@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Run an independent PR review and post its result.
 import argparse
+import html
 import json
 from pathlib import Path
 import re
@@ -10,6 +11,8 @@ import sys
 from urllib.parse import parse_qs, urlparse
 
 from review_skill_use import findings as skill_findings
+
+DOT_CHANNEL = 'C0C65A31ZHS'
 
 MACHINERY = 'Machinery rule: reject (VERDICT: CHANGES) any new background job, launchd agent, scheduled workflow, watchdog, liveness or freshness check, retry layer, queue, waiter or wrapper unless the PR names a failure that actually happened and why launchd, GitHub, git or macOS cannot already handle it; a wrapper may not add a limit, cap or validation the wrapped tool does not require. Prefer fixes that delete or shrink.'
 
@@ -38,7 +41,7 @@ def thread_timestamp(stream, expected_thread=None):
                 if expected_thread is not None:
                     context = data.get('message_context', {})
                     thread = parse_qs(urlparse(data.get('message_link', '')).query).get('thread_ts')
-                    if context.get('channel_id') != 'D0C5M92S5UJ' or thread != [expected_thread]:
+                    if context.get('channel_id') != DOT_CHANNEL or thread != [expected_thread]:
                         raise ValueError('Slack reply did not land in the requested channel and thread')
                 return ts
     raise ValueError('Slack tool result missing valid message_context.message_ts')
@@ -51,7 +54,7 @@ def submit_python():
 
 def main():
     parser = argparse.ArgumentParser(description='Have Dot review a PR for correctness and submit one SHA-bound native App review.',
-        epilog='The authoring job must never review its own PR; the orchestrator runs reviews. Dot sends a Slack DM, then polls its thread after 10 minutes and every 15 minutes. A moved head skips auto-merge; invalid reviews exit without posting. APPROVE enables GitHub squash auto-merge. Requires gh and claude.')
+        epilog='The authoring job must never review its own PR; the orchestrator runs reviews. Dot reviews in Slack #dot-jobs, then polls its thread after 10 minutes and every 15 minutes. A moved head skips auto-merge; invalid reviews exit without posting. APPROVE enables GitHub squash auto-merge. Requires gh and claude.')
     parser.add_argument('repo', metavar='OWNER/REPO')
     parser.add_argument('pr', type=int, metavar='PR')
     args = parser.parse_args()
@@ -83,14 +86,17 @@ def main():
         def send(message, thread=None):
             if len(message) > 3500 or len(message.encode('utf-8')) > 8000:
                 raise ValueError('Slack message exceeds safe size')
-            destination = 'channel D0C5M92S5UJ' + (f' in thread {thread}' if thread else '')
+            destination = f'channel {DOT_CHANNEL}' + (f' in thread {thread}' if thread else '')
             result = claude('send_message', f'Send exactly this message verbatim, without reformatting or interpreting its contents, to {destination} using Slack.\n{message}', structured=True)
             return thread_timestamp(result, expected_thread=thread)
 
         thread = send(message)
+        diff = html.escape(diff, quote=False)
         chunks = []
         while diff:
             chunk = diff[:3400].encode('utf-8')[:7900].decode('utf-8', errors='ignore')
+            if chunk.rfind('&') > chunk.rfind(';'):
+                chunk = chunk[:chunk.rfind('&')]
             chunks.append(chunk)
             diff = diff[len(chunk):]
         for index, chunk in enumerate(chunks or [''], 1):
@@ -99,7 +105,7 @@ def main():
              f'Please review now using the root instructions for {sha}.', thread)
         run('sleep', '600')
         while True:
-            review = claude('read_thread', f'Read channel D0C5M92S5UJ thread {thread}. Return only the verbatim review reply from U0C5R40MBPE, excluding the root request. If no review reply exists, return only WAIT. Do not summarize or invent a verdict.')
+            review = claude('read_thread', f'Read channel {DOT_CHANNEL} thread {thread}. Return only the verbatim review reply from U0C5R40MBPE, excluding the root request. If no review reply exists, return only WAIT. Do not summarize or invent a verdict.')
             if review != 'WAIT':
                 break
             run('sleep', '900')

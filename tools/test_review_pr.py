@@ -1,5 +1,7 @@
 # Test the pull request review command.
+import html
 import json
+import re
 import runpy
 from pathlib import Path
 import subprocess
@@ -11,7 +13,7 @@ CLI = Path(__file__).resolve().parents[1] / 'bin/review-pr'
 
 
 class ReviewPR(TestCase):
-    def run_review(self, verdict='APPROVE', moved=False, malformed=False, missing=(), diff='diff --git a/example b/example', timestamp='123.456', reply_thread='123.456', reply_channel='D0C5M92S5UJ', bad_reply_at=1, title='Fix correctness'):
+    def run_review(self, verdict='APPROVE', moved=False, malformed=False, missing=(), diff='diff --git a/example b/example', timestamp='123.456', reply_thread='123.456', reply_channel='C0C65A31ZHS', bad_reply_at=1, title='Fix correctness'):
         calls, comments = [], []
 
         def run(*command, **options):
@@ -39,9 +41,9 @@ class ReviewPR(TestCase):
                     reply_number = sum(n == 'claude' and 'slack_send_message' in ' '.join(a) for n, a, _ in calls) - 1
                     actual_thread = reply_thread if reply_number == bad_reply_at else '123.456'
                     payload = {'message_context': {'message_ts': f'123.{456 + reply_number}' if is_reply else timestamp,
-                                                   'channel_id': reply_channel if reply_number == bad_reply_at else 'D0C5M92S5UJ'},
-                               'message_link': 'https://example.slack.com/archives/D0C5M92S5UJ/p123456' +
-                               (f'?thread_ts={actual_thread}&cid=D0C5M92S5UJ' if is_reply and actual_thread else '')}
+                                                   'channel_id': reply_channel if reply_number == bad_reply_at else 'C0C65A31ZHS'},
+                               'message_link': 'https://example.slack.com/archives/C0C65A31ZHS/p123456' +
+                               (f'?thread_ts={actual_thread}&cid=C0C65A31ZHS' if is_reply and actual_thread else '')}
                     output = json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': [{'type': 'text', 'text': json.dumps(payload)}]}]}})
                 else: output = ('VERDICT: '+verdict+'\nReviewed-SHA: '+('b' if malformed else 'a')*40+'\nFinding') if any(n == 'sleep' and a == ['900'] for n, a, _ in calls) else 'WAIT'
             calls[-1] = (name, args, request)
@@ -55,7 +57,7 @@ class ReviewPR(TestCase):
 
     def test_large_diff_is_sent_in_bounded_parts(self):
         for diff in ('diff --git a/example b/example\n+ASCII text <@U123> ** _ >\n' * 1200,
-                     'a' * 3399 + '😀x' * 30000, ''):
+                     'ab' + '😀x' * 30000, ''):
             with self.subTest(size=len(diff)):
                 error, calls, _ = self.run_review(diff=diff)
                 self.assertIsNone(error)
@@ -65,14 +67,40 @@ class ReviewPR(TestCase):
                 self.assertTrue(all(len(message.encode()) <= 8000 for message in messages))
                 parts = messages[1:-1]
                 self.assertTrue(parts)
-                self.assertEqual(''.join(message.split('```\n', 1)[1].removesuffix('\n```') for message in parts), diff)
+                payloads = [message.split('```\n', 1)[1].removesuffix('\n```') for message in parts]
+                self.assertEqual(''.join(html.unescape(part) for part in payloads), diff)
+                self.assertTrue(all(not re.search(r'&(?!amp;|lt;|gt;)', part) for part in payloads))
+                if diff.startswith('ab😀'):
+                    remaining, cuts = diff, 0
+                    for part in payloads:
+                        candidate = remaining[:3400].encode('utf-8')[:7900]
+                        try:
+                            candidate.decode('utf-8')
+                        except UnicodeDecodeError:
+                            cuts += 1
+                        remaining = remaining[len(part):]
+                    self.assertGreaterEqual(cuts, 1)
                 self.assertNotIn('<@U0C5R40MBPE>', messages[0])
                 self.assertIn('<@U0C5R40MBPE>', messages[-1])
                 self.assertTrue(all('in thread 123.456' in request for request in requests[1:]))
                 self.assertTrue(all('verbatim' in request for request in requests[1:-1]))
 
+    def test_diff_mentions_and_fences_are_literal_until_final_request(self):
+        diff = ('+```\n+<@U0C5R40MBPE> & <!channel> &lt;literal&gt;\n' * 1600)
+        error, calls, _ = self.run_review(diff=diff)
+        self.assertIsNone(error)
+        messages = [request.split('using Slack.\n', 1)[1] for name, args, request in calls
+                    if name == 'claude' and 'slack_send_message' in ' '.join(args)]
+        parts = [message.split('```\n', 1)[1].removesuffix('\n```') for message in messages[1:-1]]
+        self.assertTrue(all('<@' not in message for message in messages[:-1]))
+        self.assertIn('<@U0C5R40MBPE>', messages[-1])
+        self.assertTrue(all('<' not in part and '>' not in part for part in parts))
+        self.assertTrue(all(not re.search(r'&(?!amp;|lt;|gt;)', part) for part in parts))
+        self.assertEqual(''.join(html.unescape(part) for part in parts), diff)
+        self.assertTrue(all(len(message) <= 3500 and len(message.encode()) <= 8000 for message in messages))
+
     def test_wrong_reply_placement_aborts_before_mention(self):
-        for options in ({'reply_thread': None}, {'reply_thread': '999.000'}, {'reply_channel': 'OTHER'}):
+        for options in ({'reply_thread': None}, {'reply_thread': '999.000'}, {'reply_channel': 'OTHER'}, {'reply_channel': 'D0C5M92S5UJ'}):
             with self.subTest(options=options):
                 error, calls, comment = self.run_review(diff='x' * 50000, bad_reply_at=2, **options)
                 self.assertIsNotNone(error)
@@ -97,8 +125,8 @@ class ReviewPR(TestCase):
 
     def test_timestamp_accepts_string_and_block_results(self):
         parse = runpy.run_path(str(CLI))['thread_timestamp']
-        payload = json.dumps({'message_context': {'message_ts': '123.457', 'channel_id': 'D0C5M92S5UJ'},
-                              'message_link': 'https://example.slack.com/archives/D0C5M92S5UJ/p123457?thread_ts=123.456&cid=D0C5M92S5UJ'})
+        payload = json.dumps({'message_context': {'message_ts': '123.457', 'channel_id': 'C0C65A31ZHS'},
+                              'message_link': 'https://example.slack.com/archives/C0C65A31ZHS/p123457?thread_ts=123.456&cid=C0C65A31ZHS'})
         for content in (payload, [{'type': 'text', 'text': payload}]):
             with self.subTest(content=content):
                 stream = json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': content}]}})
@@ -159,6 +187,7 @@ class ReviewPR(TestCase):
         requests = [request for name, args, request in calls if name == 'claude' and ('slack_read_thread' in ' '.join(args) or 'slack_send_message' in ' '.join(args))]
         self.assertNotIn('<@U0C5R40MBPE>', requests[0])
         self.assertTrue(all('thread 123.456' in request for request in requests[1:]))
+        self.assertTrue(all('channel C0C65A31ZHS' in request for request in requests))
 
 
 if __name__ == '__main__':
