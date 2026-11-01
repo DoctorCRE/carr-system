@@ -21,6 +21,7 @@ from lib.hook_runtime import decision, run
 
 CARD_TOOL = 'rule-cards'
 GAP_LOG = REPO / 'out/rule-lookup/selection-gaps.jsonl'
+GAP_LOG_MAX_BYTES = 1024 * 1024
 
 FAILURE = "RULE LOOKUP INCOMPLETE. Rules were not fully delivered. Ordinary actions must wait. Recover through standing-context or the read-only rule verbs; report unusable scope as a data defect."
 # The scope catalog is read from the store once per user prompt and reused by that
@@ -259,15 +260,28 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     if selection['data_defects'] or selection['unresolved']:
         try:
             GAP_LOG.parent.mkdir(parents=True, exist_ok=True)
-            with GAP_LOG.open('a') as handle:
-                handle.write(json.dumps({'session_id': session, 'event_name': event,
-                    'tool_use_id': payload.get('tool_use_id'), 'corpus_digest': selection['corpus_digest'],
-                    'data_defects': selection['data_defects'], 'unresolved': selection['unresolved']},
-                    sort_keys=True) + '\n')
+            row = (json.dumps({'session_id': session, 'event_name': event,
+                'tool_use_id': payload.get('tool_use_id'), 'corpus_digest': selection['corpus_digest'],
+                'data_defects': selection['data_defects'], 'unresolved': selection['unresolved']},
+                sort_keys=True) + '\n').encode('utf-8')
+            # A separate lock survives rename, so concurrent hook processes rotate together.
+            with GAP_LOG.with_suffix('.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                if GAP_LOG.exists() and GAP_LOG.stat().st_size + len(row) > GAP_LOG_MAX_BYTES:
+                    backup = Path(str(GAP_LOG) + '.1')
+                    GAP_LOG.replace(backup)
+                    if backup.stat().st_size > GAP_LOG_MAX_BYTES:
+                        with backup.open('rb') as handle:
+                            handle.seek(-GAP_LOG_MAX_BYTES, 2)
+                            tail = handle.read().split(b'\n', 1)[-1]
+                        backup.write_bytes(tail)
+                with GAP_LOG.open('ab') as handle:
+                    handle.write(row)
         except OSError:
             pass  # Advisory diagnostics must not deny an otherwise valid action.
-    if not rules and not cards and event != 'PreToolUse':
+    if not rules and not cards:
         return None
+    # Fit the audit receipt first to preserve existing budget refusals.
     base = {'schema': LOOKUP_RECEIPT_SCHEMA,
             'client': 'codex' if payload.get('turn_id') else 'claude',
             'session_id': session, 'turn_id': payload.get('turn_id') or None,
@@ -308,6 +322,12 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
                            f"Data defects: {len(selection['data_defects'])}; unresolved judgments: {len(selection['unresolved'])}. "
                            'Fetch matched rule IDs with standing-context: ' + ', '.join(rid[:8] for rid in ids), event)
         return refused(event)
+    visible = {'schema': LOOKUP_RECEIPT_SCHEMA, 'rules': full, 'overflow': overflow}
+    if rules:
+        visible['instruction'] = base['instruction']
+    if cards:
+        visible['cards'] = base['cards']
+    text = canonical(visible).decode()
     if dedupe:
         rule_routes.record_delivered(session, tool or event, [r['id'] for r in full], agent_id=agent, corpus_digest=selection["corpus_digest"])
         if cards:
@@ -358,15 +378,6 @@ def process(payload, *, runner=subprocess.run, dedupe=True, cache=True):
 def decide(payload):
     output = process(payload)
     if output is not None:
-        text = output.get('hookSpecificOutput', {}).get('additionalContext')
-        if text:
-            try:
-                row = json.loads(text)
-            except ValueError:
-                row = {}
-            if (row.get('schema') == LOOKUP_RECEIPT_SCHEMA and row.get('complete')
-                    and not any(row.get(key) for key in ('rules', 'rule_ids', 'overflow', 'cards'))):
-                return 0
         print(json.dumps(output, sort_keys=True, separators=(',', ':')))
     return 0
 

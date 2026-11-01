@@ -1,5 +1,6 @@
 """Delivery at the hook interface, with authenticated catalog transport injected."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -19,7 +20,31 @@ hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
 
 
-class DeliveryTests(unittest.TestCase):
+def rendered_receipt():
+    return json.loads(hook.canonical.receipts[-1])
+
+
+class HookTestCase(unittest.TestCase):
+    def setUp(self):
+        raw = tempfile.TemporaryDirectory()
+        self.addCleanup(raw.cleanup)
+        patcher = patch.object(hook, 'GAP_LOG', Path(raw.name) / 'gaps.jsonl')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        encode = hook.canonical
+        receipts = []
+        def capture(row):
+            encoded = encode(row)
+            if 'receipt_id' in row:
+                receipts.append(encoded)
+            return encoded
+        renderer = patch.object(hook, 'canonical', side_effect=capture)
+        mocked = renderer.start()
+        mocked.receipts = receipts
+        self.addCleanup(renderer.stop)
+
+
+class DeliveryTests(HookTestCase):
     def invoke(self, rows, *, event='PreToolUse', **options):
         source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
                   'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
@@ -33,24 +58,86 @@ class DeliveryTests(unittest.TestCase):
         options.setdefault('cache', False)
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
-    def test_empty_lookup_has_no_stdout_but_keeps_a_valid_receipt(self):
-        output = self.invoke([])
-        row = json.loads(output['hookSpecificOutput']['additionalContext'])
+    def test_defects_only_pretooluse_is_silent_and_logged(self):
+        with tempfile.TemporaryDirectory() as raw, patch.object(hook, 'GAP_LOG', Path(raw) / 'gaps.jsonl'):
+            output = self.invoke([dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)])
+            self.assertIsNone(output)
+            self.assertIn('missing_scope', hook.GAP_LOG.read_text())
+            with patch.object(hook, 'process', return_value=output):
+                verdict = hook.decide({})
+            self.assertEqual((verdict.code, verdict.stdout), (0, ''))
+
+    def test_log_failure_does_not_change_delivery_or_silence(self):
+        with patch.object(hook, 'GAP_LOG', Path('/dev/null/gaps.jsonl')):
+            known = dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)
+            out = self.invoke([known])
+            self.assertEqual(json.loads(out['hookSpecificOutput']['additionalContext'])['rules'], [known])
+            self.assertIsNone(self.invoke([dict(known, scope={})]))
+
+    def test_gap_log_rotates_with_one_backup(self):
+        gap = dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)
+        self.invoke([gap])
+        row = hook.GAP_LOG.read_bytes()
+        with patch.object(hook, 'GAP_LOG_MAX_BYTES', len(row) * 2):
+            for _ in range(7):
+                self.assertIsNone(self.invoke([gap]))
+        self.assertEqual(hook.GAP_LOG.read_bytes(), row * 2)
+        self.assertEqual(Path(str(hook.GAP_LOG) + '.1').read_bytes(), row * 2)
+        self.assertFalse(Path(str(hook.GAP_LOG) + '.2').exists())
+
+    def test_known_rules_do_not_create_a_receipt_log(self):
+        self.invoke([dict(id='11111111', statement='Inspect the diff.',
+                          scope={'tools': ['Bash']}, personal_to=None)])
+        self.assertEqual(list(hook.GAP_LOG.parent.iterdir()), [])
+
+    def test_fixture_suites_leave_shared_rule_lookup_unchanged(self):
+        shared = Path.home() / 'carr-system/out/rule-lookup'
+        def snapshot():
+            return {p.name: (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+                    for p in shared.glob('*') if p.is_file()}
+        before = snapshot()
+        for suite in ('rule-cards', 'grok-hook-payload'):
+            result = subprocess.run([sys.executable, str(REPO / f'ops/{suite}-selftest.py')],
+                                    cwd=REPO, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(snapshot(), before, 'fixture suites changed the shared rule-lookup logs')
+
+    def test_rotation_bounds_a_preexisting_oversized_log(self):
+        hook.GAP_LOG.write_bytes(b'old defect\n' * 100)
+        with patch.object(hook, 'GAP_LOG_MAX_BYTES', 500):
+            self.invoke([dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)])
+        self.assertLessEqual(hook.GAP_LOG.stat().st_size, 500)
+        self.assertLessEqual(Path(str(hook.GAP_LOG) + '.1').stat().st_size, 500)
+        for line in Path(str(hook.GAP_LOG) + '.1').read_bytes().splitlines():
+            self.assertEqual(line, b'old defect')
+
+    def test_complete_oversized_delivery_still_denies(self):
+        rows = [dict(id=f'{i:08x}', statement='Binding rule.', scope={'tools': ['Bash']}, personal_to=None)
+                for i in range(1000, 1600)]
+        out = self.invoke(rows)
+        self.assertEqual(out['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_rendered_receipt_preserves_validation_guards(self):
+        self.invoke([dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)])
+        row = rendered_receipt()
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
-        self.assertEqual(row['rules'], [])
-        self.assertEqual(row['rule_ids'], [])
-        self.assertEqual(row['overflow'], [])
-        self.assertNotIn('cards', row)
+        for change in ({'selection_mode': 'unknown'}, {'unresolved': []},
+                       {'data_defects': [{'reason': 'missing_scope'}]}, {'complete': False}):
+            bad = dict(row, **change)
+            bad['receipt_id'] = hook.receipt_id(bad)
+            self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
+
+    def test_empty_lookup_has_no_stdout(self):
+        output = self.invoke([])
+        self.assertIsNone(output)
         with patch.object(hook, 'process', return_value=output):
             verdict = hook.decide({})
-        self.assertEqual(verdict.code, 0)
-        self.assertEqual(verdict.stdout, '')
+        self.assertEqual((verdict.code, verdict.stdout), (0, ''))
 
     def test_nonempty_and_incomplete_outputs_still_reach_stdout(self):
         outputs = [
             self.invoke([dict(id='11111111', statement='Inspect the diff.',
                 scope={'tools': ['Bash']}, personal_to=None)]),
-            self.invoke([dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)]),
             self.invoke([dict(id='33333333', statement='Binding text ' * 2000,
                 scope={'tools': ['Bash']}, personal_to=None)]),
             hook.context('RULE LOOKUP INCOMPLETE. Full text could not fit.', 'PreToolUse'),
@@ -62,7 +149,7 @@ class DeliveryTests(unittest.TestCase):
                 self.assertEqual(verdict.code, 0)
                 self.assertEqual(json.loads(verdict.stdout), output)
 
-    def test_data_defects_remain_incomplete_at_pretooluse(self):
+    def test_data_defects_are_logged_for_all_events(self):
         gaps = [dict(id='22222222', statement='Moment rule.',
                      scope={'moment': 'Before review'}, personal_to=None),
                 dict(id='33333333', statement='Invalid scope.', scope={}, personal_to=None)]
@@ -70,10 +157,7 @@ class DeliveryTests(unittest.TestCase):
             for event in ('PreToolUse', 'UserPromptSubmit', 'Stop'):
                 output = self.invoke(gaps, event=event)
                 context = (output or {}).get('hookSpecificOutput', {}).get('additionalContext', '')
-                if event == 'PreToolUse':
-                    self.assertFalse(json.loads(context)['complete'])
-                else:
-                    self.assertEqual(len(context.encode()), 0)
+                self.assertEqual(len(context.encode()), 0)
             rows = [json.loads(line) for line in hook.GAP_LOG.read_text().splitlines()]
             self.assertEqual(len(rows), 3)
             self.assertEqual(rows[0]['unresolved'], [])
@@ -124,24 +208,7 @@ class DeliveryTests(unittest.TestCase):
                    'tool_input': {'task_name': 'review', 'message': 'Read-only review of the PR.'}}
         with tempfile.TemporaryDirectory() as raw, patch.object(hook, 'GAP_LOG', Path(raw) / 'gaps.jsonl'):
             output = self.invoke(moments, payload=payload)
-            specific = output['hookSpecificOutput']
-            self.assertNotIn('permissionDecision', specific)
-            text = specific['additionalContext']
-            row = json.loads(text)
-            self.assertTrue(row['complete'])
-            self.assertEqual(row['selection_mode'], 'deterministic')
-            self.assertEqual(row['rules'], [])
-            for field in ('unresolved', 'unresolved_count', 'unresolved_reasons'):
-                self.assertNotIn(field, row)
-            self.assertNotIn('incomplete selection', text)
-            self.assertNotIn('000000c8', text)
-            self.assertLess(len(text.encode()), 1024)
-            self.assertTrue(validate_lookup_receipt(row, repo=REPO))
-            for change in ({'selection_mode': 'unknown'}, {'unresolved': []},
-                           {'data_defects': [{'reason': 'missing_scope'}]}, {'complete': False}):
-                bad = dict(row, **change)
-                bad['receipt_id'] = hook.receipt_id(bad)
-                self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
+            self.assertIsNone(output)
             self.assertFalse(hook.GAP_LOG.exists())
 
 
@@ -157,10 +224,11 @@ class DeliveryTests(unittest.TestCase):
         self.assertLessEqual(hook.rule_routes.context_chars(specific['additionalContext']), 9600)
         row = json.loads(specific['additionalContext'])
         self.assertEqual(row['rules'], [known])
-        self.assertFalse(row['complete'])
-        self.assertIn('missing_scope', specific['additionalContext'])
+        self.assertNotIn('missing_scope', specific['additionalContext'])
+        self.assertIn('missing_scope', hook.GAP_LOG.read_text())
+        self.assertFalse(rendered_receipt()['complete'])
         self.assertNotIn('Undeliverable rule.', specific['additionalContext'])
-        self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+        self.assertTrue(validate_lookup_receipt(rendered_receipt(), repo=REPO))
 
     def test_defects_alone_do_not_block_prompt_or_stop(self):
         rows = [dict(id='11111111', statement='Undeliverable rule.', scope={}, personal_to=None)]
@@ -177,8 +245,9 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(row['rules'], [])
 
     def test_receipt_audit_accepts_only_exact_platform_owned_event(self):
-        row = json.loads(self.invoke([dict(id='11111111', statement='Binding text',
-                         scope={'tools':['Bash']}, personal_to=None)])['hookSpecificOutput']['additionalContext'])
+        self.invoke([dict(id='11111111', statement='Binding text',
+                         scope={'tools':['Bash']}, personal_to=None)])
+        row = rendered_receipt()
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
         envelope={'type':'response_item','payload':{'type':'message','role':'developer',
                   'content':[{'type':'input_text','text':json.dumps(row)}],
@@ -219,11 +288,9 @@ class DeliveryTests(unittest.TestCase):
                 'content': [{'type': 'input_text', 'text': 'Read-only child PR review'}]}}) + '\n')
             output = self.invoke([], payload={'prompt': None, 'transcript_path': str(path),
                 'agent_id': agent, 'turn_id': 'native-turn'})
-            specific = output['hookSpecificOutput']
-            self.assertNotIn('permissionDecision', specific)
-            row = json.loads(specific['additionalContext'])
-            self.assertTrue(row['complete'])
-            self.assertEqual(row['task_sha256'], digest('Read-only child PR review'))
+            self.assertIsNone(output)
+            self.assertEqual(hook.task_text({'transcript_path': str(path), 'agent_id': agent,
+                                             'turn_id': 'native-turn'}), 'Read-only child PR review')
             sibling = path.with_suffix('') / 'subagents' / 'agent-another-child.jsonl'
             sibling.parent.mkdir(parents=True)
             sibling.write_text(path.read_text())
@@ -250,8 +317,8 @@ class DeliveryTests(unittest.TestCase):
                     scope={'tools': ['Bash']}, personal_to=None)],
                     payload={'prompt': None, 'transcript_path': str(transcript)})
                 row = json.loads(output['hookSpecificOutput']['additionalContext'])
-                self.assertEqual(row['rule_ids'], ['11111111'])
-                self.assertEqual(row['task_sha256'], digest('Review the revised change 🩺'))
+                self.assertEqual([r['id'] for r in row['rules']], ['11111111'])
+                self.assertEqual(rendered_receipt()['task_sha256'], digest('Review the revised change 🩺'))
 
     def test_context_dedupe_invalidates_when_catalog_changes(self):
         rr=hook.rule_routes
@@ -278,7 +345,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('permissionDecision', hook.process(event, runner=unavailable, cache=False)['hookSpecificOutput'])
 
 
-class CardDeliveryTests(unittest.TestCase):
+class CardDeliveryTests(HookTestCase):
     """PLANNING/TOOL cards ride PreToolUse, PROMPT cards ride UserPromptSubmit."""
     UNCOVERED = dict(id='11111111', statement='Inspect the current diff.',
                      scope={'tools': ['Bash']}, personal_to=None)
@@ -301,8 +368,12 @@ class CardDeliveryTests(unittest.TestCase):
     def receipt(self, output):
         specific = output['hookSpecificOutput']
         self.assertNotIn('permissionDecision', specific)
-        row = json.loads(specific['additionalContext'])
+        visible = json.loads(specific['additionalContext'])
+        self.assertLessEqual(set(visible), {'schema', 'rules', 'overflow', 'cards', 'instruction'})
+        row = rendered_receipt()
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+        for key in ('rules', 'overflow', 'cards'):
+            self.assertEqual(visible.get(key), row.get(key))
         return row
 
     def test_tool_card_replaces_its_source_rule(self):
@@ -379,11 +450,12 @@ class CardDeliveryTests(unittest.TestCase):
             self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
 
 
-class CatalogCacheTests(unittest.TestCase):
+class CatalogCacheTests(HookTestCase):
     """standing-context is read once per user prompt, not once per tool call (WR573.S1.J2)."""
     RULE = dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)
 
     def setUp(self):
+        super().setUp()
         raw = tempfile.TemporaryDirectory()
         self.addCleanup(raw.cleanup)
         self.root = Path(raw.name)
@@ -411,7 +483,10 @@ class CatalogCacheTests(unittest.TestCase):
 
     @staticmethod
     def rule_ids(output):
-        return json.loads(output['hookSpecificOutput']['additionalContext'])['rule_ids']
+        if output is None:
+            return []
+        row = json.loads(output['hookSpecificOutput']['additionalContext'])
+        return sorted(r['id'] for r in row['rules'] + row['overflow'])
 
     def test_one_fetch_per_prompt_and_tool_calls_reuse_it(self):
         self.prompt()

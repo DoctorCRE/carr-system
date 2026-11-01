@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from git_env import fixture_env
 
@@ -87,6 +88,13 @@ class RuntimeNormalization(unittest.TestCase):
 
 
 class RuleDelivery(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        log = patch.object(rule_hook, 'GAP_LOG', Path(directory.name) / 'gaps.jsonl')
+        log.start()
+        self.addCleanup(log.stop)
+
     def invoke(self, payload, rows=()):
         source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a' * 64,
                   'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
@@ -165,14 +173,15 @@ class RuleDelivery(unittest.TestCase):
         context = output['hookSpecificOutput']
         self.assertNotIn('permissionDecision', context)
         row = json.loads(context['additionalContext'])
-        self.assertEqual(row['tool_name'], 'Bash')
-        self.assertEqual(row['rule_ids'], ['11111111'])
+        self.assertEqual(row['rules'], [rule])
+        self.assertNotIn('tool_name', row)
+        self.assertNotIn('receipt_id', row)
 
-    def test_grok_file_tools_get_rule_delivery(self):
+    def test_grok_file_tools_with_no_rules_stay_silent(self):
         for name in ('write', 'search_replace', 'read_file'):
             with self.subTest(name):
                 output = self.invoke(fixture(f'pre_tool_use.{name}'))
-                self.assertNotIn('permissionDecision', output['hookSpecificOutput'])
+                self.assertIsNone(output)
 
     def test_grok_prompt_and_stop_are_not_refused(self):
         for name in ('user_prompt_submit', 'stop'):
