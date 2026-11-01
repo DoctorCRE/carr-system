@@ -1,3 +1,4 @@
+import { NOW } from "./helpers/fixed-clock.mjs";
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -37,7 +38,7 @@ test('find resolves an exact attendee email under carr_reader without exposing c
 
 test('calendar dismissals are durable board answers scoped to the partner and tenant', async () => {
   const key = '6360000000000001';
-  const now = Date.now();
+  const now = NOW;
   const review = { key, title: 'Synthetic review meeting', state: 'needs_review', prompt: 'Did it happen?',
     start: new Date(now - 7200000).toISOString(), end: new Date(now - 3600000).toISOString() };
   await call('publish-board-snapshot', { idempotency_key: randomUUID(), board_id: 'calendar-agenda', base_version: 0,

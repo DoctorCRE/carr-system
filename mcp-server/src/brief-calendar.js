@@ -1,3 +1,4 @@
+// Shape partner calendar snapshots, meeting preparation and durable answers for the brief.
 import { organizationTenantForActor } from "./identity.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 // The morning brief's calendar section. The Outlook intake on the partner's own
