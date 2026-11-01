@@ -67,6 +67,7 @@ jobs:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          CARR_CI_PROGRAM_RECORDS: ${{ runner.temp }}/ci-programs.json
           CARR_CI_UNIT_SHARD: ${{ matrix.shard }}
           CARR_CI_UNIT_RECEIPT: ${{ runner.temp }}/unit-${{ matrix.shard }}.json
           LC_ALL: C
@@ -76,10 +77,12 @@ jobs:
           name: unit-receipt-${{ matrix.shard }}
           path: ${{ runner.temp }}/unit-${{ matrix.shard }}.json
           if-no-files-found: error
-      - name: Retain failed shard diagnostics
-        if: failure()
+      - name: Retain shard program records and failed diagnostics
+        if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: unit-diagnostics-${{ matrix.shard }}
-          path: ${{ runner.temp }}/carr-ci.*/*.log.redacted
+          path: |
+            ${{ runner.temp }}/ci-programs.json
+            ${{ runner.temp }}/carr-ci.*/*.log.redacted
           if-no-files-found: ignore

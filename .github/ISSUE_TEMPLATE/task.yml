@@ -1,0 +1,64 @@
+name: "Engineering task"
+description: "Specify an engineering problem and acceptance checks."
+labels: ["needs-triage", "type:task"]
+body:
+  - type: markdown
+    attributes:
+      value: "PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead. This applies to the title, all fields, comments and attachments."
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem"
+      description: "Describe the engineering problem and its impact. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: "Desired outcome"
+      description: "Describe the observable engineering result. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: "Scope and exclusions"
+      description: "State what this work includes and explicitly excludes. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "Acceptance checklist"
+      description: "Use stable IDs and observable checks. Keep IDs when editing criteria. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+      value: "- [ ] AC-1: Observable engineering result and verification method"
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "Dependencies"
+      description: "List public engineering issue references and contracts, or None. Never link identifying records. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: "Opaque evidence references"
+      description: "Use opaque record IDs only, or None. Keep evidence content in its authorized store; do not paste it here. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+    validations:
+      required: true
+  - type: textarea
+    id: legacy
+    attributes:
+      label: "Legacy WR ID"
+      description: "Enter the legacy WR reference, such as WR-000675, or None for new work. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+    validations:
+      required: true
+  - type: checkboxes
+    id: public-data
+    attributes:
+      label: Public repository check
+      options:
+        - label: "I checked the title and body. PUBLIC repository. Leave out client names, contact details, deal identifiers and deal facts (property addresses, rents, prices, terms), as well as document extracts, screenshots and identifying links. Use a Work Request or opaque record ID instead."
+          required: true

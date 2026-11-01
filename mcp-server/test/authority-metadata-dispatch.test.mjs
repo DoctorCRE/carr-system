@@ -41,6 +41,7 @@ for (const [name, args] of cases) {
 function syntheticClient() {
   let item;
   return { query: async (sql, params) => {
+    if (sql.includes("ops.future_work_link")) return {rows:[{ref:"WR-999628"}]};
     if (/from retrieval_proposal/.test(sql)) return { rows: [{ id, version: 1, status: 'pending' }] };
     if (/retire_retrieval_curation/.test(sql)) return { rows: [{ id, status: 'retired' }] };
     if (/assert_situation_retrieval_golden/.test(sql)) return { rows: [{ status: 'pass' }] };

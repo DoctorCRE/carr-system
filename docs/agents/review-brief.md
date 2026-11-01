@@ -13,19 +13,12 @@ You run headless in a cloud sandbox; nobody answers questions.
 - Never run env, printenv or `ps eww`, and never open .env, credential, token,
   key, keychain or dump files.
 - Do not push, merge or edit code.
-- If an earlier `VERDICT: CHANGES` exists, confirm each blocker is fixed, then
-  review the full diff for new correctness bugs.
+- If an earlier App review requests changes, confirm each blocker is fixed.
 
-Post one comment per PR with
-`gh api repos/O/R/issues/N/comments -f body=...`. Its first three lines are
-exactly:
-
-```
-VERDICT: APPROVE        (or VERDICT: CHANGES)
-Reviewed-SHA: <the 40-character head you reviewed>
-Reviewer: <model> cloud routine
-```
-
-Findings follow with file:line. Use CHANGES only for real blockers; nits go
-under a "Non-blocking" heading. If the head moved past the SHA you were given,
-review the new head and use its SHA.
+For DoctorCRE/carr-system, submit a native App review through
+`ops/review-submit.py N approve|request-changes --body-file FILE --reviewed-sha SHA`.
+The body includes the PR's Card line, reviewer identity, and findings with file:line.
+Use request-changes only for real blockers; label nits non-blocking.
+Never publish VERDICT comments. The orchestrator provides the authorized local
+App submission path when the cloud routine cannot access it. Do not copy keys.
+If the head moved, inspect the new head before submitting its SHA.

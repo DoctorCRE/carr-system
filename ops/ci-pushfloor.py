@@ -33,7 +33,7 @@ GATE_SURFACE = re.compile(
     r"^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)")
 # The detectors and their corpus. The hook runs both scanners on every push; their
 # 64s qualification suite runs here only when one of them changes (WR-000537).
-SECRET_DETECTOR = re.compile(r"^(security/|ops/ci-secret-scan\.py$|ops/githooks/pre-push$)")
+SECRET_DETECTOR = re.compile(r"^(\.gitleaks\.toml$|ops/gitleaks\.py$|security/|ops/ci-secret-scan\.py$|ops/githooks/pre-push$)")
 MISSING_PACKAGE = re.compile(r"Error.*Cannot find package '")
 
 

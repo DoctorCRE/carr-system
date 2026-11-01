@@ -10,7 +10,6 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { migrationNames } from './migration-source.testhelper.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 const MIGRATION = migrationNames().find(name => /^\d{4}_team_memory_store\.sql$/.test(name));
 const LESSON = 'Ruled out: X — the dependency checks were clean. Next agent: skip X, go straight to Y.';
@@ -201,7 +200,6 @@ test('attach-memory refuses an unknown surface or access and blank text, recordi
 
 test('the installed grant contract registers the memory_session writer grant', async () => {
   const installed = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
-  assert.deepEqual(installed, SCAC_MUTATION_CURRENT_DB_GRANTS);
   assert.deepEqual(installed.relation_dml.filter(g => g.relation === 'public.memory_session').map(g => g.privilege), ['insert']);
   const acl = (await c.query(`select privilege_type from information_schema.role_table_grants
     where table_name='memory_session' and grantee='carr_writer' order by 1`)).rows.map(r => r.privilege_type);

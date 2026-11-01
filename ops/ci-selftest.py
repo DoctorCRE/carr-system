@@ -47,7 +47,7 @@ def ci_fixture():
         for rel in (
             "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
-            "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py",
+            "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py", "ops/gitleaks.py", ".gitleaks.toml",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
             "ops/hook-deletion-check.py", "ops/githooks/path-hygiene-check.py",
             "ops/migration-open-pr-gate.py", "ops/migration-order-gate.py",
@@ -431,7 +431,7 @@ def test_secret_scanner_catches_and_respects_allow():
     with tempfile.TemporaryDirectory(prefix="carr-ci-scanner.") as tmp:
         root = pathlib.Path(tmp)
         (root / "ops/config").mkdir(parents=True)
-        paths = ["ops/ci-secret-scan.py", "ops/pii_guard.py",
+        paths = ["ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/gitleaks.py", ".gitleaks.toml",
                  "ops/config/public-source-identities.v1.json"]
         for rel in paths:
             shutil.copyfile(REPO / rel, root / rel)
@@ -468,8 +468,8 @@ def test_secret_scanner_catches_and_respects_allow():
 
         seeded.write_text(SEED_DSN + "  # ci-secret-scan" + ": allow — selftest fixture\n")
         p = subprocess.run(scan, cwd=root, env=env, capture_output=True, text=True)
-        check("an inline allow marker on the same line suppresses it",
-              tracked and p.returncode == 0,
+        check("an unreviewed inline allow marker cannot suppress a finding",
+              tracked and p.returncode == 1,
               "credential fixture was not tracked" if not tracked else f"rc={p.returncode}")
 
 def test_dep_check_detects_a_stale_lock():
@@ -484,6 +484,17 @@ def test_dep_check_detects_a_stale_lock():
         req.write_text(original + "\n# a comment-only edit\n")
         rc, out = run(["--only", "dependency"], root=root)
         check("a comment-only edit does NOT invalidate the lock", rc == 0, out)
+
+def test_dep_check_rejects_mixed_hash_coverage():
+    with ci_fixture() as root:
+        lock = root / "requirements.lock"
+        lock.write_text(
+            "# requirements.txt sha256: " + hashlib.sha256(b"synthetic-package>=1").hexdigest() + "\n"
+            "synthetic-package==1.0 --hash=sha256:" + "a" * 64 + "\n"
+            "transitive-package==2.0\n")
+        rc, out = run(["--only", "dependency"], root=root)
+        check("mixed hashed and unhashed pins fail the dependency class",
+              rc == 1 and "mixes hashed and unhashed pins" in out, out)
 
 def test_types_class_catches_a_seeded_type_error():
     fixture = "mcp-server/fixture.js"
@@ -1515,6 +1526,7 @@ def main(argv=None):
                test_migration_fixtures_ignore_hosted_pr_event,
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
+               test_dep_check_rejects_mixed_hash_coverage,
                test_types_class_catches_a_seeded_type_error,
                test_every_test_file_in_the_tree_is_collected,
                test_each_class_runs_in_exactly_one_hosted_group,

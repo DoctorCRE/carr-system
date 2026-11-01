@@ -99,6 +99,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "decide-doc-suggestion",
     "dismiss-email-proposal",
     "drop-action",
+    "edit-email-draft",
     "edit-lead-draft",
     "instruct-deal-item",
     "link-lead-client",

@@ -76,12 +76,14 @@ The pack has these top-level sections:
 with `candidates` and `send: false`. Each candidate has `id`, `session_id`,
 `deal_id`, `deal_name`, `kind`, `payload`, `evidence_quote`, and `created_at`.
 Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
-When no usable deadline is stated, default to the next Monday through Friday
-after the recorded call date in America/Chicago. If the recording has no date,
-use the processing date in that timezone. This weekday rule does not skip holidays.
-The task and stored candidate carry `due_defaulted: true` and a visible review question names the default. An
-ambiguous spoken deadline still retains its review question. Defaulted tasks
-remain proposals, just like explicitly dated tasks.
+Due dates come only from what was said on the call. When no usable deadline is
+stated, `due_on` stays null, the task and stored candidate carry
+`due_defaulted: true`, and a visible review question asks the partner for a
+date. No date is invented. An ambiguous spoken deadline still retains its review
+question. Undated tasks remain proposals, just like explicitly dated tasks.
+One extraction writes each owner's task once: tasks on the same deal whose
+titles match after case and whitespace normalization merge, a stated date
+winning over none; two different stated dates stay separate proposals.
 Email payloads contain `deal_id`, `recipient_party_id`, `recipient_ref`,
 `subject`, and `body_sha256`. Email bodies and session tokens are excluded.
 

@@ -123,6 +123,9 @@ jobs:
           python-version-file: .python-version
       - uses: ./.github/actions/ci-downloads
 
+      - name: Install checksum-pinned official Gitleaks
+        run: python3 ops/gitleaks.py --install
+
       - name: Install Python dependencies from the lock
         if: matrix.classes != 'dependency'
         run: |

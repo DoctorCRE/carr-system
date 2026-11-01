@@ -347,7 +347,8 @@ def body_fingerprint(body: str) -> str:
 def _mail_confirmation(snapshot: Snapshot, mail: Mail, since: float) -> tuple[str | None, str]:
     for row in snapshot.sent:
         listed = set(re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", (row.recipients or '').lower()))
-        if (row.sender.lower() == account() and row.sent_unix >= since
+        if (row.sender.lower() == account()
+                and since <= row.sent_unix <= since + DUPLICATE_WINDOW + CLOCK_SKEW
                 and row.subject == mail.subject
                 and listed == set(mail.recipients) and row.item_id):
             if row.body_fingerprint is not None and row.body_fingerprint != body_fingerprint(mail.body):
@@ -509,8 +510,12 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requ
     except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
         mode = None
         reason = str(exc) if isinstance(exc, UiFailure) else str(_transport_failure(exc))
+        if submitted:
+            ledger.append(key, kind, State.PRESSED_UNCONFIRMED.value, print_, ports.now())
     else:
         reason = 'pressed'
+    if submitted:
+        return _await_sent(item, key, print_, ports, ledger, pressed_at, mode, submitted)
     if not _wait(form.closed, ports.close_seconds, ports):
         ledger.append(key, kind, State.WINDOW_NOT_CLOSED.value, print_, ports.now())
         return Result(State.WINDOW_NOT_CLOSED, reason if mode is None else 'window_still_open', mode)
@@ -825,6 +830,8 @@ class Window:
         except (ui.CuaError, OSError, subprocess.SubprocessError) as exc:
             raise _transport_failure(exc) from None
         refusal = result.get('refusal') or {}
+        if not isinstance(refusal, dict):
+            raise UiFailure('press_reply_unreadable')
         if not refusal and result.get('status') not in ('refused', 'failed', 'error') and not result.get('error'):
             return 'background'
         if refusal.get('code') != 'background_unavailable':
@@ -1094,7 +1101,7 @@ def send_submitted(draft, *, ports: Ports) -> Result:
     from lib.outlook_outbox import SubmittedDraft  # the outbox imports this module
     if not isinstance(draft, SubmittedDraft):
         return Result(State.REFUSED, 'submission_required')
-    if draft.mail.attachments and not partner_copied(draft.mail, load_settings()):
+    if not partner_copied(draft.mail, load_settings()):
         return Result(State.REFUSED, 'partner_copy_required')
     return _write_transport(draft.mail, draft.key, ports, send_requested=True, submitted=True)
 

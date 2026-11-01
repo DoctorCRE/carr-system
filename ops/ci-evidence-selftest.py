@@ -113,7 +113,10 @@ class Reuse(unittest.TestCase):
                         'groups': ['gates', 'migration']}
         self.jobs = [{'name': 'ops/ci.sh --strict', 'conclusion': 'success'},
                      {'name': 'ops/ci.sh --strict --only gates', 'conclusion': 'success'},
-                     {'name': 'ops/ci.sh --strict --only migration', 'conclusion': 'success'}]
+                     {'name': 'ops/ci.sh --strict --only migration', 'conclusion': 'success'},
+                     {'name': 'unit-coverage', 'conclusion': 'success'},
+                     *[{'name': f'unit / MCP unit shard {n} of 4', 'conclusion': 'success'}
+                       for n in range(1, 5)]]
     def eligible(self):
         return evidence.can_reuse(self.run, self.jobs, self.receipt,
                                   tree=self.tree, head_tree=self.tree,
@@ -121,6 +124,21 @@ class Reuse(unittest.TestCase):
                                   groups=['gates', 'migration'])
     def test_exact_tree_success_records_source_run(self):
         self.assertTrue(self.eligible())
+
+    def test_reuse_requires_every_mcp_shard_and_coverage(self):
+        proof_jobs = ['unit-coverage', *[f'unit / MCP unit shard {n} of 4' for n in range(1, 5)]]
+        self.assertTrue(self.eligible())
+        for name in proof_jobs:
+            for state in ('failure', 'cancelled', 'skipped', None):
+                jobs = copy.deepcopy(self.jobs)
+                next(job for job in jobs if job['name'] == name)['conclusion'] = state
+                self.assertFalse(evidence.can_reuse(self.run, jobs, self.receipt,
+                    tree=self.tree, head_tree=self.tree, tested_tree=self.tree,
+                    contract='d'*64, groups=['gates', 'migration']))
+            jobs = [job for job in self.jobs if job['name'] != name]
+            self.assertFalse(evidence.can_reuse(self.run, jobs, self.receipt,
+                tree=self.tree, head_tree=self.tree, tested_tree=self.tree,
+                contract='d'*64, groups=['gates', 'migration']))
 
     def test_fast_pr_receipt_is_never_reusable(self):
         self.run['event'] = self.receipt['event'] = 'pull_request'

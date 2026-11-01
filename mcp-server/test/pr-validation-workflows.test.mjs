@@ -230,3 +230,18 @@ test("deploy preserves manual dispatch on main and refuses other events and refs
     assert.equal(expression(condition, deployContext(event_name)), false);
   }
 });
+
+test("PR secret validation installs main's pinned Gitleaks before scanning", () => {
+  const steps = read("ci.yml").jobs.secret.steps;
+  const install = steps.findIndex(step => step.run === "python3 ops/gitleaks.py --install");
+  const scan = steps.findIndex(step => step.run === "ops/ci.sh --strict --only secret");
+  assert.ok(install >= 0 && install < scan);
+});
+
+test("MCP shards retain per-program evidence even after failure", () => {
+  const steps = read("unit-shards.yml").jobs.unit.steps;
+  const run = steps.find(step => step.name === "Run assigned MCP suites");
+  assert.equal(run.env.CARR_CI_PROGRAM_RECORDS, "${{ runner.temp }}/ci-programs.json");
+  const retain = steps.find(step => step.with?.path?.includes("ci-programs.json"));
+  assert.equal(retain.if, "${{ always() }}");
+});

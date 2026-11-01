@@ -100,7 +100,9 @@ def contract_digest(root=ROOT):
 
 
 def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
-    required = {'ops/ci.sh --strict', *('ops/ci.sh --strict --only ' + g for g in groups)}
+    required = {'ops/ci.sh --strict', 'unit-coverage',
+                *(f'unit / MCP unit shard {n} of 4' for n in range(1, 5)),
+                *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
     return (run.get('name') == 'CI' and run.get('event') == 'merge_group'
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'

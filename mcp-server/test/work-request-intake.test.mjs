@@ -16,7 +16,7 @@ async function rejected(fn) {
 }
 
 class IntakeFake {
-  constructor() { this.calls = []; this.toolCalls = new Map(); this.noHits = false; this.personalFirst = false; this.noShared = false; }
+  constructor() { this.calls = []; this.toolCalls = new Map(); this.noHits = false; this.personalFirst = false; this.noShared = false; this.captureRefusal = null; }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     this.calls.push({ sql, params });
@@ -42,6 +42,7 @@ class IntakeFake {
       return { rows: [{ section_id: "30000000-0000-0000-0000-000000000001",
         current_revision_id: "40000000-0000-0000-0000-000000000001" }] };
     }
+    if (sql.includes("capture_sourced_work_request") && this.captureRefusal) throw this.captureRefusal;
     if (sql.includes("capture_sourced_work_request")) return { rows: [{
       id: "20000000-0000-0000-0000-000000000001", ref: "WR-0001", state: "captured", version: 1,
       doctrine_source_label: "control-room#evidence", replayed: false,
@@ -368,6 +369,19 @@ for (const [args, noHits, code, fields, hint] of [
   });
 });
 
+test("report-problem names a database capture refusal instead of an unhandled failure", async t => {
+  t.mock.method(console, "error", () => {});
+  const db = new IntakeFake();
+  db.captureRefusal = Object.assign(new Error("sourced capture requires bounded exact acceptance criteria plus a doctrine origin"),
+    { code: "P0001", where: "PL/pgSQL function ops.capture_sourced_work_request(text) line 22 at RAISE" });
+  const out = await rejected(() => executeRegisteredTool(db, { ...ACTOR }, "report-problem", structuredClone(REQUEST)));
+  assert.equal(out.error, "work_request_capture_refused");
+  assert.equal(db.calls.some(call => call.sql.startsWith("insert into event") || call.sql.startsWith("insert into tool_call")), false);
+  const payload = publicError(new ToolError(out), { inputSchema: TOOLS["report-problem"].inputSchema });
+  assert.equal(payload.error, "work_request_capture_refused");
+  assert.doesNotMatch(JSON.stringify(payload), /acceptance criteria plus/);
+});
+
 test("report-problem extra-field refusal has a safe public contract", t => {
   t.mock.method(console, "error", () => {});
   const payload = publicError(new ToolError({ error: "invalid_report_problem_fields",
@@ -376,4 +390,15 @@ test("report-problem extra-field refusal has a safe public contract", t => {
   assert.deepEqual(payload.fields, []);
   assert.match(payload.hint, /Remove.*documented input/i);
   assert.doesNotMatch(JSON.stringify(payload), /private input/);
+});
+import { Validator } from '@cfworker/json-schema';
+
+test('direct completion schema accepts listed repositories and rejects others', () => {
+  const validator = new Validator(structuredClone(TOOLS['complete-work-request'].inputSchema));
+  const args = { idempotency_key: '00000000-0000-4000-8000-000000000001', human_ref: 'WR-123', base_version: 1,
+    change_refs: [{ pr_url: 'https://github.com/jbookout/software-factory/pull/123', merge_commit_sha: 'a'.repeat(40) }],
+    criterion_evidence: [{ id: 'AC-1', evidence: 'Passed' }], user_facing: false };
+  assert.equal(validator.validate(args).valid, true);
+  args.change_refs[0].pr_url = 'https://github.com/jbookout/unlisted/pull/123';
+  assert.equal(validator.validate(args).valid, false);
 });

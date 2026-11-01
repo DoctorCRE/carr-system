@@ -26,6 +26,7 @@ export function sha256(value) {
 }
 
 function delegatesTo(name) {
+  if (name === "close-work-request-slice") return ["complete-work-request"];
   if (name === "stamp-touch") return ["log-activity"];
   if (name === "resolve-candidate") return ["log-activity", "new-deal", "patch-deal-field", "set-next-step"];
   if (name === "find-and-catch-up") return ["catch-me-up", "find"];
@@ -549,12 +550,12 @@ export function assertCurrentContracts(tools) {
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   if (process.argv[2] && !["--write-current", "--check-source-inventory-frontier"].includes(process.argv[2]))
-    throw new Error("use tools/regen.py registry --grant-contract for reviewed grant inputs");
+    throw new Error("unknown argument; run ./run.sh regen registry");
   const { TOOLS } = await import("../mcp-server/src/tools.js");
   if (process.argv[2] === "--write-current") {
     const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
     writeFileSync(path, renderCurrentContracts(TOOLS, readFileSync(path, "utf8")));
-    console.log("current MCP source contracts regenerated; DB registry and grants preserved");
+    console.log("current MCP source contracts regenerated; DB registry seal preserved");
   } else {
     assertCurrentContracts(TOOLS);
     const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
