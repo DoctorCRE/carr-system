@@ -213,6 +213,10 @@ def stale_outputs(root, outputs):
             rel = str(path.relative_to(root))
             if NOTICE in path.read_text() and rel not in outputs:
                 stale.append(rel)
+    for path in root.rglob("AGENTS.md"):
+        rel = str(path.relative_to(root))
+        if "node_modules" not in path.parts and NOTICE in path.read_text() and rel not in outputs:
+            stale.append(rel)
     manifest = root / REPORT
     if manifest.is_file():
         previous = json.loads(manifest.read_text())

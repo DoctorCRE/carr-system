@@ -70,6 +70,11 @@ class NativeRulesTests(unittest.TestCase):
             rules.write_outputs(root, outputs)
             self.assertEqual(rules.stale_outputs(root, outputs), [])
             path = root / ".claude/rules/carr-core.md"
+            extra = root / "other/AGENTS.md"
+            extra.parent.mkdir()
+            extra.write_text(rules.NOTICE)
+            self.assertIn("other/AGENTS.md", rules.stale_outputs(root, outputs))
+            extra.unlink()
             path.write_text("corrupt")
             self.assertIn(str(path.relative_to(root)), rules.stale_outputs(root, outputs))
             path.unlink()
