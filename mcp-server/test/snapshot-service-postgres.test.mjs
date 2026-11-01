@@ -92,7 +92,7 @@ const clusterState = async client => ({
   memberships: (await client.query('select roleid,member,grantor,admin_option,inherit_option,set_option from pg_auth_members order by roleid,member,grantor')).rows,
 });
 
-test('all snapshot callers use distinct databases on their actual CI-service connections', async () => {
+test('all direct snapshot callers use distinct databases on their actual CI-service connections', async () => {
   const suites = [];
   for (const file of await readdir(new URL('./', import.meta.url))) {
     if (file === 'snapshot-service-postgres.test.mjs' || !/\.test\.(?:js|mjs)$/.test(file)) continue;
@@ -118,7 +118,8 @@ test('all snapshot callers use distinct databases on their actual CI-service con
       CARR_TEST_PG_SNAPSHOT_BASE: baseline.snapshot, CARR_TEST_PG_SNAPSHOT_BASE_KEY: baseline.key };
     const databases = new Set();
     for (const { file, prefix } of suites.sort((a, b) => a.file.localeCompare(b.file))) {
-      const child = await childSuite(file, directory, env, { WR623_EXPECT_PREFIX: prefix });
+      const child = await childSuite(file, directory, env, { WR623_EXPECT_PREFIX: prefix,
+        ...(['cre-lifecycle-live-pg.v5.test.mjs', 'doc-request-notify-postgres.test.mjs'].includes(file) && { WR623_DELAY_POOL_CLOSE: '1' }) });
       assertChildPassed(child, file);
       const names = new Set(child.connections.map(connection => connection.database));
       assert.equal(names.size, 1, `${file} must keep all clients in its own database`);

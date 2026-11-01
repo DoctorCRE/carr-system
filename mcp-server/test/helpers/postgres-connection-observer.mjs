@@ -20,6 +20,18 @@ if (process.env.WR623_PG_RECORD) {
     syncBuiltinESMExports();
   }
 
+  if (process.env.WR623_DELAY_POOL_CLOSE === '1') {
+    const end = pg.Client.prototype.end;
+    pg.Client.prototype.end = function(callback) {
+      // Pool.end resolves before these callbacks: model a slower TCP teardown.
+      if (typeof callback === 'function') {
+        setTimeout(() => end.call(this, callback), 150);
+        return;
+      }
+      return end.call(this);
+    };
+  }
+
   const connect = pg.Client.prototype.connect;
   const query = pg.Client.prototype.query;
   async function observe(client) {

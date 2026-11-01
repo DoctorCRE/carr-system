@@ -39,6 +39,28 @@ jobs:
           path: canary-evidence.json
           if-no-files-found: error
           overwrite: true
+  unit:
+    needs: evidence
+    if: ${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}
+    uses: ./.github/workflows/unit-shards.yml
+
+  unit-coverage:
+    needs: [evidence, unit]
+    if: ${{ !cancelled() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: unit-receipt-*
+          merge-multiple: true
+          path: unit-receipts
+      - name: Prove exact suite coverage and missing-suite failure
+        run: |
+          python3 ops/ci-unit-shards-selftest.py
+          python3 ops/ci_unit_shards.py verify unit-receipts/*.json
+
   classes:
     needs: evidence
     if: ${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}
@@ -49,22 +71,25 @@ jobs:
       matrix:
         gate_shard: [1, 2]
         classes:
-          - "pushfloor unit types secret binding artifact"
+          - "pushfloor types secret binding artifact"
+          - "unit"
           - "gates"
           - "migration"
           - "hxprobe"
           - "dependency"
         job_names:
           - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
-            "pushfloor unit types secret binding artifact": {name: "ops/ci.sh --strict --only pushfloor unit types secret binding artifact", classes: "pushfloor unit types secret binding artifact"}
+            "pushfloor types secret binding artifact": {name: "ops/ci.sh --strict --only pushfloor types secret binding artifact", classes: "pushfloor types secret binding artifact"}
+            unit: {name: "ops/ci.sh --strict --only unit", classes: "unit"}
             gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
             gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
             migration_shard_2: {name: "ops/ci.sh --strict --only migration --migration-part fixtures", classes: "migration"}
             hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
             dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
         exclude:
+          - {classes: "unit", gate_shard: 2}
           - {classes: "dependency", gate_shard: 2}
-          - {classes: "pushfloor unit types secret binding artifact", gate_shard: 2}
+          - {classes: "pushfloor types secret binding artifact", gate_shard: 2}
           - {classes: "hxprobe", gate_shard: 2}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 25 }}
 
@@ -91,10 +116,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          package-manager-cache: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
+      - uses: ./.github/actions/ci-downloads
 
       - name: Install checksum-pinned official Gitleaks
         run: python3 ops/gitleaks.py --install
@@ -146,8 +173,14 @@ jobs:
           sudo install -d /etc/postgresql-common/createcluster.d
           echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
 
+      - name: Seed main system dependency archives
+        if: contains(matrix.classes, 'unit')
+        uses: ./.github/actions/ci-apt
+        with:
+          packages: --postgres --documents
+
       - name: Install PostgreSQL 17
-        if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
 
@@ -195,7 +228,7 @@ jobs:
             # core plus fixtures is exactly --migration-part all.
             ops/ci.sh --strict --only migration --migration-part "${{ matrix.gate_shard == 1 && 'core' || 'fixtures' }}"
           else
-            ops/ci.sh --strict --only "${{ matrix.classes }}"
+            ops/ci.sh --strict --only "${{ matrix.classes }}" --unit-part practice
           fi
       - name: Upload the migration shadow's regenerated db/schema.sql
         if: ${{ failure() && contains(matrix.classes, 'migration') }}
@@ -221,18 +254,14 @@ jobs:
     name: main canary
     runs-on: ubuntu-24.04
     timeout-minutes: 2
-    needs: [evidence, classes]
+    needs: [evidence, classes, unit-coverage]
     if: ${{ always() }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Require reused evidence or green classes
         env:
           EVIDENCE: ${{ needs.evidence.result }}
           REUSED: ${{ needs.evidence.outputs.reused }}
           CLASSES: ${{ needs.classes.result }}
-        run: |
-          if [ "$CLASSES" = success ] || { [ "$EVIDENCE" = success ] && [ "$REUSED" = true ] && [ "$CLASSES" = skipped ]; }; then
-            echo "main-canary-green: identical-tree PR evidence or all classes passed"
-          else
-            echo "MAIN IS RED: evidence=$EVIDENCE classes=$CLASSES reused=$REUSED" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+          COVERAGE: ${{ needs.unit-coverage.result }}
+        run: python3 ops/ci-evidence.py canary-verdict

@@ -1,3 +1,4 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // salesforce-reconciliation-rw02-postgres.test.mjs — the V5-RW02 evidence
 // store's replay and write-time refusal paths on REAL PostgreSQL.
 //
@@ -29,8 +30,7 @@ import {
 } from "../src/salesforce-reconciliation-store-rw02.v5.js";
 import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
-const DSN = process.env.DATABASE_URL || "";
-const REQUIRED = process.env.CARR_RW02_DB_REQUIRED === "1";
+const DSN = await snapshotDatabase('salesforce-reconciliation-rw02-postgres-');
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const JOE = { slug: "joe", display: "Joe", human: true, via: "mcp", client_id: "rw02-postgres-test" };
 const D = n => `sha256:${String(n).padStart(2, "0").repeat(32)}`;
@@ -103,10 +103,6 @@ const readbackEvaluator = evidence => ({
 });
 
 test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL", async t => {
-  if (!DSN) {
-    assert.equal(REQUIRED, false, "the V5-RW02 database proof is required but DATABASE_URL is unset");
-    return t.skip("the migration class supplies DATABASE_URL");
-  }
   assert.match(DSN, LOOPBACK, "the V5-RW02 database proof runs only against a loopback disposable database");
   const pg = (await import("pg")).default;
   const source = new URL(DSN).pathname.replace(/^\//, "");

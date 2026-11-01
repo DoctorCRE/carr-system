@@ -1,19 +1,14 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // V5-F05 durable rule-context seam against disposable loopback PostgreSQL.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
-const DSN = process.env.DATABASE_URL || "";
-const REQUIRED = process.env.CARR_F05_DB_REQUIRED === "1";
+const DSN = await snapshotDatabase('rule-context-runtime-postgres-');
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 async function database(t) {
-  if (!DSN) {
-    if (REQUIRED) assert.fail("CARR_F05_DB_REQUIRED requires DATABASE_URL");
-    t.skip("the migration class supplies DATABASE_URL");
-    return null;
-  }
   assert.ok(LOOPBACK.test(DSN), "REFUSED: F05 SQL fixtures require disposable loopback PostgreSQL");
   return (await import("pg")).default ?? (await import("pg"));
 }
@@ -122,7 +117,6 @@ async function contractRows(client, ruleId) {
 
 async function withFixtureTransaction(t, body) {
   const pg = await database(t);
-  if (!pg) return;
   const client = new pg.Client({ connectionString: DSN });
   await client.connect();
   await client.query("begin");

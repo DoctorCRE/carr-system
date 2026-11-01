@@ -17,10 +17,11 @@
 // the alphabetically preceding gate left behind, and it rolls back every row it
 // writes.
 //
-//   DATABASE_URL=postgresql://localhost/... node --test \
+//   node --test \
 //     mcp-server/test/program-controller-census-role-boundary.v5.test.mjs
 
 import test from "node:test";
+import { snapshotDatabase } from "./helpers/postgres-database.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
@@ -30,8 +31,7 @@ import {
 import { readLiveLeaseCensus, readSliceAdmissionRequest }
   from "../src/program-controller-census.v5.js";
 
-const DSN = process.env.DATABASE_URL || "";
-const REQUIRED = process.env.CARR_PROGRAM_CONTROLLER_DB_REQUIRED === "1";
+const DSN = await snapshotDatabase('census-role-boundary-');
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const WRITER_FUNCTION = "ops.record_program_controller_fact(text,uuid,jsonb)";
 
@@ -94,12 +94,7 @@ const censusClient = client => ({
   query: async (text, values = []) => client.query(text, values),
 });
 
-async function skipUnlessDatabase(t) {
-  if (!DSN) {
-    assert.equal(REQUIRED, false, "this proof was required and no database URL was given to it");
-    t.skip("the migration class supplies DATABASE_URL");
-    return null;
-  }
+async function database() {
   assert.ok(LOOPBACK.test(DSN),
     "REFUSED: this proof mints login roles and runs against a disposable loopback only");
   return (await import("pg")).default ?? (await import("pg"));
@@ -107,8 +102,7 @@ async function skipUnlessDatabase(t) {
 
 test("T-WRITER-DENIED: the writer bundle may record an admission refusal and nothing else",
   async t => {
-    const pg = await skipUnlessDatabase(t);
-    if (!pg) return;
+    const pg = await database();
     const owner = await connect(pg);
     t.after(() => owner.end().catch(() => {}));
     await ensureRoles(owner);
@@ -163,8 +157,7 @@ test("T-WRITER-DENIED: the writer bundle may record an admission refusal and not
 
 test("F02-LEASE-ROW: a lease recorded by the authority reads back column for column as the reader",
   async t => {
-    const pg = await skipUnlessDatabase(t);
-    if (!pg) return;
+    const pg = await database();
     const owner = await connect(pg);
     t.after(() => owner.end().catch(() => {}));
     await ensureRoles(owner);
@@ -217,8 +210,7 @@ test("F02-LEASE-ROW: a lease recorded by the authority reads back column for col
 
 test("the census read the admission door actually makes succeeds on the WRITER login",
   async t => {
-    const pg = await skipUnlessDatabase(t);
-    if (!pg) return;
+    const pg = await database();
     const owner = await connect(pg);
     t.after(() => owner.end().catch(() => {}));
     await ensureRoles(owner);

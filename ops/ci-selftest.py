@@ -335,8 +335,8 @@ def test_hosted_migration_ownership():
     wf = _hosted_workflow()
     runner = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Run this group's check classes")
     check("PR slot claims run before entering the credential-scrubbed database lane",
-          runner["run"].index("python3 ops/migration-open-pr-gate.py") < runner["run"].index("python ops/local-pg-ci.py")
-          and "GH_TOKEN" in runner["env"])
+          "ops/migration-open-pr-gate.py" in (REPO / "ops/ci-pushfloor.py").read_text()
+          and "GH_TOKEN" in wf["jobs"]["fast"]["steps"][-1]["env"])
     check("hosted migration partitions cover all independent proof groups",
           set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
           == {"reconstruction", "equivalence", "shadow", "gates", "acceptance"}
@@ -356,7 +356,7 @@ def test_hosted_migration_ownership():
                                     env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
-                                                                 "classes": {"result": classes},
+                                                                 "unit-coverage": {"result": "success"}, "classes": {"result": classes},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -1081,7 +1081,7 @@ def test_hosted_draft_lifecycle():
             ["node", "-e", script, json.dumps([expression, context])], text=True))
 
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("scope", "classes", "migration-fixtures"),
+            ("ci.yml", ("fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1132,11 +1132,12 @@ def test_hosted_draft_lifecycle():
                 ctx = context(draft=draft, action=action, sha=sha)
                 groups.append(evaluate(wf["concurrency"]["group"], ctx))
                 check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (not draft)
+                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name in ("fast", "gates", "secret", "unit-coverage") else False)
                           for name in lanes))
                 result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
                     env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs),
                          "CI_DRAFT": str(evaluate(step["env"]["CI_DRAFT"], ctx)).lower(),
+                         "CI_EVENT": "pull_request",
                          "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
                     text=True, capture_output=True, timeout=10)
                 check(f"{filename}: {action} draft={draft} verdict is explicit",
@@ -1155,10 +1156,10 @@ def test_hosted_draft_lifecycle():
             for event in ("merge_group", "schedule", "workflow_dispatch"):
                 ctx = context(event=event, draft=True)
                 check(f"{filename}: {event} runs every lane outside PR cancellation group",
-                      all(evaluate(jobs[name].get("if", "true"), ctx) for name in lanes)
+                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (filename != "ci.yml" or name not in ("fast", "gates", "secret")) for name in lanes)
                       and not evaluate(wf["concurrency"]["cancel-in-progress"], ctx)
                       and evaluate(wf["concurrency"]["group"], ctx) != groups[0])
-            for lane in lanes:
+            for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
                     if state == "missing":
@@ -1167,6 +1168,7 @@ def test_hosted_draft_lifecycle():
                         broken[lane]["result"] = state
                     result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
                         env={**scrubbed_env(), "CI_NEEDS": json.dumps(broken), "CI_DRAFT": "false",
+                             "CI_EVENT": "merge_group",
                              "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
                         text=True, capture_output=True, timeout=10)
                     check(f"{filename}: ready {lane}={state} blocks success at same SHA",

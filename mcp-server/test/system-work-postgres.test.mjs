@@ -1,9 +1,10 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Schema-shape integration: run against isolated fixtures, never production.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {readSystemWorkCensus,SYSTEM_WORK_LEGS} from '../src/system-work-census.v5.js';
-const url=process.env.SYSTEM_WORK_TEST_DATABASE_URL;
+const url=await snapshotDatabase('system-work-postgres-');
 async function sliceFixtures(db) {
   await db.query(`create temporary table census_work_fixture
    (id uuid,ref text,title text,state text,organization_tenant_id text,owner_actor text);
@@ -19,7 +20,7 @@ async function sliceFixtures(db) {
     .replaceAll('ops.slice_completion_mark','pg_temp.census_mark_fixture'),params);
   }};
 }
-test('bare business subjects stay excluded alongside recursive business identities',{skip:!url},async()=>{
+test('bare business subjects stay excluded alongside recursive business identities',async()=>{
  const db=new pg.Client({connectionString:url});await db.connect();
  try{
   await db.query('begin');
@@ -36,7 +37,7 @@ test('bare business subjects stay excluded alongside recursive business identiti
   assert.equal(result.coverage[0].count_total,1);
  }finally{await db.query('rollback');await db.end();}
 });
-test('actual PostgreSQL legs compile, grants execute and private/business loops are excluded',{skip:!url},async()=>{
+test('actual PostgreSQL legs compile, grants execute and private/business loops are excluded',async()=>{
  const client=new pg.Client({connectionString:url});await client.connect();
  try{
  await client.query('begin');
@@ -63,7 +64,7 @@ test('actual PostgreSQL legs compile, grants execute and private/business loops 
  await client.query('rollback');
  }finally{await client.end();}
 });
-test('progress census requires explicit system classification',{skip:!url},async()=>{
+test('progress census requires explicit system classification',async()=>{
  const client=new pg.Client({connectionString:url});await client.connect();
  try{await client.query('begin');
  await client.query(`insert into public.board_snapshot(organization_tenant_id,sponsoring_human_slug,board_id,snapshot_json,updated_by_actor_id)
@@ -77,7 +78,7 @@ test('progress census requires explicit system classification',{skip:!url},async
  assert.deepEqual(result.items.map(i=>i.identity.task_id),['system']);
  }finally{await client.query('rollback');await client.end();}
 });
-test('canonical slice members drive mixed, complete, reopened and superseded plan status',{skip:!url},async()=>{
+test('canonical slice members drive mixed, complete, reopened and superseded plan status',async()=>{
  const client=new pg.Client({connectionString:url});await client.connect();
  try{await client.query('begin');
  const census=await sliceFixtures(client);
@@ -103,7 +104,7 @@ test('canonical slice members drive mixed, complete, reopened and superseded pla
  }finally{await client.query('rollback');await client.end();}
 });
 
-test('slice-plan census binds PostgreSQL parameters before Passport completion', {skip:!url}, async()=>{
+test('slice-plan census binds PostgreSQL parameters before Passport completion', async()=>{
  const db=new pg.Client({connectionString:url});await db.connect();
  try{
   await db.query('begin');

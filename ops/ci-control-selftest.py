@@ -39,13 +39,41 @@ def expression(value, github, cancelled=False, matrix=None):
 
 
 class Controls(unittest.TestCase):
+    def test_pr_gates_install_the_shared_pinned_scanner_before_checks(self):
+        jobs = workflow()['jobs']
+        install = next(step for step in jobs['secret']['steps']
+                       if step.get('run') == 'python3 ops/gitleaks.py --install')
+        steps = jobs['gates']['steps']
+        checks = next(step for step in steps if step.get('name') == 'Gates checks')
+        self.assertIn(install, steps[:steps.index(checks)])
+
     def test_node_install_reuses_downloads_without_duplicating_dependency_audit(self):
         wf = workflow()
         setup = next(step for step in wf['jobs']['classes']['steps']
                      if 'actions/setup-node@' in step.get('uses', ''))
-        self.assertEqual(setup['with'].get('cache'), 'npm')
-        self.assertEqual(setup['with'].get('cache-dependency-path', '').split(),
-                         ['mcp-server/package-lock.json', 'practice-plugin/package-lock.json'])
+        self.assertFalse(setup['with']['package-manager-cache'])
+        cache = workflow('../actions/ci-downloads/action.yml')
+        self.assertIn('$ImageOS-$ImageVersion', cache['runs']['steps'][0]['run'])
+        npm, pip = cache['runs']['steps'][1:]
+        for step, locks in ((npm, ('.nvmrc', 'mcp-server/package-lock.json', 'practice-plugin/package-lock.json')),
+                            (pip, ('.python-version', 'requirements.lock'))):
+            key = step['with']['key']
+            self.assertIn('${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.identity }}', key)
+            for lock in locks:
+                self.assertIn(lock, key)
+            self.assertNotIn('restore-keys', step['with'])
+        for filename in ('ci.yml', 'main-canary.yml', 'unit-shards.yml'):
+            for job in workflow(filename)['jobs'].values():
+                steps = job.get('steps', [])
+                setups = [step for step in steps if 'actions/setup-node@' in step.get('uses', '')
+                          or 'actions/setup-python@' in step.get('uses', '')]
+                if not setups:
+                    continue
+                with self.subTest(workflow=filename, job=job.get('name')):
+                    self.assertTrue(all('cache' not in step['with'] for step in setups))
+                    restore = next(step for step in steps if step.get('uses') == './.github/actions/ci-downloads')
+                    self.assertGreater(steps.index(restore), steps.index(setups[-1]))
+                    self.assertEqual(restore.get('if'), setups[-1].get('if'))
         install = next(step for step in wf['jobs']['classes']['steps']
                        if step.get('name') == 'Install Node dependencies')
         commands = install['run'].splitlines()
@@ -134,9 +162,9 @@ class Controls(unittest.TestCase):
         new = state(event('synchronize',sha='b',run=2))
         self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
         for action in wf['on']['pull_request']['types']:
-            self.assertEqual(state(event(action))[2:], (True, True))
+            self.assertEqual(state(event(action))[2:], (False, True))
         changed = state(event('synchronize',base='release',run=4))
-        self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))
+        self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,False,True))
         for name in ('schedule','workflow_dispatch'):
             a={'workflow':'CI','event_name':name,'event':{},'run_id':10}
             b={**a,'run_id':11}
@@ -145,7 +173,7 @@ class Controls(unittest.TestCase):
     def test_superseded_expensive_jobs_can_cancel(self):
         wf = workflow()
         event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
-        for job in ('classes', 'migration-fixtures'):
+        for job in ('fast',):
             with self.subTest(job=job):
                 condition = wf['jobs'][job]['if']
                 self.assertTrue(expression(condition, event, cancelled=False))
@@ -157,7 +185,7 @@ class Controls(unittest.TestCase):
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
-        self.assertEqual(set(wf['jobs']['checks']['needs']), {'scope', 'classes', 'migration-fixtures'})
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])

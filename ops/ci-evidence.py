@@ -52,10 +52,11 @@ def hosted_verdict(*, drift=False):
             summary.write(message + '\n')
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
-    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures')
+    fast = not drift and os.environ.get('CI_EVENT') == 'pull_request'
+    lanes = ('check',) if drift else (('fast', 'gates', 'secret', 'unit-coverage') if fast else ('scope', 'classes', 'migration-fixtures', 'unit-coverage'))
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
-    if not drift:
+    if not drift and not fast:
         scope = needs['scope']
         full = scope.get('outputs', {}).get('full') if scope['result'] == 'success' else None
         if full not in ('true', 'false'):
@@ -71,10 +72,25 @@ def hosted_verdict(*, drift=False):
     return 0 if all(result in allowed[name] for name, result in results.items()) else 1
 
 
+def canary_verdict():
+    evidence, reused = os.environ['EVIDENCE'], os.environ['REUSED']
+    classes, coverage = os.environ['CLASSES'], os.environ['COVERAGE']
+    complete = classes == coverage == 'success'
+    reused_complete = evidence == 'success' and reused == 'true' and classes == coverage == 'skipped'
+    if complete or reused_complete:
+        print('main-canary-green: identical-tree evidence or classes and shard coverage passed')
+        return 0
+    message = f'MAIN IS RED: evidence={evidence} classes={classes} coverage={coverage} reused={reused}'
+    print(message)
+    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+        summary.write(message + '\n')
+    return 1
+
+
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci-unit.py',
-                 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
+                 '.github/workflows/unit-shards.yml', 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/config/hosted-suite-exceptions.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
                  'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
                  'requirements.lock',
@@ -84,9 +100,11 @@ def contract_digest(root=ROOT):
 
 
 def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
-    required = {'ops/ci.sh --strict', *('ops/ci.sh --strict --only ' + g for g in groups)}
+    required = {'ops/ci.sh --strict', 'unit-coverage',
+                *(f'unit / MCP unit shard {n} of 4' for n in range(1, 5)),
+                *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
-    return (run.get('name') == 'CI' and run.get('event') in ('pull_request', 'merge_group')
+    return (run.get('name') == 'CI' and run.get('event') == 'merge_group'
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'
             and required <= green and receipt.get('schema') == 'carr-ci-evidence/v1'
             and receipt.get('event') == run.get('event') and receipt.get('draft') is False
@@ -121,17 +139,6 @@ class GitHub:
 
 def resolve(github, sha, tree, contract, groups):
     candidates = []
-    for pr in github.api(f'commits/{sha}/pulls'):
-        if not pr.get('merged_at') or pr['base']['ref'] != 'main':
-            continue
-        head = pr['head']['sha']
-        if github.tree(head) != tree:
-            continue
-        runs = github.api(f'actions/workflows/ci.yml/runs?event=pull_request&head_sha={head}&per_page=100')['workflow_runs']
-        if not runs:
-            continue
-        run = max(runs, key=lambda r: (r['id'], r.get('run_attempt', 1)))
-        candidates.append((run, head, pr['number']))
     seen = set()
     for run in github.api('actions/workflows/ci.yml/runs?event=merge_group&per_page=100')['workflow_runs']:
         head = run['head_sha']
@@ -191,7 +198,7 @@ def git(value, root=ROOT):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'programs'])
+    parser.add_argument('action', choices=['record', 'resolve', 'verdict', 'drift-verdict', 'canary-verdict', 'programs'])
     parser.add_argument('--output')
     parser.add_argument('--rows', type=Path)
     args = parser.parse_args()
@@ -200,6 +207,8 @@ def main():
             parser.error('programs needs --rows and --output')
         program_records(args.rows, Path(args.output))
         return 0
+    if args.action == 'canary-verdict':
+        return canary_verdict()
     if args.action in ('verdict', 'drift-verdict'):
         try:
             return hosted_verdict(drift=args.action == 'drift-verdict')
@@ -210,8 +219,8 @@ def main():
         parser.error('--output is required for record/resolve')
     if args.action == 'record':
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
-        if os.environ['GITHUB_EVENT_NAME'] == 'pull_request' and event['pull_request']['draft'] is not False:
-            print('Draft: deferred; no full-suite evidence')
+        if os.environ['GITHUB_EVENT_NAME'] != 'merge_group':
+            print('Only merge groups produce full-suite evidence')
             return 1
     groups, contract = class_groups(), contract_digest()
     sha, tree = git('HEAD'), git('HEAD^{tree}')

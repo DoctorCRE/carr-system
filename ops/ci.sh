@@ -25,6 +25,7 @@ fi
 STRICT=0
 ONLY=""
 MIGRATION_PART=all
+UNIT_PART=all
 GATE_SHARD=1
 GATE_SHARDS=1
 while [ "$#" -gt 0 ]; do
@@ -38,14 +39,20 @@ while [ "$#" -gt 0 ]; do
         *) echo "ci.sh: gate shard must be 1/2 or 2/2" >&2; exit 64 ;;
       esac
       shift ;;
+    --unit-part) UNIT_PART="${2:-}"; shift ;;
     --migration-part) MIGRATION_PART="${2:-}"; shift ;;
     --list)   LIST=1 ;;
     --gate-programs) GATE_PROGRAMS=1 ;;
-    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--gate-shard 1/2|2/2] [--list] [--gate-programs]"; exit 0 ;;
+    -h|--help) echo "Usage: ops/ci.sh [--strict] [--only classes] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] [--unit-part all|fast|mcp|practice] [--gate-shard 1/2|2/2] [--list] [--gate-programs]"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
   esac
   shift
 done
+
+case "$UNIT_PART" in
+  all|fast|mcp|practice) ;;
+  *) echo "ci.sh: unknown unit part" >&2; exit 64 ;;
+esac
 
 case "$MIGRATION_PART" in
   all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow) ;;
@@ -166,7 +173,7 @@ check_unit() {
     skip unit "SKIP-for-local: CARR_CI_DATABASE_URL is unset; unit runs in hosted CI"
     return
   fi
-  if run_quiet "$LOGDIR/unit.log" "$PY" ops/ci-unit.py; then
+  if run_quiet "$LOGDIR/unit.log" "$PY" ops/ci-unit.py --part "$UNIT_PART"; then
     cat "$LOGDIR/unit.log"
     ok unit "required Node package checks executed"
   else

@@ -6,13 +6,22 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS } from '../src/tools.js';
 
 let fixture, pool, actor;
+const clientShutdowns = [];
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'doc-completion-', snapshot: true });
   pool = new pg.Pool(fixture.connection);
+  pool.on('connect', client => {
+    clientShutdowns.push(new Promise(resolve => client.once('end', resolve)));
+  });
 
   actor = { ...(await pool.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
-after(async () => { try { await pool?.end(); } finally { await fixture?.close(); } });
+after(async () => {
+  try {
+    await pool?.end();
+    await Promise.all(clientShutdowns);
+  } finally { await fixture?.close(); }
+});
 async function setup() {
   const conversation = `a${randomUUID().slice(1)}`, request = `b${randomUUID().slice(1)}`, answer = `c${randomUUID().slice(1)}`;
   await pool.query('insert into ops.doc_conversation(id,title,created_by_actor) values ($1,$2,$3)', [conversation, 'Completion test', actor.id]);

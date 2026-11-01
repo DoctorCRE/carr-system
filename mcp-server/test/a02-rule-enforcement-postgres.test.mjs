@@ -1,3 +1,4 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Test rule enforcement against PostgreSQL.
 
 import test from "node:test";
@@ -7,8 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { TOOLS, ToolError } from "../src/tools.js";
 import { readRuleEnforcementCoverage } from "../src/lifecycle-assurance.v5.js";
 
-const DSN = process.env.DATABASE_URL || "";
-const REQUIRED = process.env.CARR_A02_RULE_COVERAGE_DB_REQUIRED === "1";
+const DSN = await snapshotDatabase('a02-rule-enforcement-postgres-');
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 const sha = text => createHash("sha256").update(text, "utf8").digest("hex");
@@ -187,10 +187,6 @@ async function callVerb(pg, database, role, actor, verb, args) {
 }
 
 test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
-  if (!DSN) {
-    assert.equal(REQUIRED, false, "the V5-A02 database proof is required but DATABASE_URL is unset");
-    return t.skip("the migration class supplies DATABASE_URL");
-  }
   assert.match(DSN, LOOPBACK, "the V5-A02 database proof runs only against a loopback disposable database");
   const pg = (await import("pg")).default;
   const source = new URL(DSN).pathname.replace(/^\//, "");

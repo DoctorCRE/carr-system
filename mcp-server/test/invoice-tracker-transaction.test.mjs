@@ -1,3 +1,4 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Real registered handler, envelope and event writes on disposable PostgreSQL.
 // Committed race fixtures stay only in the loopback database CI discards.
 import test from 'node:test';
@@ -7,10 +8,9 @@ import pg from 'pg';
 import { TOOLS } from '../src/tools.js';
 import { setWriterActorContext } from '../src/mcp.js';
 
-const DSN = process.env.CARR_INVOICE_TEST_DATABASE_URL || '';
-const REQUIRED = process.env.CARR_INVOICE_TEST_REQUIRED === '1';
+const DSN = await snapshotDatabase('invoice-tracker-transaction-');
 const VERB = 'record-commission-receipt';
-const enabled = { skip: !DSN && !REQUIRED, timeout: 20000 };
+const enabled = { timeout: 20000 };
 
 async function connect() {
   assert.ok(DSN, 'receipt transaction proof requires a disposable database');

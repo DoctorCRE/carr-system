@@ -1,3 +1,4 @@
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Tests relationship network concurrency and attribution on PostgreSQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,9 +8,10 @@ import { TOOLS } from '../src/tools.js';
 import { networkStatement, projectNetwork } from '../src/relationship-network.ts';
 import { readBusinessRecord } from '../src/workspace-business-read.js';
 
-function loopback(t,flag){
-  const dsn=process.env.DATABASE_URL;
-  if(!dsn){assert.notEqual(process.env[flag],'1');t.skip('disposable PostgreSQL required');return null;}
+const SNAPSHOT_DSN = await snapshotDatabase('relationship-network-postgres-');
+
+function loopback(){
+  const dsn=SNAPSHOT_DSN;
   const url=new URL(dsn),db=new pg.Client({connectionString:dsn});
   assert.ok(['postgres:','postgresql:'].includes(url.protocol)&&['localhost','127.0.0.1'].includes(url.hostname)&&url.port&&!url.search&&!url.hash&&db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'loopback database with explicit port required');
   return db;
@@ -30,8 +32,8 @@ const network=async db=>{await db.query('savepoint read');await db.query('set lo
 const referredDeals=(snapshot,party)=>snapshot.edges.filter(e=>e.kind==='referred'&&e.from==='party:'+party&&e.to.startsWith('deal:')).map(e=>e.to).sort();
 
 test('W14 PostgreSQL: coverage and exact attachments serialize in both commit orders', async t => {
-  const setup=loopback(t,'CARR_RELATIONSHIP_DB_REQUIRED');if(!setup)return;
-  const attachment=new pg.Client({connectionString:process.env.DATABASE_URL}),verification=new pg.Client({connectionString:process.env.DATABASE_URL});
+  const setup=loopback();
+  const attachment=new pg.Client({connectionString:SNAPSHOT_DSN}),verification=new pg.Client({connectionString:SNAPSHOT_DSN});
   await setup.connect();await attachment.connect();await verification.connect();
   try {
     const f=await fixtures(setup);
@@ -105,8 +107,8 @@ test('W14 PostgreSQL: coverage and exact attachments serialize in both commit or
 });
 
 test('W14 PostgreSQL: a vendor role created after an empty lookup waits for the attachment', async t => {
-  const setup=loopback(t,'CARR_RELATIONSHIP_DB_REQUIRED');if(!setup)return;
-  const attachment=new pg.Client({connectionString:process.env.DATABASE_URL}),creation=new pg.Client({connectionString:process.env.DATABASE_URL});
+  const setup=loopback();
+  const attachment=new pg.Client({connectionString:SNAPSHOT_DSN}),creation=new pg.Client({connectionString:SNAPSHOT_DSN});
   await setup.connect();await attachment.connect();await creation.connect();
   let release=()=>{},attached,created;
   try {
@@ -145,8 +147,8 @@ test('W14 PostgreSQL: a vendor role created after an empty lookup waits for the 
 });
 
 test('W14 PostgreSQL: a concurrent attachment never credits a deal to the other caller\'s broker', async t => {
-  const setup=loopback(t,'CARR_RELATIONSHIP_DB_REQUIRED');if(!setup)return;
-  const first=new pg.Client({connectionString:process.env.DATABASE_URL}),second=new pg.Client({connectionString:process.env.DATABASE_URL});
+  const setup=loopback();
+  const first=new pg.Client({connectionString:SNAPSHOT_DSN}),second=new pg.Client({connectionString:SNAPSHOT_DSN});
   await setup.connect();await first.connect();await second.connect();
   try {
     // Committed fixture: both transactions must see the same existing edge.
@@ -257,8 +259,7 @@ test('W14 PostgreSQL: per-deal attribution, every role row, and one association 
 });
 
 test('W14 PostgreSQL: exact referrals, deduplication, broker attribution, holds and reader grants', async t => {
-  const dsn=process.env.DATABASE_URL;
-  if(!dsn){assert.notEqual(process.env.CARR_RELATIONSHIP_DB_REQUIRED,'1');t.skip('disposable PostgreSQL required');return;}
+  const dsn=SNAPSHOT_DSN;
   const url=new URL(dsn),db=new pg.Client({connectionString:dsn});
   assert.ok(['postgres:','postgresql:'].includes(url.protocol)&&['localhost','127.0.0.1'].includes(url.hostname)&&url.port&&!url.search&&!url.hash&&db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'loopback database with explicit port required');
   await db.connect();await db.query('begin');

@@ -22,13 +22,14 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'bin').mkdir()
         shutil.copy2(ROOT / 'bin/with-timeout.py', self.root / 'bin/with-timeout.py')
         for name in ('ci.sh', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
-                     'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
+                     'ci_unit_shards.py', 'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
             source = ROOT / 'ops' / name
             if source.exists():
                 shutil.copy2(source, self.root / 'ops' / name)
         (self.root / 'ops/config/ci-check-scope.json').write_text('{}')
         shutil.copy2(ROOT / 'ops/config/public-source-identities.v1.json',
                      self.root / 'ops/config/public-source-identities.v1.json')
+        (self.root / 'ops/config/hosted-suite-exceptions.json').write_text('{}')
         # npm enables Node's compile cache under TMPDIR, which outlives the fixture.
         self.env = dict(fixture_env(), NODE_DISABLE_COMPILE_CACHE='1')
         subprocess.run(['git', 'init', '-q', str(self.root)], env=self.env, check=True)
@@ -71,6 +72,15 @@ class UnitClassTests(unittest.TestCase):
         self.assertIn('2 tests, 2 passed', result.stdout)
         for name in PACKAGES:
             self.assertIn(f'OK unit {name}: 1 tests, 1 passed', result.stdout)
+
+    def test_executed_suite_marker_survives_exit_stream_teardown(self):
+        self.all_packages()
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
+            "import test from 'node:test'; test('executes', () => {});\n"
+            "process.prependOnceListener('exit', () => process.stdout.cork());")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
 
     def test_one_missing_package_fails(self):
         for name in PACKAGES[:-1]:
@@ -146,6 +156,96 @@ class UnitClassTests(unittest.TestCase):
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('original diagnostic', result.stderr)
+
+    def test_all_failed_suite_diagnostics_survive_the_log_tail(self):
+        self.all_packages()
+        mcp = self.root / 'mcp-server'
+        for name in ('run-tests.mjs', 'suite-discovery.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'test/chrome-launch.test.mjs').write_text(
+            "import test from 'node:test'; test('early', () => { throw Error('first suite assertion detail'); });")
+        (mcp / 'test/suite.test.mjs').write_text(
+            "import test from 'node:test'; test('late', () => { const error = Error('second suite assertion detail');"
+            "error.stack += '\\n' + Array(100).fill('diagnostic padding').join('\\n'); throw error; });")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('first suite assertion detail', result.stderr)
+        self.assertIn('second suite assertion detail', result.stderr)
+        (mcp / 'test/chrome-launch.test.mjs').write_text("process.kill(process.pid, 'SIGTERM');")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('SIGTERM', result.stderr, 'file-level termination must report its signal')
+
+    def test_shard_refuses_hidden_suite_and_zero_executed_tests(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        runner = (ROOT / 'mcp-server/run-tests.mjs').read_text()
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
+        for n in range(32):
+            (mcp / f'test/extra{n}.test.mjs').write_text(
+                "import test from 'node:test'; test('executes', () => {});")
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        command = ['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp']
+        receipt = self.root / 'receipt.json'
+        deadline = self.root / 'deadline.txt'
+        watchdog = self.root / 'bin/with-timeout.py'
+        original_watchdog = self.root / 'bin/watchdog.py'
+        watchdog.rename(original_watchdog)
+        watchdog.write_text('import os, sys\nfrom pathlib import Path\n'
+                            f'Path({str(deadline)!r}).write_text(sys.argv[1])\n'
+                            f'os.execv(sys.executable, [sys.executable, {str(original_watchdog)!r}, *sys.argv[1:]])\n')
+        shard_env = {**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)}
+        (mcp / 'run-tests.mjs').write_text(runner)
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(json.loads(receipt.read_text())['suites'])
+        self.assertEqual(deadline.read_text(), '600')
+        first = mcp / 'test' / json.loads(receipt.read_text())['suites'][0]
+        original = first.read_text()
+        for body in ("import test from 'node:test'; test.skip('not executed', () => {});", ""):
+            receipt.unlink()
+            first.write_text(body)
+            result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(result.returncode, 0, 'one skipped or unstarted suite must fail even beside passing suites')
+            self.assertFalse(receipt.exists(), 'unexecuted suites must never produce a shard receipt')
+            first.write_text(original)
+            (mcp / 'run-tests.mjs').write_text(runner)
+            result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        exceptions = self.root / 'ops/config/hosted-suite-exceptions.json'
+        for body in ("import test from 'node:test'; test.skip('unavailable here', () => {});", ""):
+            first.write_text(body)
+            exceptions.write_text(json.dumps({first.name: 'explicit temporary exception'}))
+            receipt.unlink()
+            result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(first.name, json.loads(receipt.read_text())['suites'])
+        first.write_text("import test from 'node:test'; test('crash', () => { throw Error('broken'); });")
+        receipt.unlink()
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0, 'an exception must never permit a failure')
+        self.assertFalse(receipt.exists())
+        first.write_text(original)
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        receipt.unlink()
+        (mcp / 'run-tests.mjs').write_text(runner.replace('const files = selected || discovered;',
+                                                         f'const files = (selected || discovered).filter(file => file !== {json.dumps(first.name)});'))
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('shard coverage mismatch', result.stderr)
+        self.assertFalse(receipt.exists())
+        exceptions.write_text('{}')
+        (mcp / 'run-tests.mjs').write_text(runner)
+        for suite in (mcp / 'test').glob('*.test.mjs'):
+            suite.write_text("import test from 'node:test'; test.skip('not executed', () => {});")
+        result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('zero passing tests', result.stderr)
+        self.assertFalse(receipt.exists())
 
     def test_package_skip_exit_is_red(self):
         self.all_packages()

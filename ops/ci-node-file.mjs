@@ -8,5 +8,5 @@ if (process.env.NODE_TEST_CONTEXT === 'child-v8') {
   process.execArgv = process.execArgv.filter(arg => arg !== option);
   let registered = false;
   tracingChannel('node.test').start.subscribe(() => { registered = true; });
-  process.on('exit', () => console.log(`CARR_TEST_FILE ${Number(registered)}`));
+  process.once('beforeExit', () => console.log(`CARR_TEST_FILE ${Number(registered)}`));
 }

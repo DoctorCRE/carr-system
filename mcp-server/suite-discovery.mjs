@@ -1,6 +1,7 @@
 // Discover the unit contract and reject tests that the runner would otherwise omit.
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export async function discoverSuites(directory, { expected, external = [] }) {
   const files = [];
@@ -26,4 +27,10 @@ export async function discoverSuites(directory, { expected, external = [] }) {
   if (files.length < expected)
     throw new Error(`Unit suite inventory mismatch: found ${files.length}, expected at least ${expected}; drop ${expected - files.length}. Check deleted, renamed or nested suites and lower the checked-in floor deliberately.`);
   return files.sort();
+}
+
+if (process.argv[1] && await realpath(process.argv[1]).catch(() => null) === fileURLToPath(import.meta.url)) {
+  const root = path.dirname(fileURLToPath(import.meta.url));
+  const inventory = JSON.parse(await readFile(path.join(root, 'suite-inventory.json'), 'utf8'));
+  console.log(JSON.stringify(await discoverSuites(path.join(root, 'test'), inventory)));
 }

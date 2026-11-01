@@ -58,19 +58,36 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
         return json.loads(result.stdout)
     main, pr = workflow(CANARY), workflow(CI_YML)
     classes = main['jobs']['classes']
-    migration_half = {'classes': 'migration', 'gate_shard': 2}
-    check('main has the PR class set and adds only the migration fixtures half',
-          sorted(classes['strategy']['matrix']['classes']) == sorted(pr['jobs']['classes']['strategy']['matrix']['classes'])
-          and classes['strategy']['matrix']['gate_shard'] == [1, 2]
-          and migration_half in pr['jobs']['classes']['strategy']['matrix']['exclude']
-          and classes['strategy']['matrix']['exclude']
-          == [row for row in pr['jobs']['classes']['strategy']['matrix']['exclude'] if row != migration_half])
-    check('main names each shard distinctly and otherwise as PR CI',
+    from collections import Counter
+    def execution_counts(job):
+        matrix = job['strategy']['matrix']
+        return Counter(name for group in matrix['classes'] for shard in matrix['gate_shard']
+                       if {'classes': group, 'gate_shard': shard} not in matrix['exclude']
+                       for name in group.split())
+    main_counts = execution_counts(classes)
+    full_counts = execution_counts(pr['jobs']['classes'])
+    check('main and full CI cover the same classes with only gates and main migration duplicated',
+          {'unit', 'gates', 'migration'} <= set(main_counts) == set(full_counts)
+          and all(count == (2 if name in ('gates', 'migration') else 1) for name, count in main_counts.items())
+          and all(count == (2 if name == 'gates' else 1) for name, count in full_counts.items()))
+    main_names = classes['strategy']['matrix']['job_names'][0]
+    full_names = pr['jobs']['classes']['strategy']['matrix']['job_names'][0]
+    check('shared class groups keep their names and main names its migration fixture shard distinctly',
           "format('{0}_shard_2', matrix.classes)" in classes['name']
-          and classes['strategy']['matrix']['job_names'][0]
-          == dict(pr['jobs']['classes']['strategy']['matrix']['job_names'][0],
-                  migration_shard_2={'name': 'ops/ci.sh --strict --only migration --migration-part fixtures',
-                                     'classes': 'migration'}))
+          and all(main_names[key] == full_names[key] for key in main_names.keys() & full_names.keys())
+          and len({row['name'] for row in main_names.values()}) == len(main_names)
+          and main_names['migration_shard_2'] == {
+              'name': 'ops/ci.sh --strict --only migration --migration-part fixtures', 'classes': 'migration'})
+    check('main fallback and CI share the MCP shard workflow and coverage gate; both run practice-plugin separately',
+          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix']['shard'] == [1, 2, 3, 4]
+          and pr['jobs']['unit-coverage']['needs'] == 'unit'
+          and 'unit-coverage' in pr['jobs']['checks']['needs']
+          and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])
+          and any('--unit-part practice' in step.get('run', '') for step in classes['steps'])
+          and main['jobs']['unit']['uses'] == pr['jobs']['unit']['uses'] == './.github/workflows/unit-shards.yml'
+          and main['jobs']['unit']['if'] == classes['if']
+          and main['jobs']['unit-coverage']['needs'] == ['evidence', 'unit']
+          and main['jobs']['unit-coverage']['steps'] == pr['jobs']['unit-coverage']['steps'])
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
@@ -93,7 +110,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     check('one aggregate main canary always reports',
           aggregate['name'] == 'main canary' and 'always()' in aggregate['if'])
     check('aggregate requires evidence and classes',
-          aggregate['needs'] == ['evidence', 'classes'])
+          aggregate['needs'] == ['evidence', 'classes', 'unit-coverage'])
     check('reuse is recorded before any classes are skipped',
           'ops/ci-evidence.py resolve' in CANARY.read_text()
           and 'ci-tree-evidence' in CI_YML.read_text())
@@ -114,7 +131,7 @@ def test_evidence_failure_runs_checks_and_uses_their_verdict():
               and all(not step.get('continue-on-error', False)
                       for step in workflow['jobs'][job]['steps'])
               for job in ('classes', 'canary')))
-    script = workflow['jobs']['canary']['steps'][0]['run']
+    script = next(step['run'] for step in workflow['jobs']['canary']['steps'] if step.get('name') == 'Require reused evidence or green classes')
     cases = [
         ('success', 'true', 'skipped', 0),
         ('success', 'false', 'success', 0),
@@ -129,9 +146,12 @@ def test_evidence_failure_runs_checks_and_uses_their_verdict():
         ('success', 'false', 'cancelled', 1),
     ]
     with tempfile.TemporaryDirectory() as tmp:
-        for evidence, reused, classes, code in cases:
+        cases = [(e, r, c, c if c in ('success', 'skipped') else 'success', code) for e, r, c, code in cases]
+        cases += [('success', 'false', 'success', state, 1) for state in ('failure', 'cancelled', 'skipped')]
+        cases += [('success', 'true', 'skipped', state, 1) for state in ('failure', 'cancelled', 'success')]
+        for evidence, reused, classes, coverage, code in cases:
             env = dict(os.environ, EVIDENCE=evidence, REUSED=reused,
-                       CLASSES=classes, GITHUB_STEP_SUMMARY=str(pathlib.Path(tmp) / 'summary'))
+                       CLASSES=classes, COVERAGE=coverage, GITHUB_STEP_SUMMARY=str(pathlib.Path(tmp) / 'summary'))
             actual = subprocess.run(['bash', '-e', '-c', script], env=env,
                                     capture_output=True, text=True)
             check(f'aggregate evidence={evidence} reused={reused!r} classes={classes}',
@@ -164,7 +184,7 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
         install_text = (REPO / 'ops/ci-postgres.sh').read_text() if installer in y else y
         install = y.find(installer if installer in y else "sudo apt-get install -y -qq postgresql-17")
         check(f"{path.name} installs PG17 for owned role-migration fixtures",
-              install >= 0 and "sudo apt-get install -y -qq postgresql-17" in install_text)
+              install >= 0 and re.search(r"(?m)^\s*sudo apt-get\b[^\n]*\binstall\b[^\n]*\bpostgresql-17(?=\s|$)", install_text) is not None)
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
               'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in install_text)
         check(f"{path.name} provisions PG17 before check execution",
@@ -173,8 +193,9 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
 
 def test_a_red_canary_stays_red_and_names_main():
     y = CANARY.read_text()
-    check('a failing class fails the aggregate', 'exit 1' in y)
-    check('its failure names main', 'MAIN IS RED' in y)
+    verdict = (REPO / 'ops/ci-evidence.py').read_text()
+    check('a failing class fails the aggregate', 'canary-verdict' in y and 'return 1' in verdict)
+    check('its failure names main', 'MAIN IS RED' in verdict)
     check('an absent reuse proof cannot green a skipped class',
           'needs.evidence.result' in y and 'needs.classes.result' in y
           and 'needs.evidence.outputs.reused' in y)
