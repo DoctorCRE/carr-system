@@ -165,14 +165,15 @@ class RuleDelivery(unittest.TestCase):
         context = output['hookSpecificOutput']
         self.assertNotIn('permissionDecision', context)
         row = json.loads(context['additionalContext'])
-        self.assertEqual(row['tool_name'], 'Bash')
-        self.assertEqual(row['rule_ids'], ['11111111'])
+        self.assertEqual(row['rules'], [rule])
+        self.assertNotIn('tool_name', row)
+        self.assertNotIn('receipt_id', row)
 
-    def test_grok_file_tools_get_rule_delivery(self):
+    def test_grok_file_tools_with_no_rules_stay_silent(self):
         for name in ('write', 'search_replace', 'read_file'):
             with self.subTest(name):
                 output = self.invoke(fixture(f'pre_tool_use.{name}'))
-                self.assertNotIn('permissionDecision', output['hookSpecificOutput'])
+                self.assertIsNone(output)
 
     def test_grok_prompt_and_stop_are_not_refused(self):
         for name in ('user_prompt_submit', 'stop'):
