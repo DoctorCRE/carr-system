@@ -1,6 +1,7 @@
 """Synthetic record replies exercise ambiguous board writes without a service."""
 import copy
 import json
+import shutil
 import tempfile
 from pathlib import Path
 import unittest
@@ -88,7 +89,9 @@ class BoardRecoveryTests(unittest.TestCase):
     result:{content:[{type:'text',text:JSON.stringify({ok:true})}]}})};
 };
 """)
-            fixture_env = {"HOME": directory, "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+            node = shutil.which("node")
+            self.assertIsNotNone(node, "node is required for the local transport fixture")
+            fixture_env = {"HOME": directory, "PATH": f"{Path(node).parent}:/usr/bin:/bin",
                            "CARR_MCP_LOCAL_TOKEN": "synthetic-fixture-bearer",
                            "CARR_MCP_ENV": str(root / "absent-file"),
                            "CARR_MCP_URL": "http://fixture.invalid/never-contacted",

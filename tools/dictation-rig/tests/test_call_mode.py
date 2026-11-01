@@ -1120,7 +1120,7 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(again, status)
         self.assertEqual(distiller.call_count, 1)
         self.assertEqual([call.args[0][-2] for call in route.call_args_list], ["deal-room-board", "get-call-context"])
-        self.assertEqual(json.loads(route.call_args_list[1].args[0][-1]), {"deal_ids": ["deal-a"]})
+        self.assertEqual(json.loads(route.call_args_list[1].kwargs["input"]), {"deal_ids": ["deal-a"]})
         self.assertEqual(distiller.call_args.args[0]["context"]["deals"][0]["owner"], "")
         self.assertIsNone(post_call.context_from_session(self.session))
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["report"]["summary"], "Summary")
@@ -1215,7 +1215,7 @@ class PostCallTests(unittest.TestCase):
         ]
         requests = []
         def route(argv, **kwargs):
-            requests.append((argv[-2], json.loads(argv[-1])))
+            requests.append((argv[-2], json.loads(kwargs["input"])))
             rows = deals + excluded if argv[-2] == "deal-room-board" else [
                 deal for deal in deals if deal["id"] in requests[-1][1]["deal_ids"]]
             return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": rows}))
