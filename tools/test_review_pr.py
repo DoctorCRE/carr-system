@@ -11,7 +11,7 @@ CLI = Path(__file__).resolve().parents[1] / 'bin/review-pr'
 
 
 class ReviewPR(TestCase):
-    def run_review(self, verdict='APPROVE', moved=False, malformed=False, missing=()):
+    def run_review(self, verdict='APPROVE', moved=False, malformed=False, missing=(), diff='diff --git a/example b/example', timestamp='123.456'):
         calls, comments = [], []
 
         def run(*command, **options):
@@ -22,7 +22,7 @@ class ReviewPR(TestCase):
             if name == 'gh':
                 if args[1] == 'view':
                     output = json.dumps(dict(headRefOid=('b' if moved and (sum(n == 'gh' and a[1] == 'view' for n, a, _ in calls) > 1 if moved is True else comments) else 'a')*40, title='Fix correctness', body='Card: WR622.S1.J37'))
-                elif args[1] == 'diff': output = 'diff --git a/example b/example'
+                elif args[1] == 'diff': output = diff
                 elif args[1] == 'comment': raise AssertionError('VERDICT comment publisher retired')
                 elif args[1] == 'merge' and moved == 'after-comment':
                     raise subprocess.CalledProcessError(1, command, stderr='head does not match')
@@ -34,7 +34,7 @@ class ReviewPR(TestCase):
                 comments.append(args[2] + '\n' + Path(args[args.index('--body-file')+1]).read_text())
             elif name == 'git' and args[0] == 'rev-parse': output = 'a'*40
             elif name == 'claude':
-                if 'mcp__claude_ai_Slack__slack_send_message' in args: output = '123.456'
+                if 'mcp__claude_ai_Slack__slack_send_message' in args: output = json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': json.dumps({'message_context': {'message_ts': timestamp}})}]}})
                 else: output = ('VERDICT: '+verdict+'\nReviewed-SHA: '+('b' if malformed else 'a')*40+'\nFinding') if any(n == 'sleep' and a == ['900'] for n, a, _ in calls) else 'WAIT'
             calls[-1] = (name, args, request)
             return output
@@ -44,6 +44,29 @@ class ReviewPR(TestCase):
             try: main_fn()
             except (ValueError, subprocess.CalledProcessError) as failure: return str(failure), calls, ''.join(comments)
         return None, calls, ''.join(comments)
+
+    def test_large_diff_is_sent_in_bounded_parts(self):
+        diff = '😀x' * 30000
+        error, calls, _ = self.run_review(diff=diff)
+        self.assertIsNone(error)
+        requests = [request for name, args, request in calls if name == 'claude' and 'slack_send_message' in ' '.join(args)]
+        messages = [request.split('using Slack.\n', 1)[1] for request in requests]
+        self.assertTrue(all(len(message.encode()) < 10000 for message in messages))
+        self.assertEqual(''.join(message.split('\n', 1)[1] for message in messages[1:]), diff)
+
+    def test_bad_timestamp_refused(self):
+        for timestamp in (None, '', 'not-a-ts'):
+            with self.subTest(timestamp=timestamp):
+                error, _, comment = self.run_review(timestamp=timestamp)
+                self.assertIn('missing valid message_context.message_ts', error)
+                self.assertFalse(comment)
+
+    def test_interpreter_selection(self):
+        fn = runpy.run_path(str(CLI))['submit_python']
+        with mock.patch.object(Path, 'exists', return_value=True):
+            self.assertEqual(fn(), str(CLI.resolve().parents[1] / '.venv/bin/python'))
+        with mock.patch.object(Path, 'exists', return_value=False):
+            self.assertEqual(fn(), sys.executable)
 
     def test_help_assigns_dot_as_only_reviewer(self):
         help_text = ' '.join(subprocess.check_output(['python3', str(CLI), '--help'], text=True).split())
@@ -90,7 +113,7 @@ class ReviewPR(TestCase):
         error, calls, _ = self.run_review()
         self.assertIsNone(error)
         self.assertEqual([args for name, args, _ in calls if name == 'sleep' and args != ['2']], [['600'], ['900']])
-        requests = [request for name, _, request in calls if name == 'claude']
+        requests = [request for name, args, request in calls if name == 'claude' and ('slack_read_thread' in ' '.join(args) or '<@U0C5R40MBPE>' in request)]
         self.assertIn('<@U0C5R40MBPE>', requests[0])
         self.assertTrue(all('thread 123.456' in request for request in requests[1:]))
 
