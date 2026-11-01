@@ -1,0 +1,44 @@
+{
+  "cli": "2.1.310 (Claude Code)",
+  "probes": [
+    {
+      "matching": false,
+      "core_loaded": true,
+      "path_loaded": false,
+      "checkpoint_invoked": true,
+      "load_reasons": [
+        "session_start"
+      ]
+    },
+    {
+      "matching": true,
+      "core_loaded": true,
+      "path_loaded": true,
+      "checkpoint_invoked": true,
+      "load_reasons": [
+        "path_glob_match",
+        "session_start"
+      ]
+    }
+  ],
+  "codex": {
+    "cli": "codex-cli 0.166.0",
+    "probes": [
+      {
+        "nested_cwd": false,
+        "core_observed": true,
+        "path_observed": false,
+        "checkpoint_listed": true,
+        "evidence": "model response, no instruction-load event API"
+      },
+      {
+        "nested_cwd": true,
+        "core_observed": true,
+        "path_observed": true,
+        "checkpoint_listed": true,
+        "evidence": "model response, no instruction-load event API"
+      }
+    ]
+  },
+  "compaction": "manual procedure documented; not executed"
+}
