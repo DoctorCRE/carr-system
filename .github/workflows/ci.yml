@@ -114,6 +114,9 @@ jobs:
         with:
           python-version-file: .python-version
 
+      - name: Install checksum-pinned official Gitleaks
+        run: python3 ops/gitleaks.py --install
+
       - name: Install Python dependencies from the lock
         if: matrix.classes != 'dependency' && (matrix.classes != 'migration' || steps.scope.outputs.full != 'false')
         # The LOCK, not requirements.txt. requirements.txt is the loose

@@ -37,23 +37,7 @@
 PROTECTED="main"
 hookdir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
-# ── a staged credential never reaches a commit (2026-08-23 gates council) ────
-# THE BIND-MOMENT WAS WRONG, and this is the fix. ops/ci-secret-scan.py without
-# a scope reads files git already TRACKS, so a brand-new file carrying a key was
-# invisible to it: the file passed every local check, `git add` made it tracked,
-# and the scan then failed at PRE-PUSH -- after the work was committed, at the
-# most expensive boundary a session can hit, needing a history rewrite rather
-# than an edit. Sessions hit it often enough for it to be written down as a
-# standing gotcha, which is the definition of a gate bound at the wrong moment.
-#
-# Here the same scanner reads the INDEX instead, additions included, so the
-# refusal arrives while the fix is still `edit the line and stage it again`.
-# Hosted CI keeps the unscoped whole-tree scan as depth; this is the cheap half,
-# not a replacement for it.
-#
-# No interpreter or scanner means no local scan: no python3, no helper, no check -- an
-# accident-stopper whose interpreter is missing must degrade to silence rather
-# than block every commit on the machine.
+# Scan index blobs with checksum-pinned Gitleaks before committing.
 if [ "$CARR_ALLOW_STAGED_SECRET" != "1" ] \
     && [ -f "$hookdir/../ci-secret-scan.py" ] \
     && command -v python3 >/dev/null 2>&1; then
@@ -74,9 +58,8 @@ if [ "$CARR_ALLOW_STAGED_SECRET" != "1" ] \
   pushed range at pre-push and over the whole tree in hosted CI; if
   it first fails there, the credential is already in a commit.
 
-  If it is documentation or a fixture, mark it at the site (the
-  marker must be on the SAME LINE) or add the path to
-  ops/config/secret-scan-allow.json.
+  Proven synthetic fixtures need a narrow exemption in .gitleaks.toml.
+  Install the pinned binary with python3 ops/gitleaks.py --install.
 
   Genuine one-off override, for this single command only:
 
