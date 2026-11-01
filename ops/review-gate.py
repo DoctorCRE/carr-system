@@ -30,12 +30,17 @@ def card_allowed(pr, files):
 def approved(pr, files, comments):
     if SKIP_CI.search(pr.get("title") or ""):
         return False
-    sha_line = f'Reviewed-SHA: {pr["head"]["sha"]}'
+    # Share the existing comment parser with Worker completion; input is JSON, never executable text.
+    module = (Path(__file__).resolve().parents[1] / 'mcp-server/src/review-gate-comments.js').as_uri()
+    script = (f'import {{reviewComments}} from {json.dumps(module)}; '
+              'import {readFileSync} from "node:fs"; '
+              'const [sha,comments]=JSON.parse(readFileSync(0,"utf8")); '
+              'console.log(JSON.stringify(reviewComments(sha,comments)));')
+    parsed = subprocess.run(['node', '--input-type=module', '-e', script],
+                            input=json.dumps([pr['head']['sha'], comments]),
+                            text=True, capture_output=True, check=True)
     # A changes verdict vetoes the current head until a new push.
-    verdicts = [lines[0] for lines in ((c.get("body") or "").splitlines() for c in comments)
-                if len(lines) >= 3 and lines[0] in ("VERDICT: APPROVE", "VERDICT: CHANGES")
-                and lines[1] == sha_line and lines[2].startswith("Reviewer: ")
-                and lines[2][10:].strip()]
+    verdicts = [review['verdict'] for review in json.loads(parsed.stdout)]
     if "VERDICT: CHANGES" in verdicts:
         return False
     # Markdown-only PRs carry no runtime behaviour, so they merge on green CI at any size (Joe 2026-10-27).

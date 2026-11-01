@@ -26,6 +26,7 @@ export function sha256(value) {
 }
 
 function delegatesTo(name) {
+  if (name === "close-work-request-slice") return ["complete-work-request"];
   if (name === "stamp-touch") return ["log-activity"];
   if (name === "resolve-candidate") return ["log-activity", "new-deal", "patch-deal-field", "set-next-step"];
   if (name === "find-and-catch-up") return ["catch-me-up", "find"];
