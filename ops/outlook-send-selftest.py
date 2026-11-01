@@ -1102,6 +1102,142 @@ class OutboxTests(unittest.TestCase):
             return {'recipients': [{'email': e, 'blocked': False} for e in args['emails']]}
         return dict(ok=True, proposal_id=self.draft['proposal_id'], status=args.get('status'))
 
+    def test_unreadable_send_and_window_replies_reconcile_without_another_press(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        clicks = []
+        test = self
+
+        class Form(send_mod.ComposeWindow):
+            def read(self):
+                return send_mod.fields(draft.mail)
+
+            def elements(self):
+                return [{'role': 'AXButton', 'label': 'Send', 'depth': 1, 'element_token': 'send'}]
+
+            def closed(self):
+                raise send_mod.UiFailure('window_reply_unreadable')
+
+        def driver(tool, args):
+            self.assertEqual(tool, 'click')
+            clicks.append(args)
+            test.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(draft.mail.recipients),
+                                            draft.mail.subject, int(NOW), 'sent-42'))
+            return 'Send action completed'  # Strict cua must reject this reply.
+
+        self.ports.open_form = lambda item: Form(42, 100, ui.Waits())
+        snapshot = self.mailbox.snapshot
+
+        def observe():
+            if clicks:
+                states = send_mod.Ledger(self.ports.out / send_mod.LEDGER).states(draft.key)
+                self.assertIn('pressed_unconfirmed', states)
+            return snapshot()
+
+        self.mailbox.snapshot = observe
+        with patch.object(ui, '_call', driver):
+            self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+            self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.assertEqual(len(clicks), 1)
+        self.assertEqual(self.calls[-1][1]['status'], 'sent')
+        self.assertEqual(self.calls[-1][1]['sent_item_id'], 'sent-42')
+
+    def test_uncertain_click_checks_parser_on_reentry_and_never_represses_a_miss(self):
+        for index, reply in enumerate(('', 'done', 'null', '[]', '{"status":"error"}', '{"refusal":"unknown"}')):
+            with self.subTest(reply=reply):
+                self.ports.out = Path(self.tmp) / str(index)
+                self.mailbox.sent.clear()
+                self.clock.t = NOW
+                draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+                clicks = []
+
+                class Form(send_mod.ComposeWindow):
+                    def read(self):
+                        return send_mod.fields(draft.mail)
+
+                    def elements(self):
+                        return [{'role': 'AXButton', 'label': 'Send', 'depth': 1, 'element_token': 'send'}]
+
+                    def closed(self):
+                        raise AssertionError('uncertain send must use parser reconciliation')
+
+                def driver(tool, args):
+                    self.assertEqual(tool, 'click')
+                    clicks.append(args)
+                    return reply
+
+                self.ports.open_form = lambda item: Form(42, 100, ui.Waits())
+                with patch.object(ui, '_call', driver):
+                    self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+                    states = send_mod.Ledger(self.ports.out / send_mod.LEDGER).states(draft.key)
+                    self.assertIn('pressed_unconfirmed', states)
+                    before = self.mailbox.reads
+                    self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+                    self.assertGreater(self.mailbox.reads, before)
+                    self.mailbox.broken = True
+                    self.worker.run(self.settings, self.ports)
+                    self.mailbox.broken = False
+                    self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(draft.mail.recipients),
+                                                    draft.mail.subject, int(NOW), 'late-sent'))
+                    self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+                self.assertEqual(len(clicks), 1)
+                self.assertEqual(self.calls[-1][1]['sent_item_id'], 'late-sent')
+
+    def test_sent_confirmation_survives_unreadable_close_after_an_accepted_click(self):
+        original = self.ports.open_form
+
+        def open_form(item):
+            form = original(item)
+            def unreadable():
+                raise send_mod.UiFailure('window_reply_unreadable')
+            form.closed = unreadable
+            return form
+
+        self.ports.open_form = open_form
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_sent_match_is_bounded_to_the_attempt_time_window(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        row = SentRow(ACCOUNT, '; '.join(draft.mail.recipients), draft.mail.subject,
+                      int(NOW + 2 * send_mod.DUPLICATE_WINDOW), 'unrelated-future-send')
+        self.assertIsNone(send_mod.confirmed_mail(Snapshot((row,), ()), draft.mail, NOW - 5))
+
+    def test_plain_submission_cannot_bypass_partner_copy_at_transport_seam(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        for mail in (replace(draft.mail, cc=()), replace(draft.mail, cc=(ACCOUNT,)),
+                     replace(draft.mail, bcc=('hidden@example.test',))):
+            with self.subTest(mail=mail):
+                result = send_mod.send_submitted(replace(draft, mail=mail), ports=self.ports)
+                self.assertEqual((result.state, result.reason), (State.REFUSED, 'partner_copy_required'))
+        self.assertEqual(self.sent, [])
+
+    def test_first_send_proof_requires_one_press_sent_entry_and_record_with_partner_cc(self):
+        self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
+        from lib.loadpy import load_module_from_path
+        proof = load_module_from_path('first_send_proof', str(ROOT / 'tools/outlook-first-send-proof.py'))
+        receipt = self.calls[-1][1]
+        row = dict(proposal_id=self.draft['proposal_id'], version=3, status='sent',
+                   partner_submitted=True, account=ACCOUNT, partner_cc=self.settings.partner_cc,
+                   subject=self.draft['subject'], to=self.draft['to'], cc=self.draft['cc'],
+                   send_result=receipt, correspondence=[dict(send_id=self.draft['proposal_id'],
+                   sent_item_id='sent-42', sent_at=receipt['sent_at'], sender=dict(email=ACCOUNT),
+                   recipients=[dict(email=self.draft['to'][0], kind='to'),
+                               dict(email=self.settings.partner_cc, kind='cc')])])
+        ledger = [json.loads(line) for line in (self.ports.out / send_mod.LEDGER).read_text().splitlines()]
+        result = proof.prove(row, ledger, self.mailbox.snapshot(), self.settings)
+        self.assertTrue(result['ok'], result)
+        for value in (self.draft['subject'], self.draft['body'], *self.draft['to'], *self.draft['cc']):
+            self.assertNotIn(value, json.dumps(result))
+        for change in (dict(status='approved_to_send'), dict(partner_submitted=False),
+                       dict(cc=[]), dict(correspondence=[]),
+                       dict(correspondence=row['correspondence'] * 2)):
+            self.assertFalse(proof.prove(dict(row, **change), ledger, self.mailbox.snapshot(), self.settings)['ok'])
+        self.assertFalse(proof.prove(row, ledger + [ledger[0]], self.mailbox.snapshot(), self.settings)['ok'])
+        self.mailbox.sent.append(replace(self.mailbox.sent[0], item_id='duplicate-send'))
+        self.assertFalse(proof.prove(row, ledger, self.mailbox.snapshot(), self.settings)['ok'])
+        self.assertFalse(proof.prove(None, [], Snapshot((), ()), self.settings)['ok'])
+
     def test_every_send_outcome_is_classified(self):
         outcomes = {
             State.DRAFT: 'failed', State.DONE: 'sent', State.ACTIVITY_LOG_FAILED: 'failed',
