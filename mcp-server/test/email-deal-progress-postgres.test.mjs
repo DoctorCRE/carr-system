@@ -1427,6 +1427,49 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
+test('contact reply drafts reach Home and retain their contact through submission and sent receipts', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Synthetic Contact: Floor plan', detail: quote,
+    email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } }, machineFor('joe'));
+  const args = { kind: 'reply_draft', activity_id: source.activity_id, evidence_quote: quote,
+    confidence: 0.95, subject: 'Re: Floor plan', body: 'Thank you.' };
+  const proposal = await command('record-email-proposal', { idempotency_key: randomUUID(), ...args }, machineFor('joe'), 'carr_writer');
+  const retry = await command('record-email-proposal', { idempotency_key: randomUUID(), ...args }, machineFor('joe'), 'carr_writer');
+  assert.equal(retry.proposal_id, proposal.proposal_id);
+  const shown = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.equal(shown.deal, null);
+  assert.equal(shown.confirm_verb, 'submit-email-draft');
+  assert.deepEqual(shown.reply_draft.to, ['sender@example.test']);
+  const edited = await command('edit-email-draft', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 1, subject: args.subject, body: 'I will review the plan.' }, actor, 'carr_writer');
+  const submitted = await submitDraft(proposal, { base_version: edited.version });
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.equal(outbox.drafts.find(item => item.proposal_id === proposal.proposal_id).deal, null);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: submitted.version, status: 'sent', sha256: submitted.sha256,
+    sent_item_id: randomUUID() }, machineFor('joe'), 'carr_writer');
+  const sent = (await c.query("select client_id,deal_id from activity where email_context->>'send_id'=$1", [proposal.proposal_id])).rows;
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].client_id, (await c.query('select client_id from activity where id=$1', [source.activity_id])).rows[0].client_id);
+  assert.equal(sent[0].deal_id, null);
+  assert.equal((await listed()).some(item => item.id === proposal.proposal_id), false);
+});
+
+test('contact reply drafts still require inbound mailbox provenance and literal evidence', async () => {
+  const args = { idempotency_key: randomUUID(), kind: 'reply_draft', evidence_quote: quote,
+    confidence: 0.95, subject: 'Re: Floor plan', body: 'Thank you.' };
+  for (const [kind, provenance] of [['email_out', false], ['email_in', false], ['email_in', true]]) {
+    const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+      kind, summary: 'Synthetic contact email', detail: quote,
+      ...(provenance ? { email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } } : {}) }, machineFor('joe'));
+    await refuses(command('record-email-proposal', { ...args, idempotency_key: randomUUID(), activity_id: source.activity_id,
+      ...(provenance ? { evidence_quote: 'This quote is absent from the source.' } : {}) }, machineFor('joe'), 'carr_writer'),
+    provenance ? 'email_proposal_quote_invalid' : 'email_proposal_source_missing');
+  }
+});
+
 const editDraft = (proposal, extra = {}, identity = actor) => command('edit-email-draft', {
   idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 1,
   subject: 'Re: Edited floor plan', body: '  Synthetic saved reply.\nThank you.  ', ...extra }, identity, 'carr_writer');

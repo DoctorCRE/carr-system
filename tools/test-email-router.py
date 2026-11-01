@@ -80,6 +80,29 @@ def route(server, classify, state=None, clock=None):
 
 
 class RouterTests(unittest.TestCase):
+    def test_contact_mail_reply_draft_does_not_require_a_deal(self):
+        source = dict(email('contact-reply', ASK), deal=None, kind='email_in', mailbox_owner='joe')
+        server = Server([source])
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'Thanks for asking. I will check the floor plan.'}
+        counts = email_router.route(server, lambda e, d: {'proposals': [draft]}, refusal_code, {}, NOW,
+            matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        self.assertEqual((counts['recorded'], counts['dropped']), (1, 0))
+        self.assertEqual(server.recorded()[0]['kind'], 'reply_draft')
+        self.assertNotIn('deal', server.recorded()[0])
+
+    def test_old_routing_state_reconsiders_mail_dropped_before_contact_drafts(self):
+        source = dict(email('old-contact-reply', ASK), deal=None, kind='email_in', mailbox_owner='joe')
+        server = Server([source])
+        state = {'routed': {source['activity_id']: NOW.timestamp()}, 'attempts': {}}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'Thanks for asking. I will check the floor plan.'}
+        def run():
+            return email_router.route(server, lambda e, d: {'proposals': [draft]}, refusal_code, state, NOW,
+                matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        self.assertEqual(run()['recorded'], 1)
+        self.assertEqual(run()['emails'], 0)
+
     def test_contact_only_email_keeps_next_step_for_partner_review(self):
         source = dict(email('nondeal', ASK), deal=None, subject_name='Synthetic vendor')
         server = Server([source])
