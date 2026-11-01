@@ -1,3 +1,4 @@
+import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 // Register MCP tools and their shared write envelope.
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
@@ -4120,11 +4121,12 @@ export const TOOLS = {
                 event_confidence,last_touch,next_action_date,owner,owner_label,
                 base_version,created_at,updated_at,
                 (stage <> 'archived') as conversion_eligible,
-                converted,stage_moves
+                converted,stage_moves,
+                (select p.contact_state='active' from party p where p.id=v_lead_board.party_id) as contact_eligible
            from v_lead_board
           order by stage_sort,suppressed,score desc nulls last,name,registry_ref`)).rows;
       const eligible=leads.filter(l=>l.stage!=="archived");
-      return { generated_at: new Date().toISOString(), stages, leads,
+      return { generated_at: new Date().toISOString(), stages, leads: leads.map(leadAdvice),
         metrics:{nurture_count:eligible.filter(l=>l.stage==="nurture_drip" && !l.suppressed).length,
           conversion_denominator:eligible.length,converted_count:eligible.filter(l=>l.converted).length} };
     },
@@ -9101,6 +9103,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
+  'lead-follow-up': 'mcp-server/src/lead-follow-up.ts',
   'action-closure': 'mcp-server/src/action-closure.ts',
   'requirement-replies': 'mcp-server/src/requirement-replies.js',
   'requirement-requests': 'mcp-server/src/requirement-requests.js',
@@ -10784,6 +10787,7 @@ registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
 registerTools(marketTermsTools(), "market-terms");
+registerTools(leadFollowUpTools(), "lead-follow-up");
 registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
 

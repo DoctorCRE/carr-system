@@ -84,7 +84,10 @@ test("lead-board exposes the full safe, versioned worked-lead board", async () =
   assert.deepEqual(result.stages.map((stage) => stage.slug), ["new", "nurture_drip", "do_not_contact"]);
   assert.equal(result.leads.length, 2, "suppressed and terminal leads stay visible");
   assert.equal(result.leads[0].party_id, SAFE_LEAD.party_id);
-  assert.deepEqual(result.leads[0], SAFE_LEAD);
+  const { handling_advice, strategy, ...safeLead } = result.leads[0];
+  assert.deepEqual(safeLead, SAFE_LEAD);
+  assert.match(handling_advice, /Research/);
+  assert.equal(strategy.sent, false);
   assert.equal(result.leads[0].converted, false);
   assert.deepEqual(result.leads[0].stage_moves, SAFE_LEAD.stage_moves);
   assert.deepEqual(result.metrics, { nurture_count: 1, conversion_denominator: 2, converted_count: 0 });
