@@ -17,8 +17,8 @@ plans two kinds of write, both through record verbs only:
   read must still show no email, the same name, and the domain carried at that
   company's identity; the write uses that read's party version.
 
-A bare address is not an identity, so an attendee without a two-word name is
-skipped. Dry run by default; output is counts only, never names or addresses.
+A bare address is not an identity, so an attendee without full first and last
+names is skipped. Initials and partial names are skipped. Dry run by default; output is counts only, never names or addresses.
 """
 from __future__ import annotations
 
@@ -127,7 +127,10 @@ def _names_conflict(display: str | None, name: str) -> bool:
 
 
 def _full_name(name: str | None, email: str) -> bool:
-    return len(_tokens(name)) >= 2 and "@" not in (name or "") and _norm(name) != email
+    tokens = "".join(char if char.isalpha() else " " for char in name or "").split()
+    return (len((name or "").split()) >= 2 and len(tokens) >= 2
+            and len(tokens[0]) > 1 and len(tokens[-1]) > 1
+            and "@" not in (name or "") and _norm(name) != email)
 
 
 def _local_forms(name: str) -> set[str]:

@@ -5064,6 +5064,12 @@ export const TOOLS = {
       research_evidence: RESEARCH_EVIDENCE_SCHEMA },
       required: ["idempotency_key","name"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-party", args, async () => {
+      const kind = args.kind || "person";
+      if (kind === "person") {
+        const tokens = args.name.match(/\p{L}+/gu) || [];
+        if (args.name.trim().split(/\s+/u).length < 2 || tokens.length < 2 || [...tokens[0]].length < 2 || [...tokens.at(-1)].length < 2 || args.name.includes("@"))
+          throw new ToolError({ error: "full_person_name_required" });
+      }
       if (args.phone && args.phone.replace(/\D/g, "").endsWith("2056436555"))
         throw new ToolError({ error: "placeholder_phone", hint: "205-643-6555 is never stored as a contact" });
       if (!args.force_new) {
@@ -5106,7 +5112,6 @@ export const TOOLS = {
       // running total. Placeholders like '(TBD — enrich)' deliberately still mint
       // separately: collapsing those would assert six unrelated people share an
       // employer, which is a fabricated fact, not a merge.
-      const kind = args.kind || "person";
       const evidence = kind === "person"
         ? researchEvidence(args.research_evidence,
           ["name", "company", "phone", "specialty", "market"], "add-party")
