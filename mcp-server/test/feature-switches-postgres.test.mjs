@@ -1,3 +1,4 @@
+import { installFocusedFutureWorkStore } from './helpers/focused-future-work-store.mjs';
 // Test feature switch reads and scheduled health on PostgreSQL.
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
@@ -80,8 +81,8 @@ test('Feature switch reads and scheduled health on disposable PostgreSQL', { ski
     await c.query('alter table tool_call add primary key(idempotency_key)');
     // This fixture tests registration with the existing guard, whose behavior
     // is covered by the canonical reference-monitor database acceptance gate.
-    await c.query(`create schema ops;
-      create function ops.scac_reference_monitor_guard() returns trigger
+    await installFocusedFutureWorkStore(c);
+    await c.query(`      create function ops.scac_reference_monitor_guard() returns trigger
       language plpgsql as $$ begin return new; end $$;`);
     await c.query(readFileSync(path.join(root,'migrations/0902_feature_switches.sql'),'utf8'));
     const guards = (await c.query(`select tgname,tgtype,tgenabled from pg_trigger

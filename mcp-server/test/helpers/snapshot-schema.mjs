@@ -1,3 +1,4 @@
+import { installFocusedFutureWorkStore } from './focused-future-work-store.mjs';
 import { readFileSync } from 'node:fs';
 
 // Restore event identity state after loading a database snapshot.
@@ -8,6 +9,7 @@ export async function restoreEventIdentity(client, snapshot) {
 }
 
 export async function applyPendingDealRoomReads(client) {
+  await applyFutureWorkSchema(client);
   if (!(await client.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='calendar_event_key'")).rows.length)
     await client.query(readFileSync(new URL('../../../migrations/1125_calendar_confirmation.sql', import.meta.url), 'utf8'));
   const { rows } = await client.query("select to_regclass('public.v_deal_client_portal') as view");
@@ -22,4 +24,13 @@ export async function applyPendingDealRoomReads(client) {
   await client.query(readFileSync(new URL('../../../migrations/1065_call_followup_contact.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1067_post_call_due_provenance.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1079_single_action_completion.sql', import.meta.url), 'utf8'));
+}
+
+export async function applyFutureWorkSchema(client) {
+  if (!(await client.query("select to_regclass('ops.work_request') as relation")).rows[0].relation) {
+    await installFocusedFutureWorkStore(client);
+    return;
+  }
+  if (!(await client.query("select to_regclass('ops.future_work_link') as relation")).rows[0].relation)
+    await client.query(readFileSync(new URL('../../../migrations/1120_future_work_links.sql', import.meta.url), 'utf8'));
 }

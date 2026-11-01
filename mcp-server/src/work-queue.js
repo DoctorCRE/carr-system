@@ -3,7 +3,9 @@ import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { readableWorkRequestSql } from './work-request-read.ts';
+import { independentApproval } from './review-gate-comments.js';
 
 const text = (max = 100) => ({ type: 'string', minLength: 1, maxLength: max });
 const positive = { type: 'integer', minimum: 1, maximum: 0x7fffffff };
@@ -11,7 +13,17 @@ const base = { idempotency_key: { type: 'string', format: 'uuid' }, work_request
 const slice = { ...positive, default: 1 };
 const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
 const jobStart = ['job', 'runner_job_id'];
-const repositories = Object.keys(addressFormat.repositories);
+export const repositories = Object.keys(addressFormat.repositories);
+export const changeUrlPattern = `^https://github\\.com/(${repositories.map(repo => repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/pull/[1-9][0-9]*$`;
+export const validChangeUrl = url => {
+  const match = typeof url === 'string' && /^https:\/\/github[.]com\/([^/]+\/[^/]+)\/pull\/[1-9][0-9]*$/.exec(url);
+  return !!match && repositories.includes(match[1]);
+};
+export const completionFields = {
+  criterion_evidence: { type: 'array', items: { type: 'object', additionalProperties: false,
+    properties: { id: { type: 'string', minLength: 1 }, evidence: { type: 'string', minLength: 1 } }, required: ['id', 'evidence'] } },
+  user_facing: { type: 'boolean' }, user_journey_ref: { type: 'string', minLength: 1 },
+};
 export function queueCardId(ref, ordinal, number) {
   const work_request = 'WR' + new RegExp(addressFormat.work_request_pattern).exec(ref)[1].replace(/^0+(?=\d)/u, '');
   return addressFormat[number == null ? 'slice_template' : 'job_template']
@@ -26,10 +38,19 @@ export const PULL_REQUEST_TTL_MS = 60_000;
 // and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+
+// Readiness is derived from the recorded plan; it grants no completion authority.
 const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
   && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
-  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
+  && validChangeUrl(change.pr_url)
   && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
+export function readyToClose(state, slices) {
+  if (['confirmed_closed','declined','superseded','failed'].includes(state) || !slices.length) return false;
+  return slices.every(slice => slice.outcome === 'retired' ||
+    (slice.outcome === 'done' && Array.isArray(slice.change_refs) && slice.change_refs.length > 0 && slice.change_refs.every(validSliceChange)))
+    && slices.some(slice => slice.outcome === 'done');
+}
+
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
@@ -38,6 +59,13 @@ const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state:
 // The cache is keyed by repository and bound day, so no caller receives a narrower window than it asked for.
 export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
   const memo = new Map();
+  const headers = { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`,
+    'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' };
+  const json = async url => {
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error('GitHub read failed');
+    return response.json();
+  };
   async function search(repo, since) {
     if (!token) return { repo, state: 'unavailable', reason: 'credential_not_configured', prs: [] };
     const bound = since ? ` updated:>=${since.slice(0, 10)}` : '';
@@ -47,8 +75,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       let total = 0, incomplete = false;
       for (let page = 1; page <= 10; page++) {
         query.set('page', String(page));
-        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
-          accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
+        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers });
         if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
         const body = await response.json();
         total = body.total_count;
@@ -64,7 +91,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: incomplete || total > items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
-  return (repos, since) => Promise.all(repos.map(repo => {
+  const read = (repos, since) => Promise.all(repos.map(repo => {
     const key = `${repo} ${since?.slice(0, 10) ?? ''}`;
     const hit = memo.get(key);
     if (hit && now() - hit.at < ttlMs) return hit.value;
@@ -73,6 +100,32 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
     memo.set(key, { at: now(), value });
     return value;
   }));
+  read.reviewedChange = async (change, sliceId) => {
+    if (!token || !validSliceChange(change)) return null;
+    try {
+      const root = change.pr_url.replace('https://github.com/', 'https://api.github.com/repos/');
+      const pr = await json(root.replace('/pull/', '/pulls/'));
+      const author = /^Card: (WR\d+\.S\d+\.J\d+)$/.exec((pr.body ?? '').split(/\r?\n/)[0])?.[1];
+      if (!pr.merged || pr.merge_commit_sha !== change.merge_commit_sha || !SHA.test(pr.head?.sha ?? '')
+        || !author || author.slice(0, author.lastIndexOf('.J')) !== sliceId) return null;
+      const pages = async url => {
+        const rows = [];
+        for (let page = 1; page <= 10; page++) {
+          const items = await json(`${url}?per_page=100&page=${page}`);
+          rows.push(...items);
+          if (items.length < 100) return rows;
+        }
+        throw new Error('GitHub comments truncated');
+      };
+      const [comments, reviews] = await Promise.all([pages(root.replace('/pull/', '/issues/') + '/comments'),
+        pages(root.replace('/pull/', '/pulls/') + '/reviews')]);
+      const ordered = [...comments, ...reviews.filter(review => !['DISMISSED', 'PENDING'].includes(review.state))]
+        .sort((a, b) => (a.submitted_at ?? a.created_at ?? '').localeCompare(b.submitted_at ?? b.created_at ?? ''));
+      const approval = independentApproval(author, pr.head.sha, ordered);
+      return approval?.review_url?.startsWith(change.pr_url + '#') ? { ...change, ...approval } : null;
+    } catch { return null; }
+  };
+  return read;
 }
 
 
@@ -202,7 +255,7 @@ export function queueView(rows, sources, at) {
   return { jobs, github: sources.map(({ prs, ...source }) => source) };
 }
 
-export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
+export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWorkRequest }) {
   const refuse = error => { throw new ToolError({ error }); };
   const validate = (args, properties, required) => {
     if (Object.keys(args).some(key => !Object.hasOwn(properties, key)) || required.some(key => args[key] == null)) refuse('invalid_work_queue_fields');
@@ -300,8 +353,9 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
           select $1,$3::integer+ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles.slice(prior.length), prior.length]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
       }),
-    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence.',
+    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence. With completion facts, the last done slice completes the request using independent current-head PR approvals.',
       { slice, base_version: positive, outcome: { ...text(), enum: ['done', 'retired'] }, reason: text(2000), superseded_by: positive,
+        completion: { type: 'object', additionalProperties: false, properties: completionFields, required: ['criterion_evidence', 'user_facing'] },
         change_refs: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false,
           properties: { pr_url: text(300), merge_commit_sha: text(40) }, required: ['pr_url', 'merge_commit_sha'] } } },
       ['slice', 'outcome', 'base_version'], async (c, actor, args, wr) => {
@@ -325,7 +379,25 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const saved = (await c.query(`update ops.work_request_slice set outcome=$3::jsonb,version=version+1
           where work_request_id=$1 and ordinal=$2 and outcome->>'outcome'='open' returning ordinal,version`, [wr.id, args.slice, JSON.stringify(record)])).rows[0];
         if (!saved) refuse('slice_not_found');
-        return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
+        const result = { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
+        let completion;
+        const slices = (await c.query('select ordinal,outcome from ops.work_request_slice where work_request_id=$1 order by ordinal', [wr.id])).rows;
+        if (args.outcome === 'done' && args.completion && readyToClose(wr.state, slices.map(row => row.outcome))) {
+          const approvals = [];
+          for (const row of slices) for (const change of row.outcome.change_refs ?? []) {
+            const approval = await c.reviewedChange?.(change, queueCardId(wr.ref, row.ordinal));
+            if (!approval) return { ...result, completion_pending: 'slice_independent_review_required' };
+            approvals.push(approval);
+          }
+          const current = (await c.query('select version from ops.work_request where id=$1 for update', [wr.id])).rows[0];
+          completion = await completeWorkRequest(c, actor, {
+            ...args.completion,
+            human_ref: wr.ref, base_version: current.version,
+            idempotency_key: derivedIdempotencyKey('slice-completion', args.idempotency_key),
+            change_refs: approvals.map(({ pr_url, merge_commit_sha }) => ({ pr_url, merge_commit_sha })),
+          }, { reviewer_card: approvals.at(-1).reviewer_card, approvals });
+        }
+        return { ...result, ...(completion ? { work_request_state: completion.state } : {}) };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
       { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
@@ -398,7 +470,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         }
         return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), priority: slots[args.position - 1] };
       }),
-    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests.',
+    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
@@ -408,12 +480,15 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const prs = view.jobs.flatMap(job => job.prs);
         const live = c.production ? await c.production(prs) : prs.map(() => null);
         prs.forEach((pr, index) => { pr.production_live = live[index]; });
-        const slices = (await c.query(`select s.*,w.ref as work_request from ops.work_request_slice s
-          join ops.work_request w on w.id=s.work_request_id where w.id=any($1::uuid[])
-          order by w.ref,s.ordinal`, [[...new Set(rows.map(row => row.work_request_id))]])).rows;
+        const slices = (await c.query(`select s.*,w.ref as work_request,w.title as work_request_title,w.state as work_request_state from ops.work_request_slice s
+          join ops.work_request w on w.id=s.work_request_id where w.organization_tenant_id=$1 and ${readableWorkRequestSql('w')}
+          order by w.ref,s.ordinal`, [organizationTenantForActor(actor)])).rows;
         const projected = slices.map(row => ({ slice_id: queueCardId(row.work_request, row.ordinal),
           work_request: row.work_request, title: row.title, version: row.version, ...row.outcome }));
-        return { ok: true, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
+        const requests = Map.groupBy(slices, row => row.work_request);
+        const ready_to_close = [...requests].filter(([, group]) => readyToClose(group[0].work_request_state, group.map(row => row.outcome)))
+          .map(([human_ref, group]) => ({ human_ref, title: group[0].work_request_title, state: group[0].work_request_state }));
+        return { ok: true, ready_to_close, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }

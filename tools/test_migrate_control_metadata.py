@@ -212,7 +212,7 @@ class SnapshotRevisionTests(unittest.TestCase):
             script = clone / 'tools/test_migrate_control_metadata.py'
             script.write_bytes(Path(__file__).read_bytes())
             result = subprocess.run([sys.executable, str(script),
-                'ApprovedControlMigrationTests.test_approved_contracts_allow_forward_maintenance_and_preserve_evidence'],
+                'ApprovedControlMigrationTests.test_source_integrity_and_grants_survive_retirement'],
                 cwd=clone, env=child, capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

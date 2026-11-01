@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
@@ -9114,7 +9115,8 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
-    return await tool.handler(client, actor, args);
+    const result = await tool.handler(client, actor, args);
+    return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
     if (e instanceof ToolError) throw e;
     throw pgConstraintError(e) || e;
@@ -9198,7 +9200,9 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
 });
 
-function bindToolSource(tool, source) {
+function bindToolSource(tool, source, name) {
+  if (FUTURE_WORK_WRITES[name]) tool = { ...tool, inputSchema: { ...tool.inputSchema,
+    properties: { ...tool.inputSchema.properties, work_request: workRequestLinkSchema } } };
   const locator = TOOL_REGISTRATION_SOURCE[source] ||
     (/^mcp-server\/src\/[a-zA-Z0-9_./-]+\.(?:js|ts)$/.test(source) ? source : null);
   if (!tool || typeof tool !== "object" || !locator)
@@ -9206,7 +9210,7 @@ function bindToolSource(tool, source) {
   Object.defineProperty(tool, "registrySource", {
     value: locator, enumerable: false, writable: false, configurable: false,
   });
-  deepFreezeToolContract(tool);
+  return deepFreezeToolContract(tool);
 }
 
 function deepFreezeToolContract(value, seen = new Set()) {
@@ -9216,14 +9220,13 @@ function deepFreezeToolContract(value, seen = new Set()) {
   return Object.freeze(value);
 }
 
-for (const tool of Object.values(TOOLS)) bindToolSource(tool, "inline");
+for (const [name, tool] of Object.entries(TOOLS)) TOOLS[name] = bindToolSource(tool, "inline", name);
 
 function registerTools(additions, source) {
   const duplicates = Object.keys(additions).filter(name => Object.hasOwn(TOOLS, name)).sort();
   if (duplicates.length)
     throw new Error(`duplicate tool registration from ${source}: ${duplicates.join(",")}`);
-  for (const tool of Object.values(additions)) bindToolSource(tool, source);
-  Object.assign(TOOLS, additions);
+  Object.assign(TOOLS, Object.fromEntries(Object.entries(additions).map(([name, tool]) => [name, bindToolSource(tool, source, name)])));
 }
 
 registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "invoice-tracker");
@@ -9999,7 +10002,13 @@ registerTools({
       };
       const verb = verbByKind[candidate.kind];
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
-      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
+      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id),
+        ...(FUTURE_WORK_WRITES[verb] && args.work_request ? { work_request: args.work_request } : {}) };
+      if (candidate.kind === 'next_step' && !innerArgs.work_request) {
+        const linked = (await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
+          where f.organization_tenant_id=$1 and f.source_ref=$2`, [organizationTenantForActor(actor), `capture:${candidate.id}`])).rows[0];
+        if (linked) innerArgs.work_request = linked.ref;
+      }
       delete innerArgs.plan_base;
       delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
@@ -10059,7 +10068,7 @@ registerTools({
           `capture_candidate:${candidate.id}`).entries()) {
           const { status, ...facts } = item;
           const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
-            ...facts, deal: result.deal_id,
+            ...facts, deal: result.deal_id, work_request: result.work_request,
             idempotency_key: derivedIdempotencyKey("capture-candidate-item", `${candidate.id}:${index}`),
           });
           result.items.push(stored.item);
@@ -10798,7 +10807,9 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
-registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError,
+  completeWorkRequest: (c, actor, args, attestor) => TOOLS["complete-work-request"].handler(c, actor, args, attestor),
+}), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 

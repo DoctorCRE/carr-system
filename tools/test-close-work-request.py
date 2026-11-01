@@ -23,6 +23,7 @@ class CloseTests(unittest.TestCase):
         self.gh_error = False
         self.extra_repos = {}
         self.close_error = False
+        self.auto_closed = False
         self.calls = self.root / 'calls.jsonl'
         self.card = dict(ok=True, human_ref='WR-000557', version=3, state='captured',
                          slices=[dict(slice_id='WR557.S5', version=2, outcome='open')],
@@ -48,7 +49,7 @@ else:
     if {self.close_error!r} and sys.argv[2] == 'close-work-request-slice':
         print('synthetic version conflict', file=sys.stderr)
         sys.exit(1)
-    print(json.dumps({self.card!r} if sys.argv[2] == 'work-request-card' else {{'ok': True}}))
+    print(json.dumps({self.card!r} if sys.argv[2] == 'work-request-card' else {{'ok': True, **({{'work_request_state': 'confirmed_closed'}} if {self.auto_closed!r} else {{}})}}))
 '''
         for path in (self.root / 'bin/gh', self.root / 'run.sh'):
             path.write_text(adapter)
@@ -113,6 +114,7 @@ else:
         self.assertEqual([c[1] for c in calls if c[0] == 'call'], ['work-request-card'])
 
     def test_completion_preserves_existing_refs_and_explicit_attestation_inputs(self):
+        self.auto_closed = True
         prior = dict(pr_url='https://github.com/jbookout/doctorcre-app/pull/50', merge_commit_sha='b' * 40)
         self.card['slices'].append(dict(slice_id='WR557.S2', version=2, outcome='done', change_refs=[prior]))
         evidence = self.root / 'evidence.json'
@@ -121,18 +123,38 @@ else:
         result, calls = self.run_close('WR-000557', '--completion-evidence', str(evidence), '--apply')
         self.assertEqual(result.returncode, 0, result.stderr)
         writes = [c for c in calls if c[0] == 'call' and c[1] != 'work-request-card']
-        self.assertEqual([c[1] for c in writes], ['close-work-request-slice', 'complete-work-request'])
-        completion = json.loads(writes[-1][2])
-        self.assertEqual(completion['base_version'], 3)
-        self.assertIn(prior, completion['change_refs'])
+        self.assertEqual([c[1] for c in writes], ['close-work-request-slice'])
+        completion = json.loads(writes[-1][2])['completion']
+        self.assertIn(prior, json.loads(result.stdout.split('\n{"verb":')[0])['change_refs'])
         self.assertTrue(completion['user_facing'])
         self.assertEqual(completion['criterion_evidence'][0]['evidence'], 'Verified synthetic closure')
+
+    def test_previously_closed_slices_use_the_existing_completion_verb(self):
+        self.card['slices'][0].update(outcome='done', change_refs=[dict(
+            pr_url=self.prs[0]['url'], merge_commit_sha='a' * 40)])
+        evidence = self.root / 'evidence.json'
+        evidence.write_text(json.dumps(dict(user_facing=False,
+            criterion_evidence=[dict(id='S5-CLOSE', evidence='Verified synthetic closure')])))
+        result, calls = self.run_close('WR557', '--completion-evidence', str(evidence), '--apply')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([c[1] for c in calls if c[0] == 'call'],
+                         ['work-request-card', 'complete-work-request'])
+        self.assertEqual(json.loads(calls[-1][2])['base_version'], 3)
 
     def test_missing_completion_evidence_is_visible_and_never_fabricated(self):
         result, _ = self.run_close('WR557')
         plan = json.loads(result.stdout)
         self.assertEqual([c['verb'] for c in plan['calls']], ['close-work-request-slice'])
         self.assertIn('--completion-evidence', plan['blocked'][-1]['reason'])
+
+    def test_auto_closed_wr_succeeds_without_a_stale_evidence_blocker(self):
+        self.auto_closed = True
+        result, calls = self.run_close('WR557', '--apply')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('completion requires --completion-evidence', result.stdout)
+        self.assertIn('"blocked": []', result.stdout)
+        self.assertEqual([c[1] for c in calls if c[0] == 'call'],
+                         ['work-request-card', 'close-work-request-slice'])
 
     def test_cross_repository_merges_keep_their_urls(self):
         app = dict(body='Card: WR557.S5.J2', state='MERGED',

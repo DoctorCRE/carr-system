@@ -118,14 +118,23 @@ def main():
                 raise ValueError('user-facing completion requires user_journey_ref')
             if not plan['change_refs']:
                 raise ValueError('completion requires merged change references')
+            if plan['calls']:
+                plan['calls'][-1]['args']['completion'] = evidence
             plan['calls'].append(dict(verb='complete-work-request', args=dict(
                 human_ref=ref, base_version=card['version'], change_refs=plan['change_refs'],
                 idempotency_key=str(uuid4()), **evidence)))
-    print(json.dumps(dict(apply=args.apply, **plan), indent=2), flush=True)
+    results = []
     if args.apply:
         for command in plan['calls']:
             result = call(command['verb'], command['args'])
-            print(json.dumps(dict(verb=command['verb'], result=result)), flush=True)
+            results.append(dict(verb=command['verb'], result=result))
+            if result.get('work_request_state') == 'confirmed_closed':
+                plan['blocked'] = []
+                break
+    print(json.dumps(dict(apply=args.apply, **plan), indent=2), flush=True)
+    for result in results:
+        print(json.dumps(result), flush=True)
+    if args.apply:
         return int(bool(plan['blocked']))
     return 0
 
