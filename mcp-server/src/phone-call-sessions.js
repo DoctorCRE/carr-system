@@ -87,7 +87,7 @@ function validStudioStatus(value) {
         ['applied', 'already_resolved'].includes(a.outcome)))) return false;
   if (value.state === null) return value.reason === null && value.open_questions === 0;
   if (value.state === 'needs_attention') return ['extraction_failed', 'transcript_unavailable', 'transient_ceiling'].includes(value.reason);
-  return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable'].includes(value.reason) ||
+  return value.state === 'held_review' && (['summary_repeats_transcript', 'transcript_unavailable', 'budget'].includes(value.reason) ||
     (value.reason === 'open_review_questions' && value.open_questions > 0));
 }
 
@@ -271,8 +271,10 @@ export function createPhoneCallHandler({ withWriter }) {
         if (request.method === 'GET' && !operation) {
           const result = view(row);
           if (result.state === 'pending' && env.PHONE_AUDIO_HANDOFF) {
-            const status = await handoffStatus(env, id);
-            if (['queued', 'expired'].includes(status.state)) result.state = status.state;
+            try {
+              const status = await handoffStatus(env, id);
+              if (['queued', 'expired'].includes(status.state)) result.state = status.state;
+            } catch { result.upload_state_unavailable = true; }
           }
           return json(result);
         }

@@ -14,9 +14,9 @@
 import test, { before, after } from 'node:test';
 import { NOW } from './helpers/fixed-clock.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -27,32 +27,15 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
+import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook } from './helpers/call-rehearsal.mjs';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');
-const PYTHON = process.env.CARR_POST_CALL_PYTHON || process.env.CARR_CI_PYTHON
-  || (existsSync(path.join(REPO, '.venv/bin/python3')) ? path.join(REPO, '.venv/bin/python3') : 'python3');
 const AUDIO = process.env.CARR_REHEARSAL_AUDIO === '1';
 const SONNET = AUDIO || process.env.CARR_REHEARSAL_SONNET === '1';
 const run = promisify(execFile);
 
-// Who says what. Joe is on the microphone track, Dell on system audio.
-const CALL = [
-  ['Joe', "Let's start with Synthetic Bayside Dental. The LOI was signed on October 20, 2026, so Bayside moves to negotiation."],
-  ['Dell', 'Agreed, Bayside is in negotiation as of October 20, 2026.'],
-  ['Joe', 'Next step for Bayside: send the lease draft to the landlord by November 6, 2026.'],
-  ['Dell', 'Synthetic Harbor Clinic toured both sites and liked the second one. Next step for Harbor: schedule the second walkthrough on November 3, 2026.'],
-  ['Joe', 'Yes, agreed on the Harbor walkthrough for November 3.'],
-  ['Joe', 'On the Pinecrest lab, I think it goes to legal.'],
-  ['Dell', 'No, keep Pinecrest in site selection for now. We have not agreed on that one.'],
-  ['Joe', 'Please email the Bayside landlord contact a short update.'],
-  ['Dell', 'I will call the Harbor lender this week.'],
-  ['Dell', 'Next step for Gulf Imaging: confirm the floor plan with the architect by November 10, 2026.'],
-  ['Joe', 'Yes, agreed on the Gulf Imaging floor plan.'],
-  ['Joe', 'Next step for Magnolia Surgery: order the space plan from the designer by November 14, 2026.'],
-];
-
-let fixture, admin, database, pool, c, server, baseUrl, companion, root, session, deals = {};
+let fixture, admin, database, pool, c, server, baseUrl, call, root, deals = {};
 const joe = { slug: 'joe', human: true, via: 'oauth' };
 const joeLocal = agentActorForToken('Bearer rehearsal-local', JSON.stringify({ 'joe-local': 'rehearsal-local' }), 'local-token');
 
@@ -117,30 +100,9 @@ before(async () => {
   pool = new pg.Pool({ ...connection, max: 4 });
   for (const actor of [joe, joeLocal]) actor.id = (await c.query('select id from actor where slug=$1', [actor.slug])).rows[0].id;
 
-  // Synthetic book: three active deals and one addressable landlord contact.
-  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic Practice Owner',$1,$1) returning id", [joe.id])).rows[0].id;
-  await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
-  const client = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id", [party, joe.id])).rows[0].id;
-  for (const [name, phase] of [['Synthetic Bayside Dental Relocation', 'research'],
-    ['Synthetic Harbor Clinic Expansion', 'site_selection'], ['Synthetic Pinecrest Lab Lease', 'site_selection'],
-    ['Synthetic Gulf Imaging Center', 'site_selection'], ['Synthetic Magnolia Surgery Center', 'site_selection']]) {
-    deals[name] = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
-      values($1,$2,'lease',$3,'joe',$4,$4) returning id`, [name, client, phase, joe.id])).rows[0].id;
-    await c.query("insert into deal_participant(deal_id,actor_id,role,set_by) values($1,$2,'lead',$2)", [deals[name], joe.id]);
-  }
-  const landlord = (await c.query(`insert into party(kind,name,email,ref,created_by,updated_by)
-    values('person','Synthetic Bayside Landlord','landlord@example.test','P-' || nextval('ref_party_seq'),$1,$1) returning id`, [joe.id])).rows[0].id;
-  await c.query("insert into deal_participant(deal_id,party_id,role,set_by) values($1,$2,'client_contact',$3)",
-    [deals['Synthetic Bayside Dental Relocation'], landlord, joe.id]);
-  // Each deal already carries a step Joe set by hand before the call.
-  for (const [name, text, date] of [['Synthetic Bayside Dental Relocation', 'Old Bayside step', '2026-10-01'],
-    ['Synthetic Harbor Clinic Expansion', 'Old Harbor step', '2026-10-30'],
-    ['Synthetic Pinecrest Lab Lease', 'Old Pinecrest step', '2026-10-30'],
-    ['Synthetic Gulf Imaging Center', 'Old Gulf step', '2026-10-01'],
-    ['Synthetic Magnolia Surgery Center', 'Old Magnolia step', '2026-10-30']]) {
-    const current = await deal(name);
-    await verb(joe, 'set-next-step', { deal: current.id, text, next_date: date, base_version: current.version });
-  }
+  deals = await seedSyntheticBook({ query: (sql, params) => c.query(sql, params), actorId: joe.id,
+    setNextStep: async (id, text, next_date) => verb(joe, 'set-next-step',
+      { deal: id, text, next_date, base_version: (await c.query('select version from deal where id=$1', [id])).rows[0].version }) });
 
   // The capture Worker and a record-layer door for the companion's verb calls.
   const capture = createCaptureHandler({ withWriter: inTransaction });
@@ -170,7 +132,7 @@ before(async () => {
 });
 
 after(async () => {
-  companion?.kill();
+  call?.stop();
   await new Promise(resolve => server ? server.close(resolve) : resolve());
   try { await pool?.end(); await c?.end(); }
   finally {
@@ -183,79 +145,33 @@ after(async () => {
   }
 });
 
-async function companionCall(port, route, body) {
-  const response = await fetch(`http://127.0.0.1:${port}${route}`, body === undefined
-    ? { headers: { origin: 'https://app.doctorcre.com', 'x-carr-call-mode': 'deal-room-v1' } }
-    : { method: 'POST', body: JSON.stringify(body), headers: { origin: 'https://app.doctorcre.com',
-      'x-carr-call-mode': 'deal-room-v1', 'content-type': 'application/json' } });
-  const payload = await response.json();
-  assert.equal(response.status, 200, JSON.stringify(payload));
-  return payload;
-}
-
 test('a recorded weekly call updates every confidently discussed card and leaves the rest as cards', { timeout: SONNET ? 900_000 : 180_000 }, async () => {
   root = mkdtempSync(path.join(tmpdir(), 'carr-call-rehearsal-'));
-  const recordings = path.join(root, 'Recordings');
-  session = path.join(recordings, '2026.10.26-0900');
-  mkdirSync(session, { recursive: true });
   const started = new Date(NOW).toISOString().replace(/\.\d+Z$/u, 'Z');
-  const write = (file, value) => writeFileSync(path.join(session, file), `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  write('announcement.json', { announcement_fired_at: started });
-  write('meta.json', { started, files: { mic: 'mic.caf', system: 'system.caf' }, start_offset_ms: { mic: 0, system: 0 } });
-  write('call-context.json', { schema: 1, mode: 'weekly_deal_call', started_at: started, recorder: 'Joe',
-    speaker_labels: { mic: 'Joe', system: 'Dell' }, speaker_method: 'separate audio channels; no third-party voiceprint' });
-  writeFileSync(path.join(root, 'capture.json'), JSON.stringify({ base_url: baseUrl, device_id: 'quill-joe-mac', token: 'synthetic-device-token' }));
-  const env = { ...process.env, CARR_RECORDINGS_DIR: recordings, CARR_CAPTURE_CONFIG: path.join(root, 'capture.json'),
-    CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'), CARR_POST_CALL_PYTHON: PYTHON,
-    CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb`,
-    HOME: root };
-  if (!SONNET) {
-    env.CARR_POST_CALL_DISTILLER_COMMAND = `${PYTHON} ${path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_distiller.py')}`;
-    env.CARR_POST_CALL_JEV_FIXTURE = path.join(REPO, 'tools/dictation-rig/tests/fixtures/rehearsal_jev.py');
-  }
+  call = await openCallSession({ root, started, captureUrl: baseUrl, deviceToken: 'synthetic-device-token',
+    distiller: SONNET ? 'live' : 'stand-in',
+    env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
 
-  // 1. Recording start: the capture rig claims the session with consent proof.
-  await run(PYTHON, [path.join(BIN, 'capture-bridge.py'), 'claim', session], { env });
-  assert.ok(existsSync(path.join(session, '.capture.json')), readFileSync(path.join(root, 'capture-bridge.log'), 'utf8'));
-
-  // 2. The companion is running and the Deal Room hands it the exact deal index.
-  const port = await new Promise(resolve => { const probe = createServer().listen(0, '127.0.0.1', () => {
-    const { port } = probe.address(); probe.close(() => resolve(port)); }); });
-  companion = spawn(PYTHON, [path.join(BIN, 'call-mode.py'), 'serve', '--port', String(port)], { env, stdio: 'ignore' });
-  for (let i = 0; i < 100; i++) {
-    try { await fetch(`http://127.0.0.1:${port}/api/state`); break; } catch { await new Promise(r => setTimeout(r, 100)); }
-  }
+  // The Deal Room hands the companion the exact deal index.
   const { deals: index } = await verb(joe, 'get-call-context', { deal_ids: Object.values(deals) });
-  const shaped = index.map(d => ({ id: d.id, name: d.name, owner: d.owner || '', operating_state: d.operating_state,
-    participants: d.participants.filter(p => p.party_id && p.ref).map(p => ({ party_id: p.party_id, ref: p.ref,
-      name: p.name || '', email: p.email || '', role: p.role || '' })) }));
-  assert.deepEqual(shaped.find(d => d.id === deals['Synthetic Bayside Dental Relocation']).participants.map(p => p.name),
-    ['Synthetic Bayside Landlord'], JSON.stringify(index));
-  const context = { session: path.basename(session), workspace_kind: 'team', generated_at: started, deals: shaped };
+  assert.deepEqual(index.find(d => d.id === deals['Synthetic Bayside Dental Relocation']).participants
+    .filter(p => p.party_id && p.ref).map(p => p.name), ['Synthetic Bayside Landlord'], JSON.stringify(index));
+  const context = callContext(call.session, started, index);
 
-  // 3. The call itself, then transcription, distillation, filing and auto-apply.
+  // The call itself, then transcription, distillation, filing and auto-apply.
   if (AUDIO) {
-    await companionCall(port, '/api/call-context', context);
+    await call.request('/api/call-context', context);
     for (const [speaker, track] of [['Joe', 'mic'], ['Dell', 'system']]) {
       const lines = CALL.map(([who, text]) => (who === speaker ? text : '[[slnc 4000]]')).join(' ');
-      await run('/usr/bin/say', ['-o', path.join(session, `${track}.caf`), lines]);
+      await run('/usr/bin/say', ['-o', path.join(call.session, `${track}.caf`), lines]);
     }
-    await run(PYTHON, [path.join(BIN, 'transcribe_session.py'), session], { env, timeout: 600_000 });
+    await run(PYTHON, [path.join(BIN, 'transcribe_session.py'), call.session], { env: call.env, timeout: 600_000 });
   } else {
-    // As transcribe_session.py records it: the diarizer ran on each track and
-    // heard one voice, so the system label identifies Dell.
-    write('transcript.json', { speaker_tracks: { mic: { diarized: true, speakers: 1 }, system: { diarized: true, speakers: 1 } },
-      segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
-    await companionCall(port, '/api/call-context', context);
+    call.writeTranscript();
+    await call.request('/api/call-context', context);
   }
-  let review;
-  for (let i = 0; i < (SONNET ? 600 : 240); i++) {
-    review = await companionCall(port, `/api/post-call?session=${encodeURIComponent(path.basename(session))}`);
-    if (review.report?.automatic?.finished_at) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  const logs = () => ['capture-bridge.log', 'call-mode.log'].map(f => existsSync(path.join(root, f)) ? readFileSync(path.join(root, f), 'utf8') : '').join('\n');
-  assert.ok(review.report?.automatic?.finished_at, `auto-apply never finished: ${JSON.stringify(review.status)}\n${logs()}`);
+  await call.waitFor(r => r.report?.automatic?.finished_at, { attempts: SONNET ? 600 : 240 });
+  const logs = call.logs;
 
   // 4. One durable call outcome lists every applied change with its evidence
   //    and every card still waiting (the task, the draft, anything unsettled).
@@ -305,7 +221,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   assert.ok(openKinds.includes('email_draft'), JSON.stringify(outcome.open_cards));
   assert.ok(openKinds.includes('assigned_action'));
   // Vendor email stays a draft: nothing created in Outlook, nothing sent.
-  assert.ok(!existsSync(path.join(session, 'outlook-drafts.json')));
+  assert.ok(!existsSync(path.join(call.session, 'outlook-drafts.json')));
 
   // 6. Undo reverts through the record layer, guarded by the deal's version,
   //    and never overwrites work done on the card after the call.
@@ -314,13 +230,12 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     [`capture_candidate:${candidateId}`])).rows;
   const gulfStep = applied(gulf.id, 'next_step');
   if (gulfStep) {
-    // The call's step superseded Joe's overdue Gulf step; undo puts that ball back.
     const undo = { candidate_id: gulfStep.candidate_id, base_version: (await deal('Synthetic Gulf Imaging Center')).version };
-    const result = await verb(joe, 'undo-call-change', undo);
+    await verb(joe, 'undo-call-change', undo);
     const restored = await deal('Synthetic Gulf Imaging Center');
     assert.equal(restored.next_step, 'Old Gulf step');
     assert.equal(restored.next_date, '2026-10-01');
-    assert.ok(result.reverted.reopened_action_ids.length >= 1, JSON.stringify(result));
+    assert.equal((await c.query("select status from next_action where subject_id=$1 and description='Old Gulf step'", [gulf.id])).rows[0].status, 'open');
     assert.ok((await items(gulfStep.candidate_id)).every(i => i.status === 'dropped'));
     // A second undo of the same change is a no-op, not a second write.
     assert.equal((await verb(joe, 'undo-call-change', { ...undo, base_version: restored.version })).already, 'undone');

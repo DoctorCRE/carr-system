@@ -17,7 +17,7 @@ import { budgetedAi } from "./ai-budget.js";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
-import { isolatePullRequests } from "./work-queue.js";
+import { isolatePullRequests, isolateProduction } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { toolCallContent } from "./untrusted-text.js";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
@@ -28,7 +28,7 @@ import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, orga
   personalScopeForActor, verifiedAgentSlugForClient } from "./identity.js";
 import { deriveTrustedPrincipalBinding,
   ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
-import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
+import { scheduleFailureRecord, failureOrigin, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
@@ -827,6 +827,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     const client = {
       ai: budgetedAi(env),
       pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
+      production: isolateProduction(env.GITHUB_TOKEN),
       query: async (text, params = []) => ({ rows: await retrySafeDatabaseOperation(() => sql.query(text, params)) }),
       sideWrite: env?.DATABASE_URL_WRITER
         ? (text, params = []) => {
@@ -1066,7 +1067,7 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
               failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
                 verb: rpc?.params?.name || null, error: e,
               }),
-              detail: `Request failed; correlation_id=${payload.correlation_id}`,
+              detail: `Request failed (${failureOrigin(e)}); correlation_id=${payload.correlation_id}`,
             });
           }
           if (!(e instanceof ToolError) && TOOLS[name]) payload.verb = name;
@@ -1083,7 +1084,7 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
       failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
         verb: rpc?.params?.name || null, error: e,
       }),
-      detail: `Request failed; correlation_id=${payload.correlation_id}`,
+      detail: `Request failed (${failureOrigin(e)}); correlation_id=${payload.correlation_id}`,
     });
     return rpcError(-32603, "internal error", payload);
   }

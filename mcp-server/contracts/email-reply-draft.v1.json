@@ -1,8 +1,8 @@
 {
   "schema": "carr-email-reply-draft.v1",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "card": "WR441.S3.J2",
-  "transport": "Authenticated MCP list-email-proposals and submit-email-draft",
+  "transport": "Authenticated MCP list-email-proposals, edit-email-draft and submit-email-draft",
   "review": "Reply-draft cards shown to verified human partners Joe and Dell may display the exact reply_draft.to and reply_draft.cc addresses. Display both before Submit, which authorizes sending. Evidence remains untrusted text. Do not infer recipients from display names or expose these pending recipient fields to agents.",
   "pending_reply_draft": {
     "subject": "Stored draft subject, editable by the owning partner",
@@ -52,5 +52,21 @@
       "failure_reason_code": "One of invalid_submission, submission_hash_mismatch, submission_recipients_invalid, aborted_before_dispatch, unconfirmed_after_dispatch, or delivery_failed for failure; null for sent"
     },
     "privacy": "No body, recipients, addresses, or free-text failure reason."
+  },
+  "edit": {
+    "verb": "edit-email-draft",
+    "arguments": [
+      "idempotency_key",
+      "proposal_id",
+      "base_version",
+      "subject",
+      "body"
+    ],
+    "authority": "Verified human mailbox owner only, joe or dell. Only pending reply drafts may be edited.",
+    "text": "Store subject and body exactly. Subject must be nonblank, at most 998 characters, and contain no CR or LF. Body must be nonblank and at most 20000 characters.",
+    "conflict": "Stale base_version refuses version_conflict with current_version and makes no change.",
+    "effects": "Changes only draft_subject, draft_body and version. Recipients, status, submitted email and send state stay unchanged. Sends and queues nothing.",
+    "receipt": "ok, proposal_id, incremented version, stored subject and body. list-email-proposals returns the saved text.",
+    "replay": "Same-key retries return the original receipt without another edit or version increment. Changed payload with the same key refuses key_reuse."
   }
 }

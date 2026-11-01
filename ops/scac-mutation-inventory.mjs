@@ -548,26 +548,19 @@ export function assertCurrentContracts(tools) {
   return true;
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  if (process.argv[2] === "--write-current-grants") {
-    const source = readFileSync(process.argv[3], "utf8");
-    const match = source.match(/\$current_grants\$([\s\S]*?)\$current_grants\$/);
-    if (!match) throw new Error("migration has no current grant contract");
-    const contract = JSON.parse(match[1]);
-    if (contract.registry_version !== CURRENT_REGISTRY_VERSION ||
-        !/^sha256:[0-9a-f]{64}$/.test(contract.registry_digest) ||
-        !Array.isArray(contract.secdef_execute))
-      throw new Error("malformed current grant contract");
-    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
-    const current = readFileSync(path, "utf8").replace(/\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = [\s\S]*$/, "");
-    writeFileSync(path, `${current.trimEnd()}\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze(${JSON.stringify(contract, null, 2)});\n`);
-  }
+  if (process.argv[2] && !["--write-current", "--check-source-inventory-frontier"].includes(process.argv[2]))
+    throw new Error("unknown argument; run ./run.sh regen registry");
   const { TOOLS } = await import("../mcp-server/src/tools.js");
   if (process.argv[2] === "--write-current") {
     const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
     writeFileSync(path, renderCurrentContracts(TOOLS, readFileSync(path, "utf8")));
-    console.log("current MCP source contracts regenerated; DB registry and grants preserved");
+    console.log("current MCP source contracts regenerated; DB registry seal preserved");
   } else {
     assertCurrentContracts(TOOLS);
+    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
+    const source = readFileSync(path, "utf8");
+    if (renderCurrentContracts(TOOLS, source) !== source)
+      throw new Error("committed registry differs from regeneration; run ./run.sh regen registry");
     console.log("current MCP contracts: OK");
   }
 }

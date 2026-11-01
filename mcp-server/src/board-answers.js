@@ -1,4 +1,5 @@
 // Expose progress board summaries and answer tools.
+import { CALENDAR_AGENDA_BOARD, calendarSection } from "./brief-calendar.js";
 import { observeBoardLinkage } from './work-linkage.ts';
 import { ToolError } from "./tool-error.ts";
 import { organizationTenantForActor } from "./identity.js";
@@ -257,7 +258,7 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
 
     "answer-board-question": {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: "Partner answers the current revision. Sent means this answer row was durably written; answered_by comes from authenticated identity.",
+      description: "Partner answers the current revision. For calendar-agenda, question_id is a current 16-character meeting review key, base_version is 1, and Dismiss records a durable dismissal. Sent means this answer row was durably written; answered_by comes from authenticated identity.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" }, board_id: { type: "string" },
         question_id: { type: "string" }, base_version: { type: "integer" }, answer_text: { type: "string" },
@@ -270,6 +271,17 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
         const answer = text(args.answer_text, "answer_text");
         return withEnvelope(c, actor, "answer-board-question", args, async () => {
           const tenant = organizationTenantForActor(actor);
+          if (board === CALENDAR_AGENDA_BOARD) {
+            const snapshot = await c.query(`select snapshot_json from board_snapshot
+              where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`, [tenant, partner, board]);
+            const review = calendarSection(snapshot.rows[0]?.snapshot_json)?.follow_up_reviews?.find(row => row.key === id);
+            if (!review || args.base_version !== 1 || answer !== "Dismiss")
+              throw new ToolError({ error: "board_answer_choice_invalid" });
+            await c.query(`insert into board_question (organization_tenant_id,sponsoring_human_slug,board_id,
+              question_id,revision,current,prompt,choices,allow_free_text,asker_ref,asked_by_actor_id)
+              values ($1,$2,$3,$4,1,true,$5,'["Dismiss"]'::jsonb,false,'calendar-intake',$6)
+              on conflict do nothing`, [tenant, partner, board, id, review.prompt, actor.id]);
+          }
           const found = await c.query(
             `select question_id,revision,choices,allow_free_text,default_answer,asker_ref
                from board_question where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3
@@ -287,6 +299,12 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
              on conflict do nothing returning *, 'Sent' as status`,
             [tenant, partner, board, id, args.base_version, q.asker_ref,
              answer, partner, actor.id, q.default_answer !== null && answer !== q.default_answer]);
+          if (!rows.rows.length && board === CALENDAR_AGENDA_BOARD) {
+            const saved = await c.query(`select *, 'Sent' as status from board_answer
+              where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3
+                and question_id=$4 and question_revision=1 and answer_text='Dismiss'`, [tenant, partner, board, id]);
+            if (saved.rows.length) return { ok: true, answer: saved.rows[0] };
+          }
           if (!rows.rows.length) throw new ToolError({ error: "board_answer_already_sent" });
           await writeEvent(c, actor, "answer-board-question", "board_answer", rows.rows[0].id,
             { new: { question_id: id, revision: args.base_version, answered_by: partner },

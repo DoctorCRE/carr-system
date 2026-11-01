@@ -1,51 +1,19 @@
 // Test persisted deal items, board projections, and item-level writes in PostgreSQL.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { readDealItems } from '../src/deal-items.ts';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
-let fixture, admin, database, c, actor, deal;
+let fixture, c, actor, deal;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin, connection;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    const name = `deal_items_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${name}" template template0`);
-    database = name;
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'deal-items-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  fixture = await acquireDisposablePostgres({ prefix: 'deal-items-', snapshot: true });
+  const connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
-  await applyPendingDealRoomReads(c);
-  await c.query(readFileSync(new URL('../../migrations/1003_notification_morning_midnight.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
@@ -53,11 +21,7 @@ before(async () => {
   deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic coastal purchase',$1,'purchase','research','joe',$2,$2) returning id", [client, actor.id])).rows[0].id;
 });
 after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
+  try { await c?.end(); } finally { await fixture?.close(); }
 });
 
 test('the record proof uses an isolated database on the provided CI service', async () => {
@@ -482,7 +446,7 @@ test('Home discovers pending call follow-ups through existing grants without exe
   };
   await t.test('task and email metadata retain exact refs and local-body hash in stable order', async () => {
     const result = await read();
-    for (const candidate of result.candidates) candidate.created_at = new Date(candidate.created_at).toISOString();
+    for (const candidate of result.candidates) candidate.created_at = Temporal.Instant.from(candidate.created_at).toString({ fractionalSecondDigits: 3 });
     assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
       { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:null,
         payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},

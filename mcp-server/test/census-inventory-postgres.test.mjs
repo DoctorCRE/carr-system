@@ -12,41 +12,15 @@ import { canonicalJson } from '../src/artifact-trust.js';
 import { readSystemWorkCensus } from '../src/system-work-census.v5.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
-let fixture, admin, database, c, actor, connection;
+let fixture, c, actor, connection;
 before(async () => {
-  const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  let bin;
-  if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
-    assert.equal(url.search, '', 'fixture connection must not override its loopback host');
-    admin = new pg.Client({ connectionString: ciDsn });
-    await admin.connect();
-    const name = `census_inventory_${randomUUID().replaceAll('-', '')}`;
-    await admin.query(`create database "${name}" template template0`);
-    database = name;
-    url.pathname = `/${database}`;
-    connection = { connectionString: url.href };
-  } else {
-    bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin',
-      '/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin'].find(p => existsSync(`${p}/initdb`));
-    assert.ok(bin, 'PostgreSQL is required for the isolated record-layer proof');
-    fixture = await acquireDisposablePostgres({ prefix: 'census-inventory-', pgCtl: `${bin}/pg_ctl` });
-    await fixture.run(`${bin}/initdb`, ['-D', `${fixture.root}/data`, '-U', 'carr_ci', '--auth=trust', '--no-locale']);
-    await fixture.run(`${bin}/pg_ctl`, ['-D', `${fixture.root}/data`, '-l', `${fixture.root}/server.log`, '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-    await fixture.run(`${bin}/createdb`, ['-h', fixture.root, '-U', 'carr_ci', 'carr_ci']);
-    connection = { host: fixture.root, user: 'carr_ci', database: 'carr_ci' };
-  }
+  fixture = await acquireDisposablePostgres({ prefix: 'census-inventory-', snapshot: true, baseline: true });
+  connection = fixture.connection;
   c = new pg.Client(connection);
   await c.connect();
-  await c.query('do $$ begin create role neondb_owner; exception when duplicate_object then null; end $$;');
-  const restore = ['-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname];
-  if (ciDsn) await promisify(execFile)('psql', [connection.connectionString, ...restore], { maxBuffer: 2 * 1024 * 1024 });
-  else await fixture.run(`${bin}/psql`, ['-h', fixture.root, '-U', 'carr_ci', '-d', 'carr_ci', ...restore]);
   const migrations = readdirSync(new URL('../../migrations/', import.meta.url))
     .filter(name => /^\d{4}_.*\.sql$/.test(name) && name < MIGRATION_NAME).sort();
-  const dsn = connection.connectionString ?? `postgresql://carr_ci@localhost/carr_ci?host=${encodeURIComponent(fixture.root)}`;
+  const dsn = fixture.dsn;
   const python = new URL('../../.venv/bin/python', import.meta.url).pathname;
   await promisify(execFile)(existsSync(python) ? python : 'python3',
     [new URL('../../tools/migrate.py', import.meta.url).pathname, '--apply', '--yes', '--through', migrations.at(-1)],
@@ -54,11 +28,7 @@ before(async () => {
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
 });
 after(async () => {
-  try { await c?.end(); }
-  finally {
-    try { if (database) await admin.query(`drop database "${database}"`); }
-    finally { await Promise.all([admin?.end(), fixture?.close()]); }
-  }
+  try { await c?.end(); } finally { await fixture?.close(); }
 });
 
 const MIGRATION_NAME = '1054_system_work_census_inventory.sql';
@@ -129,7 +99,7 @@ async function censusWith(manifest, now = OBSERVED_AT) {
   await c.query('begin');
   try {
     await c.query('set local role carr_reader');
-    return await readSystemWorkCensus({ client: c, actor, kinds: 'pull_request', now: () => new Date(now) });
+    return await readSystemWorkCensus({ client: c, actor, kinds: 'pull_request', now: () => ({ valueOf: () => Date.parse(now), toISOString: () => now }) });
   } finally { await c.query('rollback'); }
 }
 

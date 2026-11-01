@@ -45,6 +45,12 @@ class ReviewGate(unittest.TestCase):
         self.assertTrue(gate.approved(armed, self.files, [], "reviewer"))
         self.assertTrue(gate.approved(armed, self.files, [self.approval], "reviewer"))
 
+    def test_added_machinery(self):
+        pr = {"changed_files": 1, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
+        for path, status, expected in [("bin/foo", "added", False), ("bin/existing", "modified", True), ("docs/x.md", "added", True)]:
+            with self.subTest(path=path, status=status):
+                self.assertEqual(gate.approved(pr, [{"filename": path, "status": status}], [], "reviewer"), expected)
+
     def test_review_states_and_identity(self):
         large = {**self.pr, 'additions': 151}
         for review in [{**self.approval, 'commit_id': 'old'}, {**self.approval, 'state': 'DISMISSED'}, {**self.approval, 'user': {'login': 'author'}}, {'body': 'VERDICT: APPROVE\nReviewed-SHA: head\nReviewer: x'}]:

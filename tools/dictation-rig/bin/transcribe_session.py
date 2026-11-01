@@ -322,7 +322,7 @@ def parse_whisper_json(json_path: Path) -> list[RawSegment]:
 
 def run_whisper(
     wav_path: Path, model_path: Path, prompt: str, out_dir: Path, log: LogFunc,
-    *, timeout: int | None = None,
+    *, timeout: int | None = None, env: dict[str, str] | None = None,
 ) -> list[RawSegment]:
     out_stem = out_dir / wav_path.stem
     cmd = [
@@ -338,7 +338,7 @@ def run_whisper(
         str(wav_path),
     ]
     log(f"WHISPER {wav_path.name} model={model_path.name}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
     json_path = out_stem.with_suffix(".json")
     if result.returncode != 0 or not json_path.exists():
         raise TranscribeError(

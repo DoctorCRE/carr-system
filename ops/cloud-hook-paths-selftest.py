@@ -39,7 +39,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SETTINGS = REPO / ".claude" / "settings.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
-MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
+MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py", "team-memory-index.py")
 KNOWN_HOOKS = MACHINE_HOOKS + ("agent-card-gate.py",)
 
 FAILURES: list[str] = []

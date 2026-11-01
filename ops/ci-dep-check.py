@@ -230,6 +230,15 @@ def check_python(problems, notes):
     if unpinned:
         problems.append(f"{len(unpinned)} unpinned line(s) in the lock")
 
+    requirement_lines = [line for line in text.splitlines()
+                         if line.strip() and not line.lstrip().startswith("#")
+                         and "==" in line]
+    hashed = ["--hash=" in line for line in requirement_lines]
+    if any(hashed) and not all(hashed):
+        problems.append(
+            "requirements.lock mixes hashed and unhashed pins; pip requires every "
+            "requirement to carry a hash when hash-checking is enabled")
+
     if not problems:
         notes.append(f"python: {len(locked)} pinned, lock matches requirements.txt")
 

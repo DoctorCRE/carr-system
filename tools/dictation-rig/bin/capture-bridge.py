@@ -459,6 +459,11 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     if capture_token(session_dir) is None:
         log_line(f"NOOP publish no-capture-marker session={session_dir.name}")
         return 0
+    report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+    if report is not None and post_call.hold_transcript_repeat(session_dir, report) is not None:
+        return 1
+    if (post_call.read_json(session_dir / post_call.STATUS_FILE) or {}).get("state") == "held_review":
+        return 1
     try:
         shaped = post_call.sanitized_candidates(session_dir)
     except post_call.ContractError as exc:
@@ -581,6 +586,13 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     retry = read_json(retry_path) or {}
     timestamp = iso_now_utc()
     attempts = retry.get("attempts", 0)
+    report = post_call.read_json(session_dir / post_call.REPORT_FILE) if has_report else None
+    if report is not None and post_call.hold_transcript_repeat(session_dir, report) is not None:
+        # A held summary waits for the partner; it is not a failed sync.
+        if attempts:
+            write_json_atomic(retry_path, {"attempts": 0, "next_attempt_at": None}, mode=0o600)
+        log_line(f"POLL session={session_dir.name} summary held for review — holding recordings")
+        return verified(session_dir, "poll")
     if attempts >= len(post_call.EXTRACTION_RETRY_DELAYS) + 1 or (retry.get("next_attempt_at") and timestamp < retry["next_attempt_at"]):
         return Outcome.UNAVAILABLE
     result = _poll_cmd(cfg, session_dir)
@@ -659,6 +671,9 @@ def _poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         except (RuntimeError, OSError, subprocess.SubprocessError, ValueError) as exc:
             log_line(f"ERROR poll local post-call worker session={name}: {type(exc).__name__}")
             return Outcome.UNAVAILABLE
+        if worker_status.get("state") == "held_review":
+            log_line(f"POLL session={name} summary held for review — holding recordings")
+            return verified(session_dir, "poll")
         if worker_status.get("state") != "ready_review":
             log_line(f"POLL session={name} post_call={worker_status.get('state')} — holding recordings")
             return Outcome.UNAVAILABLE

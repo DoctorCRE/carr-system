@@ -1213,9 +1213,6 @@ def launchd_path_refusal(body):
 def cmd_check_launchd_main_paths():
     """Read installed CARR agents without changing or reloading any plist."""
     names = carr_plists()
-    board = "local.carr-progress-board.plist"
-    if os.path.isfile(os.path.join(LAUNCHD_SRC, board)):
-        names.append(board)
     failures = []
     for name in names:
         refusal = launchd_path_refusal(read(os.path.join(LAUNCHD_SRC, name)) or "")
@@ -1472,7 +1469,7 @@ def reconcile_retired_launchd(apply, filenames=None):
     """Unload and quarantine CARR definitions absent from the repository.
 
     Holds prevent activation of declared jobs, not retirement of deleted jobs.
-    Labels outside com.carr.*, including local.carr-progress-board, are never owned here.
+    Labels outside com.carr.* are never owned here.
     """
     failures = []
     if not os.path.isdir(LAUNCHD_REPO):
@@ -1816,79 +1813,6 @@ def install_launchd_plist(filename, dest, body, body_matches, *, timeout=15):
     return "failed"
 
 
-def cmd_install_progress_board(apply=False, repo=None):
-    """Migrate the existing board agent to the repository wrapper, then read
-    launchd's arguments back. This does not create a new schedule or label.
-    Runtime and state belong to the canonical main checkout.
-    --repo may name that checkout explicitly, but cannot
-    select a feature tree even for pre-merge verification.
-    """
-    label = "local.carr-progress-board"
-    try:
-        if launchd_hold.off_reason(label, HOME):
-            if apply:
-                launchd_hold.activate(label, ["launchctl", "load", "-w", label], home=HOME)
-            else:
-                print(launchd_hold.off_reason(label, HOME))
-            return 0
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        print(f"progress-board: HOLD REFUSED: {exc}")
-        return 1
-    runtime_repo = os.path.abspath(os.path.expanduser(repo)) if repo else REPO
-    if os.path.realpath(runtime_repo) != os.path.realpath(REPO):
-        print("progress-board: runtime must use the canonical main checkout; "
-              "feature checkout installation is refused")
-        return 1
-    wrapper = os.path.join(runtime_repo, "ops", "progress-board-render.sh")
-    python = os.path.join(runtime_repo, ".venv", "bin", "python")
-    if not os.path.isfile(wrapper) or not os.access(python, os.X_OK):
-        print("progress-board: selected checkout wrapper or repository interpreter unavailable; "
-              "select a repository checkout containing the wrapper and interpreter")
-        return 1
-    label = "local.carr-progress-board"
-    dest = os.path.join(HOME, "Library", "LaunchAgents", label + ".plist")
-    try:
-        with open(dest, "rb") as handle:
-            current = plistlib.load(handle)
-        if not isinstance(current, dict) or current.get("Label") != label:
-            raise ValueError("unexpected board agent label")
-    except (OSError, ValueError, plistlib.InvalidFileException) as exc:
-        print(f"progress-board: existing agent unavailable: {exc}; no schedule created")
-        return 1
-    desired = dict(current)
-    desired["ProgramArguments"] = ["/bin/bash", wrapper]
-    desired["WorkingDirectory"] = runtime_repo
-    desired["EnvironmentVariables"] = dict(current.get("EnvironmentVariables", {}))
-    desired["EnvironmentVariables"]["PROGRESS_BOARD_ROOT"] = os.path.join(REPO, "out")
-    desired = plistlib.loads(concrete(plistlib.dumps(desired).decode('utf-8')).encode('utf-8'))
-    refusal = launchd_path_refusal(plistlib.dumps(desired).decode("utf-8"))
-    if refusal:
-        print(f"progress-board: REFUSED {refusal}")
-        return 1
-    def registered_arguments():
-        observed = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
-                                  capture_output=True, text=True, check=False, timeout=15)
-        args = re.search(r"(?ms)^\s*arguments = \{\n(.*?)^\s*\}", observed.stdout or "")
-        return ([line.strip() for line in args.group(1).splitlines()]
-                if observed.returncode == 0 and args else [])
-
-    matches = desired == current and registered_arguments() == desired["ProgramArguments"]
-    if apply:
-        outcome = install_launchd_plist(os.path.basename(dest), dest,
-                                       plistlib.dumps(desired).decode("utf-8"), matches)
-        if outcome not in {"loaded", "kept"}:
-            return 1
-    elif not matches:
-        print("progress-board: existing agent needs migration: "
-              "ops/config-as-code.py install-progress-board --apply")
-        return 1
-    if registered_arguments() != desired["ProgramArguments"]:
-        print("progress-board: launchd arguments unverified; migration is incomplete")
-        return 1
-    print(f"progress-board: verified registered repository wrapper: {wrapper}")
-    return 0
-
-
 def write_claude_settings(path, document, before, sink=None):
     """Write the settings render, optionally exposing one redacted fake witness.
 
@@ -1995,6 +1919,90 @@ def git_hooks_path_report() -> str:
         note = (f"does not resolve to {hooks_dir}; this machine's hook "
                 "resolution is someone else's deliberate setting")
     return f"  git core.hooksPath: {observed or '(unset)'} — {note} [informational]"
+
+
+def install_launchd_templates(filenames, apply, held_labels):
+    """Converge selected tracked agents through the standard installer."""
+    launchd_activation_failures = []
+    if apply:
+        os.makedirs(LAUNCHD_SRC, exist_ok=True)
+    for f in filenames:
+        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
+            continue
+        source = read(launchd_repo_path(f))
+        if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
+            continue
+        if f in OUTLOOK_INSTALLERS:
+            print(f"  SKIP  {f} (installer-owned: {OUTLOOK_INSTALLERS[f]})")
+            continue
+        if f in PRIMARY_ONLY and not IS_PRIMARY:
+            live = os.path.join(LAUNCHD_SRC, f)
+            if os.path.exists(live):
+                if retire_primary_only_plist(f, live, apply) == "failed":
+                    launchd_activation_failures.append(f)
+            else:
+                print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
+            continue
+        if f in SECONDARY_ONLY and IS_PRIMARY:
+            print(f"  SKIP  {f} (the nightly chain already does this here)")
+            continue
+        dest = os.path.join(LAUNCHD_SRC, f)
+        if source is None:
+            print(f"  ERROR  cannot render {f} because its tracked source is missing")
+            return None
+        refusal = launchd_template_refusal(source)
+        if refusal:
+            # Never install a schedule launchd will load and then never fire:
+            # the job would look installed and be dead (see the block above
+            # refused_launchd_templates). The installed copy is left as it is.
+            print(f"  REFUSED  {f}: {refusal}")
+            launchd_activation_failures.append(f)
+            continue
+        body = concrete(source)
+        body_matches = launchd_texts_match(read(dest), source)
+        if body_matches and not apply and not os.path.exists(dest + ".pending-reload"):
+            continue
+        gone = missing_targets(body)
+        if gone:
+            print(f"  SKIP  {f} (not built on this machine: {gone[0]})")
+            continue
+        if body_matches:
+            print(f"  VERIFY LOADED  {dest}")
+        else:
+            print(f"  {'WRITE' if apply else 'would write'}  {dest}")
+        if apply:
+            # Load it, do not print a command for a human to paste (rule
+            # e313a3ca). Writing the plist and stopping leaves the job on disk
+            # and dead: on a fresh machine that means the nightly never runs,
+            # so the record-derived fetch allowlist is generated once by the
+            # migration and then never refreshed as clients are added. A
+            # pending marker keeps an interrupted reload visible until an
+            # absent-before/load/registered-after sequence verifies it.
+            outcome = install_launchd_plist(f, dest, body, body_matches)
+            if outcome == "failed":
+                launchd_activation_failures.append(f)
+
+    return launchd_activation_failures
+
+
+def cmd_install_launchd(labels, apply):
+    """Install only the named agents, leaving other machine configuration alone."""
+    if not labels or any(not re.fullmatch(r"com\.carr\.[A-Za-z0-9.-]+", label)
+                         or not os.path.isfile(launchd_repo_path(label + ".plist"))
+                         for label in labels):
+        print("install-launchd: named tracked com.carr labels are required")
+        return 2
+    filenames = [label + ".plist" for label in dict.fromkeys(labels)]
+    try:
+        held = {label for label, filename in zip(dict.fromkeys(labels), filenames)
+                if launchd_off_reason(filename, read(launchd_repo_path(filename)))}
+        for label in sorted(held):
+            print(f"  REFUSED  {label}: activation is held off")
+        failures = install_launchd_templates(filenames, apply, held)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"install-launchd: refused ({type(exc).__name__})")
+        return 1
+    return 1 if failures is None or failures or held else 0
 
 
 def plan_scheduled_task_install(apply):
@@ -2186,64 +2194,12 @@ def cmd_install(apply):
 
     launchd_activation_failures = reconcile_retired_launchd(apply)
     launchd_activation_failures += quarantine_definition_only_plists(apply, held_labels)
-    if apply:
-        os.makedirs(LAUNCHD_SRC, exist_ok=True)
-    for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        if f in {"local.ds4-flash-next.plist", "com.carr.flash-idle-stop.plist"}:
-            continue
-        source = read(launchd_repo_path(f))
-        if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
-            continue
-        if f in OUTLOOK_INSTALLERS:
-            print(f"  SKIP  {f} (installer-owned: {OUTLOOK_INSTALLERS[f]})")
-            continue
-        if f in PRIMARY_ONLY and not IS_PRIMARY:
-            live = os.path.join(LAUNCHD_SRC, f)
-            if os.path.exists(live):
-                if retire_primary_only_plist(f, live, apply) == "failed":
-                    launchd_activation_failures.append(f)
-            else:
-                print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
-            continue
-        if f in SECONDARY_ONLY and IS_PRIMARY:
-            print(f"  SKIP  {f} (the nightly chain already does this here)")
-            continue
-        dest = os.path.join(LAUNCHD_SRC, f)
-        source = read(launchd_repo_path(f))
-        if source is None:
-            print(f"  ERROR  cannot render {f} because its tracked source is missing")
-            return 1
-        refusal = launchd_template_refusal(source)
-        if refusal:
-            # Never install a schedule launchd will load and then never fire:
-            # the job would look installed and be dead (see the block above
-            # refused_launchd_templates). The installed copy is left as it is.
-            print(f"  REFUSED  {f}: {refusal}")
-            launchd_activation_failures.append(f)
-            continue
-        body = concrete(source)
-        body_matches = launchd_texts_match(read(dest), source)
-        if body_matches and not apply and not os.path.exists(dest + ".pending-reload"):
-            continue
-        gone = missing_targets(body)
-        if gone:
-            print(f"  SKIP  {f} (not built on this machine: {gone[0]})")
-            continue
-        if body_matches:
-            print(f"  VERIFY LOADED  {dest}")
-        else:
-            print(f"  {'WRITE' if apply else 'would write'}  {dest}")
-        if apply:
-            # Load it, do not print a command for a human to paste (rule
-            # e313a3ca). Writing the plist and stopping leaves the job on disk
-            # and dead: on a fresh machine that means the nightly never runs,
-            # so the record-derived fetch allowlist is generated once by the
-            # migration and then never refreshed as clients are added. A
-            # pending marker keeps an interrupted reload visible until an
-            # absent-before/load/registered-after sequence verifies it.
-            outcome = install_launchd_plist(f, dest, body, body_matches)
-            if outcome == "failed":
-                launchd_activation_failures.append(f)
+    template_failures = install_launchd_templates(
+        sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else [],
+        apply, held_labels)
+    if template_failures is None:
+        return 1
+    launchd_activation_failures += template_failures
 
     # Git hooks. Added 2026-08-03, when Dell was granted WRITE and it turned out
     # branch protection is unavailable on a private free-plan repo — so the pull
@@ -2770,6 +2726,13 @@ def main():
         return cmd_install_codex_continuity_mcp(apply)
     if mode == "verify-codex-continuity-mcp":
         return cmd_install_codex_continuity_mcp(False)
+    if mode == "install-launchd":
+        import argparse
+        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
+        parser.add_argument("labels", nargs="+")
+        parser.add_argument("--apply", action="store_true")
+        options = parser.parse_args(sys.argv[2:])
+        return cmd_install_launchd(options.labels, options.apply)
     if mode == "install":
         import argparse
         parser = argparse.ArgumentParser(prog="config-as-code.py install")
@@ -2795,14 +2758,6 @@ def main():
         return flash_install.configure(REPO_HERE, apply=options.apply)
     if mode == "check-launchd-main-paths":
         return cmd_check_launchd_main_paths()
-    if mode in {"install-progress-board", "verify-progress-board"}:
-        import argparse
-        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
-        parser.add_argument("--repo", help="repository checkout to run; defaults to canonical checkout")
-        parser.add_argument("--apply", action="store_true")
-        options = parser.parse_args(sys.argv[2:])
-        return cmd_install_progress_board(options.apply if mode == "install-progress-board" else False,
-                                          repo=options.repo)
     if mode == "reinstall-launchd-calendar":
         return cmd_reinstall_launchd_calendar(sys.argv[2:])
     if mode == "launchd-handoff-smoke":

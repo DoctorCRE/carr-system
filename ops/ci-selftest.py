@@ -64,6 +64,7 @@ def ci_fixture():
             (root / name).mkdir()
             if name not in {"migrations", "mcp-server"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
+        (root / "ops/scac-mutation-inventory.mjs").write_text("// Check the synthetic registry.\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         requirements = "synthetic-package>=1\n"
         (root / "requirements.txt").write_text(requirements)
@@ -197,6 +198,7 @@ def test_gates_build_hxprobe_before_parallel_selftests():
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
+        (root / "ops/scac-mutation-inventory.mjs").write_text("// Check the synthetic registry.\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()
         (root / "ops/probe-selftest.py").write_text(
@@ -482,6 +484,17 @@ def test_dep_check_detects_a_stale_lock():
         req.write_text(original + "\n# a comment-only edit\n")
         rc, out = run(["--only", "dependency"], root=root)
         check("a comment-only edit does NOT invalidate the lock", rc == 0, out)
+
+def test_dep_check_rejects_mixed_hash_coverage():
+    with ci_fixture() as root:
+        lock = root / "requirements.lock"
+        lock.write_text(
+            "# requirements.txt sha256: " + hashlib.sha256(b"synthetic-package>=1").hexdigest() + "\n"
+            "synthetic-package==1.0 --hash=sha256:" + "a" * 64 + "\n"
+            "transitive-package==2.0\n")
+        rc, out = run(["--only", "dependency"], root=root)
+        check("mixed hashed and unhashed pins fail the dependency class",
+              rc == 1 and "mixes hashed and unhashed pins" in out, out)
 
 def test_types_class_catches_a_seeded_type_error():
     fixture = "mcp-server/fixture.js"
@@ -1511,6 +1524,7 @@ def main(argv=None):
                test_migration_fixtures_ignore_hosted_pr_event,
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
+               test_dep_check_rejects_mixed_hash_coverage,
                test_types_class_catches_a_seeded_type_error,
                test_every_test_file_in_the_tree_is_collected,
                test_each_class_runs_in_exactly_one_hosted_group,

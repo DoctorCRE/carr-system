@@ -12,11 +12,12 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import wave
 from typing import BinaryIO
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.error
 import urllib.request
 
@@ -24,6 +25,40 @@ import post_call
 
 MIME_TYPES = {'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/mpeg', 'audio/webm'}
 ID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+INTEGER_SETTINGS = ('CALL_MAX_BYTES', 'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS',
+                    'CALL_PROCESSORS', 'CALL_EXTRACTION_ATTEMPTS')
+REQUIRED_SETTINGS = ('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', *INTEGER_SETTINGS,
+                     'TYPESAFE_API_KEY')
+
+
+class MissingSettings(ValueError):
+    pass
+
+
+def load_machine_settings() -> dict[str, str]:
+    """Require the shared private settings before any intake or paid work."""
+    from credential_env import load_carr_tokens, TokensFilePermissionError
+
+    try:
+        values = load_carr_tokens(REQUIRED_SETTINGS,
+                                  path=Path.home() / '.config/carr/typesafe.env')
+    except TokensFilePermissionError:
+        raise ValueError('machine settings file must be private (mode 600)') from None
+    missing = [name for name in REQUIRED_SETTINGS if not values.get(name, '').strip()]
+    if missing:
+        raise MissingSettings('missing required machine settings: ' + ', '.join(missing))
+    for name in INTEGER_SETTINGS:
+        try:
+            valid = int(values[name]) > 0
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError(name + ' must be a positive integer')
+    if not values['CARR_CAPTURE_BASE_URL'].startswith('https://'):
+        raise ValueError('CARR_CAPTURE_BASE_URL must use HTTPS')
+    return values
 
 
 def config_limit(name: str, default: int) -> int:
@@ -217,14 +252,14 @@ def _extract(session: Path, *, decoder: str, distiller) -> dict:
                                      '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'wav,mov,mp3,matroska,webm',
                                      '-i', str(session / 'imported.audio'),
                                      '-t', str(maximum + 1), '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', str(wav)],
-                                    capture_output=True, timeout=180, check=False)
+                                    capture_output=True, timeout=180, check=False, env={'PATH': os.defpath})
             if result.returncode != 0:
                 raise ValueError('imported audio could not be decoded')
             with wave.open(str(wav), 'rb') as handle:
                 duration = handle.getnframes() / handle.getframerate()
             if duration <= 0 or duration > maximum:
                 raise ValueError('decoded duration exceeds call limit')
-            segments = transcribe_session.run_whisper(wav, model, transcribe_session.load_prompt(), Path(tmp), log, timeout=900)
+            segments = transcribe_session.run_whisper(wav, model, transcribe_session.load_prompt(), Path(tmp), log, timeout=900, env={'PATH': os.defpath})
             if not segments:
                 raise ValueError('no speech extracted')
         post_call.write_private(session / 'transcript.json', {
@@ -251,11 +286,13 @@ def publish_status(session: Path, cfg: dict, token: str, bridge) -> bool:
                  for question in report.get('review_questions', []) if not question.get('resolved', False)]
     count = len(questions)
     state, reason = status.get('state'), status.get('reason_code', status.get('reason'))
-    if state == 'needs_attention':
+    if report.get('checks_hold'):
+        state, reason = 'held_review', 'budget'
+    elif state == 'needs_attention':
         if reason not in {'extraction_failed', 'transcript_unavailable', 'transient_ceiling'}:
             reason = 'extraction_failed'
     elif state == 'held_review':
-        if reason not in {'summary_repeats_transcript', 'transcript_unavailable'}:
+        if reason not in {'summary_repeats_transcript', 'transcript_unavailable', 'budget'}:
             reason = 'summary_repeats_transcript'
     elif count:
         state, reason = 'held_review', 'open_review_questions'
@@ -301,22 +338,55 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
     config_limit('CALL_PROCESSORS', 1)
     if slot != 0:
         raise ValueError('only one phone processor is allowed')
+    bridge = bridge_module()
+    request = bridge.http_request
+
+    class TransientNetworkError(Exception):
+        pass
+
+    def checked_request(*args, **kwargs):
+        try:
+            code, body = request(*args, **kwargs)
+        except bridge.BridgeNetworkError as exc:
+            raise TransientNetworkError('connection unavailable') from exc
+        if code == 429 or 500 <= code < 600:
+            raise TransientNetworkError(f'HTTP {code}')
+        return code, body
+
+    bridge.http_request = checked_request
+
     try:
         with exclusive(root / '.phone-processor-0.lock', blocking=False):
-            bridge = bridge_module()
             for session in sorted(root.glob('phone-*')):
                 if not (session / 'transfer.json').exists():
                     continue
                 try:
                     if int(session.name.removeprefix('phone-').replace('-', ''), 16) % config_limit('CALL_PROCESSORS', 1) != slot:
                         continue
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    if previous.get('transient_since') and previous.get('next_attempt_at') and post_call.now() < previous['next_attempt_at']:
+                        counts['pending'] += 1
+                        continue
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
                         continue
-                    if (session / 'ingested.json').exists():
-                        continue
-                    local = post_call.read_json(session / post_call.STATUS_FILE) or {}
-                    if local.get('state') in {'needs_attention', 'held_review'}:
+                    report = post_call.read_json(session / post_call.REPORT_FILE) or {}
+                    if report.get('checks_hold'):
+                        post_call.process_session(session)
+                        if not publish_status(session, cfg, token, bridge):
+                            counts['pending'] += 1
+                            continue
+                        previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    if (session / 'ingested.json').exists() or previous.get('state') in {'needs_attention', 'held_review', 'filed'}:
+                        if previous.get('transient_since') and previous.get('state') != 'needs_attention':
+                            previous.pop('transient_since', None)
+                            previous.pop('transient_count', None)
+                            previous.pop('transient_expired', None)
+                            previous['next_attempt_at'] = None
+                            post_call.write_private(session / post_call.STATUS_FILE, previous)
+                        if (session / 'ingested.json').exists() or previous.get('state') == 'filed':
+                            continue
+                    if previous.get('state') in {'needs_attention', 'held_review'}:
                         counts['pending'] += 1
                         continue
                     metadata = required_json(session / 'phone.json')
@@ -349,9 +419,41 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     if not publish_status(session, cfg, token, bridge):
                         counts['pending'] += 1
                         continue
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    if previous.get('transient_since'):
+                        previous.pop('transient_since', None)
+                        previous.pop('transient_count', None)
+                        previous.pop('transient_expired', None)
+                        previous['next_attempt_at'] = None
+                        post_call.write_private(session / post_call.STATUS_FILE, previous)
+
                     counts['ready'] += 1
+                except (TransientNetworkError, bridge.BridgeNetworkError, ConnectionError, TimeoutError) as exc:
+                    previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    timestamp = post_call.now()
+                    current = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    since = previous.get('transient_since', timestamp)
+                    elapsed = current - datetime.fromisoformat(since.replace('Z', '+00:00'))
+                    count = previous.get('transient_count', 0) + 1
+                    expired = elapsed >= timedelta(hours=24)
+                    preserve_state = previous.get('state') in {'needs_attention', 'held_review', 'filed'}
+                    delay = min(30 * 2 ** min(count - 1, 5), 900)
+                    previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
+                                     'state': previous.get('state') if preserve_state else ('needs_attention' if expired else 'blocked'), 'updated_at': timestamp,
+                                     'transient_since': since, 'transient_count': count,
+                                     'transient_expired': expired,
+                                     'next_attempt_at': None if expired else (current + timedelta(seconds=delay)).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                                     'reason': (previous.get('reason') if preserve_state
+                                                else f'Transient network error{" for 24 hours" if expired else ""}: {exc}')})
+                    if expired and not preserve_state:
+                        previous['reason_code'] = 'transient_ceiling'
+                    post_call.write_private(session / post_call.STATUS_FILE, previous)
+                    counts['pending'] += 1
                 except Exception as exc:
                     previous = post_call.read_json(session / post_call.STATUS_FILE) or {}
+                    previous.pop('transient_since', None)
+                    previous.pop('transient_count', None)
+                    previous.pop('transient_expired', None)
                     attempts = previous.get('extraction_attempts', 0) + 1
                     previous.update({'schema_version': post_call.SCHEMA_VERSION, 'session': session.name,
                                      'state': 'needs_attention' if attempts >= config_limit('CALL_EXTRACTION_ATTEMPTS', 3) else 'blocked',
@@ -361,6 +463,8 @@ def process_pending(root: Path, cfg: dict, token: str, *, slot: int = 0) -> dict
                     counts['pending'] += 1
     except BlockingIOError:
         return {'busy': True}
+    finally:
+        bridge.http_request = request
     return counts
 
 
@@ -394,12 +498,15 @@ def main() -> None:
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--process', action='store_true', help='Pull recordings and run one processing sweep')
     args = parser.parse_args()
-    token = os.environ.get('CALL_STUDIO_TOKEN', '')
-    if not token:
-        parser.error('CALL_STUDIO_TOKEN is required')
-    base_url = os.environ.get('CARR_CAPTURE_BASE_URL', '')
-    if not base_url.startswith('https://'):
-        parser.error('CARR_CAPTURE_BASE_URL must use HTTPS')
+    try:
+        settings = load_machine_settings()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(0)
+    token = settings.pop('CALL_STUDIO_TOKEN')
+    os.environ.pop('CALL_STUDIO_TOKEN', None)
+    os.environ.update(settings)
+    base_url = settings['CARR_CAPTURE_BASE_URL']
     if args.process:
         intake = pull_pending(args.root, {'base_url': base_url}, token)
         print(json.dumps({'intake': intake, 'processors': [

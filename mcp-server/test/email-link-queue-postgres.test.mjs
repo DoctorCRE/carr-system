@@ -33,7 +33,11 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
     await c.connect();
     await c.query(`create table activity (id uuid primary key, deal_id uuid, client_id uuid, vendor_id uuid,
       lead_id uuid, actor_id uuid, kind text, detail text, email_context jsonb, email_source jsonb,
-      occurred_at timestamptz, recorded_at timestamptz)`);
+      occurred_at timestamptz, recorded_at timestamptz, email_identity jsonb)`);
+    await c.query(`create table email_proposal (kind text, owner text, created_at timestamptz, activity_id uuid)`);
+    await c.query(`create table actor (id uuid, slug text)`);
+    await c.query(`insert into actor values ('30000000-0000-0000-0000-000000000001','joe'),
+      ('30000000-0000-0000-0000-000000000002','dell')`);
     const deal = '20000000-0000-0000-0000-000000000001';
     const actor = '30000000-0000-0000-0000-000000000001';
     const ids = [1, 2, 3, 4].map(n => `10000000-0000-0000-0000-00000000000${n}`);
@@ -44,6 +48,27 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
       ($4,$5,$6,'note','full body',jsonb_build_object('source_activity_id',$1::text),now(),now())`, [...ids, deal, actor]);
     const queue = emailProposalTools({})['email-router-queue'];
     const caller = { human: true, slug: 'joe', id: actor };
+    const outcomes = () => queue.handler(c, caller, { purpose: 'outcomes', account: 'fixture@example.test' });
+    const empty = await outcomes();
+    assert.equal(empty.reply_draft_count, 0);
+    assert.ok(empty.last_email_in_filed_at);
+    const initialFiled = empty.last_email_in_filed_at;
+    await c.query(`insert into email_proposal values
+      ('reply_draft','dell',now(),$1),('next_step','joe',now(),$1),
+      ('reply_draft','joe','2000-01-01',$1)`, [ids[0]]);
+    assert.equal((await outcomes()).reply_draft_count, 0);
+    await c.query(`insert into email_proposal values ('reply_draft','joe',now(),$1)`, [ids[0]]);
+    assert.equal((await outcomes()).reply_draft_count, 1);
+    await c.query(`insert into activity(id,actor_id,kind,email_source,email_identity,occurred_at,recorded_at) values
+      ('10000000-0000-0000-0000-000000000099',$1,'email_in',
+      '{"mailbox_owner":"joe"}','{"mailbox_account":"other@example.test"}',now(),now()+interval '1 day')`, [actor]);
+    assert.equal((await outcomes()).last_email_in_filed_at, initialFiled);
+    const otherOutcomes = await queue.handler(c, { human: true, slug: 'dell', id: '30000000-0000-0000-0000-000000000002' },
+      { purpose: 'outcomes', account: 'fixture@example.test' });
+    assert.equal(otherOutcomes.journey_live_at, null);
+    assert.equal(otherOutcomes.last_email_in_filed_at, null);
+    assert.equal(otherOutcomes.reply_draft_count, 0);
+    await c.query("delete from activity where id='10000000-0000-0000-0000-000000000099'");
     const first = await queue.handler(c, caller, { purpose: 'links', limit: 1 });
     assert.equal(first.emails[0].body, 'full body');
     assert.equal(first.emails[0].activity_id, ids[0]);

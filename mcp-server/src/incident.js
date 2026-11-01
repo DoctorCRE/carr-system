@@ -460,6 +460,13 @@ const VALID_ENVIRONMENTS = ["local", "rehearsal", "staging", "production"];
 const BOARD_LIMIT_DEFAULT = 60;
 const BOARD_LIMIT_MAX = 200;
 const FACT_LIMIT_DEFAULT = 50;
+// Links are one row per failed run or deploy, so a long-running recurrence
+// carries thousands (INC-20261028-11 held 25,270, a 2.2 MB reply). Paged like
+// facts, with the total reported rather than silently dropped. The per-run and
+// per-deploy occurrence links sort last, so the contextual links callers look
+// for (a work_request, ops/runtime-error-watch.mjs) always fit on the page.
+const LINK_LIMIT_DEFAULT = 50;
+const LINK_LIMIT_MAX = 500;
 const TRACE_CORRELATION_MAX = 25;
 // The allocator uses padStart(2), so its sequence is 01..99, 100, 101...
 // (not a fixed two-digit suffix). Share this with every schema and handler
@@ -691,12 +698,14 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
       inputSchema: { type: "object", properties: {
         ref: { type: "string", description: "the incident ref, e.g. INC-20260823-01" },
         fact_limit: { type: "integer", default: FACT_LIMIT_DEFAULT, description: "newest facts returned; a long-running recurrence can carry hundreds" },
+        link_limit: { type: "integer", default: LINK_LIMIT_DEFAULT, description: "links returned (max 500); a long-running recurrence can link thousands of runs, and links_total says how many exist" },
       }, required: ["ref"] },
       handler: async (c, _actor, args) => {
         const inc = await loadIncident(c, args.ref);
         const factLimit = Math.min(Math.max(Number(args.fact_limit) || FACT_LIMIT_DEFAULT, 1), 500);
+        const linkLimit = Math.min(Math.max(Number(args.link_limit) || LINK_LIMIT_DEFAULT, 1), LINK_LIMIT_MAX);
 
-        const [facts, hypotheses, links, services, duplicates, factTotal] = await Promise.all([
+        const [facts, hypotheses, links, services, duplicates, factTotal, linkTotal] = await Promise.all([
           c.query(`select text, source_ref, to_jsonb(recorded_at)#>>'{}' as recorded_at
                      from ops.incident_fact where incident_id = $1
                     order by recorded_at desc limit $2`, [inc.id, factLimit]),
@@ -704,13 +713,14 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
                      from ops.incident_hypothesis where incident_id = $1
                     order by recorded_at`, [inc.id]),
           c.query(`select kind, ref, note from ops.incident_link where incident_id = $1
-                    order by kind, ref`, [inc.id]),
+                    order by (kind in ('run','deployment')), kind, ref limit $2`, [inc.id, linkLimit]),
           c.query(`select s.key, s.name, s.criticality from ops.incident_service x
                      join ops.service s on s.id = x.service_id where x.incident_id = $1
                     order by s.key`, [inc.id]),
           c.query(`select ref, severity, state, title from ops.incident
                     where duplicate_of_id = $1 order by ref`, [inc.id]),
           c.query(`select count(*)::int as n from ops.incident_fact where incident_id = $1`, [inc.id]),
+          c.query(`select count(*)::int as n from ops.incident_link where incident_id = $1`, [inc.id]),
         ]);
 
         // THE CORRELATED JOURNEY. An incident's own correlation_id is one
@@ -754,6 +764,8 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
           facts_truncated: factTotal.rows[0].n > facts.rows.length,
           hypotheses: hypotheses.rows,
           links: links.rows,
+          links_total: linkTotal.rows[0].n,
+          links_truncated: linkTotal.rows[0].n > links.rows.length,
           services: services.rows,
           duplicates: duplicates.rows,
           trace: trace.rows,

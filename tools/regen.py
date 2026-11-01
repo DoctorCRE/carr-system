@@ -32,7 +32,7 @@ def regenerate():
         theirs = git('show', f':3:{REGISTRY}')
         parts = [OPERATIONS.split(source) for source in (ours, theirs)]
         if any(len(part) != 2 for part in parts) or parts[0] != parts[1]:
-            raise ValueError('registry conflict includes sealed metadata or grants; resolve those explicitly')
+            raise ValueError('registry conflict includes sealed metadata; resolve it explicitly')
         if OPERATIONS.split(original) != parts[0]:
             raise ValueError('registry has edits outside operations; preserve those before regeneration')
         target.write_bytes(ours)

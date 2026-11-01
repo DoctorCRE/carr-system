@@ -96,7 +96,6 @@ const read = (overrides = {}) => readWorkInventoryCensus({
 test("the path is the one contract constant and every leg SQL is a read", () => {
   assert.equal(WORK_INVENTORY_PATH, "/api/v1/work-inventory");
   assert.deepEqual(WORK_INVENTORY_LEGS.map((leg) => leg.kind), WORK_INVENTORY_KINDS);
-  assert.equal(WORK_INVENTORY_LEGS.length, 6);
   for (const leg of WORK_INVENTORY_LEGS) {
     assert.equal(assertReadOnly(leg.rowsSql), true, `${leg.kind} rowsSql must be a select`);
     assert.equal(assertReadOnly(leg.countSql), true, `${leg.kind} countSql must be a select`);

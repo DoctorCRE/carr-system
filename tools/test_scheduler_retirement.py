@@ -1,9 +1,13 @@
 """Retire scheduler SQL on the supported synthetic PostgreSQL rebuild."""
 import importlib.util
+import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +28,35 @@ EVIDENCE_TABLES = (
     'staging_release_approval_receipt', 'job_definition', 'job', 'job_attempt', 'job_receipt',
     'scac_mutation_registry_version', 'scac_mutation_registry_entry',
 )
+
+
+REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
+GRANTS = re.compile(r'\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = Object\.freeze\(([\s\S]*)\);\n$')
+
+
+def record_grant_migration(repo, name):
+    """Add one grant the way a branch does: a migration, plus any committed grant copy."""
+    number = {'a': 9001, 'b': 9002}[name]
+    row = {'grantee': 'carr_writer', 'relation': f'ops.wr622_grant_{name}', 'grantable': False,
+           'privilege': 'insert', 'ingress_key': f'db-relation-acl:ops.wr622_grant_{name}:carr_writer:insert',
+           'ingress_kind': 'db_relation_acl', 'relation_kind': 'r'}
+    (repo / f'migrations/{number}_grant_{name}.sql').write_text(f"""
+create table ops.wr622_grant_{name}(id int);
+grant insert on ops.wr622_grant_{name} to carr_writer;
+do $grant$
+declare contract jsonb := ops.scac_current_grant_contract();
+begin
+  contract := jsonb_set(contract,'{{relation_dml}}',contract->'relation_dml'||'{json.dumps(row)}'::jsonb);
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+end $grant$;
+""")
+    registry = repo / REGISTRY.split('/')[-1]
+    match = GRANTS.search(registry.read_text())
+    if match:
+        contract = json.loads(match[1])
+        contract['relation_dml'].append(row)
+        registry.write_text(registry.read_text()[:match.start(1)] + json.dumps(contract, indent=2) + ');\n')
 
 
 class SchedulerRetirementTests(unittest.TestCase):
@@ -94,6 +127,47 @@ class SchedulerRetirementTests(unittest.TestCase):
             conn.execute('grant insert on ops.provider_route to carr_writer')
             self.assertFalse(conn.execute('select ops.scac_mutation_catalog_v118_current()').fetchone()[0])
             with self.assertRaisesRegex(RuntimeError, 'retired grant is still installed'):
+                validate_current_catalog(conn.cursor())
+
+    def test_independent_grant_migrations_merge_and_validate(self):
+        """Two branches that each add a grant migration merge cleanly in either order."""
+        sys.path.insert(0, str(ROOT / 'ops'))
+        from scac_mutation_db_inventory import validate_current_catalog
+        with tempfile.TemporaryDirectory(prefix='grant-merge-') as temp:
+            repo = Path(temp)
+            from git_env import fixture_env
+            environment = fixture_env()
+            git = lambda *args: subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', *args], cwd=repo,
+                                               env=environment, capture_output=True, text=True)
+            (repo / 'migrations').mkdir()
+            (repo / 'migrations/.keep').write_text('')
+            shutil.copy(ROOT / REGISTRY, repo / REGISTRY.split('/')[-1])
+            git('init', '-q', '-b', 'main')
+            git('config', 'user.name', 'Synthetic fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            for name in ('a', 'b'):
+                git('checkout', '-q', '-b', name, 'main')
+                record_grant_migration(repo, name)
+                git('add', '.')
+                git('commit', '-qm', name)
+            for first, second in (('a', 'b'), ('b', 'a')):
+                git('checkout', '-q', '-B', 'merged', first)
+                merged = git('merge', '--no-edit', second)
+                self.assertEqual(merged.returncode, 0, f'{first} then {second}: {merged.stdout}{merged.stderr}')
+            migrations = sorted((repo / 'migrations').glob('*.sql'))
+            self.assertEqual([path.name for path in migrations], ['9001_grant_a.sql', '9002_grant_b.sql'])
+            sources = [path.read_text() for path in migrations]
+        with self.psycopg.connect(self.dsn) as conn, conn.transaction(force_rollback=True):
+            for source in sources:
+                conn.execute(source)
+            validate_current_catalog(conn.cursor())
+            with self.assertRaisesRegex(RuntimeError, 'current DB catalog drift: relation_dml'), conn.transaction():
+                conn.execute('grant update on ops.wr622_grant_a to carr_writer')
+                validate_current_catalog(conn.cursor())
+            with self.assertRaisesRegex(RuntimeError, 'registered grant missing'), conn.transaction():
+                conn.execute('revoke insert on ops.wr622_grant_b from carr_writer')
                 validate_current_catalog(conn.cursor())
 
     @staticmethod

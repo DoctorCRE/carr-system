@@ -35,7 +35,8 @@ def _name(raw: object, kind: str) -> str:
 
 
 def file_attachment(deal: str, meta: dict, data: bytes, *, message_id: str, client_ref: str | None,
-                    put_object: Callable[[str, str, bytes], dict], carr: Callable[[str, dict], dict]) -> dict:
+                    put_object: Callable[[str, str, bytes], dict], carr: Callable[[str, dict], dict],
+                    activity_id: str | None = None) -> dict:
     """Status of one attachment: stored, existing, or a refusal reason; never raises."""
     kind = att.detect(data)
     if kind not in att.DEAL_TYPES:
@@ -52,9 +53,12 @@ def file_attachment(deal: str, meta: dict, data: bytes, *, message_id: str, clie
     except Exception as error:  # noqa: BLE001 - one upload failure must not stop the rest
         return {'status': 'upload_failed', 'sha256': sha, 'error': type(error).__name__}
     source = f"{message_id}/{meta.get('id')}"
-    args = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, f'attach-deal-file|{deal}|{source}|{sha}')),
+    identity = f'attach-deal-file|{deal}|{source}|{sha}' + (f'|{activity_id}' if activity_id else '')
+    args = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, identity)),
             'deal': deal, 'r2_key': key, 'filename': filename, 'mime': att.DEAL_TYPES[kind],
             'sha256': sha, 'bytes': len(data), 'source': source}
+    if activity_id:
+        args['activity_id'] = activity_id
     try:
         reply = carr('attach-deal-file', args)
     except Exception as error:  # noqa: BLE001 - the object stays archived; a rerun records it
