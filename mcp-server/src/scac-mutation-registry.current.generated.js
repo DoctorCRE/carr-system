@@ -1241,6 +1241,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "ideal-client-profile": {
+    "ingress_key": "mcp-tool:ideal-client-profile",
+    "source_locator": "mcp-server/src/lead-follow-up.ts",
+    "schema_digest": "200e2e5790419f4fc37d8fb8da737732cc487fc663c7bb5404275593e7b6feb8",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "incident-board": {
     "ingress_key": "mcp-tool:incident-board",
     "source_locator": "mcp-server/src/incident.js",
@@ -1691,6 +1701,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "market-practice-map": {
+    "ingress_key": "mcp-tool:market-practice-map",
+    "source_locator": "mcp-server/src/lead-follow-up.ts",
+    "schema_digest": "200e2e5790419f4fc37d8fb8da737732cc487fc663c7bb5404275593e7b6feb8",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "measure-placement": {
     "ingress_key": "mcp-tool:measure-placement",
     "source_locator": "mcp-server/src/tools.js",
@@ -2072,6 +2092,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "prospect-research": {
+    "ingress_key": "mcp-tool:prospect-research",
+    "source_locator": "mcp-server/src/lead-follow-up.ts",
+    "schema_digest": "f095a14b2ad92a51e0ffb91b530bc24be7c9bade075d5a832e1311a649bd4157",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "publish-board-snapshot": {
     "ingress_key": "mcp-tool:publish-board-snapshot",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -2087,6 +2117,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/census-inventory.js",
     "schema_digest": "e4aa7ce018e2b08b4da37686d699eab0ca534cc0319d9df096401d96a4e31417",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "quiet-follow-ups": {
+    "ingress_key": "mcp-tool:quiet-follow-ups",
+    "source_locator": "mcp-server/src/lead-follow-up.ts",
+    "schema_digest": "037640c2932ce4804d4d9b08127658569bd28b6d5b48c49f35e9e92f538881c7",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
@@ -3624,6 +3664,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/work-request-intake.js",
     "schema_digest": "7be9820032d47bb94888aad94a52f89a50aa5fa7e0638d1d689fefdca03f8ccf",
     "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "territory-state-board": {
+    "ingress_key": "mcp-tool:territory-state-board",
+    "source_locator": "mcp-server/src/lead-follow-up.ts",
+    "schema_digest": "200e2e5790419f4fc37d8fb8da737732cc487fc663c7bb5404275593e7b6feb8",
+    "write": false,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,

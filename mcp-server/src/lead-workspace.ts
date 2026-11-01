@@ -6,6 +6,8 @@ type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
 // The existing default is Error; production injects the structured ToolError.
 type ErrorConstructor = new (payload: any) => Error;
 
+import { leadAdvice, researchSummary, researchEvidenceSql } from "./lead-follow-up.ts";
+
 import { isCalendarDate } from "./calendar-date.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
@@ -56,6 +58,7 @@ export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = 
     ) select coalesce((select jsonb_agg(to_jsonb(b) order by b.stage_sort,b.score desc nulls last,b.name,b.id)
         from board b),'[]'::jsonb) as leads,
       (select to_jsonb(b)||d.detail||jsonb_build_object(
+        'research_evidence',${researchEvidenceSql('b.party_id')},
         'correspondence',coalesce((select jsonb_agg(to_jsonb(a)-'lead_id' order by a.occurred_at desc,a.id desc) from correspondence_page a),'[]'::jsonb),
         'stage_history',coalesce((select jsonb_agg(to_jsonb(e)-'lead_id'||jsonb_build_object('mutation_order',e.mutation_order::text) order by e.mutation_order desc) from stage_page e),'[]'::jsonb),
         'correspondence_page',jsonb_build_object('total',(select count(*) from correspondence),'has_more',(select count(*)>100 from correspondence_tail),
@@ -66,9 +69,10 @@ export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = 
             (select e.mutation_order::text from stage_page e order by e.mutation_order limit 1) end))
         from board b join v_lead_workspace_detail d on d.id=b.id
         where b.id=$1::uuid) as detail`, [args.lead_id || null, cursor?.occurred_at || null, cursor?.id || null, args.stage_history_cursor || null])).rows[0];
+  const { research_evidence, ...detail } = row.detail || {};
   return { schema_version: LEAD_WORKSPACE_VERSION, generated_at: new Date().toISOString(),
-    leads: row.leads, last_search_at: null, search_run_coverage: "unavailable",
-    ...(args.lead_id ? { detail: row.detail } : {}) };
+    leads: row.leads.map(leadAdvice), last_search_at: null, search_run_coverage: "unavailable",
+    ...(args.lead_id ? { detail: row.detail ? { ...leadAdvice(detail), research: researchSummary(research_evidence) } : null } : {}) };
 }
 
 export function validateStageReview(review: StageReview, fields: object, ToolError: ErrorConstructor) {
