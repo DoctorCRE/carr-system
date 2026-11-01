@@ -32,9 +32,6 @@ function result(out) {
   if (!out.ok) throw new ToolError({ error: out.error });
   return out;
 }
-function jobContract(args) {
-  return Object.fromEntries(Object.keys(contract).map(key => [key, args[key]]));
-}
 
 export function dealExtractionTools() {
   return {
@@ -56,10 +53,11 @@ export function dealExtractionTools() {
       handler: async (c, actor, args) => {
         jobOnly(actor);
         const invalid = () => { throw new ToolError({ error: 'validation_error' }); };
-        const request = jobContract(args);
+        const request = Object.fromEntries(Object.keys(contract).map(key => [key, args[key]]));
         if (Object.keys(contract).some(key => args.receipt.contract[key] !== request[key])) invalid();
+        const expectedKeys = args.extractor_version === 'deal-text.v1' ? factKeys.slice(0, 4) : factKeys;
         const accounted = [...args.observations.map(o => o.fact_key), ...args.receipt.abstentions.map(a => a.fact_key)];
-        if (accounted.length !== (args.extractor_version === 'deal-text.v1' ? 4 : 5) || new Set(accounted).size !== accounted.length || accounted.some(key => !(args.extractor_version === 'deal-text.v1' ? factKeys.slice(0, 4) : factKeys).includes(key))) invalid();
+        if (accounted.length !== expectedKeys.length || new Set(accounted).size !== accounted.length || accounted.some(key => !expectedKeys.includes(key))) invalid();
         if (args.receipt.abstentions.some(a => (a.status === 'not_present') !== (a.reason === 'absent'))) invalid();
         if (args.observations.length) validateFactObservations({ entity_ref: args.entity_ref, observations: args.observations });
         if (args.receipt.passes[0].phase !== 'extract' || args.receipt.passes[1].phase !== 'ground') invalid();
