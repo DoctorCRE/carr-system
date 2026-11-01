@@ -10,7 +10,7 @@ import unittest
 import unittest.mock
 from concurrent.futures import ThreadPoolExecutor
 
-HOOK = Path(__file__).with_name('orchestrator-rotation.py')
+HOOK = Path(__file__).resolve().parent.parent / 'hooks/orchestrator-rotation.py'
 MARKER = 'CARR-Session-Role: orchestrator'
 
 
