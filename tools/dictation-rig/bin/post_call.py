@@ -11,6 +11,7 @@ checks in post_call_jev.py can never block the review pack.
 from __future__ import annotations
 
 import contextlib
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -26,6 +27,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
+
+import call_budget
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -794,6 +797,46 @@ def run_session(session_dir: Path, *, publish: bool = True) -> dict[str, Any]:
     return status
 
 
+def transcript_repeat_field(report: Any, transcript: dict[str, Any]) -> str | None:
+    """Return only the field path of a 15-word transcript run, never its text."""
+    words = re.findall(r"[^\W_]+", " ".join(
+        segment.get("text", "") for segment in transcript.get("segments", [])).casefold())
+    shingles = {tuple(words[i:i + 15]) for i in range(len(words) - 14)}
+
+    def find(value: Any, path: str) -> str | None:
+        if isinstance(value, str):
+            tokens = re.findall(r"[^\W_]+", value.casefold())
+            if any(tuple(tokens[i:i + 15]) in shingles for i in range(len(tokens) - 14)):
+                return path
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"evidence", "evidence_quote"}:
+                    continue
+                found = find(child, f"{path}.{key}" if path else key)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                found = find(child, f"{path}[{index}]")
+                if found is not None:
+                    return found
+        return None
+
+    return find(report, "")
+
+
+def hold_transcript_repeat(session_dir: Path, report: dict[str, Any]) -> dict[str, Any] | None:
+    transcript = read_json(session_dir / "transcript.json")
+    field = transcript_repeat_field(report, transcript) if transcript is not None else None
+    if field is None:
+        return None
+    status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
+    status.update(state="held_review", reason="summary_repeats_transcript", field=field,
+                  updated_at=now(), next_attempt_at=None)
+    write_private(session_dir / STATUS_FILE, status)
+    return status
+
+
 @contextlib.contextmanager
 def session_lock(session_dir: Path, *, blocking: bool = True):
     lock_path = session_dir / LOCK_FILE
@@ -842,13 +885,44 @@ def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, An
 
 def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, Any]], dict[str, Any]], *,
                             run_checks: bool = True, max_attempts: int = 3) -> dict[str, Any]:
+    existing = read_json(session_dir / STATUS_FILE) or {}
+    if existing.get("state") == "held_review":
+        return existing
     if (session_dir / REPORT_FILE).exists():
-        existing = read_json(session_dir / STATUS_FILE)
-        if existing is not None and existing.get("state") in {"ready_review", "filed"}:
-            return existing
+        held = hold_transcript_repeat(session_dir, read_json(session_dir / REPORT_FILE) or {})
+        if held is not None:
+            return held
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
             raise ContractError("post-call report is unreadable")
+        if report.get("checks_hold") and any((item.get("checks") or {}).get("reason")
+                                             for item in _report_candidates(report)):
+            hold_day = report.get("checks_hold_day") or call_budget.budget_day(
+                datetime.fromtimestamp((session_dir / REPORT_FILE).stat().st_mtime, timezone.utc))
+            if call_budget.budget_day() <= hold_day:
+                return read_json(session_dir / STATUS_FILE) or _complete_session(session_dir, report)
+            import post_call_jev
+
+            try:
+                resume_context = context_from_session(session_dir) or fetch_context(session_dir)
+                stored = read_json(session_dir / CONTEXT_FILE) or {}
+                resume_context = {**resume_context, "speaker_labels": stored.get("speaker_labels"),
+                                  "local_partner": stored.get("recorder")}
+                transcript = read_json(session_dir / "transcript.json")
+                if transcript is None:
+                    raise ContractError("transcript.json is required to resume Jev checks")
+                resumed = deepcopy(report)
+                post_call_jev.check_distillation(resumed, resume_context, transcript, client=_jev_fixture_client(),
+                                                budget_ledger=session_dir.parent / ".jev-budget.json")
+                report = resumed
+            except Exception as exc:
+                _deal_check_unavailable(report, session_dir, exc)
+            with update_report(session_dir, initial=report, locked=True) as current:
+                current.clear()
+                current.update(report)
+        existing = read_json(session_dir / STATUS_FILE) or {}
+        if existing.get("state") in {"ready_review", "filed"}:
+            return existing
         return _complete_session(session_dir, report)
     existing = read_json(session_dir / STATUS_FILE) or {}
     attempts = existing.get("extraction_attempts", 0)
@@ -898,7 +972,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
               "extraction_attempts": attempts, "next_attempt_at": next_attempt_at, "reason": "Extraction attempt did not finish."}
     write_private(session_dir / STATUS_FILE, status)
     try:
-        result = normalize_distillation(distiller(request), context, session_dir.name,
+        raw = distiller(request)
+        held = hold_transcript_repeat(session_dir, raw)
+        if held is not None:
+            return held
+        result = normalize_distillation(raw, context, session_dir.name,
                                        call_date=call_date, transcript=transcript)
     except (RuntimeError, ContractError, OSError, subprocess.SubprocessError) as exc:
         failed_at = now()
@@ -921,26 +999,31 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             result, speaker_context, transcript, client=_jev_fixture_client(),
             budget_ledger=session_dir.parent / ".jev-budget.json")
     except Exception as exc:
-        exception_class = type(exc).__name__
-        deal_check_status = {"status": "unavailable", "exception_class": exception_class}
-        result["deal_check"] = deal_check_status
+        _deal_check_unavailable(result, session_dir, exc)
+    result = mark_automatic(result, transcript, speaker_context)
+    with update_report(session_dir, initial=result, locked=True):
+        pass
+    return _complete_session(session_dir, result)
+
+
+def _deal_check_unavailable(result: dict[str, Any], session_dir: Path, exc: Exception) -> None:
+    exception_class = type(exc).__name__
+    deal_check_status = {"status": "unavailable", "exception_class": exception_class}
+    result["deal_check"] = deal_check_status
+    if not result.get("checks_hold"):
         reason = f"Deal check unavailable ({exception_class}); review proposals manually."
         for key in ("joe_tasks", "dell_tasks", "deal_updates", "draft_proposals"):
             for item in result[key]:
                 item["checks"] = {"unavailable": True, "flagged": True, "reasons": [reason]}
         result["review_questions"].append({"id": _review_id(session_dir.name, "jev_unavailable", 1),
                                            "question": reason, "resolved": False})
-        try:
-            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with LOG_PATH.open("a", encoding="utf-8") as handle:
-                handle.write(f"{now()} deal check unavailable session={session_dir.name} "
-                             f"exception={exception_class}\n")
-        except OSError:
-            pass
-    result = mark_automatic(result, transcript, speaker_context)
-    with update_report(session_dir, initial=result, locked=True):
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(f"{now()} deal check unavailable session={session_dir.name} "
+                         f"exception={exception_class}\n")
+    except OSError:
         pass
-    return _complete_session(session_dir, result)
 
 
 def _report_candidates(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -972,6 +1055,8 @@ def review_complete(report: dict[str, Any]) -> bool:
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     with session_lock(session_dir):
+        if (read_json(session_dir / STATUS_FILE) or {}).get("state") == "held_review":
+            return None
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
                 return None
@@ -1227,6 +1312,18 @@ def report_for_deal_room(session_dir: Path) -> dict[str, Any]:
     return {"status": status, "report": visible}
 
 
+def jev_question_id(session: str) -> str:
+    return hashlib.sha256(f"{session}:jev_partial_unavailable".encode()).hexdigest()[:16]
+
+
+def clear_checks_hold(report: dict[str, Any]) -> None:
+    hold = report.pop("checks_hold", None)
+    report.pop("checks_hold_day", None)
+    if hold:
+        narrative = report.get("report", {})
+        narrative["open_questions"] = [q for q in narrative.get("open_questions", []) if q != hold]
+
+
 def resolve_question(session_dir: Path, question_id: str, resolution: str) -> dict[str, Any]:
     with update_report(session_dir) as report:
         _string(resolution, "resolution")
@@ -1236,6 +1333,8 @@ def resolve_question(session_dir: Path, question_id: str, resolution: str) -> di
                     raise ContractError("already_resolved")
                 question["resolved"] = True
                 question["resolution"] = resolution
+                if question_id == jev_question_id(session_dir.name):
+                    clear_checks_hold(report)
                 return {"question_id": question_id, "resolved": True}
         raise ContractError("unknown question id")
 
