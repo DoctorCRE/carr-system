@@ -46,6 +46,11 @@ test('a participant document reply proposes its open request without fulfilling 
       create table party(id uuid primary key,email text,deleted_at timestamptz,merged_into uuid);
       create table deal_participant(deal_id uuid,party_id uuid,to_at timestamptz);`);
     await c.query(readFileSync(new URL('../../migrations/1116_requirement_document_replies.sql', import.meta.url),'utf8'));
+    for (const name of ['notification', 'notification_delivery'])
+      await c.query(schema.match(new RegExp(`CREATE TABLE ops\\.${name} \\([\\s\\S]*?\\n\\);`))[0]);
+    await c.query(readFileSync(new URL('../../migrations/1114_home_inbox.sql', import.meta.url), 'utf8').split('create or replace function ops.notification_feed_facts')[0]);
+    await c.query(readFileSync(new URL('../../migrations/1132_checklist_fulfilled_reminders.sql', import.meta.url), 'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1133_checklist_receipt_filename.sql', import.meta.url), 'utf8'));
     const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2020-01-01' });
     const checklist = () => readDealChecklist(c, { id: deal, type: 'purchase', owner: 'joe' }, new Date('2026-10-20T17:00:00Z'));
     assert.equal(requested.request.document_type, 'title_commitment');
@@ -66,10 +71,30 @@ test('a participant document reply proposes its open request without fulfilling 
     const pending = await checklist();
     assert.equal(pending.due_items.find(row => row.id === 'title_commitment').status, 'overdue');
     await t.test('confirm fulfills with the stored attachment, while satisfaction remains separate', async () => {
+      const queued = randomUUID();
+      await c.query(`insert into ops.notification(id,subject_type,subject_ref,event_ref,event_source,recipient_actor,reason,severity,deep_link,dedupe_key)
+        values($1,'deal',$2,$3,'event',$4,'Synthetic due document','action_required','/notifications',$5)`,
+      [queued,deal,randomUUID(),actor.id,`deal-checklist:${deal}:title_commitment:2020-01-01`]);
+      await c.query(`insert into ops.notification_delivery(notification_id,channel,state,held_until)
+        values($1,'in_app','held_until_morning',now()+interval '1 hour'),($1,'device','pending',null)`,[queued]);
+      const controls = [];
+      for (const [subject, key] of [[deal,`deal-checklist:${deal}:appraisal:2020-01-01`],
+        [other,`deal-checklist:${other}:title_commitment:2020-01-01`]]) {
+        const id = randomUUID(); controls.push(id);
+        await c.query(`insert into ops.notification(id,subject_type,subject_ref,event_ref,event_source,recipient_actor,reason,severity,deep_link,dedupe_key)
+          values($1,'deal',$2,$3,'event',$4,'Other due document','action_required','/notifications',$5)`,
+        [id,subject,randomUUID(),actor.id,key]);
+        await c.query("insert into ops.notification_delivery(notification_id,channel,state) values($1,'device','pending')",[id]);
+      }
       const proposal = proposals.proposals[0];
       const result = await call('confirm-requirement-reply',{proposal_id:proposal.id,base_version:proposal.version,
         proposal_digest:proposal.proposal_digest,request_id:requested.request.id});
       assert.equal(result.request_status,'fulfilled');
+      assert.deepEqual((await c.query('select state from ops.notification_delivery where notification_id=$1',[queued])).rows.map(r=>r.state),
+        ['suppressed_fulfilled','suppressed_fulfilled']);
+      assert.equal((await c.query('select ops.notification_visible($1) as visible',[queued])).rows[0].visible,false);
+      assert.deepEqual((await c.query('select state from ops.notification_delivery where notification_id=any($1::uuid[])',[controls])).rows.map(r=>r.state),
+        ['pending','pending']);
       const row = (await call('list-requirement-requests',{deal})).requests[0];
       assert.equal(row.status,'fulfilled');
       assert.equal(row.evidence_attachment_id,attached.attachment_id);
@@ -82,7 +107,7 @@ test('a participant document reply proposes its open request without fulfilling 
       assert.ok(item.request.fulfilled_at);
       assert.equal(item.request.fulfilled_by, actor.id);
       assert.equal(item.request.evidence_attachment_id, attached.attachment_id);
-      assert.equal(item.evidence_ref, `attachment:${attached.attachment_id}`);
+      assert.equal(item.evidence_ref, 'Title.pdf');
       assert.equal(received.due_items.some(item => item.id === 'title_commitment'), false);
       assert.equal((await call('list-requirement-reply-proposals',{deal})).proposals.length,0);
     });
