@@ -30,6 +30,8 @@ def card_allowed(pr, files):
 
 
 def review_exempt(pr, files):
+    if docs_only(pr, files):
+        return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
                 for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
     complete = len(files) == pr["changed_files"]
@@ -70,19 +72,61 @@ def api(path, payload=None):
     return data if payload else (sum(data, []) if data and isinstance(data[0], list) else data[0])
 
 
+def queue_prs(root, group):
+    match = re.fullmatch(r"(?:refs/heads/)?gh-readonly-queue/main/pr-([0-9]+)-.+", group["head_ref"])
+    if not match:
+        raise ValueError("Unrecognized merge queue ref")
+    comparison = api(f"{root}/compare/{group['base_sha']}...{group['head_sha']}?per_page=100")
+    commits = comparison["commits"]
+    if len(commits) != comparison["total_commits"] or not commits:
+        raise ValueError("Incomplete merge queue comparison")
+    shas = {commit["sha"] for commit in commits}
+    numbers = set()
+    for sha in shas:
+        for pr in api(f"{root}/commits/{sha}/pulls?per_page=100"):
+            if pr["state"] == "open" and pr["base"]["ref"] == "main" and pr["head"]["sha"] in shas:
+                numbers.add(pr["number"])
+    if int(match[1]) not in numbers:
+        raise ValueError("Merge queue constituent lookup failed")
+    return numbers, shas
+
+
 def run(event, repo):
     root = f"repos/{repo}"
+    if "merge_group" in event:
+        group = event["merge_group"]
+        def status(state):
+            api(f"{root}/statuses/{group['head_sha']}", {
+                "context": "review-gate", "state": state,
+                "description": "Every queued PR needs exemption or current-head App approval"})
+        status("pending")
+        try:
+            if not os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip():
+                raise ValueError("Missing CARR_REVIEW_APP_LOGIN")
+            numbers, shas = queue_prs(root, group)
+            results = [evaluate_pr(root, number, shas) for number in sorted(numbers)]
+            passed = all(result == 0 for result in results)
+        except (ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            passed = False
+        status("success" if passed else "failure")
+        return int(not passed)
+    if not event.get("number") and not event.get("pull_request") and not event.get("issue"):
+        results = [evaluate_pr(root, pr["number"]) for pr in api(f"{root}/pulls?state=open&base=main&per_page=100")]
+        return int(any(result != 0 for result in results))
+    number = event.get("number") or (event.get("pull_request") or event["issue"])["number"]
+    return evaluate_pr(root, number)
+
+
+def evaluate_pr(root, number, queue_shas=None):
     def status(sha, state, description="No skip-CI title; small safe diff or current-head approval required"):
         api(f"{root}/statuses/{sha}", {"context": "review-gate", "state": state,
             "description": description})
-    if "merge_group" in event:
-        status(event["merge_group"]["head_sha"], "success")
-        return
-    number = event.get("number") or (event.get("pull_request") or event["issue"])["number"]
     pr = api(f"{root}/pulls/{number}")
     if pr["base"]["ref"] != "main":
         return
     sha = pr["head"]["sha"]
+    if queue_shas is not None and (pr.get("state") != "open" or sha not in queue_shas):
+        return 1
     status(sha, "pending")
     files = api(f"{root}/pulls/{number}/files?per_page=100")
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")

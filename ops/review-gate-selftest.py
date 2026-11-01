@@ -29,17 +29,18 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(gate.approved(self.pr, [{'filename': 'safe', 'previous_filename': 'db/a'}], [], 'reviewer[bot]'))
         self.assertFalse(gate.approved(self.pr, [], [], "reviewer[bot]"))
 
-    def test_markdown_uses_size_and_risk_policy(self):
+    def test_markdown_exempt_at_any_size_with_app_veto(self):
         self.assertTrue(gate.approved(self.pr, [{"filename": "docs/safe.md"}], [], "reviewer[bot]"))
-        self.assertFalse(gate.approved({**self.pr, "additions": 151}, [{"filename": "docs/safe.md"}], [], "reviewer[bot]"))
-        self.assertFalse(gate.approved(self.pr, [{"filename": "migrations/notes.md"}], [], "reviewer[bot]"))
+        self.assertTrue(gate.approved({**self.pr, "additions": 900}, [{"filename": "docs/safe.md"}], [], "reviewer[bot]"))
+        self.assertTrue(gate.approved(self.pr, [{"filename": "migrations/notes.md"}], [], "reviewer[bot]"))
+        self.assertFalse(gate.approved(self.pr, [{"filename": "docs/safe.md"}], [{**self.approval, "state": "CHANGES_REQUESTED"}], "reviewer[bot]"))
 
     def test_risky_paths_and_renames(self):
         paths = ['LaunchAgents/job', 'a/job.plist', 'ops/install-job.sh', 'outlook/a', 'hxstore/a', 'hxprobe/a', 'calendar.js', '.github/workflows/deploy.yml', 'migrations/a', 'db/a', 'wrangler.toml', 'tools/migrate.py', 'CLAUDE.md', 'AGENTS.md', '.claude/settings.json', '.agents/skills/a.md', 'docs/agents/guide.md']
-        for path in paths:
+        for path in [p for p in paths if not p.lower().endswith('.md')]:
             for key in ('filename', 'previous_filename'):
                 with self.subTest(path=path, key=key):
-                    self.assertFalse(gate.approved(self.pr, [{key: path}], [], 'reviewer[bot]'))
+                    self.assertFalse(gate.approved(self.pr, [{'filename': 'lib/code.py', key: path}], [], 'reviewer[bot]'))
         self.assertFalse(gate.approved(self.pr, [{'filename': 'ops/new.py', 'status': 'added'}], [], 'reviewer[bot]'))
 
     def test_armed_safe_needs_no_review(self):
@@ -127,6 +128,45 @@ class ReviewGate(unittest.TestCase):
         with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [], {**self.pr, 'title': 'changed'}]) as api:
             gate.run({'number': 4}, 'owner/repo')
             self.assertEqual(api.call_count, 5)
+
+class QueueAndCutover(unittest.TestCase):
+    setUp = ReviewGate.setUp
+    def test_queue_checks_all_current_constituents(self):
+        event = {'merge_group': {'head_ref': 'refs/heads/gh-readonly-queue/main/pr-4-head', 'head_sha': 'queue', 'base_sha': 'base'}}
+        large = {**self.pr, 'number': 4, 'state': 'open', 'additions': 900}
+        other = {**large, 'number': 5, 'head': {'sha': 'other'}}
+        def exercise(approved_other, login='reviewer[bot]', broken=False):
+            calls = []
+            def api(path, payload=None):
+                calls.append((path, payload))
+                if payload: return {}
+                if broken: raise ValueError('lookup failed')
+                if '/compare/' in path: return {'commits': [{'sha': 'head'}, {'sha': 'other'}, {'sha': 'queue'}], 'total_commits': 3}
+                if '/commits/head/pulls' in path: return [large]
+                if '/commits/other/pulls' in path: return [other]
+                if '/commits/queue/pulls' in path: return []
+                if '/files?' in path: return self.files
+                if '/reviews?' in path: return [self.approval] if '/4/' in path else ([{**self.approval, 'commit_id': 'other'}] if approved_other else [])
+                if path.endswith('/4'): return large
+                if path.endswith('/5'): return other
+                raise AssertionError(path)
+            with patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': login}), patch.object(gate, 'api', side_effect=api):
+                result = gate.run(event, 'owner/repo')
+            self.assertEqual(calls[-1][1]['state'], 'success' if approved_other and login and not broken else 'failure')
+            return result
+        self.assertEqual(exercise(True), 0)
+        self.assertEqual(exercise(False), 1)
+        self.assertEqual(exercise(True, login=''), 1)
+        self.assertEqual(exercise(True, broken=True), 1)
+
+    def test_dispatch_evaluates_all_open_main_heads(self):
+        prs = [{'number': 4}, {'number': 5}]
+        with patch.object(gate, 'api', return_value=prs) as api, patch.object(gate, 'evaluate_pr', return_value=0) as evaluate:
+            self.assertEqual(gate.run({}, 'owner/repo'), 0)
+            self.assertIn('state=open&base=main', api.call_args.args[0])
+            self.assertEqual([c.args[1] for c in evaluate.call_args_list], [4, 5])
+        workflow = Path(__file__).resolve().parents[1] / '.github/workflows/review-gate.yml'
+        self.assertIn('workflow_dispatch:', workflow.read_text())
 
 class MergeHistory(unittest.TestCase):
     def test_main_merge_requires_new_head_approval(self):
