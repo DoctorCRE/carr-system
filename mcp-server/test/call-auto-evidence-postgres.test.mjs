@@ -2,7 +2,6 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
@@ -20,7 +19,6 @@ before(async () => {
     '-f', new URL('../../db/schema.sql', import.meta.url).pathname], { maxBuffer: 4 * 1024 * 1024 });
   await applyPendingDealRoomReads(c);
   await c.query('alter table activity add column email_context jsonb, add column email_source jsonb, add column email_identity jsonb');
-  await c.query(readFileSync(new URL('../../migrations/1125_calendar_confirmation.sql', import.meta.url), 'utf8'));
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic phase physician',$1,$1) returning id", [actor.id])).rows[0].id;
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");

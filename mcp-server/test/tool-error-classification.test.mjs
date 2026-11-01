@@ -32,8 +32,6 @@ const INTERNAL_ONLY = new Set([
   "bad_occurred_on",
   "bad_option",
   "below_confidence_bar",
-  "calendar_event_key_invalid",
-  "calendar_event_key_requires_deal_meeting",
   "calendar_history_too_large",
   "call_already_undone",
   "campaign_exists",

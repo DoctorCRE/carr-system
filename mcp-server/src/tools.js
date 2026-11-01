@@ -2862,7 +2862,7 @@ export const TOOLS = {
 
   "find": {
     write: false,
-    description: "Search people, practices, buildings, deals, leads, vendors by name (fuzzy). Use FIRST when you only have a name; returns refs (L-/C-/V-) the write verbs take. Matches party.name / deal.name / client.roster_ref. Survivors come first and are counted separately from retired aliases: `refs`/`live_rows` are what you may write to, `retired_refs`/`retired_aliases` are tombstones of completed merges, kept navigable but never a target. Also returns the intro-graph edges touching the match (who can introduce whom), newest first. FOLLOWS THE LEAD ↔ CLIENT LINK SINCE 0102: `lead_client_links` pairs a matched lead with the client it became (or sits under), by exact key and never by name, and `deals_via_link` carries the deals filed under that client — which is how a search for a doctor's name finally surfaces the deal filed under their practice's name. `deals` remains the name-match list and the two are never blended. NOT the verb for a ref you already hold (catch-me-up takes that), and NOT the referral-path verb (who-do-we-know walks the graph). Read-only.",
+    description: "Search people, practices, buildings, deals, leads, vendors by name (fuzzy) or exact contact email (case-insensitive). Use FIRST when you only have a name; returns refs (L-/C-/V-) the write verbs take. Matches party.name / deal.name / client.roster_ref. Survivors come first and are counted separately from retired aliases: `refs`/`live_rows` are what you may write to, `retired_refs`/`retired_aliases` are tombstones of completed merges, kept navigable but never a target. Also returns the intro-graph edges touching the match (who can introduce whom), newest first. FOLLOWS THE LEAD ↔ CLIENT LINK SINCE 0102: `lead_client_links` pairs a matched lead with the client it became (or sits under), by exact key and never by name, and `deals_via_link` carries the deals filed under that client — which is how a search for a doctor's name finally surfaces the deal filed under their practice's name. `deals` remains the name-match list and the two are never blended. NOT the verb for a ref you already hold (catch-me-up takes that), and NOT the referral-path verb (who-do-we-know walks the graph). Read-only.",
     inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
     handler: async (c, _a, args) => {
       const q = args.query;
@@ -2879,7 +2879,8 @@ export const TOOLS = {
         `select display_name as name, city, specialty, org_name, ref, subject_type as kind, merged
          from v_ref_index
          where subject_type in ('lead','client','vendor')
-           and (display_name % $1 or display_name ilike $2)
+           and (display_name % $1 or display_name ilike $2
+             or party_id in (select id from party where lower(trim(email))=lower(trim($1))))
          order by merged, similarity(display_name,$1) desc limit 10`, [q, `%${q}%`]);
       // ORGS AND UNLINKED PEOPLE, GROUPED (0056, 2026-08-02). Until migration 0056
       // v_ref_index held only role records, so 415 org parties were invisible here:
@@ -2932,7 +2933,8 @@ export const TOOLS = {
                            filter (where not merged and subject_type <> 'party'),
                          '{}'::text[]) as role_refs
          from v_ref_index
-         where (display_name % $1 or display_name ilike $2)
+         where (display_name % $1 or display_name ilike $2
+           or party_id in (select id from party where lower(trim(email))=lower(trim($1))))
          group by display_name
         having count(*) filter (where subject_type='party') > 0
          order by similarity(display_name,$1) desc limit 5`, [q, `%${q}%`]);
@@ -3799,7 +3801,7 @@ export const TOOLS = {
             where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
           [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
         calendar = calendarSection(result.rows[0]?.snapshot_json);
-        if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar);
+        if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar, actor);
         if (calendar?.sources && calendar.items.length) {
           await addCalendarContacts(c, calendar);
           await addCalendarDealSuggestions(c, calendar, scope.sponsor);
