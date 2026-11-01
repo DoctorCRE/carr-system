@@ -42,7 +42,7 @@ for (const researched of [false, true]) {
       const db = new Fake();
       await assert.rejects(executeRegisteredTool(db, actor, "add-party", {
         ...base, name, force_new, ...(researched ? { research_evidence: research } : {}),
-      }), e => e.payload?.error === "full_person_name_required");
+      }), e => e.payload?.error === (name === "" ? "missing_required" : "full_person_name_required"));
       assert.deepEqual(db.inserts, []);
       assert.deepEqual(db.flags, []);
     });

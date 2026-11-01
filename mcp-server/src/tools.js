@@ -5068,8 +5068,13 @@ export const TOOLS = {
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-party", args, async () => {
       const kind = args.kind || "person";
       if (kind === "person") {
-        const tokens = args.name.match(/\p{L}+/gu) || [];
-        if (args.name.trim().split(/\s+/u).length < 2 || tokens.length < 2 || [...tokens[0]].length < 2 || [...tokens.at(-1)].length < 2 || args.name.includes("@"))
+        const credentials = new Set("MD DO DDS DMD DPM DC OD PHD PSYD DPT PT PA PAC NP RN APRN CRNA MBA MHA MPH JD ESQ CPA JR SR II III IV".split(" "));
+        const parts = args.name.split(/[\s,]+/u).filter(token => {
+          if (credentials.has(token.replace(/\./g, "").toUpperCase())) return false;
+          const letters = token.replace(/['’.-]/gu, "").match(/\p{L}/gu) || [];
+          return letters.length >= 2 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(token);
+        });
+        if (!args.name.trim() || args.name.includes("@") || parts.length < 2)
           throw new ToolError({ error: "full_person_name_required" });
       }
       if (args.phone && args.phone.replace(/\D/g, "").endsWith("2056436555"))

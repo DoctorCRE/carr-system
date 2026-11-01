@@ -30,6 +30,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import unicodedata
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,11 +127,20 @@ def _names_conflict(display: str | None, name: str) -> bool:
     return {shown[0], shown[-1]} != {own[0], own[-1]}
 
 
-def _full_name(name: str | None, email: str) -> bool:
-    tokens = "".join(char if char.isalpha() else " " for char in name or "").split()
-    return (len((name or "").split()) >= 2 and len(tokens) >= 2
-            and len(tokens[0]) > 1 and len(tokens[-1]) > 1
-            and "@" not in (name or "") and _norm(name) != email)
+def _full_name(name: str | None) -> bool:
+    if not name or not name.strip() or "@" in name:
+        return False
+    credentials = set("MD DO DDS DMD DPM DC OD PHD PSYD DPT PT PA PAC NP RN APRN CRNA MBA MHA MPH JD ESQ CPA JR SR II III IV".split())
+    parts = 0
+    for token in re.split(r"[\s,]+", name):
+        if token.replace(".", "").upper() in credentials:
+            continue
+        letters = sum(char.isalpha() for char in re.sub(r"['’.-]", "", token))
+        if letters >= 2 or any(
+                any(script in unicodedata.name(char, "") for script in ("CJK", "HIRAGANA", "KATAKANA", "HANGUL"))
+                for char in token):
+            parts += 1
+    return parts >= 2
 
 
 def _local_forms(name: str) -> set[str]:
@@ -202,7 +212,7 @@ def plan(attendees, contacts, vendor_gaps, *, internal_domain: str) -> dict:
             continue
         if email in ambiguous:
             skipped["ambiguous_vendor_email"] += 1
-        elif not _full_name(name, email):
+        elif not _full_name(name):
             skipped["no_name"] += 1
         elif _norm(name) in carried_names:
             skipped["name_matches_existing_party"] += 1
