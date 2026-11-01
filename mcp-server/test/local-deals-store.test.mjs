@@ -76,7 +76,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       begin create role dot_reader; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
-    for (const name of ['actor', 'party', 'vendor', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag', 'campaign', 'marketing_subject', 'code_subject']) {
+    for (const name of ['actor', 'party', 'vendor', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'attachment', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag', 'campaign', 'marketing_subject', 'code_subject']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
@@ -85,7 +85,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query('alter table activity add column if not exists email_source jsonb');
     await c.query('alter table activity add column if not exists email_context jsonb');
     await c.query(readMigration('1125_calendar_confirmation.sql'));
-    for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
+    for (const table of ['actor','party','deal','activity','attachment']) await c.query(`alter table ${table} add primary key(id)`);
     await c.query(readMigration('0951_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
     assert.ok(touch);
@@ -1087,7 +1087,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         } finally {
           release?.();
           await Promise.all(peers.map(peer=>peer.end()));
-          await c.query('truncate ops.requirement_upload_receipt,ops.requirement_upload_grant,ops.requirement_request,deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,capture_post_call_candidate,party');
+          await c.query('truncate ops.requirement_reply_proposal,ops.requirement_upload_receipt,ops.requirement_upload_grant,ops.requirement_request,deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,capture_post_call_candidate,party');
         }
       });
     }

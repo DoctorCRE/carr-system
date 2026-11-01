@@ -5,7 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
-import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
+import { CHECKLIST_SOURCES, readDealChecklist } from '../src/deal-checklist.ts';
 import { applyFutureWorkSchema, restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -46,7 +46,8 @@ test('a participant document reply proposes its open request without fulfilling 
       create table party(id uuid primary key,email text,deleted_at timestamptz,merged_into uuid);
       create table deal_participant(deal_id uuid,party_id uuid,to_at timestamptz);`);
     await c.query(readFileSync(new URL('../../migrations/1116_requirement_document_replies.sql', import.meta.url),'utf8'));
-    const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2026-11-15' });
+    const requested = await call('request-checklist-document', { deal, row_key: 'title_commitment', owner: 'joe', due_on: '2020-01-01' });
+    const checklist = () => readDealChecklist(c, { id: deal, type: 'purchase', owner: 'joe' }, new Date('2026-10-20T17:00:00Z'));
     assert.equal(requested.request.document_type, 'title_commitment');
     assert.equal(requested.request.source.section_id, CHECKLIST_SOURCES[2].section_id);
     const person = randomUUID();
@@ -62,6 +63,8 @@ test('a participant document reply proposes its open request without fulfilling 
     assert.equal(proposals.proposals[0].candidates[0].request_id, requested.request.id);
     assert.equal(proposals.proposals[0].attachment_id, attached.attachment_id);
     assert.equal((await call('list-requirement-requests',{deal})).requests[0].status,'open');
+    const pending = await checklist();
+    assert.equal(pending.due_items.find(row => row.id === 'title_commitment').status, 'overdue');
     await t.test('confirm fulfills with the stored attachment, while satisfaction remains separate', async () => {
       const proposal = proposals.proposals[0];
       const result = await call('confirm-requirement-reply',{proposal_id:proposal.id,base_version:proposal.version,
@@ -71,6 +74,16 @@ test('a participant document reply proposes its open request without fulfilling 
       assert.equal(row.status,'fulfilled');
       assert.equal(row.evidence_attachment_id,attached.attachment_id);
       assert.equal(row.satisfied,false);
+      const received = await checklist();
+      const item = received.phases.flatMap(phase => phase.items).find(item => item.id === 'title_commitment');
+      assert.equal(item.status, 'received');
+      assert.equal(item.request.status, 'fulfilled');
+      assert.equal(item.request.satisfied, false);
+      assert.ok(item.request.fulfilled_at);
+      assert.equal(item.request.fulfilled_by, actor.id);
+      assert.equal(item.request.evidence_attachment_id, attached.attachment_id);
+      assert.equal(item.evidence_ref, `attachment:${attached.attachment_id}`);
+      assert.equal(received.due_items.some(item => item.id === 'title_commitment'), false);
       assert.equal((await call('list-requirement-reply-proposals',{deal})).proposals.length,0);
     });
     await t.test('participant thread reply lists two candidates and rejection leaves both open', async () => {
@@ -94,6 +107,8 @@ test('a participant document reply proposes its open request without fulfilling 
       assert.equal((await call('list-requirement-reply-proposals',{deal})).proposals.length,0);
       const listed = (await call('list-requirement-requests',{deal})).requests;
       assert.ok(requests.every(r=>listed.find(x=>x.id===r.id).status==='open'));
+      const rejected = (await checklist()).phases.flatMap(phase => phase.items);
+      assert.ok(requests.every(r => rejected.find(item => item.id === r.row_key).status === 'upcoming'));
     });
     await t.test('non-participant sender and unrelated document names propose nothing', async () => {
       for (const [sender,body] of [['outsider@example.test','Attached appraisal'],['participant@example.test','Appraisals are unrelated']]) {
