@@ -1144,8 +1144,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Bank',$2,$2)", [id(20), actor.id]);
       await c.query("insert into party(id,kind,name,org_id,email,created_by,updated_by) values($1,'person','Synthetic Banker',$2,'banker@example.invalid',$3,$3)", [id(21), id(20), actor.id]);
       await c.query("insert into vendor(id,party_id,category,vendor_ref,created_by,updated_by) values($1,$2,'banker','V-DEMO-1',$3,$3),($4,$2,'banker','V-DEMO-2',$3,$3)", [id(22), id(21), actor.id, id(23)]);
+      await c.query("update party set version=7 where id=$1", [id(21)]);
+      const partyVersion = (await c.query("select version from party where id=$1", [id(21)])).rows[0].version;
       const context = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)});
       assert.equal(context.vendor.base_version,1);
+      assert.equal(context.vendor.party_version,partyVersion);
+      assert.notEqual(context.vendor.party_version,context.vendor.base_version);
       assert.equal(context.vendor.company.id,id(20));
       assert.equal(context.vendor.contacts[0].id,id(21));
       const assignment = { deal_id: id(4), role: 'lender', company_party_id: id(20), contact_party_id: id(21) };

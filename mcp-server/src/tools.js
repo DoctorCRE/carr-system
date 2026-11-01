@@ -5678,13 +5678,14 @@ export const TOOLS = {
 
   "vendor-assignment-context": {
     write: false,
-    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
+    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Also returns party_version, the vendor party's own version: the base_version update-party-contact needs. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
     inputSchema: {type:'object',additionalProperties:false,properties:{vendor:{type:'string'}},required:['vendor']},
     handler: async (c,_actor,args) => {
       const subject = await resolveSubject(c,args.vendor);
       if (subject.type !== 'vendor') throw new ToolError({error:'not_a_vendor'});
       const vendor = (await c.query('select * from public.v_vendor_assignment_context where id=$1',[subject.id])).rows[0];
       if (!vendor) throw new ToolError({error:'vendor_not_live'});
+      vendor.party_version = (await c.query('select version from party where id=$1',[vendor.party_id])).rows[0]?.version ?? null;
       return {vendor};
     },
   },
