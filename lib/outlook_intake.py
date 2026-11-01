@@ -93,6 +93,7 @@ from typing import Callable
 import uuid
 
 from lib import email_links, unresolved_email
+from lib.email_outcomes import business_day_deadline
 from lib.outlook_settings import load_settings, OutlookSettings
 from lib.outlook_runtime import stamp
 OUT = Path('out/outlook-intake')
@@ -920,6 +921,8 @@ class Run:
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
             if verb == 'log-activity':
                 request['activity_id'] = reply.get('activity_id')
+                if args.get('kind') == 'email_in':
+                    self.state['last_email_in_filed_at'] = int(self.now.timestamp())
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args.get('ref', 'claim card'), verb, note))
@@ -1746,8 +1749,15 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 _remove(stale)
             if reconcile:
                 return _reconcile(out, home, ports, settings, state)
+            filing_account = _hash(f'{settings.owner}|{settings.account}|{settings.folder_account_id}')
+            if state.get('filing_account') != filing_account:
+                for name in ('filing_observed_at', 'last_email_in_filed_at'):
+                    state.pop(name, None)
+                state['filing_account'] = filing_account
             outcome = _run(out, home, ports, state)
             if outcome.state != 'succeeded':
+                if outcome.state == 'degraded':
+                    return _filing_outcome(out, state, outcome, ports.now(), settings)
                 return outcome
             state = json.loads((out / STATE).read_text())
             work = Run(ports, state, ports.now(), out, settings)
@@ -1785,14 +1795,29 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 failed = missed
             if missed:
                 outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
+            if outcome.counts.get('coverage_checked') or missed:
+                state['coverage_failed'] = bool(failed)
             _save(out, state)
             if failed:
                 outcome.state, outcome.reason = 'failed', 'coverage_failed'
-            return outcome
+            return _filing_outcome(out, state, outcome, ports.now(), settings)
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
     finally:
         os.close(fd)
+
+
+def _filing_outcome(out: Path, state: dict, outcome: Outcome, now: datetime, settings: OutlookSettings) -> Outcome:
+    if outcome.counts.get('stored', 0):
+        since = state.setdefault('filing_observed_at', int(now.timestamp()))
+        since = max(state.get('last_email_in_filed_at', since), since)
+        if outcome.state != 'failed' and now >= business_day_deadline(
+                datetime.fromtimestamp(since, timezone.utc), settings.timezone):
+            outcome.state, outcome.reason = 'failed', 'no_email_in_business_day'
+    else:
+        state.pop('filing_observed_at', None)
+    _save(out, state)
+    return outcome
 
 
 def _save(out: Path, state: dict) -> None:

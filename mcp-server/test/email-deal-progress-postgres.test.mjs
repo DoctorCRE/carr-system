@@ -2173,3 +2173,23 @@ test('expiry pages past old actionable proposals and cannot expire another mailb
   assert.equal(next.next_cursor, null);
   assert.equal((await command('list-email-proposals', { status: 'dismissed', limit: 50, include_non_deal: true })).proposals[0].id, blocked.proposal_id);
 });
+
+test('the mailbox outcome monitor reads real filing and all draft statuses as carr_reader', async () => {
+  await c.query('delete from email_proposal');
+  await email();
+  const read = owner => command('email-router-queue',
+    { purpose: 'outcomes', account: `${owner}@example.test` }, machineFor(owner), 'carr_reader');
+  const initial = await read('joe');
+  assert.equal(initial.schema_version, 'email-outcomes.v1');
+  assert.ok(initial.journey_live_at);
+  assert.ok(initial.last_email_in_filed_at);
+  assert.equal(initial.reply_draft_count, 0);
+  const draft = await draftFor();
+  assert.equal((await read('joe')).reply_draft_count, 1);
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(),
+    proposal_id: draft.proposal_id, base_version: 1, reason: 'Synthetic monitor proof' });
+  assert.equal((await read('joe')).reply_draft_count, 1);
+  assert.equal((await read('dell')).reply_draft_count, 0);
+  assert.deepEqual(Object.keys(await read('joe')).sort(),
+    ['journey_live_at', 'last_email_in_filed_at', 'reply_draft_count', 'schema_version']);
+});
