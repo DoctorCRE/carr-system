@@ -16,7 +16,7 @@ def probe(matching):
     with tempfile.TemporaryDirectory(prefix="carr-native-loading-") as directory:
         root = Path(directory)
         subprocess.run(["git", "init", "-q", str(root)], check=True, env=fixture_env())
-        for rel in (".claude/rules/carr-core.md", ".claude/rules/rule-6da539b5.md",
+        for rel in ("CLAUDE.md", "docs/generated-rules/core.md", ".claude/rules/carr-core.md", ".claude/rules/rule-6da539b5.md",
                     ".claude/skills/carr-before-send/SKILL.md"):
             target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -1113,10 +1113,10 @@
   ],
   "core_measurement": {
     "original_budget": 1500,
-    "over_original_budget": true,
-    "sha256": "ae229f5a3c4255addd3e4e8e1eb35d81471ad9d72bff0378e4c5f6140d3c5fe9",
+    "over_original_budget": false,
+    "sha256": "adaa5541f31ad4e2d5a5d024659c366daf60dfcee8a6653a5503b94c62f0c2eb",
     "tokenizer": "cl100k_base",
-    "tokens": 3772
+    "tokens": 504
   },
   "corpus_digest": "29554ae8df2036cab090011bc01a5a376105f4590bd2008168d497e202c6a28b",
   "schema": "carr-native-rules/v1",

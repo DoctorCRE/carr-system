@@ -17,7 +17,9 @@ def probe(nested):
         root = Path(directory)
         subprocess.run(["git", "init", "-q", str(root)], check=True, env=fixture_env())
         shutil.copyfile(ROOT / "AGENTS.md", root / "AGENTS.md")
-        shutil.copyfile(ROOT / "AGENT_OPERATING_GUIDE.md", root / "AGENT_OPERATING_GUIDE.md")
+        reference = root / "docs/generated-rules/core.md"
+        reference.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / "docs/generated-rules/core.md", reference)
         target = root / "tools/room-bridge"
         target.mkdir(parents=True)
         shutil.copyfile(ROOT / "tools/room-bridge/AGENTS.md", target / "AGENTS.md")

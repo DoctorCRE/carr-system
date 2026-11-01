@@ -35,6 +35,9 @@ class NativeRulesTests(unittest.TestCase):
             (folder / "tracked.py").write_text("pass\n")
             (root / ".gitignore").write_text("__pycache__/\n")
             self.git(root, "add", "AGENTS.md", "CLAUDE.md", ".gitignore", "tools/room-bridge/tracked.py")
+            config = root / "ops/config/rule-cards.v1.json"
+            config.parent.mkdir(parents=True)
+            config.write_text((rules.ROOT / "ops/config/rule-cards.v1.json").read_text())
             outputs, report = rules.render(self.snapshot, root)
             startup = {"AGENTS.md": outputs["AGENTS.md"],
                        "CLAUDE.md": (root / "CLAUDE.md").read_text(),
@@ -91,6 +94,46 @@ class NativeRulesTests(unittest.TestCase):
             path.write_text(path.read_text() + "é" * 16384)
             with self.assertRaisesRegex(ValueError, "Codex.*32768"):
                 self.check(root)
+
+    def test_check_reserves_four_kib_headroom(self):
+        with self.fixture() as root:
+            outputs, _ = rules.render(self.snapshot, root)
+            names = {p for p in [*rules.tracked_paths(root), *outputs]
+                     if Path(p).name == "AGENTS.md"}
+            total = sum(len(outputs[p].encode()) for p in names
+                        if Path(p).parent in (Path("."), Path("src"), Path("src/portal")))
+            path = root / "src/portal/AGENTS.md"
+            path.write_text(path.read_text() + "x" * (32768 - 4096 - total))
+            self.check(root)
+            path.write_text(path.read_text() + "x")
+            with self.assertRaisesRegex(ValueError, "headroom"):
+                self.check(root)
+
+    def test_ignored_nested_worktree_does_not_change_check(self):
+        with self.fixture() as root:
+            self.git(root, "config", "user.name", "Fixture")
+            self.git(root, "config", "user.email", "fixture@example.invalid")
+            self.git(root, "add", "--", *rules.tracked_paths(root))
+            self.git(root, "commit", "-qm", "fixture")
+            ignore = root / ".gitignore"
+            ignore.write_text(ignore.read_text() + ".claude/worktrees/\n")
+            nested = root / ".claude/worktrees/agent-x"
+            self.git(root, "worktree", "add", "--detach", str(nested), "HEAD")
+            outputs, _ = rules.render(self.snapshot, root)
+            rules.write_outputs(nested, outputs)
+            self.check(root)
+
+    def test_core_uses_native_cards_and_discloses_full_statements(self):
+        outputs, _ = rules.render(self.snapshot, rules.ROOT)
+        core = outputs[".claude/rules/carr-core.md"]
+        reference = outputs["docs/generated-rules/core.md"]
+        for row in rules.placements(self.snapshot):
+            if row["bucket"] == "CORE":
+                self.assertIn(row["statement"], reference)
+                self.assertNotIn(row["statement"], core)
+                self.assertIn("core.md#" + rules.marker(row), core)
+        self.assertIn("K01", core)
+        self.assertIn("K08", core)
 
     def test_retired_nested_block_deletes_empty_file_and_preserves_guidance(self):
         for maintained in ("", "Keep this guidance.\n"):
@@ -268,6 +311,7 @@ class NativeRulesTests(unittest.TestCase):
             extra = root / "other/AGENTS.md"
             extra.parent.mkdir()
             extra.write_text(rules.NOTICE)
+            self.git(root, "add", "other/AGENTS.md")
             self.assertIn("other/AGENTS.md", rules.stale_outputs(root, outputs))
             extra.unlink()
             path.write_text("corrupt")

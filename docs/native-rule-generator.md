@@ -26,14 +26,17 @@ the exceptions, and generated bodies are visibly marked incomplete with placemen
 text only. No all-222 lossless pass is claimed. A store-authorized de-identification
 is required before those fourteen bodies can be exported verbatim. No local placement or wording override is provided.
 
-CORE loads from `.claude/rules/carr-core.md` for Claude and the marked block in
-root `AGENTS.md` for Codex. Loaded headings contain only eight-character IDs;
-UUIDs, versions, and full hashes are indexed in the manifest. UUIDs occurring
-inside a live statement remain verbatim.
+CORE loads as a short index from `.claude/rules/carr-core.md` for Claude and the
+marked block in root `AGENTS.md` for Codex. Ten rules reference the existing
+native K cards without repeating their wording. Two additional short cards
+cover authorization refusals and authorized access. Before applying a CORE
+rule, agents read its linked section in `docs/generated-rules/core.md` for the
+full statement, conditions, and exceptions. This reference is generated from
+the same snapshot. UUIDs, versions, and hashes remain indexed in the manifest.
 
-The snapshot records the generated CORE chain's cl100k_base token count and
-hash. Offline checks validate that chain. The twelve full statements exceed
-the original 1,500-token target. No claim of meeting that target remains.
+The snapshot records the generated root CORE block's cl100k_base token count
+and hash. Offline checks validate that block. The Claude adapter uses the same
+index with reference links relative to its directory.
 
 The manifest's `startup_measurement` is the last optional whole-file measurement,
 not a drift constraint. Maintained AGENTS.md and CLAUDE.md edits do not require
@@ -42,18 +45,18 @@ installed to refresh it offline. The CLI labels the stored count informational.
 The measurement joins root AGENTS.md, CLAUDE.md, and the CORE file in that order.
 It counts both CORE copies and does not represent either provider's context.
 
-Every check and regeneration enforces Codex's 32,768-byte project-doc budget.
-The generator counts root AGENTS.md plus each possible nested AGENTS.md chain,
-including tracked maintained files and newly generated files, as UTF-8 bytes.
-Root AGENTS.md requires reading AGENT_OPERATING_GUIDE.md in full before task work.
-That guide preserves the maintained sections from "Jev in reviews" through
-"Agent skills" verbatim. The core cards and product-first policy remain inline.
+Every check and regeneration enforces Codex's 32,768-byte project-doc budget
+with at least 4,096 bytes of unused capacity in every chain. The generator
+counts root AGENTS.md plus each possible nested AGENTS.md chain as UTF-8 bytes
+and prints the byte count and headroom for each chain. Tracked maintained files
+and newly generated files count. Joe's maintained guidance stays natively in
+root AGENTS.md. CLAUDE.md links to its original policy headings.
 
 All write/delete destinations are preflighted before mutation. Paths must be
 relative, contain no traversal segments, remain inside the repository after
 resolution, and contain no symlink component. Allowed destinations are native
 rules, carr-prefixed skills for both adapters, manifest-named nested AGENTS
-blocks, the root CORE block, the two proposal registers, snapshot and manifest.
+blocks, the root CORE block, the full CORE reference, the two proposal registers, snapshot and manifest.
 Existing skills require both a generated notice and prior manifest ownership.
 Directory-relative mutation uses O_NOFOLLOW, including every parent directory.
 Foreign guidance outside marked AGENTS blocks is preserved.
@@ -72,7 +75,8 @@ Procedure skills use a carr- prefix to avoid replacing existing skills.
 PATH frontmatter retains the store's proposed globs. The generator matches them
 against `git ls-files -z`, excluding generated AGENTS.md files and carr-prefixed
 Codex skills. Each glob has an active or dormant status in the manifest. It stores
-no matching file lists. Untracked and ignored files cannot activate a scope.
+no matching file lists. Untracked and ignored files cannot activate a scope or appear as stale outputs.
+Stale-output discovery uses tracked paths plus expected and previously owned outputs.
 Adding or renaming a tracked file within an active scope requires no regeneration.
 Nested Codex sections preserve proposed folders and add an existing literal
 directory scope where another proposed glob matches (the .agents folder).
@@ -92,7 +96,7 @@ settings only in a temporary repository; production hooks are untouched.
 It never sends a message. Authentication and model access must already work.
 
 Run `python3 tools/probe_native_codex_loading.py` for root/nested Codex cwd
-probes. It copies the real root AGENTS.md, its required operating guide, and the
+probes. It copies the real root AGENTS.md and the
 nested room-bridge AGENTS.md. It requires the first CORE ID 179be4b8 and last
 CORE ID fa217e48 in both responses, plus 6da539b5 only from the nested cwd.
 Codex has no InstructionsLoaded hook in the inspected CLI interface;
