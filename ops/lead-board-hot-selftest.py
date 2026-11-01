@@ -72,7 +72,7 @@ import sys
 
 root = Path(__file__).parent
 verb = sys.argv[2]
-args = json.loads(sys.argv[3])
+args = json.loads(sys.stdin.read() if sys.argv[3] == "-" else sys.argv[3])
 with (root / "record-calls.jsonl").open("a") as log:
     log.write(json.dumps({"verb": verb, "args": args}) + "\\n")
 reply = json.loads((root / "record-responses.json").read_text())[verb]

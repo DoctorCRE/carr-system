@@ -69,6 +69,9 @@ def decide(event):
             return refuse('A T3 batch requires threads with Card-bearing prompts.')
         prompts = [thread.get('prompt', '') for thread in threads]
     elif tool == 'Agent':
+        # These built-in agents only read and do not dispatch work.
+        if inputs.get('subagent_type') in ('web-fetch', 'Explore'):
+            return
         prompts = [inputs.get('prompt', '')]
     elif event.get('tool_name') == 'Bash':
         command = inputs.get('command', '')

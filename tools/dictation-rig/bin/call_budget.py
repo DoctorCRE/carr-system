@@ -22,7 +22,7 @@ def budget_day(instant: datetime | None = None) -> str:
     return (instant or datetime.now(timezone.utc)).astimezone(ZoneInfo('America/Chicago')).date().isoformat()
 
 
-def reserve(ledger: Path, *, instant: datetime | None = None) -> None:
+def reserve(ledger: Path, *, instant: datetime | None = None, check_only: bool = False) -> None:
     try:
         dollars = Decimal(os.environ.get('CALL_JEV_DAILY_DOLLARS', ''))
         if not dollars.is_finite() or dollars <= 0:
@@ -44,6 +44,8 @@ def reserve(ledger: Path, *, instant: datetime | None = None) -> None:
             used = days.get(day, 0)
             if used + REQUEST_MICRODOLLARS > cap:
                 raise BudgetHold('Jev daily dollar budget is exhausted.')
+            if check_only:
+                return
             days[day] = used + REQUEST_MICRODOLLARS
             fd, temporary = tempfile.mkstemp(dir=ledger.parent, prefix='.jev-budget-')
             try:

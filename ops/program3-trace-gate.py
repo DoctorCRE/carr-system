@@ -99,6 +99,13 @@ def refuses(cur, sql: str, params: tuple, name: str) -> None:
     check(name, False, "the write was ACCEPTED")
 
 
+def chain_in_time_order(chain):
+    return all(
+        chain[i][3].astimezone(timezone.utc) <= chain[i + 1][3].astimezone(timezone.utc)
+        for i in range(len(chain) - 1)
+    )
+
+
 def main() -> int:
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
@@ -193,7 +200,7 @@ def main() -> int:
         check("the chain has every link", set(kinds) == {"deployment", "check", "job", "incident"},
               f"got {sorted(set(kinds))}")
         check("the chain is in time order",
-              all(chain[i][3] <= chain[i + 1][3] for i in range(len(chain) - 1)))
+              chain_in_time_order(chain))
         check("the deploy precedes the failure",
               bool(kinds) and kinds[0] == "deployment", f"first link was {kinds[0] if kinds else 'nothing'}")
 

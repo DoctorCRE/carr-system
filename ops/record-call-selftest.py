@@ -143,10 +143,11 @@ check("a JSON string reply is ok", r.kind == OK and r.reply == "plain text", r)
 runner = Runner(0, reply({}))
 call_verb("add-loop", {"body": "x"}, timeout=45, runner=runner)
 argv, kwargs = runner.calls[0]
-check("the only route is `run.sh call <verb> '<json>'`",
-      argv == [str(REPO / "run.sh"), "call", "add-loop", json.dumps({"body": "x"})], argv)
-check("it runs from the repo with stdin closed and the given timeout",
-      kwargs.get("cwd") == str(REPO) and kwargs.get("stdin") == subprocess.DEVNULL
+check("the record route streams JSON through run.sh call",
+      argv == [str(REPO / "run.sh"), "call", "add-loop", "-"]
+      and json.loads(kwargs["input"]) == {"body": "x"}, argv)
+check("it runs from the repo with the given timeout",
+      kwargs.get("cwd") == str(REPO)
       and kwargs.get("timeout") == 45)
 
 runner = Runner(0, reply({}))

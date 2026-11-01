@@ -1,0 +1,62 @@
+[
+  {
+    "name": "needs-triage",
+    "color": "ededed",
+    "description": "New or changed work needs classification and scope review."
+  },
+  {
+    "name": "needs-info",
+    "color": "fbca04",
+    "description": "Work needs an answer or evidence before it is ready."
+  },
+  {
+    "name": "ready-for-agent",
+    "color": "0e8a16",
+    "description": "Specified work is ready for an agent to execute."
+  },
+  {
+    "name": "ready-for-human",
+    "color": "5319e7",
+    "description": "Joe or Dell must supply judgment or a needs-Joe answer."
+  },
+  {
+    "name": "safety-review",
+    "color": "b60205",
+    "description": "Work needs an explicit safety review before execution."
+  },
+  {
+    "name": "blocked",
+    "color": "d93f0b",
+    "description": "A named dependency prevents the next action."
+  },
+  {
+    "name": "wontfix",
+    "color": "ffffff",
+    "description": "Work was deliberately withdrawn or declined."
+  },
+  {
+    "name": "superseded",
+    "color": "cfd3d7",
+    "description": "Replacement work is linked; this item is no longer active."
+  },
+  {
+    "name": "failed",
+    "color": "b60205",
+    "description": "Execution ended unsuccessfully; failure evidence is recorded."
+  },
+  {
+    "name": "type:task",
+    "color": "1d76db",
+    "description": "An engineering outcome owned by this repository."
+  },
+  {
+    "name": "type:bug",
+    "color": "d73a4a",
+    "description": "A reproducible engineering defect."
+  },
+  {
+    "name": "type:slice",
+    "color": "0075ca",
+    "description": "A bounded sub-issue of a parent engineering issue."
+  }
+]

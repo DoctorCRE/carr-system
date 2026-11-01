@@ -1120,7 +1120,7 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(again, status)
         self.assertEqual(distiller.call_count, 1)
         self.assertEqual([call.args[0][-2] for call in route.call_args_list], ["deal-room-board", "get-call-context"])
-        self.assertEqual(json.loads(route.call_args_list[1].args[0][-1]), {"deal_ids": ["deal-a"]})
+        self.assertEqual(json.loads(route.call_args_list[1].kwargs["input"]), {"deal_ids": ["deal-a"]})
         self.assertEqual(distiller.call_args.args[0]["context"]["deals"][0]["owner"], "")
         self.assertIsNone(post_call.context_from_session(self.session))
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["report"]["summary"], "Summary")
@@ -1215,7 +1215,7 @@ class PostCallTests(unittest.TestCase):
         ]
         requests = []
         def route(argv, **kwargs):
-            requests.append((argv[-2], json.loads(argv[-1])))
+            requests.append((argv[-2], json.loads(kwargs["input"])))
             rows = deals + excluded if argv[-2] == "deal-room-board" else [
                 deal for deal in deals if deal["id"] in requests[-1][1]["deal_ids"]]
             return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "deals": rows}))
@@ -2619,6 +2619,55 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             publish.assert_called_once_with(self.session.resolve())
             self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
 
+    def test_corrected_report_budget_hold_recovers_under_polling(self) -> None:
+        for recovery in ("next_day", "budget_restored", "manual_release"):
+            with self.subTest(recovery=recovery):
+                report = post_call.read_json(self.session / post_call.REPORT_FILE)
+                report["report"]["summary"] = "Corrected synthetic summary"
+                report["checks_hold"] = "Jev daily dollar budget is exhausted."
+                report["checks_hold_day"] = "2026-08-10"
+                for kind in ("joe_tasks", "deal_updates", "draft_proposals"):
+                    for item in report[kind]:
+                        item["checks"] = {"unavailable": True, "reason": report["checks_hold"]}
+                post_call.write_private(self.session / post_call.REPORT_FILE, report)
+                post_call.write_private(self.session / post_call.STATUS_FILE,
+                                        {"state": "held_review", "reason": "summary_repeats_transcript", "sync_attempts": 3})
+                ledger = self.session.parent / ".jev-budget.json"
+                post_call.write_private(ledger, {"2026-08-10": 490000})
+                client = PostCallJevChecksTests.fake_client()
+                client.system_one = Mock(wraps=client.system_one)
+                with (patch.dict(os.environ, {"CALL_JEV_DAILY_DOLLARS": "0.49"}),
+                      patch.object(post_call.call_budget, "budget_day", return_value="2026-08-10") as day,
+                      patch.object(post_call, "context_from_session", return_value={"deals": []}),
+                      patch.object(post_call, "_jev_fixture_client", return_value=client),
+                      patch.object(call_mode.post_call, "context_from_session", return_value={"deals": []}),
+                      patch.object(call_mode.post_call, "_jev_fixture_client", return_value=client)):
+                    if recovery == "manual_release":
+                        post_call.write_private(self.session / "post-call-held-draft.json", report)
+                        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+                              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+                              patch.object(call_mode, "sync_post_call"), patch("sys.stdout", io.StringIO())):
+                            self.assertEqual(call_mode.main(), 0)
+                        self.assertFalse((self.session / "post-call-held-draft.json").exists())
+                        status = post_call.read_json(self.session / post_call.STATUS_FILE)
+                    else:
+                        status = post_call.process_session(self.session, lambda _: self.fail("poll distilled"))
+                    self.assertEqual(status["state"], "ready_review")
+                    self.assertNotIn("sync_attempts", status)
+                    client.system_one.assert_not_called()
+                    self.assertTrue(post_call.read_json(self.session / post_call.REPORT_FILE)["checks_hold"])
+                    if recovery != "budget_restored":
+                        day.return_value = "2026-08-11"
+                    else:
+                        post_call.write_private(ledger, {"2026-08-10": 0})
+                    status = post_call.process_session(self.session, lambda _: self.fail("poll distilled"))
+                self.assertEqual(status["state"], "ready_review")
+                self.assertNotIn("checks_hold", post_call.read_json(self.session / post_call.REPORT_FILE))
+                self.assertEqual(client.system_one.call_count, 3)
+                spending = post_call.read_json(ledger)["2026-08-10" if recovery == "budget_restored" else "2026-08-11"]
+                self.assertEqual(spending, 8259)
+                self.assertLess(spending, 500000)
+
     def test_release_keeps_edited_report_when_poll_interleaves(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         report["report"]["summary"] = "Partner edit"
@@ -2629,7 +2678,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         polled = []
 
         def interleave(path, value):
-            if path.name == post_call.STATUS_FILE and value.get("state") == "blocked":
+            if path.name == post_call.STATUS_FILE and value.get("state") == "ready_review":
                 write(path, value)
                 try:
                     polled.append(post_call.process_session(self.session, lambda _: self.fail("poll distilled")))
@@ -2645,6 +2694,33 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             self.assertEqual(call_mode.main(), 0)
         self.assertEqual(polled, ["locked"])
         self.assertEqual(post_call.read_json(self.session / post_call.REPORT_FILE)["report"]["summary"], "Partner edit")
+
+    def test_release_reports_busy_lock_without_traceback(self) -> None:
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              post_call.session_lock(self.session)):
+            with self.assertRaises(SystemExit) as error:
+                call_mode.main()
+        self.assertEqual(str(error.exception), "post-call distillation already active for this session")
+
+    def test_interrupted_release_keeps_edited_draft_on_next_poll(self) -> None:
+        draft_path = self.session / "post-call-held-draft.json"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = "Partner edit"
+        post_call.write_private(draft_path, report)
+        (self.session / post_call.REPORT_FILE).unlink()
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch.object(call_mode.post_call, "_process_session_locked", side_effect=RuntimeError("interrupted"))):
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                call_mode.main()
+        distiller = Mock(return_value={})
+        with patch.object(post_call, "context_from_session", return_value={"deals": []}):
+            status = post_call.process_session(self.session, distiller)
+        distiller.assert_not_called()
+        self.assertEqual(status["state"], "held_review")
+        self.assertEqual(post_call.read_json(draft_path)["report"]["summary"], "Partner edit")
 
     def test_release_checks_edited_report_before_stale_draft(self) -> None:
         words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
