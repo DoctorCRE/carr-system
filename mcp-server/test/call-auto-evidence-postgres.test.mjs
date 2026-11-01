@@ -41,7 +41,7 @@ const command = async (name, args = {}) => {
     ? TOOLS[name].afterCommit(c, actor, args, result, fn => transaction(fn)) : result;
 };
 
-async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, kind = "phase_move", overdue = false, existingDeal = null } = {}) {
+async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, kind = "phase_move", overdue = false, existingDeal = null, stepText = 'Review revised terms' } = {}) {
   const deal = existingDeal || (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic phase purchase',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
   let prior;
   if (overdue) prior = await command('set-next-step', {
@@ -59,7 +59,7 @@ async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, ki
         speaker, source_sha256: createHash('sha256').update(JSON.stringify({ speaker, text: storedQuote })).digest('hex'),
         quote_sha256: createHash('sha256').update(storedQuote).digest('hex'),
       }] }), items: [{ kind,
-        payload: kind === 'next_step' ? { deal, text: 'Review revised terms', next_date: '2030-01-01' }
+        payload: kind === 'next_step' ? { deal, text: stepText, next_date: '2030-01-01' }
           : ['activity', 'meeting_record'].includes(kind) ? { ref: deal, kind: 'note', summary: evidence }
           : { deal, field: 'phase', value: 'legal' }, evidence_quote: evidence, confidence: 1 }]
     })
@@ -431,6 +431,77 @@ for (const mode of ['whole-call', 'change']) for (const order of ['call-first', 
     assert.equal(room.next_actions.find(a => a.id === call.prior.next_action_id).status, 'done');
     assert.deepEqual([room.next_step, room.next_date, room.next_step_required], [null, null, true]);
     const board = (await command('deal-room-board')).deals.find(d => d.id === call.deal);
+    assert.deepEqual([board.next_step, board.next_date, board.next_step_required], [null, null, true]);
+  } finally { delete c.jevClient; }
+});
+
+test('superseding a closed current step preserves an older hidden future action', async () => {
+  const { deal, prior } = await filePhase('Synthetic closed current step', { kind: 'activity', overdue: true });
+  await c.query("update next_action set status='done',updated_at=clock_timestamp() where id=$1", [prior.next_action_id]);
+  const older = (await c.query(`insert into next_action(subject_type,subject_id,owner_id,due_on,description,created_by,updated_by,updated_at)
+    values('deal',$1,$2,'2035-01-01','Older hidden future action',$2,$2,now()-interval '1 day') returning id`, [deal, actor.id])).rows[0].id;
+  await c.query(`insert into event(cause,occurred_at,actor_id,verb,subject_type,subject_id,field,new_value)
+    values('system',now(),$1,'resolve-candidate','deal',$2,'overdue_assessment_pending',$3)`, [actor.id, deal,
+    { candidate_id: randomUUID(), candidate_kind: 'next_step', actions: [{ id: older, source: 'next_action' }] }]);
+  const before = await command('get-deal-room', { deal });
+  assert.equal(before.next_step, null);
+  await command('patch-deal-field', { idempotency_key: randomUUID(), deal, field: 'phase', value: 'legal', base_event_id: null });
+  const room = await command('get-deal-room', { deal });
+  assert.equal(room.next_actions.find(a => a.id === older).status, 'open', 'hidden action keeps its own future date');
+  assert.deepEqual(room.events.filter(e => ['next_step','next_date'].includes(e.field)),
+    before.events.filter(e => ['next_step','next_date'].includes(e.field)));
+});
+
+for (const mode of ['whole-call', 'change']) test(`${mode} undo restores the prior action when a different completed retained action has the same text`, async () => {
+  const first = await filePhase('We discussed parking at the other property.', {
+    kind: 'next_step', overdue: true, stepText: 'Request revised terms',
+  });
+  c.jevClient = { systemOne: async request => completionAnswer(request, 'no') };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: first.id, accept: true, automatic: true });
+    const second = await filePhase('We discussed parking again.', { kind: 'next_step', existingDeal: first.deal });
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: second.id, accept: true, automatic: true });
+    c.jevClient = { systemOne: async request => completionAnswer(request) };
+    await command('add-deal-note', { idempotency_key: randomUUID(), deal: first.deal,
+      text: 'The landlord sent the requested revised terms.' });
+    const before = await command('get-deal-room', { deal: first.deal });
+    assert.equal(before.next_actions.find(a => a.id === first.prior.next_action_id).status, 'done');
+    if (mode === 'change') await command('undo-call-change', { idempotency_key: randomUUID(),
+      candidate_id: second.id, base_version: before.base_version });
+    else await command('undo-call', { idempotency_key: randomUUID(), session_id: second.session });
+    const room = await command('get-deal-room', { deal: first.deal });
+    assert.equal(room.next_step, 'Request revised terms', 'restore the prior plan, not the unrelated finished action');
+    assert.equal(room.next_date, '2030-01-01');
+    const board = (await command('deal-room-board')).deals.find(d => d.id === first.deal);
+    assert.equal(board.next_step, 'Request revised terms');
+  } finally { delete c.jevClient; }
+});
+
+for (const mode of ['whole-call', 'change']) test(`${mode} undo after an earlier call undo keeps the completed shown action off the board`, async () => {
+  const first = await filePhase('We discussed parking at the other property.', { kind: 'next_step', overdue: true });
+  c.jevClient = { systemOne: async request => completionAnswer(request, 'no') };
+  try {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: first.id, accept: true, automatic: true });
+    await command('undo-call', { idempotency_key: randomUUID(), session_id: first.session });
+    const restored = await command('get-deal-room', { deal: first.deal });
+    assert.equal(restored.next_actions.find(a => a.id === first.prior.next_action_id).status, 'open');
+    assert.deepEqual([restored.next_step, restored.next_date], ['Request revised terms', '2020-01-01']);
+    const second = await filePhase('We discussed touring the second site.', {
+      kind: 'next_step', existingDeal: first.deal, stepText: 'Tour the second site',
+    });
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: second.id, accept: true, automatic: true });
+    c.jevClient = { systemOne: async request => completionAnswer(request) };
+    const activity = await filePhase('The landlord sent the requested revised terms.', { kind: 'activity', existingDeal: first.deal });
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: activity.id, accept: true });
+    const before = await command('get-deal-room', { deal: first.deal });
+    assert.equal(before.next_actions.find(a => a.id === first.prior.next_action_id).status, 'done');
+    if (mode === 'change') await command('undo-call-change', { idempotency_key: randomUUID(),
+      candidate_id: second.id, base_version: before.base_version });
+    else await command('undo-call', { idempotency_key: randomUUID(), session_id: second.session });
+    const room = await command('get-deal-room', { deal: first.deal });
+    assert.equal(room.next_actions.find(a => a.id === first.prior.next_action_id).status, 'done');
+    assert.deepEqual([room.next_step, room.next_date, room.next_step_required], [null, null, true]);
+    const board = (await command('deal-room-board')).deals.find(d => d.id === first.deal);
     assert.deepEqual([board.next_step, board.next_date, board.next_step_required], [null, null, true]);
   } finally { delete c.jevClient; }
 });

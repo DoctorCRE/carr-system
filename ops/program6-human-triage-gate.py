@@ -30,7 +30,7 @@ def expect_refusal(cur, sql: str, params: tuple, label: str) -> None:
     raise RuntimeError(f"{label} was accepted")
 
 
-def doctrine_fixture(cur, actor_id: uuid.UUID):
+def doctrine_fixture(cur, actor_id: uuid.UUID, section_key: str = "source"):
     key = uuid.uuid4().hex
     document_id = cur.execute(
         """insert into doctrine_document (slug,title,content_class,visibility,created_by)
@@ -39,8 +39,8 @@ def doctrine_fixture(cur, actor_id: uuid.UUID):
     ).fetchone()[0]
     section_id = cur.execute(
         """insert into doctrine_section (document_id,section_key,title,ordinal,status,current_version)
-             values (%s,'source','Program 6 triage source',10,'active',1) returning id""",
-        (document_id,),
+             values (%s,%s,'Program 6 triage source',10,'active',1) returning id""",
+        (document_id, section_key),
     ).fetchone()[0]
     body = "Human triage records one bounded classification and performs no work."
     revision_id = cur.execute(
@@ -49,7 +49,7 @@ def doctrine_fixture(cur, actor_id: uuid.UUID):
         (section_id, actor_id, Jsonb({"text": body}), body, hashlib.sha256(body.encode()).hexdigest()),
     ).fetchone()[0]
     cur.execute("update doctrine_section set current_revision_id=%s where id=%s", (revision_id, section_id))
-    return section_id, revision_id, f"doctrine:program6-triage-{key}#source"
+    return section_id, revision_id, f"doctrine:program6-triage-{key}#{section_key}"
 
 
 def capture(cur, section_id, revision_id, origin_ref):
@@ -90,7 +90,13 @@ def main() -> int:
             )
 
             section_id, revision_id, origin_ref = doctrine_fixture(cur, joe_id)
+            # Team-memory keys are slash-scoped (WR-000668); report-problem must
+            # capture from them instead of tripping the origin-ref shape check.
+            scoped_source = doctrine_fixture(cur, joe_id, "lessons/slash-scoped-source")
             set_local_role(cur, "carr_writer")
+            scoped = capture(cur, *scoped_source)
+            if not scoped or scoped[2] != "captured":
+                return fail(f"slash-scoped doctrine source did not capture: {scoped}")
             request_id, ref, state, version = capture(cur, section_id, revision_id, origin_ref)
             expect_refusal(cur, "select * from ops.triage_sourced_work_request(%s,%s,%s,%s)",
                            (ref, version, "operational", uuid.uuid4()), "generic writer triage")
