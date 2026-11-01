@@ -24,7 +24,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date(NOW).toISOString(), calendar = null, calendarContacts = [], calendarDeals = [], meetingPrep = [] } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null, governanceQueue = null, localUpdatedAt = new Date(NOW).toISOString(), calendar = null, calendarContacts = [], calendarDeals = [], meetingPrep = [], confirmedCalendarKeys = [] } = {}) {
   const queries = [];
   return {
     queries,
@@ -32,6 +32,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       queries.push({ sql, params });
       if (/^(savepoint|rollback to savepoint|release savepoint) calendar_contacts/.test(sql)) return { rows: [] };
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
+      if (sql.includes("select distinct calendar_event_key")) return { rows: confirmedCalendarKeys.map(calendar_event_key => ({ calendar_event_key })) };
       if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
       if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
       if (sql.includes("from v_today_triage")) return { rows: (todayRows || [
@@ -449,9 +450,10 @@ test("morning-brief offers recent meeting outcomes for review without creating r
   calendar.follow_up_reviews = [{ key: "0000000000000000", title: "Synthetic outcome review",
     start: at(-2), end: at(-1), state: "needs_review",
     prompt: "Confirm whether this meeting happened. If it did, record the outcome and decide the next step." }];
-  const c = client({ calendar });
+  const c = client({ calendar, confirmedCalendarKeys: ["0000000000000000"] });
   const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
   const [review] = result.sections.calendar.follow_up_reviews;
+  assert.equal(review.confirmed, true);
   assert.equal(review.title, "Synthetic outcome review");
   assert.equal(review.state, "needs_review");
   assert.match(review.prompt, /Confirm whether this meeting happened/);
