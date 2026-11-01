@@ -28,6 +28,7 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
       alter table tool_call add primary key(idempotency_key);
       create role carr_reader; create role carr_writer; create role carr_authority; create schema ops;
       create table deal(id uuid primary key, client_id uuid, deal_type text, owner text);
+      create table activity(id uuid primary key);
       create table v_ref_index(subject_type text, subject_id uuid, ref text, display_name text);
       create table doctrine_section(id uuid, status text, body_hash text);
       create table v_deal_room_commission(deal_id uuid, commission_id uuid, status text, received_on date);
@@ -38,6 +39,7 @@ test('a requested checklist row receives a quarantined PDF without becoming sati
     for (const s of CHECKLIST_SOURCES) await c.query("insert into doctrine_section values($1,'active',$2)", [s.section_id, s.content_hash]);
     await c.query(readFileSync(new URL('../../migrations/1105_requirement_requests.sql', import.meta.url), 'utf8'));
     await c.query(readFileSync(new URL('../../migrations/1106_requirement_visitor_retention.sql', import.meta.url), 'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1116_requirement_document_replies.sql', import.meta.url), 'utf8'));
     await c.query('grant usage on schema ops to carr_writer');
     const call = async (name, args) => {
       await c.query('begin');
