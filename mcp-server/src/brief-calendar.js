@@ -200,7 +200,18 @@ export async function addCalendarDealSuggestions(c, section, sponsor) {
 // Confirmation is derived from durable activity, not the Outlook snapshot.
 export async function addCalendarConfirmations(c, section) {
   const reviews = section.follow_up_reviews;
-  const { rows } = await c.query('select distinct calendar_event_key from activity where calendar_event_key = any($1::text[])', [reviews.map(row => row.key)]);
-  const confirmed = new Set(rows.map(row => row.calendar_event_key));
-  for (const review of reviews) review.confirmed = confirmed.has(review.key);
+  if (c.inTransaction) await c.query("savepoint calendar_confirmations");
+  try {
+    const { rows } = await c.query('select distinct calendar_event_key from activity where calendar_event_key = any($1::text[])', [reviews.map(row => row.key)]);
+    if (c.inTransaction) await c.query("release savepoint calendar_confirmations");
+    const confirmed = new Set(rows.map(row => row.calendar_event_key));
+    for (const review of reviews) review.confirmed = confirmed.has(review.key);
+  } catch {
+    if (c.inTransaction) {
+      await c.query("rollback to savepoint calendar_confirmations");
+      await c.query("release savepoint calendar_confirmations");
+    }
+    section.state = "partial";
+    section.notes.push("Meeting confirmations could not be checked.");
+  }
 }

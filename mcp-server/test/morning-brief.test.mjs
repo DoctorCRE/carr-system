@@ -442,6 +442,21 @@ test("morning-brief flags overlapping timed meetings without treating all-day en
     "Synthetic overlapping": true, "Synthetic adjacent": false });
 });
 
+test("morning-brief keeps meeting reviews when confirmations cannot be checked", async () => {
+  const at = hours => new Date(NOW + hours * 3600000).toISOString();
+  const calendar = calendarFixture();
+  calendar.items = [];
+  calendar.follow_up_reviews = [{ key: "0000000000000000", title: "Synthetic outcome review",
+    start: at(-2), end: at(-1), state: "needs_review", prompt: "Confirm whether this meeting happened." }];
+  const c = client({ calendar, unavailable: "select distinct calendar_event_key" });
+  const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
+  const section = result.sections.calendar;
+  assert.equal(section.follow_up_reviews.length, 1);
+  assert.equal(section.follow_up_reviews[0].confirmed, undefined);
+  assert.equal(section.state, "partial");
+  assert.ok(section.notes.includes("Meeting confirmations could not be checked."));
+});
+
 test("morning-brief offers recent meeting outcomes for review without creating records", async () => {
   const now = NOW;
   const at = hours => new Date(now + hours * 3600000).toISOString();
