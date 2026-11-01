@@ -267,9 +267,9 @@ export function assertFullPersonName(name) {
     const chars = token.match(/\p{L}/gu) || [];
     return chars.length > 1 || chars.some(char => !/\p{Script=Latin}/u.test(char));
   });
-  // Non-Latin writing systems need not separate personal name components with spaces.
+  // These scripts may write personal name components without spaces.
   const unspaced = parts.length === 1 && (parts[0].match(/\p{L}/gu) || []).length >= 2
-    && !/\p{Script=Latin}/u.test(parts[0]);
+    && (parts[0].match(/\p{L}/gu) || []).every(char => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(char));
   if (!normalized || normalized.includes("@") || digits.length > letters.length
       || (!unspaced && whole.length < 2))
     throw new ToolError({ error: "full_person_name_required" });
