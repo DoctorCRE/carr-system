@@ -29,6 +29,11 @@ begin
     'and program_key is null and program_ordinal is null and origin_ref ~ ''^record:[a-z_]+:.+$''))', existing_shape);
 end $record_capture_shape$;
 
+-- Preserve the installed origin grammar when main's 1126 ran before this file.
+do $capture_definition$
+declare
+  installed text := pg_get_functiondef('ops.capture_sourced_work_request(text,text,text,jsonb,uuid,uuid,uuid)'::regprocedure);
+  definition text := $capture_sql$
 CREATE OR REPLACE FUNCTION ops.capture_sourced_work_request(p_origin_ref text, p_title text, p_desired_outcome text, p_acceptance_criteria jsonb, p_doctrine_section_id uuid, p_doctrine_revision_id uuid, p_idempotency_key uuid) RETURNS TABLE(id uuid, ref text, state text, version integer, organization_tenant_id text, doctrine_section_id uuid, doctrine_revision_id uuid, doctrine_source_label text, source_current boolean, replayed boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
@@ -130,7 +135,13 @@ begin
     v_existing.doctrine_revision_id, v_label, true, false;
 end;
 $_$;
-
+$capture_sql$;
+begin
+  if position('#[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$' in installed) > 0 then
+    definition := replace(definition, '#[a-z0-9][a-z0-9-]*$', '#[a-z0-9][a-z0-9-]*(/[a-z0-9][a-z0-9-]*)*$');
+  end if;
+  execute definition;
+end $capture_definition$;
 
 grant execute on function ops.capture_sourced_work_request(text,text,text,jsonb,uuid,uuid,uuid) to carr_authority;
 
@@ -155,7 +166,7 @@ begin
     into strict entry from pg_proc p where p.oid='ops.capture_sourced_work_request(text,text,text,jsonb,uuid,uuid,uuid)'::regprocedure;
   contract := jsonb_set(contract,'{secdef_execute}',jsonb_build_array(entry)||(contract->'secdef_execute'));
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
-    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+    'language sql immutable set search_path=pg_catalog as %L','SELECT '||quote_literal(contract::text)||'::jsonb');
 end $future_work_grants$;
 
 -- Existing SQL consumers (including incident links) use this same public card.
