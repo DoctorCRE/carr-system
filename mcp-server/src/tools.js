@@ -253,6 +253,29 @@ export async function describeConstraint(client, refusal) {
   return refusal;
 }
 
+const PERSON_TITLES = new Set("DR DOCTOR MR MISTER MRS MISS MS MX PROF PROFESSOR REV REVEREND FR FATHER SIR DAME HON HONORABLE RABBI IMAM PASTOR".split(" "));
+const PERSON_SUFFIXES = new Set("MD DO DDS DMD DPM DC OD PHD PSYD DPT PT PA PAC NP RN APRN CRNA MBA MHA MPH JD ESQ CPA JR SR II III IV V".split(" "));
+
+export function assertFullPersonName(name) {
+  const normalized = String(name ?? "").normalize("NFKC").trim();
+  const letters = normalized.match(/\p{L}/gu) || [];
+  const digits = normalized.match(/\p{N}/gu) || [];
+  const parts = normalized.split(/[\s,]+/u).filter(token => /\p{L}/u.test(token));
+  const label = token => token.replace(/\./g, "").toUpperCase();
+  while (parts.length && PERSON_TITLES.has(label(parts[0]))) parts.shift();
+  while (parts.length && PERSON_SUFFIXES.has(label(parts.at(-1)))) parts.pop();
+  const whole = parts.filter(token => {
+    const chars = token.match(/\p{L}/gu) || [];
+    return chars.length > 1 || chars.some(char => !/\p{Script=Latin}/u.test(char));
+  });
+  // These scripts may write personal name components without spaces.
+  const unspaced = parts.length === 1 && (parts[0].match(/\p{L}/gu) || []).length >= 2
+    && (parts[0].match(/\p{L}/gu) || []).every(char => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(char));
+  if (!normalized || normalized.includes("@") || digits.length > letters.length
+      || (!unspaced && whole.length < 2))
+    throw new ToolError({ error: "full_person_name_required" });
+}
+
 export function pgConstraintError(e) {
   const code = e && e.code;
   if (typeof code !== "string") return null;
@@ -5064,9 +5087,14 @@ export const TOOLS = {
       org_name: { type: "string" }, phone: { type: "string" }, email: { type: "string" },
       city: { type: "string" }, state: { type: "string" }, county: { type: "string" },
       specialty: { type: "string" }, force_new: { type: "boolean" },
+      validate_only: { type: "boolean", description: "Check the person name without database access or creation." },
       research_evidence: RESEARCH_EVIDENCE_SCHEMA },
       required: ["idempotency_key","name"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "add-party", args, async () => {
+    handler: async (c, actor, args) => {
+      const kind = args.kind || "person";
+      if (kind === "person") assertFullPersonName(args.name);
+      if (args.validate_only) return { ok: true, validated: true };
+      return withEnvelope(c, actor, "add-party", args, async () => {
       if (args.phone && args.phone.replace(/\D/g, "").endsWith("2056436555"))
         throw new ToolError({ error: "placeholder_phone", hint: "205-643-6555 is never stored as a contact" });
       if (!args.force_new) {
@@ -5109,7 +5137,6 @@ export const TOOLS = {
       // running total. Placeholders like '(TBD — enrich)' deliberately still mint
       // separately: collapsing those would assert six unrelated people share an
       // employer, which is a fabricated fact, not a merge.
-      const kind = args.kind || "person";
       const evidence = kind === "person"
         ? researchEvidence(args.research_evidence,
           ["name", "company", "phone", "specialty", "market"], "add-party")
@@ -5139,7 +5166,8 @@ export const TOOLS = {
       return { ok: true, party_id: row.id,
                ...(emp.selfNamed ? { note: "org_name ignored: it names this organisation itself " +
                  "(an org is not its own employer; pass org_name on an org only for a PARENT org)" } : {}) };
-    }),
+      });
+    },
   },
 
   // [ORDER 27 (a) + EXT (c)] One atomic call gives a deal its physical +

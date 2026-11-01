@@ -18,6 +18,7 @@ spec = importlib.util.spec_from_file_location("load_calendar_contacts", REPO / "
 assert spec is not None and spec.loader is not None
 loader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(loader)
+NAME_CASES = json.loads((REPO / "mcp-server/test/fixtures/full-name-cases.json").read_text())
 FREE = sorted(loader.FREE_MAIL)[0]
 
 CONTACTS = [
@@ -157,6 +158,26 @@ class Plan(unittest.TestCase):
             self.assertNotIn(secret, text.lower())
 
 
+class ResolvedNames(unittest.TestCase):
+    def test_partial_names_never_plan_a_party(self):
+        for name in NAME_CASES["refuse"]:
+            with self.subTest(name=name):
+                p = plan({"event": [{"email": "robin@firm-z.test", "name": name}]})
+                self.assertEqual(p["add"], [])
+                self.assertEqual(p["skipped"].get("no_name"), 1)
+
+    def test_validation_failure_stops_planning(self):
+        with mock.patch.object(loader, "check_names", side_effect=loader.VerbUncertain("name_check_failed")):
+            with self.assertRaises(loader.VerbUncertain):
+                plan({"event": [{"email": "robin@firm-z.test", "name": "Robin Vale"}]})
+
+    def test_full_names_plan_a_party(self):
+        for name in NAME_CASES["accept"]:
+            with self.subTest(name=name):
+                p = plan({"event": [{"email": "robin@firm-z.test", "name": name}]})
+                self.assertEqual(len(p["add"]), 1)
+
+
 class Apply(unittest.TestCase):
     def test_writes_go_only_through_add_party_and_update_party_contact(self):
         calls = []
@@ -174,6 +195,7 @@ class Apply(unittest.TestCase):
         self.assertEqual([v for v, _ in calls], ["add-party", "vendor-assignment-context", "update-party-contact"])
         add, fill = calls[0][1], calls[2][1]
         self.assertEqual((add["name"], add["email"], add["kind"]), ("Robin Vale", "robin.vale@firm-z.test", "person"))
+        self.assertNotIn("calendar_attestation", add)
         self.assertNotIn("force_new", add)
         self.assertEqual((fill["party"], fill["base_version"], fill["fields"]),
                          ("V-LEN-010", 4, {"email": "astone@firm-b.test"}))
@@ -199,6 +221,13 @@ class Apply(unittest.TestCase):
         self.assertEqual(calls, ["add-party", "vendor-assignment-context", "update-party-contact"])
         self.assertEqual((result["add_returned_candidates"], result["filled"], result["refused"]), (1, 0, 1))
         self.assertEqual(result["errors"], {"version_conflict": 1})
+
+    def test_server_name_refusal_is_counted_as_a_name_skip(self):
+        def call(verb, payload):
+            raise loader.VerbRefused("full_person_name_required")
+        p = {"add": [{"name": "Dr Smith", "email": "smith@firm-z.test"}], "fill": []}
+        result = loader.apply(p, call)
+        self.assertEqual((result["added"], result["refused"], result["name_skips"]), (0, 1, 1))
 
     def test_an_uncertain_write_is_counted_and_never_retried(self):
         calls = []

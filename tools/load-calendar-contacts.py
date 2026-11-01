@@ -17,8 +17,9 @@ plans two kinds of write, both through record verbs only:
   read must still show no email, the same name, and the domain carried at that
   company's identity; the write uses that read's party version.
 
-A bare address is not an identity, so an attendee without a two-word name is
-skipped. Dry run by default; output is counts only, never names or addresses.
+The add-party verb judges person names for both planning and creation. Its
+validation-only mode makes no database calls. Dry run by default; output is
+counts only, never names or addresses.
 """
 from __future__ import annotations
 
@@ -126,8 +127,18 @@ def _names_conflict(display: str | None, name: str) -> bool:
     return {shown[0], shown[-1]} != {own[0], own[-1]}
 
 
-def _full_name(name: str | None, email: str) -> bool:
-    return len(_tokens(name)) >= 2 and "@" not in (name or "") and _norm(name) != email
+def check_names(names: list) -> list[bool]:
+    """Use the local registered add-party verb in validation-only mode; no writes or network."""
+    try:
+        done = subprocess.run(["node", str(ROOT / "mcp-server/check-party-names.mjs")],
+                              input=json.dumps(names), capture_output=True, text=True,
+                              cwd=ROOT, timeout=CALL_TIMEOUT)
+        results = json.loads(done.stdout) if done.returncode == 0 else None
+    except (subprocess.TimeoutExpired, ValueError):
+        results = None
+    if not isinstance(results, list) or len(results) != len(names) or any(type(r) is not bool for r in results):
+        raise VerbUncertain("name_check_failed")
+    return results
 
 
 def _local_forms(name: str) -> set[str]:
@@ -194,12 +205,13 @@ def plan(attendees, contacts, vendor_gaps, *, internal_domain: str) -> dict:
             ambiguous |= emails
 
     add = []
+    name_checks = dict(zip(unknown, check_names(list(unknown.values()))))
     for email, name in sorted(unknown.items()):
         if email in filled:
             continue
         if email in ambiguous:
             skipped["ambiguous_vendor_email"] += 1
-        elif not _full_name(name, email):
+        elif not name_checks[email]:
             skipped["no_name"] += 1
         elif _norm(name) in carried_names:
             skipped["name_matches_existing_party"] += 1
@@ -232,7 +244,7 @@ def fill_blocker(gap: dict, vendor: dict) -> str | None:
 def apply(p: dict, call) -> dict:
     """Each write once, with its own key. Candidates, refusals and uncertain calls are counted by
     error code, never retried; a fill whose fresh read no longer supports it is skipped."""
-    result = Counter(added=0, add_returned_candidates=0, filled=0, refused=0, uncertain=0)
+    result = Counter(name_skips=0, added=0, add_returned_candidates=0, filled=0, refused=0, uncertain=0)
     errors: Counter = Counter()
     skipped: Counter = Counter()
 
@@ -242,6 +254,8 @@ def apply(p: dict, call) -> dict:
         except VerbRefused as e:
             result["refused"] += 1
             errors[str(e)] += 1
+            if str(e) == "full_person_name_required":
+                result["name_skips"] += 1
         except VerbUncertain as e:
             result["uncertain"] += 1
             errors[str(e)] += 1
