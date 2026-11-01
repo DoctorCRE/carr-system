@@ -166,7 +166,7 @@ class ResolvedNames(unittest.TestCase):
                 self.assertEqual(p["skipped"].get("no_name"), 1)
 
     def test_full_names_plan_a_party(self):
-        for name in ("Robin Vale", "Robin Q. Vale", "Élodie Dubois", "Anne-Marie Vale"):
+        for name in ("Robin Vale", "Robin Q. Vale", "Zélori Varneth", "Zélori-Mavren Varneth"):
             with self.subTest(name=name):
                 p = plan({"event": [{"email": "robin@firm-z.test", "name": name}]})
                 self.assertEqual(len(p["add"]), 1)

@@ -46,7 +46,7 @@ for (const researched of [false, true]) {
   }
 }
 
-for (const name of ["Robin Vale", "Robin Q. Vale", "Élodie Dubois", "Anne-Marie Vale"]) test(`registered researched create accepts ${name}`, async () => {
+for (const name of ["Robin Vale", "Robin Q. Vale", "Zélori Varneth", "Zélori-Mavren Varneth"]) test(`registered researched create accepts ${name}`, async () => {
   const db = new Fake();
   const out = await executeRegisteredTool(db, actor, "add-party", { ...base, name, research_evidence: research });
   assert.equal(out.ok, true);
