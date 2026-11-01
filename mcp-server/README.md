@@ -67,12 +67,12 @@ No workflow needs a generation step to make a runtime import resolve.
 - `src/atlas-inventory-graph.v5.js` imports operation rows directly, alongside
   tools and mutation-registry identity.
 - `ops/scac-mutation-inventory.mjs` imports the same committed file for checks
-  and explicit regeneration; `tools/regen.py` preserves its seals/grants.
+  and explicit regeneration; `tools/regen.py` preserves its seal.
 - `lib/rule_routes.py` follows the import in mutation-registry and reads the same
   file for `ops/rule-route-coverage.py` and its selftest.
-- `ops/scac_mutation_db_inventory.py validate_current_catalog` imports the grant
-  expectations and compares them with the installed SQL contract. Its scheduler
-  retirement and migration-control tests were included in the source audit.
+- `ops/scac_mutation_db_inventory.py validate_current_catalog` reads the
+  migration-installed grant contract and compares it with the installed catalog.
+  Its scheduler retirement and migration-control tests were included in the source audit.
 - Grant/operation test consumers are `client-portal-register-postgres`,
   `client-portal-postgres`, `fact-store-postgres`, `phone-call-sessions-postgres`,
   `team-memory-postgres`, `work-queue-postgres`, `atlas-inventory-graph-read`,

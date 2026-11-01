@@ -13,7 +13,6 @@ import { handoffState } from './helpers/phone-handoff-state.mjs';
 import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 let fixture, pool, actor, handler;
 const clients = new Map();
@@ -148,6 +147,7 @@ test('Studio holds override normal reads and clear idempotently', async () => {
     { state: 'needs_attention', reason: 'transient_ceiling', open_questions: 0 },
     { state: 'held_review', reason: 'summary_repeats_transcript', open_questions: 2 },
     { state: 'held_review', reason: 'transcript_unavailable', open_questions: 1 },
+    { state: 'held_review', reason: 'budget', open_questions: 0 },
     { state: 'held_review', reason: 'open_review_questions', open_questions: 3 },
   ]) {
     assert.equal((await status(update)).status, 200);
@@ -277,9 +277,8 @@ test('phone writer grants preserve the current SCAC catalog and reject extra aut
     await c.query('begin');
     const current = async () => (await c.query('select ops.scac_mutation_catalog_v118_current() as ok')).rows[0].ok;
     assert.equal(await current(), true, 'phone admission must preserve the sealed catalog');
-    assert.deepEqual((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract,
-      SCAC_MUTATION_CURRENT_DB_GRANTS);
-    const grants = SCAC_MUTATION_CURRENT_DB_GRANTS.relation_dml.filter(row => row.relation === 'public.phone_call_session');
+    const contract = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
+    const grants = contract.relation_dml.filter(row => row.relation === 'public.phone_call_session');
     assert.deepEqual(grants.map(row => [row.grantee, row.privilege, row.grantable]),
       [['carr_writer', 'insert', false], ['carr_writer', 'update', false]]);
     await c.query('grant delete on public.phone_call_session to carr_writer');
