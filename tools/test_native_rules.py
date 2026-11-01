@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import native_rules as rules
+from git_env import fixture_env
 
 
 class NativeRulesTests(unittest.TestCase):
@@ -20,7 +21,7 @@ class NativeRulesTests(unittest.TestCase):
 
     def git(self, root, *args):
         subprocess.run(["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", *args],
-                       check=True, capture_output=True)
+                       check=True, capture_output=True, env=fixture_env())
 
     @contextmanager
     def fixture(self):
@@ -58,6 +59,9 @@ class NativeRulesTests(unittest.TestCase):
             cache = root / "tools/room-bridge/__pycache__"
             cache.mkdir()
             (cache / "module.pyc").write_bytes(b"synthetic bytecode")
+            source = root / "src/feature"
+            source.mkdir()
+            (source / "untracked.css").write_text("body {}\n")
             self.check(root)
 
     def test_add_tracked_file_under_active_glob_does_not_change_check(self):
@@ -66,6 +70,11 @@ class NativeRulesTests(unittest.TestCase):
             name = "tools/room-bridge/another.py"
             (root / name).write_text("pass\n")
             self.git(root, "add", name)
+            self.check(root)
+            renamed = "tools/room-bridge/renamed.py"
+            self.git(root, "mv", name, renamed)
+            self.check(root)
+            self.git(root, "rm", "--cached", renamed)
             self.check(root)
 
     def test_maintained_guidance_edit_does_not_require_measurement(self):
@@ -220,6 +229,7 @@ class NativeRulesTests(unittest.TestCase):
     def test_render_preserves_foreign_guidance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            self.git(root, "init", "-q")
             (root / "AGENTS.md").write_text("Existing instructions.\n")
             outputs, report = rules.render(self.snapshot, root)
             self.assertTrue(outputs["AGENTS.md"].startswith("Existing instructions.\n"))
@@ -233,6 +243,7 @@ class NativeRulesTests(unittest.TestCase):
     def test_regeneration_is_idempotent_and_preserves_native_names(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            self.git(root, "init", "-q")
             outputs, report = rules.render(self.snapshot, root)
             outputs[rules.REPORT] = rules.dump(report)
             rules.write_outputs(root, outputs)
@@ -249,6 +260,7 @@ class NativeRulesTests(unittest.TestCase):
     def test_stale_missing_and_extra_outputs_fail(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            self.git(root, "init", "-q")
             outputs, _ = rules.render(self.snapshot, root)
             rules.write_outputs(root, outputs)
             self.assertEqual(rules.stale_outputs(root, outputs), [])

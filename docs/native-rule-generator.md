@@ -1,6 +1,6 @@
 # Native rule projection
 
-WR675.S11.J6 adds native guidance beside existing delivery. The record-layer
+The native-rule generator projects stored placement into agent guidance. The record-layer
 store remains authoritative. No rule adoption, retirement, hook removal or model
 checker is performed.
 
@@ -28,32 +28,26 @@ is required before those fourteen bodies can be exported verbatim. No local plac
 
 CORE loads from `.claude/rules/carr-core.md` for Claude and the marked block in
 root `AGENTS.md` for Codex. Loaded headings contain only eight-character IDs;
-UUIDs, versions and full hashes are indexed in the manifest. UUIDs occurring
-inside a live statement remain verbatim. Startup measurements use tiktoken
-0.14.0 and cl100k_base, with exact content hashes. These are file counts, not
-provider context totals or an adherence benchmark.
+UUIDs, versions, and full hashes are indexed in the manifest. UUIDs occurring
+inside a live statement remain verbatim.
 
-WR675.S11.J10 measured the reviewed head 62b28f926 and the repaired files with
-the same tokenizer. Marked CORE was 1,160 tokens and is now 3,772. Lossless
-wording increases the total despite removing metadata. With the same full
-wording and old long metadata, CORE would be 4,467 tokens; compact metadata
-saves 695 tokens. The old 1,500-token ceiling cannot coexist with the required
-twelve full statements. The snapshot explicitly records the over-budget result;
-no claim of meeting that ceiling remains.
+The snapshot records the generated CORE chain's cl100k_base token count and
+hash. Offline checks validate that chain. The twelve full statements exceed
+the original 1,500-token target. No claim of meeting that target remains.
 
-The full chain is the newline-joined files in this order. It deliberately counts
-both CORE copies because the requested chain includes both, without asserting
-that either provider loads all three files.
+The manifest's `startup_measurement` is the last optional whole-file measurement,
+not a drift constraint. Maintained AGENTS.md and CLAUDE.md edits do not require
+remeasurement. Run `./run.sh native-rules --measure` with `tiktoken==0.14.0`
+installed to refresh it offline. The CLI labels the stored count informational.
+The measurement joins root AGENTS.md, CLAUDE.md, and the CORE file in that order.
+It counts both CORE copies and does not represent either provider's context.
 
-| File | Reviewed head tokens | Repaired tokens |
-|---|---:|---:|
-| Root AGENTS.md | 5,652 | 8,264 |
-| CLAUDE.md | 1,927 | 1,927 |
-| CORE file | 1,146 | 3,758 |
-| Full joined chain | 8,725 | 13,949 |
-
-Offline checks validate the exact startup file hashes against the manifest.
-Live refresh remeasures with tiktoken.
+Every check and regeneration enforces Codex's 32,768-byte project-doc budget.
+The generator counts root AGENTS.md plus each possible nested AGENTS.md chain,
+including tracked maintained files and newly generated files, as UTF-8 bytes.
+Root AGENTS.md requires reading AGENT_OPERATING_GUIDE.md in full before task work.
+That guide preserves the maintained sections from "Jev in reviews" through
+"Agent skills" verbatim. The core cards and product-first policy remain inline.
 
 All write/delete destinations are preflighted before mutation. Paths must be
 relative, contain no traversal segments, remain inside the repository after
@@ -64,13 +58,10 @@ Existing skills require both a generated notice and prior manifest ownership.
 Directory-relative mutation uses O_NOFOLLOW, including every parent directory.
 Foreign guidance outside marked AGENTS blocks is preserved.
 
-CI continues to run offline `--check`. Inspection of all `.github/workflows`
-files found GitHub, deployment and database credentials, but no authenticated
-record-layer read identity usable by `--from-store`. Database read credentials
-are not record-layer authorization. Follow-up for WR675.S11 store freshness:
-connect live checking to an existing authenticated record-layer CI lane once
-one exists. This slice adds no secret or workflow. Live freshness was checked
-locally using the existing machine actor.
+Offline CI does not validate live store freshness. Refreshing the authoritative
+placement against the current active census remains a credentialed follow-up.
+The committed snapshot has 222 placements and 14 withheld statements. Those
+counts describe the snapshot, not the current store.
 
 Each UUID has exactly one logical primary home in the manifest. Claude/Codex
 copies are native adapters of that home, not additional census entries.
@@ -78,10 +69,11 @@ MECHANICAL and MERGE/RETIRE entries are explicit proposal registers, not deploye
 enforcement or enacted retirement. All existing guidance remains operative.
 Procedure skills use a carr- prefix to avoid replacing existing skills.
 
-PATH frontmatter retains the store's proposed globs. The manifest records actual
-matching files and every unmatched glob, explicitly marked dormant and excluded
-from active_glob_count. Fourteen proposed globs match nothing
-in carr-system; their native rules remain dormant until matching files exist.
+PATH frontmatter retains the store's proposed globs. The generator matches them
+against `git ls-files -z`, excluding generated AGENTS.md files and carr-prefixed
+Codex skills. Each glob has an active or dormant status in the manifest. It stores
+no matching file lists. Untracked and ignored files cannot activate a scope.
+Adding or renaming a tracked file within an active scope requires no regeneration.
 Nested Codex sections preserve proposed folders and add an existing literal
 directory scope where another proposed glob matches (the .agents folder).
 Nested AGENTS scopes are directory-wide and cannot express extension globs.
@@ -100,7 +92,10 @@ settings only in a temporary repository; production hooks are untouched.
 It never sends a message. Authentication and model access must already work.
 
 Run `python3 tools/probe_native_codex_loading.py` for root/nested Codex cwd
-probes. Codex has no InstructionsLoaded hook in the inspected CLI interface;
+probes. It copies the real root AGENTS.md, its required operating guide, and the
+nested room-bridge AGENTS.md. It requires the first CORE ID 179be4b8 and last
+CORE ID fa217e48 in both responses, plus 6da539b5 only from the nested cwd.
+Codex has no InstructionsLoaded hook in the inspected CLI interface;
 these probes check the response's UUIDs and discovered skill name, a weaker
 observation than Claude's native events. Codex directory loading is tested
 by starting in that directory, not by claiming lazy injection on arbitrary
@@ -112,9 +107,7 @@ They test delivery, not a general rule-adherence improvement.
 
 ## Required manual compaction test
 
-The following interactive procedure remains the full acceptance target. Headless
-attempt results are recorded below; an unavailable command or missing load event
-is not a pass. Avoid filling an entire context window merely to force compaction.
+The following interactive procedure remains the full acceptance target. An unavailable command or missing load event is not a pass. Avoid filling an entire context window merely to force compaction.
 All steps apply.
 
 1. Start `claude` in the checkout and record its version.
@@ -144,60 +137,3 @@ Claude formats and lifecycle are documented in
 [InstructionsLoaded](https://code.claude.com/docs/en/hooks#instructionsloaded).
 PATH rules reload on matching access after compaction; skill bodies must be
 invoked again. Neither a file-presence test nor a model's agreement proves this.
-
-## WR675.S11.J10 adapter acceptance results
-
-Claude Code 2.1.316 passed both startup probes. The matching probe then resumed
-its own synthetic session with `claude -p /compact --resume <session-id>`.
-One `compact_boundary` event was observed. After requesting a fresh Read,
-InstructionsLoaded reported `carr-core.md` with `session_start` and
-`rule-6da539b5.md` with `path_glob_match`; the fixture was actually read and
-`carr-before-send` invoked again. Both files were unchanged copies of generated
-full statements, including the room-bridge doctorcre-app exception. These are
-loader and tool observations, not proof of general model adherence. An earlier
-attempt reused summarized fixture content without a new Read and therefore
-failed reload acceptance; the final probe explicitly requires a fresh Read.
-`tools/probe_native_rule_loading.py` now reports these compaction assertions.
-
-Codex CLI 0.166.0 passed root and nested cwd loading probes with short IDs and
-checkpoint name discovery. Noninteractive `codex exec --json --sandbox read-only
-/compact` treated the slash command as a model prompt and responded that it could
-not manually compact. `codex exec --help` exposes resume/fork/review but no
-compaction control. The interactive procedure above is not doable through that
-exec interface; Codex compaction, post-compaction reload and checkpoint-body
-invocation remain unverified. No successful acceptance is claimed for them.
-
-Local verification passed 12 generator tests, offline checks, both loading scripts, and `ops/ci.sh --only artifact`. The first artifact
-attempt failed because the new worktree lacked locked Node dependencies; after
-`npm ci --prefix mcp-server --ignore-scripts`, the artifact class passed. No gate
-was bypassed.
-
-## Later removal slice
-
-A later separately authorized slice can replace the legacy rule-lookup delivery,
-the old generated core cards and duplicated CLAUDE.md/AGENTS.md prose after
-behavior comparisons and missing mechanical controls are complete. adopt-rule
-continues to own store adoption. This PR leaves it and all existing hooks intact.
-
-Final live freshness recheck refused capture with `active rule coverage differs
-from placement`. The store changed during the job: 202 active IDs now differ
-from the 222-ID placement snapshot (13 added, 33 removed). The earlier live
-check passed before that change. Current live freshness is FAILED, not passed.
-Updating the authoritative placement tables for that new census is outside this
-repair and cannot preserve the task's specified twelve CORE entries unchanged.
-The committed snapshot retains the reviewed census; offline consistency passes.
-
-The commit hook's existing identity guard detected five additional protected
-identity statements beyond the two manually found examples. All fourteen are
-withheld; no scanner exemption or hook bypass was introduced.
-
-The pre-push client-data guard found three more source-restricted statements.
-Fourteen statements are withheld in total; 208 are exported verbatim. The unpublished
-repair commit was amended to remove them before any upload. No guard was bypassed.
-
-The warning-only legacy client-name scan found four further client references after
-the push completed. Those statements are removed in a follow-up commit. The
-earlier pushed commit fab0e06df still contains them. Removing them from remote
-history is not doable under the explicit never-force-push rule. Fourteen bodies
-are withheld at the final head, and 208 export verbatim. No PII-free history
-claim is made.

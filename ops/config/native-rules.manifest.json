@@ -361,68 +361,36 @@
   ],
   "path_resolution": {
     "1ee0b3bf-032e-42e8-a325-e90d00d95fb5": {
-      "src/**/client-site/**": [],
-      "src/**/portal/**": []
+      "src/**/client-site/**": "dormant",
+      "src/**/portal/**": "dormant"
     },
     "4399df76-17ad-45c1-9087-db7b7f0cbad1": {
-      "templates/**/loi/**": [],
-      "tools/**/loi*": []
+      "templates/**/loi/**": "dormant",
+      "tools/**/loi*": "dormant"
     },
     "6da539b5-84e9-49d1-84d8-28f05e151b20": {
-      ".agents/**": [
-        ".agents/skills/codebase-design/DEEPENING.md",
-        ".agents/skills/codebase-design/DESIGN-IT-TWICE.md",
-        ".agents/skills/codebase-design/LICENSE",
-        ".agents/skills/codebase-design/SKILL.md",
-        ".agents/skills/codebase-design/UPSTREAM.md",
-        ".agents/skills/scrawl/LICENSE",
-        ".agents/skills/scrawl/SKILL.md",
-        ".agents/skills/zero-tech-debt/SKILL.md"
-      ],
-      "tools/room-bridge/**": [
-        "tools/room-bridge/activation_reliability.py",
-        "tools/room-bridge/assurance_slice_compiler.py",
-        "tools/room-bridge/brief-footer.md",
-        "tools/room-bridge/browser_visual_gate_capture.py",
-        "tools/room-bridge/design_kernel.py",
-        "tools/room-bridge/engineering_passport.py",
-        "tools/room-bridge/evaluation_kernel.py",
-        "tools/room-bridge/execution_contract.py",
-        "tools/room-bridge/execution_environment.py",
-        "tools/room-bridge/grok_wire.py",
-        "tools/room-bridge/job-rules.md",
-        "tools/room-bridge/policy_learning.py",
-        "tools/room-bridge/source_study.py",
-        "tools/room-bridge/spatial_surface.py",
-        "tools/room-bridge/test-browser-cdp.mjs",
-        "tools/room-bridge/test_activation_reliability.py",
-        "tools/room-bridge/test_engineering_passport_unit.py",
-        "tools/room-bridge/test_execution_contract_unit.py",
-        "tools/room-bridge/test_execution_environment_unit.py",
-        "tools/room-bridge/test_grok_wire_unit.py",
-        "tools/room-bridge/visual_recipe_gallery.py",
-        "tools/room-bridge/visual_recipe_library.py"
-      ]
+      ".agents/**": "active",
+      "tools/room-bridge/**": "active"
     },
     "9293d609-2fa7-4d0d-b491-ed982e2f0eae": {
-      "src/**/*.css": [],
-      "src/**/*.tsx": []
+      "src/**/*.css": "dormant",
+      "src/**/*.tsx": "dormant"
     },
     "b7ec8f3b-dd2b-412d-8bf8-5af70c8b683b": {
-      "src/**/*.css": [],
-      "src/**/*.tsx": []
+      "src/**/*.css": "dormant",
+      "src/**/*.tsx": "dormant"
     },
     "ed2828ac-1bc9-4dd9-89d3-c44ef67af695": {
-      "src/**/map/**": [],
-      "tools/**/map*": []
+      "src/**/map/**": "dormant",
+      "tools/**/map*": "dormant"
     },
     "eeb3d106-70ea-4ef5-a0f4-999160c0fd9f": {
-      "src/**/*.css": [],
-      "src/**/*.tsx": []
+      "src/**/*.css": "dormant",
+      "src/**/*.tsx": "dormant"
     },
     "f04b591f-e4c7-4bca-9eca-5b9fcdcf0c9e": {
-      "templates/**/client-brief/**": [],
-      "tools/**/demograph*": []
+      "templates/**/client-brief/**": "dormant",
+      "tools/**/demograph*": "dormant"
     }
   },
   "rules": {

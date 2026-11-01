@@ -310,9 +310,12 @@ check_binding() {
 
 check_artifact() {
   local shipping base
-  if ! run_quiet "$LOGDIR/native-rules.log" "$PY" tools/native_rules.py --check ||
-     ! run_quiet "$LOGDIR/native-rules-tests.log" "$PY" tools/test_native_rules.py; then
+  if ! run_quiet "$LOGDIR/native-rules.log" "$PY" tools/native_rules.py --check; then
     fail_tail "$LOGDIR/native-rules.log"
+    bad artifact "native rule projection is stale or coverage tests failed"
+    return
+  fi
+  if ! run_quiet "$LOGDIR/native-rules-tests.log" "$PY" tools/test_native_rules.py; then
     fail_tail "$LOGDIR/native-rules-tests.log"
     bad artifact "native rule projection is stale or coverage tests failed"
     return
