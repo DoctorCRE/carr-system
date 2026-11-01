@@ -714,6 +714,12 @@
       "sha256": "b7f5522d0b1b8bcfc3d7af2ad2f37d3dd92b45aad8e6b1305bf61cd317bd4c14",
       "rule": "pii-address",
       "reason": "WR39.S8.J1 synthetic-only origination fixture, authored in this job with no business data. Earlier fixture blobs contained invented address-shaped values and repeated-digit NPI placeholders; replaced by neutral values in 32a0dbc2. History is retained under the never-rebase/never-force-push rule."
+    },
+    {
+      "path": "ops/gitleaks-selftest.py",
+      "sha256": "647d5f2ed3087097378021403590e2cb53c456d59bc327513d30a579331d1174",
+      "rule": "credential-url",
+      "reason": "WR623.S1.J12 synthetic production-shaped DSN tests that unit-shards.yml cannot hide credentials; exact reviewed test blob only, no workflow exemption."
     }
   ]
 }
