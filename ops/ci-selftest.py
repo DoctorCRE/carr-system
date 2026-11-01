@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Exercise CI classes, fixture isolation, collection, and failure behavior.
 
+import ast
 import contextlib
 import hashlib
 import importlib.util
@@ -45,7 +46,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
+            "ops/ci.sh", "ops/ci.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py", "ops/gitleaks.py", ".gitleaks.toml",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
@@ -112,6 +113,87 @@ def run(args, env=None, shell_cmd=None, timeout=60, root=None):
         e.update(TMPDIR=directory, TMP=directory, TEMP=directory, RUNNER_TEMP=directory)
         p = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
+
+def test_python_controller_entrypoint():
+    result = subprocess.run([sys.executable, str(REPO / "ops/ci.py"), "--list"],
+                            capture_output=True, text=True, timeout=15)
+    check("Python controller exposes the canonical class inventory", result.returncode == 0
+          and all(name in result.stdout for name in
+                  ("pushfloor", "unit", "types", "gates", "secret", "dependency",
+                   "migration", "binding", "artifact", "hxprobe")), result.stdout + result.stderr)
+
+
+def test_controller_selection_and_invalid_arguments():
+    with ci_fixture() as root:
+        for args, message in ((["--unknown"], "unknown argument"),
+                              (["--unit-part", "unknown"], "unknown unit part"),
+                              (["--migration-part", "unknown"], "unknown migration part"),
+                              (["--gate-shard", "3/2"], "gate shard must be 1/2 or 2/2")):
+            rc, output = run(args, root=root)
+            check(f"invalid arguments refuse with exit 64: {args}",
+                  rc == 64 and message in output and "CI passed" not in output, output)
+        for shell in ("bash", "zsh", "sh"):
+            if not shutil.which(shell):
+                continue
+            rc, output = run(["--only", "dependency,unit", "--only", "dependency"],
+                             root=root, shell_cmd=[shell])
+            verdicts = re.findall(r"(?:OK|FAIL|SKIP)\s+(unit|dependency)\s", output)
+            check(f"{shell} selects repeated and comma-separated classes once in canonical order",
+                  rc == 0 and verdicts == ["unit", "dependency"], output)
+            check(f"{shell} reports timings for exactly the selected classes",
+                  re.search(r"ci-timing: unit=\d+s dependency=\d+s", output) is not None, output)
+
+
+def test_doc_drift_keeps_its_argument_and_interpreter_handoff():
+    with ci_fixture() as root:
+        path = root / 'scripts/doc-drift/ci.py'
+        path.parent.mkdir(parents=True)
+        path.write_text("import json,sys\nprint(json.dumps(sys.argv[1:])); raise SystemExit(73)\n")
+        rc, output = run(['--doc-drift', '--fixture', 'two words'], root=root,
+                         env={'CARR_DOC_DRIFT_PYTHON': sys.executable})
+        check('doc drift preserves arguments and its own exit code',
+              rc == 73 and json.loads(output) == ['--fixture', 'two words'], output)
+        rc, output = run(['--strict', '--doc-drift'], root=root)
+        check('doc drift is only a first-argument handoff',
+              rc == 64 and 'unknown argument: --doc-drift' in output, output)
+
+
+def test_controller_requires_runner_verdicts():
+    with ci_fixture() as root:
+        for name in ("gates", "secret", "pushfloor", "migration"):
+            runner = root / f"ops/ci-{name}.py"
+            original = runner.read_text()
+            runner.write_text("raise SystemExit(0)\n")
+            rc, output = run(["--strict", "--only", f"{name},dependency"], root=root)
+            runner.write_text(original)
+            check(f"{name} cannot pass with an empty successful child verdict",
+                  rc == 1 and "without a verdict" in output
+                  and re.search(rf"FAIL\s+{name}\s", output) is not None, output)
+            check(f"dependency still runs after {name} fails",
+                  re.search(r"OK\s+dependency\s", output) is not None
+                  and f"ci-failed-classes: {name}" in output, output)
+
+
+def test_controller_consumes_evidence_destination_before_nested_runs():
+    with ci_fixture() as root:
+        unit = root / "ops/ci-unit.py"
+        unit.write_text("import os,subprocess\n"
+                        "assert 'CARR_CI_PROGRAM_RECORDS' not in os.environ\n"
+                        "raise SystemExit(subprocess.call(['bash','ops/ci.sh','--only','dependency']))\n")
+        evidence = root / "ops/ci-evidence.py"
+        evidence.write_text("import json,sys\nfrom pathlib import Path\n"
+                            "args=sys.argv\n"
+                            "target=Path(args[args.index('--output')+1])\n"
+                            "assert not target.exists(), 'nested CI wrote the parent receipt'\n"
+                            "rows=Path(args[args.index('--rows')+1]).read_text()\n"
+                            "target.write_text(json.dumps(rows))\n")
+        output = root / "receipt.json"
+        rc, text = run(["--strict", "--only", "unit"], root=root,
+                       env={"CARR_CI_PROGRAM_RECORDS": str(output)})
+        rows = json.loads(output.read_text()).splitlines() if output.exists() else []
+        check("nested CI cannot overwrite the parent's program evidence",
+              rc == 0 and len(rows) == 1 and rows[0].split('\t')[:3] == ["unit", "unit", "0"], text)
+
 
 def test_retired_freshness_class_is_not_available():
     rc, out = run(["--list"])
@@ -194,7 +276,7 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "bin").mkdir()
         (root / "tools").mkdir()
         shutil.copy2(REPO / "tools/codemap.py", root / "tools/codemap.py")
-        for name in ("ci.sh", "ci-gates.py", "node_test_summary.py", "git_env.py",
+        for name in ("ci.sh", "ci.py", "ci-gates.py", "node_test_summary.py", "git_env.py",
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
@@ -241,7 +323,7 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/ci.py", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
         (root / "ops/config/ci-check-scope.json").write_text('{}')
@@ -669,13 +751,18 @@ def test_the_walk_prunes_named_roots_only():
 FIXTURE_TOKEN = "ghp_0123456789abcdefghijklmnopqrstuvwxyz"  # ci-secret-scan: allow — inert redaction fixture
 
 def _fail_tail(log_path, py=None):
-    src = CI.read_text(encoding="utf-8")
-    start = src.index("fail_tail() {")
-    fn = src[start:src.index("\ncheck_unit()", start)]
-    p = subprocess.run(
-        ["bash", "-c", f'PY={shlex.quote(py or sys.executable)}\n{fn}\nfail_tail '
-                       f'{shlex.quote(str(log_path))}'],
-        cwd=str(REPO), capture_output=True, text=True, timeout=120)
+    script = (
+        "import runpy,sys,shutil\n"
+        "from pathlib import Path\n"
+        "m=runpy.run_path(sys.argv[1])\n"
+        "c=m['Controller'](m['Options'](),sys.argv[3])\n"
+        "shutil.rmtree(c.logdir)\n"
+        "c.logdir=Path(sys.argv[2]).parent\n"
+        "c.fail_tail(Path(sys.argv[2]).stem)\n"
+    )
+    p = subprocess.run([sys.executable, "-c", script, str(REPO / "ops/ci.py"),
+                        str(log_path), py or sys.executable],
+                       cwd=REPO, capture_output=True, text=True, timeout=120)
     return ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
 def test_a_failing_gates_output_is_printed_whole_when_it_is_short():
@@ -723,6 +810,19 @@ def test_a_long_failing_gate_log_is_tailed_and_still_redacted():
           "<redacted:github-token:40 chars>" in out, out[-400:])
     check("the line above the window is not printed at all",
           "early line 3" not in out, out[:300])
+
+def test_log_tail_counts_newlines_in_progress_output():
+    with tempfile.TemporaryDirectory(prefix="ci-selftest-progress-") as directory:
+        log = pathlib.Path(directory) / "progress.log"
+        log.write_bytes(b"".join(f"line {i}\rprogress {i}\n".encode() for i in range(1, 251))
+                        + f"failure {FIXTURE_TOKEN}\n".encode())
+        output = _fail_tail(log)
+    check("progress updates do not shorten the 80-newline diagnostic window",
+          output.splitlines()[0] == "line 172", output[:100])
+    check("progress diagnostics retain the final failure line",
+          "progress 250" in output and "failure <redacted:github-token:40 chars>" in output, output[-150:])
+    check("progress diagnostics still redact shaped credentials", FIXTURE_TOKEN not in output)
+
 
 def test_fail_tail_withholds_the_window_when_it_cannot_redact():
     with tempfile.TemporaryDirectory(prefix="ci-selftest-failtail-") as td:
@@ -787,9 +887,9 @@ def test_gates_never_run_the_production_diagnostic():
 
 def test_gates_report_every_completed_result_after_a_timeout():
     with ci_fixture() as root:
-        ci = root / "ops/ci.sh"
-        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS=120",
-                                            "CI_SELFTEST_TIMEOUT_SECONDS=1"))
+        ci = root / "ops/ci.py"
+        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS = 120",
+                                            "CI_SELFTEST_TIMEOUT_SECONDS = 1"))
         (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
         (root / "tools/test_migration_fixture.py").write_text("print('later tool passed')\n")
         cases = {
@@ -846,9 +946,9 @@ def test_failed_gate_logs_survive_exit():
                   and len(log.read_text().splitlines()) == 252)
             check("passing gate logs are removed", not (directory / "safety-hooks.log").exists()
                   and not (directory / "gate-test_migration_fixture.py.log").exists())
-        ci = root / "ops/ci.sh"
-        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS=120",
-                                            "CI_SELFTEST_TIMEOUT_SECONDS=1"))
+        ci = root / "ops/ci.py"
+        ci.write_text(ci.read_text().replace("CI_SELFTEST_TIMEOUT_SECONDS = 120",
+                                            "CI_SELFTEST_TIMEOUT_SECONDS = 1"))
         (root / "ops/a-failure-selftest.py").write_text(
             f"import time; print('timeout evidence {FIXTURE_TOKEN}', flush=True); time.sleep(10)\n")
         result = subprocess.run(command, cwd=root,
@@ -901,13 +1001,12 @@ FIXTURE_GATE = "hooks/zz-ci-fixture-gate.py"
 FIXTURE_RANGE = "CI-SELFTEST-FLOOR-FIXTURE-RANGE"
 FLOOR_BUDGET_SECONDS = 60
 
-def _ci_function_body(name, until):
-    src = CI.read_text(encoding="utf-8")
-    start = src.index(f"\n{name}() {{")
-    return src[start:src.index(f"\n{until}() {{", start)]
+def _ci_function_body(name):
+    source = (REPO / "ops/ci.py").read_text()
+    method = next(node for node in ast.walk(ast.parse(source))
+                  if isinstance(node, ast.FunctionDef) and node.name == name)
+    return ast.get_source_segment(source, method) or ""
 
-def _push_floor_body():
-    return _ci_function_body("check_pushfloor", "check_dependency")
 
 @contextlib.contextmanager
 def _stub_git_answering_the_floor(changed_paths, *, main_paths=None, added_paths=(),
@@ -943,7 +1042,7 @@ def _stub_git_answering_the_floor(changed_paths, *, main_paths=None, added_paths
         yield {"PATH": f"{td}{os.pathsep}{os.environ.get('PATH', '')}"}
 
 def test_push_floor_defers_the_gates_class_instead_of_running_it():
-    body = _push_floor_body()
+    body = _ci_function_body("check_pushfloor")
     if "check_gates" in body:
         check("the floor no longer calls the gates class as a fallback", False,
               "check_pushfloor calls check_gates — refusing to run the class to confirm it")
@@ -1508,7 +1607,11 @@ def main(argv=None):
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_failed_gate_logs_survive_exit, test_worktree_python_selection,
+    for fn in (test_controller_selection_and_invalid_arguments,
+               test_doc_drift_keeps_its_argument_and_interpreter_handoff,
+               test_controller_requires_runner_verdicts,
+               test_controller_consumes_evidence_destination_before_nested_runs,
+               test_python_controller_entrypoint, test_failed_gate_logs_survive_exit, test_worktree_python_selection,
                test_retired_freshness_class_is_not_available,
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
@@ -1533,6 +1636,7 @@ def main(argv=None):
                test_the_walk_prunes_named_roots_only,
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
+               test_log_tail_counts_newlines_in_progress_output,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
                test_gates_exclude_prose_counts_but_enforce_rule_consistency,
                test_gates_never_run_the_production_diagnostic,
