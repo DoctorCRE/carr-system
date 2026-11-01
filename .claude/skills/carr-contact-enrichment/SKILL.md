@@ -9,14 +9,6 @@ Apply the relevant conditions below. Keep exceptions with their actions; missing
 
 ### cff429f5
 
-A THIN CONTACT RECORD IS A RESEARCH TASK, NOT A QUESTION FOR JOE.
+Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction.
 
-BINDING AT THE MOMENT a new vendor, client, lead or party is about to be created — or an existing one updated — and a field the record wants is blank: company, title, category, specialty, market, phone, website, which side of a deal they sit on.
-
-THE ORDER OF ATTEMPTS, and none of them is "ask Joe". (1) Check whether an existing capture already answers it — the Copilot email batches, prior activity rows, the intro graph. (2) Read the evidence already in hand: an email address is data, not just an identifier. The domain usually names the employer outright, the local-part usually reveals the convention (first.last, flast, first), and an email signature carries title, company, phone and a website link. (3) Search the open web — the practice or firm site, the state entity registry, the licensing board, the NPI registry for clinicians. (4) Only if all of that leaves a genuine ambiguity that changes what gets written does it become Joe's, and then the question names the specific fork rather than handing him a blank.
-
-JOE'S WORDS, 2026-08-10, giving this as a standing instruction while the calendar backfill left 61 external contacts with no record: "if the email copilot batch doesn't fill in the gaps for you on these new vendor and client contacts, you will do the research to fill in the gaps. Email conventions and email signatures with company links will give you clues about where the contact works, you can do a web search, etc."
-
-WHY IT MATTERS MORE THAN IT SOUNDS. A record created thin is not neutral — it is a row that every later query treats as complete. A vendor with no category never surfaces in an intro search; a contact with no company cannot be told apart from the other side of a deal; a lead with no market never reaches a territory filter. And the alternative failure is worse: filing sixty-one questions to Joe converts a research job into a bottleneck, which is the exact pattern the delegation boundary was activated to stop.
-
-THE LIMIT THAT KEEPS THIS HONEST. Research fills a gap with a SOURCED fact, never a plausible one. A finding goes in through record-finding with its source, an inference is labelled as an inference, and a domain-name guess is not a finding — the same session that learned this filed Catalyst as a competitor because the domain looked like a brokerage, when the record already held them as the referral source who sent Dr. Hyder. Corroborate against the record before writing, and where the two disagree, the record wins until a primary source overturns it.
+Skill: contact-enrichment. Trigger: "Contact record has blank wanted field". Procedure: Search prior capture, mail/signature evidence, then primary web; source facts and labeled inference, ask only unresolved identity fork.

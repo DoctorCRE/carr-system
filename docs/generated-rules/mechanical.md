@@ -33,7 +33,9 @@ Weekends are off, both humans: Sat/Sun are not workdays for Joe or Dell; never p
 
 ### 23ea0607
 
-SALESFORCE PHASE IS NOT AUTHORITATIVE FOR A DEAL ALREADY CLOSED IN THE DEAL ROOM. FIRES AT: the moment a salesforce-diff CHANGED row proposes a phase move, on any run of the Salesforce read. CONSTRAINT: if that row moves a deal BACKWARDS from closed to an earlier phase, do not apply it and do not run its update-deal call. CARR back-office moves a closed deal back to "Legal" while it is awaiting invoicing, so Salesforce shows Legal on a deal that is genuinely done. Joe has seen this twice; on 2026-08-07 an unheld backwards row reopened Bhate and had to be reverted. Forward phase moves are unaffected and still follow Salesforce. AUDIT SIGNAL: diff-salesforce-deals.py enforces this itself and prints every blocked row under "HELD - backwards from closed", so a run where the guard fired is visible in the output, and a silent run is not the same thing as a clean one.
+Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction.
+
+EXTEND diff-salesforce-deals.py closed-to-earlier phase refusal with verb-side invariant and fixtures. Existing enforcement is rule-reported, not independently executed here; forward changes unaffected. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance.
 
 ### 2e8b4840
 
@@ -191,7 +193,9 @@ THE HONEST LIMIT OF THIS RULE AS WRITTEN. It is prose, and prose is advisory. Th
 
 ### d7e6de46
 
-CLIENT BENEFIT VALUE IS NOT REVENUE, AND THE TWO MUST NEVER MEET IN THE SAME FIELD. A deal's `won_value` is the value DELIVERED TO THE CLIENT — the number on the Benefit Summary Sheet, what the negotiation saved or gained them over the term. A commission is the fee CARR EARNED. They are different by an order of magnitude and they answer different questions. Before writing any figure into a money field, name which of the two it is and cite the document it came from; a number found near a closed deal is not thereby a commission. Two specific traps, both live in this system: (1) `won_value` and commission totals are reported SEPARATELY by the attribution view, so putting a benefit figure into `gross_amount` both fabricates revenue and double-counts the same dollars; (2) a Salesforce pipeline column captured mid-deal is a forecast, not a payment, and is doctrinally banned as data. The cost when this fails: on 2026-08-07 an open loop had recorded "a $46K Cottis close" among the evidence for backfilling the commission table. It was the client's benefit total, the deal's commission field was null, and loading it would have put $46,000 of imaginary revenue into the one table meant to prove which lead source actually pays.
+Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction.
+
+BUILD typed money provenance on commission/benefit writes and views: reject benefit source as revenue or forecast as payment; verb-side schema/refusal plus CI attribution fixtures. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance.
 
 ### defee176
 

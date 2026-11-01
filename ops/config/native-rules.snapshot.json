@@ -137,8 +137,8 @@
     },
     {
       "id": "23ea0607-7ee0-4749-bfe1-0f45e65bdc09",
-      "statement": "SALESFORCE PHASE IS NOT AUTHORITATIVE FOR A DEAL ALREADY CLOSED IN THE DEAL ROOM. FIRES AT: the moment a salesforce-diff CHANGED row proposes a phase move, on any run of the Salesforce read. CONSTRAINT: if that row moves a deal BACKWARDS from closed to an earlier phase, do not apply it and do not run its update-deal call. CARR back-office moves a closed deal back to \"Legal\" while it is awaiting invoicing, so Salesforce shows Legal on a deal that is genuinely done. Joe has seen this twice; on 2026-08-07 an unheld backwards row reopened Bhate and had to be reverted. Forward phase moves are unaffected and still follow Salesforce. AUDIT SIGNAL: diff-salesforce-deals.py enforces this itself and prints every blocked row under \"HELD - backwards from closed\", so a run where the guard fired is visible in the output, and a silent run is not the same thing as a clean one.",
-      "text_hash": "ae7f29b56815db8768df5e850c6a2e9595f07d45c48071ae2c3649a2299d8c29"
+      "text_hash": "ae7f29b56815db8768df5e850c6a2e9595f07d45c48071ae2c3649a2299d8c29",
+      "withheld": "Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction."
     },
     {
       "id": "2422ece6-1047-4b41-95a0-a3b4fc07697f",
@@ -217,8 +217,8 @@
     },
     {
       "id": "38b15dc6-ef80-4bf6-b983-3445b386e7dc",
-      "statement": "ANY MULTI-CLAUSE INSTRUCTION GIVEN TO A PARTNER MUST PRESENT EACH CLAUSE SEPARATELY, NUMBERED, WITH AN EXPLICIT STATEMENT THAT ALL OF THEM ARE REQUIRED. Never pack several required steps into one flowing sentence. Binding at the moment a session hands a partner a task, a checklist, a test instruction, or a request containing more than one required action. THE COST WHEN IT IS BROKEN, measured live on 2026-08-12: a Phase 0 prototype journey was issued as the single sentence \"Find the Myrick work record, park it with a reason, prove its history survived, then bring it back.\" Joe performed the first three clauses, reported the task done, and the fourth clause never registered. The session's first reading of that evidence blamed the product — it was drafting a finding that the prototype had let a partner believe a state change landed when it had not. That finding was FALSE. The control was discoverable and Joe had already read it correctly; his words were \"I defintely saw the button and it was self explanatory.\" A proctor instrument error was one step away from being committed to a Phase 0 exit record as a product defect. THE GENERAL FAILURE MODE: a run-on instruction produces a partial result that looks like a finding about the thing being tested, when it is actually a finding about the instruction. Every downstream conclusion inherits the error. This extends rule c864b8cb, which governs QUESTIONS put to Joe, to INSTRUCTIONS and task statements given to either partner, and it applies to Dell equally. It does not conflict with goal-only proctoring: enumerating the clauses of a goal is not disclosing the route to achieving it.",
-      "text_hash": "ec9698b8fd2f27b3284c38e80f5417e0d18b0d50b76e147e0c54e5ef72ef0343"
+      "text_hash": "ec9698b8fd2f27b3284c38e80f5417e0d18b0d50b76e147e0c54e5ef72ef0343",
+      "withheld": "Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction."
     },
     {
       "id": "3a9dbafd-04cf-460d-a573-619efb3db348",
@@ -912,8 +912,8 @@
     },
     {
       "id": "cff429f5-580b-4035-94b0-4e23a073ffd4",
-      "statement": "A THIN CONTACT RECORD IS A RESEARCH TASK, NOT A QUESTION FOR JOE.\n\nBINDING AT THE MOMENT a new vendor, client, lead or party is about to be created — or an existing one updated — and a field the record wants is blank: company, title, category, specialty, market, phone, website, which side of a deal they sit on.\n\nTHE ORDER OF ATTEMPTS, and none of them is \"ask Joe\". (1) Check whether an existing capture already answers it — the Copilot email batches, prior activity rows, the intro graph. (2) Read the evidence already in hand: an email address is data, not just an identifier. The domain usually names the employer outright, the local-part usually reveals the convention (first.last, flast, first), and an email signature carries title, company, phone and a website link. (3) Search the open web — the practice or firm site, the state entity registry, the licensing board, the NPI registry for clinicians. (4) Only if all of that leaves a genuine ambiguity that changes what gets written does it become Joe's, and then the question names the specific fork rather than handing him a blank.\n\nJOE'S WORDS, 2026-08-10, giving this as a standing instruction while the calendar backfill left 61 external contacts with no record: \"if the email copilot batch doesn't fill in the gaps for you on these new vendor and client contacts, you will do the research to fill in the gaps. Email conventions and email signatures with company links will give you clues about where the contact works, you can do a web search, etc.\"\n\nWHY IT MATTERS MORE THAN IT SOUNDS. A record created thin is not neutral — it is a row that every later query treats as complete. A vendor with no category never surfaces in an intro search; a contact with no company cannot be told apart from the other side of a deal; a lead with no market never reaches a territory filter. And the alternative failure is worse: filing sixty-one questions to Joe converts a research job into a bottleneck, which is the exact pattern the delegation boundary was activated to stop.\n\nTHE LIMIT THAT KEEPS THIS HONEST. Research fills a gap with a SOURCED fact, never a plausible one. A finding goes in through record-finding with its source, an inference is labelled as an inference, and a domain-name guess is not a finding — the same session that learned this filed Catalyst as a competitor because the domain looked like a brokerage, when the record already held them as the referral source who sent Dr. Hyder. Corroborate against the record before writing, and where the two disagree, the record wins until a primary source overturns it.",
-      "text_hash": "226f3808398d0e80335798edd85e0a7f11c18965efe56ea76fc78442d0c02e4d"
+      "text_hash": "226f3808398d0e80335798edd85e0a7f11c18965efe56ea76fc78442d0c02e4d",
+      "withheld": "Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction."
     },
     {
       "id": "d26d63b0-6944-4212-aa22-8baee56b28d4",
@@ -932,8 +932,8 @@
     },
     {
       "id": "d7e6de46-7e6f-45b8-83c5-8b71fcf1dec0",
-      "statement": "CLIENT BENEFIT VALUE IS NOT REVENUE, AND THE TWO MUST NEVER MEET IN THE SAME FIELD. A deal's `won_value` is the value DELIVERED TO THE CLIENT — the number on the Benefit Summary Sheet, what the negotiation saved or gained them over the term. A commission is the fee CARR EARNED. They are different by an order of magnitude and they answer different questions. Before writing any figure into a money field, name which of the two it is and cite the document it came from; a number found near a closed deal is not thereby a commission. Two specific traps, both live in this system: (1) `won_value` and commission totals are reported SEPARATELY by the attribution view, so putting a benefit figure into `gross_amount` both fabricates revenue and double-counts the same dollars; (2) a Salesforce pipeline column captured mid-deal is a forecast, not a payment, and is doctrinally banned as data. The cost when this fails: on 2026-08-07 an open loop had recorded \"a $46K Cottis close\" among the evidence for backfilling the commission table. It was the client's benefit total, the deal's commission field was null, and loading it would have put $46,000 of imaginary revenue into the one table meant to prove which lead source actually pays.",
-      "text_hash": "69d5261d7b51cfbfa4e1d64ed1a077cf383298482a420e2eb5c1f5a9b1ba24b9"
+      "text_hash": "69d5261d7b51cfbfa4e1d64ed1a077cf383298482a420e2eb5c1f5a9b1ba24b9",
+      "withheld": "Full statement withheld: client-identifying historical examples conflict with the no-client-PII instruction."
     },
     {
       "id": "d7f74c93-0602-4f0c-be7c-1f5d948b5e33",

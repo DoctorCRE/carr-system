@@ -17,14 +17,14 @@ contact production or claim the snapshot remains current forever.
 
 The snapshot contains the live statements verbatim alongside placement prose and
 UUID/hash inventory. Every statement hash must agree with the placement table.
-212 generated bodies contain their full statement, including examples and
+208 generated bodies contain their full statement, including examples and
 exceptions. Lossless export of rules 3b0cd546, 49533583, 54e2bcb9,
-5d44d3f3, 83b9a362, 9f15f21a, f47a8fe9, 5f8c661d, 76a1ae2b and 8cddc6ad is explicitly not doable
+5d44d3f3, 83b9a362, 9f15f21a, f47a8fe9, 5f8c661d, 76a1ae2b and 8cddc6ad, 23ea0607, 38b15dc6, cff429f5, d7e6de46 is explicitly not doable
 under the task's no-client-PII instruction and existing identity guard: their historical examples identify
 clients. Their statements are withheld from the snapshot, the manifest names
 the exceptions, and generated bodies are visibly marked incomplete with placement
 text only. No all-222 lossless pass is claimed. A store-authorized de-identification
-is required before those ten bodies can be exported verbatim. No local placement or wording override is provided.
+is required before those fourteen bodies can be exported verbatim. No local placement or wording override is provided.
 
 CORE loads from `.claude/rules/carr-core.md` for Claude and the marked block in
 root `AGENTS.md` for Codex. Loaded headings contain only eight-character IDs;
@@ -187,9 +187,16 @@ repair and cannot preserve the task's specified twelve CORE entries unchanged.
 The committed snapshot retains the reviewed census; offline consistency passes.
 
 The commit hook's existing identity guard detected five additional protected
-identity statements beyond the two manually found examples. All ten are
+identity statements beyond the two manually found examples. All fourteen are
 withheld; no scanner exemption or hook bypass was introduced.
 
 The pre-push client-data guard found three more source-restricted statements.
-Ten statements are withheld in total; 212 are exported verbatim. The unpublished
+Fourteen statements are withheld in total; 208 are exported verbatim. The unpublished
 repair commit was amended to remove them before any upload. No guard was bypassed.
+
+The warning-only legacy client-name scan found four further client references after
+the push completed. Those statements are removed in a follow-up commit. The
+earlier pushed commit fab0e06df still contains them. Removing them from remote
+history is not doable under the explicit never-force-push rule. Fourteen bodies
+are withheld at the final head, and 208 export verbatim. No PII-free history
+claim is made.

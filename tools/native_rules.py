@@ -20,6 +20,10 @@ START = "<!-- carr-native-rules:start -->"
 END = "<!-- carr-native-rules:end -->"
 TABLE_PREFIX = "rules/placement-plan-2026-11-table"
 WITHHELD = {
+    "23ea0607-7ee0-4749-bfe1-0f45e65bdc09",
+    "38b15dc6-ef80-4bf6-b983-3445b386e7dc",
+    "cff429f5-580b-4035-94b0-4e23a073ffd4",
+    "d7e6de46-7e6f-45b8-83c5-8b71fcf1dec0",
     "5f8c661d-b620-41a1-a900-acc4dcfa07df",
     "76a1ae2b-6f84-4209-ac52-e610a6610e15",
     "8cddc6ad-46e8-4c38-9ee7-07cb9860f68f",
