@@ -1,5 +1,5 @@
 // The deliberately small Program 6 bridge: source a problem from the current
-import { readyToClose, completionFields, validChangeUrl } from './work-queue.js';
+import { readyToClose, completionFields, validChangeUrl, changeUrlPattern } from './work-queue.js';
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
 import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.ts";
@@ -850,7 +850,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
         base_version: { type: "integer", minimum: 1 },
         change_refs: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false,
-          properties: { pr_url: { type: "string", pattern: "^https://github\\.com/(DoctorCRE/carr-system|jbookout/doctorcre-app)/pull/[1-9][0-9]*$" },
+          properties: { pr_url: { type: "string", pattern: changeUrlPattern },
             merge_commit_sha: { type: "string", pattern: "^[0-9a-fA-F]{40}$" } }, required: ["pr_url", "merge_commit_sha"] } },
         ...completionFields,
       }, required: ["idempotency_key", "human_ref", "base_version", "change_refs", "criterion_evidence", "user_facing"] },

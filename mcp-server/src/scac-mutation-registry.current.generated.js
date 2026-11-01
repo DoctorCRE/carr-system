@@ -733,7 +733,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "complete-work-request": {
     "ingress_key": "mcp-tool:complete-work-request",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "schema_digest": "ba6119c8b5476f08d8d5e20df152395f3c89b81732ce898cc783b4f7adc933b0",
+    "schema_digest": "3c7699ff842968550f207195665afc21cba139949b4020886c7324cc95c5af03",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

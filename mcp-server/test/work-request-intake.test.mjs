@@ -391,3 +391,14 @@ test("report-problem extra-field refusal has a safe public contract", t => {
   assert.match(payload.hint, /Remove.*documented input/i);
   assert.doesNotMatch(JSON.stringify(payload), /private input/);
 });
+import { Validator } from '@cfworker/json-schema';
+
+test('direct completion schema accepts listed repositories and rejects others', () => {
+  const validator = new Validator(structuredClone(TOOLS['complete-work-request'].inputSchema));
+  const args = { idempotency_key: '00000000-0000-4000-8000-000000000001', human_ref: 'WR-123', base_version: 1,
+    change_refs: [{ pr_url: 'https://github.com/jbookout/software-factory/pull/123', merge_commit_sha: 'a'.repeat(40) }],
+    criterion_evidence: [{ id: 'AC-1', evidence: 'Passed' }], user_facing: false };
+  assert.equal(validator.validate(args).valid, true);
+  args.change_refs[0].pr_url = 'https://github.com/jbookout/unlisted/pull/123';
+  assert.equal(validator.validate(args).valid, false);
+});

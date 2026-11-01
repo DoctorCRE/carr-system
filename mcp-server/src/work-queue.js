@@ -13,7 +13,8 @@ const base = { idempotency_key: { type: 'string', format: 'uuid' }, work_request
 const slice = { ...positive, default: 1 };
 const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
 const jobStart = ['job', 'runner_job_id'];
-const repositories = Object.keys(addressFormat.repositories);
+export const repositories = Object.keys(addressFormat.repositories);
+export const changeUrlPattern = `^https://github\\.com/(${repositories.map(repo => repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/pull/[1-9][0-9]*$`;
 export const validChangeUrl = url => {
   const match = typeof url === 'string' && /^https:\/\/github[.]com\/([^/]+\/[^/]+)\/pull\/[1-9][0-9]*$/.exec(url);
   return !!match && repositories.includes(match[1]);
