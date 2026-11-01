@@ -5,14 +5,17 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "ops"))
+from git_env import fixture_env, scrubbed_env
 
 
 def probe(nested):
     with tempfile.TemporaryDirectory(prefix="carr-codex-loading-") as directory:
         root = Path(directory)
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "init", "-q", str(root)], check=True, env=fixture_env())
         core = (ROOT / ".claude/rules/carr-core.md").read_text()
         (root / "AGENTS.md").write_text(core)
         target = root / "tools/room-bridge"
@@ -27,7 +30,7 @@ def probe(nested):
                   "Also list the available before-send checkpoint skill name.")
         result = subprocess.run(
             ["codex", "exec", "--json", "--sandbox", "read-only", "-C", str(cwd), prompt],
-            cwd=cwd, capture_output=True, text=True, timeout=180)
+            cwd=cwd, capture_output=True, text=True, timeout=180, env=scrubbed_env())
         if result.returncode:
             raise RuntimeError(f"Codex probe failed: {result.stderr[-1000:]} {result.stdout[-1000:]}")
         events = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
