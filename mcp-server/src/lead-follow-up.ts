@@ -95,7 +95,7 @@ export function leadFollowUpTools() {
             null::date,null::uuid,$2::int
           from vendor v join party p on p.id=v.party_id
             left join v_last_touch t on t.subject_type='vendor' and t.subject_id=v.id
-          where v.merged_into is null and v.disposition='active' and p.merged_into is null
+          where v.merged_into is null and v.disposition=$4::text and p.merged_into is null
             and p.deleted_at is null and p.contact_state=any($3::text[])), due as (
           select s.*,coalesce(next_action_date,anchor_on+interval_days) due_on
           from subjects s where not exists(select 1 from next_action n where n.status='open'
@@ -103,7 +103,7 @@ export function leadFollowUpTools() {
               or (n.subject_type='client' and n.subject_id=s.client_id))))
           select d.*,a.slug owner,current_date-due_on days_overdue from due d
             left join actor a on a.id=d.owner_id where due_on<=current_date
-          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES])).rows;
+          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES,'active'])).rows;
         if (proposals.length > 1000) throw new ToolError({ error: 'quiet_follow_up_limit_exceeded' });
         return { schema_version: 'quiet-follow-ups.v1', cadence, proposals, sent: false, tasks_created: false };
       },
