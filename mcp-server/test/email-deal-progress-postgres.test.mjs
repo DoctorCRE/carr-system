@@ -1427,10 +1427,17 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
-test('contact reply drafts reach Home and retain their contact through submission and sent receipts', async () => {
+for (const subjectType of ['client', 'lead', 'vendor']) test(`${subjectType} reply drafts reach Home and retain their contact through submission and sent receipts`, async () => {
   await c.query("update actor set email='joe@example.test' where slug='joe'");
   await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
-  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic reply contact',$1,$1) returning id", [actor.id])).rows[0].id;
+  const query = {
+    client: "insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,$3) returning id",
+    lead: "insert into lead(party_id,stage,created_by,updated_by,registry_ref) values($1,'new',$2,$2,$3) returning id",
+    vendor: "insert into vendor(party_id,category,created_by,updated_by,vendor_ref) values($1,'banker',$2,$2,$3) returning id",
+  }[subjectType];
+  const contact = (await c.query(query, [party,actor.id,`${subjectType}-${randomUUID()}`])).rows[0].id;
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: contact,
     kind: 'email_in', summary: 'Email from Synthetic Contact: Floor plan', detail: quote,
     email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } }, machineFor('joe'));
   const args = { kind: 'reply_draft', activity_id: source.activity_id, evidence_quote: quote,
@@ -1450,9 +1457,9 @@ test('contact reply drafts reach Home and retain their contact through submissio
   await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
     base_version: submitted.version, status: 'sent', sha256: submitted.sha256,
     sent_item_id: randomUUID() }, machineFor('joe'), 'carr_writer');
-  const sent = (await c.query("select client_id,deal_id from activity where email_context->>'send_id'=$1", [proposal.proposal_id])).rows;
+  const sent = (await c.query("select client_id,lead_id,vendor_id,deal_id from activity where email_context->>'send_id'=$1", [proposal.proposal_id])).rows;
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].client_id, (await c.query('select client_id from activity where id=$1', [source.activity_id])).rows[0].client_id);
+  assert.equal(sent[0][`${subjectType}_id`], contact);
   assert.equal(sent[0].deal_id, null);
   assert.equal((await listed()).some(item => item.id === proposal.proposal_id), false);
 });

@@ -13,7 +13,8 @@ minutes). Unfiled email goes through lib.email_matching: thread continuity files
 automatically; otherwise one pinned Jev call proposes a deal, a possible new matter,
 or contact-only logging. That filing is written before any model call. Filed email retains the
 isolated phase-move, next-step and reply-draft model call (lib/model_call.py, model from settings);
-email just inherited to a deal gets its next step and reply draft. Unconfirmed filing hints
+email just inherited to a deal gets its next step and reply draft. Reply drafts also work
+without a deal, using the captured inbound mailbox provenance. Unconfirmed filing hints
 never select the next-step subject. Each proposal carries a
 literal evidence quote (capped at 2000 characters) and a confidence. Every surviving
 proposal is stored through `record-email-proposal`, which re-checks the evidence
@@ -37,7 +38,8 @@ transport, timeout, setup or authorization failure on a write, or a failed queue
 leaves work for the next run and makes this run exit 1; a filing already written stays
 written, so a model failure delays only the proposals. An email that fails
 MAX_ATTEMPTS times is abandoned (still exit 1). State lives in
-out/email-router/state.json (0600) and is pruned after the queue window. The receipt
+out/email-router/state.json (0600) and is pruned after the queue window. A state version
+change reconsiders recent mail handled under the earlier proposal contract. The receipt
 line carries counts and exception type names only.
 """
 from __future__ import annotations
@@ -64,6 +66,7 @@ MIN_CONFIDENCE = 0.6
 MAX_EMAILS = 25
 MAX_ATTEMPTS = 3
 WINDOW_DAYS = 3
+STATE_VERSION = 2
 MODEL_BODY_CHARS = 12_000
 MAX_QUOTE = 2000
 BUDGET = timedelta(minutes=20)
@@ -133,7 +136,7 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
                 'evidence_quote': quote, 'confidence': float(confidence)}
         if email.get('deal'):
             args['deal'] = email['deal']
-        elif item['kind'] != 'next_step':
+        elif item['kind'] == 'phase_move':
             continue
         if item['kind'] == 'next_step':
             text, due = (item.get('text') or '').strip(), item.get('next_date') or today.isoformat()
@@ -173,6 +176,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
     codes: dict[str, int] = {}
     model_failed_types: dict[str, int] = {}
+    if state.get('version') != STATE_VERSION:
+        state.update(version=STATE_VERSION, routed={}, attempts={})
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
