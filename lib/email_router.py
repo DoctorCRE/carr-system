@@ -177,21 +177,25 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
     codes: dict[str, int] = {}
     model_failed_types: dict[str, int] = {}
     if state.get('version') != STATE_VERSION:
-        state.update(version=STATE_VERSION, routed={}, attempts={})
+        state.update(version=STATE_VERSION, reply_recheck=state.get('routed', {}).copy())
     routed, attempts = state.setdefault('routed', {}), state.setdefault('attempts', {})
+    reply_recheck = state.setdefault('reply_recheck', {})
     cutoff = (now - timedelta(days=WINDOW_DAYS + 1)).timestamp()
     for activity, at in list(routed.items()):
         if at < cutoff:
             del routed[activity]
+            reply_recheck.pop(activity, None)
 
     def failed(activity: str) -> None:
+        if activity in routed:
+            return
         attempts[activity] = attempts.get(activity, 0) + 1
         if attempts[activity] >= MAX_ATTEMPTS:
             routed[activity] = now.timestamp()
             attempts.pop(activity)
             counts['abandoned'] += 1
     try:
-        queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed)})
+        queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed.keys() - reply_recheck.keys())})
     except Exception:
         counts['queue_failed'] = 1
         return {**counts, 'refusal_codes': codes, 'model_failed_types': model_failed_types}
@@ -201,6 +205,8 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             counts['out_of_time'] = 1
             break
         activity = email['activity_id']
+        rechecking = activity in reply_recheck
+        reply_recheck.pop(activity, None)
         counts['emails'] += 1
         if email.get('kind') == 'email_out' and (not account or
                 (email.get('sender', {}).get('email') or '').casefold() != account.casefold()):
@@ -244,7 +250,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
 
         # Filing first: matching and thread inheritance never wait on the next-step model below.
         deal = email.get('deal')
-        if not deal:
+        if not deal and not rechecking:
             try:
                 decision = matching(email, queue['open_deals'], email.get('thread_history', []))
             except Exception as error:
@@ -284,7 +290,9 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             model_failed(error)
             continue
         kept = proposals(reply, source, now.date())
-        if email.get('kind') == 'email_out':
+        if rechecking:
+            kept = [item for item in kept if item['kind'] == 'reply_draft' and email.get('kind') != 'email_out']
+        elif email.get('kind') == 'email_out':
             kept = [item for item in kept if item['kind'] == 'next_step']
         elif source is not email:
             kept = [item for item in kept if item['kind'] in ('next_step', 'reply_draft')]

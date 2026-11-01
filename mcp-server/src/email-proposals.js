@@ -372,8 +372,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             const account = partner?.email;
             if (!args.sender_account || args.sender_account !== account) fail('email_draft_sender_mismatch');
             if (!args.sent_at || !Number.isFinite(Date.parse(args.sent_at))) fail('email_draft_sent_time_required');
-            const sourceActivity = (await c.query('select email_context,client_id,lead_id,vendor_id from activity where id=$1', [row.activity_id])).rows[0];
+            const sourceActivity = (await c.query('select email_context,deal_id,client_id,lead_id,vendor_id from activity where id=$1', [row.activity_id])).rows[0];
             const source = sourceActivity?.email_context;
+            const sentDeal = row.deal_id ?? sourceActivity.deal_id;
             const context = { subject: row.submitted_email.subject, conversation_id: source?.conversation_id ?? null,
               sender: { email: args.sender_account, internal: true },
               recipients: [
@@ -387,14 +388,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             if (existing) {
               if (existing.kind !== 'email_out' || (existing.email_context?.send_id && existing.email_context.send_id !== row.id))
                 fail('email_identity_conflict');
-              await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=$4,email_context=$5::jsonb,
+              await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=coalesce($4,deal_id),email_context=$5::jsonb,
+                client_id=coalesce(client_id,$6),lead_id=coalesce(lead_id,$7),vendor_id=coalesce(vendor_id,$8),
                 version=version+1,updated_by=$3,updated_at=now() where id=$1`,
-              [existing.id, args.sent_at, partner.id, row.deal_id, JSON.stringify(context)]);
+              [existing.id, args.sent_at, partner.id, sentDeal, JSON.stringify(context),
+                sourceActivity.client_id,sourceActivity.lead_id,sourceActivity.vendor_id]);
             } else {
               await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_context,email_identity,client_id,lead_id,vendor_id)
                 values($1,$2,'email_out','Partner-submitted email sent',$3,'outlook',$4::jsonb,$5::jsonb,$6,$7,$8)`,
-              [args.sent_at, partner.id, row.deal_id, JSON.stringify(context),
-                JSON.stringify({ ...identity, subject: row.deal_id ?? sourceActivity.client_id ?? sourceActivity.lead_id ?? sourceActivity.vendor_id }),
+              [args.sent_at, partner.id, sentDeal, JSON.stringify(context),
+                JSON.stringify({ ...identity, subject: sentDeal ?? sourceActivity.client_id ?? sourceActivity.lead_id ?? sourceActivity.vendor_id }),
                 sourceActivity.client_id,sourceActivity.lead_id,sourceActivity.vendor_id]);
             }
           }

@@ -145,6 +145,33 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(route(server, broken, state)['abandoned'], 1)
         self.assertEqual(route(server, broken, state)['emails'], 0)
 
+    def test_contact_recheck_drafts_without_repeating_matching(self):
+        source = dict(email('recheck-contact', ASK), deal=None, kind='email_in')
+        server = Server([source])
+        state = {'routed': {source['activity_id']: NOW.timestamp()}}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'I will check the floor plan.'}
+        def matching(*args):
+            raise AssertionError('handled mail must not be matched again')
+        counts = email_router.route(server, lambda e, d: {'proposals': [draft]}, refusal_code,
+            state, NOW, matching=matching)
+        self.assertEqual((counts['recorded'], counts['model_failed']), (1, 0))
+
+    def test_reply_recheck_drains_pages_across_saved_runs(self):
+        server = Server([email(f'recheck-{i}', ASK) for i in range(email_router.MAX_EMAILS + 1)])
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'I will check the floor plan.'}
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)
+            (out / 'state.json').write_text(json.dumps({'routed': {
+                e['activity_id']: NOW.timestamp() for e in server.emails}}))
+            def run():
+                return email_router.run(out, server, lambda e, d: {'proposals': [draft]}, refusal_code, NOW)[1]
+            self.assertEqual(run()['recorded'], email_router.MAX_EMAILS)
+            self.assertEqual(run()['recorded'], 1)
+            self.assertEqual(run()['emails'], 0)
+        self.assertEqual(len(server.stored), email_router.MAX_EMAILS + 1)
+
     def test_contact_only_email_keeps_next_step_for_partner_review(self):
         source = dict(email('nondeal', ASK), deal=None, subject_name='Synthetic vendor')
         server = Server([source])
