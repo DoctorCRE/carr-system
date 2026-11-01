@@ -84,7 +84,7 @@ for label, fetch in (
         failures.append(f"{label}: expected one warning line and exit 0, got rc={rc} {text!r}")
 
 # The real fetcher reads team-memory through the existing verb door.
-calls = []
+calls: list[list[str]] = []
 
 
 def fake_run(args, **kw):
