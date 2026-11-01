@@ -1427,6 +1427,103 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
 
+const editDraft = (proposal, extra = {}, identity = actor) => command('edit-email-draft', {
+  idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 1,
+  subject: 'Re: Edited floor plan', body: '  Synthetic saved reply.\nThank you.  ', ...extra }, identity, 'carr_writer');
+
+test('reply draft edits persist exact text and version through list-email-proposals without sending', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const before = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.deepEqual(before.reply_draft.to, ['sender@example.test']);
+  assert.deepEqual(before.reply_draft.cc, ['dell@example.test']);
+  const result = await editDraft(proposal);
+  const after = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.equal(result.version, before.version + 1);
+  assert.equal(result.subject, 'Re: Edited floor plan');
+  assert.equal(result.body, '  Synthetic saved reply.\nThank you.  ');
+  assert.deepEqual(after, { ...before, version: result.version,
+    reply_draft: { ...before.reply_draft, subject: result.subject, body: result.body } });
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.ok(!outbox.drafts.some(item => item.proposal_id === proposal.proposal_id));
+});
+
+test('reply draft edits are owner-only for both partners', async () => {
+  const dell = { ...(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
+  for (const [owner, other] of [[actor, dell], [dell, actor]]) {
+    const proposal = await draftFor(owner.slug);
+    await refuses(editDraft(proposal, {}, other), 'email_draft_not_owner');
+    assert.equal((await editDraft(proposal, {}, owner)).version, 2);
+  }
+  await refuses(editDraft(await draftFor(), {}, machineFor('joe')), 'human_only_verb_requires_verified_partner');
+});
+
+test('reply draft edits refuse stale versions and preserve the winning text', async () => {
+  const proposal = await draftFor();
+  const saved = await editDraft(proposal);
+  await assert.rejects(editDraft(proposal, { body: 'Stale overwrite' }), error =>
+    error.payload?.error === 'version_conflict' && error.payload.current_version === 2);
+  const shown = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.equal(shown.version, saved.version);
+  assert.equal(shown.reply_draft.body, saved.body);
+});
+
+test('reply draft edit replay returns the original result without another version or event', async () => {
+  const proposal = await draftFor();
+  const idempotency_key = randomUUID();
+  const saved = await editDraft(proposal, { idempotency_key });
+  const replay = await editDraft(proposal, { idempotency_key });
+  assert.deepEqual(replay, { ...saved, replayed: true });
+  assert.equal((await listed()).find(item => item.id === proposal.proposal_id).version, 2);
+  const room = await command('get-deal-room', { deal });
+  assert.equal(room.events.filter(event => event.verb === 'edit-email-draft' &&
+    event.new_value.proposal_id === proposal.proposal_id).length, 1);
+});
+
+test('reply draft edits reject recipient and status fields and invalid text without changing the draft', async () => {
+  const proposal = await draftFor();
+  const before = (await listed()).find(item => item.id === proposal.proposal_id);
+  for (const extra of [{ to: ['other@example.test'] }, { cc: ['other@example.test'] },
+    { status: 'approved_to_send' }, { subject: '' }, { subject: 'x'.repeat(999) }, { body: 'x'.repeat(20001) }])
+    await assert.rejects(editDraft(proposal, extra));
+  await refuses(editDraft(proposal, { subject: 'Bad\nheader' }), 'email_draft_subject_invalid');
+  await refuses(editDraft(proposal, { subject: '   ' }), 'email_draft_subject_invalid');
+  await refuses(editDraft(proposal, { body: '   ' }), 'email_draft_empty_body');
+  assert.deepEqual((await listed()).find(item => item.id === proposal.proposal_id), before);
+});
+
+test('reply draft edits refuse submitted drafts and cannot change frozen send text', async () => {
+  const proposal = await draftFor();
+  const submitted = await submitDraft(proposal);
+  await refuses(editDraft(proposal, { base_version: submitted.version }), 'email_draft_not_pending');
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  const frozen = outbox.drafts.find(item => item.proposal_id === proposal.proposal_id);
+  assert.equal(frozen.body, submitted.body);
+  assert.equal(frozen.subject, submitted.subject);
+  assert.equal(frozen.version, submitted.version);
+});
+
+test('concurrent same-key reply draft edits replay once while different-key stale writes refuse', async () => {
+  const proposal = await draftFor();
+  const other = new pg.Client(connection);
+  await other.connect();
+  const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 1,
+    subject: 'Synthetic concurrent subject', body: 'Synthetic concurrent body' };
+  try {
+    const results = await Promise.all([command('edit-email-draft', args, actor, 'carr_writer'),
+      command('edit-email-draft', args, actor, 'carr_writer', other)]);
+    assert.equal(results.filter(result => result.replayed).length, 1);
+    assert.ok(results.every(result => result.version === 2));
+    await refuses(command('edit-email-draft', { ...args, idempotency_key: randomUUID(),
+      body: 'Losing text' }, actor, 'carr_writer', other), 'version_conflict');
+    await refuses(command('edit-email-draft', { ...args, body: 'Key reuse text' }), 'key_reuse');
+    const shown = (await listed()).find(item => item.id === proposal.proposal_id);
+    assert.equal(shown.version, 2);
+    assert.equal(shown.reply_draft.body, args.body);
+  } finally { await other.end(); }
+});
+
 test('submission audit binds recipients without addresses and proves both partner copies', async () => {
   await c.query("update actor set email='joe@example.test' where slug='joe'");
   await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
