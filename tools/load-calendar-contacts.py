@@ -5,9 +5,10 @@ Reads a private attendee file (path argument, never copied into the repo) and
 plans two kinds of write, both through record verbs only:
 
 - C3: an external attendee the record does not carry, with a full display name,
-  becomes a party through add-party. Never force_new: when add-party answers
-  with candidates the attendee is counted, not inserted. A contact is a party,
-  never a lead.
+  becomes a party through add-party with calendar_attestation calendar_attendee.
+  That records the calendar as the origin and does not mark the party research-
+  verified. Never force_new: when add-party answers with candidates the attendee
+  is counted, not inserted. A contact is a party, never a lead.
 - C2: a vendor person with no email gets one through update-party-contact when
   exactly one attendee address at that person's own firm domain matches their
   full name (first.last, firstlast, flast), the attendee's display name does not
@@ -249,7 +250,8 @@ def apply(p: dict, call) -> dict:
 
     for person in p["add"]:
         response = attempt("add-party", {"idempotency_key": str(uuid4()), "kind": "person",
-                                         "name": person["name"], "email": person["email"]})
+                                         "name": person["name"], "email": person["email"],
+                                         "calendar_attestation": "calendar_attendee"})
         if response is not None:
             result["add_returned_candidates" if response.get("candidates") else "added"] += 1
     for gap in p["fill"]:

@@ -628,8 +628,11 @@ async function insertOrgPartyGuarded(c, savepoint, insertSql, insertParams, name
 
 // Research is evidence, not a checkbox supplied after the write.  These
 // validators run before every intake write that turns a contact into a client
-// or vendor (and before a directly-created contact party).  The resulting
+// or vendor, and before a directly-created person party.  The resulting
 // evidence is then persisted as a `verified` finding in the same envelope.
+// calendarAttestation is the one person create that is not research: a calendar
+// attendee record stays unverified, and new-client / new-vendor still require
+// research before those roles exist.
 function researchEvidence(raw, requiredFields, gate) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw))
     throw new ToolError({ error: "research_evidence_required", gate,
@@ -678,6 +681,27 @@ async function stampResearch(c, actor, partyId, evidence) {
       field_evidence: evidence.field_evidence, sources: evidence.sources,
       discrepancies: evidence.discrepancies, epistemic_status: "source_backed" }),
      evidence.sources.map(source => `${source.url} observed ${source.observed_at}`).join(" | "), actor.id]);
+}
+
+// A calendar attendee is a person the calendar named, not a researched contact.
+// The flag records that weaker origin. It is never the `verified` kind.
+function calendarAttestation(args, kind) {
+  if (!Object.hasOwn(args, "calendar_attestation") || args.calendar_attestation == null) return null;
+  const admitted = args.calendar_attestation === "calendar_attendee" && kind === "person"
+    && !args.force_new && !args.research_evidence;
+  if (!admitted) throw new ToolError({ error: "conflicting_party_inputs",
+    hint: "calendar_attestation admits only a person, never force_new and never research_evidence" });
+  if (!String(args.email || "").trim())
+    throw new ToolError({ error: "field_required", field: "email" });
+  return "calendar_attendee";
+}
+
+async function stampCalendarAttestation(c, actor, partyId) {
+  await c.query(
+    `insert into record_flag (subject_type,subject_id,kind,value,source,created_by)
+     values ('party',$1,'calendar_attendee',$2,$3,$4)`,
+    [partyId, JSON.stringify({ found: true, epistemic_status: "calendar_attested",
+      checked_fields: ["name", "email"] }), "calendar attendee record", actor.id]);
 }
 
 function preferredMergeSurvivor(rows) {
@@ -5052,18 +5076,21 @@ export const TOOLS = {
 
   "add-party": {
     write: true,
-    description: "Create a party (person or org). CHECKS for existing matches first (email, similar name) and returns candidates INSTEAD of inserting when found — pass force_new:true only after the human confirms it is genuinely a different person. Never store 205-643-6555 (it is Dell's placeholder, not a contact).",
+    description: "Create a party (person or org). CHECKS for existing matches first (email, similar name) and returns candidates INSTEAD of inserting when found — pass force_new:true only after the human confirms it is genuinely a different person. A calendar_attestation of calendar_attendee records an emailed person from a calendar attendee record without research verification; it refuses force_new, and candidates still block the insert.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, name: { type: "string" },
       kind: { type: "string", enum: ["person","org"], default: "person" },
       org_name: { type: "string" }, phone: { type: "string" }, email: { type: "string" },
       city: { type: "string" }, state: { type: "string" }, county: { type: "string" },
       specialty: { type: "string" }, force_new: { type: "boolean" },
+      calendar_attestation: { type: "string", enum: ["calendar_attendee"] },
       research_evidence: RESEARCH_EVIDENCE_SCHEMA },
       required: ["idempotency_key","name"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-party", args, async () => {
       if (args.phone && args.phone.replace(/\D/g, "").endsWith("2056436555"))
         throw new ToolError({ error: "placeholder_phone", hint: "205-643-6555 is never stored as a contact" });
+      const kind = args.kind || "person";
+      const calendar = calendarAttestation(args, kind);
       if (!args.force_new) {
         const cand = await c.query(
           `select id, name, email, city,
@@ -5104,8 +5131,7 @@ export const TOOLS = {
       // running total. Placeholders like '(TBD — enrich)' deliberately still mint
       // separately: collapsing those would assert six unrelated people share an
       // employer, which is a fabricated fact, not a merge.
-      const kind = args.kind || "person";
-      const evidence = kind === "person"
+      const evidence = kind === "person" && !calendar
         ? researchEvidence(args.research_evidence,
           ["name", "company", "phone", "specialty", "market"], "add-party")
         : null;
@@ -5128,10 +5154,12 @@ export const TOOLS = {
       } else {
         row = (await c.query(insertSql, insertParams)).rows[0];
       }
-      if (evidence) await stampResearch(c, actor, row.id, evidence);
+      if (calendar) await stampCalendarAttestation(c, actor, row.id);
+      else if (evidence) await stampResearch(c, actor, row.id, evidence);
       await writeEvent(c, actor, "add-party", "party", row.id,
-        { new: { name: args.name }, idempotency_key: args.idempotency_key });
-      return { ok: true, party_id: row.id,
+        { new: { name: args.name, ...(calendar ? { origin: calendar } : {}) },
+          idempotency_key: args.idempotency_key });
+      return { ok: true, party_id: row.id, ...(calendar ? { calendar_attested: true } : {}),
                ...(emp.selfNamed ? { note: "org_name ignored: it names this organisation itself " +
                  "(an org is not its own employer; pass org_name on an org only for a PARENT org)" } : {}) };
     }),

@@ -173,8 +173,10 @@ class Apply(unittest.TestCase):
         result = loader.apply(p, call)
         self.assertEqual([v for v, _ in calls], ["add-party", "vendor-assignment-context", "update-party-contact"])
         add, fill = calls[0][1], calls[2][1]
-        self.assertEqual((add["name"], add["email"], add["kind"]), ("Robin Vale", "robin.vale@firm-z.test", "person"))
+        self.assertEqual((add["name"], add["email"], add["kind"], add["calendar_attestation"]),
+                         ("Robin Vale", "robin.vale@firm-z.test", "person", "calendar_attendee"))
         self.assertNotIn("force_new", add)
+        self.assertNotIn("research_evidence", add)
         self.assertEqual((fill["party"], fill["base_version"], fill["fields"]),
                          ("V-LEN-010", 4, {"email": "astone@firm-b.test"}))
         self.assertTrue(fill["source"].strip())
