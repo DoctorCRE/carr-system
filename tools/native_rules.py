@@ -354,13 +354,14 @@ def write_outputs(root, outputs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from-store", action="store_true", help="read live placement and catalog; requires tiktoken")
+    parser.add_argument("--measure", action="store_true", help="remeasure startup from the committed snapshot; requires tiktoken")
     parser.add_argument("--check", action="store_true", help="verify against committed snapshot offline")
     args = parser.parse_args()
     snapshot = capture() if args.from_store else load_snapshot(ROOT / SNAPSHOT)
     outputs, report = render(snapshot, ROOT)
     core = outputs[".claude/rules/carr-core.md"]
     chain = START + "\n" + core.rstrip() + "\n" + END + "\n"
-    if args.from_store:
+    if args.from_store or args.measure:
         import tiktoken
         snapshot["core_measurement"] = {
             "tokenizer": "cl100k_base", "sha256": digest(chain),
@@ -374,7 +375,7 @@ def main():
     startup = {"AGENTS.md": outputs["AGENTS.md"],
                "CLAUDE.md": (ROOT / "CLAUDE.md").read_text(),
                ".claude/rules/carr-core.md": core}
-    if args.from_store:
+    if args.from_store or args.measure:
         report["startup_measurement"] = {
             "tokenizer": "cl100k_base",
             "files": {p: {"sha256": digest(t), "tokens": len(tiktoken.get_encoding("cl100k_base").encode(t))}

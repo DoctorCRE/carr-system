@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
@@ -250,6 +251,29 @@ export async function describeConstraint(client, refusal) {
       `field on its own -- each may be individually valid.`;
   }
   return refusal;
+}
+
+const PERSON_TITLES = new Set("DR DOCTOR MR MISTER MRS MISS MS MX PROF PROFESSOR REV REVEREND FR FATHER SIR DAME HON HONORABLE RABBI IMAM PASTOR".split(" "));
+const PERSON_SUFFIXES = new Set("MD DO DDS DMD DPM DC OD PHD PSYD DPT PT PA PAC NP RN APRN CRNA MBA MHA MPH JD ESQ CPA JR SR II III IV V".split(" "));
+
+export function assertFullPersonName(name) {
+  const normalized = String(name ?? "").normalize("NFKC").trim();
+  const letters = normalized.match(/\p{L}/gu) || [];
+  const digits = normalized.match(/\p{N}/gu) || [];
+  const parts = normalized.split(/[\s,]+/u).filter(token => /\p{L}/u.test(token));
+  const label = token => token.replace(/\./g, "").toUpperCase();
+  while (parts.length && PERSON_TITLES.has(label(parts[0]))) parts.shift();
+  while (parts.length && PERSON_SUFFIXES.has(label(parts.at(-1)))) parts.pop();
+  const whole = parts.filter(token => {
+    const chars = token.match(/\p{L}/gu) || [];
+    return chars.length > 1 || chars.some(char => !/\p{Script=Latin}/u.test(char));
+  });
+  // These scripts may write personal name components without spaces.
+  const unspaced = parts.length === 1 && (parts[0].match(/\p{L}/gu) || []).length >= 2
+    && (parts[0].match(/\p{L}/gu) || []).every(char => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u.test(char));
+  if (!normalized || normalized.includes("@") || digits.length > letters.length
+      || (!unspaced && whole.length < 2))
+    throw new ToolError({ error: "full_person_name_required" });
 }
 
 export function pgConstraintError(e) {
@@ -5063,9 +5087,14 @@ export const TOOLS = {
       org_name: { type: "string" }, phone: { type: "string" }, email: { type: "string" },
       city: { type: "string" }, state: { type: "string" }, county: { type: "string" },
       specialty: { type: "string" }, force_new: { type: "boolean" },
+      validate_only: { type: "boolean", description: "Check the person name without database access or creation." },
       research_evidence: RESEARCH_EVIDENCE_SCHEMA },
       required: ["idempotency_key","name"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "add-party", args, async () => {
+    handler: async (c, actor, args) => {
+      const kind = args.kind || "person";
+      if (kind === "person") assertFullPersonName(args.name);
+      if (args.validate_only) return { ok: true, validated: true };
+      return withEnvelope(c, actor, "add-party", args, async () => {
       if (args.phone && args.phone.replace(/\D/g, "").endsWith("2056436555"))
         throw new ToolError({ error: "placeholder_phone", hint: "205-643-6555 is never stored as a contact" });
       if (!args.force_new) {
@@ -5108,7 +5137,6 @@ export const TOOLS = {
       // running total. Placeholders like '(TBD — enrich)' deliberately still mint
       // separately: collapsing those would assert six unrelated people share an
       // employer, which is a fabricated fact, not a merge.
-      const kind = args.kind || "person";
       const evidence = kind === "person"
         ? researchEvidence(args.research_evidence,
           ["name", "company", "phone", "specialty", "market"], "add-party")
@@ -5138,7 +5166,8 @@ export const TOOLS = {
       return { ok: true, party_id: row.id,
                ...(emp.selfNamed ? { note: "org_name ignored: it names this organisation itself " +
                  "(an org is not its own employer; pass org_name on an org only for a PARENT org)" } : {}) };
-    }),
+      });
+    },
   },
 
   // [ORDER 27 (a) + EXT (c)] One atomic call gives a deal its physical +
@@ -8976,7 +9005,8 @@ function assertDeclaredVocabularies(name, tool, args) {
 }
 
 export async function assertRegisteredToolInput(name, tool, args = {}) {
-  assertDeclaredVocabularies(name, tool, args);
+  // dispatch-job aggregates schema vocabulary and copy errors in its handler.
+  if (name !== 'dispatch-job') assertDeclaredVocabularies(name, tool, args);
   try {
     await assertRegisteredOperation(name, tool, args);
   } catch (error) {
@@ -9114,7 +9144,8 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
-    return await tool.handler(client, actor, args);
+    const result = await tool.handler(client, actor, args);
+    return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
     if (e instanceof ToolError) throw e;
     throw pgConstraintError(e) || e;
@@ -9198,7 +9229,9 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
 });
 
-function bindToolSource(tool, source) {
+function bindToolSource(tool, source, name) {
+  if (FUTURE_WORK_WRITES[name]) tool = { ...tool, inputSchema: { ...tool.inputSchema,
+    properties: { ...tool.inputSchema.properties, work_request: workRequestLinkSchema } } };
   const locator = TOOL_REGISTRATION_SOURCE[source] ||
     (/^mcp-server\/src\/[a-zA-Z0-9_./-]+\.(?:js|ts)$/.test(source) ? source : null);
   if (!tool || typeof tool !== "object" || !locator)
@@ -9206,7 +9239,7 @@ function bindToolSource(tool, source) {
   Object.defineProperty(tool, "registrySource", {
     value: locator, enumerable: false, writable: false, configurable: false,
   });
-  deepFreezeToolContract(tool);
+  return deepFreezeToolContract(tool);
 }
 
 function deepFreezeToolContract(value, seen = new Set()) {
@@ -9216,14 +9249,13 @@ function deepFreezeToolContract(value, seen = new Set()) {
   return Object.freeze(value);
 }
 
-for (const tool of Object.values(TOOLS)) bindToolSource(tool, "inline");
+for (const [name, tool] of Object.entries(TOOLS)) TOOLS[name] = bindToolSource(tool, "inline", name);
 
 function registerTools(additions, source) {
   const duplicates = Object.keys(additions).filter(name => Object.hasOwn(TOOLS, name)).sort();
   if (duplicates.length)
     throw new Error(`duplicate tool registration from ${source}: ${duplicates.join(",")}`);
-  for (const tool of Object.values(additions)) bindToolSource(tool, source);
-  Object.assign(TOOLS, additions);
+  Object.assign(TOOLS, Object.fromEntries(Object.entries(additions).map(([name, tool]) => [name, bindToolSource(tool, source, name)])));
 }
 
 registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "invoice-tracker");
@@ -9999,7 +10031,13 @@ registerTools({
       };
       const verb = verbByKind[candidate.kind];
       if (!verb) throw new ToolError({ error: "unknown_candidate_kind", kind: candidate.kind });
-      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id) };
+      const innerArgs = { ...candidate.payload, idempotency_key: captureKey(candidate.id),
+        ...(FUTURE_WORK_WRITES[verb] && args.work_request ? { work_request: args.work_request } : {}) };
+      if (candidate.kind === 'next_step' && !innerArgs.work_request) {
+        const linked = (await c.query(`select w.ref from ops.future_work_link f join ops.work_request w on w.id=f.work_request_id
+          where f.organization_tenant_id=$1 and f.source_ref=$2`, [organizationTenantForActor(actor), `capture:${candidate.id}`])).rows[0];
+        if (linked) innerArgs.work_request = linked.ref;
+      }
       delete innerArgs.plan_base;
       delete innerArgs.evidence_source;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
@@ -10059,7 +10097,7 @@ registerTools({
           `capture_candidate:${candidate.id}`).entries()) {
           const { status, ...facts } = item;
           const stored = await executeRegisteredTool(c, actor, 'record-deal-item', {
-            ...facts, deal: result.deal_id,
+            ...facts, deal: result.deal_id, work_request: result.work_request,
             idempotency_key: derivedIdempotencyKey("capture-candidate-item", `${candidate.id}:${index}`),
           });
           result.items.push(stored.item);
@@ -10798,7 +10836,9 @@ registerTools({
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
 // Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
-registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError }), "work-queue");
+registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError,
+  completeWorkRequest: (c, actor, args, attestor) => TOOLS["complete-work-request"].handler(c, actor, args, attestor),
+}), "work-queue");
 registerTools(workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }), "work-request-intake");
 registerTools(workPortfolioTools({ ToolError }), "work-portfolio");
 

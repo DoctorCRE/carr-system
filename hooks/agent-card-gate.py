@@ -14,7 +14,11 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.hook_runtime import Verdict, decision, run
 
-MINT = """Mint the job first, then put the returned card_id on its own Card: line in the prompt:
+MINT = """Start with /pstack:poteto-mode as a poteto-agent worker on every provider.
+Read ~/.agents/skills/pstack/skills/poteto-mode/SKILL.md on Codex/Grok, or the installed Claude pstack skill.
+Use tools/room-bridge/brief-footer.md and include the standing orders from
+/Users/booko/.claude/orchestrate/doctorcre-delivery/preferences.md verbatim in remote briefs and every resume.
+Mint the job first, then put the returned card_id on its own Card: line in the prompt:
 ./run.sh call dispatch-job '{"idempotency_key":"<fresh UUID>","work_request":"<work request ref>","slice":1,"executor":"claude","model":"<model>","effort":"<effort>","card_title":"Review assigned change","description":"Review the assigned change."}'"""
 
 

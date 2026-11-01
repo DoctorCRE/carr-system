@@ -7,6 +7,7 @@ type PublicError = {
   error: string; correlation_id: string; hint: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
   current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
+  field_errors?: { field: string; value: unknown; code: string; pattern?: string; allowed_values?: string[] }[];
   suggested_card_title?: string; suggested_description?: string; allowed_values?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
@@ -14,6 +15,12 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["research_evidence_required", "Research is required before creating this person or assigning a business role. Supply the documented research_evidence."],
+  ["research_source_invalid", "Each research source needs an HTTPS URL and a valid non-future observed_at timestamp."],
+  ["research_evidence_incomplete", "Link every required research field to source indexes and supply discrepancies, including an empty array when none exist."],
+  ["full_person_name_required", "Resolve the full first and last personal name before creating a person. Initials and partial names are not records."],
+  ["conflicting_party_inputs", "Supply one consistent party identity input using the documented operation shape."],
+  ["field_required", "Supply the required field using the documented operation shape."],
   ["calendar_event_key_invalid", "Use the meeting review key: exactly 16 lowercase hexadecimal characters."],
   ["calendar_event_key_requires_deal_meeting", "Confirm the calendar meeting on a deal with kind meeting."],
   ["answer_blocks_invalid", "Use table.v1 or chart.v1 answer blocks with typed columns and sourced numbers. Limit each answer to 8 blocks, each table to 200 rows and 20 columns, and the payload to 128 KiB. Charts must reference a table in the answer."],
@@ -53,6 +60,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["action_link_no_longer_actionable", "This card has already been handled or has changed. Open Home for what needs you now."],
   ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
   ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
+  ["future_work_link_conflict", "This record already has a Work Request. Reuse its existing link."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],
   ["work_request_terminal_state", "The Work Request is already terminal. Re-read its card before choosing another action."],
   ["work_request_not_completable", "Complete only a captured, triaged, ready, or verification Work Request."],
@@ -68,7 +76,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
   ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
   ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
-  ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals."],
+  ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals. An adopted proposal is consumed. To amend it, write a new Convention proposal with Retires: [<full rule UUID as a JSON string>] and adopt the new section."],
   ["convention_proposal_malformed", "Use 'Convention: <statement>' with Card or Packs, or 'Retires: [<full rule UUID>, ...]' for retirement only. A replacement may also name Retires."],
   ["convention_retirement_rule_not_found", "A retirement target does not exist. Re-read find-rule and use its full rule UUID."],
   ["convention_retirement_rule_not_active", "A retirement target is no longer active. Re-read find-rule and review the proposal before adopting."],
@@ -113,6 +121,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["missing_plan_base", "Review this older call proposal before applying it."],
   ["newer_change_exists", "The record changed after this proposal. Review its current state before deciding."],
   ["invalid_work_queue_fields", "Use only the documented queue fields and positive 32-bit slice, job, and position numbers."],
+  ["invalid_job_type", "Supply job_type from the documented job-types.v1.json vocabulary."],
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
@@ -147,6 +156,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["slice_outcome_already_recorded", "The recorded outcome and its evidence are final. Plan a new slice for further work."],
   ["slice_reason_required", "Explain why the slice is retired."],
   ["slice_merged_change_required", "Supply at least one merged PR URL and its full merge commit SHA."],
+  ["slice_independent_review_required", "Each shipped PR needs a current-head APPROVE comment from a reviewer Card different from its author Card."],
   ["invalid_slice_successor", "Only a retired slice may name a different recorded slice as its replacement."],
   ["work_request_open_slices", "Finish or retire every open slice before completing the Work Request."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
@@ -308,6 +318,16 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       result.hint = PUBLIC_ERRORS.get(result.error)!;
       delete result.fields;
     }
+  }
+  if (["invalid_work_queue_fields", "invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_job_description",
+    "invalid_work_request", "invalid_idempotency_key", "invalid_job_type", "value_not_in_declared_vocabulary",
+    "convention_pack_unknown", "convention_proposal_malformed"].includes(code) && Array.isArray(payload?.field_errors)) {
+    result.field_errors = payload.field_errors.filter((item): item is Record<string, unknown> =>
+      !!item && typeof item === "object" && typeof item.field === "string" && typeof item.code === "string")
+      .map(item => ({ field: String(item.field), value: item.value, code: String(item.code),
+        ...(typeof item.pattern === "string" ? { pattern: item.pattern } : {}),
+        ...(Array.isArray(item.allowed_values) && item.allowed_values.every(v => typeof v === "string")
+          ? { allowed_values: item.allowed_values } : {}) }));
   }
   return result;
 }

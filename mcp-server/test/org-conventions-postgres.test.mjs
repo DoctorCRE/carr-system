@@ -420,3 +420,72 @@ test('malformed retirement lists are non-adoptable and cannot retire rules', asy
   }
   assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
 });
+
+
+test('PR card attribution is not rule-card JSON and unknown packs name the options', async () => {
+  const p = await proposeText('pr-attribution', 'Convention: Synthetic attributed rule.\nCard: WR698.S1.J1\nPacks: governance-rules');
+  const out = await adopt(joe, p, 'carr_authority_joe');
+  assert.ok(out.rule_id);
+  await assert.rejects(adopt(joe, p, 'carr_authority_joe'), error => {
+    assert.match(publicError(error).hint, /Retires:/);
+    return true;
+  });
+  const bad = await proposeText('pack-options', 'Convention: Synthetic unknown pack.\nPacks: does-not-exist');
+  await assert.rejects(adopt(joe, bad, 'carr_authority_joe'), error => {
+    const field = publicError(error).field_errors.find(e => e.field === 'Packs');
+    assert.deepEqual(field.value, ['does-not-exist']);
+    assert.ok(field.allowed_values.includes('governance-rules'));
+    return true;
+  });
+});
+
+for (const route of ['tool', 'sql']) {
+  const adoptVia = async proposal => {
+    if (route === 'tool') return adopt(joe, proposal, 'carr_authority_joe');
+    await c.query('begin');
+    try {
+      await c.query('set local session authorization carr_authority_joe');
+      const out = (await c.query('select ops.adopt_rule($1,$2,$3,$4) as adopted',
+        [proposal.section_id, proposal.base_version, randomUUID(), 'Synthetic attribution regression'])).rows[0].adopted;
+      await c.query('commit');
+      return out;
+    } catch (error) { await c.query('rollback'); throw error; }
+  };
+
+  test(`${route} ignores first-line PR attribution before a packed convention`, async () => {
+    const p = await proposeText(`attribution-first-${route}`,
+      'Card: WR1.S1.J1\nConvention: Synthetic attributed first line.\nPacks: governance-rules');
+    const out = await adoptVia(p);
+    assert.ok(out.rule_id);
+    assert.equal(out.card_id, null);
+    assert.deepEqual(out.packs, ['governance-rules']);
+  });
+
+  test(`${route} ignores PR attribution in retirement-only proposals`, async () => {
+    for (const first of [false, true]) {
+      const old = await adoptCard(`attribution-retire-${route}-${first}`);
+      const lines = [`Retires: ["${old.rule_id}"]`, 'Card: WR1.S1.J1'];
+      const p = await proposeText(`attribution-retirement-${route}-${first}`, (first ? lines.reverse() : lines).join('\n'));
+      const out = await adoptVia(p);
+      assert.equal(out.rule_id, null);
+      assert.deepEqual(out.retired_rule_ids, [old.rule_id]);
+      assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'retired');
+    }
+  });
+
+  test(`${route} ignores PR attribution without Packs when JSON card metadata exists`, async () => {
+    const p = await proposeText(`attribution-json-${route}`,
+      `Card: WR1.S1.J1\nConvention: Synthetic attributed JSON card.\nCard: {"id":"attribution-${route}","placement":"CORE"}\nCard: WR2.S3.J4  `);
+    assert.equal((await adoptVia(p)).card_id, `attribution-${route}`);
+  });
+}
+
+test('PR attribution supplies no delivery metadata and noncanonical Card lines stay invalid', async () => {
+  const p = await proposeText('attribution-without-delivery', 'Convention: Synthetic missing delivery.\nCard: WR1.S1.J1');
+  await refused(adopt(joe, p, 'carr_authority_joe'), 'convention_proposal_malformed');
+  const old = await adoptCard('attribution-not-canonical');
+  for (const [index, line] of ['Card: WR1.S1.J1 extra', 'Card: WR1xS1xJ1', 'Card: {"id":"metadata","placement":"CORE"}'].entries()) {
+    const bad = await proposeText(`attribution-invalid-${index}`, `Retires: ["${old.rule_id}"]\n${line}`);
+    await refused(adopt(joe, bad, 'carr_authority_joe'), 'convention_proposal_malformed');
+  }
+});

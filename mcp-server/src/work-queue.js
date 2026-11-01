@@ -3,15 +3,32 @@ import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
+import { derivedIdempotencyKey } from './derived-key.ts';
 import { readableWorkRequestSql } from './work-request-read.ts';
+import { independentApproval } from './review-gate-comments.js';
 
 const text = (max = 100) => ({ type: 'string', minLength: 1, maxLength: max });
 const positive = { type: 'integer', minimum: 1, maximum: 0x7fffffff };
+const workRequestPattern = '^WR-?[0-9]{1,6}$';
+const titlePattern = "^[A-Za-z']+( [A-Za-z']+){1,2}$";
+const titleRule = `2-3 plain words, first word one of: ${cardVerbs.join(', ')}. Unique within the Work Request.`;
+const descriptionRule = `one sentence starting with one of: ${cardVerbs.join(', ')}; no line breaks`;
 const base = { idempotency_key: { type: 'string', format: 'uuid' }, work_request: text() };
 const slice = { ...positive, default: 1 };
 const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
 const jobStart = ['job', 'runner_job_id'];
-const repositories = Object.keys(addressFormat.repositories);
+const titleVerbRepairs = new Map([['Update', 'Revise'], ['Rereview', 'Review'], ['Resync', 'Fix']]);
+export const repositories = Object.keys(addressFormat.repositories);
+export const changeUrlPattern = `^https://github\\.com/(${repositories.map(repo => repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/pull/[1-9][0-9]*$`;
+export const validChangeUrl = url => {
+  const match = typeof url === 'string' && /^https:\/\/github[.]com\/([^/]+\/[^/]+)\/pull\/[1-9][0-9]*$/.exec(url);
+  return !!match && repositories.includes(match[1]);
+};
+export const completionFields = {
+  criterion_evidence: { type: 'array', items: { type: 'object', additionalProperties: false,
+    properties: { id: { type: 'string', minLength: 1 }, evidence: { type: 'string', minLength: 1 } }, required: ['id', 'evidence'] } },
+  user_facing: { type: 'boolean' }, user_journey_ref: { type: 'string', minLength: 1 },
+};
 export function queueCardId(ref, ordinal, number) {
   const work_request = 'WR' + new RegExp(addressFormat.work_request_pattern).exec(ref)[1].replace(/^0+(?=\d)/u, '');
   return addressFormat[number == null ? 'slice_template' : 'job_template']
@@ -26,10 +43,19 @@ export const PULL_REQUEST_TTL_MS = 60_000;
 // and review and merge wait on others, so none of those is ever stale.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
+
+// Readiness is derived from the recorded plan; it grants no completion authority.
 const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
   && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
-  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
+  && validChangeUrl(change.pr_url)
   && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
+export function readyToClose(state, slices) {
+  if (['confirmed_closed','declined','superseded','failed'].includes(state) || !slices.length) return false;
+  return slices.every(slice => slice.outcome === 'retired' ||
+    (slice.outcome === 'done' && Array.isArray(slice.change_refs) && slice.change_refs.length > 0 && slice.change_refs.every(validSliceChange)))
+    && slices.some(slice => slice.outcome === 'done');
+}
+
 const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state: 'unavailable', reason: 'no_github_reader', prs: [] }));
 
 // One GitHub search per repository per TTL, shared by every caller in this isolate; failures are cached too.
@@ -38,6 +64,13 @@ const unavailablePullRequests = async repos => repos.map(repo => ({ repo, state:
 // The cache is keyed by repository and bound day, so no caller receives a narrower window than it asked for.
 export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...a), now = Date.now, ttlMs = PULL_REQUEST_TTL_MS }) {
   const memo = new Map();
+  const headers = { accept: 'application/vnd.github+json', authorization: `Bearer ${token}`,
+    'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' };
+  const json = async url => {
+    const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error('GitHub read failed');
+    return response.json();
+  };
   async function search(repo, since) {
     if (!token) return { repo, state: 'unavailable', reason: 'credential_not_configured', prs: [] };
     const bound = since ? ` updated:>=${since.slice(0, 10)}` : '';
@@ -47,8 +80,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       let total = 0, incomplete = false;
       for (let page = 1; page <= 10; page++) {
         query.set('page', String(page));
-        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers: {
-          accept: 'application/vnd.github+json', authorization: `Bearer ${token}`, 'user-agent': 'carr-mcp-work-queue', 'x-github-api-version': '2022-11-28' } });
+        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers });
         if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
         const body = await response.json();
         total = body.total_count;
@@ -64,7 +96,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: incomplete || total > items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
-  return (repos, since) => Promise.all(repos.map(repo => {
+  const read = (repos, since) => Promise.all(repos.map(repo => {
     const key = `${repo} ${since?.slice(0, 10) ?? ''}`;
     const hit = memo.get(key);
     if (hit && now() - hit.at < ttlMs) return hit.value;
@@ -73,6 +105,32 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
     memo.set(key, { at: now(), value });
     return value;
   }));
+  read.reviewedChange = async (change, sliceId) => {
+    if (!token || !validSliceChange(change)) return null;
+    try {
+      const root = change.pr_url.replace('https://github.com/', 'https://api.github.com/repos/');
+      const pr = await json(root.replace('/pull/', '/pulls/'));
+      const author = /^Card: (WR\d+\.S\d+\.J\d+)$/.exec((pr.body ?? '').split(/\r?\n/)[0])?.[1];
+      if (!pr.merged || pr.merge_commit_sha !== change.merge_commit_sha || !SHA.test(pr.head?.sha ?? '')
+        || !author || author.slice(0, author.lastIndexOf('.J')) !== sliceId) return null;
+      const pages = async url => {
+        const rows = [];
+        for (let page = 1; page <= 10; page++) {
+          const items = await json(`${url}?per_page=100&page=${page}`);
+          rows.push(...items);
+          if (items.length < 100) return rows;
+        }
+        throw new Error('GitHub comments truncated');
+      };
+      const [comments, reviews] = await Promise.all([pages(root.replace('/pull/', '/issues/') + '/comments'),
+        pages(root.replace('/pull/', '/pulls/') + '/reviews')]);
+      const ordered = [...comments, ...reviews.filter(review => !['DISMISSED', 'PENDING'].includes(review.state))]
+        .sort((a, b) => (a.submitted_at ?? a.created_at ?? '').localeCompare(b.submitted_at ?? b.created_at ?? ''));
+      const approval = independentApproval(author, pr.head.sha, ordered);
+      return approval?.review_url?.startsWith(change.pr_url + '#') ? { ...change, ...approval } : null;
+    } catch { return null; }
+  };
+  return read;
 }
 
 
@@ -202,7 +260,40 @@ export function queueView(rows, sources, at) {
   return { jobs, github: sources.map(({ prs, ...source }) => source) };
 }
 
-export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
+function dispatchErrors(args, properties, required) {
+  const errors = [];
+  const add = (field, code, repair) => errors.push({ field, value: args[field] ?? null, code, ...repair });
+  const starting = jobStart.some(key => Object.hasOwn(args, key));
+  const needed = new Set([...required, ...(starting ? [...jobStart, 'repository'] : [...jobFacts, 'job_type']),
+    ...(jobFacts.some(key => Object.hasOwn(args, key)) ? jobFacts : [])]);
+  for (const field of new Set([...Object.keys(args), ...needed])) {
+    const spec = properties[field], value = args[field];
+    if (!spec) { add(field, 'invalid_work_queue_fields', { allowed_values: Object.keys(properties) }); continue; }
+    if (value == null && !needed.has(field)) continue;
+    if (spec.enum && !spec.enum.includes(value)) {
+      add(field, field === 'job_type' && value == null ? 'invalid_job_type' : 'value_not_in_declared_vocabulary', { allowed_values: spec.enum });
+    } else if (spec.type === 'string' && (typeof value !== 'string' || !value.trim() || value.length > (spec.maxLength || 100))) {
+      add(field, 'invalid_work_queue_fields', { pattern: `nonempty string, at most ${spec.maxLength || 100} characters` });
+    } else if (spec.type === 'integer' && (!Number.isSafeInteger(value) || value < 1 || value > spec.maximum)) {
+      add(field, 'invalid_work_queue_fields', { pattern: `integer from 1 through ${spec.maximum}` });
+    } else if (field === 'work_request' && !new RegExp(workRequestPattern).test(value)) {
+      add(field, 'invalid_work_request', { pattern: 'WR-000675 (WR followed by a hyphen and six digits)' });
+    } else if (field === 'idempotency_key' && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)) {
+      add(field, 'invalid_idempotency_key', { pattern: 'UUID: 8-4-4-4-12 hexadecimal digits' });
+    }
+  }
+  if (!starting && typeof args.card_title === 'string' && !errors.some(e => e.field === 'card_title')) {
+    if (!new RegExp(titlePattern).test(args.card_title) || !cardVerbs.includes(args.card_title.split(' ')[0]))
+      add('card_title', !new RegExp(titlePattern).test(args.card_title) ? 'invalid_card_title' : 'card_title_verb', { pattern: titleRule, allowed_values: cardVerbs });
+  }
+  if (!starting && typeof args.description === 'string' && !errors.some(e => e.field === 'description') &&
+      (/[\r\n]/u.test(args.description) || args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
+        || !cardVerbs.includes(args.description.split(/\s/u)[0])))
+    add('description', 'invalid_job_description', { pattern: descriptionRule, allowed_values: cardVerbs });
+  return errors;
+}
+
+export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWorkRequest }) {
   const refuse = error => { throw new ToolError({ error }); };
   const validate = (args, properties, required) => {
     if (Object.keys(args).some(key => !Object.hasOwn(properties, key)) || required.some(key => args[key] == null)) refuse('invalid_work_queue_fields');
@@ -216,7 +307,9 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
   };
   const suggestTitle = async (c, wr, args, current) => {
     const words = (String(args.card_title || args.description || '').match(/[A-Za-z']+/g) || []).filter(word => /[A-Za-z]/.test(word));
-    const verb = cardVerbs.includes(words[0]) ? words.shift() : 'Build';
+    const first = words[0];
+    const verb = titleVerbRepairs.get(first) || (cardVerbs.includes(first) ? first : 'Build');
+    if (titleVerbRepairs.has(first) || cardVerbs.includes(first)) words.shift();
     const subject = (words[0] || 'work').slice(0, 30);
     const used = new Set((await c.query(`select card_title from ops.work_request_job where work_request_id=$1
       and not (slice_ordinal=$2 and j_number=$3)`, [wr.id, current?.slice ?? 0, current?.job ?? 0])).rows.map(row => row.card_title.toLowerCase()));
@@ -234,8 +327,8 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     return `${verb} ${words.join(' ').slice(0, 490) || 'the work'}.`;
   };
   const validateCopy = async (c, wr, args, current) => {
-    const titleRefusal = async error => { throw new ToolError({ error, suggested_card_title: await suggestTitle(c, wr, args, current) }); };
-    if (!/^[A-Za-z']+( [A-Za-z']+){1,2}$/.test(args.card_title)) await titleRefusal('invalid_card_title');
+    const titleRefusal = async error => { throw new ToolError({ error, field_errors: [{ field: 'card_title', value: args.card_title, code: error, pattern: titleRule, allowed_values: cardVerbs }], suggested_card_title: await suggestTitle(c, wr, args, current) }); };
+    if (!new RegExp(titlePattern).test(args.card_title)) await titleRefusal('invalid_card_title');
     if (!cardVerbs.includes(args.card_title.split(' ')[0])) await titleRefusal('card_title_verb');
     if (args.description != null && (/[\r\n]/u.test(args.description) || args.description.trim().split(/[.!?](?:\s|$)/u).filter(Boolean).length !== 1
       || !cardVerbs.includes(args.description.split(/\s/u)[0]))) {
@@ -261,19 +354,33 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
     return { write: true, description,
       inputSchema: { type: 'object', additionalProperties: false, properties, required: needed, ...schema },
       handler: async (c, actor, args) => {
-        try { validate(args, properties, needed); } catch (error) {
-          if (name === 'dispatch-job' && error.message === 'invalid_work_queue_fields') {
-            const invalid = key => Object.hasOwn(args, key) && (typeof args[key] !== 'string' || !args[key].trim() || args[key].length > properties[key].maxLength);
-            if (invalid('card_title') || invalid('description')) {
-              let wr;
-              try { wr = await request(c, actor, args.work_request); } catch { throw error; }
-              throw new ToolError({ error: error.message,
-                ...(invalid('card_title') ? { suggested_card_title: await suggestTitle(c, wr, args) } : {}),
-                ...(invalid('description') ? { suggested_description: suggestDescription(args.description || args.card_title) } : {}) });
+        if (name === 'dispatch-job') {
+          const field_errors = dispatchErrors(args, properties, needed);
+          let suggested_card_title;
+          const normalized = typeof args.work_request === 'string' && /^WR-?([0-9]{1,6})$/.exec(args.work_request);
+          if (normalized) args = { ...args, work_request: `WR-${normalized[1].padStart(6, '0')}` };
+          if (field_errors.length && normalized && !jobStart.some(key => Object.hasOwn(args, key))) {
+            let wr;
+            try { wr = await request(c, actor, args.work_request); }
+            catch (error) {
+              if (!(error instanceof ToolError) || error.payload.error !== 'work_request_not_found') throw error;
+              field_errors.push({ field: 'work_request', value: args.work_request, code: 'work_request_not_found',
+                pattern: 'an existing Work Request visible to this actor' });
             }
+            if (wr && typeof args.card_title === 'string' && (await c.query(`select 1 from ops.work_request_job
+              where work_request_id=$1 and lower(card_title)=lower($2)`, [wr.id, args.card_title])).rows.length)
+              field_errors.push({ field: 'card_title', value: args.card_title, code: 'card_title_duplicate', pattern: titleRule, allowed_values: cardVerbs });
+            if (wr && field_errors.some(e => e.field === 'card_title'))
+              suggested_card_title = await suggestTitle(c, wr, args);
           }
-          throw error;
-        }
+          if (field_errors.length) {
+            const first = field_errors[0];
+            throw new ToolError({ error: field_errors.length === 1 ? first.code : 'invalid_work_queue_fields', field: first.field, field_errors,
+              ...(first.allowed_values ? { allowed_values: first.allowed_values } : {}),
+              ...(suggested_card_title ? { suggested_card_title } : {}),
+              ...(field_errors.some(e => e.field === 'description') ? { suggested_description: suggestDescription(args.description) } : {}) });
+          }
+        } else validate(args, properties, needed);
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, name, args, async () => {
           await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', ['work-queue:' + organizationTenantForActor(actor)]);
@@ -300,8 +407,9 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
           select $1,$3::integer+ordinality,title from unnest($2::text[]) with ordinality as s(title,ordinality)`, [wr.id, titles.slice(prior.length), prior.length]);
         return { slices: titles.map((title, index) => ({ slice_id: queueCardId(wr.ref, index + 1), title })) };
       }),
-    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence.',
+    'close-work-request-slice': command('close-work-request-slice', 'Record an open slice as done or retired exactly once, using the current slice version as base_version. Done requires merged change evidence. With completion facts, the last done slice completes the request using independent current-head PR approvals.',
       { slice, base_version: positive, outcome: { ...text(), enum: ['done', 'retired'] }, reason: text(2000), superseded_by: positive,
+        completion: { type: 'object', additionalProperties: false, properties: completionFields, required: ['criterion_evidence', 'user_facing'] },
         change_refs: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false,
           properties: { pr_url: text(300), merge_commit_sha: text(40) }, required: ['pr_url', 'merge_commit_sha'] } } },
       ['slice', 'outcome', 'base_version'], async (c, actor, args, wr) => {
@@ -325,20 +433,30 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const saved = (await c.query(`update ops.work_request_slice set outcome=$3::jsonb,version=version+1
           where work_request_id=$1 and ordinal=$2 and outcome->>'outcome'='open' returning ordinal,version`, [wr.id, args.slice, JSON.stringify(record)])).rows[0];
         if (!saved) refuse('slice_not_found');
-        return { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
+        const result = { slice_id: queueCardId(wr.ref, saved.ordinal), version: saved.version, ...record };
+        let completion;
+        const slices = (await c.query('select ordinal,outcome from ops.work_request_slice where work_request_id=$1 order by ordinal', [wr.id])).rows;
+        if (args.outcome === 'done' && args.completion && readyToClose(wr.state, slices.map(row => row.outcome))) {
+          const approvals = [];
+          for (const row of slices) for (const change of row.outcome.change_refs ?? []) {
+            const approval = await c.reviewedChange?.(change, queueCardId(wr.ref, row.ordinal));
+            if (!approval) return { ...result, completion_pending: 'slice_independent_review_required' };
+            approvals.push(approval);
+          }
+          const current = (await c.query('select version from ops.work_request where id=$1 for update', [wr.id])).rows[0];
+          completion = await completeWorkRequest(c, actor, {
+            ...args.completion,
+            human_ref: wr.ref, base_version: current.version,
+            idempotency_key: derivedIdempotencyKey('slice-completion', args.idempotency_key),
+            change_refs: approvals.map(({ pr_url, merge_commit_sha }) => ({ pr_url, merge_commit_sha })),
+          }, { reviewer_card: approvals.at(-1).reviewer_card, approvals });
+        }
+        return { ...result, ...(completion ? { work_request_state: completion.state } : {}) };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
-      { slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: text(), model: text(), effort: text(), card_title: text(80), description: text(500) },
+      { work_request: { ...text(), pattern: workRequestPattern, description: 'WR-000675; WR675 and WR-675 normalize to WR-000675.' }, slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: { ...text(), description: 'Executor identifier, open text (for example codex or claude); no closed catalog.' }, model: { ...text(), description: 'Model identifier selected by the executor, open text; no closed catalog.' }, effort: text(), card_title: { ...text(80), description: titleRule }, description: { ...text(500), description: descriptionRule } },
       [], async (c, actor, args, wr) => {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
-        if ((!starting || Object.hasOwn(args, 'job_type')) && !jobTypes.includes(args.job_type)) throw new ToolError({ error: 'invalid_job_type', allowed_values: jobTypes });
-        if ((starting ? jobStart : jobFacts).some(key => args[key] == null)
-          || (jobFacts.some(key => Object.hasOwn(args, key)) && jobFacts.some(key => args[key] == null))) {
-          throw new ToolError({ error: 'invalid_work_queue_fields',
-            ...(!starting && args.card_title == null ? { suggested_card_title: await suggestTitle(c, wr, args) } : {}),
-            ...(!starting && args.description == null ? { suggested_description: suggestDescription(args.card_title) } : {}) });
-        }
-        if ((starting || Object.hasOwn(args, 'repository')) && !repositories.includes(args.repository)) refuse('invalid_work_queue_fields');
         if (starting) {
           const row = (await c.query(`select runner_job_id,repository,job_type from ops.work_request_job
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
@@ -354,7 +472,8 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
-        if (!jobTypes.includes(args.job_type)) throw new ToolError({ error: 'invalid_job_type', allowed_values: jobTypes });
+        if (!jobTypes.includes(args.job_type)) throw new ToolError({ error: 'invalid_job_type', allowed_values: jobTypes,
+          field_errors: [{ field: 'job_type', value: args.job_type ?? null, code: 'invalid_job_type', allowed_values: jobTypes }] });
         await validateCopy(c, wr, args);
         const ordinal = args.slice || 1;
         if (!starting) await c.query(`insert into ops.work_request_slice (work_request_id,ordinal,title) select $1,1,$2
@@ -370,7 +489,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         return { card_id: queueCardId(wr.ref, ordinal, number), priority,
           ...(starting ? { runner_job_id: args.runner_job_id } : {}) };
       }, { anyOf: [
-        { required: jobFacts },
+        { required: [...jobFacts, 'job_type'] },
         { required: [...jobStart, 'repository'] },
       ] }),
     'retitle-job': command('retitle-job', 'Rename one job card using its current base_version and optionally replace its one-sentence description. Preserve all other job facts.',
@@ -398,7 +517,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         }
         return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), priority: slots[args.position - 1] };
       }),
-    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests.',
+    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
@@ -408,12 +527,15 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError }) {
         const prs = view.jobs.flatMap(job => job.prs);
         const live = c.production ? await c.production(prs) : prs.map(() => null);
         prs.forEach((pr, index) => { pr.production_live = live[index]; });
-        const slices = (await c.query(`select s.*,w.ref as work_request from ops.work_request_slice s
-          join ops.work_request w on w.id=s.work_request_id where w.id=any($1::uuid[])
-          order by w.ref,s.ordinal`, [[...new Set(rows.map(row => row.work_request_id))]])).rows;
+        const slices = (await c.query(`select s.*,w.ref as work_request,w.title as work_request_title,w.state as work_request_state from ops.work_request_slice s
+          join ops.work_request w on w.id=s.work_request_id where w.organization_tenant_id=$1 and ${readableWorkRequestSql('w')}
+          order by w.ref,s.ordinal`, [organizationTenantForActor(actor)])).rows;
         const projected = slices.map(row => ({ slice_id: queueCardId(row.work_request, row.ordinal),
           work_request: row.work_request, title: row.title, version: row.version, ...row.outcome }));
-        return { ok: true, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
+        const requests = Map.groupBy(slices, row => row.work_request);
+        const ready_to_close = [...requests].filter(([, group]) => readyToClose(group[0].work_request_state, group.map(row => row.outcome)))
+          .map(([human_ref, group]) => ({ human_ref, title: group[0].work_request_title, state: group[0].work_request_state }));
+        return { ok: true, ready_to_close, slices: projected, stale_after_hours: STALE_AFTER_MS / 3_600_000, ...view };
       } },
   };
 }

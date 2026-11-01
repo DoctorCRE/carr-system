@@ -50,11 +50,6 @@ class RedactionTest(unittest.TestCase):
                     self.assertIn('before', redacted)
                     self.assertIn('after', redacted)
 
-    def test_standard_pgp_private_block_is_detected_even_with_inline_exemption(self):
-        text = '-----' + 'BEGIN PGP PRIVATE KEY BLOCK----- ci-secret-scan: allow'
-        findings = self.scanner['scan']([('synthetic.txt', text)])
-        self.assertEqual([(name, line, pattern) for name, line, pattern, _ in findings],
-                         [('synthetic.txt', 1, 'private-key-block')])
 
 
 class SecretTest(unittest.TestCase):

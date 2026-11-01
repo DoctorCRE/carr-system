@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
-import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { applyFutureWorkSchema, restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const actor = { id: randomUUID(), slug: 'joe', human: true };
@@ -28,6 +28,7 @@ test('a participant document reply proposes its open request without fulfilling 
       create table doctrine_section(id uuid, status text, body_hash text);
       create table v_deal_room_commission(deal_id uuid, commission_id uuid, status text, received_on date);
       create function ops.scac_current_grant_contract() returns jsonb language sql as $$select '{"relation_dml":[]}'::jsonb$$;`);
+    await applyFutureWorkSchema(c);
     await c.query("insert into actor(id,slug,kind,display_name,active) values($1,'joe','human','Synthetic partner',true)", [actor.id]);
     await c.query("insert into deal values($1,$3,'purchase','joe'),($2,$3,'purchase','joe')", [deal, other, randomUUID()]);
     await c.query("insert into v_ref_index values('deal',$1,'D-1','Synthetic closing'),('deal',$2,'D-2','Synthetic other')", [deal, other]);

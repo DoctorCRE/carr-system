@@ -1,0 +1,436 @@
+title = "CARR secret detection"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = 'carr-aws-access-key'
+description = 'CARR aws-access-key parity'
+regex = '''\bA[K]IA[0-9A-Z]{16}\b'''
+
+[[rules]]
+id = 'carr-google-api-key'
+description = 'CARR google-api-key parity'
+regex = '''\bAIza[0-9A-Za-z\-_]{35}\b'''
+
+[[rules]]
+id = 'carr-google-oauth-client-secret'
+description = 'CARR google-oauth-client-secret parity'
+regex = '''\bGOCSPX-[0-9A-Za-z\-_]{28}\b'''
+
+[[rules]]
+id = 'carr-github-token'
+description = 'CARR github-token parity'
+regex = '''\bgh[pousr]_[A-Za-z0-9]{36}\b'''
+
+[[rules]]
+id = 'carr-slack-token'
+description = 'CARR slack-token parity'
+regex = '''\bxox[baprs]-[0-9A-Za-z-]{10,}\b'''
+
+[[rules]]
+id = 'carr-anthropic-key'
+description = 'CARR anthropic-key parity'
+regex = '''\bsk-ant-[A-Za-z0-9\-_]{20,}\b'''
+
+[[rules]]
+id = 'carr-openai-key'
+description = 'CARR openai-key parity'
+regex = '''\bsk-(?:proj-)?[A-Za-z0-9]{32,}\b'''
+
+[[rules]]
+id = 'carr-dsn-with-password'
+description = 'CARR dsn-with-password parity'
+regex = '''\bpostgres(?:ql)?[:]//[^\s:/@]+:[^\s@]{6,}@'''
+
+[[rules]]
+id = 'carr-private-key-header'
+description = 'Private key headers, including incomplete blocks'
+regex = '''-----BEGIN (?:PRIVATE KEY|RSA PRIVATE KEY|EC PRIVATE KEY|DSA PRIVATE KEY|ENCRYPTED PRIVATE KEY|OPENSSH PRIVATE KEY|PGP PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----'''
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)\.github/workflows/main\-canary\.yml$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ CARR_CI_DATABASE_URL:\ \$\{\{\ \(contains\(matrix\.classes,\ 'unit'\)\ \|\|\ matrix\.classes\ ==\ 'migration'\)\ \&\&\ 'postgres[:]//carr_ci:postgres@127\.0\.0\.1:5432/carr_ci'\ \|\|\ ''\ \}\}\ \#\ ci\-secret\-scan:\ allow\ —\ throwaway\ container\ credential,\ loopback\ only,\ dies\ with\ the\ runner$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)\.github/workflows/ci\.yml$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ CARR_CI_DATABASE_URL:\ \$\{\{\ contains\(matrix\.classes,\ 'unit'\)\ \&\&\ 'postgres[:]//carr_ci:postgres@127\.0\.0\.1:5432/carr_ci'\ \|\|\ ''\ \}\}\ \#\ ci\-secret\-scan:\ allow\ \-\ disposable\ loopback\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)corpus/DNA/Deal\ Management/playbooks/diligence\-and\-valuation\.md$''']
+regexes = [
+  '''^\-\ \*\*The\ \#1\ way\ CARR\ actually\ values\ a\ purchase\ =\ the\ Purchase\-vs\-Lease\ comparison\ spreadsheet\*\*\ —\ it\ shows\ value\ \*\*to\ THIS\ client\ vs\.\ their\ real\ alternatives\*\*,\ not\ an\ abstract\ market\ number\.\ It's\ for\ you\ as\ much\ as\ the\ client\.\ Key\ drivers:\ upfront/monthly\ cost\ \(if\ it's\ similar\-or\-slightly\-higher\ than\ leasing,\ buying\ often\ wins\),\ tax\ benefits,\ and\ \*\*principal\ pay\-down\ \(huge\)\*\*\.$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/error\-unmasking\.test\.mjs$''']
+regexes = [
+  '''^\ \ \ \ message:\ "permission\ denied;\ connecting\ as\ postgresql[:]//carr_writer:hunter2@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ invented\ fixture;\ the\ whole\ point\ of\ this\ case\ is\ that\ it\ must\ NOT\ survive\ into\ the\ payload$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/src/salesforce\-reconciliation\-rw02\.v5\.js$''']
+regexes = [
+  '''^\ \ "V5_RW02_CREDENTIAL_PATTERNS",$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/release\.test\.mjs$''']
+regexes = [
+  '''^\ \ \ \ DATABASE_URL_READER:\ "postgres[:]//reader:supersecret@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ canary,\ db\.example\ is\ RFC\ 2606\ reserved$''',
+  '''^\ \ \ \ DATABASE_URL_WRITER:\ "postgres[:]//writer:evensecreter@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ canary,\ db\.example\ is\ RFC\ 2606\ reserved$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/salesforce\-reconciliation\-store\-rw02\.v5\.test\.mjs$''']
+regexes = [
+  '''^\ \ \ \ store\.recordPageStop\(\{\ idempotency_key:\ "rw02\-actor\-mismatch",\ page:\ page\(\{\ challenge:\ "mfa_challenge"\ \}\)\ \},\ ctx\),$''',
+  '''^\ \ await\ store\.recordDuplicateCheck\(\{\ \.\.\.base,\ idempotency_key:\ "rw02\-duplicate\-2",$''',
+  '''^\ \ const\ base\ =\ \{\ idempotency_key:\ "rw02\-duplicate\-1",\ tenant:\ T,\ case:\ kase,\ intent_ordinal:\ 1,$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/cre\-lifecycle\-store\.v5\.test\.mjs$''']
+regexes = [
+  '''^\ \ \ \ \ \ idempotency_key:\ "j102\-fixture\-1",$''',
+  '''^\ \ \ \ \ \ idempotency_key:\ "j102\-fixture\-init\-3",$''',
+  '''^\ \ \ \ \(\)\ =>\ store\.recordLifecycleFact\(\{\ idempotency_key:\ "j102\-fixture\-1",\ fact\ \},\ ctx\(JOE\)\),$''',
+  '''^\ \ \ \ \.initializeProspectRelationship\(\{\ idempotency_key:\ "j102\-fixture\-sponsor\-3",$''',
+  '''^\ \ \ \ \.initializeProspectRelationship\(\{\ idempotency_key:\ "j102\-fixture\-sponsor\-4",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-1",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-2",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-3",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-4",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-init\-2",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-init\-4",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-init\-5",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-invoice",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-reconcile\-a",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-reconcile\-b",$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-sponsor\-1",\ declared:\ \{\ new_subject_id:\ "rel\-synthetic\-7"\ \},$''',
+  '''^\ \ \ \ idempotency_key:\ "j102\-fixture\-sponsor\-2",\ declared:\ \{\ new_subject_id:\ "rel\-synthetic\-8"\ \},$''',
+  '''^\ \ assert\.equal\(key,\ "j102\-fixture\-1"\);$''',
+  '''^\ \ idempotency_key:\ "j102\-fixture\-init\-1",$''',
+  '''^\ \ idempotency_key:\ "j102\-fixture\-reconcile\-1",$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/unattended\-authority\.test\.mjs$''']
+regexes = [
+  '''^\ \ \ \ idempotency_key:\ "4f0e7c1a\-2b3d\-4e5f\-8a9b\-0c1d2e3f4a5b",$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/vendor\-directory\-postgres\.test\.mjs$''']
+regexes = [
+  '''^\ const\ password=`synthetic\-\$\{randomUUID\(\)\}`,\ dsn=`postgres[:]//synthetic\-user:\$\{password\}@example\.invalid:5432/demo`;\ //\ ci\-secret\-scan:\ allow\ —\ generated\ refusal\-test\ credential,\ never\ connected$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/record\-source\-authority\-store\.v5\.test\.mjs$''']
+regexes = [
+  '''^\ \ \ \ \ \ idempotency_key:\ "syn\-deletion\-custody\-0001",\ subject:\ DELETION_SUBJECT,$''',
+  '''^\ \ \ \ \ \ idempotency_key:\ "syn\-deletion\-custody\-0002",\ subject:\ DELETION_SUBJECT,$''',
+  '''^\ \ \ \ \ \ idempotency_key:\ "syn\-derivative\-partial\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-deletion\-allow\-0001",\ subject:\ DELETION_SUBJECT,$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-deletion\-derivatives\-0001",\ subject:\ DELETION_SUBJECT,$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-derivative\-0001",\ registration:\ REGISTRATION,$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-derivative\-corrupt\-0001",\ registration:\ REGISTRATION,$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-derivative\-distinct\-0001",\ registration:\ REGISTRATION,$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-derivative\-early\-0001",\ registration:\ REGISTRATION,$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-derivative\-forge\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-derivative\-self\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-idempotency\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-0002",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-0003",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-accept\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-corrupt\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-establish\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-nopolicy\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-observation\-stale\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-policy\-genesis\-0001",$''',
+  '''^\ \ \ \ idempotency_key:\ "syn\-proposal\-reserved\-0001",\ proposal:\ PROPOSAL,$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)migrations/0247_system_rule_scope_binding\.sql$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ and\ e\.idempotency_key='c4ad90f7\-d8dd\-4bf3\-8785\-659bae3d3f27'$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)migrations/0228_atomic_rule_lifecycle_forward_upgrade\.sql$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ and\ e\.idempotency_key='c4ad90f7\-d8dd\-4bf3\-8785\-659bae3d3f27'$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)migrations/0498_f09_workflow_truth_and_scac_successor\.sql$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ on\ r2\.workflow_key=j2\.definition_key\ and\ r2\.workflow_version=j2\.definition_version$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)mcp\-server/test/salesforce\-reconciliation\-rw02\.v5\.test\.mjs$''']
+regexes = [
+  '''^\ \ api_key:\ "key\ s[k]\-ant\-api03\-abcdefghijklmnopq",\ //\ synthetic,\ not\ a\ key;\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ aws_access_key_id:\ "key\ A[K]IASYNTHETIC00000XY",\ //\ synthetic,\ not\ a\ key;\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ github_token:\ "g[h]p_SYNTHETICsyntheticSYNTHETICsynthetic0",\ //\ synthetic;\ ci\-secret\-scan:\ allow$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)migrations/0604_doctorcre_r02_dual_write_gating\.sql$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ on\ r2\.workflow_key=j2\.definition_key\ and\ r2\.workflow_version=j2\.definition_version$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/backup\-dump\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ f"postgresql[:]//carr_backup:\{SECRET\}@127\.0\.0\.1:5432/carr"\ \ \#\ ci\-secret\-scan:\ allow\ —\ synthetic\ loopback\ fixture\ DSN$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/backup\-guard\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ f"postgresql[:]//\{quote\(user\)\}:synthetic\-only@\{host_part\}:\{port\}/"\ \ \#\ ci\-secret\-scan:\ allow\ —\ synthetic\ disposable\ loopback\ fixture\ DSN$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)migrations/0856_qualify_security_definer_dependencies\.sql$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ and\ e\.idempotency_key='c4ad90f7\-d8dd\-4bf3\-8785\-659bae3d3f27'$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/control\-plane\-authority\-runtime\-preflight\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//carr_authority_joe:synthetic\-only@invalid\.invalid/carr\#fragment",\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//carr_authority_joe:synthetic\-only@invalid\.invalid/carr\?channel_binding=require",\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//carr_authority_joe:synthetic\-only@invalid\.invalid/carr\?service=alternate",\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//carr_authority_joe:synthetic\-only@invalid\.invalid/carr\?sslmode=disable",\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//carr_authority_joe:synthetic\-only@invalid\.invalid/carr\?sslmode=require\&sslmode=require",\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//carr_writer:synthetic\-only@invalid\.invalid/carr",\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ dell_dsn\ =\ "postgresql[:]//carr_authority_dell:synthetic\-only@invalid\.invalid/carr"\ \ \#\ ci\-secret\-scan:\ allow$''',
+  '''^\ \ \ \ joe_dsn\ =\ "postgresql[:]//carr_authority_joe:synthetic\-only@invalid\.invalid/carr"\ \ \#\ ci\-secret\-scan:\ allow$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/github\-reader\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ synthetic_secret\ =\ "synthetic\-secret\-canary\-123456789"$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/learning\-monthly\-credential\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \{"DATABASE_URL":"postgresql[:]//carr_writer:ambient@db/carr"\}\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/learning\-credential\-boundary\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ DATABASE_URL="postgresql[:]//carr_writer:ambient\-only@db/carr"\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ DATABASE_URL="postgresql[:]//writer:ambient\-must\-not\-pass@db/carr"\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ "CARR_DB_OWNER_URL=postgresql[:]//owner:must\-not\-pass@db/carr\\n",\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ "CARR_DB_WRITER_URL=postgresql[:]//carr_writer:must\-not\-pass@db/carr\\n"\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ bool\(rows\)\ and\ all\(r\["env"\]\.get\("CARR_DB_JOBS_URL"\)\ ==\ "postgresql[:]//carr_jobs:file\-only@db/carr"\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ db\.write_text\("CARR_DB_JOBS_URL=postgresql[:]//carr_jobs:file\-only@db/carr\\n"\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ db\.write_text\("CARR_DB_WRITER_URL=postgresql[:]//carr_writer:writer\-only@db/carr\\n",\ encoding="utf\-8"\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ selftest\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/migrate\-prod\-support\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \[\],\ 7,\ "untrusted\ provider\ output",\ f"fixture\ failure\ \{canary\}\ postgres[:]//fixture:\{canary\}@invalid/db"\)\ \ \#\ ci\-secret\-scan:\ allow$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/local\-pg\-ci\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ "CARR_DB_JOBS_URL":\ "postgres[:]//jobs:secret@remote/db",\ \ \#\ ci\-secret\-scan:\ allow\ \-\ synthetic\ non\-routable\ fixture$''',
+  '''^\ \ \ \ "DATABASE_URL":\ "postgres[:]//owner:secret@remote/db",\ \ \#\ ci\-secret\-scan:\ allow\ \-\ synthetic\ non\-routable\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/migration\-production\-proof\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ proof\.schema_dump\('postgres[:]//reader:placeholder@localhost:5433/example\?options=\-c%20default_transaction_read_only%3Doff',\ \ \#\ ci\-secret\-scan:\ allow\ synthetic\ placeholder$''',
+  '''^\ \ \ \ \ \ \ \ response\ =\ subprocess\.CompletedProcess\(\[\],\ 1,\ b'',\ b'password=placeholder\ postgres[:]//reader:placeholder@localhost/example'\)\ \ \#\ ci\-secret\-scan:\ allow\ synthetic\ placeholder$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/routine\-credential\-boundary\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ "DATABASE_URL":\ "postgresql[:]//neondb_owner:ambient@db/main",\ \ \#\ ci\-secret\-scan:\ allow$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/schema\-snapshot\-connection\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ neon\.write_text\("\#!/bin/sh\\nprintf\ '%s\\\\n'\ 'postgresql[:]//owner:fixture\-password@db\.example\.test/carr\?sslmode=require'\\n",\ encoding="utf\-8"\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ synthetic\ local\ fixture$''',
+  '''^DSN\ =\ "postgresql[:]//snapshot_user:fixture\-password@db\.example\.test:5432/carr\?sslmode=require\&channel_binding=require"\ \ \#\ ci\-secret\-scan:\ allow\ —\ synthetic\ parser\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/scheduled\-drive\-writer\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ db\.write_text\("CARR_DB_JOBS_URL=postgresql[:]//jobs:fixture@db/carr\\n",\ encoding="utf\-8"\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/studio\-failover\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ path\.write_text\('CARR_FAILOVER_JOBS_URL=postgresql[:]//carr_jobs:fixture@'\ \+\ host\ \+\ '/fixture\?sslmode=require\\n'\)\ \ \#\ ci\-secret\-scan:\ allow\ \-\-\ owned\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ path\.write_text\('CARR_FAILOVER_JOBS_URL=postgresql[:]//carr_jobs:fixture@ep\-fixture\.neon\.tech/fixture\?sslmode=require\&hostaddr=127\.0\.0\.1\\n'\)\ \ \#\ ci\-secret\-scan:\ allow\ \-\-\ owned\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ path\.write_text\('CARR_FAILOVER_JOBS_URL=postgresql[:]//carr_jobs:fixture@ep\-fixture\.neon\.tech/fixture\?sslmode=require\\n'\)\ \ \#\ ci\-secret\-scan:\ allow\ \-\-\ owned\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/settlement\-run\-token\.py$''']
+regexes = [
+  '''^CAPABILITY_KEY\ =\ "R03C\.settlement\-capability\.v1"$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/staging\-database\-credential\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ "postgresql[:]//neondb_owner:owner\-fixture@staging\.example:5432/neondb"\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//app_writer:secret@other\.example/neondb\?sslmode=require",\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//app_writer:secret@staging\.example/neondb\?sslmode=disable",\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//app_writer:secret@staging\.example/neondb\?sslmode=require\&options=\-csearch_path%3Dpublic",\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//app_writer:secret@staging\.example/other\?sslmode=require",\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//app_writer:secret@staging\.example:6432/neondb\?sslmode=require",\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//neondb_owner:owner\-fixture@staging\.example:5432/neondb"\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ "postgresql[:]//wrong:secret@staging\.example/neondb\?sslmode=require",\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)ops/rotate\-credential\-mint\-selftest\.py$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ \ lambda:\ rc\.set_github_secret\("postgresql[:]//carr_backup:NEVERPRINT@host/db\?sslmode=require"\)\)\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^\ \ \ \ \ \ \ \ rc\.set_github_secret\("postgresql[:]//carr_backup:NEVERPRINT@host/db\?sslmode=require"\)\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+  '''^OWNER\ =\ "postgresql[:]//owner:ownerpw@ep\-x\-123\.us\-east\-2\.aws\.neon\.tech/neondb\?sslmode=require"\ \ \#\ ci\-secret\-scan:\ allow\ —\ hermetic\ fixture$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)tools/test_pg_env_exec\.py$''']
+regexes = [
+  '''^URL\ =\ "postgresql[:]//owner%40x:p%2Fss%20w@ep\-host\.example:6543/neondb\?sslmode=require\&channel_binding=require\&options=\-c%20search_path%3Dops"\ \ \#\ ci\-secret\-scan:\ allow\ \(made\-up\ fixture\ password\)$''',
+]
+
+[[allowlists]]
+description = "Reviewed synthetic fixture or non-secret source expression"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(?:^|/)db/schema\.sql$''']
+regexes = [
+  '''^\ \ \ \ \ \ \ \ \ \ \ and\ e\.idempotency_key='c4ad90f7\-d8dd\-4bf3\-8785\-659bae3d3f27'$''',
+]

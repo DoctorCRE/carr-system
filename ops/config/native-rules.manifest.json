@@ -1323,16 +1323,16 @@
         "tokens": 3758
       },
       "AGENTS.md": {
-        "sha256": "9bcd7d5a651db4fb4e624d841af8208ae268b63c8ad765278752164f8c7ee56a",
-        "tokens": 8264
+        "sha256": "b933fdd6f0a43b1f500f1da8e3a182d6732597f38b2b855a4c708b16b3657c63",
+        "tokens": 8344
       },
       "CLAUDE.md": {
-        "sha256": "1cb194912d14030c3bdeacb848b18f9013aa6ac246ffcfdf687432fa6a0b246b",
-        "tokens": 1927
+        "sha256": "14e0bccac6b30b0843e5f916442bb7b35cf2ccb7151d7182bc5630a5637ff7dd",
+        "tokens": 2402
       }
     },
     "tokenizer": "cl100k_base",
-    "tokens": 13949
+    "tokens": 14504
   },
   "unmatched_globs": [
     {
