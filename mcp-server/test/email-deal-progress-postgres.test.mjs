@@ -1136,6 +1136,21 @@ test('the router queue keeps a partly proposed email until the router excludes i
   } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
 });
 
+test('the router queue routes email logged after its window, up to the unresolved hold', async () => {
+  await c.query('delete from email_proposal');
+  const late = await email(askQuote);
+  const stale = await email(askQuote);
+  await c.query("update activity set occurred_at=now()-interval '5 days' where id=$1", [late.activity_id]);
+  await c.query("update activity set occurred_at=now()-interval '31 days' where id=$1", [stale.activity_id]);
+  const ids = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails
+    .map(row => row.activity_id);
+  assert.ok(ids.includes(late.activity_id), 'mail recorded late still reaches reply proposals');
+  assert.ok(!ids.includes(stale.activity_id), 'mail older than the unresolved hold stays out');
+  await c.query("update activity set recorded_at=now()-interval '4 days' where id=$1", [late.activity_id]);
+  const again = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails;
+  assert.ok(!again.some(row => row.activity_id === late.activity_id), 'routed once, inside its recording window');
+});
+
 test('the router queue includes logged outbound email with sender evidence', async () => {
   const context = { subject: 'Synthetic commitment', sender: { email: 'sender@example.test', internal: true },
     recipients: [{ email: 'recipient@example.test', internal: false }] };
