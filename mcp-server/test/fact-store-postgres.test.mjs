@@ -14,7 +14,6 @@ import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { CONTRACTS } from '../src/fact-observations.ts';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 // WR-000039 E09a. Synthetic tenants, entities, documents, and actors only.
 const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
@@ -67,10 +66,9 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
     await restoreEventIdentity(c, schema);
     await c.query('alter table tool_call add primary key(idempotency_key)');
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader');
-    // Grants registered by migrations after 0983 are not in the predecessor; they follow the fact-store grants.
-    const LATER_FUNCTIONS = /^ops\.(register_client_portal|adopt_rule|reap_expired_runs|market_terms_snapshot)\(/;
-    const predecessor = { ...SCAC_MUTATION_CURRENT_DB_GRANTS,
-      secdef_execute: SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature) && !LATER_FUNCTIONS.test(g.signature)) };
+    // The snapshot's contract without the fact-store definers is the predecessor these migrations extend.
+    const snapshot = JSON.parse(schema.match(/FUNCTION ops\.scac_current_grant_contract\(\) RETURNS jsonb[\s\S]*?AS \$\$SELECT '((?:[^']|'')*)'::jsonb\$\$;/)[1].replaceAll("''", "'"));
+    const predecessor = { ...snapshot, secdef_execute: snapshot.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature)) };
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $f$select ${c.escapeLiteral(JSON.stringify(predecessor))}::jsonb$f$`);
     await c.query(await readFile(new URL('../../migrations/0983_fact_store.sql', import.meta.url), 'utf8'));
     await c.query(await readFile(new URL('../../migrations/1099_fact_review.sql', import.meta.url), 'utf8'));
@@ -483,9 +481,8 @@ assert len(os.listdir(root+'/output'))==1
 
     await t.test('the grant contract registers exactly the installed fact-store definers', async () => {
       const installedContract = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
-      installedContract.secdef_execute.push(...SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => LATER_FUNCTIONS.test(g.signature)));
-      assert.deepEqual({ ...installedContract, secdef_execute: [...installedContract.secdef_execute].sort((a,b) => a.signature.localeCompare(b.signature)) },
-        { ...SCAC_MUTATION_CURRENT_DB_GRANTS, secdef_execute: [...SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute].sort((a,b) => a.signature.localeCompare(b.signature)) });
+      assert.deepEqual({ ...installedContract, secdef_execute: installedContract.secdef_execute.filter(g => !FACT_FUNCTIONS.test(g.signature)) },
+        predecessor, 'the fact-store migrations preserve every unrelated contract row');
       const installed = (await c.query(`select p.oid::regprocedure::text sig,
           n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' signature,
           p.proconfig,p.provolatile,acl.grantee::regrole::text grantee
@@ -494,7 +491,7 @@ assert len(os.listdir(root+'/output'))==1
        where n.nspname='ops' and p.prosecdef and acl.privilege_type='EXECUTE' and acl.grantee<>p.proowner
       `)).rows;
       assert.deepEqual(installed.map(r => [r.signature, r.grantee, r.proconfig, r.provolatile]).sort((a, b) => a[0].localeCompare(b[0])),
-        SCAC_MUTATION_CURRENT_DB_GRANTS.secdef_execute.filter(g => FACT_FUNCTIONS.test(g.signature))
+        installedContract.secdef_execute.filter(g => FACT_FUNCTIONS.test(g.signature))
           .map(g => [g.signature, g.grantee, g.config, g.volatility]).sort((a, b) => a[0].localeCompare(b[0])));
     });
 

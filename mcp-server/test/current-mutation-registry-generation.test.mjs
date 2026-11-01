@@ -24,7 +24,7 @@ test("editing a module without changing any verb contract leaves the registry un
   assert.equal(renderCurrentContracts(tools, current), before);
 });
 
-test("current contract generation removes a retired operation and preserves the database seal and grants", async () => {
+test("current contract generation removes a retired operation and preserves the database seal", async () => {
   const { "propose-ready-plan": removed, ...remaining } = TOOLS;
   assert.ok(removed);
   const output = renderCurrentContracts(remaining, current);
@@ -33,6 +33,4 @@ test("current contract generation removes a retired operation and preserves the 
   assert.equal(Object.keys(registry.SCAC_MUTATION_OPERATIONS).length, Object.keys(remaining).length);
   assert.equal(output.slice(0, output.indexOf("export const SCAC_MUTATION_OPERATIONS")),
     current.slice(0, current.indexOf("export const SCAC_MUTATION_OPERATIONS")));
-  assert.equal(output.slice(output.indexOf("export const SCAC_MUTATION_CURRENT_DB_GRANTS")),
-    current.slice(current.indexOf("export const SCAC_MUTATION_CURRENT_DB_GRANTS")));
 });

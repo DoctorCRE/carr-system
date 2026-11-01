@@ -13,7 +13,7 @@ minutes). Unfiled email goes through lib.email_matching: thread continuity files
 automatically; otherwise one pinned Jev call proposes a deal, a possible new matter,
 or contact-only logging. That filing is written before any model call. Filed email retains the
 isolated phase-move, next-step and reply-draft model call (lib/model_call.py, model from settings);
-email just inherited to a deal gets only its next step. Unconfirmed filing hints
+email just inherited to a deal gets its next step and reply draft. Unconfirmed filing hints
 never select the next-step subject. Each proposal carries a
 literal evidence quote (capped at 2000 characters) and a confidence. Every surviving
 proposal is stored through `record-email-proposal`, which re-checks the evidence
@@ -279,8 +279,10 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             model_failed(error)
             continue
         kept = proposals(reply, source, now.date())
-        if email.get('kind') == 'email_out' or source is not email:
+        if email.get('kind') == 'email_out':
             kept = [item for item in kept if item['kind'] == 'next_step']
+        elif source is not email:
+            kept = [item for item in kept if item['kind'] in ('next_step', 'reply_draft')]
         if source is email:
             counts['dropped'] += max(0, len(reply.get('proposals') or []) - len(kept))
         try:

@@ -809,6 +809,18 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(state['attachments_pending'], not terminal)
                 self.assertEqual(len(state['attachments_done']), int(terminal))
 
+    def test_inbound_attachment_waits_for_its_source_activity(self):
+        ports = self.attachment_fixture()
+        self.fake.fail_verbs.add('log-activity')
+        result = intake.run(self.repo, self.home, ports)
+        self.assertEqual(self.filed, {})
+        self.assertEqual(result.counts['attachments_source_pending'], 1)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=31)
+        intake.run(self.repo, self.home, ports)
+        [args] = self.filed.values()
+        self.assertIn('activity_id', args)
+
     def test_matched_attachment_is_copied_archived_and_filed_idempotently(self):
         ports = self.attachment_fixture()
         result = intake.run(self.repo, self.home, ports)
@@ -817,6 +829,8 @@ class IntakeTest(unittest.TestCase):
         [args] = self.filed.values()
         self.assertEqual((args['deal'], args['mime'], args['bytes']),
                          ('synthetic-deal', 'application/pdf', len(self.pdf)))
+        source = next(a for _, a in self.fake.writes('log-activity') if a['kind'] == 'email_in')
+        self.assertEqual(args['activity_id'], str(uuid.uuid5(uuid.NAMESPACE_URL, source['idempotency_key'])))
         self.assertEqual(args['sha256'], hashlib.sha256(self.pdf).hexdigest())
         self.assertEqual(self.uploads[args['r2_key']], self.pdf)
         self.assertEqual(self.copied, [self.cache_path])
@@ -2153,6 +2167,18 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                          mail('lee@example.test', -timedelta(hours=2), subject='Delivered late')])
         self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901', 'L-902'])
+
+    def test_late_synced_mail_keeps_the_48_hour_recovery_window_after_watermark_advances(self):
+        first = mail('pat@example.test', -timedelta(hours=1))
+        delayed = mail('lee@example.test', -timedelta(hours=30), subject='Delivered a day late')
+        too_old = mail('lee@example.test', -timedelta(hours=49), subject='Outside recovery window')
+        self.run_intake([first])
+        self.fake.now = NOW + timedelta(minutes=30)
+        for _ in range(2):
+            self.run_intake([first, delayed, too_old])
+        activities = [a for _, a in self.fake.writes('log-activity')]
+        self.assertEqual([a['ref'] for a in activities], ['C-901', 'L-902'])
+        self.assertEqual(activities[-1]['occurred_at'], intake._iso(delayed['sent_unix']))
 
     def test_unmatched_people_are_reported_by_name_and_domain_only(self):
         self.run_intake([mail('stranger@example.test', -timedelta(hours=1), name='Sam Stranger')])

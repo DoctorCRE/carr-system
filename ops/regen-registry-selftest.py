@@ -2,7 +2,6 @@
 """Prove independent verb and suite additions merge and rebuild together."""
 from pathlib import Path
 import shutil
-import json
 import subprocess
 import tempfile
 import unittest
@@ -140,26 +139,6 @@ console.log('both verbs assembled and present in the sole generated registry');
         self.assertNotEqual(self.regen(check=False).returncode, 0)
         self.assertEqual((self.repo / REGISTRY).read_bytes(), original)
 
-    def test_rehearsal_contract_refresh_is_explicit_and_failure_preserves_inputs(self):
-        self.regen()
-        path = self.repo / 'rehearsal.sql'
-        result = self.command('node', '--input-type=module', '-e',
-            "import {SCAC_MUTATION_CURRENT_DB_GRANTS as grants} from './" + REGISTRY +
-            "'; console.log(JSON.stringify(grants));")
-        contract = json.loads(result.stdout)
-        contract['review_note'] = "synthetic O'Brien"
-        literal = json.dumps(contract).replace("'", "''")
-        path.write_text("CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb "
-                        "LANGUAGE sql IMMUTABLE AS $$SELECT '" + literal + "'::jsonb$$;\n")
-        self.command('python3', 'tools/regen.py', 'registry', '--grant-contract', str(path))
-        inputs = self.repo / REGISTRY
-        self.assertIn("synthetic O'Brien", inputs.read_text())
-        before = inputs.read_bytes()
-        path.write_text('SELECT arbitrary_database_state();')
-        result = self.command('python3', 'tools/regen.py', 'registry', '--grant-contract', str(path), check=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(inputs.read_bytes(), before)
-
     def test_ci_check_is_read_only_and_refuses_stale_registry(self):
         target = self.repo / REGISTRY
         target.write_text(target.read_text().replace('mcp-tool:today-triage', 'mcp-tool:stale-fixture'))
@@ -248,9 +227,7 @@ class RegistryConflictTests(unittest.TestCase):
         self.assertIn('"wr491-a"', output)
         self.assertIn('"wr491-b"', output)
         start = 'export const SCAC_MUTATION_OPERATIONS'
-        end = 'export const SCAC_MUTATION_CURRENT_DB_GRANTS'
         self.assertEqual(output.split(start)[0], ours.split(start)[0])
-        self.assertEqual(output.split(end)[1], ours.split(end)[1])
         self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout, '')
         self.command('node', 'ops/scac-mutation-inventory.mjs')
         (self.repo / 'mcp-server/src/fixture-b.js').write_text('export default {};\n')
@@ -273,7 +250,7 @@ class RegistryConflictTests(unittest.TestCase):
         before = self.git('ls-files', '--stage').stdout
         result = self.regen()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('sealed metadata or grants', result.stderr)
+        self.assertIn('sealed metadata', result.stderr)
         self.assertEqual((self.repo / REGISTRY).read_bytes(), self.conflicted)
         self.assertEqual(self.git('ls-files', '--stage').stdout, before)
 
