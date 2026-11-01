@@ -1021,16 +1021,35 @@ class PostCallTests(unittest.TestCase):
         result.update(overrides)
         return result
 
-    def test_undated_actions_default_to_next_business_day_and_show_the_reason(self) -> None:
+    def test_undated_actions_stay_undated_and_ask_the_partner_for_a_date(self) -> None:
         result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
                                                   call_date="2026-10-30")
         task = result["joe_tasks"][0]
-        self.assertEqual(task["due_on"], "2026-11-02")
+        self.assertIsNone(task["due_on"])
         self.assertTrue(task["due_defaulted"])
-        self.assertTrue(any("default" in q["question"].lower() for q in result["review_questions"]))
+        self.assertEqual([q["question"] for q in result["review_questions"]],
+                         ["joe_tasks item 1 (Call vendor): No due date was said on the call; set one if it has a deadline."])
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
-        self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"], "2026-11-02")
+        self.assertIsNone(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"])
         self.assertTrue(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_defaulted"])
+
+    def test_repeated_task_in_one_extraction_is_written_once_with_its_stated_date(self) -> None:
+        (self.session / "transcript.json").write_text(json.dumps({"segments": [
+            {"speaker": "Joe", "text": "I will call the vendor on November 6, 2026."}]}))
+        task = {"title": "Call vendor", "deal_id": "deal-a", "participant_ids": [], "evidence": "Joe agreed to call."}
+        result = post_call.normalize_distillation(self.output(joe_tasks=[
+            {**task, "participant_ids": ["p-1"]},
+            {**task, "title": "  call   VENDOR ", "evidence": "I will call the vendor on November 6, 2026.",
+             "due_on": "2026-11-06"},
+            {**task, "deal_id": "deal-b"},
+        ], dell_tasks=[task]), self.context, self.session.name, call_date="2026-10-30",
+            transcript=json.loads((self.session / "transcript.json").read_text()))
+        self.assertEqual([(t["deal_id"], t["due_on"], t["participant_ids"]) for t in result["joe_tasks"]],
+                         [("deal-a", "2026-11-06", ["p-1"]), ("deal-b", None, [])])
+        self.assertFalse(result["joe_tasks"][0]["due_defaulted"])
+        self.assertEqual(len(result["dell_tasks"]), 1)
+        self.assertEqual([q["question"].split(":")[0] for q in result["review_questions"]],
+                         ["joe_tasks item 2 (Call vendor)", "dell_tasks item 1 (Call vendor)"])
 
     def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
         task = {"title": "Call Pat", "deal_id": "deal-a", "participant_ids": ["p-1"],
@@ -1284,6 +1303,37 @@ class PostCallTests(unittest.TestCase):
                 capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
         self.assertEqual(post_call.report_for_deal_room(self.session)["status"]["state"], "ready_review")
 
+    def test_poll_reports_a_held_summary_as_held_not_as_a_failed_sync(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        post_call.write_private(self.session / post_call.REPORT_FILE,
+                                self.output(report={"summary": words, "decisions": [], "open_questions": []}))
+        # The state an earlier poller left: a hold counted as three failed syncs.
+        post_call.write_private(self.session / "post-call-sync.json", {"attempts": 3, "next_attempt_at": None})
+        post_call.write_private(self.session / post_call.STATUS_FILE, {
+            "state": "needs_attention", "reason": "Post-call synchronization failed; recordings retained.",
+            "sync_attempts": 3})
+        with patch.object(capture_bridge, "http_request") as http:
+            result = capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+        self.assertEqual(result, capture_bridge.Outcome.VERIFIED)
+        http.assert_not_called()
+        status = post_call.read_json(self.session / post_call.STATUS_FILE)
+        self.assertEqual((status["state"], status["reason"], status["field"]),
+                         ("held_review", "summary_repeats_transcript", "report.summary"))
+        self.assertNotIn("sync_attempts", status)
+        self.assertEqual(post_call.read_json(self.session / "post-call-sync.json")["attempts"], 0)
+        self.assertTrue((self.session / ".capture.json").exists())
+
+    def test_poll_reports_a_summary_held_before_its_report_as_held(self) -> None:
+        call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        (self.session / ".capture.json").write_text(json.dumps({"session_token": "synthetic"}))
+        with patch.object(capture_bridge.post_call, "run_session", return_value={"state": "held_review"}), \
+                patch.object(capture_bridge, "http_request") as http:
+            result = capture_bridge.poll_cmd({"base_url": "https://synthetic.invalid"}, self.session)
+        self.assertEqual(result, capture_bridge.Outcome.VERIFIED)
+        http.assert_not_called()
+
     def test_extraction_retries_back_off_and_stop_after_three_attempts(self) -> None:
         post_call.store_context(self.session, self.context)
         calls = []
@@ -1439,7 +1489,7 @@ class PostCallTests(unittest.TestCase):
         )
         self.assertEqual([item["kind"] for item in shaped["legacy_items"]], ["activity"])
         self.assertEqual(shaped["legacy_items"][0]["payload"]["ref"], "deal-a")
-        self.assertRegex(shaped["post_call_items"][0]["due_on"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertIsNone(shaped["post_call_items"][0]["due_on"])
         remote_items = shaped["post_call_items"] + shaped["legacy_items"]
         self.assertLessEqual(max(len(item["evidence_quote"].split()) for item in remote_items), 15)
 
@@ -1611,7 +1661,7 @@ class PostCallTests(unittest.TestCase):
         actions = [item for item in post_call.sanitized_candidates(self.session)["post_call_items"]
                    if item["kind"] == "assigned_action"]
         self.assertEqual([(item["assignee"], item["due_on"]) for item in actions],
-                         [("joe", "2028-02-29"), ("dell", "2026-10-27")])
+                         [("joe", "2028-02-29"), ("dell", None)])
 
     def test_relative_dates_use_recorded_chicago_day_in_report_and_candidates(self) -> None:
         cases = (
@@ -1758,7 +1808,7 @@ class PostCallTests(unittest.TestCase):
                     self.assertEqual(step["apply"], "review")
                     candidates = post_call.sanitized_candidates(self.session)
                     actions = [item for item in candidates["post_call_items"] if item["kind"] == "assigned_action"]
-                    self.assertEqual([item["due_on"] for item in actions], ["2026-11-02" if started_at == "2026-10-30T18:00:00Z" else "2026-10-27", "2026-11-06"])
+                    self.assertEqual([item["due_on"] for item in actions], [None, "2026-11-06"])
                     self.assertIsNone(candidates["legacy_items"][1]["payload"]["next_date"])
 
     def test_relative_date_validation_preserves_explicit_and_unmatched_evidence_dates(self) -> None:
@@ -1766,9 +1816,9 @@ class PostCallTests(unittest.TestCase):
             ("I will call Friday, November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call before the lunch call on November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call two weeks from Friday.", "2026-11-13", "2026-11-13"),
-            ("Review last Friday's proposal.", None, "2026-10-27"),
-            ("I will review Friday's proposal.", None, "2026-10-27"),
-            ("I will call Vendor A tomorrow.", None, "2026-10-27"),
+            ("Review last Friday's proposal.", None, None),
+            ("I will review Friday's proposal.", None, None),
+            ("I will call Vendor A tomorrow.", None, None),
         )
         for quote, supplied, expected in cases:
             with self.subTest(quote=quote):
@@ -1825,7 +1875,7 @@ class PostCallTests(unittest.TestCase):
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertTrue(report["review_questions"])
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
-        self.assertRegex(action["due_on"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertIsNone(action["due_on"])
 
     def test_long_relative_evidence_retains_the_spoken_deadline(self) -> None:
         post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-10-27T00:30:00Z"})
@@ -2568,6 +2618,51 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             self.assertEqual(call_mode.main(), 0)
             publish.assert_called_once_with(self.session.resolve())
             self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
+
+    def test_release_keeps_edited_report_when_poll_interleaves(self) -> None:
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = "Partner edit"
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": "Original call"}]})
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        write = post_call.write_private
+        polled = []
+
+        def interleave(path, value):
+            if path.name == post_call.STATUS_FILE and value.get("state") == "blocked":
+                write(path, value)
+                try:
+                    polled.append(post_call.process_session(self.session, lambda _: self.fail("poll distilled")))
+                except RuntimeError:
+                    polled.append("locked")
+                return
+            return write(path, value)
+
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch.object(call_mode.post_call, "write_private", side_effect=interleave),
+              patch.object(call_mode, "sync_post_call"), patch("sys.stdout", io.StringIO())):
+            self.assertEqual(call_mode.main(), 0)
+        self.assertEqual(polled, ["locked"])
+        self.assertEqual(post_call.read_json(self.session / post_call.REPORT_FILE)["report"]["summary"], "Partner edit")
+
+    def test_release_checks_edited_report_before_stale_draft(self) -> None:
+        words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        report["report"]["summary"] = words
+        post_call.write_private(self.session / "post-call-held-draft.json", report)
+        post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
+        post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        with (patch.object(call_mode, "RECORDINGS", self.session.parent),
+              patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
+              patch.object(call_mode, "sync_post_call"), patch("sys.stdout", io.StringIO())):
+            post_call.write_private(self.session / post_call.REPORT_FILE, report)
+            self.assertEqual(call_mode.main(), 1)
+            report["report"]["summary"] = "Partner edit"
+            post_call.write_private(self.session / post_call.REPORT_FILE, report)
+            self.assertEqual(call_mode.main(), 0)
+        self.assertFalse((self.session / "post-call-held-draft.json").exists())
+        self.assertEqual(post_call.read_json(self.session / post_call.REPORT_FILE)["report"]["summary"], "Partner edit")
 
     def test_missing_and_malformed_transcript_hold_saved_report(self) -> None:
         for transcript in (None, {"segments": [None]}):
