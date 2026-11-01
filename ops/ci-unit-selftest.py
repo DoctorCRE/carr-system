@@ -73,6 +73,15 @@ class UnitClassTests(unittest.TestCase):
         for name in PACKAGES:
             self.assertIn(f'OK unit {name}: 1 tests, 1 passed', result.stdout)
 
+    def test_executed_suite_marker_survives_exit_stream_teardown(self):
+        self.all_packages()
+        (self.root / 'practice-plugin/test/suite.test.mjs').write_text(
+            "import test from 'node:test'; test('executes', () => {});\n"
+            "process.prependOnceListener('exit', () => process.stdout.cork());")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
+
     def test_one_missing_package_fails(self):
         for name in PACKAGES[:-1]:
             self.package(name)
