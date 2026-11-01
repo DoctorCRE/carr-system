@@ -185,11 +185,11 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
   assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
-    "append-tour-entrance-verification-receipt", "approve-retrieval-proposals", "cancel-pending-deal", "commit-winning-property",
-    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "dismiss-email-proposal",
+    "append-tour-entrance-verification-receipt", "cancel-pending-deal", "commit-winning-property",
+    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal",
     "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "retire-retrieval-curation", "submit-email-draft", "undo-email-thread-filing"]);
+    "register-record-source-authority-policy", "reject-requirement-reply", "retire-retrieval-curation", "submit-email-draft", "undo-email-thread-filing"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {

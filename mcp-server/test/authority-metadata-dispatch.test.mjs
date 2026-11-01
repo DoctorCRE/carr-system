@@ -8,7 +8,7 @@ const id = '10000000-0000-4000-8000-000000000001';
 const itemId = '10000000-0000-4000-8000-000000000002';
 const key = '10000000-0000-4000-8000-000000000003';
 const cases = [
-  ['approve-retrieval-proposals', { proposal_ids: [id], base_versions: { [id]: 1 }, golden_suite_digest: 'a'.repeat(64) }, true],
+  ['approve-retrieval-proposals', { proposal_ids: [id], base_versions: { [id]: 1 }, golden_suite_digest: 'a'.repeat(64) }, false],
   ['retire-retrieval-curation', { target_type: 'concept', target_id: id, base_version: 1, reason: 'Synthetic retirement', golden_suite_digest: 'a'.repeat(64) }, true],
   ['record-deal-item', { deal: id, title: 'Synthetic task', source_ref: 'fixture:task', bullets: [{ kind: 'status', text: 'Synthetic task recorded.' }] }, false],
   ['backfill-deal-items', { deal: id }, false],

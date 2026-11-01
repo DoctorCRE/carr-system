@@ -230,13 +230,12 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     [`capture_candidate:${candidateId}`])).rows;
   const gulfStep = applied(gulf.id, 'next_step');
   if (gulfStep) {
-    // The call's step superseded Joe's overdue Gulf step; undo puts that ball back.
     const undo = { candidate_id: gulfStep.candidate_id, base_version: (await deal('Synthetic Gulf Imaging Center')).version };
-    const result = await verb(joe, 'undo-call-change', undo);
+    await verb(joe, 'undo-call-change', undo);
     const restored = await deal('Synthetic Gulf Imaging Center');
     assert.equal(restored.next_step, 'Old Gulf step');
     assert.equal(restored.next_date, '2026-10-01');
-    assert.ok(result.reverted.reopened_action_ids.length >= 1, JSON.stringify(result));
+    assert.equal((await c.query("select status from next_action where subject_id=$1 and description='Old Gulf step'", [gulf.id])).rows[0].status, 'open');
     assert.ok((await items(gulfStep.candidate_id)).every(i => i.status === 'dropped'));
     // A second undo of the same change is a no-op, not a second write.
     assert.equal((await verb(joe, 'undo-call-change', { ...undo, base_version: restored.version })).already, 'undone');

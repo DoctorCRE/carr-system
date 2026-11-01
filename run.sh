@@ -116,7 +116,7 @@ case "${1:-}" in
   # and prints the audit of red rows that have no open loop.
   health)       shift; "$PY" "$REPO/tools/health-check.py" "$@" ;;
   costs)        shift; PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import system_costs,sys; sys.exit(system_costs.main(sys.argv[1:]))' "$@" ;;
-  config)       shift; python3 "$REPO/ops/config-as-code.py" "$@" ;;
+  config)       shift; "$PY" "$REPO/ops/config-as-code.py" "$@" ;;
   lint)         shift; python3 "$REPO/tools/writing-lint.py" "$@" ;;
   # WR561: the headless Friday social batch. plan and check are read-only;
   # submit is the only Blotato writer and schedules future review drafts only.

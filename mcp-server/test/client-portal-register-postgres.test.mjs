@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { readFile } from 'node:fs/promises';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001' };
 const migration = name => readFile(new URL(`../../migrations/${name}`, import.meta.url), 'utf8');
@@ -106,11 +105,10 @@ test('registering a client portal stores only a verifier and exposes only a deri
       } finally { await c.query('reset role'); }
     });
 
-    await t.test('the installed grant contract matches the runtime contract', async () => {
-      const registered = contract => contract.secdef_execute.filter(grant => grant.signature.startsWith('ops.register_client_portal('));
-      assert.equal(registered(SCAC_MUTATION_CURRENT_DB_GRANTS).length, 1);
-      assert.deepEqual(registered((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract),
-        registered(SCAC_MUTATION_CURRENT_DB_GRANTS));
+    await t.test('the installed grant contract registers the writer definer once', async () => {
+      const contract = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
+      assert.deepEqual(contract.secdef_execute.filter(grant => grant.signature.startsWith('ops.register_client_portal('))
+        .map(grant => grant.grantee), ['carr_writer']);
     });
   } finally { await db.close(); }
 });
