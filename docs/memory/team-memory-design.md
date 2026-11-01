@@ -372,6 +372,13 @@ an operator step). Reads continue. The first dream backfills transcripts since
 the merge (S9). `autoMemoryEnabled: false` and the removal follow in S10,
 because whether the setting also stops loading `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` is unproven. *Reopen
 if* the freeze breaks session start.
+- **Pulled forward 2026-11-01 (WR562.S10.J1, Joe: "Yes do the memory cut
+  over").** Sessions still loaded the stale index while writes to the frozen
+  folder failed with EACCES. The still-current entries were migrated to
+  `team-memory`, the project `.claude/settings.json` sets
+  `autoMemoryEnabled: false`, and `hooks/team-memory-index.py` injects the live
+  team-memory index and the attach instruction at SessionStart. Archiving and
+  removing the folder stays with deletion #5.
 
 **D14. What does the dream do when a section moved since its clone?**
 *Decision:* rebase. Only the change units that touch moved sections are
@@ -588,7 +595,7 @@ in S1.
 | 2 | `tools/room-bridge/brief-footer.md` and its two pointers | `rule` rows | As #1 | S7 |
 | 3 | Hand-written convention prose in CLAUDE.md (126 lines) and AGENTS.md (327 lines) | `rule` rows + pointers | The S5 heading ledger has every line classified; the K12 rewrite is merged first | S5 |
 | 4 | `memory_item`, `memory_evidence`, `recall-memory`, their RLS (0573/0574/0579), and the memory branches of two 0303 functions | `team-memory` | **The database-side check, failing closed** (below) | S10 |
-| 5 | `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` and the 104-file private folder | `team-memory` + `rule` | Frozen at S1; the ledger maps 105 of 105; `autoMemoryEnabled: false`; tarred to `~/carr-local/archive/`, then removed by a human | S10 |
+| 5 | `~/.claude/projects/-Users-booko-carr-system/memory/MEMORY.md` and the 104-file private folder | `team-memory` + `rule` | Frozen at S1; the ledger maps 105 of 105; `autoMemoryEnabled: false` (done in WR562.S10.J1, PR ledger in its body); tarred to `~/carr-local/archive/`, then removed by a human | S10 |
 | 6 | `bin/learning-weekly.sh` + selftests | Dream | Unscheduled; registry rows retire with it | S10 |
 | 7 | `bin/learning-monthly.sh` + selftests | Dream | As #6 | S10 |
 | 8 | `ops/corrections-sweep.py` + selftest, and the `corrections` miner in `pipelines/learning_jobs.py` | Dream | Callers swept to zero | S10 |

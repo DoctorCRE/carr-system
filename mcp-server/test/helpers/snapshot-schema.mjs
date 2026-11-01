@@ -10,6 +10,8 @@ export async function restoreEventIdentity(client, snapshot) {
 
 export async function applyPendingDealRoomReads(client) {
   await applyFutureWorkSchema(client);
+  if (!(await client.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='calendar_event_key'")).rows.length)
+    await client.query(readFileSync(new URL('../../../migrations/1125_calendar_confirmation.sql', import.meta.url), 'utf8'));
   const { rows } = await client.query("select to_regclass('public.v_deal_client_portal') as view");
   if (!rows[0].view)
     await client.query(readFileSync(new URL('../../../migrations/1013_register_client_portal.sql', import.meta.url), 'utf8'));
@@ -18,6 +20,7 @@ export async function applyPendingDealRoomReads(client) {
     await client.query(readFileSync(new URL('../../../migrations/1105_requirement_requests.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1064_deal_sent_correspondence.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1117_preserve_call_plan_projection.sql', import.meta.url), 'utf8'));
+  await client.query(readFileSync(new URL('../../../migrations/1123_closed_current_step_projection.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1065_call_followup_contact.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1067_post_call_due_provenance.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1079_single_action_completion.sql', import.meta.url), 'utf8'));

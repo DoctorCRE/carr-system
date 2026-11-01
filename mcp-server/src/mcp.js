@@ -28,7 +28,7 @@ import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, orga
   personalScopeForActor, verifiedAgentSlugForClient } from "./identity.js";
 import { deriveTrustedPrincipalBinding,
   ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
-import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
+import { scheduleFailureRecord, failureOrigin, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
@@ -1068,7 +1068,7 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
               failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
                 verb: rpc?.params?.name || null, error: e,
               }),
-              detail: `Request failed; correlation_id=${payload.correlation_id}`,
+              detail: `Request failed (${failureOrigin(e)}); correlation_id=${payload.correlation_id}`,
             });
           }
           if (!(e instanceof ToolError) && TOOLS[name]) payload.verb = name;
@@ -1085,7 +1085,7 @@ export async function dispatch(request, env, ctx, actor, sessionKey) {
       failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
         verb: rpc?.params?.name || null, error: e,
       }),
-      detail: `Request failed; correlation_id=${payload.correlation_id}`,
+      detail: `Request failed (${failureOrigin(e)}); correlation_id=${payload.correlation_id}`,
     });
     return rpcError(-32603, "internal error", payload);
   }

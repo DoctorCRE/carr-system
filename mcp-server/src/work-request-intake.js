@@ -370,12 +370,23 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
   // is always the one the database returned for THIS section in this
   // transaction.
   async function captureFromSource(c, actor, args, source, revisionId, extra = {}) {
-    const captured = await c.query(
-      `select * from ops.capture_sourced_work_request($1::text, $2::text, $3::text,
-         $4::jsonb, $5::uuid, $6::uuid, $7::uuid)
-         /* work-request-intake:capture */`,
-      [`doctrine:${source.doc_slug}#${source.section_key}`, args.title.trim(), args.desired_outcome.trim(),
-        JSON.stringify(args.acceptance_criteria), source.section_id, revisionId, args.idempotency_key]);
+    let captured;
+    try {
+      captured = await c.query(
+        `select * from ops.capture_sourced_work_request($1::text, $2::text, $3::text,
+           $4::jsonb, $5::uuid, $6::uuid, $7::uuid)
+           /* work-request-intake:capture */`,
+        [`doctrine:${source.doc_slug}#${source.section_key}`, args.title.trim(), args.desired_outcome.trim(),
+          JSON.stringify(args.acceptance_criteria), source.section_id, revisionId, args.idempotency_key]);
+    } catch (error) {
+      // The capture function refuses with RAISE (P0001), which no constraint
+      // translator recognizes; name it so a refused capture is not reported
+      // as a server fault. The driver error stays as the logged cause.
+      if (error?.code !== "P0001") throw error;
+      const refusal = new ToolError({ error: "work_request_capture_refused" });
+      refusal.cause = error;
+      throw refusal;
+    }
     const row = captured.rows[0];
     if (!row) throw new ToolError({ error: "work_request_capture_refused" });
     await writeEvent(c, actor, "report-problem", "ops_work_request", row.id, {
