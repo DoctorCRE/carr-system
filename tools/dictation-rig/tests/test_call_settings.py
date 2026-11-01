@@ -58,6 +58,7 @@ def test_python_entry_points_load_one_source_and_preserve_explicit_empty(tmp_pat
                 else:
                     os.environ['CALL_JEV_DAILY_DOLLARS'] = value
                 with patch.object(sys, 'argv', ['phone_intake.py', '--root', str(tmp_path), '--process']), \
+                     patch.object(phone_intake, 'load_machine_settings', side_effect=lambda: {'CALL_STUDIO_TOKEN': 'synthetic', 'CARR_CAPTURE_BASE_URL': 'https://synthetic.test'}), \
                      patch.object(phone_intake, 'pull_pending', return_value={}), \
                      patch.object(phone_intake, 'process_pending', return_value={}):
                     phone_intake.main()

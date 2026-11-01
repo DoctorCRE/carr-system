@@ -12,7 +12,11 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+from email_outcomes import business_day_deadline
+from outlook_settings import load_settings
 
 from local_jobs import append, command, epoch, locked, path_at, read_latest, stamp, tail
 
@@ -60,7 +64,42 @@ def collect(root, config):
                 break
         jobs.append({"label": label, "exit_code": code, "log_line": log_line, "degraded": degraded})
     total, _, free = shutil.disk_usage(root)
-    return {"jobs": jobs, "disk_free_percent": free / total * 100}
+    facts = {"jobs": jobs, "disk_free_percent": free / total * 100}
+    if "com.carr.outlook-intake" in statuses:
+        # A failed outcome read is its own finding; it must not silence every other alarm.
+        try:
+            facts["outlook"] = collect_outlook(config)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            facts["outlook"] = {"read_error": str(exc)}
+    return facts
+
+
+def collect_outlook(config):
+    settings = load_settings()
+    state = json.loads((settings.repo / "out/outlook-intake/state.json").read_text())
+    try:
+        result = subprocess.run(
+            [str(settings.repo / "run.sh"), "call", "email-router-queue", "-"],
+            input=json.dumps({"purpose": "outcomes", "account": settings.account}),
+            cwd=settings.repo, env=settings.transport_environment(), capture_output=True,
+            text=True, timeout=config["thresholds"]["command_timeout_seconds"])
+        if result.returncode:
+            raise ValueError("outlook outcome read failed")
+        reply = json.loads(result.stdout)
+        if reply.get("schema_version") != "email-outcomes.v1":
+            raise ValueError("outlook outcome contract unavailable")
+        for field in ("journey_live_at", "last_email_in_filed_at"):
+            if reply[field] is not None:
+                datetime.fromisoformat(reply[field].replace("Z", "+00:00"))
+        if type(reply["reply_draft_count"]) is not int or reply["reply_draft_count"] < 0:
+            raise ValueError("outlook outcome count invalid")
+    except (KeyError, TypeError, AttributeError, ValueError) as exc:
+        raise ValueError("outlook outcome read invalid or unavailable") from exc
+    return {**{field: reply[field] for field in
+               ("journey_live_at", "last_email_in_filed_at", "reply_draft_count")},
+            "timezone": str(settings.timezone),
+            "filing_observed_at": state.get("filing_observed_at"),
+            "coverage_failed": state.get("coverage_failed", False)}
 
 
 def degraded_receipt(lines):
@@ -114,7 +153,32 @@ def degraded_receipt(lines):
     return None
 
 
-def detect(facts):
+def outlook_findings(facts, now):
+    if "read_error" in facts:
+        return [{"key": "job_degraded:outlook:outcome_read_failed", "kind": "job_degraded",
+                 "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
+                 "reason": f"Outlook intake: outcome read failed ({facts['read_error']})"}]
+
+    def instant(value):
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, timezone.utc)
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    last = facts.get("last_email_in_filed_at") or facts.get("filing_observed_at")
+    overdue = last is not None and now > business_day_deadline(instant(last), ZoneInfo(facts["timezone"]))
+    alarms = {
+        "no_email_in": (overdue, "no email_in filed for more than one business day"),
+        "no_reply_draft": ((facts.get("journey_live_at") or facts.get("filing_observed_at")) is not None and facts["reply_draft_count"] == 0,
+                           "zero reply_draft rows since the email journey went live"),
+        "coverage_failed": (facts.get("coverage_failed") is True, "daily coverage check failed"),
+    }
+    return [{"key": f"job_degraded:outlook:{code}", "kind": "job_degraded",
+             "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
+             "reason": f"Outlook intake: {reason}"}
+            for code, (alarm, reason) in alarms.items() if alarm]
+
+
+def detect(facts, now=None):
     found = []
     for job in facts["jobs"]:
         if job.get("degraded"):
@@ -130,6 +194,9 @@ def detect(facts):
     if free < 10:
         found.append({"key": "disk_low:local", "kind": "disk_low", "subject": "local disk",
                       "reason": f"disk free {free:.1f}% (below 10%)"})
+    if facts.get("outlook") is not None:
+        found.extend(outlook_findings(facts["outlook"],
+                     datetime.fromtimestamp(time.time() if now is None else now, timezone.utc)))
     return found
 
 
@@ -146,6 +213,8 @@ def reconcile(root, config, found, observed_jobs, now=None):
     declared = {plistlib.loads(p.read_bytes()).get("Label") for p in (SOURCE / "ops/launchd").glob("*.plist")}
     for key, prior in previous.items():
         if prior.get("source") == "social-batch-report":
+            continue
+        if prior.get("source") == "outlook-outcomes" and prior["subject"] not in observed_jobs:
             continue
         if (prior.get("kind") == "job_failed" and "exit_code" in prior
                 and prior["subject"] not in observed_jobs and prior["subject"] in declared):
@@ -282,12 +351,15 @@ def scan(root, config):
             now = time.time()
             try:
                 facts = collect(root, config)
-                found = detect(facts)
+                found = detect(facts, now)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
                 append(ledger, {"key": "scan", "status": "failed", "at": stamp(), "error": str(exc)})
                 print(f"Watchdog scan failed: {exc}", file=sys.stderr)
                 return 1
-            reconcile(root, config, found, {job["label"] for job in facts["jobs"]}, now)
+            observed = {job["label"] for job in facts["jobs"]}
+            if facts.get("outlook") is not None:
+                observed.add("com.carr.outlook-intake")
+            reconcile(root, config, found, observed, now)
             deliver_findings(root, config, now)
             append(ledger, {"key": "scan", "status": "completed", "at": stamp(), "findings": len(found)})
             return 0

@@ -61,3 +61,19 @@ test('ordinary router mode retains the existing bounded classification contract'
   assert.deepEqual(calls[0].args.slice(0, 5), [3, [], 26, 'joe', actor.id]);
   assert.ok(!Number.isNaN(Date.parse(calls[0].args[5])), 'window start is the server clock');
 });
+
+
+test('outcome reads admit the registered contract and refuse ambiguous inputs before database access', async () => {
+  const { TOOLS, assertRegisteredToolInput, ToolError } = await import('../src/tools.js');
+  await assertRegisteredToolInput('email-router-queue', TOOLS['email-router-queue'],
+    { purpose: 'outcomes', account: 'fixture@example.test' });
+  const read = emailProposalTools({ ToolError })['email-router-queue'];
+  for (const args of [{ purpose: 'outcomes' },
+    { purpose: 'outcomes', account: 'fixture@example.test', days: 3 }]) {
+    await assert.rejects(read.handler(null, actor, args),
+      error => error.payload.error === 'email_outcomes_arguments_invalid');
+  }
+  await assert.rejects(read.handler(null, { human: false, slug: 'machine' },
+    { purpose: 'outcomes', account: 'fixture@example.test' }),
+  error => error.payload.error === 'email_sender_identity_required');
+});

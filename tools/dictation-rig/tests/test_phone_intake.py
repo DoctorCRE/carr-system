@@ -1,8 +1,12 @@
 """Synthetic recordings through the Studio's intake and processing interfaces."""
 import hashlib
+import importlib.util
+import os
 import http.client
 import io
 import json
+import plistlib
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -43,6 +47,133 @@ class PhoneIntakeTests(unittest.TestCase):
             'started_at': '2026-01-01T12:00:00Z', 'consent_announced_at': '2026-01-01T12:00:00Z',
             'session_token': 'synthetic-session-token',
         }
+
+    def test_agent_renders_released_program_standard_root_and_logs(self):
+        repo = Path(__file__).resolve().parents[3]
+        body = (repo / 'ops/launchd/com.carr.phone-intake.plist').read_text()
+        spec = importlib.util.spec_from_file_location('phone_render', repo / 'ops/config-as-code.py')
+        config = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config)
+        with patch.object(config, 'TOKENS', [('{{REPO}}', '/released/carr'),
+                                             ('{{HOME}}', '/fixture/home')]), \
+                patch.dict(os.environ, {'HOME': str(self.root)}):
+            body = config.concrete(body)
+        agent = plistlib.loads(body.encode())
+        self.assertEqual(agent['ProgramArguments'], [
+            '/released/carr/.venv/bin/python3',
+            '/released/carr/tools/dictation-rig/bin/phone_intake.py',
+            '--root', '/fixture/home/Recordings'])
+        self.assertEqual(agent['Label'], 'com.carr.phone-intake')
+        self.assertEqual(agent['KeepAlive'], {'SuccessfulExit': False})
+        self.assertEqual(agent['ThrottleInterval'], 30)
+        self.assertEqual(agent['StandardOutPath'], '/fixture/home/Library/Logs/phone-intake.log')
+        self.assertEqual(agent['StandardErrorPath'], agent['StandardOutPath'])
+        self.assertNotIn('CALL_STUDIO_TOKEN', body)
+
+    def test_scoped_install_touches_only_requested_label(self):
+        repo = Path(__file__).resolve().parents[3]
+        sys.path.insert(0, str(repo))
+        spec = importlib.util.spec_from_file_location('phone_config', repo / 'ops/config-as-code.py')
+        config = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config)
+        with patch.multiple(config, HOME=str(self.root), LAUNCHD_SRC=str(self.root / 'agents'),
+                            IS_PRIMARY=True), patch.object(config, 'missing_targets', return_value=[]), \
+                patch.object(config, 'launchd_template_refusal', return_value=None), \
+                patch.object(config, 'install_launchd_plist', return_value='loaded') as install:
+            self.assertEqual(config.cmd_install_launchd(['com.carr.phone-intake'], True), 0)
+        self.assertEqual(install.call_count, 1)
+        self.assertEqual(install.call_args.args[0], 'com.carr.phone-intake.plist')
+        with patch.object(config, 'install_launchd_plist') as install:
+            self.assertEqual(config.cmd_install_launchd(['../untracked'], True), 2)
+        install.assert_not_called()
+
+    def test_startup_requires_every_machine_setting_before_touching_recordings(self):
+        names = ('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', 'CALL_MAX_BYTES',
+                 'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS', 'CALL_PROCESSORS',
+                 'CALL_EXTRACTION_ATTEMPTS', 'TYPESAFE_API_KEY')
+        values = dict.fromkeys(names, '1')
+        values['CARR_CAPTURE_BASE_URL'] = 'https://synthetic.invalid'
+        config = self.root / '.config/carr/typesafe.env'
+        config.parent.mkdir(parents=True)
+        for missing in names:
+            with self.subTest(missing=missing):
+                config.write_text(''.join(f'{name}={value}\n' for name, value in values.items()
+                                          if name != missing))
+                config.chmod(0o600)
+                result = subprocess.run([sys.executable, str(Path(phone_intake.__file__)),
+                                         '--root', str(self.root / 'Recordings'), '--process'],
+                                        env={'HOME': str(self.root), 'PATH': os.defpath},
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stderr.splitlines()), 1)
+                self.assertIn(missing, result.stderr)
+                self.assertFalse((self.root / 'Recordings').exists())
+
+    def test_invalid_settings_stop_without_restart(self):
+        values = dict.fromkeys(('CALL_STUDIO_TOKEN', 'CARR_CAPTURE_BASE_URL', 'CALL_MAX_BYTES',
+                                'CALL_MAX_SECONDS', 'CALL_DAILY_ADMISSIONS', 'CALL_PROCESSORS',
+                                'CALL_EXTRACTION_ATTEMPTS', 'TYPESAFE_API_KEY'), '1')
+        values['CARR_CAPTURE_BASE_URL'] = 'https://synthetic.invalid'
+        config = self.root / '.config/carr/typesafe.env'
+        config.parent.mkdir(parents=True)
+        for name, value, mode, message in [('CALL_MAX_BYTES', 'bad', 0o600, 'CALL_MAX_BYTES'),
+                                           ('CARR_CAPTURE_BASE_URL', 'http://invalid', 0o600, 'CARR_CAPTURE_BASE_URL'),
+                                           ('CALL_MAX_BYTES', '1', 0o644, 'mode 600')]:
+            with self.subTest(message=message):
+                config.write_text(''.join(f'{key}={item}\n' for key, item in {**values, name: value}.items()))
+                config.chmod(mode)
+                result = subprocess.run([sys.executable, str(Path(phone_intake.__file__)),
+                                         '--root', str(self.root / 'Recordings'), '--process'],
+                                        env={'HOME': str(self.root), 'PATH': os.defpath},
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stderr.splitlines()), 1)
+                self.assertIn(message, result.stderr)
+                self.assertFalse((self.root / 'Recordings').exists())
+
+    def test_studio_token_is_not_in_child_environment(self):
+        import runpy
+        settings = dict.fromkeys(phone_intake.REQUIRED_SETTINGS, '1')
+        settings.update(CALL_STUDIO_TOKEN='synthetic-token', CARR_CAPTURE_BASE_URL='https://synthetic.invalid')
+        def check_child(_event, _seconds):
+            child = subprocess.run([sys.executable, '-c',
+                                    "import os, sys; sys.exit('CALL_STUDIO_TOKEN' in os.environ)"], check=False)
+            self.assertEqual(child.returncode, 0)
+            raise SystemExit
+        with patch.object(sys, 'argv', ['phone_intake.py', '--root', str(self.root)]), \
+                patch.dict(os.environ, {'CALL_STUDIO_TOKEN': 'inherited-token'}), \
+                patch('credential_env.load_carr_tokens', return_value=settings), \
+                patch('threading.Thread.start'), \
+                patch('threading.Event.wait', check_child), \
+                self.assertRaises(SystemExit):
+            with patch('urllib.request.urlopen', side_effect=OSError('offline')):
+                runpy.run_path(phone_intake.__file__, run_name='__main__')
+
+    def test_machine_settings_load_only_named_values_and_reject_invalid_limits(self):
+        settings = {'CALL_STUDIO_TOKEN': 'synthetic-token',
+                    'CARR_CAPTURE_BASE_URL': 'https://synthetic.invalid',
+                    'CALL_MAX_BYTES': '1024', 'CALL_MAX_SECONDS': '60',
+                    'CALL_DAILY_ADMISSIONS': '5', 'CALL_PROCESSORS': '1',
+                    'CALL_EXTRACTION_ATTEMPTS': '3',
+                    'TYPESAFE_API_KEY': 'synthetic-key'}
+        config = self.root / '.config/carr/typesafe.env'
+        config.parent.mkdir(parents=True)
+        def write(values):
+            config.write_text(''.join(f'{name}={value}\n' for name, value in values.items()))
+            config.chmod(0o600)
+        with patch.dict(os.environ, {'HOME': str(self.root)}, clear=True):
+            write({**settings, 'UNRELATED': 'synthetic-unrelated'})
+            self.assertEqual(phone_intake.load_machine_settings(), settings)
+            for name, value in [('CALL_MAX_SECONDS', '0'), ('CALL_PROCESSORS', 'oops'),
+                                ('CARR_CAPTURE_BASE_URL', 'http://synthetic.invalid')]:
+                write({**settings, name: value})
+                with self.assertRaisesRegex(ValueError, name):
+                    phone_intake.load_machine_settings()
+            write(settings)
+            config.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, 'private'):
+                phone_intake.load_machine_settings()
+
 
     def test_duplicate_transfer_has_one_durable_private_session(self):
         receipt = phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
@@ -152,9 +283,19 @@ class PhoneIntakeTests(unittest.TestCase):
                 self.assertEqual(len(updates), count)
             post_call.write_private(session / 'ingested.json', {'ok': True})
             post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
-            report = {'report': {'summary': 'private summary'}, 'review_questions': [
-                {'id': 'q1', 'question': 'Review the closure?', 'resolved': False}, {'id': 'q2', 'question': 'resolved question', 'resolved': True}]}
+            jev_question = hashlib.sha256(f'{session.name}:jev_partial_unavailable'.encode()).hexdigest()[:16]
+            report = {'session': session.name, 'report': {'summary': 'private summary'}, 'review_questions': [
+                {'id': jev_question, 'question': 'Automatic Jev checks did not run', 'resolved': False},
+                {'id': 'other', 'question': 'Review the closure?', 'resolved': False}, {'id': 'q2', 'question': 'resolved question', 'resolved': True}]}
             post_call.write_private(session / post_call.REPORT_FILE, report)
+            report['checks_hold'] = 'Jev daily dollar budget is exhausted.'
+            post_call.write_private(session / post_call.REPORT_FILE, report)
+            phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
+            self.assertEqual(updates[-1], {'state': 'held_review', 'reason': 'budget', 'open_questions': 2,
+                                           'review_questions': [{'id': jev_question, 'question': 'Automatic Jev checks did not run'},
+                                                                {'id': 'other', 'question': 'Review the closure?'}]})
+            post_call.resolve_question(session, jev_question, 'Reviewed the unchecked items')
+            report = post_call.read_json(session / post_call.REPORT_FILE)
             fail[0] = True
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'filed')
@@ -164,15 +305,192 @@ class PhoneIntakeTests(unittest.TestCase):
             post_call.write_private(session / post_call.STATUS_FILE, status)
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             self.assertEqual(updates[-2:], [{'state': 'held_review', 'reason': 'open_review_questions', 'open_questions': 1,
-                                           'review_questions': [{'id': 'q1', 'question': 'Review the closure?'}]}] * 2)
-            report['review_questions'][0]['resolved'] = True
-            post_call.write_private(session / post_call.REPORT_FILE, report)
+                                           'review_questions': [{'id': 'other', 'question': 'Review the closure?'}]}] * 2)
+            post_call.resolve_question(session, 'other', 'Reviewed the remaining question')
             phone_intake.process_pending(self.root, cfg, 'synthetic-service-secret')
             self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
         payloads = json.dumps(updates)
         self.assertNotIn('private', payloads)
         self.assertEqual(output.getvalue(), '')
         self.assertEqual((session / 'phone-status.json').stat().st_mode & 0o777, 0o600)
+
+    def test_budget_reset_resumes_checks_and_clears_filed_phone_status(self):
+        import call_budget
+        import post_call
+        import post_call_jev
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        transcript = {'segments': [{'speaker': 'Joe', 'text': 'Review the proposal'}]}
+        context = {'session': session.name, 'workspace_kind': 'all',
+                   'generated_at': '2026-01-01T12:00:00Z', 'deals': []}
+        post_call.store_context(session, context)
+        post_call.write_private(session / 'transcript.json', transcript)
+        report = {'session': session.name, 'report': {'summary': 'Review proposals', 'open_questions': []},
+                  'joe_tasks': [{'title': 'Review proposal', 'evidence': 'Review the proposal'}] * 2,
+                  'dell_tasks': [], 'deal_updates': [], 'draft_proposals': [], 'review_questions': []}
+        report['joe_tasks'] = [dict(item) for item in report['joe_tasks']]
+        client = Mock()
+        client.system_one.return_value = SimpleNamespace(answers={
+            'deal_match': SimpleNamespace(choice='none', confidence=0.9),
+            'deal_in_candidates': SimpleNamespace(noul=0.9),
+            'speaker_right': SimpleNamespace(noul=0.9),
+            'details_supported': SimpleNamespace(noul=0.9)})
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=False)
+        bridge = phone_intake.bridge_module()
+        updates = []
+
+        def http(_method, url, body, _headers):
+            self.assertTrue(url.endswith('/status'))
+            updates.append(body)
+            return 200, {'ok': True}
+
+        with (patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.005506'}),
+              patch.object(call_budget, 'datetime') as clock,
+              patch.object(post_call_jev, 'TypeSafeClient', return_value=client),
+              patch.object(post_call, 'call_record_command', return_value=(True, {'deals': []})),
+              patch.object(phone_intake, 'bridge_module', return_value=bridge),
+              patch.object(bridge, 'http_request', side_effect=http)):
+            clock.now.return_value = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+            ledger = self.root / '.jev-budget.json'
+            call_budget.reserve(ledger)
+            post_call_jev.check_distillation(report, context, transcript, client=client, budget_ledger=ledger)
+            post_call.write_private(session / post_call.REPORT_FILE, report)
+            post_call.process_session(session)
+            self.assertIsNone(post_call.context_from_session(session))
+            post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
+            post_call.write_private(session / 'ingested.json', {'ok': True})
+            phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
+            self.assertEqual(updates[-1]['state'], 'held_review')
+            self.assertEqual(updates[-1]['reason'], 'budget')
+            self.assertEqual(updates[-1]['open_questions'], 1)
+            self.assertEqual(len(updates[-1]['review_questions']), 1)
+            self.assertEqual(client.system_one.call_count, 1)
+            self.assertEqual(len(post_call.read_json(session / post_call.REPORT_FILE)['review_questions']), 1)
+            clock.now.return_value = datetime(2026, 1, 2, 6, tzinfo=timezone.utc)
+            phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
+            self.assertEqual(updates[-1], {'state': None, 'reason': None, 'open_questions': 0, 'review_questions': []})
+            self.assertEqual(client.system_one.call_count, 2)
+            phone_intake.process_pending(self.root, {'base_url': 'https://api.example.test'}, 'synthetic')
+            self.assertEqual(client.system_one.call_count, 2)
+        cleared = post_call.read_json(session / post_call.REPORT_FILE)
+        self.assertNotIn('checks_hold', cleared)
+        self.assertNotIn('checks_hold_day', cleared)
+        self.assertEqual(cleared['report']['open_questions'], [])
+        self.assertEqual(post_call.read_json(session / post_call.STATUS_FILE)['state'], 'filed')
+
+    def budget_held_phone(self):
+        import call_budget
+        import post_call
+        import post_call_jev
+        from datetime import datetime, timezone
+
+        phone_intake.receive(self.root, self.metadata, io.BytesIO(self.audio))
+        session = self.root / f"phone-{self.metadata['session_id']}"
+        transcript = {'segments': [{'speaker': 'Joe', 'text': 'Review the proposal'}]}
+        report = {'session': session.name, 'report': {'open_questions': []},
+                  'joe_tasks': [{'title': 'Review proposal', 'evidence': 'Review the proposal'}],
+                  'review_questions': []}
+        with (patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.001'}),
+              patch.object(call_budget, 'datetime') as clock):
+            clock.now.return_value = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+            post_call_jev.check_distillation(report, {'deals': []}, transcript,
+                                            budget_ledger=self.root / '.jev-budget.json')
+        post_call.write_private(session / 'transcript.json', transcript)
+        post_call.write_private(session / post_call.REPORT_FILE, report)
+        post_call.write_private(session / post_call.STATUS_FILE, {'state': 'filed'})
+        post_call.write_private(session / 'ingested.json', {'ok': True})
+        return session
+
+    def test_resume_error_keeps_processor_alive_and_other_calls_processing(self):
+        import call_budget
+        import post_call
+        from datetime import datetime, timezone
+        from unittest.mock import Mock
+
+        session = self.budget_held_phone()
+        original = post_call.read_json(session / post_call.REPORT_FILE)
+        other = self.root / 'phone-20000000-0000-0000-0000-000000000002'
+        other.mkdir()
+        post_call.write_private(other / 'transfer.json', {'ok': True})
+        post_call.write_private(other / 'ingested.json', {'ok': True})
+        visited, errors = [], []
+        swept, stopped = threading.Event(), threading.Event()
+        client = Mock()
+        client.system_one.side_effect = KeyError('private provider details')
+
+        def processor():
+            try:
+                phone_intake.process_pending(self.root, {}, 'synthetic')
+                swept.set()
+                stopped.wait(5)
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+                swept.set()
+
+        with (patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '100'}),
+              patch.object(call_budget, 'datetime') as clock,
+              patch.object(post_call, 'fetch_context', return_value={'deals': []}),
+              patch.object(post_call, '_jev_fixture_client', return_value=client),
+              patch.object(phone_intake, 'publish_status', side_effect=lambda path, *_: visited.append(path) or True)):
+            clock.now.return_value = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+            thread = threading.Thread(target=processor)
+            thread.start()
+            try:
+                self.assertTrue(swept.wait(5))
+                self.assertEqual(errors, [])
+                self.assertTrue(thread.is_alive())
+                self.assertIn(other, visited)
+            finally:
+                stopped.set()
+                thread.join(5)
+        held = post_call.read_json(session / post_call.REPORT_FILE)
+        self.assertEqual(held['checks_hold'], original['checks_hold'])
+        self.assertEqual(held['joe_tasks'], original['joe_tasks'])
+        self.assertEqual(held['deal_check'], {'status': 'unavailable', 'exception_class': 'KeyError'})
+        self.assertIn('exception=KeyError', post_call.LOG_PATH.read_text())
+        self.assertNotIn('private provider details', post_call.LOG_PATH.read_text())
+
+    def test_failed_resume_waits_until_next_budget_day(self):
+        import call_budget
+        import post_call
+        from datetime import datetime, timezone
+
+        session = self.budget_held_phone()
+        with (patch.object(call_budget, 'datetime') as clock,
+              patch.object(post_call, 'fetch_context', side_effect=RuntimeError('synthetic failure')) as fetch,
+              patch.object(post_call, 'write_private', wraps=post_call.write_private) as write,
+              patch.object(phone_intake, 'publish_status', return_value=True)):
+            clock.now.return_value = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
+            phone_intake.process_pending(self.root, {}, 'synthetic')
+            fetch.assert_called_once()
+            fetch.reset_mock()
+            write.reset_mock()
+            for _ in range(5):
+                phone_intake.process_pending(self.root, {}, 'synthetic')
+            fetch.assert_not_called()
+            self.assertEqual([c for c in write.call_args_list if c.args[0] == session / post_call.REPORT_FILE], [])
+
+    def test_same_chicago_budget_day_sweep_does_no_context_fetch_or_report_write(self):
+        import call_budget
+        import post_call
+        from datetime import datetime, timezone
+
+        session = self.budget_held_phone()
+        with (patch.object(call_budget, 'datetime') as clock,
+              patch.object(post_call, 'fetch_context', return_value={'deals': []}) as fetch,
+              patch.object(post_call, 'write_private', wraps=post_call.write_private) as write,
+              patch.object(phone_intake, 'publish_status', return_value=True)):
+            # UTC has rolled over, but Chicago is still on the hold's budget day.
+            clock.now.return_value = datetime(2026, 1, 2, 5, 59, tzinfo=timezone.utc)
+            with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.001'}):
+                phone_intake.process_pending(self.root, {}, 'synthetic')
+            fetch.assert_not_called()
+            self.assertEqual([c for c in write.call_args_list if c.args[0] == session / post_call.REPORT_FILE], [])
 
     def test_outbound_download_is_acknowledged_only_after_durable_hash_verification(self):
         received = []
@@ -411,9 +729,9 @@ class PhoneIntakeTests(unittest.TestCase):
         model = self.root / 'synthetic-model'
         model.write_bytes(b'fixture model, never speech recognition')
         decoder = self.root / 'decoder'
-        decoder.write_text(f'#!{sys.executable}\nimport shutil,sys\nshutil.copyfile(sys.argv[sys.argv.index("-i")+1],sys.argv[-1])\n')
+        decoder.write_text(f'#!{sys.executable}\nimport os,shutil,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\nshutil.copyfile(sys.argv[sys.argv.index("-i")+1],sys.argv[-1])\n')
         whisper = self.root / 'whisper'
-        whisper.write_text(f'#!{sys.executable}\nimport json,sys\njson.dump({{"transcription":[{{"offsets":{{"from":0,"to":1000}},"text":"Synthetic Clinic needs a revised proposal."}}]}},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\n')
+        whisper.write_text(f'#!{sys.executable}\nimport json,os,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\njson.dump({{"transcription":[{{"offsets":{{"from":0,"to":1000}},"text":"Synthetic Clinic needs a revised proposal."}}]}},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\n')
         decoder.chmod(0o700)
         whisper.chmod(0o700)
         import transcribe_session
@@ -433,7 +751,7 @@ class PhoneIntakeTests(unittest.TestCase):
                         'next_step': {'text': 'Revise proposal', 'next_date': '2026-01-02', 'needs_review': None}}],
                     'draft_proposals': [], 'review_questions': []}
 
-        with patch.dict('os.environ', {'CARR_WHISPER_MODEL': str(model)}), patch.object(transcribe_session, 'WHISPER_CLI_BIN', str(whisper)):
+        with patch.dict('os.environ', {'CARR_WHISPER_MODEL': str(model), 'SYNTHETIC_UNRELATED_SECRET': 'fixture'}), patch.object(transcribe_session, 'WHISPER_CLI_BIN', str(whisper)):
             status = phone_intake.extract(session, decoder=str(decoder), distiller=distiller)
         self.assertEqual(status['state'], 'ready_review')
         report = post_call.read_json(session / post_call.REPORT_FILE)

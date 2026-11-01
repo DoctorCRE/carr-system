@@ -9,7 +9,6 @@ import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { publicError } from '../src/public-errors.ts';
 import { queueCardId } from '../src/work-queue.js';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 import { mcpInventory, assertCurrentContracts } from '../../ops/scac-mutation-inventory.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
@@ -234,8 +233,8 @@ test('queue grants preserve the current catalog seal and reject wider grants', a
   const current = async () => (await c.query('select ops.scac_mutation_catalog_v118_current() as current')).rows[0].current;
   assert.equal(await current(), true);
   const installed = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
-  const jobGrants = contract => contract.relation_dml.filter(row => row.relation === 'ops.work_request_job');
-  assert.deepEqual(jobGrants(installed), jobGrants(SCAC_MUTATION_CURRENT_DB_GRANTS));
+  assert.deepEqual(installed.relation_dml.filter(row => row.relation === 'ops.work_request_job')
+    .map(row => [row.grantee, row.privilege, row.grantable]), [['carr_writer', 'insert', false], ['carr_writer', 'update', false]]);
   assert.equal(assertCurrentContracts(TOOLS), true);
   const census = mcpInventory(TOOLS).filter(row => row.operation === 'retitle-job');
   assert.equal(census.length, 1);

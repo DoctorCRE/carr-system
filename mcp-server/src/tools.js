@@ -2386,7 +2386,7 @@ async function lockDealField(c, dealId, field) {
   );
 }
 
-async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preservedActionIds = []) {
+async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preservedActionIds = [], actionStatus = 'open') {
   assertDealRoomField("next_date", nextDate, ToolError);
   // The step also changes next_date. Take that cell's lock first so its
   // field history cannot race a direct date edit or undo.
@@ -2417,10 +2417,10 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preserv
       returning id /* dealroom:drop-prior-action */`, [actor.id, dealId, await partnerOwnerIds(c, actor), preservedActionIds])).rows;
   const action = await c.query(
     `insert into next_action (subject_type, subject_id, owner_id, due_on,
-                              description, created_by, updated_by, updated_at)
-     values ('deal',$1,$2,$3,$4,$2,$2,clock_timestamp()) returning id
+                              description, created_by, updated_by, updated_at, status)
+     values ('deal',$1,$2,$3,$4,$2,$2,clock_timestamp(),$5) returning id
      /* dealroom:add-next-action */`,
-    [dealId, actor.id, nextDate, text]);
+    [dealId, actor.id, nextDate, text, actionStatus]);
   await writeEvent(c, actor, "set-next-step", "deal", dealId, {
     field: "next_step",
     old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null } : {}) },
@@ -2516,8 +2516,19 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
 // and refuses the undo instead of being overwritten.
 // A call proposal's write is filed under one derived UUID. Calls applied before
 // the envelope took only UUIDs were filed under `capture:<id>`; undo still reads those.
+// Only resolve-candidate can mark a next step for immediate checklist conversion.
+const callNextStepItems = Symbol('call next step items');
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
+
+async function completedRetainedStep(c, dealId, candidateIds, step) {
+  return (await c.query(
+    `select 1 from event request join next_action n on n.subject_type='deal' and n.subject_id=$1
+       and request.new_value->'actions' @> jsonb_build_array(jsonb_build_object('id',n.id::text,'source','next_action'))
+      where request.subject_type='deal' and request.subject_id=$1 and request.field='overdue_assessment_pending'
+        and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done' and n.description=$3
+      limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, step])).rows.length > 0;
+}
 
 async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
@@ -2535,7 +2546,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   if (!first("next_step") || !first("next_date") || !applied) throw new ToolError({ error: "applied_change_not_found" });
   const newer = (await c.query(
     `select 1 from event where subject_type='deal' and subject_id=$1 and field in ('next_step','next_date')
-        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]))
+        and recorded_at > (select max(recorded_at) from event where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]) and field in ('next_step','next_date'))
       limit 1 /* call-outcome:undo-step-newer */`, [dealId, keys])).rows;
   const items = (await c.query(
     `select n.id, n.status, (select count(*) from event e where e.subject_type='deal' and e.subject_id=$1
@@ -2560,11 +2571,13 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
     ...(await c.query(`update capture_post_call_action set status='open', updated_at=clock_timestamp()
       where id=any($1::uuid[]) and status='dropped' returning id /* call-outcome:undo-step-reopen-post-call */`, [reopenIds])).rows,
   ].map(row => row.id);
+  reopened.push(...await overdueUpdates.undoCallAssessments(c, actor, dealId, keys, args.idempotency_key));
   await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* call-outcome:undo-step-date */", [dealId, priorDate, actor.id]);
   const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
   // The board shows the newest open ball, else the newest unhidden note. Put
   // back the note it showed, or hide the call's note when it showed none.
-  if (priorStep !== null && shown !== priorStep)
+  const completedPrior = await completedRetainedStep(c, dealId, [candidate.id], priorStep);
+  if (priorStep !== null && shown !== priorStep && !completedPrior)
     await c.query("insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) /* call-outcome:undo-step-note */",
       [dealId, priorStep, actor.id]);
   for (const [field, before, after] of [["next_step", candidate.payload.text, priorStep], ["next_date", candidate.payload.next_date ?? null, priorDate]])
@@ -9372,7 +9385,7 @@ registerTools({
   },
 
   "read-home-agenda": {
-    description: "Read one bounded Home agenda snapshot across active team and national-account deals: scope, dates, open actions including holds, short deal names and stored deal-items.v1 checklists. No deal detail or history. Refuses rather than truncates above 1000 deals, 10000 dates or 10000 open actions or 10000 checklist items; owner and workspace filtering remain with the viewer.",
+    description: "Read one bounded Home agenda snapshot across active team and national-account deals: scope, dates, open actions including holds, short deal names and stored deal-items.v1 checklists. Each deal carries needs_next_action: past pending with no open ordinary action (held counts, checklist items do not); missing_next_action lists those deal ids by owner, for a partner to set with set-next-action. No deal detail or history. Refuses rather than truncates above 1000 deals, 10000 dates or 10000 open actions or 10000 checklist items; owner and workspace filtering remain with the viewer.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c, actor) => {
       const { rows: [snapshot] } = await c.query(`
@@ -9385,7 +9398,10 @@ registerTools({
                  to_jsonb(b.last_review_at)#>>'{}' as last_review_at,
                  b.workspace_kind, b.account_client_id, b.operating_state, b.outcome,
                  to_jsonb(b.closed_on)#>>'{}' as closed_on,
-                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on
+                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
+                 b.phase <> 'pending' and not exists (
+                   select 1 from v_deal_room_action a
+                    where a.deal_id = b.id and a.status = 'open' and a.item_title is null) as needs_next_action
             from v_open_deal_room_board b
             join v_client_engagement_status ce on ce.client_id = b.client_id
            where b.operating_state = 'active'
@@ -9434,9 +9450,15 @@ registerTools({
                ), '[]'::jsonb) end as deals from bounds`);
       if (snapshot.overflow) throw new ToolError({ error: "agenda_limit_exceeded",
         limits: { deals: 1000, critical_dates: 10000, open_actions: 10000, checklist_items: 10000 } });
+      // A partner sets the missing ball with set-next-action on the deal id;
+      // this read only names the gap and never fills it.
+      const missing = new Map();
+      for (const deal of snapshot.deals.filter(deal => deal.needs_next_action))
+        missing.set(deal.owner, [...(missing.get(deal.owner) || []), deal.id]);
       return { schema_version: "home-agenda.v1", actor: actor.slug, deals: snapshot.deals.map(({ client_name, market, ...deal }) => ({
         ...deal, short_name: shortDealHeading({ ...deal, client_name, market }),
-      })) };
+      })), missing_next_action: [...missing].map(([owner, deal_ids]) => ({ owner, deal_ids }))
+        .sort((a, b) => a.owner === null ? 1 : b.owner === null ? -1 : a.owner.localeCompare(b.owner)) };
     },
   },
 
@@ -9578,9 +9600,10 @@ registerTools({
       await lockDealField(c, s.id, "next_date");
       await lockDealField(c, s.id, "next_step");
       await versionGuard(c, "deal", s.id, args.base_version);
-      const preserved = await overdueUpdates.preserved(c, s.id);
+      const preserved = await overdueUpdates.preserved(c, s.id, args.idempotency_key);
       await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step", preserved);
-      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key, preserved);
+      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key, preserved,
+        args[callNextStepItems] ? 'dropped' : 'open');
     }),
   },
 
@@ -9905,6 +9928,8 @@ registerTools({
 
   "resolve-candidate": {
     write: true,
+    afterCommit: (c, actor, args, result, transact) => overdueUpdates.process(c, actor,
+      { ...args, idempotency_key: captureKey(args.candidate_id) }, result, transact),
     description: "Resolve one capture proposal. Device credentials only reach /capture/*; this verb does not require a human actor. Rejecting only skips it. Accepting invokes its mapped live verb as the confirming partner, then confirms the candidate only after that write returns a real record reference. automatic=true is the weekly pipeline call applying a next step or phase it heard stated plainly: partner authority only, post-call sessions only, and the change is listed on read-call-outcomes with its evidence and an undo.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, candidate_id: { type: "string" },
@@ -9957,6 +9982,7 @@ registerTools({
         innerArgs.human_quote = candidate.evidence_quote;
         innerArgs.change_reason = "Stated on the weekly pipeline call";
       }
+      let assessmentDealId;
       if (["next_step", "phase_move"].includes(candidate.kind)) {
         const subject = await resolveSubject(c, candidate.payload.deal);
         if (candidate.kind === "next_step")
@@ -9980,9 +10006,22 @@ registerTools({
           if (changed.rows.length) throw new ToolError({ error: "newer_change_exists", field: changed.rows[0].field,
             hint: "The plan changed after this call proposal was filed. Review it before applying." });
         }
-        if (candidate.kind === "next_step")
+        if (candidate.kind === "next_step") {
+          assessmentDealId = subject.id;
+          await overdueUpdates.prepare(c, actor, subject.id, null, candidate.evidence_quote,
+            innerArgs.idempotency_key, { candidate_id: candidate.id, candidate_kind: candidate.kind, verb: 'resolve-candidate' });
           innerArgs.base_version = (await c.query("select version from deal where id=$1 for update", [subject.id])).rows[0]?.version;
+        }
       }
+      if (['activity', 'meeting_record'].includes(candidate.kind)) {
+        const subject = await resolveSubject(c, innerArgs.ref);
+        if (subject.type === 'deal') {
+          assessmentDealId = subject.id;
+          await overdueUpdates.prepare(c, actor, subject.id, null, candidate.evidence_quote,
+            innerArgs.idempotency_key, { candidate_id: candidate.id, candidate_kind: candidate.kind, verb: 'resolve-candidate' });
+        }
+      }
+      if (candidate.kind === 'next_step') innerArgs[callNextStepItems] = true;
       const result = await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
       if (candidate.kind === 'next_step') {
@@ -9996,7 +10035,6 @@ registerTools({
           });
           result.items.push(stored.item);
         }
-        await c.query("update next_action set status='dropped',updated_by=$2 where id=$1 and item_title is null", [result.next_action_id, actor.id]);
         await writeEvent(c, actor, 'resolve-candidate', 'deal', result.deal_id, {
           field: 'deal_items_conversion', old: { next_action_id: result.next_action_id },
           new: { item_ids: result.items.map(i => i.id), source_ref: `capture_candidate:${candidate.id}` }, idempotency_key: args.idempotency_key,
@@ -10014,7 +10052,7 @@ registerTools({
           where id=$1 /* capture:resolve-confirm */`,
         [candidate.id, actor.id, args.note || null, String(ref), automatic]);
       return { ok: true, candidate_id: candidate.id, status: "confirmed", ref: String(ref),
-        verb, automatic, result };
+        verb, automatic, result, ...(assessmentDealId ? { deal_id: assessmentDealId } : {}) };
     }),
   },
 
@@ -10264,6 +10302,7 @@ registerTools({
           where id=any($1::uuid[])`, [reopenIds,actor.id]);
         await c.query(`update capture_post_call_action set status='open',updated_at=clock_timestamp()
           where id=any($1::uuid[])`, [reopenIds]);
+        reopenIds.push(...await overdueUpdates.undoCallAssessments(c, actor, dealId, keys, args.idempotency_key, 'undo-call'));
         const restored = {};
         for (const field of ['phase','next_date','next_step']) {
           const first = journal.find(row=>row.field===field);
@@ -10272,7 +10311,7 @@ registerTools({
             ? first.old_value.board_next_step : first.old_value?.[field] ?? null;
           restored[field] = value;
           if (field==='next_step') {
-            if (value !== null) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
+            if (value !== null && !await completedRetainedStep(c, dealId, own.map(row => row.id), value)) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
               values($1,'next_step',$2,$3,clock_timestamp())`, [dealId,value,actor.id]);
           } else await c.query(`update deal set ${field}=$2,updated_by=$3 where id=$1`, [dealId,value,actor.id]);
           await writeEvent(c,actor,field==='phase' ? 'revert-deal-field' : 'undo-call', 'deal',dealId,{

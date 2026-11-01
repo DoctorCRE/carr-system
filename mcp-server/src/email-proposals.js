@@ -615,16 +615,40 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound and outbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
-          purpose: { enum: ['links'] }, after: { type: 'string', format: 'uuid' },
+          purpose: { enum: ['links', 'outcomes'] }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
         // The age window's start follows the server clock, so tests on a fixed clock stay in range.
         const clock = new Date().toISOString();
+        if (args.purpose === 'outcomes') {
+          if (!args.account || Object.keys(args).some(key => !['purpose', 'account'].includes(key)))
+            fail('email_outcomes_arguments_invalid');
+          const owner = senderOwner(_actor);
+          const { rows } = await c.query(`with inbound as (
+              select a.recorded_at from activity a where a.kind='email_in'
+                and (a.email_source->>'mailbox_owner'=$1 or
+                  (a.email_source is null and a.actor_id=$3::uuid))
+                and (a.email_identity->>'mailbox_account' is null or
+                  a.email_identity->>'mailbox_account'=$2)
+            ), filing as (
+              select min(recorded_at) as journey_live_at,max(recorded_at) as last_email_in_filed_at from inbound
+            ) select filing.*, (select count(*)::int from email_proposal p
+                where p.kind='reply_draft' and p.owner=$1 and p.created_at>=filing.journey_live_at
+                  and exists (select 1 from activity a where a.id=p.activity_id
+                    and (a.email_identity->>'mailbox_account' is null or
+                      a.email_identity->>'mailbox_account'=$2))) as reply_draft_count from filing`,
+          [owner, args.account.toLowerCase(), _actor.id]);
+          const row = rows[0];
+          return { schema_version: 'email-outcomes.v1',
+            journey_live_at: row.journey_live_at ? new Date(row.journey_live_at).toISOString() : null,
+            last_email_in_filed_at: row.last_email_in_filed_at ? new Date(row.last_email_in_filed_at).toISOString() : null,
+            reply_draft_count: row.reply_draft_count };
+        }
         if (args.purpose === 'links') {
           const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,
               coalesce(hydrated.detail,a.detail) as body,a.occurred_at
