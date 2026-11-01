@@ -296,6 +296,84 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
+    def test_census_request_runs_on_fresh_copy_once_and_keeps_only_counts(self):
+        self.out().mkdir(parents=True)
+        request = self.out() / 'coverage-census.request'
+        request.touch(mode=0o600)
+        calls = []
+        original = self.copy_snapshot
+        def execute(command, **kwargs):
+            if 'census' not in command:
+                return original(command, **kwargs)
+            calls.append(command)
+            self.assertEqual(command[1:3], ['census', '--immutable-copy'])
+            self.assertEqual(Path(command[3]).read_bytes(), self.store.read_bytes())
+            self.assertEqual(Path(command[4]).name, 'Files')
+            self.assertEqual(command[5], '7')
+            kwargs['stdout'].write(json.dumps({'totals': {'messages': 1},
+                                              'messages': {'1': {'PRIVATE-TOKEN': 7}}}).encode())
+            return subprocess.CompletedProcess(command, 0)
+        with patch('subprocess.run', side_effect=execute):
+            self.assertEqual(self.run_intake().state, 'succeeded')
+            self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(request.exists())
+        receipt = self.out() / 'coverage-census.json'
+        self.assertEqual(json.loads(receipt.read_text()), {'totals': {'messages': 1}})
+        self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
+        self.assertFalse(list(self.out().glob('work-*')))
+
+    def test_census_failures_do_not_fail_intake_or_leak_output(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        failures = ['exit', 'timeout', 'launch', 'json', 'label', 'value', 'bool', 'oversized']
+        for failure in failures:
+            with self.subTest(failure=failure):
+                self.out().mkdir(parents=True, exist_ok=True)
+                (self.out() / 'coverage-census.request').touch(mode=0o600)
+                original = self.copy_snapshot
+                def execute(command, **kwargs):
+                    if 'census' not in command:
+                        return original(command, **kwargs)
+                    self.assertEqual(kwargs['timeout'], 5)
+                    if failure == 'timeout':
+                        raise subprocess.TimeoutExpired(command, 5, output=b'PRIVATE-TOKEN')
+                    if failure == 'launch':
+                        raise OSError('PRIVATE-TOKEN')
+                    payload = {'exit': b'PRIVATE-TOKEN', 'json': b'PRIVATE-TOKEN',
+                               'label': b'{"totals":{"PRIVATE-TOKEN":1}}',
+                               'value': b'{"totals":{"messages":"PRIVATE-TOKEN"}}',
+                               'bool': b'{"totals":{"messages":true}}',
+                               'oversized': b' ' * (8 * 1024 * 1024 + 1)}[failure]
+                    kwargs['stdout'].write(payload)
+                    return subprocess.CompletedProcess(command, int(failure == 'exit'))
+                log = StringIO()
+                with patch('subprocess.run', side_effect=execute), redirect_stderr(log):
+                    self.assertEqual(self.run_intake().state, 'succeeded')
+                self.assertEqual(log.getvalue(), 'coverage_census_failed=1\n')
+                self.assertFalse((self.out() / 'coverage-census.request').exists())
+                self.assertFalse(list(self.out().glob('work-*')))
+                for path in self.out().rglob('*'):
+                    if path.is_file():
+                        self.assertNotIn(b'PRIVATE-TOKEN', path.read_bytes())
+
+    def test_census_rejects_symlink_nonempty_and_public_requests(self):
+        self.out().mkdir(parents=True)
+        request = self.out() / 'coverage-census.request'
+        target = self.tmp / 'PRIVATE-TOKEN'
+        target.write_text('PRIVATE-TOKEN')
+        for kind in ('symlink', 'content', 'mode'):
+            with self.subTest(kind=kind):
+                if kind == 'symlink':
+                    request.symlink_to(target)
+                else:
+                    request.write_text('PRIVATE-TOKEN' if kind == 'content' else '')
+                    request.chmod(0o644 if kind == 'mode' else 0o600)
+                self.assertEqual(self.run_intake().state, 'succeeded')
+                self.assertFalse(request.exists())
+                self.assertFalse((self.out() / 'coverage-census.json').exists())
+                self.assertEqual(target.read_text(), 'PRIVATE-TOKEN')
+
     def copy_snapshot(self, command, *, cwd=None, **kwargs):
         if command[-1] == '--scope':
             return subprocess.CompletedProcess(command, 0, stdout=f'{self.store.parent}\n{self.repo / intake.OUT}\n{self.repo}\n')

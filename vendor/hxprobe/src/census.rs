@@ -106,6 +106,9 @@ pub fn run(path: &OsStr, files: &OsStr, account: u64) -> Result<String, ()> {
     }
     totals.insert("blocks_verified", verified);
     totals.insert("message_layout_rejected_all_accounts", objects.rejected(&messages));
+    let (orphaned_bodies, orphaned_recipients) = objects.orphaned_children();
+    totals.insert("body_orphaned_all_accounts", orphaned_bodies);
+    totals.insert("recipient_orphaned_all_accounts", orphaned_recipients);
     totals.insert("body_unlinked_all_accounts", objects.unlinked_bodies);
     totals.insert("recipient_unlinked_all_accounts", objects.unlinked_recipients);
     Ok(format!("{{\"totals\":{{{}}},\"messages\":{{{}}}}}", json(&totals), rows.join(",")))
