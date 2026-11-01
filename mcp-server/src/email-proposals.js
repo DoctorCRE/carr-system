@@ -615,7 +615,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound and outbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
           purpose: { enum: ['links', 'outcomes'] }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
@@ -682,7 +682,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           from activity a left join deal d on d.id=a.deal_id
           left join v_email_non_deal_step ns on ns.activity_id=a.id
           where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
-            and a.occurred_at>$6::timestamptz-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
+            and a.recorded_at>$6::timestamptz-make_interval(days=>$1)
+            and a.occurred_at>$6::timestamptz-interval '30 days' and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
             and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
           order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id, clock]);
         const people = await contacts(c);
