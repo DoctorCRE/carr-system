@@ -811,6 +811,19 @@ def test_a_long_failing_gate_log_is_tailed_and_still_redacted():
     check("the line above the window is not printed at all",
           "early line 3" not in out, out[:300])
 
+def test_log_tail_counts_newlines_in_progress_output():
+    with tempfile.TemporaryDirectory(prefix="ci-selftest-progress-") as directory:
+        log = pathlib.Path(directory) / "progress.log"
+        log.write_bytes(b"".join(f"line {i}\rprogress {i}\n".encode() for i in range(1, 251))
+                        + f"failure {FIXTURE_TOKEN}\n".encode())
+        output = _fail_tail(log)
+    check("progress updates do not shorten the 80-newline diagnostic window",
+          output.splitlines()[0] == "line 172", output[:100])
+    check("progress diagnostics retain the final failure line",
+          "progress 250" in output and "failure <redacted:github-token:40 chars>" in output, output[-150:])
+    check("progress diagnostics still redact shaped credentials", FIXTURE_TOKEN not in output)
+
+
 def test_fail_tail_withholds_the_window_when_it_cannot_redact():
     with tempfile.TemporaryDirectory(prefix="ci-selftest-failtail-") as td:
         log = pathlib.Path(td) / "gate-noredactor.log"
@@ -1623,6 +1636,7 @@ def main(argv=None):
                test_the_walk_prunes_named_roots_only,
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,
+               test_log_tail_counts_newlines_in_progress_output,
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
                test_gates_exclude_prose_counts_but_enforce_rule_consistency,
                test_gates_never_run_the_production_diagnostic,

@@ -131,7 +131,7 @@ class Controller:
     def show(self, name, *, tail=None, error=False):
         data = (self.logdir / f'{name}.log').read_bytes()
         if tail is not None:
-            data = b''.join(data.splitlines(keepends=True)[-tail:])
+            data = b''.join(io.BytesIO(data).readlines()[-tail:])
         target = sys.stderr if error else sys.stdout
         target.flush()
         target.buffer.write(data)
@@ -140,7 +140,7 @@ class Controller:
     def fail_tail(self, name):
         log = self.logdir / f'{name}.log'
         data = log.read_bytes()
-        window = data if data.count(b'\n') < 200 else b''.join(data.splitlines(keepends=True)[-80:])
+        window = data if data.count(b'\n') < 200 else b''.join(io.BytesIO(data).readlines()[-80:])
         try:
             result = subprocess.run([self.python, 'ops/ci-secret-scan.py', '--redact'],
                                     input=window, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
