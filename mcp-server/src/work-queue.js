@@ -14,6 +14,10 @@ const slice = { ...positive, default: 1 };
 const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
 const jobStart = ['job', 'runner_job_id'];
 const repositories = Object.keys(addressFormat.repositories);
+export const validChangeUrl = url => {
+  const match = typeof url === 'string' && /^https:\/\/github[.]com\/([^/]+\/[^/]+)\/pull\/[1-9][0-9]*$/.exec(url);
+  return !!match && repositories.includes(match[1]);
+};
 export const completionFields = {
   criterion_evidence: { type: 'array', items: { type: 'object', additionalProperties: false,
     properties: { id: { type: 'string', minLength: 1 }, evidence: { type: 'string', minLength: 1 } }, required: ['id', 'evidence'] } },
@@ -37,7 +41,7 @@ const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
 // Readiness is derived from the recorded plan; it grants no completion authority.
 const validSliceChange = change => change && typeof change === 'object' && Object.keys(change).length === 2
   && typeof change.pr_url === 'string' && typeof change.merge_commit_sha === 'string'
-  && /^https:\/\/github[.]com\/(DoctorCRE\/carr-system|jbookout\/(doctorcre-app|software-factory))\/pull\/[1-9][0-9]*$/.test(change.pr_url)
+  && validChangeUrl(change.pr_url)
   && /^[0-9a-fA-F]{40}$/.test(change.merge_commit_sha);
 export function readyToClose(state, slices) {
   if (['confirmed_closed','declined','superseded','failed'].includes(state) || !slices.length) return false;

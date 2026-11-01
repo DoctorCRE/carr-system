@@ -332,7 +332,7 @@ test('real verbs close a newly captured WR using the merged PR review-gate appro
   const card=()=>command('work-request-card',{work_request:ref},actor,'carr_reader');
   const initial=await card();
   const completionFacts={criterion_evidence:initial.acceptance_criteria.map(row=>({id:row.id,evidence:'Registered capture and both slice writes exercised in the independent PR review.'})),user_facing:false};
-  const changes=[1,2].map(n=>({pr_url:`https://github.com/DoctorCRE/carr-system/pull/${810+n}`,merge_commit_sha:String(n).repeat(40)}));
+  const changes=[1,2].map(n=>({pr_url:`https://github.com/${n === 1 ? 'DoctorCRE/carr-system' : 'jbookout/software-factory'}/pull/${810+n}`,merge_commit_sha:String(n).repeat(40)}));
   const heads=['b'.repeat(40),'c'.repeat(40)];
   const fetches=[];
   let reviewerJob=26;
@@ -383,6 +383,8 @@ test('real verbs close a newly captured WR using the merged PR review-gate appro
     const closed=await command('close-work-request-slice',args,actor,'carr_writer');
     assert.equal(closed.work_request_state,'confirmed_closed');
     const result=await card();assert.equal(result.state,'confirmed_closed');
+    const capsule=(await c.query('select completion_evidence from ops.work_request where ref=$1',[ref])).rows[0].completion_evidence;
+    assert.equal(capsule.change_ref,changes.map(change=>`${change.pr_url}#${change.merge_commit_sha}`).join('\n'));
     const requests=fetches.length;
     await command('close-work-request-slice',args,actor,'carr_writer');
     assert.equal(fetches.length,requests);assert.equal((await card()).version,result.version);
