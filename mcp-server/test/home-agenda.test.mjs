@@ -8,16 +8,19 @@ const deal = {
   id: 'synthetic-deal', name: 'Synthetic agenda', phase: 'search', owner: 'dell', type: 'lease',
   attention: false, next_step: 'Review', next_date: '2026-10-22', last_touch: null, last_review_at: null,
   workspace_kind: 'national_account', account_client_id: 'synthetic-account', operating_state: 'active',
-  outcome: null, closed_on: null, invoiced_on: null,
+  outcome: null, closed_on: null, invoiced_on: null, needs_next_action: false,
   critical_dates: [{ id: 'date', kind: 'option', due_on: null, note: null, status: 'settled' }],
   next_actions: [{ id: 'action', owner: 'dell', description: 'Review', due_on: null, status: 'open', hold_until: '2026-10-25' }],
 };
 
 test('Home agenda returns the versioned minimal snapshot in one read, retaining national-account scope and held/undated rows', async () => {
   const calls = [];
-  const client = { async query(sql, params) { calls.push({ sql, params }); return { rows: [{ overflow: false, deals: [deal] }] }; } };
+  const bare = { ...deal, id: 'synthetic-bare', next_actions: [], needs_next_action: true };
+  const client = { async query(sql, params) { calls.push({ sql, params }); return { rows: [{ overflow: false, deals: [deal, bare] }] }; } };
   const result = await TOOLS['read-home-agenda'].handler(client, { slug: 'joe' }, {});
-  assert.deepEqual(result, { schema_version: 'home-agenda.v1', actor: 'joe', deals: [{ ...deal, short_name: deal.name }] });
+  assert.deepEqual(result, { schema_version: 'home-agenda.v1', actor: 'joe',
+    deals: [{ ...deal, short_name: deal.name }, { ...bare, short_name: bare.name }],
+    missing_next_action: [{ owner: 'dell', deal_ids: ['synthetic-bare'] }] });
   assert.equal(calls.length, 1);
   assert.equal(TOOLS['read-home-agenda'].write, undefined);
   assert.deepEqual(TOOLS['read-home-agenda'].inputSchema, { type: 'object', additionalProperties: false, properties: {} });

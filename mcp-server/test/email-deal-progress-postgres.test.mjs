@@ -1136,6 +1136,21 @@ test('the router queue keeps a partly proposed email until the router excludes i
   } finally { await c.query("update deal set phase='closed' where id=$1", [second]); }
 });
 
+test('the router queue routes email logged after its window, up to the unresolved hold', async () => {
+  await c.query('delete from email_proposal');
+  const late = await email(askQuote);
+  const stale = await email(askQuote);
+  await c.query("update activity set occurred_at=now()-interval '5 days' where id=$1", [late.activity_id]);
+  await c.query("update activity set occurred_at=now()-interval '31 days' where id=$1", [stale.activity_id]);
+  const ids = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails
+    .map(row => row.activity_id);
+  assert.ok(ids.includes(late.activity_id), 'mail recorded late still reaches reply proposals');
+  assert.ok(!ids.includes(stale.activity_id), 'mail older than the unresolved hold stays out');
+  await c.query("update activity set recorded_at=now()-interval '4 days' where id=$1", [late.activity_id]);
+  const again = (await command('email-router-queue', { days: 3, limit: 200 }, router(), 'carr_reader')).emails;
+  assert.ok(!again.some(row => row.activity_id === late.activity_id), 'routed once, inside its recording window');
+});
+
 test('the router queue includes logged outbound email with sender evidence', async () => {
   const context = { subject: 'Synthetic commitment', sender: { email: 'sender@example.test', internal: true },
     recipients: [{ email: 'recipient@example.test', internal: false }] };
@@ -1411,6 +1426,124 @@ const submitDraft = (proposal, extra = {}, identity = actor) => command('submit-
   subject: 'Re: Floor plan', body: 'I will review.', to: ['sender@example.test'],
   cc: [identity.slug === 'dell' ? 'joe@example.test' : 'dell@example.test'], ...extra }, identity, 'carr_writer');
 const refuses = (promise, code) => assert.rejects(promise, error => error.payload?.error === code);
+
+const editDraft = (proposal, extra = {}, identity = actor) => command('edit-email-draft', {
+  idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 1,
+  subject: 'Re: Edited floor plan', body: '  Synthetic saved reply.\nThank you.  ', ...extra }, identity, 'carr_writer');
+
+test('reply draft edits persist exact text and version through list-email-proposals without sending', async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const proposal = await draftFor();
+  const before = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.deepEqual(before.reply_draft.to, ['sender@example.test']);
+  assert.deepEqual(before.reply_draft.cc, ['dell@example.test']);
+  const result = await editDraft(proposal);
+  const after = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.equal(result.version, before.version + 1);
+  assert.equal(result.subject, 'Re: Edited floor plan');
+  assert.equal(result.body, '  Synthetic saved reply.\nThank you.  ');
+  assert.deepEqual(after, { ...before, version: result.version,
+    reply_draft: { ...before.reply_draft, subject: result.subject, body: result.body } });
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  assert.ok(!outbox.drafts.some(item => item.proposal_id === proposal.proposal_id));
+});
+
+test('reply draft edits are owner-only for both partners', async () => {
+  const dell = { ...(await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
+  for (const [owner, other] of [[actor, dell], [dell, actor]]) {
+    const proposal = await draftFor(owner.slug);
+    await refuses(editDraft(proposal, {}, other), 'email_draft_not_owner');
+    assert.equal((await editDraft(proposal, {}, owner)).version, 2);
+  }
+  await refuses(editDraft(await draftFor(), {}, machineFor('joe')), 'human_only_verb_requires_verified_partner');
+});
+
+test('reply draft edits refuse stale versions and preserve the winning text', async () => {
+  const proposal = await draftFor();
+  const saved = await editDraft(proposal);
+  await assert.rejects(editDraft(proposal, { body: 'Stale overwrite' }), error =>
+    error.payload?.error === 'version_conflict' && error.payload.current_version === 2);
+  const shown = (await listed()).find(item => item.id === proposal.proposal_id);
+  assert.equal(shown.version, saved.version);
+  assert.equal(shown.reply_draft.body, saved.body);
+});
+
+test('reply draft edit replay returns the original result without another version or event', async () => {
+  const proposal = await draftFor();
+  const idempotency_key = randomUUID();
+  const saved = await editDraft(proposal, { idempotency_key });
+  const replay = await editDraft(proposal, { idempotency_key });
+  assert.deepEqual(replay, { ...saved, replayed: true });
+  assert.equal((await listed()).find(item => item.id === proposal.proposal_id).version, 2);
+  const room = await command('get-deal-room', { deal });
+  assert.equal(room.events.filter(event => event.verb === 'edit-email-draft' &&
+    event.new_value.proposal_id === proposal.proposal_id).length, 1);
+});
+
+test('reply draft edits reject recipient and status fields and invalid text without changing the draft', async () => {
+  const proposal = await draftFor();
+  const before = (await listed()).find(item => item.id === proposal.proposal_id);
+  for (const extra of [{ to: ['other@example.test'] }, { cc: ['other@example.test'] },
+    { status: 'approved_to_send' }, { subject: '' }, { subject: 'x'.repeat(999) }, { body: 'x'.repeat(20001) }])
+    await assert.rejects(editDraft(proposal, extra));
+  await refuses(editDraft(proposal, { subject: 'Bad\nheader' }), 'email_draft_subject_invalid');
+  await refuses(editDraft(proposal, { subject: '   ' }), 'email_draft_subject_invalid');
+  await refuses(editDraft(proposal, { body: '   ' }), 'email_draft_empty_body');
+  assert.deepEqual((await listed()).find(item => item.id === proposal.proposal_id), before);
+});
+
+test('reply draft edits and submissions reject oversized raw text without changing the row', async () => {
+  for (const action of [editDraft, submitDraft]) {
+    const proposal = await draftFor();
+    const before = (await c.query('select * from email_proposal where id=$1', [proposal.proposal_id])).rows[0];
+    await refuses(action(proposal, { body: ' '.repeat(50000) + 'hello' }), 'invalid_field_value');
+    await refuses(action(proposal, { subject: ' '.repeat(999) + 'hello' }), 'invalid_field_value');
+    assert.deepEqual((await c.query('select * from email_proposal where id=$1', [proposal.proposal_id])).rows[0], before);
+  }
+});
+
+test('reply draft edits and submissions accept a 20000-character raw body', async () => {
+  const body = ' '.repeat(19995) + 'hello';
+  for (const action of [editDraft, submitDraft]) {
+    const proposal = await draftFor();
+    const result = await action(proposal, { body });
+    assert.equal(result.body, body);
+    const row = (await c.query('select draft_body, submitted_email from email_proposal where id=$1', [proposal.proposal_id])).rows[0];
+    assert.equal(action === editDraft ? row.draft_body : row.submitted_email.body, body);
+  }
+});
+
+test('reply draft edits refuse submitted drafts and cannot change frozen send text', async () => {
+  const proposal = await draftFor();
+  const submitted = await submitDraft(proposal);
+  await refuses(editDraft(proposal, { base_version: submitted.version }), 'email_draft_not_pending');
+  const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
+  const frozen = outbox.drafts.find(item => item.proposal_id === proposal.proposal_id);
+  assert.equal(frozen.body, submitted.body);
+  assert.equal(frozen.subject, submitted.subject);
+  assert.equal(frozen.version, submitted.version);
+});
+
+test('concurrent same-key reply draft edits replay once while different-key stale writes refuse', async () => {
+  const proposal = await draftFor();
+  const other = new pg.Client(connection);
+  await other.connect();
+  const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id, base_version: 1,
+    subject: 'Synthetic concurrent subject', body: 'Synthetic concurrent body' };
+  try {
+    const results = await Promise.all([command('edit-email-draft', args, actor, 'carr_writer'),
+      command('edit-email-draft', args, actor, 'carr_writer', other)]);
+    assert.equal(results.filter(result => result.replayed).length, 1);
+    assert.ok(results.every(result => result.version === 2));
+    await refuses(command('edit-email-draft', { ...args, idempotency_key: randomUUID(),
+      body: 'Losing text' }, actor, 'carr_writer', other), 'version_conflict');
+    await refuses(command('edit-email-draft', { ...args, body: 'Key reuse text' }), 'key_reuse');
+    const shown = (await listed()).find(item => item.id === proposal.proposal_id);
+    assert.equal(shown.version, 2);
+    assert.equal(shown.reply_draft.body, args.body);
+  } finally { await other.end(); }
+});
 
 test('submission audit binds recipients without addresses and proves both partner copies', async () => {
   await c.query("update actor set email='joe@example.test' where slug='joe'");
@@ -2172,4 +2305,24 @@ test('expiry pages past old actionable proposals and cannot expire another mailb
   assert.equal(next.expired_count, 1);
   assert.equal(next.next_cursor, null);
   assert.equal((await command('list-email-proposals', { status: 'dismissed', limit: 50, include_non_deal: true })).proposals[0].id, blocked.proposal_id);
+});
+
+test('the mailbox outcome monitor reads real filing and all draft statuses as carr_reader', async () => {
+  await c.query('delete from email_proposal');
+  await email();
+  const read = owner => command('email-router-queue',
+    { purpose: 'outcomes', account: `${owner}@example.test` }, machineFor(owner), 'carr_reader');
+  const initial = await read('joe');
+  assert.equal(initial.schema_version, 'email-outcomes.v1');
+  assert.ok(initial.journey_live_at);
+  assert.ok(initial.last_email_in_filed_at);
+  assert.equal(initial.reply_draft_count, 0);
+  const draft = await draftFor();
+  assert.equal((await read('joe')).reply_draft_count, 1);
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(),
+    proposal_id: draft.proposal_id, base_version: 1, reason: 'Synthetic monitor proof' });
+  assert.equal((await read('joe')).reply_draft_count, 1);
+  assert.equal((await read('dell')).reply_draft_count, 0);
+  assert.deepEqual(Object.keys(await read('joe')).sort(),
+    ['journey_live_at', 'last_email_in_filed_at', 'reply_draft_count', 'schema_version']);
 });
