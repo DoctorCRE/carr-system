@@ -25,12 +25,12 @@ RED, YELLOW, RESET = "\033[31m", "\033[33m", "\033[0m"
 MIGRATION_STRUCTURE = re.compile(
     r"^(migrations/|db/migration-baseline\.json$|tools/migration_(number_contract|baseline|source)\.py$"
     r"|ops/migration-order-gate\.py$)")
-TEST_COLLECTION = re.compile(r"(^ops/ci\.sh$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)")
+TEST_COLLECTION = re.compile(r"(^ops/ci\.(sh|py)$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)")
 SCAC_ATLAS = re.compile(
     r"^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|mcp-server/src/tool-families/[^/]+\.js|tools/regen\.py"
     r"|ops/config/scac-registry-.*\.json)$")
 GATE_SURFACE = re.compile(
-    r"^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)")
+    r"^(hooks/[^/]+\.py|ops/ci\.(sh|py)|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)")
 # The detectors and their corpus. The hook runs both scanners on every push; their
 # 64s qualification suite runs here only when one of them changes (WR-000537).
 SECRET_DETECTOR = re.compile(r"^(\.gitleaks\.toml$|ops/gitleaks\.py$|security/|ops/ci-secret-scan\.py$|ops/githooks/pre-push$)")

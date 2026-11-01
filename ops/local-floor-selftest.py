@@ -296,6 +296,22 @@ class PushFloorTests(RepositoryFixture):
         self.assertEqual(self.calls(), ["collection --collection-only"])
         self.assertRegex(self.verdict(result)[1], r"path shape \+ test-collection$")
 
+    def assert_controller_change_runs_collection_and_closes_gates(self, controller):
+        self.stub("ops/ci-selftest.py", "collection")
+        self.stub("ops/hook-env-isolation-selftest.py", "hook-isolation")
+        self.stub("ops/selftest-git-isolation-check.py", "git-isolation")
+        result = self.run_floor(controller)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["collection --collection-only", "hook-isolation", "git-isolation"])
+        self.assertIn("test-collection", self.verdict(result)[1])
+        self.assertIn("gate-closure", self.verdict(result)[1])
+
+    def test_python_controller_only_change_runs_collection_and_closes_gates(self):
+        self.assert_controller_change_runs_collection_and_closes_gates("ops/ci.py")
+
+    def test_shell_launcher_only_change_runs_collection_and_closes_gates(self):
+        self.assert_controller_change_runs_collection_and_closes_gates("ops/ci.sh")
+
     def test_a_runner_that_dies_without_a_verdict_fails_the_class(self):
         self.write("ops/ci-pushfloor.py", "raise SystemExit(2)\n")
         result = self.run_floor("hooks/example.py")
