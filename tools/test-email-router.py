@@ -103,6 +103,48 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(run()['recorded'], 1)
         self.assertEqual(run()['emails'], 0)
 
+    def test_recheck_does_not_duplicate_a_next_step_after_deal_filing(self):
+        source = dict(email('late-filed', ASK), deal=None, kind='email_in', mailbox_owner='joe')
+        server = Server([source])
+        state = {}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'I will check the floor plan.'}
+        def run(reply):
+            return email_router.route(server, lambda e, d: reply, refusal_code, state, NOW,
+                matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        run(BOTH)
+        state.pop('version')
+        source['deal'] = DEAL
+        run({'proposals': [*BOTH['proposals'], draft]})
+        self.assertEqual([p['kind'] for p in server.stored.values()].count('next_step'), 1)
+        self.assertEqual([p['kind'] for p in server.recorded()], ['next_step', 'reply_draft'])
+        self.assertEqual(run(BOTH)['emails'], 0)
+
+    def test_recheck_does_not_restart_abandoned_mail_retry_budget(self):
+        server = Server([email('abandoned', ASK)])
+        state = {}
+        def broken(e, d):
+            raise RuntimeError('model unavailable')
+        for _ in range(email_router.MAX_ATTEMPTS):
+            route(server, broken, state)
+        state.pop('version')
+        calls = []
+        def still_broken(e, d):
+            calls.append(e['activity_id'])
+            return broken(e, d)
+        for _ in range(email_router.MAX_ATTEMPTS):
+            route(server, still_broken, state)
+        self.assertEqual(calls, ['abandoned'])
+        self.assertEqual(state['attempts'], {})
+
+    def test_recheck_preserves_attempts_for_unfinished_mail(self):
+        server = Server([email('unfinished', ASK)])
+        state = {'attempts': {'unfinished': email_router.MAX_ATTEMPTS - 1}}
+        def broken(e, d):
+            raise RuntimeError('model unavailable')
+        self.assertEqual(route(server, broken, state)['abandoned'], 1)
+        self.assertEqual(route(server, broken, state)['emails'], 0)
+
     def test_contact_only_email_keeps_next_step_for_partner_review(self):
         source = dict(email('nondeal', ASK), deal=None, subject_name='Synthetic vendor')
         server = Server([source])

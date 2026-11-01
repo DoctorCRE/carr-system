@@ -1464,6 +1464,41 @@ for (const subjectType of ['client', 'lead', 'vendor']) test(`${subjectType} rep
   assert.equal((await listed()).some(item => item.id === proposal.proposal_id), false);
 });
 
+for (const scenario of ['captured deal', 'new receipt', 'captured receipt']) test(`contact sent receipt keeps its deal filing for ${scenario}`, async () => {
+  await c.query("update actor set email='joe@example.test' where slug='joe'");
+  await c.query("insert into actor(slug,kind,display_name,email) values('dell','human','Synthetic Dell','dell@example.test') on conflict(slug) do update set email=excluded.email,active=true");
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Synthetic Contact: Floor plan', detail: quote,
+    email_source: { mailbox_owner: 'joe', sender_email: 'sender@example.test' } }, machineFor('joe'));
+  const proposal = await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'reply_draft',
+    activity_id: source.activity_id, evidence_quote: quote, confidence: 0.95,
+    subject: 'Re: Floor plan', body: 'Thank you.' }, machineFor('joe'), 'carr_writer');
+  const submitted = await submitDraft(proposal);
+  const itemId = randomUUID();
+  let captured;
+  if (scenario.startsWith('captured')) {
+    captured = (await c.query(`insert into activity(occurred_at,actor_id,kind,summary,deal_id,source,email_identity)
+      values(now(),$1,'email_out','Captured sent copy',$2,'outlook',$3::jsonb) returning id`,
+    [actor.id, scenario === 'captured deal' ? deal : null, JSON.stringify({ mailbox_owner: 'joe',
+      mailbox_account: 'joe@example.test', item_id: itemId, subject: deal })])).rows[0].id;
+  }
+  if (scenario !== 'captured deal')
+    await c.query('update activity set deal_id=$2,version=version+1 where id=$1', [source.activity_id, deal]);
+  const args = { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: submitted.version, status: 'sent', sha256: submitted.sha256, sent_item_id: itemId };
+  await command('record-email-sent', args, machineFor('joe'), 'carr_writer');
+  assert.equal((await command('record-email-sent', { ...args, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer')).replayed, true);
+  const sent = (await command('get-deal-room', { deal }, actor, 'carr_reader')).activities
+    .filter(a => a.email_context?.send_id === proposal.proposal_id);
+  assert.equal(sent.length, 1, 'the reply appears once in deal correspondence');
+  if (captured) assert.equal(sent[0].id, captured, 'the receipt updates the captured Sent copy');
+  const contacts = (await c.query('select client_id from activity where id=any($1::uuid[]) order by id',
+    [[source.activity_id, sent[0].id]])).rows;
+  assert.equal(contacts.length, 2);
+  assert.ok(contacts[0].client_id);
+  assert.equal(contacts[0].client_id, contacts[1].client_id, 'the reply retains the source contact');
+});
+
 test('contact reply drafts still require inbound mailbox provenance and literal evidence', async () => {
   const args = { idempotency_key: randomUUID(), kind: 'reply_draft', evidence_quote: quote,
     confidence: 0.95, subject: 'Re: Floor plan', body: 'Thank you.' };
