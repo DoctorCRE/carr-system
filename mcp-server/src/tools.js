@@ -1,5 +1,5 @@
-import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 // Register MCP tools and their shared write envelope.
+import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
@@ -4122,7 +4122,7 @@ export const TOOLS = {
                 base_version,created_at,updated_at,
                 (stage <> 'archived') as conversion_eligible,
                 converted,stage_moves,
-                (select p.contact_state='active' from party p where p.id=v_lead_board.party_id) as contact_eligible
+                (select p.contact_state from party p where p.id=v_lead_board.party_id) as contact_state
            from v_lead_board
           order by stage_sort,suppressed,score desc nulls last,name,registry_ref`)).rows;
       const eligible=leads.filter(l=>l.stage!=="archived");

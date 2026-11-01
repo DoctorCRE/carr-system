@@ -28,7 +28,7 @@ async function read(verb, args = {}) {
 }
 
 test('every lead has safe handling advice and deeper strategy, including suppressed and terminal leads', async () => {
-  for (const stage of ['new','qualified','engaged','nurture_drip','archived','do_not_contact']) {
+  for (const stage of ['new','qualified','engaged','nurture_drip','opportunity','active_deal','closed_won','closed_lost','archived','do_not_contact']) {
     await c.query('update lead set stage=$2,suppressed=$3 where id=$1', [lead, stage, stage === 'do_not_contact']);
     const result = await read('lead-board', stage === 'do_not_contact' ? {} : { workspace: 'leads', lead_id: lead });
     const row = result.leads.find(row => row.id === lead);
@@ -38,6 +38,9 @@ test('every lead has safe handling advice and deeper strategy, including suppres
     assert.ok(row.strategy.discovery.length >= 3);
     assert.equal(row.strategy.sent, false);
     if (result.detail) assert.equal(result.detail.handling_advice, row.handling_advice);
+    if (stage === 'opportunity' || stage === 'active_deal') assert.match(row.handling_advice, /Coordinate with the linked client and deal/);
+    if (stage === 'closed_won') assert.match(row.handling_advice, /closed won/i);
+    if (stage === 'closed_lost') assert.match(row.handling_advice, /closed lost/i);
     if (stage === 'do_not_contact' || stage === 'archived') assert.match(row.handling_advice, /Do not contact/);
   }
   await c.query("update lead set stage='new',suppressed=false where id=$1", [lead]);
@@ -136,6 +139,12 @@ test('quiet lead and vendor cadence proposes dated follow-ups but respects exist
   assert.equal(result.sent, false);
   assert.equal(result.proposals.find(row => row.subject_id === lead).days_overdue, 15);
   assert.equal(result.proposals.find(row => row.subject_id === vendor).days_overdue, 10);
+  const defaults = await read('quiet-follow-ups');
+  assert.deepEqual(defaults.cadence, { lead_days: 45, vendor_days: 90 });
+  assert.deepEqual(defaults.proposals, result.proposals);
+  await c.query('update lead set next_action_date=current_date+20 where id=$1', [lead]);
+  assert.ok(!(await queue()).proposals.some(row => row.subject_id === lead));
+  await c.query('update lead set next_action_date=null where id=$1', [lead]);
   const action = randomUUID();
   await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,due_on,description,created_by,updated_by)
     values($1,'lead',$2,$3,current_date+20,'Synthetic existing promise',$3,$3)`, [action,lead,actor.id]);
@@ -160,5 +169,28 @@ test('legacy board advice respects party-level contact restrictions even when le
   try {
     const result = await read('lead-board');
     assert.match(result.leads.find(row => row.id === lead).handling_advice, /Do not contact/);
+  } finally { await c.query("update party set contact_state='active' where id=$1", [party]); }
+});
+
+
+test('party contact state controls advice on both boards and quiet lead and vendor proposals', async () => {
+  const vendor = randomUUID();
+  await c.query(`insert into vendor(id,party_id,category,stage,disposition,last_touch,created_by,updated_by)
+    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-100,$3,$3)`, [vendor,party,actor.id]);
+  await c.query("update lead set stage='nurture_drip',suppressed=false,client_id=null,last_touch=current_date-60 where id=$1", [lead]);
+  try {
+    for (const state of ['nurture','paused','do_not_contact','active']) {
+      await c.query('update party set contact_state=$2 where id=$1', [party,state]);
+      const contactable = state === 'active' || state === 'nurture';
+      for (const args of [{}, { workspace: 'leads', lead_id: lead }]) {
+        const result = await read('lead-board', args);
+        const row = result.leads.find(row => row.id === lead);
+        assert.equal(row.contact_eligible, contactable, state);
+        assert.match(row.handling_advice, contactable ? /Respect the requested timing and return with useful, relevant information/ : /Do not contact/, state);
+        if (result.detail) assert.equal(result.detail.handling_advice, row.handling_advice);
+      }
+      const quiet = await read('quiet-follow-ups');
+      for (const id of [lead,vendor]) assert.equal(quiet.proposals.some(row => row.subject_id === id), contactable, state);
+    }
   } finally { await c.query("update party set contact_state='active' where id=$1", [party]); }
 });

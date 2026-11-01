@@ -1,22 +1,35 @@
+// Read lead guidance, quiet follow-up proposals, and sourced practice and market context.
 import type { Db } from './verb-contract.ts';
 import { ToolError } from './tool-error.ts';
 
-type Lead = { id: string; stage: string; suppressed: boolean; contact_eligible?: boolean; next_action_date?: string | null;
+const CONTACTABLE_STATES = ['active', 'nurture'];
+const contactable = (state: string) => CONTACTABLE_STATES.includes(state);
+
+type Lead = { id: string; stage: string; suppressed: boolean; contact_eligible?: boolean; contact_state?: string; next_action_date?: string | null;
   est_lease_event?: string | null; event_confidence?: string | null; lane?: string | null };
+const DEAL_OBJECTIVE = 'Coordinate with the linked client and deal before creating competing follow-up.';
+const CLOSED_OBJECTIVES: Record<string, string> = {
+  closed_won: 'Closed won. Coordinate any post-close follow-up with the owning partner.',
+  closed_lost: 'Closed lost. Review the recorded close with the owning partner before any future outreach.',
+};
 const OBJECTIVES: Record<string, string> = {
   new: 'Verify identity and discover whether the practice has a real estate decision.',
   qualified: 'Confirm the decision window, decision makers and an appropriate introduction.',
   outreach_active: 'Follow the agreed next step and offer one useful reason to respond.',
   engaged: 'Understand requirements and agree the next decision with the practice.',
   nurture_drip: 'Respect the requested timing and return with useful, relevant information.',
-  opportunity: 'Coordinate with the linked client and deal before creating competing follow-up.',
+  opportunity: DEAL_OBJECTIVE,
+  active_deal: DEAL_OBJECTIVE,
 };
 export function leadAdvice<T extends Lead>(lead: T) {
-  const hold = lead.suppressed || lead.contact_eligible === false || !OBJECTIVES[lead.stage];
-  return { ...lead,
-    handling_advice: hold ? 'Do not contact. Review the recorded restriction or terminal stage with the owning partner.' :
+  const contact_eligible = lead.contact_state === undefined ? lead.contact_eligible :
+    !lead.suppressed && lead.stage !== 'do_not_contact' && contactable(lead.contact_state);
+  const closed = CLOSED_OBJECTIVES[lead.stage];
+  const hold = lead.suppressed || contact_eligible === false || (!OBJECTIVES[lead.stage] && !closed);
+  return { ...lead, contact_eligible,
+    handling_advice: hold ? 'Do not contact. Review the recorded restriction or terminal stage with the owning partner.' : closed ||
       `${OBJECTIVES[lead.stage]} Research the handed record before preparing an outreach draft.`,
-    strategy: { basis: 'stage_based_guidance', objective: hold ? 'Resolve the recorded hold before any outreach.' : OBJECTIVES[lead.stage],
+    strategy: { basis: 'stage_based_guidance', objective: hold ? 'Resolve the recorded hold before any outreach.' : closed || OBJECTIVES[lead.stage],
       discovery: ['What has the practice already tried?', 'What constraints and timing are firm?',
         'Who approves the decision?', 'What would make the practice stop?', 'What would success look like in 90 days?'],
       decision_window: lead.est_lease_event || null, confidence: lead.event_confidence || 'unrecorded',
@@ -73,7 +86,7 @@ export function leadFollowUpTools() {
           from lead l join party p on p.id=l.party_id left join client cl on cl.id=l.client_id
             left join v_last_touch t on t.subject_type='lead' and t.subject_id=l.id
           where not l.suppressed and l.stage in ('new','qualified','outreach_active','engaged','nurture_drip')
-            and p.merged_into is null and p.deleted_at is null and p.contact_state='active'
+            and p.merged_into is null and p.deleted_at is null and p.contact_state=any($3::text[])
             and (l.client_id is null or (cl.merged_into is null and coalesce(cl.status,'') not in ('cold','paused')))
           union all
           select 'vendor',v.id,v.party_id,v.vendor_ref,p.name,v.owner_id,
@@ -83,14 +96,14 @@ export function leadFollowUpTools() {
           from vendor v join party p on p.id=v.party_id
             left join v_last_touch t on t.subject_type='vendor' and t.subject_id=v.id
           where v.merged_into is null and v.disposition='active' and p.merged_into is null
-            and p.deleted_at is null and p.contact_state='active'), due as (
+            and p.deleted_at is null and p.contact_state=any($3::text[])), due as (
           select s.*,coalesce(next_action_date,anchor_on+interval_days) due_on
           from subjects s where not exists(select 1 from next_action n where n.status='open'
             and ((n.subject_type=s.subject_type and n.subject_id=s.subject_id)
               or (n.subject_type='client' and n.subject_id=s.client_id))))
           select d.*,a.slug owner,current_date-due_on days_overdue from due d
             left join actor a on a.id=d.owner_id where due_on<=current_date
-          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days])).rows;
+          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES])).rows;
         if (proposals.length > 1000) throw new ToolError({ error: 'quiet_follow_up_limit_exceeded' });
         return { schema_version: 'quiet-follow-ups.v1', cadence, proposals, sent: false, tasks_created: false };
       },

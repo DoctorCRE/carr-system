@@ -19,6 +19,8 @@ const SAFE_LEAD = Object.freeze({
   score: "71.00",
   segment: "renewal-radar",
   suppressed: false,
+  contact_state: "active",
+  contact_eligible: true,
   est_lease_event: "2027-03-01",
   event_confidence: "medium",
   last_touch: "2026-08-11",
