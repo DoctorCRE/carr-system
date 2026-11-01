@@ -269,9 +269,13 @@ def main():
 
     from gitleaks import detect
     try:
-        return detect(REPO, redactor=redact, rev_range=args.range, history=args.history,
-                      files=staged_files() if args.staged else tracked_files()
-                      if not (args.range or args.history) else None)
+        status = detect(REPO, redactor=redact, rev_range=args.range, history=args.history,
+                        files=staged_files() if args.staged else tracked_files()
+                        if not (args.range or args.history) else None)
+        if args.range:
+            tip_status = detect(REPO, redactor=redact, files=range_files(args.range))
+            return max(status, tip_status)
+        return status
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(redact(str(exc)), file=sys.stderr)
         return 2

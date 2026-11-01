@@ -36,6 +36,33 @@ class DetectionTest(unittest.TestCase):
             with self.subTest(shape=value[:8]):
                 self.check_shape(value)
 
+    def test_range_refuses_existing_secret_in_changed_tip_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / 'ops/config').mkdir(parents=True)
+            for name in ('ci-secret-scan.py', 'pii_guard.py', 'gitleaks.py'):
+                shutil.copy(ROOT / 'ops' / name, root / 'ops' / name)
+            shutil.copy(ROOT / '.gitleaks.toml', root)
+            shutil.copy(ROOT / 'ops/config/public-source-identities.v1.json', root / 'ops/config')
+            env = fixture_env()
+            def git(*args):
+                return subprocess.run(['git', *args], cwd=root, env=env, check=True, capture_output=True)
+            git('init', '-b', 'fixture')
+            git('config', 'user.name', 'Synthetic Tester')
+            git('config', 'user.email', 'test@example.invalid')
+            value = 'AKIA' + 'Z' * 16
+            (root / 'fixture.txt').write_text(value + '\n')
+            git('add', 'fixture.txt')
+            git('commit', '--no-verify', '-m', 'baseline')
+            base = git('rev-parse', 'HEAD').stdout.decode().strip()
+            (root / 'fixture.txt').write_text(value + '\nclean change\n')
+            git('add', 'fixture.txt')
+            git('commit', '--no-verify', '-m', 'change another line')
+            result = subprocess.run([sys.executable, 'ops/ci-secret-scan.py', '--range', base + '..HEAD'],
+                                    cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertNotIn(value, result.stdout + result.stderr)
+
     def check_shape(self, value):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
