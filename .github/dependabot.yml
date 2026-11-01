@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directories: ["/"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels: ["dependency-updates"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "npm"
+    directories: ["/mcp-server", "/practice-plugin"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels: ["dependency-updates"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "pip"
+    directories: ["/", "/scripts/doc-drift"]
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    labels: ["dependency-updates"]
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
