@@ -588,3 +588,80 @@ test('launcher description fixtures are accepted at mint', async () => {
     assert.ok(result.card_id);
   }
 });
+
+
+test('dispatch reports every rejected field with its value and repair in one call', async () => {
+  const work_request = await request('WR-000698');
+  await command('dispatch-job', job(work_request, { card_title: 'Build dispatch errors' }));
+  for (const job_type of ['perf-issue', 'chore']) {
+    await assert.rejects(command('dispatch-job', job(work_request, {
+      job_type, card_title: 'Build dispatch errors', description: 'Implement errors. Then retry.'
+    })), error => {
+      const fields = publicError(error).field_errors;
+      assert.equal(fields.find(e => e.field === 'job_type').value, job_type);
+      assert.ok(fields.find(e => e.field === 'job_type').allowed_values.includes('bug-fix'));
+      assert.equal(fields.find(e => e.field === 'card_title').code, 'card_title_duplicate');
+      assert.match(fields.find(e => e.field === 'description').pattern, /one sentence/);
+      return true;
+    });
+  }
+  for (const card_title of ['Rereview cards', 'Update cards', 'Resync cards', 'Too many words here']) {
+    await assert.rejects(command('dispatch-job', job(work_request, { card_title, work_request: 'wrong', description: 'Implement errors.' })), error => {
+      const fields = publicError(error).field_errors;
+      assert.deepEqual(fields.map(e => e.field).sort(), ['card_title', 'description', 'work_request']);
+      assert.equal(fields.find(e => e.field === 'card_title').value, card_title);
+      assert.ok(fields.find(e => e.field === 'card_title').allowed_values.includes('Revise'));
+      assert.match(fields.find(e => e.field === 'work_request').pattern, /WR-/);
+      return true;
+    });
+  }
+});
+
+test('dispatch normalizes short work request references and publishes copy rules', async () => {
+  const work_request = await request('WR-000675');
+  for (const ref of ['WR675', 'WR-675']) {
+    const result = await command('dispatch-job', job(ref));
+    assert.match(result.card_id, /^WR675[.]S1[.]J/);
+  }
+  const schema = TOOLS['dispatch-job'].inputSchema.properties;
+  assert.ok(schema.job_type.enum.includes('bug-fix'));
+  assert.match(schema.card_title.description, /2-3/);
+  assert.match(schema.card_title.description, /Revise/);
+  assert.ok(new RegExp(schema.work_request.pattern).test(work_request));
+});
+
+test('missing dispatch job_type exposes its allowed values publicly', async () => {
+  const { job_type, ...args } = job(await request());
+  await assert.rejects(command('dispatch-job', args), error => {
+    const reply = publicError(error, { inputSchema: TOOLS['dispatch-job'].inputSchema });
+    assert.equal(reply.error, 'invalid_job_type');
+    assert.deepEqual(reply.field_errors, [{ field: 'job_type', value: null,
+      code: 'invalid_job_type', allowed_values: TOOLS['dispatch-job'].inputSchema.properties.job_type.enum }]);
+    return true;
+  });
+});
+
+test('missing Work Request preserves the other dispatch field errors', async () => {
+  for (const extra of [{ card_title: 'Update cards' }, { job_type: 'chore' }]) {
+    await assert.rejects(command('dispatch-job', job('WR-000999', extra)), error => {
+      const reply = publicError(error, { inputSchema: TOOLS['dispatch-job'].inputSchema });
+      assert.equal(reply.error, 'invalid_work_queue_fields');
+      assert.equal(reply.field_errors.length, 2);
+      assert.ok(reply.field_errors.some(e => e.field === Object.keys(extra)[0]));
+      assert.deepEqual(reply.field_errors.find(e => e.field === 'work_request'), {
+        field: 'work_request', value: 'WR-000999', code: 'work_request_not_found',
+        pattern: 'an existing Work Request visible to this actor',
+      });
+      return true;
+    });
+  }
+});
+
+for (const [title, suggested] of [['Update cards', 'Revise cards'], ['Rereview cards', 'Review cards'], ['Resync cards', 'Fix cards']]) {
+  test(`dispatch suggests ${suggested} for ${title}`, async () => {
+    await assert.rejects(command('dispatch-job', job(await request(), { card_title: title })), error => {
+      assert.equal(publicError(error).suggested_card_title, suggested);
+      return true;
+    });
+  });
+}
