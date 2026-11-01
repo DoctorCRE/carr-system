@@ -1,5 +1,6 @@
 """Delivery at the hook interface, with authenticated catalog transport injected."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -19,18 +20,28 @@ hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
 
 
-def logged_receipt():
-    return json.loads(hook.RECEIPT_LOG.read_text().splitlines()[-1])
+def rendered_receipt():
+    return json.loads(hook.canonical.receipts[-1])
 
 
 class HookTestCase(unittest.TestCase):
     def setUp(self):
         raw = tempfile.TemporaryDirectory()
         self.addCleanup(raw.cleanup)
-        for name in ('GAP_LOG', 'RECEIPT_LOG'):
-            patcher = patch.object(hook, name, Path(raw.name) / (name + '.jsonl'))
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = patch.object(hook, 'GAP_LOG', Path(raw.name) / 'gaps.jsonl')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        encode = hook.canonical
+        receipts = []
+        def capture(row):
+            encoded = encode(row)
+            if 'receipt_id' in row:
+                receipts.append(encoded)
+            return encoded
+        renderer = patch.object(hook, 'canonical', side_effect=capture)
+        mocked = renderer.start()
+        mocked.receipts = receipts
+        self.addCleanup(renderer.stop)
 
 
 class DeliveryTests(HookTestCase):
@@ -57,12 +68,48 @@ class DeliveryTests(HookTestCase):
             self.assertEqual((verdict.code, verdict.stdout), (0, ''))
 
     def test_log_failure_does_not_change_delivery_or_silence(self):
-        with patch.object(hook, 'RECEIPT_LOG', Path('/dev/null/receipts.jsonl')), \
-                patch.object(hook, 'GAP_LOG', Path('/dev/null/gaps.jsonl')):
+        with patch.object(hook, 'GAP_LOG', Path('/dev/null/gaps.jsonl')):
             known = dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)
             out = self.invoke([known])
             self.assertEqual(json.loads(out['hookSpecificOutput']['additionalContext'])['rules'], [known])
             self.assertIsNone(self.invoke([dict(known, scope={})]))
+
+    def test_gap_log_rotates_with_one_backup(self):
+        gap = dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)
+        self.invoke([gap])
+        row = hook.GAP_LOG.read_bytes()
+        with patch.object(hook, 'GAP_LOG_MAX_BYTES', len(row) * 2):
+            for _ in range(7):
+                self.assertIsNone(self.invoke([gap]))
+        self.assertEqual(hook.GAP_LOG.read_bytes(), row * 2)
+        self.assertEqual(Path(str(hook.GAP_LOG) + '.1').read_bytes(), row * 2)
+        self.assertFalse(Path(str(hook.GAP_LOG) + '.2').exists())
+
+    def test_known_rules_do_not_create_a_receipt_log(self):
+        self.invoke([dict(id='11111111', statement='Inspect the diff.',
+                          scope={'tools': ['Bash']}, personal_to=None)])
+        self.assertEqual(list(hook.GAP_LOG.parent.iterdir()), [])
+
+    def test_fixture_suites_leave_shared_rule_lookup_unchanged(self):
+        shared = Path.home() / 'carr-system/out/rule-lookup'
+        def snapshot():
+            return {p.name: (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
+                    for p in shared.glob('*') if p.is_file()}
+        before = snapshot()
+        for suite in ('rule-cards', 'grok-hook-payload'):
+            result = subprocess.run([sys.executable, str(REPO / f'ops/{suite}-selftest.py')],
+                                    cwd=REPO, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(snapshot(), before, 'fixture suites changed the shared rule-lookup logs')
+
+    def test_rotation_bounds_a_preexisting_oversized_log(self):
+        hook.GAP_LOG.write_bytes(b'old defect\n' * 100)
+        with patch.object(hook, 'GAP_LOG_MAX_BYTES', 500):
+            self.invoke([dict(id='22222222', statement='Invalid scope.', scope={}, personal_to=None)])
+        self.assertLessEqual(hook.GAP_LOG.stat().st_size, 500)
+        self.assertLessEqual(Path(str(hook.GAP_LOG) + '.1').stat().st_size, 500)
+        for line in Path(str(hook.GAP_LOG) + '.1').read_bytes().splitlines():
+            self.assertEqual(line, b'old defect')
 
     def test_complete_oversized_delivery_still_denies(self):
         rows = [dict(id=f'{i:08x}', statement='Binding rule.', scope={'tools': ['Bash']}, personal_to=None)
@@ -70,9 +117,9 @@ class DeliveryTests(HookTestCase):
         out = self.invoke(rows)
         self.assertEqual(out['hookSpecificOutput']['permissionDecision'], 'deny')
 
-    def test_logged_receipt_preserves_validation_guards(self):
+    def test_rendered_receipt_preserves_validation_guards(self):
         self.invoke([dict(id='11111111', statement='Inspect the diff.', scope={'tools': ['Bash']}, personal_to=None)])
-        row = logged_receipt()
+        row = rendered_receipt()
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
         for change in ({'selection_mode': 'unknown'}, {'unresolved': []},
                        {'data_defects': [{'reason': 'missing_scope'}]}, {'complete': False}):
@@ -179,9 +226,9 @@ class DeliveryTests(HookTestCase):
         self.assertEqual(row['rules'], [known])
         self.assertNotIn('missing_scope', specific['additionalContext'])
         self.assertIn('missing_scope', hook.GAP_LOG.read_text())
-        self.assertFalse(logged_receipt()['complete'])
+        self.assertFalse(rendered_receipt()['complete'])
         self.assertNotIn('Undeliverable rule.', specific['additionalContext'])
-        self.assertTrue(validate_lookup_receipt(logged_receipt(), repo=REPO))
+        self.assertTrue(validate_lookup_receipt(rendered_receipt(), repo=REPO))
 
     def test_defects_alone_do_not_block_prompt_or_stop(self):
         rows = [dict(id='11111111', statement='Undeliverable rule.', scope={}, personal_to=None)]
@@ -200,7 +247,7 @@ class DeliveryTests(HookTestCase):
     def test_receipt_audit_accepts_only_exact_platform_owned_event(self):
         self.invoke([dict(id='11111111', statement='Binding text',
                          scope={'tools':['Bash']}, personal_to=None)])
-        row = logged_receipt()
+        row = rendered_receipt()
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
         envelope={'type':'response_item','payload':{'type':'message','role':'developer',
                   'content':[{'type':'input_text','text':json.dumps(row)}],
@@ -271,7 +318,7 @@ class DeliveryTests(HookTestCase):
                     payload={'prompt': None, 'transcript_path': str(transcript)})
                 row = json.loads(output['hookSpecificOutput']['additionalContext'])
                 self.assertEqual([r['id'] for r in row['rules']], ['11111111'])
-                self.assertEqual(logged_receipt()['task_sha256'], digest('Review the revised change 🩺'))
+                self.assertEqual(rendered_receipt()['task_sha256'], digest('Review the revised change 🩺'))
 
     def test_context_dedupe_invalidates_when_catalog_changes(self):
         rr=hook.rule_routes
@@ -323,7 +370,7 @@ class CardDeliveryTests(HookTestCase):
         self.assertNotIn('permissionDecision', specific)
         visible = json.loads(specific['additionalContext'])
         self.assertLessEqual(set(visible), {'schema', 'rules', 'overflow', 'cards', 'instruction'})
-        row = logged_receipt()
+        row = rendered_receipt()
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
         for key in ('rules', 'overflow', 'cards'):
             self.assertEqual(visible.get(key), row.get(key))

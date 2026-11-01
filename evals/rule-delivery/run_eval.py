@@ -337,7 +337,8 @@ def replay_cards_live(world, case, *, hook=None):
     events = []
     with tempfile.TemporaryDirectory() as state, mock.patch.dict(
             os.environ, {'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(state, 'routes'),
-                         'CARR_RULE_BOOT_STATE_DIR': os.path.join(state, 'boot')}):
+                         'CARR_RULE_BOOT_STATE_DIR': os.path.join(state, 'boot')}), mock.patch.object(
+                hook, 'GAP_LOG', Path(state) / 'gaps.jsonl'):
         session = f'replay-{uuid.uuid4()}'
         for kind, payload, inherited in payloads:
             selection = {'rules': [{'id': rid, 'statement': 'frozen replay rule', 'personal_to': None}

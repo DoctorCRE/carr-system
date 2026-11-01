@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from git_env import fixture_env
 
@@ -87,6 +88,13 @@ class RuntimeNormalization(unittest.TestCase):
 
 
 class RuleDelivery(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        log = patch.object(rule_hook, 'GAP_LOG', Path(directory.name) / 'gaps.jsonl')
+        log.start()
+        self.addCleanup(log.stop)
+
     def invoke(self, payload, rows=()):
         source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a' * 64,
                   'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
