@@ -1,0 +1,943 @@
+{
+  "active": [
+    {
+      "id": "015183f5-3f36-45f4-a3cd-d80608350449",
+      "text_hash": "25d44a5c88c8209dc56ec807cffccc711357c5365c0cd0f73ffc3281c2925583"
+    },
+    {
+      "id": "0156e9fa-1c57-451d-9074-7474c950c727",
+      "text_hash": "1735598b2b618939d3ad5839893f435142f639d8d6fda58b9f596511fc0b9cb8"
+    },
+    {
+      "id": "018ce972-7f3e-42d4-931d-e96a169d020e",
+      "text_hash": "f05abaf268093f466858ac183740cef210097ae9a4556c9341c18a74bc5520cc"
+    },
+    {
+      "id": "0622949a-1442-4e73-a3df-98ba0e549eba",
+      "text_hash": "8da0e6a6868774a1b2e0c7a42119630af50cd5497d1edbab1cfd76ea9062a6d2"
+    },
+    {
+      "id": "07dde434-6e9e-4ead-b75f-c225c43201d8",
+      "text_hash": "b7d0cd03d293cef77b595764c4c401113643e0b8023c75acbe56c4ba889a0398"
+    },
+    {
+      "id": "08c4eda2-ba7a-45fa-abf8-3ac53e923c38",
+      "text_hash": "abb6e65ebea5b989ee9891c86ce053a9f19706b9b48fe7f6497f686ea7606336"
+    },
+    {
+      "id": "0c1bac27-56b9-4544-9d7c-1a80e178e728",
+      "text_hash": "e479e58f99ba0d690f9c04c16b0f63621372d2f72cb36be9bbc40475e1b21573"
+    },
+    {
+      "id": "0e22e34a-b38b-4cb0-ac58-9f29d9595615",
+      "text_hash": "5dc97613be94f8de3f720a18c2c5af93ac8757825d1ced99c084ad3e674d9f9a"
+    },
+    {
+      "id": "1021fa84-2259-496f-a2f6-47bf84215361",
+      "text_hash": "ea8450e495dd1eb120f69ee2eb196af2e2f518753472c5edc237e5defbe33d04"
+    },
+    {
+      "id": "11b2b73b-29b5-419d-8262-3a4a4d746345",
+      "text_hash": "d0051aedeaaa816d0669094ba6f0ea3b6066e1f017be0f73b7bc19d757ba3440"
+    },
+    {
+      "id": "14181e60-e1b7-43eb-bdb7-9ce3cbc85cde",
+      "text_hash": "1407bda1d5d0f78a68ae9989ef9134380fbf05254fe5216e211b16720e3740b0"
+    },
+    {
+      "id": "152ceb65-11c0-445c-b68c-38cc5a0fd39c",
+      "text_hash": "575f6f8f5710e95e952c22f6079626628e23c81400c6b32207eb552e160e4ec4"
+    },
+    {
+      "id": "173119a8-c210-47fc-9ee1-f916d9b45fdc",
+      "text_hash": "e3186f345a7781472d0f6773d9638a48fe87573ae3b2db92de48da7beeac9912"
+    },
+    {
+      "id": "179be4b8-2fe0-418d-9503-52d1e33921d3",
+      "text_hash": "77f2b5002a65b281737c46ba01ffd49c68979a4edea2d3c0babde49a56517368"
+    },
+    {
+      "id": "17ffd587-a2d4-45c5-8554-31898e7aa194",
+      "text_hash": "d5635d61b70ed4c28b10b277bdfeadd1b79cc15065024fd689ae3c0ddb44d66b"
+    },
+    {
+      "id": "185013c6-2eaa-441d-9a80-7917dcf652d5",
+      "text_hash": "e703775a3aea5bfb3440094f034f4ce950e214c1906efdf1b13ed09ba4eba551"
+    },
+    {
+      "id": "19304882-ffba-4aa1-bcbf-e0c04624012a",
+      "text_hash": "541578abaf1e75401a8c2c6f2f8e4d6d62af787aefea91aac568986143559516"
+    },
+    {
+      "id": "19ebbeb3-2e44-4c7b-848c-2f929f7ea9d0",
+      "text_hash": "82ea79297ba1cb116d03c82071e5a00da57eca37fcf3c53ddaacc249959f2ed0"
+    },
+    {
+      "id": "1b8e7f43-49a4-48b3-92a9-8d00041edc94",
+      "text_hash": "14b18a00847c7774c803ffaf3c38b9ba4a5f54925b13fb071ea07a2edf60ef65"
+    },
+    {
+      "id": "1c21263c-fd28-4ea5-b711-1210cae38398",
+      "text_hash": "3eb68d4f69cbf1764d13a08e220dffeefc5153aead704bae67b44853734073ed"
+    },
+    {
+      "id": "1c42d80c-f401-4065-93d7-b557664b929b",
+      "text_hash": "870f61c8a185b89442d5578aadaafd4d2e5c6d57bed8688a89600e57db8626f9"
+    },
+    {
+      "id": "1ee0b3bf-032e-42e8-a325-e90d00d95fb5",
+      "text_hash": "825a75814cd36c7c5db48d8f8bc1b6be55c8285b4ceb8688d9e60ec38905f499"
+    },
+    {
+      "id": "1f3a7372-cedf-4957-8884-3dcd4c681b0a",
+      "text_hash": "8685663629b04f5dcdde91b98d691c5ff6c48e08225ad8535585ccc878039883"
+    },
+    {
+      "id": "1f750181-1474-4362-90a0-3b3f166c5356",
+      "text_hash": "0c412356baeeedfbad62ba81c611f3e5717ef1f93c8a673ccbec9f25d034a703"
+    },
+    {
+      "id": "20d106f1-b2bc-4009-a76f-7382da7152c0",
+      "text_hash": "99a78a202c74badeca4a31daf0cd7cae72be430e327d4350ab3ad307ab44aa8b"
+    },
+    {
+      "id": "2271e684-7988-4b98-a97a-670e90da4b85",
+      "text_hash": "adb8b7b31776fa5894d39356c958803b5fd684d849ac93169e117d38c62b06a2"
+    },
+    {
+      "id": "236ca227-ae4a-4a2f-bccc-c464a590c89c",
+      "text_hash": "6f8f82d168a29dbf18767cf3df571a4b26cfa02414343ffe5f655e5af1e00753"
+    },
+    {
+      "id": "23ea0607-7ee0-4749-bfe1-0f45e65bdc09",
+      "text_hash": "ae7f29b56815db8768df5e850c6a2e9595f07d45c48071ae2c3649a2299d8c29"
+    },
+    {
+      "id": "2422ece6-1047-4b41-95a0-a3b4fc07697f",
+      "text_hash": "d5e17753bc5ae443162f9eb8ae1d788ca82f8e6f612977d8503878375fc2e44c"
+    },
+    {
+      "id": "24e10ee8-1c4e-4d9a-8441-4dfd588b9d5d",
+      "text_hash": "cc7b471b40b71cf8640b01199b8036ce53812918bbdaa3479872730a88dd12d0"
+    },
+    {
+      "id": "25fab860-47f7-47ee-b77f-7b046ef8e9a2",
+      "text_hash": "7bcf6237dd6c6d1de99e6f0d5457d358be45440968d01afe8545915205519cb4"
+    },
+    {
+      "id": "25fcddee-5356-4629-8438-5884eb97f41b",
+      "text_hash": "a8e9df118489f0a0b3e27b1cfd7bebdd7ff76f58b70dee80f75653428e177ab9"
+    },
+    {
+      "id": "27277539-c593-4219-b7d7-2dd08089911d",
+      "text_hash": "00c2d8f837a7d55d4c7b6d092adb66c0769dc5e71f97991407623fcd02b3b8d3"
+    },
+    {
+      "id": "2a3ff869-6743-4513-be32-3a3323802ee4",
+      "text_hash": "2dd3455a8fa827bc49dc9e6dac8fbdb4d1f5a18e09ed31c653ed44a906d79e9d"
+    },
+    {
+      "id": "2b66211d-b0ea-41ee-ad18-7b84d12c6fb7",
+      "text_hash": "21f5241aa8db00e5159b7904751132668a49b5b576275688830f9beeb8437a24"
+    },
+    {
+      "id": "2b889e80-a351-42b6-b3a5-565e59a75654",
+      "text_hash": "a22a0cbb9c1f96fd2506e96fbb3b3e54845ae71908afa3eea55dccf7fef82c39"
+    },
+    {
+      "id": "2ca2add2-4fef-4484-a957-0f54ff1fdf33",
+      "text_hash": "e04649879fb6d1860664e6f7f727c701b18ed53fe8d03f0639d063c6514d01fe"
+    },
+    {
+      "id": "2e362970-b9bc-4f2c-991b-271760ea1460",
+      "text_hash": "03718bf3de2f2431d088d0985aaffd01c6affb59a2904b1a37309120e8de36df"
+    },
+    {
+      "id": "2e8b4840-2d0c-4e56-9b6b-2e37640ef5dd",
+      "text_hash": "6f0ab2e241471e71fde4b41ea8b160079ebedf67ac75cbab3d3281fae6025722"
+    },
+    {
+      "id": "30a189fb-6873-4ae5-89f1-1dcba92485da",
+      "text_hash": "2d2b81f992f3e31590d1af090ceadab7ba336f4b78c3dc30d229eab8f41ce208"
+    },
+    {
+      "id": "347a9ca6-633e-4d47-a083-f2ea7c77b5cc",
+      "text_hash": "f88b91a2c0f1de456936ac462e130451521359639ae856d7669cf40c1b0178c1"
+    },
+    {
+      "id": "3578d799-28fc-4a66-85b5-cba47c8ca1a5",
+      "text_hash": "2e33319cb49e1c1fcdd6d2647e4632a931d2aa9ea07b5a0b4f4dfab28542b15d"
+    },
+    {
+      "id": "388cc81e-076c-4f4d-9959-69233cb11879",
+      "text_hash": "7efc9c351ec567bc5d07aa60dbf49d0a2586e009c98fb137606ebd2a943df172"
+    },
+    {
+      "id": "38b15dc6-ef80-4bf6-b983-3445b386e7dc",
+      "text_hash": "ec9698b8fd2f27b3284c38e80f5417e0d18b0d50b76e147e0c54e5ef72ef0343"
+    },
+    {
+      "id": "3a9dbafd-04cf-460d-a573-619efb3db348",
+      "text_hash": "21050af1335915d9eba1929f056dc06f8332958aaab5c2b15d47b8acc50171a0"
+    },
+    {
+      "id": "3b0cd546-e03e-40ce-9a8d-5ba9343f63d2",
+      "text_hash": "01ce463c86aef79515a2626b076fa3277d09cc199f631c7af1f04a8e53512c93"
+    },
+    {
+      "id": "3d185f2b-0034-475d-9dee-c526f16b6d6d",
+      "text_hash": "923321e92b6f5984adb0709f9d6fb14a2e1a652b19654f34d937daf0b17b3a9c"
+    },
+    {
+      "id": "3fa17fa0-7a45-43df-861f-4ee88d73e723",
+      "text_hash": "b871e548f7d75fae684d3bee0caf8bb588d9ddcb717a9af5deca1b27b11f1d9b"
+    },
+    {
+      "id": "4039b9b5-7099-45ce-891d-c34dfbf31e62",
+      "text_hash": "f0e502dd9c6ef8e85fef28d8522bf09833fbc20555eec99a81cd36201874a06e"
+    },
+    {
+      "id": "40f7a11b-1a87-480e-89cc-b9c8947b8047",
+      "text_hash": "8a3724e15b4faa3a2d0677747782374c2731971650620a44f327d5d0ddcc7e3f"
+    },
+    {
+      "id": "412d37d3-1337-4cce-9606-a8085b85a811",
+      "text_hash": "83dec0f5fcb30becde3d6b56089a62e7b8599b470dca281be31b14326c95978d"
+    },
+    {
+      "id": "424ba0cc-e512-4ab3-9488-4cf026992d34",
+      "text_hash": "f0fe3c86c9352776ef15f6a23e961b567661c0c71e6781b528e1d6e9c557c375"
+    },
+    {
+      "id": "4399df76-17ad-45c1-9087-db7b7f0cbad1",
+      "text_hash": "ea51dc0ad0cc82dbaf8a29ea87251576d1b3e40ef1ec69ed0c53947c92ab954f"
+    },
+    {
+      "id": "43e2ef76-1201-4d20-be8f-547754d72cb3",
+      "text_hash": "e9eb4a05d618cff29f1038ecbf4f02740693a6393fbd1b8887d38684741f6454"
+    },
+    {
+      "id": "44658b1b-9298-487b-9a1e-68fbaf24e5c7",
+      "text_hash": "bc6f32a6026827454d2f4b06bc694e8d9284c59938fb977fe7f3e25238936a63"
+    },
+    {
+      "id": "466a545a-8816-4930-8171-57c482d1532f",
+      "text_hash": "33c83c01ec85c370e29582eaece5a8eff27eb8116a697cd82846c4139924a5da"
+    },
+    {
+      "id": "48083552-6866-4427-9f27-ebadb763bf89",
+      "text_hash": "af98a658059a41138ae60b25da4ad641452b048d7e8c25167b0eb4f5f08fb8f6"
+    },
+    {
+      "id": "486584d6-418b-41aa-8e29-d0b4e4eb8e51",
+      "text_hash": "2d53bffc9c36bf9695007734b50dfee69cff155fe6fe578ec88e091b1ae14e26"
+    },
+    {
+      "id": "49533583-77aa-462b-bd88-ab68efd66795",
+      "text_hash": "7e1c5d733ac74bfd1b53bb66ffb7bdb56af1b707c232c36bedcecdf5bb110e28"
+    },
+    {
+      "id": "499878db-75b0-4e15-8a0e-802f42d25235",
+      "text_hash": "40a776b638a9827f1304d4df8b6cc98952c0c9d4e388d130ca4bed832f116898"
+    },
+    {
+      "id": "49c627cc-feca-4ebb-9ca6-4624a333b77f",
+      "text_hash": "c1ebc019eca2912b7a2dd191068dde0c777a42f3575509bd3362ff5f47d9d463"
+    },
+    {
+      "id": "4a53ff82-cb3f-4a0c-94a5-1a6e0b8b96c8",
+      "text_hash": "396f534e42778248adcaefe87b1b805f5183af159db34bbd630df199d3b457b2"
+    },
+    {
+      "id": "4a9188f3-5b7f-4be8-aea4-211df356671b",
+      "text_hash": "6b07ecbe26fe500155dba959e161a3408af224cae186324dde01cd7fab0b354d"
+    },
+    {
+      "id": "4c21d86b-5571-4133-832b-5fb89672261c",
+      "text_hash": "83e09a848b298213748d3240454f4680d0d1fa3471a661c39e24ac380ed1c6a7"
+    },
+    {
+      "id": "4dd44fd7-9dbe-4f37-be04-2f250dcab057",
+      "text_hash": "848b825ad07531e2e6e292f3962b72c44f966da26a3ce47aa605034de71066f2"
+    },
+    {
+      "id": "4e104d4c-1131-43fd-8bc5-c6d6ebc646f2",
+      "text_hash": "57425be10c519702e766bb4e9d930599774eb8f736c1bcb653e29c508d8f5f48"
+    },
+    {
+      "id": "4fae20f4-5b35-4ce9-a7a0-355c8af895f0",
+      "text_hash": "1cd5c50e6975c97964de6b0985f6fffe2fb29b98bd050f71fec109d47640a513"
+    },
+    {
+      "id": "51d9f05f-8a5c-465c-a209-b2f7d6323e4a",
+      "text_hash": "872aa9c4f6487ae4146971b5b3e1927c71fb9cd2366e541fc7d683f99f24ad31"
+    },
+    {
+      "id": "5409731b-98af-4671-a4c4-45972c5f53ef",
+      "text_hash": "d34bc95eecdb122f38cad336230943e9d764cd1b434980f1062ac3a26732c7c4"
+    },
+    {
+      "id": "54e2bcb9-cae8-4dfc-adb9-677ffbca0043",
+      "text_hash": "c4dbf35a10c98f08554bd48573c12d1686d87d4cb7b8c72f33f281e83bac1923"
+    },
+    {
+      "id": "55449e5c-219c-48aa-bbb1-b36bc8c6abbe",
+      "text_hash": "d11aee3f5ca0d381fdf8ef03b4e41e72b37a8ba3555643f3b9470e5b9b81b22b"
+    },
+    {
+      "id": "557838a5-3b01-46fa-9104-01b5e5116b66",
+      "text_hash": "30ed075982249b7ab58a69b59300ac859f9132afc83605cadf085ecf3c11ac48"
+    },
+    {
+      "id": "578fdd91-1b26-42d3-99bb-fe49f3768d54",
+      "text_hash": "09fe640fd1d22f861981c4a3219c6d2c7651a560e973bd9aec61f959ab615c5b"
+    },
+    {
+      "id": "57d13061-78e4-4364-8943-a8484eebef95",
+      "text_hash": "f7d21cca09298015f9b72bb0f9c7a7d37682ba441535be504e3863dcab2efdd0"
+    },
+    {
+      "id": "57d83b75-e4f3-4d69-a572-7b9f6ba9582d",
+      "text_hash": "c8d34e212d54cc3458fa184ba2e4335b525fe6e334ad5ad2ef752a5e6adc55dc"
+    },
+    {
+      "id": "58cef3a1-b717-458e-829e-42c91dec0e62",
+      "text_hash": "794de8e7852e44457b02216a96024d38fc234f2e99312c8ac5b7a53fa7925558"
+    },
+    {
+      "id": "590b11e1-3152-4ae3-be54-8fa5b6821185",
+      "text_hash": "1591454e466ca92c27f115c08a0dc1cc908f30eda3b4a0c9ab0c0f9713535618"
+    },
+    {
+      "id": "596f7549-a47b-480a-8df2-c7ede20ae840",
+      "text_hash": "59532de5d7c63878b7b99d1ee6db7f60af02667ae5907c40740d5b3f37e4e157"
+    },
+    {
+      "id": "5be2f462-dd0b-458f-be92-f32a4901faf4",
+      "text_hash": "ad29b0d02df5944e4f85647bce59294c8f89bce1e20661d16d0d677d18afcacb"
+    },
+    {
+      "id": "5cd8d0f6-f5b0-4bc4-ad69-ceb78c819dcc",
+      "text_hash": "e34a77acbeaffa09c0e98780464bf198b657ac9fd441694c207ed0453d9e17bb"
+    },
+    {
+      "id": "5d44d3f3-6d5e-4b5c-8358-1f7dfe8b86ce",
+      "text_hash": "3e54a88797d9a11cfc1c0daa69c1ef703f49870e87c2a95b90c522e8d64d6881"
+    },
+    {
+      "id": "5e896ed6-45d8-4a71-bbaa-ab861bc2d672",
+      "text_hash": "25d759a54d9770c629236883698a6099d681811aaf596c3c7d03b36b90ecbc86"
+    },
+    {
+      "id": "5e89c211-996a-4681-b93d-d0226dbf21fa",
+      "text_hash": "b4fd9588c53ba7189b41568f894e1ee5f641472546917682a8b660c17a85d538"
+    },
+    {
+      "id": "5f8c661d-b620-41a1-a900-acc4dcfa07df",
+      "text_hash": "515151ae2ef4b6537a9418ecd559a5d632adb2d7f38555fc25011bb48260c0e7"
+    },
+    {
+      "id": "614c1209-d793-401b-9500-36b1b6fdb74d",
+      "text_hash": "0c848c22502a69c0f26484054c8689466ca551efbcfc221e4b633e29a468f72b"
+    },
+    {
+      "id": "6172e7d5-2c95-44f0-9fa1-89962200b336",
+      "text_hash": "9a10dcd0d7ff001f80453db007b00b2bfbeee9fcdd938f26845fc1bc29c28c0d"
+    },
+    {
+      "id": "61c64d91-cbd7-490f-9d7b-bb68578053dc",
+      "text_hash": "f8da70545a51a436032026ac03a857b425f735487601375ac806188599eb7403"
+    },
+    {
+      "id": "6330bec8-b656-4388-a81a-636350056790",
+      "text_hash": "f3d998ae64e75c49874b88c11207ca971be71bd0812d9914c56964234daa9d20"
+    },
+    {
+      "id": "6437ae15-0b40-45e2-b14a-9193d679891b",
+      "text_hash": "93d241636d73c1d637269343fa960bce57fa020afe65806f6a792498dcf48d2b"
+    },
+    {
+      "id": "647f843d-dea0-46d0-a0d2-5ca7fa07fd7b",
+      "text_hash": "49fa31276ab2349b15dae1010103a8f6100943fac2bb811f595175121aafbdfc"
+    },
+    {
+      "id": "661d7757-ed97-41a0-b692-d577c386d01c",
+      "text_hash": "5a9f00b04f638e81a9fe37fa5745938ba1824ab1f20780ffc79b35343c96ffa9"
+    },
+    {
+      "id": "67e48aaf-13f9-4fc7-a937-bcfa41ff7ff8",
+      "text_hash": "9d68c1d0c7466410a2c0ac5b162f4379bd0dff67f5bf60f3a3b6af52139ae02e"
+    },
+    {
+      "id": "6901cc3b-a69f-46b3-aae5-0cb60bc9c789",
+      "text_hash": "4b53d1a40b2766f2aba73e3cf8f94226cb37d230668f92c18ed8421938b818b4"
+    },
+    {
+      "id": "6a4e6283-afc2-42cd-a761-ca157d3e4e47",
+      "text_hash": "b412f918ebc4dc6fe5ea4dd9a8327e509ca4d6170592558c7f1e109e9f02a93e"
+    },
+    {
+      "id": "6cfb67f5-6e85-48ad-9008-b0a82e2b71cc",
+      "text_hash": "c1dcb1f55f60f880661fded12628044a8f977b62a995493d656e4f20a3c388df"
+    },
+    {
+      "id": "6da539b5-84e9-49d1-84d8-28f05e151b20",
+      "text_hash": "0974af853ecb97996afb87ddf727c85261ad94663568066ce59f7af7e203a6a0"
+    },
+    {
+      "id": "6ec7312d-a534-46dd-b791-94c92481f0a8",
+      "text_hash": "9f4f113c62b78782d3c161ec093d36f9c878bde7659c5d15d537ca3281202cbf"
+    },
+    {
+      "id": "70e372f0-4ac3-41e0-8837-0be6fdbbcdc1",
+      "text_hash": "d4dd289da3e3f8ed51e210844ab6f77006b1344a93ba99b963a20054fa904b52"
+    },
+    {
+      "id": "7105955b-623b-44a3-a9b2-00c6a8907691",
+      "text_hash": "329d008c56433f4eecb550429d07919fa00a2e349fc82e50fe991150c9030b20"
+    },
+    {
+      "id": "725dff46-ba35-4fd7-bb84-4e6941e89525",
+      "text_hash": "bf83bb6c254b22748ec5431b7cf7d672836d50c9318c0198d4236648ab241913"
+    },
+    {
+      "id": "72dc7305-de7e-45fc-badd-efd48847aedb",
+      "text_hash": "ef89634e3b7c459aad8c218b17b7dae96f38a134f05f2445b17033c66369c4a2"
+    },
+    {
+      "id": "72e06bdf-3404-48b5-83e1-9236384ecdd8",
+      "text_hash": "d70f42ea7f1bd8d78bd92b2e624f61941bdfe38ee9129484270a8faf15db8dc3"
+    },
+    {
+      "id": "73381d78-307e-4da8-8534-eacfa96d5ff0",
+      "text_hash": "b4740ab2d5f9b3f5a11843e25c2abab35cd4b8e3a1f747e8a24478f107ccb9ab"
+    },
+    {
+      "id": "737a68d6-3377-47ba-92f0-6c8e31810477",
+      "text_hash": "33b8226ab9fe71792f125d8a224de5bceb4cbb24b344d41c26ad105915b39374"
+    },
+    {
+      "id": "740bb505-20f1-4cd3-87d8-7d45802e1ff0",
+      "text_hash": "96ebafef0845c1812d9d4c2bad5d24d9199f98b27903fd50331fe9afb4d5a35b"
+    },
+    {
+      "id": "766c7997-bc0d-4947-8852-ec73b4e80a65",
+      "text_hash": "b7db42d51578f8daf1c05020635be57f16ae7a4a04d0fcdfcde0b5182a88b928"
+    },
+    {
+      "id": "767f9b41-18ab-4827-9325-1c8d354fb855",
+      "text_hash": "e302b9772a16e3a96a2be2a3b7e018140b2b35d4953ba6fc080bcd2556af2217"
+    },
+    {
+      "id": "76a1ae2b-6f84-4209-ac52-e610a6610e15",
+      "text_hash": "dbba5c17fb7ed4817a084f69082e1538b8f3664c1b788052411ed07f61f03dd5"
+    },
+    {
+      "id": "76a53dfe-1c8a-4cd2-92a5-8c7e2b69592e",
+      "text_hash": "dfff2d72e45f0a925383c88a184a792c8d85d1035be51713d3ba83abe28fdad6"
+    },
+    {
+      "id": "76fcbed6-2a46-46ab-b7aa-e210989fa01c",
+      "text_hash": "b8db28ed6172407119ebfeb5a05e3363661aef37a59332fb1e23554332d4fe94"
+    },
+    {
+      "id": "7b4ba3aa-eb02-49aa-8de0-03af07899032",
+      "text_hash": "429c0fc736dfb9a6b07e3261c54b87cd13e4ca2272be656cd407a511e7c26a63"
+    },
+    {
+      "id": "7bb0a3ed-fc42-41ab-9f8c-0ae183b8f95b",
+      "text_hash": "f33e6e4c7e05c606dee93f765a137c6f6abbf657c5ee9b07a4db1997596af393"
+    },
+    {
+      "id": "7e4ca905-07fc-4d79-8d86-31376dcf3214",
+      "text_hash": "0d9e5362f7a4375fa35d9530475276eeaff8f9cdd2931341a6c505ef5530aa1d"
+    },
+    {
+      "id": "7e9739f2-c9ab-4e27-ae63-4f6c13078c95",
+      "text_hash": "5ae89288f8ea0c6b2d562454f7a77be6a7204949495b56c9124bc7a01106714e"
+    },
+    {
+      "id": "80def9d2-5b69-44f0-842d-8148b1083366",
+      "text_hash": "b7c6c1398693953bbf91c41058d34d324624fa01c796c5d1d60b17d8611d4ad6"
+    },
+    {
+      "id": "81709f57-1cc9-48a6-a4ac-12dbb4b7a1d9",
+      "text_hash": "37bbf4951ef976312a80510108e92658be90b1fef6088e62798acc3b62258132"
+    },
+    {
+      "id": "83b9a362-cfaf-4fd0-bd7e-e971c90b7d51",
+      "text_hash": "595399fe5e5d9f1d3ea4b61217ca883894ebeda2ad2c047dfcb72c4ac56271b1"
+    },
+    {
+      "id": "8400cd3d-37a1-47fa-a32a-0fd4794f7309",
+      "text_hash": "16791e7b4841a737f1932f8c95340340a1c1b0384da3bfeb72dee1ccb51eb398"
+    },
+    {
+      "id": "847f9995-29f4-4fea-9926-8c932d432e5d",
+      "text_hash": "ee2bdcf033950174c2984e91ed50164a70e22c4669611e7993060e0c2f7d457c"
+    },
+    {
+      "id": "84bda4e4-7af6-47d4-9d90-937034940c85",
+      "text_hash": "61dc0991f6813f6278b59963870b55b2d7aa83499a740980f6642429d5c3602a"
+    },
+    {
+      "id": "86647daf-3492-4d3d-b543-047d96bade42",
+      "text_hash": "2d231fe4483599c91c4ad4e5ce38c76f36f9998344751f55b2dea538aad62663"
+    },
+    {
+      "id": "88e9b5eb-92ea-41d1-a758-5afab63c9337",
+      "text_hash": "ad98b1c1aceac57ad69b7e4302d2351b84c4730c490b40481653613c46b434f7"
+    },
+    {
+      "id": "893aeec5-e9dc-41c2-8768-e7cee23b50cc",
+      "text_hash": "a6f932989a98461fb6e87b52c6ca87477711fd27bb952e4613ac082b8f4c1692"
+    },
+    {
+      "id": "8aefcdce-8c37-40a2-85bc-3c744db7f34e",
+      "text_hash": "ae9487693d3b1a21d8067cadad5745b7cb5f5b4f271a45c3fd5ac1cb4ef77a1d"
+    },
+    {
+      "id": "8c1e6057-7dad-4e15-94a1-9e4c56aefd2f",
+      "text_hash": "ef26dd361197a2dc84a7b7410c3b3e8ecaebe670f30d5cd31f6f4e3c2c981485"
+    },
+    {
+      "id": "8c812bed-ceda-453e-8052-76f476d6b17d",
+      "text_hash": "a23eed392815a58c50e0ab360f4c6d0ba1d0b500c5989eada8737e03d015675e"
+    },
+    {
+      "id": "8cddc6ad-46e8-4c38-9ee7-07cb9860f68f",
+      "text_hash": "9b4f6a3bfba1278353d6e06729d1e9731960349b2a1dd6fd461a436117846c00"
+    },
+    {
+      "id": "909b50d4-355a-4884-81bc-3cdf6d7f2d8c",
+      "text_hash": "2f09be8dafc07dc5f8c7095d2dd53fb118f8b8022a1178ae76ad086ca581c894"
+    },
+    {
+      "id": "9293d609-2fa7-4d0d-b491-ed982e2f0eae",
+      "text_hash": "95a11920a62ba5878223f9f581c7d7884015779db28dece6927072d4b2e0adca"
+    },
+    {
+      "id": "9310827b-2d0f-49f0-80f0-42c94a1d001a",
+      "text_hash": "76dfa20f81f6b49679f37715b08a50713dd197904245445cda7367699a94067d"
+    },
+    {
+      "id": "94806da2-f4aa-46ca-b3c1-aa9872bc357c",
+      "text_hash": "d444875f500abc6c5dafb6ecfb367ff17174155b7f5df35de82bda26a6f558f6"
+    },
+    {
+      "id": "9530fb1c-a58f-4788-99ee-1eac771a4c97",
+      "text_hash": "ab33e3f09e1c9cf0372d1dd1c4afcf81f9d4ddf9cb07d27d6c91a63d49f2c06d"
+    },
+    {
+      "id": "95e76c1f-0036-418a-93fd-011680cc7f9c",
+      "text_hash": "7fe05bee38e0341a2f3fdd62edef6853cb4dc86fd1d2b65371a45e77b1d5db09"
+    },
+    {
+      "id": "9730f565-56f0-48cd-9828-746481b8f9d7",
+      "text_hash": "67697f340ce8cbadd461c3a1310d082e0df4c7250da86cbd781e0748a362e1d3"
+    },
+    {
+      "id": "97326357-d61b-452e-bdae-e02788f90c2b",
+      "text_hash": "31b5b54865234cf051e7e9eab4d7f2b4750326b6660c2f60e1de8448c25da9db"
+    },
+    {
+      "id": "9873a0d2-9077-40f9-8970-2325a927305b",
+      "text_hash": "c62367a7c72a7f534c98259198e3f4b77b8584dade9569efd1e006255495f179"
+    },
+    {
+      "id": "98e74e7c-af2a-463c-b8b5-297abe712f5f",
+      "text_hash": "5a5f62919884d4691fd3bea8ebbb48b8551f884a409b0c5b49f9f136b1db2c10"
+    },
+    {
+      "id": "9d80fd2d-71b6-439d-b1ad-0f5876252eff",
+      "text_hash": "0cc97a0d7c297ebd725c2d842e582a8ead41f550c6e156f3562988ab94eb08d5"
+    },
+    {
+      "id": "9e3fb6d0-4871-4cc9-abae-06dc0723ba11",
+      "text_hash": "d3736c10035d6c901a9a1f30eca8779aa966e5c9d3d8f994d2c2697d445250fa"
+    },
+    {
+      "id": "9f15f21a-18bc-46fc-a06b-7b232d6158ba",
+      "text_hash": "928b037fe9f855c21f47dac62a52ad70e26e14c13e07f20e6aba32b802a0d2a0"
+    },
+    {
+      "id": "9ff56260-af58-4b75-97ae-95d56490bcf5",
+      "text_hash": "25717c8ad5f47cf668ca55851231635e70aa3ca620868380905c69b284dfe6eb"
+    },
+    {
+      "id": "a3da3d39-91b4-47a4-9409-46076223ec0f",
+      "text_hash": "2828d8b662e11549ec69f6f7d9254f44bfa07ae16de3220aa36d4b1cff29a4fd"
+    },
+    {
+      "id": "a3f6c7f9-89e1-4678-9770-11dc7c641077",
+      "text_hash": "7337f07b7da3b28fcf697dc5f526f6b3f65c9d807991d5dd5d7003ef7b256915"
+    },
+    {
+      "id": "a6e6ab4e-5745-4afc-bb87-1f1588dc4cfe",
+      "text_hash": "c1a00e2a769719e7b462177869907659bf69aa7d1c6bee98fe77ca176a5df3d0"
+    },
+    {
+      "id": "a7784a18-cc7d-478f-9b1f-76a5150e62d4",
+      "text_hash": "115ccdc2c407b1a524543799df4a8a5252517ebc36057dd66f1416f1891532d7"
+    },
+    {
+      "id": "a8c55a47-168c-4a25-b36a-743262e4d5a5",
+      "text_hash": "89109921ec7bf336c33316bf5218c82fc21e2be75647bebf7876c2a706ea9cf8"
+    },
+    {
+      "id": "a8f159ad-ff97-448b-b57a-d77bdc317a00",
+      "text_hash": "fae25d0b2c77aac239e9e853b096ee5de8f7e56bc72a6c6394e7b3c313f198a8"
+    },
+    {
+      "id": "a9ecd5b4-825c-45ac-a19f-e3a8c9d108c0",
+      "text_hash": "6e1ff552f4255abd6c58a9999ac522910278465b42377adda1cfce03a1757929"
+    },
+    {
+      "id": "a9fc3f0e-e222-4417-8184-a9bb4f010c8c",
+      "text_hash": "fe224be5334d19711480e21b7eda0da8b2554522f09d6254f99129f574ab8204"
+    },
+    {
+      "id": "ab814a26-e96e-4772-8c77-0bc455998935",
+      "text_hash": "6879950218ff5501852608f891f4d40b35a19874f73d67195f74368acfd3c0a6"
+    },
+    {
+      "id": "ac0a6579-b4a3-4e64-8d60-b5f909c737c6",
+      "text_hash": "b45687dce5a7b37d488d4caf3c3aece8bbae6dcbedbb4731c4ab189d0e44027d"
+    },
+    {
+      "id": "af7de070-5290-45a6-861a-8bed8c882e90",
+      "text_hash": "9aa2d6c74d3fa7348f0eacbb074bfe2d89c21266d0e28911fd84431cc702178d"
+    },
+    {
+      "id": "b01edd26-8378-407f-b5f1-a7a6000e48e1",
+      "text_hash": "ac811af43b3f2c7f64f33dca70c595729b8e2cc8058772510e073bcf189a08f0"
+    },
+    {
+      "id": "b1521526-9227-46cc-833c-6d7b49befe34",
+      "text_hash": "af5e252cc5cfcc5556309278bb0ce47f007e848fc96cc7bd047fcc16269b5879"
+    },
+    {
+      "id": "b3ea627f-e2d4-4d02-bed2-44c086954440",
+      "text_hash": "11496ddceaf7a189cabda3f7007c70c63a3df3714530826f4f637704b5a244c4"
+    },
+    {
+      "id": "b3f9b86f-4532-434e-b8b2-de7d0e2d39ad",
+      "text_hash": "50b6c37b33b3b8d90eef44ae8db53479576a03e7c8bbf225dc13f339cd9acda2"
+    },
+    {
+      "id": "b42e217e-6f64-4529-8c48-18949143ef36",
+      "text_hash": "ca55d76a0e1bbccc1926d9e74f9df851532e0ed56e7caf270baeeee181fc86f8"
+    },
+    {
+      "id": "b42f11a0-2bc5-4f28-9534-9932b5381935",
+      "text_hash": "868e8d13d7c2e17f564f0c143f59eeca5dd40a265559848f630f6bce5de21075"
+    },
+    {
+      "id": "b587f6c2-167a-4808-b683-bb7d85bcad1d",
+      "text_hash": "282090786bc0b26353eed5e1b7b400318d7dc5d67c84a38e7474cfd005951226"
+    },
+    {
+      "id": "b7ec8f3b-dd2b-412d-8bf8-5af70c8b683b",
+      "text_hash": "417335372fccc2728e746d55b5f0535a4021f87b4c9b424855988c2e99ad6035"
+    },
+    {
+      "id": "ba5730c5-e706-4168-b461-b8fbd5e8d605",
+      "text_hash": "bb4fd0939a2f633d41a43f9dd1a19602fdd491402ca55ace06e9e3815ef779d8"
+    },
+    {
+      "id": "bc4145f6-6a70-4021-ba08-49d991e7a9d8",
+      "text_hash": "4264f1adb9c9e3038650455a4b7e17bb7d2cbf5713f8315130e73a65fed790c2"
+    },
+    {
+      "id": "bc9188b4-afb1-461f-b972-22403af65edd",
+      "text_hash": "606774cdf9d2e721284e0ca60ba0ddf9866ab3286a24957443c1bab0762ed6a1"
+    },
+    {
+      "id": "bd4a6d22-481c-4991-80b0-a617d6eb7665",
+      "text_hash": "30bece458cd5201617704f3c910957ed31945d79b746fcd87847f4eb7d044777"
+    },
+    {
+      "id": "bddb0e7b-14b3-4042-8e88-99cbfbf5a913",
+      "text_hash": "45d851f15fc3db59116d554ffadce2503dee825ea1df97da4d2aaa77fc6ecef6"
+    },
+    {
+      "id": "c0b38d80-8c5a-4c93-9248-16f7db2352c6",
+      "text_hash": "819ed50a271667be1a89cdb9c1d2906eadc2e5be93d57bebf22d06a37b688a8c"
+    },
+    {
+      "id": "c1db316c-25cf-4d8b-8bb3-ad3dcf099e64",
+      "text_hash": "22f1989adb771c268a1cfdeac5fbbf0e8abe644b56c1bd6f74ebdf201ff0f283"
+    },
+    {
+      "id": "c20dc3d5-801f-47c1-9890-5338956cb03d",
+      "text_hash": "e0036776a081b588e8ecb9d660b88791b65c427f6c2f73c33158681446a6b9f3"
+    },
+    {
+      "id": "c315befa-b261-45b7-8fb9-87f5d47bd8d8",
+      "text_hash": "590a2d3796b70505bd91b4f614545cb3da4f7f8c91792200429f80a028020e2f"
+    },
+    {
+      "id": "c363bd8b-c7df-4afe-8dc2-713200f378b0",
+      "text_hash": "4a289dd89054b8dab6db2bf4cbd79d7249dc80e53dd109d30c3e21bb2bb5e933"
+    },
+    {
+      "id": "c4a284b2-79ab-4f7c-a99e-2996552609a8",
+      "text_hash": "dfbfee1abfa161d1dbc344ebf18ddd62591d4768e926b2e3242bc20c17029cd7"
+    },
+    {
+      "id": "c53beeaa-4431-488a-b4cf-c04cc0fb51e5",
+      "text_hash": "47f804b55c61bc12585e90d1ab5825d4582a4a77665dd64503d618e28223f5e9"
+    },
+    {
+      "id": "c66dc739-394e-498d-ba87-0b16afd284a0",
+      "text_hash": "3aa8ff551fb576b9f576452b963624073c6b9d442d8e21fa160b53bd7ef71761"
+    },
+    {
+      "id": "c6f69dee-7f6b-46ef-a799-e729f4e3d1f0",
+      "text_hash": "b2228676894dee75c8298962126da848b42119fb4595a4a5c101f67f472a4d88"
+    },
+    {
+      "id": "c864b8cb-6801-42bf-a561-4683c0a3b77a",
+      "text_hash": "1e094129942becc6f4a2efb1886dffa991453d3d6d9bf2d8ef1189f7fefa5d5e"
+    },
+    {
+      "id": "c8ebeb5b-b2ad-467d-b601-ab30ec9340a2",
+      "text_hash": "233480060239eaada09569c26e1abc3661352ba0d444d96bc218883251067995"
+    },
+    {
+      "id": "ca841807-a39b-488b-be3d-c5ecf48a54ea",
+      "text_hash": "a68ca72b3e8372a67544c6f2019137e0462e6952f3ed34d426f4c13585a16765"
+    },
+    {
+      "id": "cc39b82d-333b-42ca-9754-0663c1ee7e00",
+      "text_hash": "af120799d20afea9494c1c1072d5611d9b615b4ba9554956204cdc22bbef82f7"
+    },
+    {
+      "id": "cd84d22a-a5df-40cc-9c00-44cc0e1fcbcb",
+      "text_hash": "ccb1098629b00a63316529d3ed6ac113d580478a40f654d9eeb2f7359cfff7fb"
+    },
+    {
+      "id": "ce12c11e-828d-44f4-82e1-d48d57249f2a",
+      "text_hash": "b9971d31c779a437c25f11ac9b0b36d2c8a0a6884c969b284b6f0b2f9e8f3be6"
+    },
+    {
+      "id": "cf1c13a6-8446-4a3e-8a2d-fa7d0eb42e16",
+      "text_hash": "857b9ddf5cdb218656d1457941bd337f0835ff42d96b13d7a3e3992da1687ab1"
+    },
+    {
+      "id": "cfe6b5c6-c66f-4830-a09d-4a2e431abe31",
+      "text_hash": "b84a74fbc15b71188dcc748fdbca396d1d3ff46ff5eebdee228a870acaa68ec5"
+    },
+    {
+      "id": "cff429f5-580b-4035-94b0-4e23a073ffd4",
+      "text_hash": "226f3808398d0e80335798edd85e0a7f11c18965efe56ea76fc78442d0c02e4d"
+    },
+    {
+      "id": "d26d63b0-6944-4212-aa22-8baee56b28d4",
+      "text_hash": "8f0e3d35267ee93e3d4e98bf3c75c68e87833626e22a9b0c590e1bf7b2ce3b84"
+    },
+    {
+      "id": "d3774a28-ba06-4ce0-954e-47ee72c8121c",
+      "text_hash": "0a395c6b39c74c83a8b99f607b32fefe4c0279caf58461b927d13473521804af"
+    },
+    {
+      "id": "d7c69aa6-a91c-4915-95a9-788604f640bc",
+      "text_hash": "2ac48c884e4b3d79f915bc370bda7f4bb3347657af6478ff180d1b7df725d5e8"
+    },
+    {
+      "id": "d7e6de46-7e6f-45b8-83c5-8b71fcf1dec0",
+      "text_hash": "69d5261d7b51cfbfa4e1d64ed1a077cf383298482a420e2eb5c1f5a9b1ba24b9"
+    },
+    {
+      "id": "d7f74c93-0602-4f0c-be7c-1f5d948b5e33",
+      "text_hash": "c526d181337990bad2aec539b36070911fcc9c27fa61d32d6ce7686f26016add"
+    },
+    {
+      "id": "d8c9b1f0-dce0-4684-b190-33191abf38e9",
+      "text_hash": "fddfcc25c50cf06043745f345d71eb7e08af4fc9c240a936b70cb97932904e2e"
+    },
+    {
+      "id": "d9874334-6c02-409c-9949-28e6d22d2ebf",
+      "text_hash": "54515fa59ee99231e616107f638305f7a22dcaffdfcca9151210908128bdba7f"
+    },
+    {
+      "id": "d9ce2b08-75ff-4770-8499-6b4a5d27442c",
+      "text_hash": "a764023f6d0698dc57c9569b0eb3ff7620810696cc3706ae089ec6f238a7cbb8"
+    },
+    {
+      "id": "dcf98880-41ae-4711-ae83-7766d3e7a84a",
+      "text_hash": "b4956e3fe4618d637148c60149083fa44d72cf7723e8f949739bbc07936c6856"
+    },
+    {
+      "id": "def3e84e-a802-4518-b5be-59a0fb908eda",
+      "text_hash": "b47945bfce6eada03b1aaafb43cb83b5e32b1ee568a7db572df784c2caccf9a9"
+    },
+    {
+      "id": "defee176-47a6-4c0b-bd54-48b171eaeae3",
+      "text_hash": "84260aeb9ebdce7d654acab01e48c4ce5bee3022178762494312384b13964811"
+    },
+    {
+      "id": "df55c398-e31b-42ff-b0e8-b6bd3afb565d",
+      "text_hash": "3a2f7b10de1b1951e65245b00615b3416a7387c460060426ce17481922f9ba92"
+    },
+    {
+      "id": "df8f1da0-d490-4b73-ad85-e9510204dd32",
+      "text_hash": "7aca2c79d43478860c2eeed73f81f68d60759af914de7afbc3d1ffe62619acea"
+    },
+    {
+      "id": "e313a3ca-b23a-440a-be80-cc70c2418069",
+      "text_hash": "2114a3fb7ac71aba47b9309fc0149ec4c66a1e1e004c878bdb8b443238e656bb"
+    },
+    {
+      "id": "e4d965d9-f898-4d21-b349-828a71418ece",
+      "text_hash": "2efab3906436a0291b611ce93e7534315560a2f2e712fedf161a6ffd5eca4073"
+    },
+    {
+      "id": "e65efc68-5106-43ac-a0bf-6d7aba8554eb",
+      "text_hash": "d50f35af368241c5364ee589f59ef8bd9a3e56293a4ee9ab18c87ea4a568bcd0"
+    },
+    {
+      "id": "e6e0b0e7-1405-4489-85f7-f53f08c32b6f",
+      "text_hash": "770ac81f3a8d11fc8929f3faa095226d8638829f5dfd89ca2289bf1bd74878c5"
+    },
+    {
+      "id": "ea16f322-687e-42f0-bf20-f6881fc7a127",
+      "text_hash": "afa32bcfd95740705a448b84281f138f0f62820cf2d1cfa91b32faca4ad18232"
+    },
+    {
+      "id": "eaa31ac5-83b7-4fc9-84fd-8483a73376a0",
+      "text_hash": "d26e97bef2d7b0a851a9ecb9c0e10b6375fd5937ab2067f37ddcede21985b4b1"
+    },
+    {
+      "id": "ed2828ac-1bc9-4dd9-89d3-c44ef67af695",
+      "text_hash": "1247728c8b015e4bf65da8e472297db921745cff5231061e5fe26f78225ea109"
+    },
+    {
+      "id": "eda17f3a-bcb0-4cfd-ba35-a03835466ea6",
+      "text_hash": "f738e9ba5e289708cfb4f8a25818cf339f95b9c56be09ebacc241b1016a03e1d"
+    },
+    {
+      "id": "ede4c735-2dcb-46d1-a8d1-e0c3a660265a",
+      "text_hash": "1c7d4dbc6726dc9043e84a9109122e6b780f447c91c7d9398462e784c0ca0118"
+    },
+    {
+      "id": "eeb3d106-70ea-4ef5-a0f4-999160c0fd9f",
+      "text_hash": "fab1b8ae8325cc57b5d501e9954b07c7d8328b06cf33a4357a48f2ec55f9b25b"
+    },
+    {
+      "id": "efbdfb1a-7963-4210-b05b-bde1cacc7a17",
+      "text_hash": "93c8735d307ebc49982eb346274ae0d8c57fa83fc2aa33812983d3efb61bb293"
+    },
+    {
+      "id": "f04a05aa-7942-4e8b-8f36-957c7a606135",
+      "text_hash": "0aa643e7864ef079a5a6da40b0ba04a0898c1a7c83cb2953972becdfc77137b3"
+    },
+    {
+      "id": "f04b591f-e4c7-4bca-9eca-5b9fcdcf0c9e",
+      "text_hash": "15e9bd0f5f18d1edc58922e1eb8155f7713764b19b37a43357e3c893f882902a"
+    },
+    {
+      "id": "f0f9156e-089d-4ec5-8b95-e477125ba3b9",
+      "text_hash": "d47ea8a227df2acf3e290462ef819e5d706ec19c0b8908f129c31969c1649778"
+    },
+    {
+      "id": "f2d58a30-7e51-4a96-afb0-c5805593afc2",
+      "text_hash": "891ebf8ee2345f8f8bb82fe474b714972bcc0bf6ae09fe75a425d555af085f38"
+    },
+    {
+      "id": "f47a8fe9-0028-4dd3-92b7-8c5411ac3942",
+      "text_hash": "f481ce9dcd1ab89119e529c6396fe7cb7218cc298f63b26dffa9b673647ef9cc"
+    },
+    {
+      "id": "f5bac101-d076-4245-bdab-dc7a97056468",
+      "text_hash": "d0015e907ad3b85aaf8a30a949377cb180aef0d44214e70c769e5fe55b203188"
+    },
+    {
+      "id": "f5beac20-3519-44e9-93fd-dcfa67aba818",
+      "text_hash": "f302dd49b3cb915d26883e15c499b7f9a9d16af844757c9c22baa4bd075c334f"
+    },
+    {
+      "id": "f5d97b4a-ccd8-4fb7-8e5f-e4e7ed44569d",
+      "text_hash": "c0a4ca827d12a4d59a0c5bf4417ab3646c64a60bd0c2b67dbb0d3a24d29427fb"
+    },
+    {
+      "id": "f673326b-6861-4d85-9954-13145dd0f555",
+      "text_hash": "8e3907ed3e762cd3db33adf04bfa963bbfcde015efdc69629c5b1007fa31b182"
+    },
+    {
+      "id": "f92dfab2-87ee-469d-b683-397167a373ca",
+      "text_hash": "12e22effd1740cea0d8879c90723febe37f8f8a12f3eaad35f95f2cfefcd7bf0"
+    },
+    {
+      "id": "fa217e48-d763-481e-8146-dcf1420c19a8",
+      "text_hash": "1514738e937a70ba1c153ac73d327dd03a1a58a81d8f28abfa22023bded5afec"
+    },
+    {
+      "id": "faae6748-851b-479d-b01e-543aa0cc17f5",
+      "text_hash": "b9ca4f07a33366c0dbed2516a8cc8d7a33aab11c47f94dfc0cedb627d306e5ce"
+    },
+    {
+      "id": "faf1b643-1936-44f9-af5a-2f26461dfef6",
+      "text_hash": "f36a35845ea7574ce3b48a68810b5925d00dcbe152aaf6e1d036a6c135234142"
+    },
+    {
+      "id": "fc21a431-6a17-4843-b610-60e63aba17e6",
+      "text_hash": "f7d38b3f7dbe1b10e6b426b24bd8f9cfb7cc1ed67bf70652ac00a53331919be4"
+    },
+    {
+      "id": "fc4d7753-34d1-49f7-9cdd-ef756e17b574",
+      "text_hash": "edc69aef4cce3f414c92f1dc8b188e8305deaf421bf0935e7cdafc446cabc56e"
+    }
+  ],
+  "core_measurement": {
+    "sha256": "e6b0bd362488892d6df19fadf70ecdb5b54497e05488024a713f0bf5e982bfb8",
+    "tokenizer": "cl100k_base",
+    "tokens": 1160
+  },
+  "corpus_digest": "29554ae8df2036cab090011bc01a5a376105f4590bd2008168d497e202c6a28b",
+  "schema": "carr-native-rules/v1",
+  "sections": [
+    {
+      "body_text": "WR675.S11.J5 — per-rule placement table, part 1. Proposal only. UUID/version/hash bind the live full statement; see summary for decision order and non-adoption boundary.\n| Rule UUID | Version | Bucket | Placement / rewritten wording / exceptions | Source statement SHA-256 |\n|---|---:|---|---|---|\n| 015183f5-3f36-45f4-a3cd-d80608350449 | 3 | SKILL | Skill: classify-and-define. Trigger: \"Classifying a record/rule/finding or defining an actionable term\". Procedure: Publish ordered questions, boundary case and testable decision procedure; hybrid obligations need separate consumers. | 25d44a5c88c8209dc56ec807cffccc711357c5365c0cd0f73ffc3281c2925583 |\n| 0156e9fa-1c57-451d-9074-7474c950c727 | 3 | MERGE or RETIRE | MERGE into c864b8cb-6801-42bf-a561-4683c0a3b77a: Fold one-outstanding-action and genuine-fork exception into the core interaction rule; obsolete literal-reply reference is removed. Proposal only; retain original authority until separately enacted. | 1735598b2b618939d3ad5839893f435142f639d8d6fda58b9f596511fc0b9cb8 |\n| 018ce972-7f3e-42d4-931d-e96a169d020e | 3 | JUDGMENT | Observable condition: Structural change has timing-dependent cost. Checkpoint: reply to Joe. Action: Compare cost now and after the next dependency; explain assumptions. Exceptions/boundaries: No measured cost window: label estimate.. No deterministic check can establish the contextual meaning or adequacy of this decision. | f05abaf268093f466858ac183740cef210097ae9a4556c9341c18a74bc5520cc |\n| 0622949a-1442-4e73-a3df-98ba0e549eba | 2 | MECHANICAL | BUILD dispatch budget contract: resolve current provider usage/prices and allowed model target before launch; pre-tool hook plus dispatch verb-side refusal for missing budget snapshot, not a hardcoded model schedule. Qualification remains a review judgment. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 8da0e6a6868774a1b2e0c7a42119630af50cd5497d1edbab1cfd76ea9062a6d2 |\n| 07dde434-6e9e-4ead-b75f-c225c43201d8 | 3 | JUDGMENT | Observable condition: Proposed prospect-facing AI answers instead of preparing partner conversation. Checkpoint: merge. Action: Test whether it removes the reason to contact a partner; redesign toward partner preparation. Exceptions/boundaries: Behind-scenes research and briefs allowed.. No deterministic check can establish the contextual meaning or adequacy of this decision. | b7d0cd03d293cef77b595764c4c401113643e0b8023c75acbe56c4ba889a0398 |\n| 08c4eda2-ba7a-45fa-abf8-3ac53e923c38 | 4 | JUDGMENT | Observable condition: Alabama lead ownership or representation is being chosen. Checkpoint: production write. Action: Separate lead work from licensed party-of-record; verify current license evidence. Exceptions/boundaries: Do not infer license issued from elapsed weeks; Florida unchanged.. No deterministic check can establish the contextual meaning or adequacy of this decision. | abb6e65ebea5b989ee9891c86ce053a9f19706b9b48fe7f6497f686ea7606336 |\n| 0c1bac27-56b9-4544-9d7c-1a80e178e728 | 1 | JUDGMENT | Observable condition: Generating partner complementarity observation. Checkpoint: reply to Joe. Action: Use symmetric work products and quotes, visible to both. Exceptions/boundaries: No personality assessment; parity125 blocks publication until comparable evidence.. No deterministic check can establish the contextual meaning or adequacy of this decision. | e479e58f99ba0d690f9c04c16b0f63621372d2f72cb36be9bbc40475e1b21573 |\n| 0e22e34a-b38b-4cb0-ac58-9f29d9595615 | 3 | MECHANICAL | BUILD workspace folder-shape lint in CI and Drive-create wrapper: reject empty scaffolds, version-suffix names and depth beyond four; allow explicit artifact/tool required layouts. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 5dc97613be94f8de3f720a18c2c5af93ac8757825d1ced99c084ad3e674d9f9a |\n| 1021fa84-2259-496f-a2f6-47bf84215361 | 2 | JUDGMENT | Observable condition: Inferring Joe’s work patterns from build-heavy context. Checkpoint: reply to Joe. Action: Account for brokerage-first history and sampling bias. Exceptions/boundaries: Do not diagnose unfinished patterns from build residue.. No deterministic check can establish the contextual meaning or adequacy of this decision. | ea8450e495dd1eb120f69ee2eb196af2e2f518753472c5edc237e5defbe33d04 |\n| 11b2b73b-29b5-419d-8262-3a4a4d746345 | 3 | SKILL | Skill: study-source. Trigger: \"Joe shares a UI/UX reference\". Procedure: Adapt supported design learnings to current UX doctrine and log capture; read-only scope permits plan only. | d0051aedeaaa816d0669094ba6f0ea3b6066e1f017be0f73b7bc19d757ba3440 |\n| 14181e60-e1b7-43eb-bdb7-9ce3cbc85cde | 7 | MECHANICAL | EXTEND hooks/record-home-gate.py with machine-required manifest and canonical-store receipt for durable record content; pre-tool write gate across native write/edit and shell routes. Registry phase governs migration exceptions. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 1407bda1d5d0f78a68ae9989ef9134380fbf05254fe5216e211b16720e3740b0 |\n| 152ceb65-11c0-445c-b68c-38cc5a0fd39c | 4 | JUDGMENT | Observable condition: Explaining structure or preparing nontrivial design. Checkpoint: reply to Joe. Action: Show compact shape when it reduces reconstruction effort. Exceptions/boundaries: Simple fact or short prose needs no decorative visual.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 575f6f8f5710e95e952c22f6079626628e23c81400c6b32207eb552e160e4ec4 |\n| 173119a8-c210-47fc-9ee1-f916d9b45fdc | 3 | JUDGMENT | Observable condition: Attributing dirty work or blocker to another session. Checkpoint: reply to Joe. Action: Compare actual index/worktree and current remote evidence; distinguish stale checkout. Exceptions/boundaries: Net-negative diff alone does not prove absence of local edits; no fetch in protected shared root.. No deterministic check can establish the contextual meaning or adequacy of this decision. | e3186f345a7781472d0f6773d9638a48fe87573ae3b2db92de48da7beeac9912 |\n| 179be4b8-2fe0-418d-9503-52d1e33921d3 | 4 | CORE | Proposed wording: Finish the agreed result and its necessary follow-ups; name a concrete external blocker when completion cannot proceed. Backlog substrate improvements with the product task they block. Justification: Defines scope completion on every task; retains the product-first exception. | 77f2b5002a65b281737c46ba01ffd49c68979a4edea2d3c0babde49a56517368 |\n| 17ffd587-a2d4-45c5-8554-31898e7aa194 | 3 | MECHANICAL | BUILD glanceable-surface query/output exclusion for lead-outreach reminders; CI fixtures plus brief/heartbeat verb-side filter; preserve partner-dated real-deal reminders. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | d5635d61b70ed4c28b10b277bdfeadd1b79cc15065024fd689ae3c0ddb44d66b |\n| 185013c6-2eaa-441d-9a80-7917dcf652d5 | 6 | MERGE or RETIRE | MERGE into 0622949a-1442-4e73-a3df-98ba0e549eba: Consolidate executor budgeting; remove historical model/PII fences conflicting with current access posture and sponsored identities. Proposal only; retain original authority until separately enacted. | e703775a3aea5bfb3440094f034f4ce950e214c1906efdf1b13ed09ba4eba551 |\n| 19304882-ffba-4aa1-bcbf-e0c04624012a | 2 | SKILL | Skill: partner-calibration. Trigger: \"Major decision, pipeline review or partner override\". Procedure: Run requested compression/timing/override practice without personality inference; no compulsory extra approval. | 541578abaf1e75401a8c2c6f2f8e4d6d62af787aefea91aac568986143559516 |\n| 19ebbeb3-2e44-4c7b-848c-2f929f7ea9d0 | 3 | JUDGMENT | Observable condition: Unrelated defect discovered during authorized work. Checkpoint: turn end. Action: Record specific defect and fix in-scope or link product-blocking backlog. Exceptions/boundaries: Read-only job records plan only; do not expand substrate scope.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 82ea79297ba1cb116d03c82071e5a00da57eca37fcf3c53ddaacc249959f2ed0 |\n| 1b8e7f43-49a4-48b3-92a9-8d00041edc94 | 3 | JUDGMENT | Observable condition: Authorized action genuinely remains blocked after attempts. Checkpoint: turn end. Action: Record action, subject, evidence and concrete cause in appropriate loop. Exceptions/boundaries: Do not create loop for doable work; task-authorized memory plan can carry research gaps.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 14b18a00847c7774c803ffaf3c38b9ba4a5f54925b13fb071ea07a2edf60ef65 |\n| 1c21263c-fd28-4ea5-b711-1210cae38398 | 3 | SKILL | Skill: diagnosing-bugs. Trigger: \"About four fixes of the same shape recur\". Procedure: Name the process pattern, improve shared check/instruction when in authorized scope; otherwise record product-linked follow-up. | 3eb68d4f69cbf1764d13a08e220dffeefc5153aead704bae67b44853734073ed |\n| 1c42d80c-f401-4065-93d7-b557664b929b | 3 | JUDGMENT | Observable condition: Unexpected refusal or friction recurs. Checkpoint: merge. Action: Remove root cause with test inside authorized scope. Exceptions/boundaries: Temporary sanctioned workaround allowed with tracked cause; product-first backlog and read-only scope override same-session build.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 870f61c8a185b89442d5578aadaafd4d2e5c6d57bed8688a89600e57db8626f9 |\n| 1ee0b3bf-032e-42e8-a325-e90d00d95fb5 | 2 | PATH | Claude .claude/rules/rule-1ee0b3bf.md paths: [src/**/portal/**,src/**/client-site/**]; Codex nested folder: src/portal/ (AGENTS.md). Proposed wording: For client-site headings and introductions, describe that page’s own content. When a feature is removed, remove its stale references on other pages too. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | 825a75814cd36c7c5db48d8f8bc1b6be55c8285b4ceb8688d9e60ec38905f499 |\n| 1f3a7372-cedf-4957-8884-3dcd4c681b0a | 4 | MECHANICAL | BUILD routine completion schema requiring durable finding/decision receipts and downstream completion receipt; verb-side refusal at run close. Clean finding-free runs need no extra findings row. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 8685663629b04f5dcdde91b98d691c5ff6c48e08225ad8535585ccc878039883 |\n| 1f750181-1474-4362-90a0-3b3f166c5356 | 2 | MECHANICAL | BUILD event invite validation at send/event verb: evaluate category/rivalry/avoid blocks and record event-scoped partner override. Event log uses current record home. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 0c412356baeeedfbad62ba81c611f3e5717ef1f93c8a673ccbec9f25d034a703 |\n| 20d106f1-b2bc-4009-a76f-7382da7152c0 | 2 | SKILL | Skill: partner-calibration. Trigger: \"New major build, prediction or unfamiliar confident domain decision\". Procedure: Offer oldest unresolved human decision once, record calibration evidence, label confidence basis; do not block authorized product work. | 99a78a202c74badeca4a31daf0cd7cae72be430e327d4350ab3ad307ab44aa8b |\n| 2271e684-7988-4b98-a97a-670e90da4b85 | 3 | MERGE or RETIRE | MERGE into fa217e48-d763-481e-8146-dcf1420c19a8: Current-source verification specializes artifact verification; retain source freshness in research skill. Proposal only; retain original authority until separately enacted. | adb8b7b31776fa5894d39356c958803b5fd684d849ac93169e117d38c62b06a2 |\n| 236ca227-ae4a-4a2f-bccc-c464a590c89c | 3 | MECHANICAL | BUILD business-day clock library for escalation, heartbeat and next-action writers; CI calendar fixtures, heartbeat scheduler refusal on weekend; partner live override remains explicit. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 6f8f82d168a29dbf18767cf3df571a4b26cfa02414343ffe5f655e5af1e00753 |\n| 23ea0607-7ee0-4749-bfe1-0f45e65bdc09 | 4 | MECHANICAL | EXTEND diff-salesforce-deals.py closed-to-earlier phase refusal with verb-side invariant and fixtures. Existing enforcement is rule-reported, not independently executed here; forward changes unaffected. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | ae7f29b56815db8768df5e850c6a2e9595f07d45c48071ae2c3649a2299d8c29 |\n| 2422ece6-1047-4b41-95a0-a3b4fc07697f | 2 | SKILL | Skill: estimate-model-cost. Trigger: \"Quoting model/run cost\". Procedure: Read current price and show arithmetic; historical dollar tiers are examples, not live price authority. | d5e17753bc5ae443162f9eb8ae1d788ca82f8e6f612977d8503878375fc2e44c |\n| 24e10ee8-1c4e-4d9a-8441-4dfd588b9d5d | 5 | JUDGMENT | Observable condition: Commit/report claims an implemented act. Checkpoint: reply to Joe. Action: Match each material claim to actual diff or receipt. Exceptions/boundaries: No automatic semantic proof from file presence; record-only plan is not implementation.. No deterministic check can establish the contextual meaning or adequacy of this decision. | cc7b471b40b71cf8640b01199b8036ce53812918bbdaa3479872730a88dd12d0 |\n| 25fab860-47f7-47ee-b77f-7b046ef8e9a2 | 3 | SKILL | Skill: write-content. Trigger: \"Preparing weekly social batch or daily replies\". Procedure: Weekly owns standalone posts; quote-tweet candidates belong to daily run; no second queue. | 7bcf6237dd6c6d1de99e6f0d5457d358be45440968d01afe8545915205519cb4 |\n| 25fcddee-5356-4629-8438-5884eb97f41b | 3 | JUDGMENT | Observable condition: First unfamiliar deliverable has approach-changing ambiguity. Checkpoint: reply to Joe. Action: Resolve critical ambiguity or show cheap variants. Exceptions/boundaries: Routine skill-covered work and known authorized choices need no interview.. No deterministic check can establish the contextual meaning or adequacy of this decision. | a8e9df118489f0a0b3e27b1cfd7bebdd7ff76f58b70dee80f75653428e177ab9 |\n| 27277539-c593-4219-b7d7-2dd08089911d | 3 | JUDGMENT | Observable condition: Explaining technical choices to Joe. Checkpoint: reply to Joe. Action: Explain terms and support requested technical stretch. Exceptions/boundaries: Do not narrow ambition solely for presumed inexperience.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 00c2d8f837a7d55d4c7b6d092adb66c0769dc5e71f97991407623fcd02b3b8d3 |\n| 2a3ff869-6743-4513-be32-3a3323802ee4 | 4 | SKILL | Skill: publish-document. Trigger: \"Creating client/company document\". Procedure: Default Office formats unless partner directs otherwise; LOI/letters Word, outbound spreadsheets PDF; preserve editable working original. | 2dd3455a8fa827bc49dc9e6dac8fbdb4d1f5a18e09ed31c653ed44a906d79e9d |\n| 2b66211d-b0ea-41ee-ad18-7b84d12c6fb7 | 3 | SKILL | Skill: dispatch-and-review. Trigger: \"Launching fan-out or independent verifier\". Procedure: Fresh evidence-only verifier context and watched first run; current measured-compute rule replaces old ~20-agent cap. | 21f5241aa8db00e5159b7904751132668a49b5b576275688830f9beeb8437a24 |\n| 2b889e80-a351-42b6-b3a5-565e59a75654 | 5 | CORE | Proposed wording: Bound absence and capability claims to the collections searched and routes tested. An unreachable collection leaves the broader claim unproved. Justification: Prevents confident false negatives across all work, the replay matched two corrected cases. | a22a0cbb9c1f96fd2506e96fbb3b3e54845ae71908afa3eea55dccf7fef82c39 |\n| 2ca2add2-4fef-4484-a957-0f54ff1fdf33 | 2 | SKILL | Skill: capture-platform-data. Trigger: \"Exporting or capturing a source dataset\". Procedure: Capture all available authorized fields; separate render policy from capture; never extend authorized data scope silently. | e04649879fb6d1860664e6f7f727c701b18ed53fe8d03f0639d063c6514d01fe |\n| 2e362970-b9bc-4f2c-991b-271760ea1460 | 3 | SKILL | Skill: research-first-implementation. Trigger: \"First capability/tool/platform workflow of its kind\". Procedure: Research live features, existing owned tools, operator practice and failure modes before design; routine fixes exempt. | 03718bf3de2f2431d088d0985aaffd01c6affb59a2904b1a37309120e8de36df |\n| 2e8b4840-2d0c-4e56-9b6b-2e37640ef5dd | 3 | MECHANICAL | BUILD duplicate detector type guard at merge suggestion and confirm-merge: same person carrying lead and client roles is valid, not duplicate solely by those roles. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 6f0ab2e241471e71fde4b41ea8b160079ebedf67ac75cbab3d3281fae6025722 |\n| 30a189fb-6873-4ae5-89f1-1dcba92485da | 3 | JUDGMENT | Observable condition: New material is outside CARR purpose. Checkpoint: production write. Action: Clarify correct Life AI home before storing non-CARR brand material. Exceptions/boundaries: Current explicitly authorized CARR rule-planning material belongs here.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 2d2b81f992f3e31590d1af090ceadab7ba336f4b78c3dc30d229eab8f41ce208 |",
+      "id": "c1e2ca0f-75d9-43a7-964b-d2c7c3015418",
+      "key": "rules/placement-plan-2026-11-table",
+      "text_hash": "8c01bb5c5d8e7315428d02e5576f03e1d4f40030ada2865e95f3624a784dc005",
+      "version": 1
+    },
+    {
+      "body_text": "WR675.S11.J5 — per-rule placement table, part 2. Proposal only. UUID/version/hash bind the live full statement; see summary for decision order and non-adoption boundary.\n| Rule UUID | Version | Bucket | Placement / rewritten wording / exceptions | Source statement SHA-256 |\n|---|---:|---|---|---|\n| 347a9ca6-633e-4d47-a083-f2ea7c77b5cc | 4 | JUDGMENT | Observable condition: Inferring work/access/isolation from session name. Checkpoint: merge. Action: Inspect actual work and treat unknown work shape as unknown. Exceptions/boundaries: Scheduled starts may become full builds; label is not evidence.. No deterministic check can establish the contextual meaning or adequacy of this decision. | f88b91a2c0f1de456936ac462e130451521359639ae856d7669cf40c1b0178c1 |\n| 3578d799-28fc-4a66-85b5-cba47c8ca1a5 | 3 | JUDGMENT | Observable condition: Naming a system verb or business concept. Checkpoint: merge. Action: Choose human words that describe doctrinal behavior. Exceptions/boundaries: Stable machine identifiers can remain internal aliases.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 2e33319cb49e1c1fcdd6d2647e4632a931d2aa9ea07b5a0b4f4dfab28542b15d |\n| 388cc81e-076c-4f4d-9959-69233cb11879 | 4 | MECHANICAL | BUILD identity-match evidence validator at merge verb: require independent corroborating fields; candidate-only when second field absent; contradictions refuse. Meaning of corroboration needs sourced judgment. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 7efc9c351ec567bc5d07aa60dbf49d0a2586e009c98fb137606ebd2a943df172 |\n| 38b15dc6-ef80-4bf6-b983-3445b386e7dc | 3 | SKILL | Skill: give-human-steps. Trigger: \"Handing a partner multiple required actions\". Procedure: Number every required action, say all are required, active voice under twenty words, real values and final proof check; only human-only residue is handed over. | ec9698b8fd2f27b3284c38e80f5417e0d18b0d50b76e147e0c54e5ef72ef0343 |\n| 3a9dbafd-04cf-460d-a573-619efb3db348 | 4 | CORE | Proposed wording: Name the subject in ordinary words before its ID, including inside question boxes and record titles. Include an ID when it helps lookup or action. Justification: Universal human interface; identifiers otherwise impose hidden lookup work. | 21050af1335915d9eba1929f056dc06f8332958aaab5c2b15d47b8acc50171a0 |\n| 3b0cd546-e03e-40ce-9a8d-5ba9343f63d2 | 2 | MECHANICAL | BUILD named-rivalry pair IDs in introduction/event permission check; refuse rival co-invites/intros; disclosure of rival activity remains judgment at send. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 01ce463c86aef79515a2626b076fa3277d09cc199f631c7af1f04a8e53512c93 |\n| 3d185f2b-0034-475d-9dee-c526f16b6d6d | 3 | JUDGMENT | Observable condition: System build is awaiting Dell participation. Checkpoint: merge. Action: Keep Joe-side iteration progressing; Dell reviews finished product. Exceptions/boundaries: Dell remains equal writer/teacher in business lanes and own workflows.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 923321e92b6f5984adb0709f9d6fb14a2e1a652b19654f34d937daf0b17b3a9c |\n| 3fa17fa0-7a45-43df-861f-4ee88d73e723 | 3 | JUDGMENT | Observable condition: Drafting re-engagement from notes older than about sixty days. Checkpoint: send. Action: Check live activity and ask specific still-true question if unresolved. Exceptions/boundaries: Fresh sourced status supersedes old notes; avoid generic manual activity request.. No deterministic check can establish the contextual meaning or adequacy of this decision. | b871e548f7d75fae684d3bee0caf8bb588d9ddcb717a9af5deca1b27b11f1d9b |\n| 4039b9b5-7099-45ce-891d-c34dfbf31e62 | 3 | JUDGMENT | Observable condition: Selecting doctrine writer or discussing machine authority. Checkpoint: production write. Action: Allow qualified model, protect version concurrency and actual credential authority. Exceptions/boundaries: Old universal machine-token humanOnly examples are superseded by sponsored authority156.. No deterministic check can establish the contextual meaning or adequacy of this decision. | f0e502dd9c6ef8e85fef28d8522bf09833fbc20555eec99a81cd36201874a06e |\n| 40f7a11b-1a87-480e-89cc-b9c8947b8047 | 2 | MECHANICAL | BUILD retention reachability test with real Activity/board/receipt readers before and after deletion; CI rehearsal and deletion verb-side refusal when a referenced row or necessary writer would be lost. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 8a3724e15b4faa3a2d0677747782374c2731971650620a44f327d5d0ddcc7e3f |\n| 412d37d3-1337-4cce-9606-a8085b85a811 | 3 | MECHANICAL | BUILD surface-aware spelling lint for HIPPA/HIPPA variants to HIPAA at pre-send and CI; correctness of compliance advice stays research judgment. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 83dec0f5fcb30becde3d6b56089a62e7b8599b470dca281be31b14326c95978d |\n| 424ba0cc-e512-4ab3-9488-4cf026992d34 | 2 | MECHANICAL | BUILD cold/paused-client exclusion in active-book query and cadence-send predicate; explicit partner-directed reactivation is an exception. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | f0fe3c86c9352776ef15f6a23e961b567661c0c71e6781b528e1d6e9c557c375 |\n| 4399df76-17ad-45c1-9087-db7b7f0cbad1 | 2 | PATH | Claude .claude/rules/rule-4399df76.md paths: [templates/**/loi/**,tools/**/loi*]; Codex nested folder: templates/loi/ (AGENTS.md). Proposed wording: LOI template values are overridable deal defaults, because terms are negotiated. Check distributions across deals before calling a term common. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | ea51dc0ad0cc82dbaf8a29ea87251576d1b3e40ef1ec69ed0c53947c92ab954f |\n| 43e2ef76-1201-4d20-be8f-547754d72cb3 | 3 | SKILL | Skill: verify-deliverable. Trigger: \"Beginning nontrivial work\". Procedure: Name artifact, expected result and failure condition before implementation; fix success criteria before author bias. | e9eb4a05d618cff29f1038ecbf4f02740693a6393fbd1b8887d38684741f6454 |\n| 44658b1b-9298-487b-9a1e-68fbaf24e5c7 | 2 | MECHANICAL | BUILD workflow reachability browser contract suite for live mail/calendar/call moves, at CI and pre-merge: assert original workflows remain mounted and usable. Hold removal when no replacement path exists; reachability alone does not establish usability. | bc6f32a6026827454d2f4b06bc694e8d9284c59938fb977fe7f3e25238936a63 |\n| 466a545a-8816-4930-8171-57c482d1532f | 3 | SKILL | Skill: study-source. Trigger: \"Grading shared source for applicability\". Procedure: Test exact properties, cite covering doctrine for already-met claims and failed test for declines; no source adoption under read-only assignment. | 33c83c01ec85c370e29582eaece5a8eff27eb8116a697cd82846c4139924a5da |\n| 48083552-6866-4427-9f27-ebadb763bf89 | 3 | SKILL | Skill: client-discovery. Trigger: \"Preparing a client/prospect meeting\". Procedure: Capture previous attempts, constraints, approvers and outcome test, then reflect back before options; real meeting context supplies answers. | af98a658059a41138ae60b25da4ad641452b048d7e8c25167b0eb4f5f08fb8f6 |\n| 486584d6-418b-41aa-8e29-d0b4e4eb8e51 | 3 | SKILL | Skill: signed-in-console. Trigger: \"Authorized work needs an available signed-in dashboard\". Procedure: Operate authorized console task; preserve secret transport, leave human-only prompts to account holder; actual browser-tool contract supersedes historical extension route. | 2d53bffc9c36bf9695007734b50dfee69cff155fe6fe578ec88e091b1ae14e26 |\n| 49533583-77aa-462b-bd88-ab68efd66795 | 4 | SKILL | Skill: local-mail-calendar. Trigger: \"Reading partner schedule, attendees or mail\". Procedure: Use verified local stores and research-copy route where appropriate; published ICS is schedule-only, Google AI mailbox not CARR calendar; avoid Calendar AppleScript under load. | 7e1c5d733ac74bfd1b53bb66ffb7bdb56af1b707c232c36bedcecdf5bb110e28 |\n| 499878db-75b0-4e15-8a0e-802f42d25235 | 2 | JUDGMENT | Observable condition: Child slice depends on unmerged branch or active PR conflicts after merge. Checkpoint: merge. Action: Keep main-based independent slices; resolve owned conflicts by merge commits. Exceptions/boundaries: Do not edit unrelated PRs without scope; batch-overlap169 governs shared groups.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 40a776b638a9827f1304d4df8b6cc98952c0c9d4e388d130ca4bed832f116898 |\n| 49c627cc-feca-4ebb-9ca6-4624a333b77f | 2 | MERGE or RETIRE | MERGE into 2b889e80-a351-42b6-b3a5-565e59a75654: Full live verb enumeration is the capability-claim case of bounded negative findings; remove frozen local registry command. Proposal only; retain original authority until separately enacted. | c1ebc019eca2912b7a2dd191068dde0c777a42f3575509bd3362ff5f47d9d463 |\n| 4a53ff82-cb3f-4a0c-94a5-1a6e0b8b96c8 | 4 | MERGE or RETIRE | MERGE into a7784a18-cc7d-478f-9b1f-76a5150e62d4: Superseded completion boundary: open PR is intermediate, and shared root is bootstrap rather than integration workspace. Proposal only; retain original authority until separately enacted. | 396f534e42778248adcaefe87b1b805f5183af159db34bbd630df199d3b457b2 |\n| 4a9188f3-5b7f-4be8-aea4-211df356671b | 2 | SKILL | Skill: capture-durable-correction. Trigger: \"Partner settles a recurring fact, preference or correction\". Procedure: Run recurrence test at event and boundary sweep; use current team-memory proposal/adopt mechanism only when authorized, no forced adoption in research jobs. | 6b07ecbe26fe500155dba959e161a3408af224cae186324dde01cd7fab0b354d |\n| 4c21d86b-5571-4133-832b-5fb89672261c | 2 | MECHANICAL | BUILD duplicate survivorship/orphan assertion transaction at confirm-merge: business ref, corroborated fields, links, then age; require match_basis and authenticated confirmation, preserve all linked history. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 83e09a848b298213748d3240454f4680d0d1fa3471a661c39e24ac380ed1c6a7 |\n| 4dd44fd7-9dbe-4f37-be04-2f250dcab057 | 2 | SKILL | Skill: publish-document. Trigger: \"Sending LOI, letter or spreadsheet\". Procedure: Use editable Word for negotiated letters/LOIs and PDF for spreadsheets; explicit partner direction controls. | 848b825ad07531e2e6e292f3962b72c44f966da26a3ce47aa605034de71066f2 |\n| 4e104d4c-1131-43fd-8bc5-c6d6ebc646f2 | 5 | MERGE or RETIRE | MERGE into 2b889e80-a351-42b6-b3a5-565e59a75654: Merge live-list discovery and propagation retry into capability evidence procedure; retain cached connector caveat. Proposal only; retain original authority until separately enacted. | 57425be10c519702e766bb4e9d930599774eb8f736c1bcb653e29c508d8f5f48 |\n| 4fae20f4-5b35-4ce9-a7a0-355c8af895f0 | 3 | JUDGMENT | Observable condition: Reporting typical rate/age/trend. Checkpoint: reply to Joe. Action: Inspect daily distribution, migration dates and intervention windows. Exceptions/boundaries: Report event effects separately; no universal flat-line requirement.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 1cd5c50e6975c97964de6b0985f6fffe2fb29b98bd050f71fec109d47640a513 |\n| 51d9f05f-8a5c-465c-a209-b2f7d6323e4a | 3 | JUDGMENT | Observable condition: prospect-visible copy. Checkpoint: send. Action: explain CRE to healthcare experts in an educational consultative register. Exceptions: known prior CARR context can shorten explanation; do not assume domain ignorance about healthcare. Tone and assumed knowledge require context. | 872aa9c4f6487ae4146971b5b3e1927c71fb9cd2366e541fc7d683f99f24ad31 |\n| 5409731b-98af-4671-a4c4-45972c5f53ef | 3 | MECHANICAL | BUILD migration writer-role execution matrix for changed trigger dependencies in CI migration rehearsal; run as actual production caller role, not owner; plain FK semantics handled distinctly. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | d34bc95eecdb122f38cad336230943e9d764cd1b434980f1062ac3a26732c7c4 |\n| 54e2bcb9-cae8-4dfc-adb9-677ffbca0043 | 2 | MECHANICAL | BUILD shared placeholder normalizer at importer and contact-write verbs: known agent/office contact values become unknown with source receipt, cannot satisfy completeness or send eligibility. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | c4dbf35a10c98f08554bd48573c12d1686d87d4cb7b8c72f33f281e83bac1923 |\n| 55449e5c-219c-48aa-bbb1-b36bc8c6abbe | 2 | MERGE or RETIRE | MERGE into c53beeaa-4431-488a-b4cf-c04cc0fb51e5: Readback duplicates paragraph-write validation; retention clause conflicts with preserve-visible-history rule 49, so retain that exception before any expiry. Proposal only; retain original authority until separately enacted. | d11aee3f5ca0d381fdf8ef03b4e41e72b37a8ba3555643f3b9470e5b9b81b22b |\n| 557838a5-3b01-46fa-9104-01b5e5116b66 | 3 | SKILL | Skill: study-source. Trigger: \"Shared X post contains quotes or linked material\". Procedure: Follow nested quoted posts and linked sources in full, report inaccessible branches; do not grade preview. | 30ed075982249b7ab58a69b59300ac859f9132afc83605cadf085ecf3c11ac48 |\n| 578fdd91-1b26-42d3-99bb-fe49f3768d54 | 3 | JUDGMENT | Observable condition: Research finds blank or wrong contact identity field. Checkpoint: production write. Action: Require corroborated identity and clean re-verifiable value, save prior value then apply. Exceptions/boundaries: Ambiguous candidates/unconfirmed values stay unapplied; shared-row rename126 still holds.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 09fe640fd1d22f861981c4a3219c6d2c7651a560e973bd9aec61f959ab615c5b |\n| 57d13061-78e4-4364-8943-a8484eebef95 | 5 | SKILL | Skill: retrieve-x-source. Trigger: \"Retrieving X public source or logged-in analytics\". Procedure: Try current authorized retrieval capability; confirm correct account for logged-in surfaces; first-hand source for durable claims; old Grok-first availability must be tested. | f7d21cca09298015f9b72bb0f9c7a7d37682ba441535be504e3863dcab2efdd0 |\n| 57d83b75-e4f3-4d69-a572-7b9f6ba9582d | 2 | MERGE or RETIRE | MERGE into d26d63b0-6944-4212-aa22-8baee56b28d4: New-client verification is contained in all-contact intake; retain clinical source checklist. Proposal only; retain original authority until separately enacted. | c8d34e212d54cc3458fa184ba2e4335b525fe6e334ad5ad2ef752a5e6adc55dc |\n| 58cef3a1-b717-458e-829e-42c91dec0e62 | 1 | JUDGMENT | Observable condition: Joe’s term appears wrong but underlying intuition may be sound. Checkpoint: reply to Joe. Action: Find intended true referent then correct label with mechanism. Exceptions/boundaries: Do not accept inaccurate label or dismiss whole claim.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 794de8e7852e44457b02216a96024d38fc234f2e99312c8ac5b7a53fa7925558 |\n| 590b11e1-3152-4ae3-be54-8fa5b6821185 | 4 | MECHANICAL | BUILD health/check definition schema requiring owner, dedupe key, remediation, verification and auto-clear action; CI rejects unbound thresholds; runtime prints bound action. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 1591454e466ca92c27f115c08a0dc1cc908f30eda3b4a0c9ab0c0f9713535618 |\n| 596f7549-a47b-480a-8df2-c7ede20ae840 | 3 | JUDGMENT | Observable condition: Error blames another subsystem. Checkpoint: production write. Action: Inspect failing call for absent arguments and test blamed data before acting. Exceptions/boundaries: Absence of key may be serialization defect, not evidence of subsystem failure.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 59532de5d7c63878b7b99d1ee6db7f60af02667ae5907c40740d5b3f37e4e157 |\n| 5be2f462-dd0b-458f-be92-f32a4901faf4 | 3 | JUDGMENT | Observable condition: Writing partner-facing explanation. Checkpoint: reply to Joe. Action: Remove empty modifiers and invented opposing claims. Exceptions/boundaries: Epistemic status words preserved; correcting an actually raised claim may use contrast.. No deterministic check can establish the contextual meaning or adequacy of this decision. | ad29b0d02df5944e4f85647bce59294c8f89bce1e20661d16d0d677d18afcacb |\n| 5cd8d0f6-f5b0-4bc4-ad69-ceb78c819dcc | 3 | MERGE or RETIRE | MERGE into e313a3ca-b23a-440a-be80-cc70c2418069: Self-serve sanctioned routes is part of running authorized commands; keep genuine-denial exception. Proposal only; retain original authority until separately enacted. | e34a77acbeaffa09c0e98780464bf198b657ac9fd441694c207ed0453d9e17bb |",
+      "id": "9eb60b50-943c-4b5d-9452-b25d51f1a9ec",
+      "key": "rules/placement-plan-2026-11-table-2",
+      "text_hash": "d2ca17241113565d97bfaa4163997e13f0f9e6086d7abc69b7a367a73c0db8a9",
+      "version": 1
+    },
+    {
+      "body_text": "WR675.S11.J5 — per-rule placement table, part 3. Proposal only. UUID/version/hash bind the live full statement; see summary for decision order and non-adoption boundary.\n| Rule UUID | Version | Bucket | Placement / rewritten wording / exceptions | Source statement SHA-256 |\n|---|---:|---|---|---|\n| 5d44d3f3-6d5e-4b5c-8358-1f7dfe8b86ce | 1 | SKILL | Skill: contact-verification. Trigger: \"Intake/backfill uses an unverified business record\". Procedure: Verify sourced identity, dated stamp and discrepancies; apply later enrichment amendment 72 instead of obsolete partner-only identity correction. | 3e54a88797d9a11cfc1c0daa69c1ef703f49870e87c2a95b90c522e8d64d6881 |\n| 5e896ed6-45d8-4a71-bbaa-ab861bc2d672 | 2 | MERGE or RETIRE | MERGE into 76fcbed6-2a46-46ab-b7aa-e210989fa01c: Same-session application belongs in full source-study procedure; preserve backlog versus source-edit scope. Proposal only; retain original authority until separately enacted. | 25d759a54d9770c629236883698a6099d681811aaf596c3c7d03b36b90ecbc86 |\n| 5e89c211-996a-4681-b93d-d0226dbf21fa | 3 | MECHANICAL | BUILD typed cognition broker admission: reject untyped canonical state proposals, require schema and deterministic authorization; CI job-manifest linter. Whether a new problem admits a predicate stays design review; preserve authoring/explanation/receipted override exceptions. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | b4fd9588c53ba7189b41568f894e1ee5f641472546917682a8b660c17a85d538 |\n| 5f8c661d-b620-41a1-a900-acc4dcfa07df | 2 | JUDGMENT | Observable condition: Selecting vendor for a client vertical. Checkpoint: send. Action: Prefer exact specialty fit before relationship stage. Exceptions/boundaries: Same-category hard blocks for vendor-to-vendor introductions still apply.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 515151ae2ef4b6537a9418ecd559a5d632adb2d7f38555fc25011bb48260c0e7 |\n| 614c1209-d793-401b-9500-36b1b6fdb74d | 3 | JUDGMENT | Observable condition: About to report stale/overdue contact or ask partner about own activity. Checkpoint: reply to Joe. Action: Inspect mail/calendar, attach dated inference, ask specific unresolved proposition. Exceptions/boundaries: Missing log is not absent contact; actual source access gaps must be named.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 0c848c22502a69c0f26484054c8689466ca551efbcfc221e4b633e29a468f72b |\n| 6172e7d5-2c95-44f0-9fa1-89962200b336 | 3 | SKILL | Skill: watch-video. Trigger: \"Source substance is video or image\". Procedure: Use vetted frame/sampling procedure, >=1600px for text, detailed dimensions and honest unreadable parts; personally inspect pixels before durable use; provider availability is live. | 9a10dcd0d7ff001f80453db007b00b2bfbeee9fcdd938f26845fc1bc29c28c0d |\n| 61c64d91-cbd7-490f-9d7b-bb68578053dc | 4 | JUDGMENT | Observable condition: New shared/personal asset created. Checkpoint: production write. Action: Choose tier now and inspect partner/path assumptions. Exceptions/boundaries: Personal template may clone; shared must be usable by either partner.. No deterministic check can establish the contextual meaning or adequacy of this decision. | f8da70545a51a436032026ac03a857b425f735487601375ac806188599eb7403 |\n| 6330bec8-b656-4388-a81a-636350056790 | 2 | SKILL | Skill: crux. Trigger: \"Nontrivial problem before generating options\". Procedure: State gap, map causes, identify crux, tie options to causal levers and stress-test; routine mechanical work exempt. | f3d998ae64e75c49874b88c11207ca971be71bd0812d9914c56964234daa9d20 |\n| 6437ae15-0b40-45e2-b14a-9193d679891b | 2 | MERGE or RETIRE | MERGE into 76fcbed6-2a46-46ab-b7aa-e210989fa01c: Full reading and honest declines are duplicated by per-source study; preserve no-preview grading. Proposal only; retain original authority until separately enacted. | 93d241636d73c1d637269343fa960bce57fa020afe65806f6a792498dcf48d2b |\n| 647f843d-dea0-46d0-a0d2-5ca7fa07fd7b | 4 | SKILL | Skill: file-blocked-work. Trigger: \"Opening open_loop or wrapping blocked deliverable\". Procedure: Use genuine external blocker and detail, distinguish ideas/team asks; add-loop schema already exposes this requirement. Judgment of real blockage remains contextual. | 49fa31276ab2349b15dae1010103a8f6100943fac2bb811f595175121aafbdfc |\n| 661d7757-ed97-41a0-b692-d577c386d01c | 2 | SKILL | Skill: bounded-review. Trigger: \"A review judgment could use Jev\". Procedure: Use Jev where useful without special approval; retain exact evidence, CI and reviewer-of-record requirements; unavailable provider is reported, not silently substituted. | 5a9f00b04f638e81a9fe37fa5745938ba1824ab1f20780ffc79b35343c96ffa9 |\n| 67e48aaf-13f9-4fc7-a937-bcfa41ff7ff8 | 3 | JUDGMENT | Observable condition: Joe pastes credential and session considers exposure warning. Checkpoint: reply to Joe. Action: Use only as directed; do not re-open accepted transcript exposure. Exceptions/boundaries: Credential custody/autonomy question may be raised once; host secret controls still apply.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 9d68c1d0c7466410a2c0ac5b162f4379bd0dff67f5bf60f3a3b6af52139ae02e |\n| 6901cc3b-a69f-46b3-aae5-0cb60bc9c789 | 3 | JUDGMENT | Observable condition: Doc design proposes compromise visible in repeated daily use. Checkpoint: merge. Action: Test real tooling that meets voluntary-adoption bar. Exceptions/boundaries: Cost breaks ties between qualified outcomes; perfection is not an endless unrelated prerequisite.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 4b53d1a40b2766f2aba73e3cf8f94226cb37d230668f92c18ed8421938b818b4 |\n| 6a4e6283-afc2-42cd-a761-ca157d3e4e47 | 3 | JUDGMENT | Observable condition: Client/public artifact ready to ship. Checkpoint: send. Action: Obtain fresh-eyes artifact-versus-criteria review and fix material findings. Exceptions/boundaries: Single drafts Joe reviews line by line exempt; source review requirements remain distinct.. No deterministic check can establish the contextual meaning or adequacy of this decision. | b412f918ebc4dc6fe5ea4dd9a8327e509ca4d6170592558c7f1e109e9f02a93e |\n| 6cfb67f5-6e85-48ad-9008-b0a82e2b71cc | 3 | MERGE or RETIRE | MERGE into eda17f3a-bcb0-4cfd-ba35-a03835466ea6: Newer target rule leaves provider defaults intact; remove compulsory effort override, retain difficulty rationale. Proposal only; retain original authority until separately enacted. | c1dcb1f55f60f880661fded12628044a8f977b62a995493d656e4f20a3c388df |\n| 6da539b5-84e9-49d1-84d8-28f05e151b20 | 2 | PATH | Claude .claude/rules/rule-6da539b5.md paths: [tools/room-bridge/**,.agents/**]; Codex nested folder: tools/room-bridge/ (AGENTS.md). Proposed wording: CARR builder briefs start with sizing, then a topic-specific run.sh map lookup. Omit the map command for doctorcre-app, which has no map. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | 0974af853ecb97996afb87ddf727c85261ad94663568066ce59f7af7e203a6a0 |\n| 6ec7312d-a534-46dd-b791-94c92481f0a8 | 2 | JUDGMENT | Observable condition: Multiple fitting vendors available. Checkpoint: send. Action: Rank delivery tier below hard blocks and vertical/state fit, above relationship stage. Exceptions/boundaries: No suitable evidence: label uncertainty, do not invent tier.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 9f4f113c62b78782d3c161ec093d36f9c878bde7659c5d15d537ca3281202cbf |\n| 70e372f0-4ac3-41e0-8837-0be6fdbbcdc1 | 1 | JUDGMENT | Observable condition: Adapting Dell workflow from observed friction. Checkpoint: production write. Action: Capture stated preferences and design fixes visible to partners. Exceptions/boundaries: No inferred psychology; usage measures design not person.. No deterministic check can establish the contextual meaning or adequacy of this decision. | d4dd289da3e3f8ed51e210844ab6f77006b1344a93ba99b963a20054fa904b52 |\n| 7105955b-623b-44a3-a9b2-00c6a8907691 | 3 | JUDGMENT | Observable condition: Closing row because work moved to successor. Checkpoint: production write. Action: Say superseded/renumbered first, link successor, exclude from abandonment. Exceptions/boundaries: Enum dropped alone is misleading; actual withdrawn work distinct.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 329d008c56433f4eecb550429d07919fa00a2e349fc82e50fe991150c9030b20 |\n| 725dff46-ba35-4fd7-bb84-4e6941e89525 | 3 | MERGE or RETIRE | MERGE into ce12c11e-828d-44f4-82e1-d48d57249f2a: Merge team-owned network positioning into marketing guidance; no independent always-on obligation. Proposal only; retain original authority until separately enacted. | bf83bb6c254b22748ec5431b7cf7d672836d50c9318c0198d4236648ab241913 |\n| 72dc7305-de7e-45fc-badd-efd48847aedb | 2 | JUDGMENT | Observable condition: Local Outlook reader needs protected store access. Checkpoint: production write. Action: Use installed research-copy and read-only decode route; no new Full Disk Access request. Exceptions/boundaries: Verify current route; do not treat old installed-job claim as live proof.. No deterministic check can establish the contextual meaning or adequacy of this decision. | ef89634e3b7c459aad8c218b17b7dae96f38a134f05f2445b17033c66369c4a2 |\n| 72e06bdf-3404-48b5-83e1-9236384ecdd8 | 3 | JUDGMENT | Observable condition: Presenting generated leads. Checkpoint: reply to Joe. Action: Include plausible weak leads with score; partner qualifies on board. Exceptions/boundaries: Remove confirmed different-person collisions/artifacts; no fabricated dates.. No deterministic check can establish the contextual meaning or adequacy of this decision. | d70f42ea7f1bd8d78bd92b2e624f61941bdfe38ee9129484270a8faf15db8dc3 |\n| 73381d78-307e-4da8-8534-eacfa96d5ff0 | 2 | MECHANICAL | BUILD multi-consumer config fixtures using synthetic values only: same parser paths as shell/Python consumers; CI consumer inventory and parse-equivalence checks; never read real credential files for tests. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | b4740ab2d5f9b3f5a11843e25c2abab35cd4b8e3a1f747e8a24478f107ccb9ab |\n| 737a68d6-3377-47ba-92f0-6c8e31810477 | 3 | SKILL | Skill: extend-record-contract. Trigger: \"Required record operation lacks a deployed verb\". Procedure: Enumerate live behaviors first, build/register versioned verb in authorized build scope; planning-only job records gap rather than building. | 33b8226ab9fe71792f125d8a224de5bceb4cbb24b344d41c26ad105915b39374 |\n| 740bb505-20f1-4cd3-87d8-7d45802e1ff0 | 4 | SKILL | Skill: estimate-long-job. Trigger: \"Projecting supervised/retry job completion\". Procedure: Measure active elapsed time including failed work, subtract demonstrated idle gaps; inspect supervisor and final report before death claims. | 96ebafef0845c1812d9d4c2bad5d24d9199f98b27903fd50331fe9afb4d5a35b |\n| 766c7997-bc0d-4947-8852-ec73b4e80a65 | 2 | MECHANICAL | BUILD secret-detector replacement contract tests preserving redaction helpers/callers; pre-tool permission parser rejects bare env, bare printenv, ps eww while allowing env command execution; CI regression tests. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | b7db42d51578f8daf1c05020635be57f16ae7a4a04d0fcdfcde0b5182a88b928 |\n| 767f9b41-18ab-4827-9325-1c8d354fb855 | 3 | JUDGMENT | Observable condition: Partner asks whether result really meets bar. Checkpoint: reply to Joe. Action: Re-inspect actual artifact and report remaining failures. Exceptions/boundaries: A confirmation question is not evidence of success.. No deterministic check can establish the contextual meaning or adequacy of this decision. | e302b9772a16e3a96a2be2a3b7e018140b2b35d4953ba6fc080bcd2556af2217 |\n| 76a1ae2b-6f84-4209-ac52-e610a6610e15 | 2 | JUDGMENT | Observable condition: Matching vendor territory within specialty. Checkpoint: send. Action: Verify current territory and specialty together. Exceptions/boundaries: Historical named bankers are reference data requiring freshness, not immutable rule constants.. No deterministic check can establish the contextual meaning or adequacy of this decision. | dbba5c17fb7ed4817a084f69082e1538b8f3664c1b788052411ed07f61f03dd5 |\n| 76a53dfe-1c8a-4cd2-92a5-8c7e2b69592e | 3 | SKILL | Skill: record-durable-result. Trigger: \"Record-home gate blocks narrative record\". Procedure: Route durable content through owning verb; scratch files may stage exact API payload, never substitute as durable deliverable. | dfff2d72e45f0a925383c88a184a792c8d85d1035be51713d3ba83abe28fdad6 |\n| 76fcbed6-2a46-46ab-b7aa-e210989fa01c | 3 | SKILL | Skill: study-source. Trigger: \"Joe supplies an article, repo, post, paper or video\". Procedure: One full-source study with links, direct/lateral application and explicit declined tests; scope authorizes application only to requested plan in read-only jobs. | b8db28ed6172407119ebfeb5a05e3363661aef37a59332fb1e23554332d4fe94 |\n| 7b4ba3aa-eb02-49aa-8de0-03af07899032 | 2 | JUDGMENT | Observable condition: Unproven Watch vendor considered for fragile high-stakes client. Checkpoint: send. Action: Prefer fitting Trusted option and disclose evidence. Exceptions/boundaries: Watch is not Benched; ordinary use can build evidence.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 429c0fc736dfb9a6b07e3261c54b87cd13e4ca2272be656cd407a511e7c26a63 |\n| 7bb0a3ed-fc42-41ab-9f8c-0ae183b8f95b | 2 | MECHANICAL | EXTEND ops/review-gate.py exact-head reviewer validation: complete diff <=150 net lines, no risky paths, Bot API identity, configured [bot] login, no self-approval; pre-merge/CI fail closed. Inspect route coverage before treating existing gate as complete. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | f33e6e4c7e05c606dee93f765a137c6f6abbf657c5ee9b07a4db1997596af393 |\n| 7e4ca905-07fc-4d79-8d86-31376dcf3214 | 2 | MERGE or RETIRE | MERGE into e6e0b0e7-1405-4489-85f7-f53f08c32b6f: Same-category rule already explicitly includes different verticals. Proposal only; retain original authority until separately enacted. | 0d9e5362f7a4375fa35d9530475276eeaff8f9cdd2931341a6c505ef5530aa1d |\n| 7e9739f2-c9ab-4e27-ae63-4f6c13078c95 | 6 | CORE | Proposed wording: Lead with the outcome in plain, human prose sized to the question. Use structure when the content has parts; preserve precise uncertainty. Justification: Every reply requires this contextual choice; replay matched two corrected cases. | 5ae89288f8ea0c6b2d562454f7a77be6a7204949495b56c9124bc7a01106714e |\n| 80def9d2-5b69-44f0-842d-8148b1083366 | 3 | JUDGMENT | Observable condition: Human-facing choice or surface ready for review. Checkpoint: merge. Action: Check one obvious action, change explanation, Undo and human labels. Exceptions/boundaries: Semantic ease needs human/browser evidence; existence of a button alone cannot decide it.. No deterministic check can establish the contextual meaning or adequacy of this decision. | b7c6c1398693953bbf91c41058d34d324624fa01c796c5d1d60b17d8611d4ad6 |\n| 81709f57-1cc9-48a6-a4ac-12dbb4b7a1d9 | 3 | SKILL | Skill: redteam. Trigger: \"Uncertain high-cost decision needs adversarial review\". Procedure: Assign distinct lenses and evidence-rerun seat; agreement is not verification; council trigger/host rules govern whether convened. | 37bbf4951ef976312a80510108e92658be90b1fef6088e62798acc3b62258132 |\n| 83b9a362-cfaf-4fd0-bd7e-e971c90b7d51 | 3 | JUDGMENT | Observable condition: Suggesting unconfirmed vendor pairing. Checkpoint: send. Action: Label hypothesis and request specific pairing confirmation. Exceptions/boundaries: Hard blocks outrank plausible pair; confirmed contractor/architect still conditional.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 595399fe5e5d9f1d3ea4b61217ca883894ebeda2ad2c047dfcb72c4ac56271b1 |\n| 8400cd3d-37a1-47fa-a32a-0fd4794f7309 | 4 | SKILL | Skill: size-work. Trigger: \"New build, plan, queue item or builder dispatch\". Procedure: Tiny -> implement; one-session design -> docs interview/poteto; multi-session -> sliced Work Request; preserve already-authorized planning and no repeat gates. | 16791e7b4841a737f1932f8c95340340a1c1b0384da3bfeb72dee1ccb51eb398 |\n| 847f9995-29f4-4fea-9926-8c932d432e5d | 3 | MECHANICAL | BUILD unattended authentication preflight with noninteractive timeout/expiry simulation and dead-man alarm; CI job contract plus launch refusal; vendor-only interactive exception requires explicit expiry alarm. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | ee2bdcf033950174c2984e91ed50164a70e22c4669611e7993060e0c2f7d457c |\n| 84bda4e4-7af6-47d4-9d90-937034940c85 | 2 | JUDGMENT | Observable condition: Orchestrator wrapping owned delivery work or heartbeat. Checkpoint: turn end. Action: Use event-driven open-PR inventory and classify merge/held/external dependency. Exceptions/boundaries: Read-only subagent does not take over all repos; no polling; respect intentionally held work.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 61dc0991f6813f6278b59963870b55b2d7aa83499a740980f6642429d5c3602a |",
+      "id": "3ad5caa2-4169-42c1-bc86-32db7a5a8c16",
+      "key": "rules/placement-plan-2026-11-table-3",
+      "text_hash": "219722cbea3d534039acf9794cc7d08219c156995e525ad0b06e67062fc32a82",
+      "version": 1
+    },
+    {
+      "body_text": "WR675.S11.J5 — per-rule placement table, part 4. Proposal only. UUID/version/hash bind the live full statement; see summary for decision order and non-adoption boundary.\n| Rule UUID | Version | Bucket | Placement / rewritten wording / exceptions | Source statement SHA-256 |\n|---|---:|---|---|---|\n| 86647daf-3492-4d3d-b543-047d96bade42 | 4 | SKILL | Skill: share-operating-change. Trigger: \"Shared change, partner-only ask or adoption need completes\". Procedure: Write appropriate record and report what was recorded; delivery requires authorized send/recipient receipt, no invented delivered claim. | 2d231fe4483599c91c4ad4e5ce38c76f36f9998344751f55b2dea538aad62663 |\n| 88e9b5eb-92ea-41d1-a758-5afab63c9337 | 4 | CORE | Proposed wording: Distinguish an authorization refusal from missing capability or throughput failure. Name the refused action and respect a human denial. Justification: Universal authority reporting prevents both false blockers and bypasses. | ad98b1c1aceac57ad69b7e4302d2351b84c4730c490b40481653613c46b434f7 |\n| 893aeec5-e9dc-41c2-8768-e7cee23b50cc | 2 | MECHANICAL | BUILD Benched-vendor refusal in intro/send permission boundary unless authenticated partner override reason exists. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | a6f932989a98461fb6e87b52c6ca87477711fd27bb952e4613ac082b8f4c1692 |\n| 8aefcdce-8c37-40a2-85bc-3c744db7f34e | 3 | MERGE or RETIRE | MERGE into 0622949a-1442-4e73-a3df-98ba0e549eba: Static Copilot/Claude division conflicts with current multi-provider dispatch and local-store workflows. Proposal only; retain original authority until separately enacted. | ae9487693d3b1a21d8067cadad5745b7cb5f5b4f271a45c3fd5ac1cb4ef77a1d |\n| 8c1e6057-7dad-4e15-94a1-9e4c56aefd2f | 2 | MECHANICAL | BUILD partner-review request schema with subject and clickable file link; pre-send/turn-end lint for structured requests. Do not infer all natural-language file mentions are review requests. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | ef26dd361197a2dc84a7b7410c3b3e8ecaebe670f30d5cd31f6f4e3c2c981485 |\n| 8c812bed-ceda-453e-8052-76f476d6b17d | 1 | JUDGMENT | Observable condition: Publishing partnership fit summary. Checkpoint: send. Action: Require roughly four weeks comparable Dell work and similar evidence depth. Exceptions/boundaries: Observations can accumulate privately until parity; count alone cannot establish comparability.. No deterministic check can establish the contextual meaning or adequacy of this decision. | a23eed392815a58c50e0ab360f4c6d0ba1d0b500c5989eada8737e03d015675e |\n| 8cddc6ad-46e8-4c38-9ee7-07cb9860f68f | 3 | MECHANICAL | BUILD shared-label rename transaction: count references, split/repoint when shared, read untouched records after write; verb-side refusal of unsafe rename; zero-reference case needs explicit policy rather than guessed behavior. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 9b4f6a3bfba1278353d6e06729d1e9731960349b2a1dd6fd461a436117846c00 |\n| 909b50d4-355a-4884-81bc-3cdf6d7f2d8c | 2 | MERGE or RETIRE | MERGE into 0622949a-1442-4e73-a3df-98ba0e549eba: Until-reset routing is a mutable budget snapshot, not a durable separate rule; resolve live budget at dispatch. Proposal only; retain original authority until separately enacted. | 2f09be8dafc07dc5f8c7095d2dd53fb118f8b8022a1178ae76ad086ca581c894 |\n| 9293d609-2fa7-4d0d-b491-ed982e2f0eae | 4 | PATH | Claude .claude/rules/rule-9293d609.md paths: [src/**/*.tsx,src/**/*.css]; Codex nested folder: src/ (AGENTS.md). Proposed wording: For workstation surfaces, build responsive motion and interaction that communicates state. Test reduced-motion fallback, unobstructed controls and laptop performance. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | 95a11920a62ba5878223f9f581c7d7884015779db28dece6927072d4b2e0adca |\n| 9310827b-2d0f-49f0-80f0-42c94a1d001a | 2 | CORE | Proposed wording: When a request looks wrong or risks undoing a partner’s work, state the reason, consequence and safer option before acting. Honor the partner’s reaffirmed direction within applicable authority. Justification: Needed before effects; no file or task trigger reliably captures it. | 76dfa20f81f6b49679f37715b08a50713dd197904245445cda7367699a94067d |\n| 94806da2-f4aa-46ca-b3c1-aa9872bc357c | 3 | SKILL | Skill: study-source. Trigger: \"Source supports durable doctrine/rule/record change\". Procedure: Read raw original and cite anchors; extraction summary allowed for triage, not sole durable evidence. | d444875f500abc6c5dafb6ecfb367ff17174155b7f5df35de82bda26a6f558f6 |\n| 9530fb1c-a58f-4788-99ee-1eac771a4c97 | 4 | MERGE or RETIRE | MERGE into 179be4b8-2fe0-418d-9503-52d1e33921d3: Build-or-recommend-against binary omits authorized planning and product-first backlog; preserve completion discipline within scope. Proposal only; retain original authority until separately enacted. | ab33e3f09e1c9cf0372d1dd1c4afcf81f9d4ddf9cb07d27d6c91a63d49f2c06d |\n| 95e76c1f-0036-418a-93fd-011680cc7f9c | 1 | JUDGMENT | Observable condition: Giving Joe criticism or calibration. Checkpoint: reply to Joe. Action: State mechanism candidly, assume competence. Exceptions/boundaries: No personality categorization or invented psychological interpretation.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 7fe05bee38e0341a2f3fdd62edef6853cb4dc86fd1d2b65371a45e77b1d5db09 |\n| 9730f565-56f0-48cd-9828-746481b8f9d7 | 3 | JUDGMENT | Observable condition: stating a date, time, age or today. Checkpoint: reply to Joe. Action: use observed clock/timestamp and America/Chicago conversion, distinguish source date from event date. Exceptions: explicitly hypothetical dates are labeled; no inference from mood. A check can require a clock receipt but cannot decide every temporal claim. | 67697f340ce8cbadd461c3a1310d082e0df4c7250da86cbd781e0748a362e1d3 |\n| 97326357-d61b-452e-bdae-e02788f90c2b | 1 | JUDGMENT | Observable condition: Capability claim would change doctrine or architecture. Checkpoint: production write. Action: Live-test from the actual surface and label untested hypothesis. Exceptions/boundaries: Other surface or report is insufficient; blocked test remains unverified.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 31b5b54865234cf051e7e9eab4d7f2b4750326b6660c2f60e1de8448c25da9db |\n| 9873a0d2-9077-40f9-8970-2325a927305b | 4 | SKILL | Skill: promote-repeated-how. Trigger: \"Partner explains same procedure twice or an ability drifts\". Procedure: Quote both examples, propose skill with scope and trigger; enact only within task authority and current policy. | c62367a7c72a7f534c98259198e3f4b77b8584dade9569efd1e006255495f179 |\n| 98e74e7c-af2a-463c-b8b5-297abe712f5f | 2 | SKILL | Skill: study-source. Trigger: \"Studying a supplied source\". Procedure: Test capabilities against workflows and parked ideas as well as stated topic; propose scope expansion separately. | 5a5f62919884d4691fd3bea8ebbb48b8551f884a409b0c5b49f9f136b1db2c10 |\n| 9d80fd2d-71b6-439d-b1ad-0f5876252eff | 3 | JUDGMENT | Observable condition: Setting prospect follow-up cadence. Checkpoint: send. Action: Honor prospect’s own terms and consultative pace. Exceptions/boundaries: No next-action date may be intentional; avoid automatic walk-in/back-channel escalation.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 0cc97a0d7c297ebd725c2d842e582a8ead41f550c6e156f3562988ab94eb08d5 |\n| 9e3fb6d0-4871-4cc9-abae-06dc0723ba11 | 3 | SKILL | Skill: study-source. Trigger: \"Colleague/competitor content supplied\". Procedure: Study substance and craft separately; paraphrase knowledge, label craft observation, do not reproduce signature design or publicly identify source. | d3736c10035d6c901a9a1f30eca8779aa966e5c9d3d8f994d2c2697d445250fa |\n| 9f15f21a-18bc-46fc-a06b-7b232d6158ba | 2 | MECHANICAL | BUILD national-account schema and owning-verb invariants: one brand parent org/client, franchisee client per person, deals linked to that franchisee, segment restricted to vertical vocabulary; CI duplicate-parent and wrong-deal-grain fixtures. Historical client examples are data, not constants. | 928b037fe9f855c21f47dac62a52ad70e26e14c13e07f20e6aba32b802a0d2a0 |\n| 9ff56260-af58-4b75-97ae-95d56490bcf5 | 3 | MECHANICAL | EXTEND hooks/guard-unattended.py command parsing and CI stored-command lint: wrapper resolves secret, no private-key path in prompts or command overrides; human-invoked alternate-key path follows original exception. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 25717c8ad5f47cf668ca55851231635e70aa3ca620868380905c69b284dfe6eb |\n| a3da3d39-91b4-47a4-9409-46076223ec0f | 3 | JUDGMENT | Observable condition: A real unresolved human approval remains. Checkpoint: reply to Joe. Action: Ask one named approve/decline question after doable preparation. Exceptions/boundaries: No extra approval for already-authorized effects or rule adoption permitted by current chain; not triggered by this plan.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 2828d8b662e11549ec69f6f7d9254f44bfa07ae16de3220aa36d4b1cff29a4fd |\n| a3f6c7f9-89e1-4678-9770-11dc7c641077 | 3 | JUDGMENT | Observable condition: Proposing restructure for performance/friction. Checkpoint: merge. Action: Name observed slow task and measured consequence. Exceptions/boundaries: Novel authorized capability may use explicit future load; no invented slowness claim.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 7337f07b7da3b28fcf697dc5f526f6b3f65c9d807991d5dd5d7003ef7b256915 |\n| a6e6ab4e-5745-4afc-bb87-1f1588dc4cfe | 3 | SKILL | Skill: verify-deliverable. Trigger: \"Changing existing working behavior\". Procedure: Capture real baseline before change and compare after; if no prior state exists, say so. | c1a00e2a769719e7b462177869907659bf69aa7d1c6bee98fe77ca176a5df3d0 |\n| a7784a18-cc7d-478f-9b1f-76a5150e62d4 | 2 | MECHANICAL | BUILD canonical-checkout write refusal covering file and shell routes; session-owned worktree identity plus full delivery ledger through hosted checks, merge, release verification and cleanup; pre-tool hook and turn-end gate. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 115ccdc2c407b1a524543799df4a8a5252517ebc36057dd66f1416f1891532d7 |\n| a8c55a47-168c-4a25-b36a-743262e4d5a5 | 4 | SKILL | Skill: codebase-design. Trigger: \"Documenting or automating an existing operation\". Procedure: Use the existing wrapper; delete duplicate implementation, or test equivalence if duplication necessary. | 89109921ec7bf336c33316bf5218c82fc21e2be75647bebf7876c2a706ea9cf8 |\n| a8f159ad-ff97-448b-b57a-d77bdc317a00 | 3 | JUDGMENT | Observable condition: Structured artifact or workstation surface ready. Checkpoint: merge. Action: Include visual showing actual flow/location/network/time/composition. Exceptions/boundaries: Icon/photo/table alone is not structural visual; do not fabricate data to draw one.. No deterministic check can establish the contextual meaning or adequacy of this decision. | fae25d0b2c77aac239e9e853b096ee5de8f7e56bc72a6c6394e7b3c313f198a8 |\n| a9ecd5b4-825c-45ac-a19f-e3a8c9d108c0 | 3 | SKILL | Skill: verify-deliverable. Trigger: \"Building/reviewing guard or success signal\". Procedure: Read actual artifact against expected shape; corrupted, missing and hanging cases fail; success receipt derived from validated output. | 6e1ff552f4255abd6c58a9999ac522910278465b42377adda1cfce03a1757929 |\n| a9fc3f0e-e222-4417-8184-a9bb4f010c8c | 3 | SKILL | Skill: research. Trigger: \"Research or fact-check begins\". Procedure: Consult useful-source index and open internet; add useful sources; exfiltration permissions remain separate. | fe224be5334d19711480e21b7eda0da8b2554522f09d6254f99129f574ab8204 |\n| ab814a26-e96e-4772-8c77-0bc455998935 | 4 | SKILL | Skill: design-rule-enforcement. Trigger: \"Rule proposed/amended or violation discovered\". Procedure: Choose invariant or judgment with condition/consumer; explicit plan-only scope stops before adoption and code. | 6879950218ff5501852608f891f4d40b35a19874f73d67195f74368acfd3c0a6 |\n| ac0a6579-b4a3-4e64-8d60-b5f909c737c6 | 3 | JUDGMENT | Observable condition: Client share portal access design. Checkpoint: merge. Action: Keep simple partner-directed password and cross-client isolation. Exceptions/boundaries: Current host/security/legal requirements still control; simple access is scoped to these pages.. No deterministic check can establish the contextual meaning or adequacy of this decision. | b45687dce5a7b37d488d4caf3c3aece8bbae6dcbedbb4731c4ab189d0e44027d |\n| af7de070-5290-45a6-861a-8bed8c882e90 | 3 | MERGE or RETIRE | MERGE into e313a3ca-b23a-440a-be80-cc70c2418069: Keep one transient-classifier retry in command procedure; obsolete blanket sensitive-effect approval examples yield to live authority. Proposal only; retain original authority until separately enacted. | 9aa2d6c74d3fa7348f0eacbb074bfe2d89c21266d0e28911fd84431cc702178d |\n| b01edd26-8378-407f-b5f1-a7a6000e48e1 | 3 | JUDGMENT | Observable condition: Writing counts or blanket summaries in maintained guidance. Checkpoint: merge. Action: Derive mutable counts or bound summary to source revision. Exceptions/boundaries: Snapshot measurement with timestamp/revision is legitimate.. No deterministic check can establish the contextual meaning or adequacy of this decision. | ac811af43b3f2c7f64f33dca70c595729b8e2cc8058772510e073bcf189a08f0 |\n| b1521526-9227-46cc-833c-6d7b49befe34 | 3 | CORE | Proposed wording: Resolve conflicts using Joe’s live direction, then the current domain record, then the newer dated ruling; disclose the conflict. Archives supply evidence, not authority; public material excludes identifiable client details. Justification: Defines precedence across every task; updates file-era wording to current store authority. | af5e252cc5cfcc5556309278bb0ce47f007e848fc96cc7bd047fcc16269b5879 |\n| b3ea627f-e2d4-4d02-bed2-44c086954440 | 3 | MERGE or RETIRE | MERGE into c864b8cb-6801-42bf-a561-4683c0a3b77a: Preserve no scripted reply and do-the-doable-work in core interaction wording. Proposal only; retain original authority until separately enacted. | 11496ddceaf7a189cabda3f7007c70c63a3df3714530826f4f637704b5a244c4 |\n| b3f9b86f-4532-434e-b8b2-de7d0e2d39ad | 2 | SKILL | Skill: report-lane-status. Trigger: \"Asked for lane progress\". Procedure: Read Finish line and tie each criterion to current receipt before PR list; no implied production delivery from merged source. | 50b6c37b33b3b8d90eef44ae8db53479576a03e7c8bbf225dc13f339cd9acda2 |\n| b42e217e-6f64-4529-8c48-18949143ef36 | 4 | MECHANICAL | BUILD authorization parity matrix for both sponsored partners and unattended profiles; verb-side permission tests retain confirm-merge humanCallerOnly boundary. Do not grant by provider name. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | ca55d76a0e1bbccc1926d9e74f9df851532e0ed56e7caf270baeeee181fc86f8 |\n| b42f11a0-2bc5-4f28-9534-9932b5381935 | 3 | JUDGMENT | Observable condition: Sizing architecture for future practice. Checkpoint: merge. Action: Design against named trajectory and compare cost/complexity honestly. Exceptions/boundaries: Merit/proportionality still applies; current smallness alone is not veto.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 868e8d13d7c2e17f564f0c143f59eeca5dd40a265559848f630f6bce5de21075 |\n| b587f6c2-167a-4808-b683-bb7d85bcad1d | 4 | SKILL | Skill: frontier-council. Trigger: \"No deterministic verifier plus wide/anchored options plus expensive reversal\". Procedure: Small diverse fresh chairs, same constraint brief, host prior view, evidence-rerun lens; second round only disagreement, anonymized and evidence-driven; decision recorded. | 282090786bc0b26353eed5e1b7b400318d7dc5d67c84a38e7474cfd005951226 |\n| b7ec8f3b-dd2b-412d-8bf8-5af70c8b683b | 3 | PATH | Claude .claude/rules/rule-b7ec8f3b.md paths: [src/**/*.tsx,src/**/*.css]; Codex nested folder: src/ (AGENTS.md). Proposed wording: Use DoctorCRE’s title, popup, icon-toggle, time-picker and Doc-chat grammar. Keep keyboard alternatives and verify every apparent control acts. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | 417335372fccc2728e746d55b5f0535a4021f87b4c9b424855988c2e99ad6035 |",
+      "id": "28c0592f-59f3-4bb8-b39f-9d2b4c165233",
+      "key": "rules/placement-plan-2026-11-table-4",
+      "text_hash": "9a1488805baf54757d9d37d0219dee87d77e915be7bb4e1a6e49cfcc61c5a9d8",
+      "version": 1
+    },
+    {
+      "body_text": "WR675.S11.J5 — per-rule placement table, part 5. Proposal only. UUID/version/hash bind the live full statement; see summary for decision order and non-adoption boundary.\n| Rule UUID | Version | Bucket | Placement / rewritten wording / exceptions | Source statement SHA-256 |\n|---|---:|---|---|---|\n| ba5730c5-e706-4168-b461-b8fbd5e8d605 | 2 | JUDGMENT | Observable condition: Suggesting contractor/architect introduction. Checkpoint: send. Action: Confirm real shared project, complementary territory and existing loyalties. Exceptions/boundaries: Good sometimes, not default pairing.. No deterministic check can establish the contextual meaning or adequacy of this decision. | bb4fd0939a2f633d41a43f9dd1a19602fdd491402ca55ace06e9e3815ef779d8 |\n| bc4145f6-6a70-4021-ba08-49d991e7a9d8 | 2 | JUDGMENT | Observable condition: Monthly review or repeated observed learning pattern. Checkpoint: reply to Joe. Action: Recommend one primary work-linked resource with specific observed reason. Exceptions/boundaries: No nag/follow-up guilt; no personality categories.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 4264f1adb9c9e3038650455a4b7e17bb7d2cbf5713f8315130e73a65fed790c2 |\n| bc9188b4-afb1-461f-b972-22403af65edd | 5 | MECHANICAL | BUILD ownership-aware staging/commit gate and turn-end delivery check: explicit paths only, no broad git add, no commit on main, commit message file; unresolved foreign paths reported and left intact. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 606774cdf9d2e721284e0ca60ba0ddf9866ab3286a24957443c1bab0762ed6a1 |\n| bd4a6d22-481c-4991-80b0-a617d6eb7665 | 3 | JUDGMENT | Observable condition: Permanent partner-accepted state leaves check red. Checkpoint: merge. Action: Encode exact accepted state, retain outside-case failure and visibility. Exceptions/boundaries: Do not widen generic bypass or remove assertion.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 30bece458cd5201617704f3c910957ed31945d79b746fcd87847f4eb7d044777 |\n| bddb0e7b-14b3-4042-8e88-99cbfbf5a913 | 2 | JUDGMENT | Observable condition: Cross-category vendors may overlap services. Checkpoint: send. Action: Verify actual competitive overlap and client context before introduction. Exceptions/boundaries: Defaults can be overridden explicitly; category labels alone insufficient.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 45d851f15fc3db59116d554ffadce2503dee825ea1df97da4d2aaa77fc6ecef6 |\n| c0b38d80-8c5a-4c93-9248-16f7db2352c6 | 4 | MECHANICAL | EXTEND hooks/gate-integrity.py baseline verification to pre-commit/CI for gate and enforcement-map changes; require regenerated baseline in same commit. Startup detection exists; full pre-commit coverage unverified. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 819ed50a271667be1a89cdb9c1d2906eadc2e5be93d57bebf22d06a37b688a8c |\n| c1db316c-25cf-4d8b-8bb3-ad3dcf099e64 | 3 | MERGE or RETIRE | MERGE into efbdfb1a-7963-4210-b05b-bde1cacc7a17: Clean complete solution principle belongs in deliberate second pass; retain tiny-fix exemption. Proposal only; retain original authority until separately enacted. | 22f1989adb771c268a1cfdeac5fbbf0e8abe644b56c1bd6f74ebdf201ff0f283 |\n| c20dc3d5-801f-47c1-9890-5338956cb03d | 4 | JUDGMENT | Observable condition: Material delegated finding will drive write/spend/send/decision. Checkpoint: production write. Action: Reproduce source evidence and ask producer for missing details before escalation. Exceptions/boundaries: Read-only nonmaterial report can be labeled relayed; agreement is not rerun.. No deterministic check can establish the contextual meaning or adequacy of this decision. | e0036776a081b588e8ecb9d660b88791b65c427f6c2f73c33158681446a6b9f3 |\n| c315befa-b261-45b7-8fb9-87f5d47bd8d8 | 3 | MERGE or RETIRE | MERGE into 3a9dbafd-04cf-460d-a573-619efb3db348: Subject-in-question is the same standalone-description obligation; retain question-box boundary. Proposal only; retain original authority until separately enacted. | 590a2d3796b70505bd91b4f614545cb3da4f7f8c91792200429f80a028020e2f |\n| c363bd8b-c7df-4afe-8dc2-713200f378b0 | 4 | SKILL | Skill: batch-overlapping-prs. Trigger: \"Active PRs overlap generated/shared paths before merge\". Procedure: Group active overlapping changes with combined-head CI/review and regenerated artifacts; held/backlog drafts excluded; retain no-rebase/no-force-push. | 4a289dd89054b8dab6db2bf4cbd79d7249dc80e53dd109d30c3e21bb2bb5e933 |\n| c4a284b2-79ab-4f7c-a99e-2996552609a8 | 3 | SKILL | Skill: research-practitioner-convention. Trigger: \"A question has a substantial practitioner base\". Procedure: observe independent operators, then verify convention against current authoritative rules; no unconfirmed convention becomes legal advice. Novel work and questioning the convention itself are exceptions. | dfbfee1abfa161d1dbc344ebf18ddd62591d4768e926b2e3242bc20c17029cd7 |\n| c53beeaa-4431-488a-b4cf-c04cc0fb51e5 | 4 | MECHANICAL | BUILD paragraph-write readback verifier at owning verb transaction boundary: compare passed fields, non-null expectations and XML parameter contamination; audit/event originals preserved for repair. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 47f804b55c61bc12585e90d1ab5825d4582a4a77665dd64503d618e28223f5e9 |\n| c66dc739-394e-498d-ba87-0b16afd284a0 | 4 | MERGE or RETIRE | MERGE into 49533583-77aa-462b-bd88-ab68efd66795: Local mail route is contained in mail/calendar source policy; retain current policy-checked send distinction separately. Proposal only; retain original authority until separately enacted. | 3aa8ff551fb576b9f576452b963624073c6b9d442d8e21fa160b53bd7ef71761 |\n| c6f69dee-7f6b-46ef-a799-e729f4e3d1f0 | 3 | SKILL | Skill: define-agent-role. Trigger: \"Creating or naming an agent role\". Procedure: Use human job title and bounded skills/rules; voice work may be delegated to named autobiographer role; do not assume role loading proves compliance. | b2228676894dee75c8298962126da848b42119fb4595a4a5c101f67f472a4d88 |\n| c864b8cb-6801-42bf-a561-4683c0a3b77a | 2 | CORE | Proposed wording: When Joe must decide, ask one self-contained question in the question box. Resolve the doable work first so at most one human action remains. Justification: Universal interaction checkpoint; avoids serial handoffs disguised as questions. | 1e094129942becc6f4a2efb1886dffa991453d3d6d9bf2d8ef1189f7fefa5d5e |\n| c8ebeb5b-b2ad-467d-b601-ab30ec9340a2 | 4 | JUDGMENT | Observable condition: Acquisition research finds exiting practice owner. Checkpoint: production write. Action: Classify potential future startup with multi-year nurture and reason. Exceptions/boundaries: CARR does not represent practice sale; acquiring platform is national account.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 233480060239eaada09569c26e1abc3661352ba0d444d96bc218883251067995 |\n| ca841807-a39b-488b-be3d-c5ecf48a54ea | 3 | MERGE or RETIRE | MERGE into 14181e60-e1b7-43eb-bdb7-9ce3cbc85cde: Record-home rule contains findings and narrative-disguised records; remove obsolete doctrine-markdown carve-out. Proposal only; retain original authority until separately enacted. | a68ca72b3e8372a67544c6f2019137e0462e6952f3ed34d426f4c13585a16765 |\n| cc39b82d-333b-42ca-9754-0663c1ee7e00 | 2 | MECHANICAL | BUILD dispatch capacity check using measured cores/load/memory; pre-launch admission queue, no fixed job-count policy; provider/runtime concurrency ceilings remain actual host limits. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | af120799d20afea9494c1c1072d5611d9b615b4ba9554956204cdc22bbef82f7 |\n| cd84d22a-a5df-40cc-9c00-44cc0e1fcbcb | 3 | JUDGMENT | Observable condition: Claude feedback survey offers transcript share. Checkpoint: send. Action: Decline share and explain scope to partner. Exceptions/boundaries: No harmless-session exception; runtime share details require current verification if explained technically.. No deterministic check can establish the contextual meaning or adequacy of this decision. | ccb1098629b00a63316529d3ed6ac113d580478a40f654d9eeb2f7359cfff7fb |\n| ce12c11e-828d-44f4-82e1-d48d57249f2a | 3 | JUDGMENT | Observable condition: Drafting public positioning. Checkpoint: send. Action: Lead with fee-neutral tenant/buyer representation and team expertise. Exceptions/boundaries: No invented client anecdotes or claim of landlord representation.. No deterministic check can establish the contextual meaning or adequacy of this decision. | b9971d31c779a437c25f11ac9b0b36d2c8a0a6884c969b284b6f0b2f9e8f3be6 |\n| cf1c13a6-8446-4a3e-8a2d-fa7d0eb42e16 | 2 | JUDGMENT | Observable condition: Approaching vendor whose services may include brokerage. Checkpoint: send. Action: Verify overlap and frame taking real-estate work off their plate. Exceptions/boundaries: Do not assume welcome or infer competition solely from domain name.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 857b9ddf5cdb218656d1457941bd337f0835ff42d96b13d7a3e3992da1687ab1 |\n| cfe6b5c6-c66f-4830-a09d-4a2e431abe31 | 3 | MECHANICAL | BUILD mechanism activation config check in CI and deploy admission: authorized automation defaults live; shadow only with irreversible untested effect and dated end; kill switch/caps/receipts required. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | b84a74fbc15b71188dcc748fdbca396d1d3ff46ff5eebdee228a870acaa68ec5 |\n| cff429f5-580b-4035-94b0-4e23a073ffd4 | 3 | SKILL | Skill: contact-enrichment. Trigger: \"Contact record has blank wanted field\". Procedure: Search prior capture, mail/signature evidence, then primary web; source facts and labeled inference, ask only unresolved identity fork. | 226f3808398d0e80335798edd85e0a7f11c18965efe56ea76fc78442d0c02e4d |\n| d26d63b0-6944-4212-aa22-8baee56b28d4 | 2 | SKILL | Skill: contact-intake. Trigger: \"Any new contact enters system\". Procedure: Research identity, role, location, clinical/public sources and social links before questions; dated verification; apply amendment72 correction policy. | 8f0e3d35267ee93e3d4e98bf3c75c68e87833626e22a9b0c590e1bf7b2ce3b84 |\n| d3774a28-ba06-4ce0-954e-47ee72c8121c | 3 | JUDGMENT | Observable condition: Model reality differs from agreed concept or brand draft rejected. Checkpoint: reply to Joe. Action: Surface mismatch and use rejection as design evidence. Exceptions/boundaries: Do not silently rewrite domain model or attribute motive.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 0a395c6b39c74c83a8b99f607b32fefe4c0279caf58461b927d13473521804af |\n| d7c69aa6-a91c-4915-95a9-788604f640bc | 3 | MECHANICAL | BUILD calendar unknown-attendee event handler with durable dedupe and mail-evidence -> research -> typed intake queue; skip colleague domains; deterministic trigger cannot decide ambiguous person identity. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 2ac48c884e4b3d79f915bc370bda7f4bb3347657af6478ff180d1b7df725d5e8 |\n| d7e6de46-7e6f-45b8-83c5-8b71fcf1dec0 | 3 | MECHANICAL | BUILD typed money provenance on commission/benefit writes and views: reject benefit source as revenue or forecast as payment; verb-side schema/refusal plus CI attribution fixtures. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 69d5261d7b51cfbfa4e1d64ed1a077cf383298482a420e2eb5c1f5a9b1ba24b9 |\n| d7f74c93-0602-4f0c-be7c-1f5d948b5e33 | 3 | MERGE or RETIRE | MERGE into f673326b-6861-4d85-9954-13145dd0f555: Agent confidentiality rationale is already covered by current no-invented-fences rule; retain credential custody distinction. Proposal only; retain original authority until separately enacted. | c526d181337990bad2aec539b36070911fcc9c27fa61d32d6ce7686f26016add |\n| d8c9b1f0-dce0-4684-b190-33191abf38e9 | 3 | JUDGMENT | Observable condition: Raising machine finding never delivered to partner. Checkpoint: reply to Joe. Action: Explain subject, reason, evidence and inference from scratch. Exceptions/boundaries: A database row or render does not establish prior human delivery.. No deterministic check can establish the contextual meaning or adequacy of this decision. | fddfcc25c50cf06043745f345d71eb7e08af4fc9c240a936b70cb97932904e2e |\n| d9874334-6c02-409c-9949-28e6d22d2ebf | 3 | JUDGMENT | Observable condition: Timeout/empty result being called capability denial. Checkpoint: reply to Joe. Action: Try smallest probe and alternate faithful source, distinguish throughput/stripping from permission. Exceptions/boundaries: Small success proves route access, not access to every data class.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 54515fa59ee99231e616107f638305f7a22dcaffdfcca9151210908128bdba7f |\n| d9ce2b08-75ff-4770-8499-6b4a5d27442c | 3 | MERGE or RETIRE | MERGE into e313a3ca-b23a-440a-be80-cc70c2418069: Verify stale blocker claims and attempt wrappers within authorized command procedure. Proposal only; retain original authority until separately enacted. | a764023f6d0698dc57c9569b0eb3ff7620810696cc3706ae089ec6f238a7cbb8 |\n| dcf98880-41ae-4711-ae83-7766d3e7a84a | 3 | MERGE or RETIRE | MERGE into 38b15dc6-ef80-4bf6-b983-3445b386e7dc: Reliable human execution belongs in runnable-instructions procedure, not universal context. Proposal only; retain original authority until separately enacted. | b4956e3fe4618d637148c60149083fa44d72cf7723e8f949739bbc07936c6856 |\n| def3e84e-a802-4518-b5be-59a0fb908eda | 4 | SKILL | Skill: retire-artifact. Trigger: \"Gallery or published artifact superseded\". Procedure: Visible tombstone and queued cleanup with redirect-stub exception; use owning record verbs, no silent rot. | b47945bfce6eada03b1aaafb43cb83b5e32b1ee568a7db572df784c2caccf9a9 |\n| defee176-47a6-4c0b-bd54-48b171eaeae3 | 2 | MECHANICAL | BUILD Avoid-vendor refusal for both directions at intro/event/send boundary; historical spreadsheet Stage becomes current store status. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 84260aeb9ebdce7d654acab01e48c4ce5bee3022178762494312384b13964811 |\n| df55c398-e31b-42ff-b0e8-b6bd3afb565d | 3 | SKILL | Skill: dispatch-sweep. Trigger: \"Delegating disk search or widening it\". Procedure: State data-class boundary explicitly on initial and widened brief; encrypted stores/credentials/dumps excluded unless human named scope; honor granted business access. | 3a2f7b10de1b1951e65245b00615b3416a7387c460060426ce17481922f9ba92 |\n| df8f1da0-d490-4b73-ad85-e9510204dd32 | 4 | CORE | Proposed wording: An assessment request ends with the assessment. Once work is authorized, carry it through the agreed result without repeat permission requests. Justification: Separates scope from permission on every turn. | 7aca2c79d43478860c2eeed73f81f68d60759af914de7afbc3d1ffe62619acea |\n| e313a3ca-b23a-440a-be80-cc70c2418069 | 4 | CORE | Proposed wording: Run authorized commands yourself after checking the actual runtime and sanctioned wrappers. Leave human-only sign-in, physical confirmation or a genuine denial to the partner. Justification: Prevents needless handoff while retaining real provider/host gates; stale examples need live tests. | 2114a3fb7ac71aba47b9309fc0149ec4c66a1e1e004c878bdb8b443238e656bb |\n| e4d965d9-f898-4d21-b349-828a71418ece | 4 | MERGE or RETIRE | MERGE into e313a3ca-b23a-440a-be80-cc70c2418069: Alternative sanctioned routes and one retry belong in command procedure; obsolete proposal-only/human activation claims yield to current governance. Proposal only; retain original authority until separately enacted. | 2efab3906436a0291b611ce93e7534315560a2f2e712fedf161a6ffd5eca4073 |\n| e65efc68-5106-43ac-a0bf-6d7aba8554eb | 3 | SKILL | Skill: tdd. Trigger: \"Nontrivial implementation, especially gate\". Procedure: Write/run behavioral failing check first, then implement/refactor; gate gets false-success selftests; tiny obvious mechanical edits exempt by sizing. | d50f35af368241c5364ee589f59ef8bd9a3e56293a4ee9ab18c87ea4a568bcd0 |\n| e6e0b0e7-1405-4489-85f7-f53f08c32b6f | 2 | MECHANICAL | BUILD category competitor predicate for intro/co-invite verbs, including cross-vertical peers; authenticated explicit partner/event allowlist is the exception. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 770ac81f3a8d11fc8929f3faa095226d8638829f5dfd89ca2289bf1bd74878c5 |",
+      "id": "3ba0772b-744b-4167-9785-19cd8f906999",
+      "key": "rules/placement-plan-2026-11-table-5",
+      "text_hash": "427b15d8dd13771dca4ce5659e46a3b2efef73366b414f7e570c6285f762039c",
+      "version": 1
+    },
+    {
+      "body_text": "WR675.S11.J5 — per-rule placement table, part 6. Proposal only. UUID/version/hash bind the live full statement; see summary for decision order and non-adoption boundary.\n| Rule UUID | Version | Bucket | Placement / rewritten wording / exceptions | Source statement SHA-256 |\n|---|---:|---|---|---|\n| ea16f322-687e-42f0-bf20-f6881fc7a127 | 2 | MECHANICAL | BUILD lane owner-thread registry and main-based batch/no-stack admission in dispatch/PR metadata; CI checks related fix grouping and parent revision, with explicit held-work exclusions. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | afa32bcfd95740705a448b84281f138f0f62820cf2d1cfa91b32faca4ad18232 |\n| eaa31ac5-83b7-4fc9-84fd-8483a73376a0 | 3 | JUDGMENT | Observable condition: Claiming sent/delivered/handed off. Checkpoint: reply to Joe. Action: Name actual recipient and receipt; distinguish recorded from delivered. Exceptions/boundaries: Record-only authorized tasks report stored section, not delivery; no unsolicited external send.. No deterministic check can establish the contextual meaning or adequacy of this decision. | d26e97bef2d7b0a851a9ecb9c0e10b6375fd5937ab2067f37ddcede21985b4b1 |\n| ed2828ac-1bc9-4dd9-89d3-c44ef67af695 | 2 | PATH | Claude .claude/rules/rule-ed2828ac.md paths: [src/**/map/**,tools/**/map*]; Codex nested folder: src/map/ (AGENTS.md). Proposed wording: For research-map previews, verify every marker and overlay fits desktop and mobile. Preserve exact requested geography and full ZIP polygons. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | 1247728c8b015e4bf65da8e472297db921745cff5231061e5fe26f78225ea109 |\n| eda17f3a-bcb0-4cfd-ba35-a03835466ea6 | 2 | SKILL | Skill: dispatch-job. Trigger: \"Launching a delegated job\". Procedure: Name provider/model selected by difficulty and current budget; leave provider defaults intact; obey host target-options schema. | f738e9ba5e289708cfb4f8a25818cf339f95b9c56be09ebacc241b1016a03e1d |\n| ede4c735-2dcb-46d1-a8d1-e0c3a660265a | 2 | MECHANICAL | EXTEND writing lint surface admission: run prospect-visible rules for email/social/proposal/web at pre-send and CI, exempt internal prompts/comments/specs; internal dialogue still follows its own core. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | 1c7d4dbc6726dc9043e84a9109122e6b780f447c91c7d9398462e784c0ca0118 |\n| eeb3d106-70ea-4ef5-a0f4-999160c0fd9f | 3 | PATH | Claude .claude/rules/rule-eeb3d106.md paths: [src/**/*.tsx,src/**/*.css]; Codex nested folder: src/ (AGENTS.md). Proposed wording: Encode workstation urgency with redundant pulse, color and shape: slow for healthy, faster for attention, still for dormant. Reduced-motion keeps the state visible without pulse. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | fab1b8ae8325cc57b5d501e9954b07c7d8328b06cf33a4357a48f2ec55f9b25b |\n| efbdfb1a-7963-4210-b05b-bde1cacc7a17 | 3 | SKILL | Skill: zero-tech-debt. Trigger: \"Nontrivial build works and is ready for review\". Procedure: Reconsider solved shape with new knowledge, remove avoidable complexity; skip tiny obvious fixes, keep authorized result fixed. | 93c8735d307ebc49982eb346274ae0d8c57fa83fc2aa33812983d3efb61bb293 |\n| f04a05aa-7942-4e8b-8f36-957c7a606135 | 3 | SKILL | Skill: create-autonomous-run. Trigger: \"Creating scheduled task, trigger or subagent\". Procedure: Define done/failure, watch first run, dated recurrence ledger and live SOP pointer; test preflight and alarm before live. | 0aa643e7864ef079a5a6da40b0ba04a0898c1a7c83cb2953972becdfc77137b3 |\n| f04b591f-e4c7-4bca-9eca-5b9fcdcf0c9e | 2 | PATH | Claude .claude/rules/rule-f04b591f.md paths: [templates/**/client-brief/**,tools/**/demograph*]; Codex nested folder: templates/client-brief/ (AGENTS.md). Proposed wording: When a brief asks for demographic percentages, lead with age/sex and income-band shares. Keep counts and source cells in the research evidence. Proposed destination globs require repository path-resolution before generation; these files are not claimed to exist. Apply in doctorcre-app for UI, carr-system for templates/tools; cross-repo projection binds exact revisions. Source-body exceptions remain in linked skill/reference, not silently dropped. | 15e9bd0f5f18d1edc58922e1eb8155f7713764b19b37a43357e3c893f882902a |\n| f0f9156e-089d-4ec5-8b95-e477125ba3b9 | 3 | JUDGMENT | Observable condition: Local/cloud design affects phone mobility. Checkpoint: merge. Action: Design mobile option and state specific exposure for partner ruling. Exceptions/boundaries: Consent, voiceprint and third-party confidentiality floors remain; no silent local-first inference.. No deterministic check can establish the contextual meaning or adequacy of this decision. | d47ea8a227df2acf3e290462ef819e5d706ec19c0b8908f129c31969c1649778 |\n| f2d58a30-7e51-4a96-afb0-c5805593afc2 | 3 | JUDGMENT | Observable condition: Client-facing option recommendation. Checkpoint: send. Action: State honest substantive limit and why per option. Exceptions/boundaries: Must follow evidence; do not invent a contrast merely to satisfy style.. No deterministic check can establish the contextual meaning or adequacy of this decision. | 891ebf8ee2345f8f8bb82fe474b714972bcc0bf6ae09fe75a425d555af085f38 |\n| f47a8fe9-0028-4dd3-92b7-8c5411ac3942 | 2 | MERGE or RETIRE | MERGE into fa217e48-d763-481e-8146-dcf1420c19a8: Four verification examples become query fixtures and verification skill references, not another standing rule. Proposal only; retain original authority until separately enacted. | f481ce9dcd1ab89119e529c6396fe7cb7218cc298f63b26dffa9b673647ef9cc |\n| f5bac101-d076-4245-bdab-dc7a97056468 | 3 | JUDGMENT | Observable condition: Choosing polish versus pipeline improvement. Checkpoint: merge. Action: Compare real brokerage impact and agreed product priority. Exceptions/boundaries: Early-stage label does not veto named future scale or authorized work.. No deterministic check can establish the contextual meaning or adequacy of this decision. | d0015e907ad3b85aaf8a30a949377cb180aef0d44214e70c769e5fe55b203188 |\n| f5beac20-3519-44e9-93fd-dcfa67aba818 | 3 | JUDGMENT | Observable condition: Useful source idea falls outside current scope. Checkpoint: turn end. Action: Capture durable insight and concrete possible application, let partner rule expansion. Exceptions/boundaries: Read-only planning does not authorize adoption/build.. No deterministic check can establish the contextual meaning or adequacy of this decision. | f302dd49b3cb915d26883e15c499b7f9a9d16af844757c9c22baa4bd075c334f |\n| f5d97b4a-ccd8-4fb7-8e5f-e4e7ed44569d | 2 | SKILL | Skill: costar-export. Trigger: \"Authorized task uses CoStar\". Procedure: use currently permitted desktop pane, one observed action at a time, market query then offline filtering and saved export layout; challenge/block stops for partner. Historical browser limitations require live confirmation, never bypass a platform block. | c0a4ca827d12a4d59a0c5bf4417ab3646c64a60bd0c2b67dbb0d3a24d29427fb |\n| f673326b-6861-4d85-9954-13145dd0f555 | 3 | CORE | Proposed wording: Apply the access Joe authorized without adding data fences. Raise live-credential custody once; explain autonomy, isolation, recovery and cost when those matter. Justification: Cross-task access posture; replay matched two corrected cases; does not waive host controls. | 8e3907ed3e762cd3db33adf04bfa963bbfcde015efdc69629c5b1007fa31b182 |\n| f92dfab2-87ee-469d-b683-397167a373ca | 2 | SKILL | Skill: client-search-packet. Trigger: \"Publishing property search packet\". Procedure: Ground market commentary in actual search comps, medians/ranges and inventory limits; current findings/confirmations evidence, omit unsupported numbers. | 12e22effd1740cea0d8879c90723febe37f8f8a12f3eaad35f95f2cfefcd7bf0 |\n| fa217e48-d763-481e-8146-dcf1420c19a8 | 3 | CORE | Proposed wording: Before calling work done or a claim verified, inspect the actual artifact with a current tool result. State what remains unverified, skipped or failed. Justification: Universal evidence rule; receipt existence cannot establish semantic correctness. | 1514738e937a70ba1c153ac73d327dd03a1a58a81d8f28abfa22023bded5afec |\n| faae6748-851b-479d-b01e-543aa0cc17f5 | 2 | MECHANICAL | BUILD filesystem destructive-action permission: candidate deletion becomes _to_delete move with original path receipt; final removal requires human decision. Source cleanup governed by PR policy needs explicit distinct exception rather than accidental blanket rm denial. BUILD/EXTEND names are proposed controls, not claims they are installed or sufficient. Cross-route tests must precede removing worker guidance. | b9ca4f07a33366c0dbed2516a8cc8d7a33aab11c47f94dfc0cedb627d306e5ce |\n| faf1b643-1936-44f9-af5a-2f26461dfef6 | 2 | JUDGMENT | Observable condition: Changing vendor relationship level. Checkpoint: production write. Action: Consider countable two-way and reciprocal value evidence, compare suggestion view. Exceptions/boundaries: Stored level remains human judgment; event counts are evidence, not automatic promotion.. No deterministic check can establish the contextual meaning or adequacy of this decision. | f36a35845ea7574ce3b48a68810b5925d00dcbe152aaf6e1d036a6c135234142 |\n| fc21a431-6a17-4843-b610-60e63aba17e6 | 3 | MERGE or RETIRE | MERGE into 4a9188f3-5b7f-4be8-aea4-211df356671b: Correction trigger and durable-recurrence test belong in one capture procedure; update store proposal/adoption mechanism without adoption here. Proposal only; retain original authority until separately enacted. | f7d38b3f7dbe1b10e6b426b24bd8f9cfb7cc1ed67bf70652ac00a53331919be4 |\n| fc4d7753-34d1-49f7-9cdd-ef756e17b574 | 3 | JUDGMENT | Observable condition: Proposing added structure or outside idea. Checkpoint: merge. Action: Test real need, smallest adequate structure, output and single authority. Exceptions/boundaries: Evaluate against named future scale; do not treat minimum current size as future design target.. No deterministic check can establish the contextual meaning or adequacy of this decision. | edc69aef4cce3f414c92f1dc8b188e8305deaf421bf0935e7cdafc446cabc56e |",
+      "id": "82a449c8-8fc4-4e9c-a895-1390448ad2bc",
+      "key": "rules/placement-plan-2026-11-table-6",
+      "text_hash": "bd15bdbfa23d28581a74535dd005aa6cfd8faebe0f3923dc1337da6526ecc8ad",
+      "version": 1
+    }
+  ]
+}
