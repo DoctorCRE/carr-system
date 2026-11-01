@@ -1493,6 +1493,27 @@ test('reply draft edits reject recipient and status fields and invalid text with
   assert.deepEqual((await listed()).find(item => item.id === proposal.proposal_id), before);
 });
 
+test('reply draft edits and submissions reject oversized raw text without changing the row', async () => {
+  for (const action of [editDraft, submitDraft]) {
+    const proposal = await draftFor();
+    const before = (await c.query('select * from email_proposal where id=$1', [proposal.proposal_id])).rows[0];
+    await refuses(action(proposal, { body: ' '.repeat(50000) + 'hello' }), 'invalid_field_value');
+    await refuses(action(proposal, { subject: ' '.repeat(999) + 'hello' }), 'invalid_field_value');
+    assert.deepEqual((await c.query('select * from email_proposal where id=$1', [proposal.proposal_id])).rows[0], before);
+  }
+});
+
+test('reply draft edits and submissions accept a 20000-character raw body', async () => {
+  const body = ' '.repeat(19995) + 'hello';
+  for (const action of [editDraft, submitDraft]) {
+    const proposal = await draftFor();
+    const result = await action(proposal, { body });
+    assert.equal(result.body, body);
+    const row = (await c.query('select draft_body, submitted_email from email_proposal where id=$1', [proposal.proposal_id])).rows[0];
+    assert.equal(action === editDraft ? row.draft_body : row.submitted_email.body, body);
+  }
+});
+
 test('reply draft edits refuse submitted drafts and cannot change frozen send text', async () => {
   const proposal = await draftFor();
   const submitted = await submitDraft(proposal);

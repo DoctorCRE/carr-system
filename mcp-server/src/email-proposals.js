@@ -106,6 +106,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     if (row.version !== version) fail('version_conflict', { current_version: row.version });
   };
   const checkDraftText = args => {
+    if ([...args.subject].length > 998 || [...args.body].length > 20000) fail('invalid_field_value');
     if (!args.body.trim()) fail('email_draft_empty_body');
     if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
   };
