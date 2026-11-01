@@ -913,7 +913,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                             run_checks: bool = True, max_attempts: int = 3,
                             releasing: bool = False) -> dict[str, Any]:
     existing = read_json(session_dir / STATUS_FILE) or {}
-    if existing.get("state") == "held_review" and not releasing:
+    if existing.get("state") == "held_review" and not releasing and not (session_dir / REPORT_FILE).exists():
         return existing
     if (session_dir / REPORT_FILE).exists():
         held = hold_transcript_repeat(session_dir, read_json(session_dir / REPORT_FILE) or {})
@@ -927,7 +927,14 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             hold_day = report.get("checks_hold_day") or call_budget.budget_day(
                 datetime.fromtimestamp((session_dir / REPORT_FILE).stat().st_mtime, timezone.utc))
             if call_budget.budget_day() <= hold_day:
-                return read_json(session_dir / STATUS_FILE) or _complete_session(session_dir, report)
+                retry_budget = "budget" in report["checks_hold"].lower() and not report.get("deal_check", {}).get("exception_class")
+                if retry_budget:
+                    try:
+                        call_budget.reserve(session_dir.parent / ".jev-budget.json", check_only=True)
+                    except call_budget.BudgetHold:
+                        retry_budget = False
+                if not retry_budget:
+                    return existing if existing.get("state") in {"ready_review", "filed"} else _complete_session(session_dir, report)
             import post_call_jev
 
             try:
