@@ -126,6 +126,25 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(len({args['idempotency_key'] for args in filed}), 1)
         self.assertEqual(counts['abandoned'], 1)
 
+    def test_inbound_inherited_thread_keeps_reply_draft_after_confirmed_filing(self):
+        source = dict(email('inherit-reply', ASK), deal=None, kind='email_in', mailbox_owner='dell')
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'emails': [source], 'open_deals': [{'id': DEAL}]}
+            return {'ok': True}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'Thanks. I will send the floor plan by Friday.'}
+        counts = email_router.route(carr, lambda e, d: {'proposals': [*BOTH['proposals'], draft]},
+            refusal_code, {}, NOW, matching=lambda *args: email_matching.MatchDecision(
+                'inherit_thread', DEAL, thread_activity_id='prior'))
+        writes = [(verb, args) for verb, args in calls if verb != 'email-router-queue']
+        self.assertEqual(writes[0][0], 'inherit-email-thread')
+        self.assertEqual([a['kind'] for v, a in writes[1:]], ['next_step', 'reply_draft'])
+        self.assertEqual(writes[-1][1]['deal'], DEAL)
+        self.assertEqual((counts['recorded'], counts['routed']), (2, 1))
+
     def test_unconfirmed_filing_hint_keeps_next_step_on_the_contact(self):
         source = dict(email('unfiled', ASK), deal=None, kind='email_out',
                       sender={'email': 'sender@example.test'}, mailbox_owner='dell')

@@ -569,7 +569,6 @@
     "unused-export:src/salesforce-reconciliation-store-rw02.v5.js:V5_RW02_STORE_SCHEMA_VERSION",
     "unused-export:src/salesforce-reconciliation-store-rw02.v5.js:v5Rw02StoreToolRegistrations",
     "unused-export:src/scac-exact-effects.js:canonicalExactEffect",
-    "unused-export:src/scac-mutation-registry.current.generated.js:SCAC_MUTATION_CURRENT_DB_GRANTS",
     "unused-export:src/scac-mutation-registry.current.generated.js:SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST",
     "unused-export:src/situation-retrieval.js:retrievalVisibilityActorId",
     "unused-export:src/system-work-census.v5.js:EXTERNAL_WORK_KINDS",
