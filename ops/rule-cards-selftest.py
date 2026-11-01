@@ -99,6 +99,18 @@ class CardTests(unittest.TestCase):
                     '[gone](removed/file.txt) See removed/file.py.\n[ref]: removed/other.txt'),
                     ['removed/file.py', 'removed/file.txt', 'removed/other.txt'])
 
+    def test_store_statement_paths_are_not_repository_references(self):
+        spec = importlib.util.spec_from_file_location(
+            'guidance', REPO / 'ops/sync-core-rule-cards.py')
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        text = ('See before.py.\n<!-- carr-native-rules:start -->\n'
+                "Read that machine's settings.json.\n"
+                '<!-- carr-native-rules:end -->\nSee after.py.\n')
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+                checker, 'ROOT', Path(directory)):
+            self.assertEqual(checker.missing_paths(text), ['after.py', 'before.py'])
+
     def test_cards_file_renders_from_the_store(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
         sync = importlib.util.module_from_spec(spec)

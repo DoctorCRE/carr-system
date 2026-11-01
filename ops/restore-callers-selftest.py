@@ -80,6 +80,22 @@ class RestoreCallers(unittest.TestCase):
             self.assertEqual({item.split(':')[0] for item in violations},
                              {'future.sh', 'future.md', 'direct.sh', 'future.json'})
 
+    def test_proposal_statements_are_not_restore_invocations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = fixture_env()
+            subprocess.run(['git', 'init', '-q', str(root)], env=env, check=True)
+            proposal = root / 'docs/generated-rules/mechanical.md'
+            proposal.parent.mkdir(parents=True)
+            proposal.write_text('Historical command: `./run.sh restore-rehearse`.\n')
+            runbook = root / 'docs/recovery.md'
+            runbook.write_text('./run.sh restore-rehearse\n')
+            subprocess.run(['git', 'add', str(proposal), str(runbook)],
+                           cwd=root, env=env, check=True)
+            found, violations = caller_violations(root)
+            self.assertEqual(found, ['docs/recovery.md:1'])
+            self.assertEqual(violations, ['docs/recovery.md:1'])
+
     def test_recovery_argument_parser_accepts_run_ids_and_refuses_local_backups(self):
         source = (ROOT / 'bin/key-recovery-test.sh').read_text()
         parser = source[source.index('BACKUP_RUN_ID=latest'):source.index('say()')]

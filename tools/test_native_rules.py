@@ -1,4 +1,5 @@
 import copy
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,15 @@ import native_rules as rules
 class NativeRulesTests(unittest.TestCase):
     def setUp(self):
         self.snapshot = rules.load_snapshot(rules.ROOT / rules.SNAPSHOT)
+
+    def test_offline_ci_discovers_generator_tests_without_live_probes(self):
+        spec = importlib.util.spec_from_file_location('ci_gates', rules.ROOT / 'ops/ci-gates.py')
+        gates = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gates)
+        programs = gates.gate_programs()
+        self.assertIn('tools/test_native_rules.py', programs)
+        self.assertFalse(any('native_codex_loading' in p or 'native_rule_loading' in p
+                             for p in programs))
 
     def test_symlink_overwrite_refused_before_any_write(self):
         with tempfile.TemporaryDirectory() as directory:
