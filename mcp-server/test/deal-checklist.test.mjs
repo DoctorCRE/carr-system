@@ -80,15 +80,15 @@ test('requested deadlines enter the existing due list', () => {
   assert.deepEqual(result.due_items.map(item => [item.id, item.status]), [['requirements', 'overdue'], ['market_survey', 'due']]);
 });
 
-test('a confirmed document receipt leaves delivery reminders without satisfying the row', () => {
+test('a confirmed document receipt stops delivery reminders without satisfying the row', () => {
   const request = { id: 'received', row_key: 'requirements', owner: 'joe', due_on: '2026-10-19',
     document_type: 'requirements', status: 'fulfilled', fulfilled_at: '2026-10-20T12:00:00Z',
-    fulfilled_by: 'partner', evidence_attachment_id: 'stored-document', satisfied: false, receipts: [] };
+    fulfilled_by: 'partner', evidence_attachment_id: 'stored-document', evidence_filename: 'Title.pdf', satisfied: false, receipts: [] };
   const result = checklist({ requests: [request] });
   const row = result.phases.flatMap(phase => phase.items).find(item => item.id === request.row_key);
   assert.equal(row.status, 'received');
   assert.equal(row.request.satisfied, false);
-  assert.equal(row.evidence_ref, 'attachment:stored-document');
+  assert.equal(row.evidence_ref, 'Title.pdf');
   assert.equal(result.due_items.some(item => item.id === request.row_key), false);
 });
 
@@ -108,7 +108,7 @@ test('confirmed receipt preserves authoritative lease, invoice and commission co
     lease: { status: 'current', executed_on: '2026-10-19', evidence_ref: 'fixture:executed-lease' },
     commissions: [{ commission_id: 'paid', status: 'received', received_on: '2026-10-19' }],
     requests: ids.map(row_key => ({ id: row_key, row_key, owner: 'joe', due_on: '2026-10-19',
-      status: 'fulfilled', evidence_attachment_id: 'stored-document', satisfied: false, receipts: [] })),
+      status: 'fulfilled', evidence_attachment_id: 'stored-document', evidence_filename: 'Title.pdf', satisfied: false, receipts: [] })),
   });
   const items = result.phases.flatMap(phase => phase.items);
   for (const id of ids) {
