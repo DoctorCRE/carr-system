@@ -118,6 +118,44 @@ test('Home agenda real SQL preserves eligibility, nullable dates, holds and read
         assert.equal(Object.hasOwn(row, 'market'), false);
       }
     });
+    await t.test('active-phase deals with no open next action are flagged and grouped by owner', async t => {
+      await c.query('begin');
+      t.after(() => c.query('rollback'));
+      await c.query("insert into actor values ($1,'joe')", [id(101)]);
+      await c.query(`insert into board_source(id,name,phase,owner,outcome,operating_state) values
+        ($1,'Synthetic bare','research','joe',null,'active'),
+        ($2,'Synthetic with action','negotiation','dell',null,'active'),
+        ($3,'Synthetic item only','legal','dell',null,'active'),
+        ($4,'Synthetic done only','closing','dell',null,'active'),
+        ($5,'Synthetic captured action','site_selection','dell',null,'active'),
+        ($6,'Synthetic pending','pending','joe',null,'active'),
+        ($7,'Synthetic closed','closed','dell',null,'active'),
+        ($8,'Synthetic lost','research','dell','lost','active'),
+        ($9,'Synthetic parked','research','joe',null,'parked'),
+        ($10,'Synthetic held','research','dell',null,'active'),
+        ($11,'Synthetic unowned','negotiation',null,null,'active'),
+        ($12,'Synthetic other partner ball','research','joe',null,'active')`,
+        [1,2,3,4,5,6,7,8,9,10,11,12].map(id));
+      await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,status,item_title,hold_until) values
+        ($1,'deal',$2,$3,'Synthetic open ball','open',null,null),
+        ($4,'deal',$5,$3,'Synthetic open item','open','Synthetic Item',null),
+        ($6,'deal',$7,$3,'Synthetic done ball','done',null,null),
+        ($8,'deal',$9,$3,'Synthetic held ball','open',null,'2026-11-15'),
+        ($10,'deal',$11,$3,'Synthetic dropped ball','dropped',null,null),
+        ($12,'deal',$13,$3,'Synthetic ball held by the other partner','open',null,null),
+        ($14,'lead',$2,$3,'Synthetic lead ball sharing an id','open',null,null)`,
+        [id(301),id(2),id(100),id(302),id(3),id(303),id(4),id(304),id(10),id(305),id(1),id(306),id(12),id(307)]);
+      await c.query("insert into capture_post_call_action(id,deal_id,owner_id,description,status) values ($1,$2,$3,'Synthetic captured ball','open')", [id(308),id(5),id(100)]);
+      await c.query('set role carr_reader');
+      const result = await read();
+      assert.deepEqual(result.deals.map(d => [d.id, d.needs_next_action]), [
+        [id(1),true],[id(2),false],[id(3),true],[id(4),true],[id(5),false],[id(6),false],[id(10),false],[id(11),true],[id(12),false]]);
+      assert.deepEqual(result.missing_next_action, [
+        { owner: 'dell', deal_ids: [id(3), id(4)] },
+        { owner: 'joe', deal_ids: [id(1)] },
+        { owner: null, deal_ids: [id(11)] },
+      ]);
+    });
     for (const kind of ['deals', 'critical_dates', 'open_actions', 'checklist_items']) await t.test(`${kind} limit is inclusive and overflow refuses rather than truncates`, async t => {
       await c.query('begin');
       t.after(() => c.query('rollback'));
