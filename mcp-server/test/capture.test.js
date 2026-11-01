@@ -47,6 +47,11 @@ class CaptureFake {
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
     if (sql.includes("call-outcome:resolve-session-lock") || sql.includes("call-outcome:resolve-undo-check")) return { rows: [] };
     if (sql.includes("dealroom:field-lock")) return { rows: [] };
+    if (sql.startsWith("select b.next_step,b.next_date::text as next_date"))
+      return { rows: [{ next_step: null, next_date: this.nextDate ?? null, action_id: null }] };
+    if (sql.includes("'next_action' as source") && sql.includes("from capture_post_call_action")
+        && !sql.includes("capture:followup-existing")) return { rows: [] };
+    if (sql === "select current_date::text as day") return { rows: [{ day: "2026-08-08" }] };
     if (sql === "select next_date::text as next_date from deal where id=$1")
       return { rows: [{ next_date: this.nextDate ?? null }] };
     if (sql.includes("dealroom:set-next-date")) { this.nextDate = params[1]; return { rows: [] }; }

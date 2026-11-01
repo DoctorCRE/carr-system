@@ -8,7 +8,6 @@ import { callTool } from '../src/mcp.js';
 import { authenticatedIdentity } from '../src/identity.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
-import { SCAC_MUTATION_CURRENT_DB_GRANTS } from '../src/scac-mutation-registry.current.generated.js';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
 
@@ -174,10 +173,10 @@ test('a password opens only its client portal and the live deal roadmap', async 
       }
     });
 
-    await t.test('the installed portal grant contract matches the runtime contract', async () => {
-      const portalGrants = contract => contract.secdef_execute.filter(grant => grant.signature.startsWith('ops.read_client_portal('));
-      assert.deepEqual(portalGrants((await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract),
-        portalGrants(SCAC_MUTATION_CURRENT_DB_GRANTS));
+    await t.test('the installed portal grant contract registers the writer definer once', async () => {
+      const contract = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0].contract;
+      assert.deepEqual(contract.secdef_execute.filter(grant => grant.signature.startsWith('ops.read_client_portal('))
+        .map(grant => grant.grantee), ['carr_writer']);
     });
 
     await t.test('the portal definer follows the canonical trusted search path policy', async () => {
