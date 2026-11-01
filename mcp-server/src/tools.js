@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
@@ -67,7 +68,7 @@ import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail } from "./email
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
-import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions } from "./brief-calendar.js";
+import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
@@ -2397,7 +2398,9 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preserv
     "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
     [dealId],
   );
-  const board = (await c.query("select next_step from v_deal_room_board where id=$1 /* dealroom:board-step */", [dealId])).rows[0];
+  const board = (await c.query(`select b.next_step, n.id as board_next_action_id from v_deal_room_board b
+    left join v_deal_current_action n on n.deal_id=b.id and n.status='open'
+    where b.id=$1 /* dealroom:board-step */`, [dealId])).rows[0];
   const note = await c.query(
     "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
     [dealId, text, actor.id],
@@ -2423,7 +2426,7 @@ async function appendDealNextStep(c, actor, dealId, text, nextDate, key, preserv
     [dealId, actor.id, nextDate, text, actionStatus]);
   await writeEvent(c, actor, "set-next-step", "deal", dealId, {
     field: "next_step",
-    old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null } : {}) },
+    old: { next_step: prior.rows[0]?.text ?? null, ...(board ? { board_next_step: board.next_step ?? null, board_next_action_id: board.board_next_action_id ?? null } : {}) },
     new: { next_step: text, next_date: nextDate, next_action_id: action.rows[0].id,
       replaced_action_ids: replaced.map(row => row.id) },
     recorded_at_after_lock: true,
@@ -2464,12 +2467,10 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
   await lockDealField(c, dealId, "next_date");
   await lockDealField(c, dealId, "next_step");
   const current = (await c.query(
-    `select d.next_date::text as next_date, d.next_date < current_date as overdue, d.owner,
+    `select b.next_date::text as next_date, b.next_date < current_date as overdue, d.owner,
             n.id as action_id, b.next_step
-       from deal d left join v_deal_room_board b on b.id=d.id left join lateral (
-         select id, description from next_action where subject_type='deal' and subject_id=d.id and status='open' and item_title is null
-          order by updated_at desc, id desc limit 1
-       ) n on true where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
+       from deal d left join v_deal_room_board b on b.id=d.id
+       left join v_deal_current_action n on n.deal_id=d.id and n.status='open' where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
   const dropped = (await c.query(
     `update next_action set status='dropped', updated_by=$2
       where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open' and item_title is null
@@ -2492,9 +2493,9 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
     ...(supersededIds.length ? { superseded_action_ids: supersededIds,
       superseded_post_call_action_ids: postCall.map(a => a.id) } : {}) };
   const next = (await c.query(
-    `select description, due_on::text as due_on from next_action
-      where subject_type='deal' and subject_id=$1 and status='open' and item_title is null
-      order by updated_at desc, id desc limit 1 /* dealroom:remaining-plan */`, [dealId])).rows[0];
+    `select n.description, n.due_on::text as due_on from v_deal_current_action current_action
+      join next_action n on n.id=current_action.id
+      where current_action.deal_id=$1 and current_action.status='open' /* dealroom:remaining-plan */`, [dealId])).rows[0];
   const nextDate = next?.due_on ?? null;
   await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
     [dealId, nextDate, actor.id]);
@@ -2521,13 +2522,20 @@ const callNextStepItems = Symbol('call next step items');
 const captureKey = id => derivedIdempotencyKey("capture-candidate", id);
 const captureKeys = id => [`capture:${id}`, captureKey(id)];
 
-async function completedRetainedStep(c, dealId, candidateIds, step) {
+// Match the action the board showed at apply time. Older events have only its text.
+async function completedRetainedStep(c, dealId, candidateIds, firstStepEventId) {
   return (await c.query(
-    `select 1 from event request join next_action n on n.subject_type='deal' and n.subject_id=$1
+    `select 1 from event first_step join event request on request.subject_type='deal' and request.subject_id=$1
+      join next_action n on n.subject_type='deal' and n.subject_id=$1
        and request.new_value->'actions' @> jsonb_build_array(jsonb_build_object('id',n.id::text,'source','next_action'))
-      where request.subject_type='deal' and request.subject_id=$1 and request.field='overdue_assessment_pending'
-        and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done' and n.description=$3
-      limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, step])).rows.length > 0;
+      where first_step.id=$3 and request.field='overdue_assessment_pending'
+        and request.new_value->>'candidate_id'=any($2::text[]) and n.status='done'
+        and case when first_step.old_value ? 'board_next_action_id'
+          then n.id::text=first_step.old_value->>'board_next_action_id'
+          else n.description=case when first_step.old_value ? 'board_next_step'
+            then first_step.old_value->>'board_next_step' else first_step.old_value->>'next_step' end
+        end
+      limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, firstStepEventId])).rows.length > 0;
 }
 
 async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
@@ -2538,7 +2546,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   await lockDealField(c, dealId, "next_step");
   await versionGuard(c, "deal", dealId, args.base_version);
   const events = (await c.query(
-    `select field, old_value, new_value, recorded_at from event
+    `select id, field, old_value, new_value, recorded_at from event
       where subject_type='deal' and subject_id=$1 and idempotency_key=any($2::text[]) and field in ('next_step','next_date','next_action')
       order by recorded_at, id /* call-outcome:undo-step-events */`, [dealId, keys])).rows;
   const first = field => events.find(row => row.field === field);
@@ -2576,7 +2584,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
   const shown = (await c.query("select next_step from v_deal_room_board where id=$1", [dealId])).rows[0]?.next_step ?? null;
   // The board shows the newest open ball, else the newest unhidden note. Put
   // back the note it showed, or hide the call's note when it showed none.
-  const completedPrior = await completedRetainedStep(c, dealId, [candidate.id], priorStep);
+  const completedPrior = await completedRetainedStep(c, dealId, [candidate.id], first("next_step").id);
   if (priorStep !== null && shown !== priorStep && !completedPrior)
     await c.query("insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) /* call-outcome:undo-step-note */",
       [dealId, priorStep, actor.id]);
@@ -2855,7 +2863,7 @@ export const TOOLS = {
 
   "find": {
     write: false,
-    description: "Search people, practices, buildings, deals, leads, vendors by name (fuzzy). Use FIRST when you only have a name; returns refs (L-/C-/V-) the write verbs take. Matches party.name / deal.name / client.roster_ref. Survivors come first and are counted separately from retired aliases: `refs`/`live_rows` are what you may write to, `retired_refs`/`retired_aliases` are tombstones of completed merges, kept navigable but never a target. Also returns the intro-graph edges touching the match (who can introduce whom), newest first. FOLLOWS THE LEAD ↔ CLIENT LINK SINCE 0102: `lead_client_links` pairs a matched lead with the client it became (or sits under), by exact key and never by name, and `deals_via_link` carries the deals filed under that client — which is how a search for a doctor's name finally surfaces the deal filed under their practice's name. `deals` remains the name-match list and the two are never blended. NOT the verb for a ref you already hold (catch-me-up takes that), and NOT the referral-path verb (who-do-we-know walks the graph). Read-only.",
+    description: "Search people, practices, buildings, deals, leads, vendors by name (fuzzy) or exact contact email (case-insensitive). Use FIRST when you only have a name; returns refs (L-/C-/V-) the write verbs take. Matches party.name / deal.name / client.roster_ref. Survivors come first and are counted separately from retired aliases: `refs`/`live_rows` are what you may write to, `retired_refs`/`retired_aliases` are tombstones of completed merges, kept navigable but never a target. Also returns the intro-graph edges touching the match (who can introduce whom), newest first. FOLLOWS THE LEAD ↔ CLIENT LINK SINCE 0102: `lead_client_links` pairs a matched lead with the client it became (or sits under), by exact key and never by name, and `deals_via_link` carries the deals filed under that client — which is how a search for a doctor's name finally surfaces the deal filed under their practice's name. `deals` remains the name-match list and the two are never blended. NOT the verb for a ref you already hold (catch-me-up takes that), and NOT the referral-path verb (who-do-we-know walks the graph). Read-only.",
     inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
     handler: async (c, _a, args) => {
       const q = args.query;
@@ -2872,7 +2880,8 @@ export const TOOLS = {
         `select display_name as name, city, specialty, org_name, ref, subject_type as kind, merged
          from v_ref_index
          where subject_type in ('lead','client','vendor')
-           and (display_name % $1 or display_name ilike $2)
+           and (display_name % $1 or display_name ilike $2
+             or party_id in (select id from party where lower(trim(email))=lower(trim($1))))
          order by merged, similarity(display_name,$1) desc limit 10`, [q, `%${q}%`]);
       // ORGS AND UNLINKED PEOPLE, GROUPED (0056, 2026-08-02). Until migration 0056
       // v_ref_index held only role records, so 415 org parties were invisible here:
@@ -2925,7 +2934,8 @@ export const TOOLS = {
                            filter (where not merged and subject_type <> 'party'),
                          '{}'::text[]) as role_refs
          from v_ref_index
-         where (display_name % $1 or display_name ilike $2)
+         where (display_name % $1 or display_name ilike $2
+           or party_id in (select id from party where lower(trim(email))=lower(trim($1))))
          group by display_name
         having count(*) filter (where subject_type='party') > 0
          order by similarity(display_name,$1) desc limit 5`, [q, `%${q}%`]);
@@ -3792,6 +3802,7 @@ export const TOOLS = {
             where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
           [organizationTenantForActor(actor), scope.sponsor, CALENDAR_AGENDA_BOARD]);
         calendar = calendarSection(result.rows[0]?.snapshot_json);
+        if (calendar?.follow_up_reviews?.length) await addCalendarConfirmations(c, calendar, actor);
         if (calendar?.sources && calendar.items.length) {
           await addCalendarContacts(c, calendar);
           await addCalendarDealSuggestions(c, calendar, scope.sponsor);
@@ -4120,11 +4131,12 @@ export const TOOLS = {
                 event_confidence,last_touch,next_action_date,owner,owner_label,
                 base_version,created_at,updated_at,
                 (stage <> 'archived') as conversion_eligible,
-                converted,stage_moves
+                converted,stage_moves,
+                (select p.contact_state from party p where p.id=v_lead_board.party_id) as contact_state
            from v_lead_board
           order by stage_sort,suppressed,score desc nulls last,name,registry_ref`)).rows;
       const eligible=leads.filter(l=>l.stage!=="archived");
-      return { generated_at: new Date().toISOString(), stages, leads,
+      return { generated_at: new Date().toISOString(), stages, leads: leads.map(leadAdvice),
         metrics:{nurture_count:eligible.filter(l=>l.stage==="nurture_drip" && !l.suppressed).length,
           conversion_denominator:eligible.length,converted_count:eligible.filter(l=>l.converted).length} };
     },
@@ -4391,6 +4403,7 @@ export const TOOLS = {
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
       email_identity: EMAIL_IDENTITY_SCHEMA,
+      calendar_event_key: { type: "string", pattern: "^[0-9a-f]{16}$", description: "Stable Outlook event key for a meeting confirmation" },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
           mailbox_owner: { type: "string", enum: ["joe", "dell"] } } },
@@ -4444,7 +4457,16 @@ export const TOOLS = {
       if (args.email_source !== undefined && (args.kind !== 'email_in' ||
           args.email_source.mailbox_owner !== partnerAuthoritySlugForActor(actor)))
         throw new ToolError({ error: 'email_source_owner_mismatch' });
+      if (args.calendar_event_key !== undefined && (typeof args.calendar_event_key !== 'string' || !/^[0-9a-f]{16}$/.test(args.calendar_event_key)))
+        throw new ToolError({ error: 'calendar_event_key_invalid', hint: 'calendar_event_key must be exactly 16 lowercase hexadecimal characters' });
       const s = await resolveSubject(c, args.ref);
+      if (args.calendar_event_key !== undefined) {
+        if (s.type !== 'deal' || args.kind !== 'meeting')
+          throw new ToolError({ error: 'calendar_event_key_requires_deal_meeting' });
+        await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`calendar-confirmation:${s.id}:${args.calendar_event_key}`]);
+        const existing = await c.query('select id from activity where calendar_event_key=$1 and deal_id=$2', [args.calendar_event_key, s.id]);
+        if (existing.rows.length) return { ok: true, activity_id: existing.rows[0].id, subject: s, deduped: true };
+      }
       let emailIdentity = null;
       if (args.email_identity) {
         if (!['email_in', 'email_out'].includes(args.kind) ||
@@ -4486,12 +4508,12 @@ export const TOOLS = {
           await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
       const r = await c.query(
-        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity)
-         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb) returning id, occurred_at`,
+        `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key)
+         values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11) returning id, occurred_at`,
         [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null,
-          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null]);
+          emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null]);
       await writeEvent(c, actor, "log-activity", s.type, s.id,
         { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length
@@ -5678,13 +5700,19 @@ export const TOOLS = {
 
   "vendor-assignment-context": {
     write: false,
-    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
+    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Also returns party_version, the vendor party's own version (the base_version update-party-contact needs), its current party_name and party_email, and company_domains: the email domains carried by that company's own party and its people. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
     inputSchema: {type:'object',additionalProperties:false,properties:{vendor:{type:'string'}},required:['vendor']},
     handler: async (c,_actor,args) => {
       const subject = await resolveSubject(c,args.vendor);
       if (subject.type !== 'vendor') throw new ToolError({error:'not_a_vendor'});
       const vendor = (await c.query('select * from public.v_vendor_assignment_context where id=$1',[subject.id])).rows[0];
       if (!vendor) throw new ToolError({error:'vendor_not_live'});
+      const party = (await c.query(`select p.version,p.name,p.email,coalesce((select array_agg(distinct d.domain order by d.domain)
+          from public.party m cross join lateral (select lower(substring(m.email from '@([A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+)')) as domain) d
+          where (m.id=$2 or m.org_id=$2) and m.merged_into is null and m.deleted_at is null and d.domain is not null),'{}') as company_domains
+        from public.party p where p.id=$1`,[vendor.party_id,vendor.company?.id ?? null])).rows[0];
+      Object.assign(vendor,{party_version:party?.version ?? null,party_name:party?.name ?? null,
+        party_email:party?.email ?? null,company_domains:party?.company_domains ?? []});
       return {vendor};
     },
   },
@@ -9095,6 +9123,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
+  'lead-follow-up': 'mcp-server/src/lead-follow-up.ts',
   'action-closure': 'mcp-server/src/action-closure.ts',
   'requirement-replies': 'mcp-server/src/requirement-replies.js',
   'requirement-requests': 'mcp-server/src/requirement-requests.js',
@@ -10311,7 +10340,7 @@ registerTools({
             ? first.old_value.board_next_step : first.old_value?.[field] ?? null;
           restored[field] = value;
           if (field==='next_step') {
-            if (value !== null && !await completedRetainedStep(c, dealId, own.map(row => row.id), value)) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
+            if (value !== null && !await completedRetainedStep(c, dealId, own.map(row => row.id), first.id)) await c.query(`insert into deal_note(deal_id,kind,text,actor_id,created_at)
               values($1,'next_step',$2,$3,clock_timestamp())`, [dealId,value,actor.id]);
           } else await c.query(`update deal set ${field}=$2,updated_by=$3 where id=$1`, [dealId,value,actor.id]);
           await writeEvent(c,actor,field==='phase' ? 'revert-deal-field' : 'undo-call', 'deal',dealId,{
@@ -10778,6 +10807,7 @@ registerTools(leaseTermComparisonTools({ ToolError }), "lease-term-comparison");
 registerTools(factObservationTools(), "fact-observations");
 registerTools(factReviewTools(), "fact-review");
 registerTools(marketTermsTools(), "market-terms");
+registerTools(leadFollowUpTools(), "lead-follow-up");
 registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
 

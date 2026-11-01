@@ -1,6 +1,7 @@
 {
   "autoCompactEnabled": true,
   "autoCompactWindow": 500000,
+  "autoMemoryEnabled": false,
   "hooks": {
     "PreToolUse": [
       {
@@ -27,6 +28,11 @@
             "type": "command",
             "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; if [ ! -e \"${HOME}/carr-system/hooks/machine-converge.py\" ] && [ ! -L \"${HOME}/carr-system/hooks/machine-converge.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script ${HOME}/carr-system/hooks/machine-converge.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/machine-converge.py\"",
             "timeout": 180
+          },
+          {
+            "type": "command",
+            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; if [ ! -e \"${HOME}/carr-system/hooks/team-memory-index.py\" ] && [ ! -L \"${HOME}/carr-system/hooks/team-memory-index.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script ${HOME}/carr-system/hooks/team-memory-index.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/team-memory-index.py\"",
+            "timeout": 20
           }
         ]
       }

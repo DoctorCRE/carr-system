@@ -105,6 +105,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
   const checkVersion = (row, version) => {
     if (row.version !== version) fail('version_conflict', { current_version: row.version });
   };
+  const checkDraftText = args => {
+    if ([...args.subject].length > 998 || [...args.body].length > 20000) fail('invalid_field_value');
+    if (!args.body.trim()) fail('email_draft_empty_body');
+    if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
+  };
   const draftProperties = {
     idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
     proposal_id: { type: 'string', format: 'uuid' },
@@ -247,6 +252,32 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         return { ok: true, deal: prior.deal, activity_id: current.activity_id };
       }),
     },
+    'edit-email-draft': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'The owning partner saves the exact subject and body of a pending reply draft at base_version. Refuses stale versions with version_conflict. Returns the stored text and incremented version. Changes no recipients, status, or send state; sends and queues nothing.',
+      inputSchema: { type: 'object', additionalProperties: false,
+        required: [...Object.keys(draftProperties), 'subject', 'body'], properties: { ...draftProperties,
+          subject: { type: 'string', minLength: 1, maxLength: 998 },
+          body: { type: 'string', minLength: 1, maxLength: 20000 } } },
+      handler: async (c, actor, args) => {
+        if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('email_draft_not_owner');
+        await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
+        return withEnvelope(c, actor, 'edit-email-draft', args, async () => {
+          const row = await draftRow(c, args.proposal_id, actor.slug);
+          if (row.status !== 'pending') fail('email_draft_not_pending');
+          checkVersion(row, args.base_version);
+          checkDraftText(args);
+          const stored = (await c.query(`update email_proposal set draft_subject=$2,draft_body=$3,
+            version=version+1 where id=$1 returning version,draft_subject as subject,draft_body as body`,
+          [row.id,args.subject,args.body])).rows[0];
+          await writeEvent(c, actor, 'edit-email-draft', 'deal', row.deal_id, {
+            old: { proposal_id: row.id, version: row.version, subject: row.draft_subject, body: row.draft_body },
+            new: { proposal_id: row.id, ...stored },
+            cause: 'human_correction', idempotency_key: args.idempotency_key });
+          return { ok: true, proposal_id: row.id, ...stored };
+        });
+      },
+    },
     'submit-email-draft': {
       write: true, humanOnly: true, humanCallerOnly: true,
       description: 'The owning partner submits the exact final subject, body and displayed to/cc arrays from a review card. Missing or changed recipients refuse email_draft_recipients_mismatch. Approval freezes the original sender as recipient, the other partner actor.email as cc, and the supplied attachment paths, sha256 and byte sizes. Paths must be canonical absolute paths under the local attachment root. Missing copy address refuses. Enqueues for that partner’s Mac; does not send mail.',
@@ -269,8 +300,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             fail('email_draft_failure_not_resubmittable', { reason: row.send_result?.reason ?? null });
           if (row.status !== 'pending' && row.status !== 'failed') fail('email_draft_already_submitted');
           checkVersion(row, args.base_version);
-          if (!args.body.trim()) fail('email_draft_empty_body');
-          if (!args.subject.trim() || /[\r\n]/.test(args.subject)) fail('email_draft_subject_invalid');
+          checkDraftText(args);
           const recipients = await draftRecipients(c, row, true);
           if (['to', 'cc'].some(field => !Array.isArray(args[field]) || args[field].length !== 1 ||
               args[field][0] !== recipients[field][0])) fail('email_draft_recipients_mismatch');
@@ -615,7 +645,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound and outbound emails from the last 1-7 days (default 3), oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
           purpose: { enum: ['links', 'outcomes'] }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
@@ -682,7 +712,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           from activity a left join deal d on d.id=a.deal_id
           left join v_email_non_deal_step ns on ns.activity_id=a.id
           where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
-            and a.occurred_at>$6::timestamptz-make_interval(days=>$1) and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
+            and a.recorded_at>$6::timestamptz-make_interval(days=>$1)
+            and a.occurred_at>$6::timestamptz-interval '30 days' and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
             and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
           order by a.occurred_at,a.id limit $3`, [args.days ?? 3, args.exclude ?? [], limit + 1, partnerAuthoritySlugForActor(_actor), _actor.id, clock]);
         const people = await contacts(c);
