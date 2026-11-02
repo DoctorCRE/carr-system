@@ -33,10 +33,8 @@ a script does internally. `nightly.sh` runs git, pg_dump and R2 uploads inside
 itself and this gate never sees them. That is the correct scope: the threat model
 is a session taking a destructive action, not the reviewed scripts in this repo.
 
-FAILS OPEN, ON PURPOSE. Any internal error allows the call. A gate that wedges
-the 2am chain costs more than the marginal safety of failing closed, on a
-single-operator machine that is not a hostile environment. Every allow-on-error
-is logged so a silently-degraded gate is still discoverable.
+Internal decision errors refuse the call. Telemetry failures do not affect
+verdicts. An uninspectable command must not bypass the safety checks.
 
 DISABLE FAST: remove the hooks block from settings.json, or `chmod -x` this file
 (a non-executable hook errors, and this gate fails open).
@@ -65,6 +63,11 @@ from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens as _shell_to
 from refused_content import REFUSAL, remember_refusal, was_refused  # noqa: E402
 
 
+def without_shell_comments(command):
+    return re.sub(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|(?<!\S)#[^\n]*",
+                  lambda match: '' if match[0].startswith('#') else match[0], command)
+
+
 def shell_tokens(command):
     """Normalize shell control syntax before any program-position classification.
 
@@ -72,7 +75,7 @@ def shell_tokens(command):
     simple commands, including glued subshells and process substitutions.
     Unsupported lexical forms raise ValueError, which check refuses.
     """
-    command = command.replace('-m <message>', '-m message')
+    command = without_shell_comments(command).replace('-m <message>', '-m message')
     pieces = re.findall(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|[^'\"\\]+|['\"\\]", command)
     normalized = []
     for piece in pieces:
@@ -1087,7 +1090,12 @@ def invocations_in(cmd, depth=0):
     """Every (executable, argument words) `cmd` could run, from both the
     quoted-word reading and the raw boundary-split reading (see THE SENDER TEST)."""
     found = []
-    tokens = shell_tokens(cmd)
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        if depth:
+            raise
+        tokens = []  # Raw payload text is not necessarily shell syntax.
     segment = []
     for token in tokens + [";"]:
         if token in SHELL_BOUNDARIES:
@@ -1838,9 +1846,48 @@ def raw_targets_carr(cmd):
 
 
 
+def shell_expansions(text):
+    """Extract executable substitutions with their own quote/parenthesis scope."""
+    stack, quote, i = [], None, 0
+    while i < len(text):
+        char = text[i]
+        if char == '\\' and quote != "'":
+            i += 2
+            continue
+        if quote == "'":
+            if char == quote:
+                quote = None
+        elif char == '`':
+            end = re.match(r'`(?:\\[\s\S]|[^`])*`', text[i:])
+            if end is None:
+                raise ValueError('unterminated command substitution')
+            if not stack:
+                yield end[0][1:-1]
+            i += len(end[0])
+            continue
+        elif text.startswith('$(', i):
+            stack.append((i + 2, quote))
+            quote = None
+            i += 2
+            continue
+        elif char == '(' and stack and quote is None:
+            stack.append((None, None))
+        elif char == ')' and stack and quote is None:
+            start, quote = stack.pop()
+            if not stack and start is not None:
+                yield text[start:i]
+        elif char == quote:
+            quote = None
+        elif char in {'"', "'"} and quote is None:
+            quote = char
+        i += 1
+    if stack:
+        raise ValueError('unterminated command substitution')
+
+
 def executed_invocations(cmd):
     """Commands in shell positions, excluding quoted arguments and heredoc data."""
-    executable = strip_inert_text(cmd)
+    executable = without_shell_comments(strip_inert_text(cmd))
     tokens = shell_tokens(executable)
     segment = []
     for token in tokens + [';']:
@@ -1849,10 +1896,23 @@ def executed_invocations(cmd):
             continue
         yield from command_invocations(_without_redirects(segment))
         segment = []
-    # Single quotes are literal; substitutions in double quotes still execute.
-    expanding = re.sub(r"'[^']*'", '', executable)
-    for match in re.finditer(r'\$\(([^()]*)\)|`([^`]+)`', expanding):
-        yield from executed_invocations(match[1] or match[2])
+    for body in shell_expansions(executable):
+        yield from executed_invocations(body)
+
+
+def _git_command_words(arguments):
+    """Remove Git global options before classifying the subcommand."""
+    words = list(arguments)
+    while words:
+        if words[0] in {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'}:
+            if len(words) < 2:
+                raise ValueError('missing git option value')
+            words = words[2:]
+        elif words[0].startswith(('--git-dir=', '--work-tree=', '--namespace=', '--config-env=')) or words[0] in {'--no-pager', '--paginate', '--bare', '--no-optional-locks'}:
+            words = words[1:]
+        else:
+            break
+    return words
 
 
 def _gh_command_words(arguments):
@@ -2376,7 +2436,8 @@ def check(cmd, cwd=None):
     # Claude native Read rules cover direct file tools. Command-sensitive reads
     # stay here for Codex and shell wrappers without blocking reviewed readers.
     try:
-        invocations = list(executed_invocations(executable))
+        invocations = [(program, _git_command_words(arguments) if program == 'git' else arguments)
+                       for program, arguments in executed_invocations(executable)]
     except ValueError as exc:
         return f'cannot parse shell command safely: {exc}'
     for program, arguments in invocations:
@@ -2396,8 +2457,9 @@ def check(cmd, cwd=None):
                 return 'recursive/forced delete — blocked by the CARR unattended guard'
         if program == 'git':
             words = list(arguments)
-            while words and words[0] in {'-C', '-c', '--git-dir', '--work-tree'}:
-                words = words[2:]
+            if words[:1] and words[0] in {'push', 'reset', 'clean', 'filter-branch', 'filter-repo'} and any(
+                    '$' in word or '`' in word for word in words[1:]):
+                return 'cannot classify dynamic git mutation arguments safely'
             if words[:1] == ['push'] and any(
                     word.split(':')[-1].removeprefix('refs/heads/') in {'main', 'master'}
                     for word in words[1:] if not word.startswith('-')):
@@ -2492,8 +2554,9 @@ def _parse_error(exc):
 
 
 def _decision_error(exc):
-    log(f"ALLOW(internal-error) {exc}")
-    return 0
+    log(f"DENY(internal-error) {exc}")
+    print('Cannot inspect command safely: internal guard error.', file=sys.stderr)
+    return 2
 
 
 @decision(on_error=_decision_error)

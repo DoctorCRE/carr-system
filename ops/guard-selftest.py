@@ -1475,9 +1475,33 @@ for command in ("git status  # it's fine", "git status # $(git push --force orig
     case('ordinary shell data ' + command, bash(command), ALLOW)
 
 
+def decision_error_cases():
+    failures = []
+    script = (
+        "import runpy,sys; m=runpy.run_path(sys.argv[1]); "
+        "m['decide'].__wrapped__.__globals__['check']="
+        "lambda *args: 1/0; "
+        "v=m['decide']({'tool_name':'Bash','tool_input':{'command':'git status'}}); "
+        "sys.stderr.write(v.stderr); sys.exit(v.code)"
+    )
+    result = subprocess.run([sys.executable, '-c', script, GUARD],
+                            env=ENV, capture_output=True, text=True, timeout=20)
+    if result.returncode != DENY or 'internal guard error' not in result.stderr:
+        failures.append('internal decision errors must refuse')
+    log_path = os.path.join(OUTSIDE, 'commit-heredoc.log')
+    payload = bash("git commit -F - <<'EOF'\ndon't lose this\nEOF")
+    payload['__env'] = {'CARR_HOOK_GUARD_LOG': log_path}
+    rc, _ = run(payload)
+    logged = pathlib.Path(log_path).read_text() if os.path.exists(log_path) else ''
+    if rc != ALLOW or 'internal-error' in logged:
+        failures.append('commit heredoc must pass without internal errors')
+    print(f"decision error policy: {2 - len(failures)}/2 passed")
+    return failures
+
+
 def main():
     verbose = "-v" in sys.argv[1:]
-    source_fails = source_restore_cases()
+    source_fails = source_restore_cases() + decision_error_cases()
     fails = []
     for name, payload, expect in CASES:
         rc, err = run(payload)
