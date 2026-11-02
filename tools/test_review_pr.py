@@ -1,5 +1,6 @@
 # Test the pull request review command.
 import html
+import importlib.util
 import json
 import re
 import runpy
@@ -10,6 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 from unittest import TestCase, main, mock
 
 CLI = Path(__file__).resolve().parents[1] / 'bin/review-pr'
+spec = importlib.util.spec_from_file_location('review_submit', CLI.parents[1] / 'ops/review-submit.py')
+review_submit = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(review_submit)
 
 
 class ReviewPR(TestCase):
@@ -33,7 +37,12 @@ class ReviewPR(TestCase):
                 self.assertEqual(args[1], '42')
                 self.assertIn(args[2], ('approve', 'request-changes'))
                 self.assertEqual(args[-2:], ['--reviewed-sha', 'a'*40])
-                comments.append(args[2] + '\n' + Path(args[args.index('--body-file')+1]).read_text())
+                body = Path(args[args.index('--body-file')+1]).read_text()
+                with mock.patch.object(review_submit, 'installation_token', return_value='synthetic-token'), \
+                        mock.patch.object(review_submit, 'request', side_effect=[{'head': {'sha': args[-1]}}, {'id': 1}, {}]) as request:
+                    self.assertEqual(review_submit.submit(42, args[2], body, args[-1]), 1)
+                    self.assertEqual(request.call_args_list[1].args[2]['body'], body)
+                comments.append(args[2] + '\n' + body)
             elif name == 'git' and args[0] == 'rev-parse': output = 'a'*40
             elif name == 'claude':
                 if 'mcp__claude_ai_Slack__slack_send_message' in args:
@@ -150,9 +159,17 @@ class ReviewPR(TestCase):
         self.assertIsNone(error)
         self.assertTrue(any(name == 'git' and args == ['fetch', 'origin', 'pull/42/head'] for name, args, _ in calls))
         self.assertTrue(comment.startswith('approve\nCard: WR622.S1.J37\n'))
-        self.assertTrue(any('--auto' in args and '--squash' in args and args[-2:] == ['--match-head-commit', 'a'*40] for name, args, _ in calls if name == 'gh'))
+        self.assertIn(('gh', ['pr', 'merge', '42', '--repo', 'DoctorCRE/carr-system', '--auto', '--match-head-commit', 'a'*40], ''), calls)
         self.assertIn('<@U0C5R40MBPE>', [request for name, args, request in calls if name == 'claude' and 'slack_send_message' in ' '.join(args)][-1])
         self.assertTrue(all(name != 'grok-run.sh' for name, _, _ in calls))
+
+    def test_dot_body_passes_real_submit_validation(self):
+        for verdict in ('APPROVE', 'CHANGES'):
+            with self.subTest(verdict=verdict):
+                error, _, comment = self.run_review(verdict=verdict)
+                self.assertIsNone(error)
+                self.assertEqual(comment.splitlines()[2:], [
+                    'Reviewed-SHA: ' + 'a' * 40, 'Reviewer: the Dot', '', 'Finding'])
 
     def test_changes_stale_and_invalid_reviews(self):
         for options in [{'verdict': 'CHANGES'}, {'moved': True}, {'moved': 'after-comment'}, {'malformed': True}]:
