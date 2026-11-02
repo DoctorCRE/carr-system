@@ -1,4 +1,5 @@
 """Behavior tests for the conditional review gate."""
+import ast
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -77,6 +78,48 @@ class ReviewGate(unittest.TestCase):
                         self.assertTrue(gate.approved(self.pr, [file], [self.approval], 'reviewer[bot]'))
         self.assertFalse(gate.approved({**self.pr, 'additions': 1, 'deletions': 900},
                                       [{'filename': 'ops/review-gate.py'}], [], 'reviewer[bot]'))
+
+    def test_ci_fixture_dependencies_require_review(self):
+        tree = ast.parse(Path(__file__).with_name('ci-selftest.py').read_text())
+        fixture = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'ci_fixture')
+        paths = ast.literal_eval(next(n.iter for n in ast.walk(fixture)
+                                     if isinstance(n, ast.For) and isinstance(n.target, ast.Name)
+                                     and n.target.id == 'rel'))
+        for path in paths:
+            for key in ('filename', 'previous_filename'):
+                files = [{'filename': 'docs/moved.md', key: path, 'status': 'modified'}]
+                with self.subTest(path=path, key=key), patch.dict(
+                        gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
+                    with patch.object(gate, 'api', side_effect=[self.pr, {}, files, [], self.pr, {}]) as api:
+                        self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 1)
+                        self.assertEqual(api.call_args.args[1]['state'], 'failure')
+                    self.assertTrue(gate.approved(self.pr, files, [self.approval], 'reviewer[bot]'))
+
+    def test_refusals_explain_required_action(self):
+        cases = [
+            (self.pr, [{'filename': 'ops/review-gate.py'}], [],
+             'Gate, CI or review path changed; current-head App review required at any size'),
+            ({**self.pr, 'additions': 151}, self.files, [],
+             'Current-head App approval required; submit via ops/review-submit.py'),
+            (self.pr, self.files, [{**self.approval, 'state': 'CHANGES_REQUESTED'}],
+             'App requested changes at this head; resolve findings and resubmit via ops/review-submit.py'),
+            ({**self.pr, 'title': '[skip ci] fix'}, self.files, [self.approval],
+             'Remove skip-CI markers from the PR title'),
+        ]
+        for body in ('VERDICT: APPROVE', 'Reviewed-SHA: old', 'Reviewed-SHA: head ',
+                     'Reviewed-SHA: head\nReviewed-SHA: old'):
+            cases.append(({**self.pr, 'additions': 151}, self.files,
+                          [{**self.approval, 'body': body}],
+                          "App approval body needs exactly one line 'Reviewed-SHA: head'; resubmit via ops/review-submit.py"))
+        for pr, files, reviews, description in cases:
+            with self.subTest(description=description, reviews=reviews), patch.dict(
+                    gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
+                with patch.object(gate, 'api', side_effect=[pr, {}, files, reviews, pr, {}]) as api:
+                    self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 1)
+                    status = api.call_args.args[1]
+                    self.assertEqual(status['state'], 'failure')
+                    self.assertEqual(status['description'], description)
+                    self.assertLessEqual(len(status['description']), 140)
 
     def test_armed_safe_needs_no_review(self):
         armed = {**self.pr, 'auto_merge': {'enabled_by': {'login': 'author'}}}
