@@ -291,9 +291,7 @@ test('Home inbox v2 projects current partner work with context', async t => {
     ('${id(74)}','${joe.id}','${id(60)}','Dropped','dropped',1,now(),now(),null,null),
     ('${id(75)}','${joe.id}','${id(60)}','Held','open',1,now(),now(),current_date+1,null);
     insert into ops.notification values
-    ('${id(80)}','${joe.id}','loop','${id(61)}','action_required','Action needed on an open loop',null,now()),
-    ('${id(81)}','${joe.id}','engineering','build','failure','build_failed',null,now()),
-    ('${id(82)}','${joe.id}','release','deploy','failure','deploy_failed',null,now());`);
+    ('${id(80)}','${joe.id}','loop','${id(61)}','action_required','Action needed on an open loop',null,now());`);
   const read=async()=> (await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
   const before=(await c.query('select ops.read_home_inbox() result')).rows[0].result;
   console.log('Synthetic v1 seed items',before.items.length);
@@ -329,8 +327,17 @@ test('Home inbox v2 projects current partner work with context', async t => {
   await t.test('notification title names its loop',()=>{
     assert.match(snapshot.items.find(i=>i.source_type==='notification' && i.title.includes('loop')).title,/Synthetic orb panel/);
   });
-  await t.test('engineering and release notifications stay out',()=>{
-    assert.equal(snapshot.items.filter(i=>i.source_type==='notification').length,1);
+  await t.test('notifications admit exactly the partner-facing subject allowlist',async()=>{
+    const allowed=['deal','loop','call','email','doc_conversation_request'];
+    const subjects=[...allowed,'next_action','capture_session','email_proposal','unknown'];
+    const notificationIds=subjects.map((_,n)=>id(800+n));
+    for (const [n,subject] of subjects.entries()) {
+      await c.query(`insert into ops.notification values($1,$2,$3,$4,'action_required','Allowlist request',null,now())`,
+        [notificationIds[n],joe.id,subject,`allowlist-${subject}`]);
+    }
+    const notifications=(await read()).items.filter(i=>i.source_type==='notification' && i.title.startsWith('Allowlist request'));
+    assert.deepEqual(notifications.map(i=>JSON.parse(i.source_id)[0]).sort(),allowed.toSorted());
+    await c.query('delete from ops.notification where id=any($1::uuid[])',[notificationIds]);
   });
   await t.test('v2 keeps completion identity across task kinds and non-deal tasks',async()=>{
     await c.query(`insert into next_action(id,owner_id,subject_type,subject_id,description,status,version,created_at,updated_at)
