@@ -261,7 +261,7 @@ KNOWN_HOSTS = (
     # lookup on chiro.alabama.gov and routes to this portal instead, and it is
     # the one AL board absent from the unified licensesearch.alabama.gov (that
     # path returns HTTP 500). Without this entry a chiropractor's licence cannot
-    # be verified in Alabama at all — the live gap behind the C-130 Nina Calloway
+    # be verified in Alabama at all — the live gap behind the C-130 client
     # npi:found=false row of 2026-08-07.
     #
     # UNLIKE the igovsolution entry above, this one CANNOT be narrowed: the

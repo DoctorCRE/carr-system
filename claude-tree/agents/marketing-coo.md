@@ -249,8 +249,8 @@ middle of the whole lane: pieces and metrics exist, and nothing says what any of
 `SELECT column_name, data_type FROM information_schema.columns WHERE table_name='campaign'`:
 `id uuid`, `name text NOT NULL`, `goal text`, `status text NOT NULL DEFAULT 'active'`.
 `content_piece.campaign_id` is a nullable FK to it. That is the entire linkage. There is no start
-date, no end date, no budget, no target, and no outcome column. Read `migrations/0001_init.sql`
-around the MARKETING section before designing anything that assumes otherwise.
+date, no end date, no budget, no target, and no outcome column. Read the `campaign` and `content_piece` definitions
+in `db/schema.sql` before designing anything that assumes otherwise.
 
 **The gap, and do not paper over it.** No MCP verb writes `campaign`, `content_piece`, `placement`
 or `placement_metric`. Verified 2026-08-02 by

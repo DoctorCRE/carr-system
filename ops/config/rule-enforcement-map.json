@@ -797,8 +797,8 @@
       "category": "hard_pre_action",
       "control": "lead_client_pair",
       "enforcement_class": "deny_gate",
-      "exceptions": "the Petersen shape \u2014 two party rows for one human \u2014 passes `same_person_because` with what establishes it; two leads, two clients, a party already holding both roles, and anything touching a vendor row are all out of scope",
-      "note": "Built 2026-08-15 after the Ramsey false positive showed the same confusion from the other direction. Joe's ruling: everyone starts as a lead, so an L- and a C- ref for one person is the system working. The gate refuses a merge whose only basis is a name match, is symmetric so swapping the arguments does not slip past, writes nothing when it refuses, and records the stated basis on the event because a merge is permanent and a retired ref is never reissued."
+      "exceptions": "two party rows for one human passes `same_person_because` with what establishes it; two leads, two clients, a party already holding both roles, and anything touching a vendor row are all out of scope",
+      "note": "Built 2026-08-15 after a lead/client false positive showed the same confusion from the other direction. Joe's ruling: everyone starts as a lead, so an L- and a C- ref for one person is the system working. The gate refuses a merge whose only basis is a name match, is symmetric so swapping the arguments does not slip past, writes nothing when it refuses, and records the stated basis on the event because a merge is permanent and a retired ref is never reissued."
     },
     "30a189fb": {
       "binding_moment": "non-CARR task",

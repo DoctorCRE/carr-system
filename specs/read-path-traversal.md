@@ -14,8 +14,8 @@
 Observed today:
 
 ```
-catch-me-up L-005  (Jonathan Sorbara, lead)   → 3 bare rows: import, convert-lead, last-touch stamp
-catch-me-up C-113  (Jonathan Sorbara, client) → the actual narrative
+catch-me-up L-005  (same person, lead)   → 3 bare rows: import, convert-lead, last-touch stamp
+catch-me-up C-113  (same person, client) → the actual narrative
 ```
 
 Same person. The pointer from L-005 to C-113 exists and is unused. The work queues
