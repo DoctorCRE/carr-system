@@ -1,0 +1,140 @@
+-- rollback: forward-only; restore prior projection bodies in a new migration if needed.
+-- expand-contract: expand; add v2 JSON fields and replace the ungranted private helper with all callers atomically.
+-- lock-review: function DDL only; no canonical rows are changed or locked for repair.
+set local lock_timeout = '5s';
+set local statement_timeout = '30s';
+
+drop function ops.home_inbox_sources(uuid);
+create function ops.home_inbox_sources(p_actor uuid)
+returns table(item_id text,source_type text,source_id text,source_version text,material_version text,
+  source_state text,title text,activity_at timestamptz,hold_until date,unseen boolean,
+  context_label text,due_on date,open_url text,kind_label text,merged_source_ids jsonb,action_id uuid,action_version integer,deal_id uuid)
+language sql stable set search_path=pg_catalog,pg_temp as $$
+  with task_groups as (
+    select t.*,
+      first_value(id) over w representative,
+      jsonb_agg(id::text) over w merged_ids,
+      md5(string_agg(id::text||':'||version::text,',' ) over w) revision
+    from public.next_action t
+    where owner_id=p_actor and
+      (status='open' or (status='done' and updated_at>=now()-interval '7 days'))
+    window w as (partition by owner_id,subject_type,subject_id,
+      case when status='open' then lower(regexp_replace(btrim(description),'\s+',' ','g')) else id::text end
+      order by updated_at desc,id rows between unbounded preceding and unbounded following)
+  ), tasks as materialized (
+    select * from task_groups where id=representative
+    order by (status='open') desc,updated_at desc,id limit 1001
+  ), actions as materialized (
+    select * from public.capture_post_call_action where owner_id=p_actor
+      and (status='open' or (status='done' and completed_at>=now()-interval '7 days'))
+    order by (status='open') desc,updated_at desc,id limit 1001
+  ), sessions as materialized (
+    select * from public.capture_session where actor_id=p_actor
+      and (state<>'done' or state_at>=now()-interval '7 days')
+    order by (state<>'done') desc,state_at desc,id limit 1001
+  ), drafts as materialized (
+    select p.* from public.email_proposal p
+      join public.activity e on e.id=p.activity_id
+      join public.actor a on a.id=p_actor and a.slug=p.owner
+      where p.kind='reply_draft' and e.email_source->>'mailbox_owner'=a.slug
+        and p.status<>'dismissed' and (p.status<>'sent' or p.result_recorded_at>=now()-interval '7 days')
+      order by (p.status<>'sent') desc,coalesce(p.result_recorded_at,p.submitted_at,p.created_at) desc,p.id limit 1001
+  ), notifications as materialized (
+    select n.* from ops.notification n where recipient_actor=p_actor
+      and subject_type in ('deal','loop','call','email') and ops.notification_visible(n.id)
+      order by created_at desc,id desc limit 10001
+  ), groups as (
+    select subject_type,subject_ref,
+      jsonb_agg(to_jsonb(n) order by created_at desc,id desc)->0 latest,
+      md5(coalesce(string_agg(id::text,',' order by created_at,id) filter(where severity<>'completion'),'')) material,
+      md5(string_agg(id::text,',' order by created_at,id)) revision,
+      jsonb_agg(id::text order by created_at desc,id desc) merged_ids,
+      bool_or(r.read_at is null) unseen
+    from notifications n left join ops.notification_read r on r.notification_id=n.id and r.recipient_actor=p_actor
+    group by subject_type,subject_ref
+  ), raw_sources as (
+    select 'next_action:'||t.id item_id,'next_action'::text source_type,t.id::text source_id,t.revision source_version,
+      md5(jsonb_build_array(t.description,t.hold_until,t.subject_id,t.due_on)::text) material_version,
+      case when t.status='done' then 'done' else 'needs_attention' end source_state,
+      t.description title,t.updated_at activity_at,t.hold_until,false unseen,
+      d.name context_label,t.due_on,'/deals?deal='||d.id||'&focus=next-step' open_url,
+      'Task'::text kind_label,t.merged_ids merged_source_ids,t.id action_id,t.version action_version,
+      case when t.subject_type='deal' then t.subject_id end deal_id from tasks t left join public.deal d on t.subject_type='deal' and d.id=t.subject_id
+    union all
+    select 'capture_post_call_action:'||a.id,'capture_post_call_action',a.id::text,
+      md5(jsonb_build_array(a.status,a.description,a.updated_at,a.completed_at)::text),md5(a.description),
+      case when a.status='done' then 'done' else 'needs_attention' end,
+      a.description,a.updated_at,null,false,d.name,a.due_on,'/deals?deal='||d.id||'&focus=next-step',
+      'Call follow-up',jsonb_build_array(a.id::text),a.id,a.version,a.deal_id from actions a left join public.deal d on d.id=a.deal_id
+    union all
+    select 'capture_session:'||id,'capture_session',id::text,md5(jsonb_build_array(state,state_at)::text),
+      md5(jsonb_build_array(started_at)::text),
+      case when state='failed' then 'failed' when state='done' then 'done' else 'working' end,
+      'Call processing '||to_char(started_at at time zone 'America/Chicago','Mon DD HH24:MI'),state_at,null,false,
+      'Call '||to_char(started_at at time zone 'America/Chicago','Mon DD HH24:MI'),null,
+      null,'Call',jsonb_build_array(id::text),null,null,null from sessions
+    union all
+    select 'email_proposal:'||id,'email_proposal',id::text,version::text,md5(coalesce(draft_subject,'')),
+      case when status='failed' then 'failed' when status='sent' then 'done'
+        when status='approved_to_send' then 'working' else 'needs_attention' end,
+      coalesce(draft_subject,'Reply draft'),coalesce(result_recorded_at,submitted_at,created_at),null,false,
+      coalesce(draft_subject,'Reply draft'),null,null,'Reply draft',jsonb_build_array(id::text),null,null,null from drafts
+  )
+  select * from raw_sources
+  union all
+  select 'notification:'||jsonb_build_array(g.subject_type,g.subject_ref)::text,
+    'notification',jsonb_build_array(g.subject_type,g.subject_ref)::text,revision,material,
+    case latest->>'severity' when 'completion' then 'done' when 'failure' then 'failed' else 'needs_attention' end,
+    coalesce(latest->>'reason','Update')||' · '||coalesce(d.name,l.title,g.subject_type||' '||g.subject_ref),
+    (latest->>'created_at')::timestamptz,null,unseen,
+    coalesce(d.name,l.title,g.subject_type||' '||g.subject_ref),null,latest->>'deep_link','Update',
+    g.merged_ids,null,null,d.id
+    from groups g left join public.deal d on g.subject_type='deal' and d.id::text=g.subject_ref
+    left join lateral (select title from public.loop_item where g.subject_type='loop'
+      and (id::text=g.subject_ref or number=g.subject_ref)
+      order by (id::text=g.subject_ref) desc,id limit 1) l on true
+    where (latest->>'severity'<>'completion' or (latest->>'created_at')::timestamptz>=now()-interval '7 days')
+$$;
+revoke all on function ops.home_inbox_sources(uuid) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+
+create or replace function ops.home_inbox_items(p_actor uuid)
+returns setof jsonb language sql stable set search_path=pg_catalog,pg_temp as $$
+  with observed as (
+    select s.*,d.version disposition_version,d.explicit_unsettle,d.snoozed_until,
+      coalesce(d.disposition,'inbox') stored_disposition,
+      coalesce(d.material_version<>s.material_version or
+        (s.source_state in ('needs_attention','failed') and d.source_version<>s.source_version),false) new_activity
+    from ops.home_inbox_sources(p_actor) s
+    left join ops.home_inbox_disposition d on d.actor_id=p_actor and d.item_id=s.item_id
+  ), placed as (
+    select *,case when stored_disposition='snoozed' and (snoozed_until<=now() or new_activity)
+      then 'inbox' else stored_disposition end disposition from observed
+  )
+  select jsonb_build_object('item_id',item_id,'source_type',source_type,'source_id',source_id,
+    'source_version',source_version,'source_state',source_state,'title',title,'activity_at',activity_at,
+    'context_label',context_label,'due_on',due_on,'open_url',open_url,'kind_label',kind_label,
+    'action_id',action_id,'action_version',action_version,'deal_id',deal_id,'merged_source_ids',merged_source_ids,'hold_until',hold_until,'unseen',unseen,'disposition',disposition,
+    'snoozed_until',case when disposition='snoozed' then snoozed_until end,
+    'explicit_unsettle',coalesce(explicit_unsettle,false) and not new_activity,
+    'section',case when source_state='done' then 'done' when hold_until>current_date then 'held' when disposition<>'inbox' then disposition when source_state='working' then 'working' else 'inbox' end,
+    'base_version',md5(jsonb_build_array(source_version,coalesce(disposition_version,0),disposition)::text))
+    from placed order by (source_state='done'),activity_at desc,item_id limit 1001
+$$;
+revoke all on function ops.home_inbox_items(uuid) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+
+create or replace function ops.read_home_inbox() returns jsonb
+language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $$
+declare a uuid:=ops.portfolio_writer_actor_id(); items jsonb;
+begin
+  if a is null then raise insufficient_privilege; end if;
+  select coalesce(jsonb_agg(i order by (i->>'source_state'='done'),(i->>'activity_at')::timestamptz desc,i->>'item_id'),'[]') into items from ops.home_inbox_items(a) i;
+  return jsonb_build_object('ok',true,'schema_version','home-inbox.v2','items',(select coalesce(jsonb_agg(value order by ord),'[]') from jsonb_array_elements(items) with ordinality e(value,ord) where ord<=1000),
+    'truncated',jsonb_array_length(items)>1000 or exists (
+      select 1 from ops.notification n where n.recipient_actor=a
+        and n.subject_type in ('deal','loop','call','email') and ops.notification_visible(n.id)
+        offset 10000 limit 1),'limit',1000,
+    'working_collapsed',true,'auto_settle_enabled',false);
+end $$;
+revoke all on function ops.read_home_inbox() from public,carr_reader;
+grant execute on function ops.read_home_inbox() to carr_writer;
+

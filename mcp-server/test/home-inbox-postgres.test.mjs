@@ -5,6 +5,7 @@ import pg from 'pg';
 import { setTimeout } from 'node:timers/promises';
 import { readFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
+import { HOME_INBOX_CONTRACT } from '../src/home-inbox.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
 const id = n => `ae000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -12,10 +13,7 @@ const joe = { id: id(1), slug: 'joe', human: true };
 const dell = { id: id(2), slug: 'dell', human: true };
 
 
-test('Home inbox is an actor-scoped bounded snapshot over canonical records', async t => {
-  const db = await postgresDatabase('home-inbox-');
-  const c = db.client;
-  t.after(() => db.close());
+async function initialize(c) {
   await c.query(`create schema ops;
     create function ops.scac_current_grant_contract() returns jsonb language sql as
       $$select '{"secdef_execute":[]}'::jsonb$$;
@@ -46,6 +44,13 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
   const cadence=readFileSync(new URL('../../migrations/0617_delivery_cadence_a05.sql', import.meta.url),'utf8');
   await c.query(cadence.match(/create or replace function ops\.notification_feed_facts\(p_after timestamptz, p_limit integer\)[\s\S]*?end \$\$;/)[0]);
   await c.query(readFileSync(new URL('../../migrations/1114_home_inbox.sql', import.meta.url),'utf8'));
+}
+
+test('Home inbox is an actor-scoped bounded snapshot over canonical records', async t => {
+  const db = await postgresDatabase('home-inbox-');
+  const c = db.client;
+  t.after(() => db.close());
+  await initialize(c);
   await c.query(`insert into next_action values
     ($1,$2,'Synthetic open task','open',1,'2026-10-29','2026-10-29','2026-11-02'),
     ($3,$2,'Synthetic done task','done',2,'2026-10-28','2026-10-29',null),
@@ -266,4 +271,117 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
     await assert.rejects(read(),e=>e.payload.error==='inbox_limit_exceeded');
   });
 
+});
+
+
+test('Home inbox v2 projects current partner work with context', async t => {
+  const db=await postgresDatabase('home-inbox-v2-');
+  const c=db.client;
+  t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal', add subject_id uuid, add due_on date;
+    alter table capture_post_call_action add deal_id uuid, add due_on date, add version integer default 1;
+    create table deal(id uuid primary key,name text);
+    create table loop_item(id uuid primary key,number text,title text);
+    insert into deal values('${id(60)}','Synthetic lease');
+    insert into loop_item values('${id(61)}','250','Synthetic orb panel');
+    insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at,hold_until,due_on) values
+    ('${id(70)}','${joe.id}','${id(60)}','Call owner','open',1,now(),now(),null,current_date),
+    ('${id(71)}','${joe.id}','${id(60)}',' CALL   owner ','open',2,now()-interval '1 day',now()-interval '1 day',null,current_date),
+    ('${id(72)}','${joe.id}','${id(60)}','Recent done','done',1,now(),now(),null,null),
+    ('${id(73)}','${joe.id}','${id(60)}','Old done','done',1,now()-interval '8 days',now()-interval '8 days',null,null),
+    ('${id(74)}','${joe.id}','${id(60)}','Dropped','dropped',1,now(),now(),null,null),
+    ('${id(75)}','${joe.id}','${id(60)}','Held','open',1,now(),now(),current_date+1,null);
+    insert into ops.notification values
+    ('${id(80)}','${joe.id}','loop','${id(61)}','action_required','Action needed on an open loop',null,now()),
+    ('${id(81)}','${joe.id}','engineering','build','failure','build_failed',null,now()),
+    ('${id(82)}','${joe.id}','release','deploy','failure','deploy_failed',null,now());`);
+  const read=async()=> (await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  const before=await read();
+  console.log('Synthetic v1 seed items',before.items.length);
+  if (!process.env.HOME_INBOX_TEST_V1) {
+    await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  }
+  const snapshot=await read();
+  console.log('Synthetic v2 seed items',snapshot.items.length);
+  await t.test('done has a seven-day shelf and dropped is hidden',()=>{
+    const done=snapshot.items.find(i=>i.source_id===id(72));
+    assert.equal(done.section,'done');
+    assert.ok(!snapshot.items.some(i=>[id(73),id(74)].includes(i.source_id)));
+  });
+  await t.test('identical open tasks collapse by owner and deal with actionable context',()=>{
+    const task=snapshot.items.find(i=>i.source_id===id(70));
+    assert.equal(snapshot.items.filter(i=>[id(70),id(71)].includes(i.source_id)).length,1);
+    assert.deepEqual(task.merged_source_ids,[id(70),id(71)]);
+    assert.equal(task.context_label,'Synthetic lease');
+    assert.equal(task.kind_label,'Task');
+    assert.ok(task.due_on);
+    assert.equal(task.open_url,`/deals?deal=${id(60)}&focus=next-step`);
+  });
+  await t.test('task completion uses canonical action identity and integer version',()=>{
+    const task=snapshot.items.find(i=>i.source_id===id(70));
+    assert.equal(task.action_id,id(70));
+    assert.equal(task.action_version,1);
+    assert.equal(task.deal_id,id(60));
+  });
+  await t.test('future hold belongs to Held',()=>{
+    assert.equal(snapshot.items.find(i=>i.source_id===id(75)).section,'held');
+  });
+  await t.test('notification title names its loop',()=>{
+    assert.match(snapshot.items.find(i=>i.source_type==='notification' && i.title.includes('loop')).title,/Synthetic orb panel/);
+  });
+  await t.test('engineering and release notifications stay out',()=>{
+    assert.equal(snapshot.items.filter(i=>i.source_type==='notification').length,1);
+  });
+  await t.test('v2 keeps completion identity across task kinds and non-deal tasks',async()=>{
+    await c.query(`insert into next_action(id,owner_id,subject_type,subject_id,description,status,version,created_at,updated_at)
+      values($1,$2,'client',$3,'Client task','open',7,now(),now())`,[id(90),joe.id,id(62)]);
+    await c.query(`insert into capture_post_call_action(id,owner_id,deal_id,description,status,updated_at,version)
+      values('${id(91)}','${joe.id}','${id(60)}','Accepted call task','open',now(),4)`);
+    const items=(await read()).items;
+    const client=items.find(i=>i.source_id===id(90));
+    assert.equal(client.action_id,id(90));
+    assert.equal(client.action_version,7);
+    assert.equal(client.deal_id,null);
+    const call=items.find(i=>i.source_id===id(91));
+    assert.equal(call.action_id,id(91));
+    assert.equal(call.action_version,4);
+    assert.equal(call.deal_id,id(60));
+    await c.query('delete from next_action where id=$1',[id(90)]);
+    await c.query('delete from capture_post_call_action where id=$1',[id(91)]);
+  });
+  await t.test('v2 dispositions stay private and reject stale canonical edits',async()=>{
+    const task=(await read()).items.find(i=>i.source_id===id(70));
+    await c.query('set role carr_reader');
+    await assert.rejects(c.query('select ops.read_home_inbox()'),e=>e.code==='42501');
+    await c.query('reset role');
+    const change=async(key,item)=> (await c.query("select ops.change_home_inbox($1,'settle',$2,null) result",
+      [key,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])])).rows[0].result;
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.equal((await change(id(93),task)).results[0].error,'inbox_item_not_found');
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    assert.equal((await change(id(94),task)).results[0].item.disposition,'settled');
+    await c.query('update next_action set version=version+1 where id=$1',[id(70)]);
+    assert.equal((await change(id(95),task)).results[0].error,'version_conflict');
+  });
+  await t.test('generated v2 contract matches the runtime declaration and projected fields',()=>{
+    const contract=JSON.parse(readFileSync(new URL('../contracts/home-inbox.v2.json',import.meta.url),'utf8'));
+    assert.deepEqual(contract,HOME_INBOX_CONTRACT);
+    assert.equal(snapshot.schema_version,contract.schema_version);
+    for(const item of snapshot.items) {
+      for(const field of Object.keys(contract.item_fields)) assert.ok(Object.hasOwn(item,field),field);
+      assert.ok(contract.sections.includes(item.section));
+    }
+  });
+  await t.test('over-cap returns newest open work without refusing the snapshot',async()=>{
+    await c.query(`insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at)
+      select ('af000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,$1,$2,'Bound '||n,'open',1,
+        now()+n*interval '1 second',now()+n*interval '1 second' from generate_series(1,1002)n`,[joe.id,id(60)]);
+    const result=await read();
+    assert.equal(result.ok,true);
+    assert.equal(result.items.length,1000);
+    assert.equal(result.items[0].title,'Bound 1002');
+    assert.equal(result.truncated,true);
+    assert.equal(result.schema_version,'home-inbox.v2');
+  });
 });
