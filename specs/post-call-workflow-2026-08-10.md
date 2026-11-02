@@ -191,10 +191,9 @@ only when the incoming date is stated (`due_defaulted: false`) and nonempty.
 Defaulted, missing, and historical dates with unknown provenance preserve the
 existing date. Closed actions remain history.
 
-`read-call-outcomes` task cards at `calls[].open_cards[]` and
-`read-post-call-followups` task rows at `candidates[]` add
+`read-call-outcomes` task cards at `calls[].open_cards[]` add
 `existing_action_comparison`. Other proposal kinds omit the field. The outer
-response versions stay unchanged. The comparison is a current read, not a
+response version stays unchanged. The comparison is a current read, not a
 reservation. A read failure fails the request; clients must show comparison
 unavailable rather than infer no match from a missing field.
 

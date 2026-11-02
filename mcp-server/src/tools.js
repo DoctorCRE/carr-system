@@ -4018,7 +4018,7 @@ export const TOOLS = {
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const { rows } = await c.query(`
-        select c.id, c.session_id, c.kind, c.due_defaulted, c.deal_id, b.name as deal_name, p.name as contact_name,
+        select c.id, c.session_id, c.kind, c.deal_id, b.name as deal_name, p.name as contact_name,
                case c.kind when 'assigned_action' then jsonb_build_object(
                  'deal_id', c.deal_id, 'assignee', c.assignee_slug,
                  'action', c.action_description, 'due_on', to_jsonb(c.due_on)#>>'{}')
@@ -4037,7 +4037,7 @@ export const TOOLS = {
          order by c.created_at, c.id limit 1001`);
       if (rows.length > 1000)
         throw new ToolError({ error: "post_call_followups_limit_exceeded", limit: 1000 });
-      return { schema_version: "post-call-followups.v1", candidates: await withPostCallActionComparisons(c, rows), send: false };
+      return { schema_version: "post-call-followups.v1", candidates: rows, send: false };
     },
   },
 
