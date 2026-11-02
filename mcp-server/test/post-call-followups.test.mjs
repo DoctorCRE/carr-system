@@ -89,6 +89,31 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       assert.equal((await command('resolve-post-call-candidate', { candidate_id: id, accept: true, idempotency_key: randomUUID() })).ref === action, false);
       assert.deepEqual((await c.query(`select * from ${source} where id=$1`, [action])).rows[0], stored);
     });
+    for (const [label, proposed, existing, expected] of [
+      ['different call recipient', 'Call the landlord', 'Call the broker', 'no_match'],
+      ['different document', 'Send the LOI', 'Send the survey', 'no_match'],
+      ['different follow-up recipient', 'Follow up with the tenant', 'Follow up with the lender', 'no_match'],
+      ['only filler words shared', 'Meet at the property', 'Work at the office', 'no_match'],
+      ['reworded rent roll task', 'Get rent roll from landlord', 'Ask landlord for the rent roll', 'possible_match'],
+    ]) await t.test(`${label} compares meaningful words`, async () => {
+      const id = await proposal(proposed);
+      const action = await seed('capture_post_call_action', id, existing, actor.id, 'done');
+      const before = await preview(id);
+      assert.equal(before.status, expected);
+      assert.equal(before.exact_match, null);
+      assert.deepEqual(before.possible_matches.map(match => match.id), expected === 'possible_match' ? [action] : []);
+    });
+    await t.test('identical text on another deal gives no match', async () => {
+      const text = 'Request synthetic zoning certificate';
+      const id = await proposal(text);
+      const otherDeal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic other deal',$1,'lease','site_selection','joe',$2,$2) returning id", [client, actor.id])).rows[0].id;
+      await c.query(`insert into next_action(subject_type,subject_id,owner_id,description,status,created_by)
+        values('deal',$1,$2,$3,'open',$2)`, [otherDeal, actor.id, text]);
+      const before = await preview(id);
+      assert.equal(before.status, 'no_match');
+      assert.equal(before.exact_match, null);
+      assert.deepEqual(before.possible_matches, []);
+    });
     for (const [due, defaulted, reason] of [[null, false, 'unstated_date'], ['2027-03-03', true, 'defaulted_date'], ['2027-04-04', null, 'defaulted_date']]) {
       const id = await proposal(`Keep synthetic date ${reason} ${defaulted}`, due, defaulted);
       const action = await seed('next_action', id, `Keep synthetic date ${reason} ${defaulted}`);
