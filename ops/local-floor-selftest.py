@@ -116,6 +116,7 @@ class PushFloorTests(RepositoryFixture):
     def setUp(self):
         super().setUp()
         self.copy("ops/ci.sh")
+        self.copy("ops/ci.py")
         self.copy("ops/ci-pushfloor.py")
         self.copy("ops/node_test_summary.py")
         for name in ("ops/no-client-deliverables-gate.py", "ops/hook-deletion-check.py",
@@ -131,7 +132,7 @@ class PushFloorTests(RepositoryFixture):
                    "with Path('calls').open('a') as log:\n    log.write('paired\\n')\n")
         self.write("mcp-server/src/scac-mutation-registry.current.generated.js", "// baseline\n")
         self.write("mcp-server/src/tool-families/fixture.js", "// reviewed family\n")
-        self.commit("ops/ci.sh", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
+        self.commit("ops/ci.sh", "ops/ci.py", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
                     "ops/no-client-deliverables-gate.py",
                     "ops/hook-deletion-check.py", "ops/ci-selftest.py", "bin/type-check.sh",
                     "bin/node", "hooks/example.py", "ops/example-selftest.py",
@@ -294,6 +295,22 @@ class PushFloorTests(RepositoryFixture):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.calls(), ["collection --collection-only"])
         self.assertRegex(self.verdict(result)[1], r"path shape \+ test-collection$")
+
+    def assert_controller_change_runs_collection_and_closes_gates(self, controller):
+        self.stub("ops/ci-selftest.py", "collection")
+        self.stub("ops/hook-env-isolation-selftest.py", "hook-isolation")
+        self.stub("ops/selftest-git-isolation-check.py", "git-isolation")
+        result = self.run_floor(controller)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["collection --collection-only", "hook-isolation", "git-isolation"])
+        self.assertIn("test-collection", self.verdict(result)[1])
+        self.assertIn("gate-closure", self.verdict(result)[1])
+
+    def test_python_controller_only_change_runs_collection_and_closes_gates(self):
+        self.assert_controller_change_runs_collection_and_closes_gates("ops/ci.py")
+
+    def test_shell_launcher_only_change_runs_collection_and_closes_gates(self):
+        self.assert_controller_change_runs_collection_and_closes_gates("ops/ci.sh")
 
     def test_a_runner_that_dies_without_a_verdict_fails_the_class(self):
         self.write("ops/ci-pushfloor.py", "raise SystemExit(2)\n")

@@ -21,7 +21,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'ops/config').mkdir(parents=True)
         (self.root / 'bin').mkdir()
         shutil.copy2(ROOT / 'bin/with-timeout.py', self.root / 'bin/with-timeout.py')
-        for name in ('ci.sh', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
+        for name in ('ci.sh', 'ci.py', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
                      'ci_unit_shards.py', 'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
             source = ROOT / 'ops' / name
             if source.exists():
