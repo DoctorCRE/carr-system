@@ -158,6 +158,130 @@ def test_doc_drift_keeps_its_argument_and_interpreter_handoff():
               rc == 64 and 'unknown argument: --doc-drift' in output, output)
 
 
+def test_migration_requires_newline_terminated_verdict():
+    with ci_fixture() as root:
+        for content, expected in (("ok\tfixture migration", 1),
+                                  ("ok\tfixture migration\r", 1),
+                                  ("ok\tfixture migration\n", 0),
+                                  ("ok\tfixture migration\r\n", 0),
+                                  ("ok\tA\nbad\tB", 1),
+                                  ("ok\tA\nskip\tS", 1),
+                                  ("ok\tA\rbad\tB\n", 1)):
+            (root / "ops/ci-migration.py").write_text(
+                "import sys\nfrom pathlib import Path\n"
+                f"Path(sys.argv[sys.argv.index('--result')+1]).write_text({content!r})\n")
+            rc, output = run(["--strict", "--only", "migration"], root=root)
+            check(f"migration verdict newline={content.endswith(chr(10))} exits {expected}",
+                  rc == expected, output)
+            check("malformed migration records cannot pass CI",
+                  ("CI passed" in output) == (expected == 0), output)
+
+
+def test_controller_sigterm_cleans_children_and_temp_state():
+    for name, runner, signals, delay in (
+            ("dependency", "ci-dep-check.py", (signal.SIGTERM,), None),
+            ("secret", "ci-secret.py", (signal.SIGTERM,), None),
+            ("migration", "ci-migration.py", (signal.SIGTERM,), None),
+            ("dependency", "ci-dep-check.py", (signal.SIGINT,), None),
+            ("dependency", "ci-dep-check.py", (signal.SIGINT, signal.SIGTERM), None),
+            *(("dependency", "ci-dep-check.py", pair, delay)
+              for pair in ((signal.SIGINT, signal.SIGINT),
+                           (signal.SIGTERM, signal.SIGTERM),
+                           (signal.SIGINT, signal.SIGTERM))
+              for delay in (0, .02))):
+        escalating = len(signals) == 2
+        retained = signals[0] == signal.SIGINT
+        scenario = f"{name} {' then '.join(signal.Signals(sig).name for sig in signals)}"
+        if delay is not None:
+            scenario += f" gap={delay}s"
+        with ci_fixture() as root, tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            (root / "child.py").write_text(
+                "import signal,time\nfrom pathlib import Path\n"
+                f"signal.signal(signal.SIGTERM, {'signal.SIG_IGN' if escalating else 'lambda *_: exit(0)'})\n"
+                "Path('child-ready').touch()\n"
+                "while True: time.sleep(1)\n")
+            (root / "ops" / runner).write_text(
+                "import os,signal,subprocess,sys,time\nfrom pathlib import Path\n"
+                "child=subprocess.Popen([sys.executable,'child.py'],start_new_session=True)\n"
+                "def stop(*_):\n" +
+                ("    Path('terminating').touch()\n" if escalating else
+                 "    child.wait(timeout=5)\n    sys.exit(143)\n") +
+                "signal.signal(signal.SIGTERM,stop)\n"
+                "while not Path('child-ready').exists(): time.sleep(.01)\n"
+                "print('cancellation fixture log', flush=True)\n"
+                "Path('pids').write_text(f'{os.getpid()} {child.pid}')\n"
+                "while True: time.sleep(1)\n")
+            for finalizer in ("ci-evidence.py", "ci-secret-scan.py"):
+                (root / "ops" / finalizer).write_text(
+                    "import signal,sys\nfrom pathlib import Path\n"
+                    "assert signal.getsignal(signal.SIGINT) == signal.default_int_handler\n"
+                    "assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL\n"
+                    "Path(__file__).with_suffix('.ready').touch()\n"
+                    "if '--redact' in sys.argv: sys.stdout.write(sys.stdin.read())\n")
+            process = subprocess.Popen(["bash", "ops/ci.sh", "--only", name], cwd=root,
+                env={**fixture_env(), "RUNNER_TEMP": directory, "GITHUB_ACTIONS": "true",
+                     "CARR_CI_PROGRAM_RECORDS": str(state / "records.json")}, start_new_session=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            pids = []
+            try:
+                deadline = time.monotonic() + 15
+                while not (root / "pids").exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                if (root / "pids").exists():
+                    pids = [int(pid) for pid in (root / "pids").read_text().split()]
+                check(f"{name} cancellation fixture starts runner and descendant", len(pids) == 2)
+                started = time.monotonic()
+                process.send_signal(signals[0])
+                if escalating and delay is None:
+                    deadline = time.monotonic() + 5
+                    while not (root / "terminating").exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    check(f"{scenario} reaches child cleanup", (root / "terminating").exists())
+                if escalating:
+                    if delay:
+                        time.sleep(delay)
+                    process.send_signal(signals[1])
+                try:
+                    stdout, stderr = process.communicate(timeout=5 if escalating and delay is None else 15)
+                except subprocess.TimeoutExpired:
+                    check(f"{scenario} exits within cancellation bound", False)
+                    continue
+                check(f"{scenario} exits nonzero without claiming success",
+                      (process.returncode != 0 if retained else process.returncode == 143) and "CI passed" not in stdout, stdout + stderr)
+                for finalizer in (("ci-evidence", "ci-secret-scan") if retained else ("ci-evidence",)):
+                    check(f"{scenario} {finalizer} restores cancellation signals",
+                          (root / "ops" / f"{finalizer}.ready").exists(), stdout + stderr)
+                for pid in pids:
+                    try:
+                        os.kill(pid, 0)
+                        alive = True
+                    except ProcessLookupError:
+                        alive = False
+                    check(f"{name} child {pid} exits before controller returns", not alive)
+                if retained:
+                    logs = list(state.glob("carr-ci.*/dep.log.redacted"))
+                    check(f"{scenario} retains redacted logs for upload",
+                          "ci-retained-logs:" in stderr and len(logs) == 1
+                          and "cancellation fixture log" in logs[0].read_text(), stderr)
+                else:
+                    check(f"{scenario} removes controller temporary state",
+                          not list(state.glob("carr-ci.*")), stderr)
+                if escalating and delay is None:
+                    check(f"{scenario} escalation exits promptly", time.monotonic() - started < 5)
+            finally:
+                for pid in [process.pid, *pids]:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                process.wait(timeout=10)
+
+
 def test_controller_requires_runner_verdicts():
     with ci_fixture() as root:
         for name in ("gates", "secret", "pushfloor", "migration"):
@@ -1637,6 +1761,8 @@ def main(argv=None):
     for fn in (test_artifact_requires_native_rule_projection_and_tests,
                test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
+               test_migration_requires_newline_terminated_verdict,
+               test_controller_sigterm_cleans_children_and_temp_state,
                test_controller_requires_runner_verdicts,
                test_controller_consumes_evidence_destination_before_nested_runs,
                test_python_controller_entrypoint, test_failed_gate_logs_survive_exit, test_worktree_python_selection,

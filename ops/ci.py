@@ -6,7 +6,9 @@ from dataclasses import dataclass
 import io
 import os
 from pathlib import Path
+import runpy
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -82,9 +84,38 @@ def parse_options(argv):
     return options
 
 
+def run_command(command, **kwargs):
+    data = kwargs.pop('input', None)
+    if data is not None:
+        kwargs['stdin'] = subprocess.PIPE
+    with subprocess.Popen(command, start_new_session=True, **kwargs) as process:
+        try:
+            stdout, stderr = process.communicate(data)
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        except BaseException:
+            timeout = runpy.run_path(str(ROOT / 'bin/with-timeout.py'))
+            tree = timeout['_descendants'](process.pid)
+
+            def force_cleanup(*_):
+                timeout['_signal_tree'](tree, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+            previous = {sig: signal.signal(sig, force_cleanup)
+                        for sig in (signal.SIGINT, signal.SIGTERM)}
+            try:
+                timeout['_terminate_group'](process)
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
+            raise
+
+
 def execute(command, **kwargs):
     try:
-        result = subprocess.run([str(arg) for arg in command], **kwargs)
+        result = run_command([str(arg) for arg in command], **kwargs)
         return result.returncode if result.returncode >= 0 else 128 - result.returncode
     except OSError as error:
         target = kwargs.get('stderr')
@@ -94,7 +125,7 @@ def execute(command, **kwargs):
 
 
 def capture(command, *, quiet=False):
-    return subprocess.run([str(arg) for arg in command], stdout=subprocess.PIPE,
+    return run_command([str(arg) for arg in command], stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL if quiet else None,
                           text=True, errors='replace').stdout.rstrip('\n')
 
@@ -142,7 +173,7 @@ class Controller:
         data = log.read_bytes()
         window = data if data.count(b'\n') < 200 else b''.join(io.BytesIO(data).readlines()[-80:])
         try:
-            result = subprocess.run([self.python, 'ops/ci-secret-scan.py', '--redact'],
+            result = run_command([self.python, 'ops/ci-secret-scan.py', '--redact'],
                                     input=window, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             if result.returncode == 0:
                 sys.stderr.buffer.write(result.stdout)
@@ -154,11 +185,15 @@ class Controller:
               f'and unredacted child output is never printed. The captured log is at {log}.', file=sys.stderr)
 
     def finish(self, rc):
+        def reset_cancel_signals():
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                signal.signal(sig, signal.SIG_DFL)
+
         if self.program_records and execute(
                 [self.python, ROOT / 'ops/ci-evidence.py', 'programs', '--rows', self.logdir / 'programs.tsv',
-                 '--output', self.program_records], stdout=subprocess.DEVNULL):
+                 '--output', self.program_records], stdout=subprocess.DEVNULL, preexec_fn=reset_cancel_signals):
             print(f'ci-program-records: NOT WRITTEN to {self.program_records}', file=sys.stderr)
-        if rc == 0:
+        if rc in (0, 143):
             shutil.rmtree(self.logdir)
             return
         for status in self.logdir.glob('*.rc'):
@@ -172,7 +207,8 @@ class Controller:
             for log in self.logdir.glob('*.log'):
                 redacted = Path(str(log) + '.redacted')
                 with log.open('rb') as source, redacted.open('wb') as target:
-                    status_code = execute([self.python, 'ops/ci-secret-scan.py', '--redact'], stdin=source, stdout=target)
+                    status_code = execute([self.python, 'ops/ci-secret-scan.py', '--redact'],
+                                          stdin=source, stdout=target, preexec_fn=reset_cancel_signals)
                 if status_code:
                     redacted.unlink(missing_ok=True)
         print(f'ci-retained-logs: {self.logdir}', file=sys.stderr)
@@ -213,8 +249,8 @@ class Controller:
             version = 'unknown'
             for python in (str(ROOT / '.venv/bin/python'), 'python3'):
                 try:
-                    result = subprocess.run([python, '-c', 'import sys;print("%d.%d"%sys.version_info[:2])'],
-                                            capture_output=True, text=True)
+                    result = run_command([python, '-c', 'import sys;print("%d.%d"%sys.version_info[:2])'],
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                     if result.returncode == 0:
                         version = result.stdout.strip()
                         break
@@ -251,7 +287,7 @@ class Controller:
         self.runner_verdict('ops/ci-pushfloor.py', deferred, 'push floor runner')
 
     def runner_verdict(self, runner, arguments, label):
-        result = subprocess.run([self.python, runner, '--logdir', str(self.logdir), *arguments],
+        result = run_command([self.python, runner, '--logdir', str(self.logdir), *arguments],
                                 stdout=subprocess.PIPE, text=True, errors='replace')
         message = result.stdout.rstrip('\n')
         rc = result.returncode if result.returncode >= 0 else 128 - result.returncode
@@ -274,8 +310,12 @@ class Controller:
                       '--python', self.python, '--part', self.options.migration_part,
                       '--prior-failed', len(self.failed), *flags])
         reported = reported_bad = False
-        for line in result.read_text().splitlines():
-            kind, _, message = line.partition('\t')
+        for line in result.read_bytes().decode().splitlines(keepends=True):
+            if not line.endswith('\n'):
+                self.verdict('bad', 'migration runner wrote an unterminated record')
+                reported = reported_bad = True
+                continue
+            kind, _, message = line.rstrip('\r\n').partition('\t')
             if kind in ('ok', 'bad', 'skip'):
                 self.verdict(kind, message)
                 reported = True
@@ -323,7 +363,7 @@ if(/DATABASE_URL\s*=/.test(t)){console.error("wrangler.toml declares a DATABASE_
             self.verdict('bad', 'the exact DoctorCRE release artifact did not match its CARR pin')
             return
         with (self.logdir / 'artifact.log').open('wb') as error:
-            shipping = subprocess.run(['sh', 'ops/verb-count.sh', str(ROOT / 'mcp-server'),
+            shipping = run_command(['sh', 'ops/verb-count.sh', str(ROOT / 'mcp-server'),
                                       '--check-retirements', '0'], stderr=error,
                                      stdout=subprocess.PIPE, text=True, errors='replace').stdout.rstrip('\n')
         if not shipping:
@@ -404,6 +444,14 @@ def main(argv=None):
         return 0
     controller = Controller(options, python)
     rc = 1
+    def cancel(signum, _):
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, signal.SIG_IGN)
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
+        sys.exit(143)
+
+    previous = {sig: signal.signal(sig, cancel) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         if options.gate_programs:
             execute([python, 'ops/ci-gates.py', '--gate-programs'])
@@ -411,8 +459,18 @@ def main(argv=None):
         else:
             rc = controller.run()
         return rc
+    except SystemExit as error:
+        rc = error.code
+        raise
+    except KeyboardInterrupt:
+        rc = 130
+        raise
     finally:
-        controller.finish(rc)
+        try:
+            controller.finish(rc)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
 
 
 if __name__ == '__main__':
