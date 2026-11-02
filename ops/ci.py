@@ -15,6 +15,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+TIMEOUT = runpy.run_path(str(ROOT / 'bin/with-timeout.py'))
 CI_SELFTEST_TIMEOUT_SECONDS = 120
 CLASS_DESCRIPTIONS = {
     'pushfloor': 'seeded defect that must not leave the machine (local pre-push floor)',
@@ -93,7 +94,22 @@ def run_command(command, **kwargs):
             stdout, stderr = process.communicate(data)
             return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
         except BaseException:
-            runpy.run_path(str(ROOT / 'bin/with-timeout.py'))['_terminate_group'](process)
+            tree = TIMEOUT['_descendants'](process.pid)
+
+            def force_cleanup(*_):
+                TIMEOUT['_signal_tree'](tree, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+            previous = {sig: signal.signal(sig, force_cleanup)
+                        for sig in (signal.SIGINT, signal.SIGTERM)}
+            try:
+                TIMEOUT['_terminate_group'](process)
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
             raise
 
 
@@ -173,7 +189,7 @@ class Controller:
                 [self.python, ROOT / 'ops/ci-evidence.py', 'programs', '--rows', self.logdir / 'programs.tsv',
                  '--output', self.program_records], stdout=subprocess.DEVNULL):
             print(f'ci-program-records: NOT WRITTEN to {self.program_records}', file=sys.stderr)
-        if rc in (0, 130, 143):
+        if rc in (0, 143):
             shutil.rmtree(self.logdir)
             return
         for status in self.logdir.glob('*.rc'):
@@ -289,8 +305,12 @@ class Controller:
                       '--python', self.python, '--part', self.options.migration_part,
                       '--prior-failed', len(self.failed), *flags])
         reported = reported_bad = False
-        for line in result.read_bytes().decode().split('\n')[:-1]:
-            kind, _, message = line.partition('\t')
+        for line in result.read_bytes().decode().splitlines(keepends=True):
+            if not line.endswith('\n'):
+                self.verdict('bad', 'migration runner wrote an unterminated record')
+                reported = reported_bad = True
+                continue
+            kind, _, message = line.rstrip('\r\n').partition('\t')
             if kind in ('ok', 'bad', 'skip'):
                 self.verdict(kind, message)
                 reported = True
