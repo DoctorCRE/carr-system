@@ -258,6 +258,77 @@ class LedgerTests(unittest.TestCase):
                         self.assertTrue((session / 'ingested.json').exists())
                         self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'filed')
 
+    def test_poll_prior_filing_hash_changed_retains_audio(self):
+        self.check_prior_filing('hash_changed')
+
+    def test_poll_prior_filing_remote_unfiled_retains_audio(self):
+        self.check_prior_filing('remote_unfiled')
+
+    def test_poll_prior_filing_foreign_dispositions_retains_audio(self):
+        self.check_prior_filing('foreign_dispositions')
+
+    def test_poll_prior_filing_refused_dispositions_retains_audio(self):
+        self.check_prior_filing('refused_dispositions')
+
+    def test_poll_prior_filing_matching_metadata_change_purges(self):
+        self.check_prior_filing('valid')
+
+    def check_prior_filing(self, case):
+        home = Path(self.tmp.name) / 'home'
+        session = home / 'Recordings/2026.01.01-1200'
+        session.mkdir(parents=True)
+        (home / 'Library/Logs').mkdir(parents=True)
+        report = self.raw_report()
+        for index, item in enumerate(pc._report_candidates(report)):
+            item.update(candidate_id=f'legacy-{index}', candidate_status='confirmed')
+        report.update(review_questions=[{'resolved': True}], backend_report_sha256='a' * 64,
+                      aggregate_report_hash='c' * 64, filed_at='2000-01-01T00:00:00Z')
+        pc.write_private(session / pc.REPORT_FILE, report)
+        pc.write_private(session / pc.STATUS_FILE, {'state': 'filed'})
+        pc.write_private(session / '.capture.json', {'session_token': 'synthetic'})
+        pc.write_private(session / 'transcript.json', self.transcript)
+        (session / 'mic.caf').write_bytes(b'synthetic audio')
+        rows = [{'id': item['candidate_id'], 'status': item['candidate_status']}
+                for item in pc._report_candidates(report)]
+        if case == 'foreign_dispositions':
+            rows = [{'id': 'foreign', 'status': 'confirmed'}]
+        if case == 'refused_dispositions':
+            rows[0]['status'] = 'refused'
+        if case == 'remote_unfiled':
+            rows = []
+        response = {'state': 'done', 'post_call': True, 'meeting_record': None,
+                    'candidates': {'pending': 0}, 'candidate_statuses': rows,
+                    'post_call_report': {'filed': case != 'remote_unfiled',
+                        'sha256': ('b' if case == 'hash_changed' else 'a') * 64,
+                        'candidate_count': len(rows)}}
+        calls = []
+        def request(_cfg, _path, method, endpoint, body=None):
+            calls.append((method, endpoint))
+            if endpoint == '/capture/session':
+                return 200, deepcopy(response)
+            return 200, {'ok': True, 'filed': True}
+        spec = importlib.util.spec_from_file_location('prior_filing_bridge', BIN / 'capture-bridge.py')
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)
+        with patch.object(bridge, 'LOG_PATH', session / 'bridge.log'), patch.object(
+                bridge, 'session_request', side_effect=request):
+            bridge.poll_cmd({}, session)
+        receipt = pc.read_json(session / 'ingested.json')
+        if case == 'valid':
+            self.assertIsNotNone(receipt)
+            self.assertEqual(receipt['backend_report_sha256'], 'a' * 64)
+            self.assertEqual(receipt['aggregate_report_hash'], 'c' * 64)
+            receipt['ingested_at'] = '2000-01-01T00:00:00Z'
+            pc.write_private(session / 'ingested.json', receipt)
+        else:
+            self.assertIsNone(receipt)
+            self.assertEqual(calls, [('GET', '/capture/session')])
+            self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'needs_attention')
+        subprocess.run(['/bin/sh', str(BIN / 'purge-recordings.sh')], check=True,
+                       env={'HOME': str(home), 'PATH': '/usr/bin:/bin'}, capture_output=True)
+        self.assertEqual((session / 'mic.caf').exists(), case != 'valid')
+        self.assertEqual(pc.read_json(session / pc.REPORT_FILE)['backend_report_sha256'], 'a' * 64)
+
     def test_oversized_history_is_terminal_without_model_retry(self):
         self.transcript = {'segments': [{'text': 'x' * 25000}]}
         pc.write_private(self.session / 'transcript.json', self.transcript)
