@@ -56,6 +56,8 @@ def florida_rows(line, *, published_on, line_number):
         raise ValueError(error + "invalid Filing Type field; fixed-width schema drift")
     if not re.fullmatch(r"[A-Z]{2}| {2}", raw[344:346]):
         raise ValueError(error + "invalid Country field; fixed-width schema drift")
+    if raw[586] not in {"P", "C", " "}:
+        raise ValueError(error + "invalid Registered Agent Type field; fixed-width schema drift")
     dates = set()
     if re.fullmatch(r"[0-9]{8}", row["filing_on"]):
         for form in ("%Y%m%d", "%m%d%Y"):
