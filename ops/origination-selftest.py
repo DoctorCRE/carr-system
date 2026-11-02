@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Verify public-source origination adapters using synthetic records only."""
 import csv
+import contextlib
+import io
+import json
+from unittest.mock import patch
 import tempfile
 import copy
 import importlib.util
@@ -40,6 +44,35 @@ def florida_fixture(**changes):
 
 
 class OriginationTests(unittest.TestCase):
+    def test_cli_preflight_reports_all_rows_without_external_calls(self):
+        from tools.import_practice_origination import main
+        variants = [florida_fixture(), florida_fixture(name='Synthetic Retail LLC'),
+                    florida_fixture(registered_agent_state='Fl'),
+                    florida_fixture(registered_agent_zip='    32501'),
+                    florida_fixture(registered_agent_zip='32501-123'), florida_fixture()]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.txt'
+            path.write_bytes(('\r\n'.join(variants) + '\r\n').encode('latin1'))
+            output = io.StringIO()
+            with patch.object(sys, 'argv', ['import', 'formation-fl', str(path),
+                                           '--published-on', '2026-10-21']), \
+                    patch('subprocess.run', side_effect=AssertionError('record call')) as record, \
+                    patch('socket.socket', side_effect=AssertionError('network call')) as network, \
+                    contextlib.redirect_stdout(output):
+                with self.assertRaises(SystemExit) as exit:
+                    main()
+            self.assertEqual(exit.exception.code, 1)
+            record.assert_not_called()
+            network.assert_not_called()
+        report = json.loads(output.getvalue())
+        self.assertEqual(report['rows_read'], 6)
+        self.assertEqual(report['accepted'], 2)
+        self.assertEqual(report['skipped'], 1)
+        self.assertEqual(report['refused'], 3)
+        self.assertTrue(report['blocked'])
+        self.assertEqual(sorted(report['refused_by_reason'].values()), [1, 2])
+        self.assertEqual([row['line'] for row in report['first_refusals']], [3, 4, 5])
+
     def test_npi_delta_keeps_evidence_date_without_claiming_practice_opening(self):
         row = {'NPI': '1234567890', 'Entity Type Code': '2',
                'Provider Enumeration Date': '01/01/2020', 'Last Update Date': '10/20/2026',
