@@ -1,16 +1,15 @@
 // Embed doctrine revisions and search their vectors.
 import type { Db } from './verb-contract.ts';
-import { AiBudgetError } from './ai-budget.js';
+import { AiBudgetError, withAiTimeout } from './ai-budget.js';
 
 const DOCTRINE_EMBEDDING_MODEL = '@cf/baai/bge-small-en-v1.5';
 const EMBEDDING_VERSION = `${DOCTRINE_EMBEDDING_MODEL}:cls:chunks-v1`;
 const DIMENSIONS = 384;
-const TIMEOUT_MS = 2000;
 
 /** The Workers AI binding, as far as this module calls it. */
 type EmbeddingAi = {
   run(model: string, input: { text: string[]; pooling: string }): Promise<unknown>;
-  reserveOperation?(textCount: number): Promise<Pick<EmbeddingAi, 'run'>>;
+  reserveOperation?(textCount: number, signal?: AbortSignal): Promise<Pick<EmbeddingAi, 'run'>>;
 };
 /** The database client tools.js hands doctrine verbs: it carries the AI binding and its transaction state. */
 type DoctrineDb = Db & { ai?: EmbeddingAi; inTransaction?: boolean };
@@ -41,29 +40,24 @@ function embeddingChunks(text: string) {
 
 async function doctrineEmbeddings(ai: EmbeddingAi | undefined, texts: string[]): Promise<Vector[]> {
   if (!ai?.run) throw new Error('binding_unavailable');
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race<{ data?: unknown } | undefined>([
-      ai.run(DOCTRINE_EMBEDDING_MODEL, { text: texts, pooling: 'cls' }) as Promise<{ data?: unknown } | undefined>,
-      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('embedding_timeout')), TIMEOUT_MS); }),
-    ]);
-    if (!Array.isArray(result?.data) || result.data.length !== texts.length ||
-        result.data.some((vector: unknown) => !Array.isArray(vector) || vector.length !== DIMENSIONS ||
-          vector.some(value => !Number.isFinite(value)) || !vector.some(value => value !== 0)))
-      throw new Error('invalid_embedding');
-    return result.data as Vector[];
-  } finally {
-    // Unset only if ai.run threw before the race began; clearTimeout ignores that.
-    clearTimeout(timeout!);
-  }
+  const result = await ai.run(DOCTRINE_EMBEDDING_MODEL, { text: texts, pooling: 'cls' }) as { data?: unknown } | undefined;
+  if (!Array.isArray(result?.data) || result.data.length !== texts.length ||
+      result.data.some((vector: unknown) => !Array.isArray(vector) || vector.length !== DIMENSIONS ||
+        vector.some(value => !Number.isFinite(value)) || !vector.some(value => value !== 0)))
+    throw new Error('invalid_embedding');
+  return result.data as Vector[];
 }
 
-async function embedChunks(ai: EmbeddingAi | undefined, texts: string[]) {
-  const operation = ai?.reserveOperation ? await ai.reserveOperation(texts.length) : ai;
-  const vectors: Vector[] = [];
-  for (let offset = 0; offset < texts.length; offset += 16)
-    vectors.push(...await doctrineEmbeddings(operation, texts.slice(offset, offset + 16)));
-  return vectors;
+async function embedChunks(ai: EmbeddingAi | undefined, texts: string[]): Promise<Vector[]> {
+  return withAiTimeout(async (signal: AbortSignal) => {
+    const operation = ai?.reserveOperation ? await ai.reserveOperation(texts.length, signal) : ai;
+    const vectors: Vector[] = [];
+    for (let offset = 0; offset < texts.length; offset += 16) {
+      signal.throwIfAborted();
+      vectors.push(...await doctrineEmbeddings(operation, texts.slice(offset, offset + 16)));
+    }
+    return vectors;
+  });
 }
 
 export async function searchDoctrineWithEmbeddings(c: DoctrineDb,
