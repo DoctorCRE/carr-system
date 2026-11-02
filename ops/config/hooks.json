@@ -32,7 +32,7 @@
       ]
     },
     {
-      "matcher": "AskUserQuestion|ExitPlanMode",
+      "matcher": "AskUserQuestion|EnterPlanMode|ExitPlanMode",
       "hooks": [
         {
           "type": "command",

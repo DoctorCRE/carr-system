@@ -15,7 +15,7 @@ import sys
 
 REPO = Path(__file__).resolve().parent.parent
 REQUIRED = {
-    'claude': {'guard-unattended.py', 'record-home-gate.py'},
+    'claude': {'guard-unattended.py', 'record-home-gate.py', 'orchestrator-question.py'},
     'codex': {'guard-unattended.py', 'record-home-gate.py'},
 }
 

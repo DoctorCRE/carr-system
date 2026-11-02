@@ -45,8 +45,19 @@ class Questions(unittest.TestCase):
         self.assertEqual(self.run_hook(tool_name='ExitPlanMode')['hookSpecificOutput']
                          ['permissionDecision'], 'deny')
 
+    def test_enter_plan_mode_is_denied_only_when_marked(self):
+        result = self.run_hook(tool_name='EnterPlanMode')['hookSpecificOutput']
+        self.assertEqual(result['permissionDecision'], 'deny')
+        self.assertEqual(result['permissionDecisionReason'],
+                         'Orchestrator sessions stay in default mode (rule d1a7973a, standing order 24). '
+                         'Keep working in default mode and write any plan into your reply or the program store.')
+        self.write([self.user('Worker')])
+        for tool in ('AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode'):
+            with self.subTest(tool=tool):
+                self.assertIsNone(self.run_hook(tool_name=tool))
+
     def test_other_tools_and_events_are_untouched(self):
-        for tool in ('Read', 'Bash', 'EnterPlanMode', 'Agent', 'mcp__example__lookup'):
+        for tool in ('Read', 'Bash', 'Agent', 'mcp__example__lookup'):
             with self.subTest(tool=tool):
                 self.assertIsNone(self.run_hook(tool_name=tool))
         self.assertIsNone(self.run_hook(hook_event_name='PostToolUse'))
@@ -93,7 +104,7 @@ class Questions(unittest.TestCase):
         groups = [g for g in config['PreToolUse'] if any('orchestrator-question.py' in
                   h.get('command', '') for h in g['hooks'])]
         self.assertEqual(len(groups), 1)
-        self.assertEqual(set(groups[0]['matcher'].split('|')), {'AskUserQuestion', 'ExitPlanMode'})
+        self.assertEqual(set(groups[0]['matcher'].split('|')), {'AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode'})
         self.assertNotIn('orchestrator-question.py', (ROOT / 'ops/config/codex-hooks.json').read_text())
 
 
