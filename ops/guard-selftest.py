@@ -1474,6 +1474,9 @@ for command in ("git status  # it's fine", "git status # $(git push --force orig
                 "gh pr create --body-file - <<'EOF'\nit's here\nEOF"):
     case('ordinary shell data ' + command, bash(command), ALLOW)
 
+case('unterminated backticks with repeated escapes',
+     bash('echo `' + '\\_' * 10000), DENY)
+
 
 def decision_error_cases():
     failures = []
