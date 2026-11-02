@@ -14,6 +14,12 @@ RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
          ".github/workflows/deploy*", "migrations/*", "db/*", "*wrangler*", "tools/migrate.py")
 
 
+REVIEW_REQUIRED = ("hooks/*", "ops/githooks/*", "ops/*gate*", "ops/ci*",
+                   "ops/review-*", "ops/pr-*", "ops/config/*", ".github/workflows/*",
+                   ".github/actions/*", "security/*", "lib/hook_runtime.py",
+                   "lib/native_shell.py", "run.sh", "bin/review-pr")
+
+
 # GitHub skips every push workflow for these title markers, so a merged PR would never deploy.
 SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
 
@@ -30,6 +36,9 @@ def card_allowed(pr, files):
 
 
 def review_exempt(pr, files):
+    if any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
+           for f in files for key in ("filename", "previous_filename") for pattern in REVIEW_REQUIRED):
+        return False
     if docs_only(pr, files):
         return True
     risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
@@ -55,7 +64,8 @@ def approved(pr, files, reviews, reviewer_login):
     if review_exempt(pr, files):
         return True
     author = (pr.get("user") or {}).get("login", "").lower()
-    return any(reviewer_login and user == reviewer_login.lower() and user != author and (r.get("user") or {}).get("type") == "Bot" and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
+    return any(reviewer_login and user == reviewer_login.lower() and user != author and (r.get("user") or {}).get("type") == "Bot" and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"] and
+               [line for line in (r.get("body") or "").splitlines() if line.startswith("Reviewed-SHA:")] == [f'Reviewed-SHA: {pr["head"]["sha"]}']
                for user, r in latest.items())
 
 

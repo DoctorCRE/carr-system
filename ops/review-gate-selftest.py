@@ -153,6 +153,19 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
             self.assertEqual(api.call_args.args[1]['state'], 'success')
 
+    def test_adapter_publishes_failure_for_rewritten_review_commit(self):
+        pr = {**self.pr, 'additions': 151}
+        for body, expected in [('Reviewed-SHA: old', 'failure'),
+                               ('VERDICT: APPROVE', 'failure'),
+                               ('Reviewed-SHA: head', 'success')]:
+            review = {**self.approval, 'body': body}
+            with self.subTest(body=body), patch.dict(
+                    gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
+                with patch.object(gate, 'api', side_effect=[pr, {}, self.files, [review], pr, {}]) as api:
+                    self.assertEqual(gate.run({'number': 4}, 'owner/repo'), int(expected == 'failure'))
+                    self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
+                    self.assertEqual(api.call_args.args[1]['state'], expected)
+
     def test_base_repository_activity_still_publishes_status(self):
         pr = {**self.pr, 'base': {'ref': 'main', 'sha': 'base', 'repo': {
             'pushed_at': '2026-01-01T00:00:00Z', 'open_issues_count': 4}}}
@@ -199,7 +212,7 @@ class QueueAndCutover(unittest.TestCase):
     setUp = ReviewGate.setUp
     def exercise_queue(self, count=1, missing=False, moved=False, changed=False,
                        broken=False, truncated=False, unknown=False, dispatch=False,
-                       login="reviewer[bot]"):
+                       login="reviewer[bot]", stale_body=False):
         event = {'merge_group': {'head_ref': 'refs/heads/gh-readonly-queue/main/pr-4-base',
                                 'head_sha': 'queue' + str(count), 'base_sha': 'base',
                                 'base_ref': 'refs/heads/main'}}
@@ -228,7 +241,7 @@ class QueueAndCutover(unittest.TestCase):
             n = int(path.split('/pulls/')[1].split('/')[0])
             if '/files?' in path: return self.files
             if '/reviews?' in path:
-                return [] if missing and n == 3 + count else [{**self.approval, 'commit_id': 'head' + str(n), 'body': 'Reviewed-SHA: head' + str(n)}]
+                return [] if missing and n == 3 + count else [{**self.approval, 'commit_id': 'head' + str(n), 'body': 'Reviewed-SHA: ' + ('old' if stale_body else 'head' + str(n))}]
             if moved and n == 4:
                 return {**prs[n], 'head': {'sha': 'moved'}}
             return prs[n]
@@ -252,6 +265,9 @@ class QueueAndCutover(unittest.TestCase):
 
     def test_multiple_queue_entries_need_every_approval(self):
         self.assertEqual(self.exercise_queue(count=3, missing=True)[0], 1)
+
+    def test_queue_rewritten_review_commit_is_refused(self):
+        self.assertEqual(self.exercise_queue(stale_body=True)[0], 1)
 
     def test_queue_moved_head_is_refused(self):
         self.assertEqual(self.exercise_queue(moved=True)[0], 1)
