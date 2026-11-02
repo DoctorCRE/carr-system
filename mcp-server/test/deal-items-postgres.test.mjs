@@ -483,13 +483,13 @@ test('Home discovers pending call follow-ups through existing grants without exe
     }
   });
   await t.test('reviewed source calls retain provenance beyond the outcomes page', async () => {
-    await c.query('update capture_session set outcome_reviewed_at=now(),outcome_reviewed_by=$2 where id=$1', [session,actor.id]);
+    const reviewed = (await c.query('update capture_session set outcome_reviewed_at=now(),outcome_reviewed_by=$2 where id=$1 returning started_at', [session,actor.id])).rows[0];
     try {
       const rows = (await read()).candidates;
       assert.equal(rows.length, 2);
       for (const row of rows) {
         assert.equal(row.source_call_label_key, session);
-        assert.ok(Date.parse(row.source_call_started_at) < Date.now() - 6 * 86400000);
+        assert.equal(Date.parse(row.source_call_started_at), reviewed.started_at.getTime());
       }
     } finally {
       await c.query('update capture_session set outcome_reviewed_at=null,outcome_reviewed_by=null where id=$1', [session]);
