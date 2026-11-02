@@ -720,6 +720,30 @@
       "sha256": "647d5f2ed3087097378021403590e2cb53c456d59bc327513d30a579331d1174",
       "rule": "credential-url",
       "reason": "WR623.S1.J12 synthetic production-shaped DSN tests that unit-shards.yml cannot hide credentials; exact reviewed test blob only, no workflow exemption."
+    },
+    {
+      "path": "ops/fixtures/guard-main/corpus/manifest.json",
+      "sha256": "22baefafff2955d5b15461ec3a54449a3869e44b1bcac926a02a50b2fc30d4da",
+      "rule": "pii-email",
+      "reason": "Byte-identical copy of reviewed main blob c1966f9d6046d77c43c996ed05e0ce70d49773a4:corpus/manifest.json for the subprocess guard oracle. Existing source path identifiers or documented examples; fixture identity is checked by ops/guard-selftest.py. No new contact data."
+    },
+    {
+      "path": "ops/fixtures/guard-main/hooks/corpus_renders.py",
+      "sha256": "c8d81a78831b4cc68c08ab5d759e1e115e7d4e61c0fce09ca9d6bf80e5d663ac",
+      "rule": "pii-email",
+      "reason": "Byte-identical copy of reviewed main blob c1966f9d6046d77c43c996ed05e0ce70d49773a4:hooks/corpus_renders.py for the subprocess guard oracle. Existing source path identifiers or documented examples; fixture identity is checked by ops/guard-selftest.py. No new contact data."
+    },
+    {
+      "path": "ops/fixtures/guard-main/hooks/gate_paths.py",
+      "sha256": "81f8ca48e4b70f5732c5dc769e5aa3876df4cde1c07e897335356086312ef7dd",
+      "rule": "pii-email",
+      "reason": "Byte-identical copy of reviewed main blob c1966f9d6046d77c43c996ed05e0ce70d49773a4:hooks/gate_paths.py for the subprocess guard oracle. Existing source path identifiers or documented examples; fixture identity is checked by ops/guard-selftest.py. No new contact data."
+    },
+    {
+      "path": "ops/fixtures/guard-main/hooks/guard-unattended.py",
+      "sha256": "584eaf0b47769f0f51180d51828055ffd382a211e5449115e2d1a13f87754b3d",
+      "rule": "pii-email",
+      "reason": "Byte-identical copy of reviewed main blob c1966f9d6046d77c43c996ed05e0ce70d49773a4:hooks/guard-unattended.py for the subprocess guard oracle. Existing source path identifiers or documented examples; fixture identity is checked by ops/guard-selftest.py. No new contact data."
     }
   ]
 }
