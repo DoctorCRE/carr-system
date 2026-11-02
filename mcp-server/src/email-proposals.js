@@ -52,12 +52,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       left join client cl on cl.party_id in (p.id,p.org_id) and cl.merged_into is null
       left join party cp on cp.id=cl.party_id
       left join vendor v on v.party_id=p.id and v.merged_into is null
-      where p.merged_into is null and p.deleted_at is null and p.email is not null`)).rows;
+      where p.merged_into is null and p.deleted_at is null`)).rows;
   }
   function evidence(row, people) {
     const context = row.email_context ?? {};
+    const recorded = row.recorded_sender;
+    const known = recorded ? people.filter(p => p.party_id === recorded.party_id) : [];
+    const recordedSender = recorded ? { ...recorded, related_clients: known.flatMap(p => [
+      ...p.related_clients, ...(p.client_id ? [{ client_id: p.client_id, basis: 'exact_party_or_organization' }] : [])]) } : null;
     return { ...row, subject: context.subject ?? sender(row.summary)?.[2] ?? row.summary,
-      conversation_id: context.conversation_id ?? null, participant_evidence_missing: !row.email_context, sender: context.sender ? resolveContact(context.sender, people) : row.recorded_sender ?? resolveContact({}, people),
+      conversation_id: context.conversation_id ?? null, participant_evidence_missing: !row.email_context, sender: context.sender ? resolveContact(context.sender, people) : recordedSender ?? resolveContact({}, people),
       recipients: (context.recipients ?? []).map(p => resolveContact(p, people)),
       occurred_at: new Date(row.occurred_at).toISOString() };
   }

@@ -2489,8 +2489,8 @@ test('explicit lead-client edges and equal names remain suggestions without merg
   const party = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Separate synthetic lead',$1,$2,$2) returning id", [address,actor.id])).rows[0].id;
   const clientId = (await c.query('select client_id from deal where id=$1', [deal])).rows[0].client_id;
   const stage = (await c.query('select slug from lead_stage order by sort limit 1')).rows[0].slug;
-  await c.query('insert into lead(party_id,stage,client_id,created_by,updated_by) values($1,$2,$3,$4,$4)', [party,stage,clientId,actor.id]);
-  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+  await c.query("insert into lead(party_id,stage,client_id,created_by,updated_by,registry_ref) values($1,$2,$3,$4,$4,'L-999634')", [party,stage,clientId,actor.id]);
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: 'L-999634', kind: 'email_in',
     summary: 'Synthetic linked lead', detail: quote, email_context: { subject: 'Current search', sender: { email: address }, recipients: [] } });
   const stored = await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'possible_new_deal',
     activity_id: source.activity_id, evidence_quote: quote, confidence: .9, sender_role: 'other_vendor' }, router());
@@ -2499,6 +2499,14 @@ test('explicit lead-client edges and equal names remain suggestions without merg
   assert.equal((await c.query('select merged_into from party where id=$1', [party])).rows[0].merged_into, null);
   const queue = await wholeQueue(router(), 'carr_reader');
   assert.ok(queue.emails.find(row => row.activity_id === source.activity_id).sender.related_clients.some(edge => edge.client_id === clientId));
+  const legacy = await command('log-activity', { idempotency_key: randomUUID(), ref: 'L-999634', kind: 'email_in',
+    summary: 'Synthetic legacy linked lead', detail: quote });
+  const legacyStored = await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'possible_new_deal',
+    activity_id: legacy.activity_id, evidence_quote: quote, confidence: .8, sender_role: 'other_vendor' }, router());
+  const legacyItem = (await listed()).find(row => row.id === legacyStored.proposal_id);
+  assert.ok(legacyItem.suggested_deals.find(row => row.deal === deal).reasons.includes('Explicit lead-to-client relationship.'));
+  assert.equal(legacyItem.preview.sender.email, null);
+
 });
 
 
