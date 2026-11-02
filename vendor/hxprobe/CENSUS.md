@@ -81,13 +81,14 @@ Synthetic regression coverage lives in `ops/hxstore-local-key-selftest.py`.
 
 ## Synthetic timeout sizing
 
-Release runs on a 982,928,089-byte synthetic store containing 140,000 messages
-and 3,500 verified blocks took 4.83 to 5.09 seconds, median 4.90 seconds over five
-runs. Each run verified all message and block counts, with zero errors and 879
-stdout bytes. The earlier output was 86,552,892 bytes for the same counts.
-The 30-second budget is over five times the slowest observed totals-only run,
-with room for background contention. This is a bounded one-shot budget, not a
-latency guarantee for arbitrary larger stores, hardware, or sidecar workloads.
+On a 982,928,089-byte synthetic store with 140,000 messages, plain release
+runs had a median of 5.03 seconds and ranged from 4.66 to 8.66 seconds.
+Runs throttled with `taskpolicy -b` had a median of 12.36 seconds and ranged
+from 11.14 to 13.70 seconds. The intake LaunchAgent sets no `ProcessType`, so
+launchd lightly throttles it. The 30-second budget is about 2.2 times the
+slowest throttled run. Stores over about 2 GB or runs on the 8-core MacBook Pro
+may need a re-measure. This is a one-shot budget, not a latency guarantee for
+larger stores, other hardware, or sidecar workloads.
 The fixture used inline 3,000-character HTML bodies and one recipient per message.
 No real store was opened. Reproduce the small cap regression with
 `python3 ops/hxstore-local-key-selftest.py LocalKeyExportTests.test_large_census_emits_only_totals_below_intake_cap`.
