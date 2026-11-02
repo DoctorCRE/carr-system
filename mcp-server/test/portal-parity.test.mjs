@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parityLaunchOptions } from '../portal-parity/browser.mjs';
 import { runParity } from '../portal-parity/harness.mjs';
-import { FILE_FETCH_PACE_MS, signIn, sourceFidelity } from '../portal-parity/http.mjs';
+import { FILE_FETCH_PACE_MS, sourceFidelity } from '../portal-parity/http.mjs';
 import { loadProbes, schemaHasField } from '../portal-parity/probes.mjs';
 import { selectRows } from '../portal-parity/rows.mjs';
 
@@ -227,22 +227,35 @@ test('Stage 0 paces its file fetches so they cannot trip the burst limit', async
   const manifestPaths = Object.keys(served).map(name => `/portal/${name}`);
   const { source, out } = await stageZeroSource(files, manifestPaths);
   t.after(() => Promise.all([rm(source, { recursive: true }), rm(out, { recursive: true })]));
-  const { server, base } = await gatedSite(served);
-  t.after(() => server.close());
-  const cookie = await signIn(base, 'example-health');
+  const base = 'https://synthetic.invalid/portal/';
   let time = 0;
+  let delayPending = false;
   const fetches = [];
+  const requestedPaths = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(delayPending, false, 'fetch must wait for the pacing delay to resolve');
+    fetches.push(time);
+    requestedPaths.push(url.pathname);
+    const name = url.pathname.slice('/portal/'.length);
+    return new Response(served[name] ?? '', { status: name in served ? 200 : 404 });
+  });
   const clock = {
     now: () => time,
-    sleep: async ms => { time += ms; fetches.push(time); },
+    sleep: async ms => {
+      delayPending = ms > 0;
+      await Promise.resolve();
+      time += ms;
+      delayPending = false;
+    },
   };
-  const run = await sourceFidelity(base, source, cookie, manifestPaths, clock);
+  const run = await sourceFidelity(base, source, 'synthetic-session', manifestPaths, clock);
   assert.equal(run.failed, 0);
   assert.equal(run.unserved, Object.keys(files).length - manifestPaths.length);
   assert.equal(fetches.length, Object.keys(files).length);
   assert.equal(run.total, fetches.length);
+  assert.deepEqual(requestedPaths.slice(0, manifestPaths.length), manifestPaths);
   const gaps = fetches.slice(1).map((at, i) => at - fetches[i]);
-  assert.ok(gaps.every(gap => gap >= FILE_FETCH_PACE_MS), `scheduled gaps ${gaps} ms`);
+  assert.ok(gaps.every(gap => gap >= FILE_FETCH_PACE_MS), `fetch gaps ${gaps} ms`);
   for (const start of fetches) {
     const count = fetches.filter(at => at >= start && at < start + burstWindowMs).length;
     assert.ok(count <= burstLimit, `${count} fetches in the window starting at ${start} ms`);
