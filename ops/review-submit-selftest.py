@@ -15,13 +15,25 @@ spec.loader.exec_module(submit)
 class Submit(unittest.TestCase):
     def test_review_binds_reviewed_head_and_app_token(self):
         with patch.object(submit, 'installation_token', return_value='secret'), patch.object(submit, 'request', side_effect=[{'head': {'sha': 'abc'}}, {'id': 1}, {}]) as request:
-            submit.submit(12, 'approve', 'looks good', 'abc')
-            self.assertEqual(request.call_args_list[1].args[2], {'event': 'APPROVE', 'body': 'looks good', 'commit_id': 'abc'})
+            submit.submit(12, 'approve', 'Reviewed-SHA: abc', 'abc')
+            self.assertEqual(request.call_args_list[1].args[2], {'event': 'APPROVE', 'body': 'Reviewed-SHA: abc', 'commit_id': 'abc'})
             self.assertEqual(request.call_args_list[1].args[1], 'secret')
+
+    def test_invalid_body_never_authenticates_or_posts(self):
+        sha = 'a' * 40
+        for body in ('looks good', 'Reviewed-SHA: ' + 'b' * 40,
+                     'Reviewed-SHA: ' + sha + ' ',
+                     'Reviewed-SHA: ' + sha + '\nReviewed-SHA: ' + sha):
+            with self.subTest(body=body), patch.object(submit, 'installation_token') as token, \
+                    patch.object(submit, 'request') as request:
+                with self.assertRaisesRegex(ValueError, 'exactly one line.*Reviewed-SHA'):
+                    submit.submit(12, 'approve', body, sha)
+                token.assert_not_called()
+                request.assert_not_called()
 
     def test_moved_head_never_posts(self):
         with patch.object(submit, 'installation_token', return_value='secret'), patch.object(submit, 'request', return_value={'head': {'sha': 'new'}}) as request:
-            with self.assertRaises(ValueError): submit.submit(12, 'approve', 'body', 'old')
+            with self.assertRaises(ValueError): submit.submit(12, 'approve', 'Reviewed-SHA: old', 'old')
             self.assertEqual(request.call_count, 2)
 
     def test_token_exchange_uses_installation(self):
@@ -34,7 +46,7 @@ class Submit(unittest.TestCase):
                                    ('jbookout/doctorcre-app', ['--repository', 'jbookout/doctorcre-app'])]:
             with self.subTest(repository=repository), tempfile.TemporaryDirectory() as raw:
                 body = Path(raw) / 'review.md'
-                body.write_text('Synthetic review')
+                body.write_text('VERDICT: APPROVE\nReviewed-SHA: ' + 'a' * 40 + '\nReviewer: test')
                 argv = ['review-submit.py', '12', 'approve', '--body-file', str(body),
                         '--reviewed-sha', 'a' * 40, *option]
                 responses = [{'id': 42}, {'token': 'app-token'},
@@ -77,7 +89,7 @@ class Submit(unittest.TestCase):
 
     def test_revoke_after_submission_failure(self):
         with patch.object(submit, 'installation_token', return_value='secret'), patch.object(submit, 'request', side_effect=[{'head': {'sha': 'abc'}}, ValueError('failed'), {}]) as request:
-            with self.assertRaises(ValueError): submit.submit(12, 'approve', 'body', 'abc')
+            with self.assertRaises(ValueError): submit.submit(12, 'approve', 'Reviewed-SHA: abc', 'abc')
             self.assertEqual(request.call_args.kwargs, {'method': 'DELETE'})
 
     def test_environment_key_does_not_override_missing_file(self):
