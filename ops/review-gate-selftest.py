@@ -19,7 +19,7 @@ class ReviewGate(unittest.TestCase):
     def setUp(self):
         self.pr = {'title': 'Fix', 'body': 'Card: WR622.S1.J5', 'user': {'login': 'author', 'type': 'User'}, 'changed_files': 1, 'additions': 150, 'deletions': 0, 'head': {'sha': 'head'}, 'base': {'ref': 'main'}, 'auto_merge': None}
         self.files = [{'filename': 'lib/safe.py', 'status': 'modified'}]
-        self.approval = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': 'head', 'submitted_at': '2026-01-01T00:00:00Z'}
+        self.approval = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': 'head', 'body': 'VERDICT: APPROVE\nReviewed-SHA: head\nReviewer: test', 'submitted_at': '2026-01-01T00:00:00Z'}
 
     def test_safe_and_threshold(self):
         self.assertTrue(gate.approved(self.pr, self.files, [], "reviewer[bot]"))
@@ -28,6 +28,20 @@ class ReviewGate(unittest.TestCase):
         self.assertFalse(gate.approved(self.pr, [{'filename': 'migrations/a'}], [], 'reviewer[bot]'))
         self.assertFalse(gate.approved(self.pr, [{'filename': 'safe', 'previous_filename': 'db/a'}], [], 'reviewer[bot]'))
         self.assertFalse(gate.approved(self.pr, [], [], "reviewer[bot]"))
+
+    def test_approval_requires_exact_reviewed_sha(self):
+        pr = {**self.pr, 'additions': 151, 'head': {'sha': 'a' * 40}}
+        for body, expected in [
+                ('VERDICT: APPROVE\nReviewed-SHA: ' + 'a' * 40 + '\nReviewer: test', True),
+                ('Reviewed-SHA: ' + 'b' * 40, False),
+                ('VERDICT: APPROVE', False),
+                (None, False),
+                ('Reviewed-SHA: ' + 'a' * 7, False),
+                ('text Reviewed-SHA: ' + 'a' * 40, False),
+                ('Reviewed-SHA: ' + 'a' * 40 + '\nReviewed-SHA: ' + 'b' * 40, False)]:
+            with self.subTest(body=body):
+                review = {**self.approval, 'commit_id': pr['head']['sha'], 'body': body}
+                self.assertEqual(gate.approved(pr, self.files, [review], 'reviewer[bot]'), expected)
 
     def test_markdown_exempt_at_any_size_with_app_veto(self):
         self.assertTrue(gate.approved(self.pr, [{"filename": "docs/safe.md"}], [], "reviewer[bot]"))
@@ -193,7 +207,7 @@ class QueueAndCutover(unittest.TestCase):
             n = int(path.split('/pulls/')[1].split('/')[0])
             if '/files?' in path: return self.files
             if '/reviews?' in path:
-                return [] if missing and n == 3 + count else [{**self.approval, 'commit_id': 'head' + str(n)}]
+                return [] if missing and n == 3 + count else [{**self.approval, 'commit_id': 'head' + str(n), 'body': 'Reviewed-SHA: head' + str(n)}]
             if moved and n == 4:
                 return {**prs[n], 'head': {'sha': 'moved'}}
             return prs[n]
@@ -297,9 +311,9 @@ class MergeHistory(unittest.TestCase):
             head = git('rev-parse', 'HEAD')
             self.assertNotEqual(old, head)
             pr = {'head': {'sha': head}, 'additions': 151, 'deletions': 0, 'changed_files': 1}
-            review = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': old}
+            review = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': old, 'body': f'Reviewed-SHA: {old}'}
             self.assertFalse(gate.approved(pr, [{'filename': 'feature'}], [review], 'reviewer[bot]'))
             self.assertTrue(gate.approved(pr, [{'filename': 'feature'}],
-                [{**review, 'commit_id': head}], 'reviewer[bot]'))
+                [{**review, 'commit_id': head, 'body': f'Reviewed-SHA: {head}'}], 'reviewer[bot]'))
 
 if __name__ == '__main__': unittest.main()
