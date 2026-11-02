@@ -207,12 +207,14 @@ function deployContext(event_name = "workflow_run", run = {}) {
   };
 }
 
-test("deploy accepts only successful main push canaries from this repository", () => {
+test("deploy accepts successful main push and dispatched canaries from this repository", () => {
   const condition = read("deploy.yml").jobs.deploy.if;
-  assert.equal(expression(condition, deployContext()), true);
+  for (const event of ["push", "workflow_dispatch"]) {
+    assert.equal(expression(condition, deployContext("workflow_run", { event })), true);
+  }
   for (const run of [
     { event: "pull_request" }, { event: "pull_request_target" },
-    { event: "workflow_dispatch" }, { event: "schedule" }, { event: undefined },
+    { event: "merge_group" }, { event: "schedule" }, { event: undefined },
     { head_repository: { full_name: "someone/carr-system" } },
     { head_repository: {} }, { head_repository: null },
     { head_branch: "feature" }, { conclusion: "failure" }, { conclusion: "cancelled" },

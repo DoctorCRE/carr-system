@@ -132,6 +132,7 @@ case "${1:-}" in
   # something breaks on a path that is simply not there.
   worktree)     shift; "$REPO/bin/worktree.sh" "$@" ;;
   pre-pr)       shift; "$PY" "$REPO/ops/ci-pushfloor.py" --pre-pr "$@" ;;
+  ci)           shift; "$PY" "$REPO/ops/ci-dispatch.py" "$@" ;;
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
   outlook-send) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["send", *sys.argv[1:]]))' "$@" ;;
   outlook-event) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import outlook_send as o; sys.exit(o.main(["event", *sys.argv[1:]]))' "$@" ;;
@@ -166,6 +167,7 @@ case "${1:-}" in
       "call [--branch <name>] <verb> '<json args>'|" \
       "call-mode [serve|state|start|stop]|" \
       "pre-pr [--body <file>]|" \
+      "ci dispatch main-canary.yml|deploy.yml [--ref main] [--dry-run]|" \
       "local-db-ci [--class migration|strict] [--port N]|" \
       "portal-parity --stage N [--rows <ids>] (see --help)|" \
       "worktree <name> [--from B]|--list|--remove <name|path>"
