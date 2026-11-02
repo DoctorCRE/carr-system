@@ -69,6 +69,35 @@ class OriginationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'line 4.*width'):
             florida_rows(line[:-1], published_on=date(2026, 10, 21), line_number=4)
 
+    def test_florida_mixed_file_skips_out_of_scope_and_counts_rows(self):
+        from tools.import_practice_origination import import_file
+        line = ("L26000000001" + "Synthetic Dental LLC".ljust(192) + "20261019" +
+                "SYNTHETIC_LOCATION_A".ljust(42) + "Pensacola".ljust(28) + "FL" +
+                "".ljust(42) + "32501".ljust(10))
+        variants = [line, line.replace('Dental', 'Retail'),
+                    line[:-10] + ''.ljust(10), line[:-10] + 'M5V 2T6'.ljust(10),
+                    line[:282] + '  ' + line[284:], line[:-10] + '33101'.ljust(10),
+                    line[:282] + 'NY' + line[284:]]
+        batches = []
+
+        def call(verb, args):
+            if verb == 'list-practice-origination':
+                return {'coverage': [{'source': 'formation-fl', 'enabled': True, 'checkpoint': None}]}
+            batches.append(args)
+            return {'inserted': len(args['records']), 'checkpoint': args['checkpoint']}
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.txt'
+            path.write_text('\n'.join(variants) + '\n')
+            result = import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
+        self.assertEqual(result['inserted'], 1)
+        self.assertEqual(result['processed'], 7)
+        self.assertEqual(result['skipped'], 6)
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0]['status'], 'available')
+        self.assertEqual(batches[0]['records'][0]['document_number'], 'L26000000001')
+        self.assertIn('6 out-of-scope rows skipped', batches[0]['detail'])
+
     def test_florida_import_disabled_and_bad_batch_preserves_checkpoint(self):
         from tools.import_practice_origination import import_file, FLORIDA_SOURCE
         state = {'checkpoint': None, 'status': 'available', 'enabled': False}
