@@ -1,4 +1,5 @@
 """Publish a SHA-bound review-gate commit status using trusted GitHub event data."""
+import ast
 import fnmatch
 import re
 import json
@@ -24,6 +25,26 @@ REVIEW_REQUIRED = ("hooks/*", "ops/githooks/*", "ops/*gate*", "ops/ci*",
                    "mypy.ini", "tools/migration_*.py")
 
 
+def ci_review_paths():
+    root = Path(__file__).resolve().parent
+    trees = [ast.parse((root / name).read_text())
+             for name in ('ci.py', 'ci-gates.py', 'ci-migration.py')]
+    declarations = {node.targets[0].id: ast.literal_eval(node.value)
+                    for node in trees[1].body if isinstance(node, ast.Assign)
+                    and isinstance(node.targets[0], ast.Name)
+                    and node.targets[0].id in ('INVARIANTS', 'PROGRAM_PATTERNS')}
+    paths = {node.value for tree in trees for node in ast.walk(tree)
+             if isinstance(node, ast.Constant) and isinstance(node.value, str)
+             and node.value.startswith(('ops/', 'tools/', 'bin/'))
+             and node.value.endswith(('.py', '.sh', '.mjs'))}
+    paths.update('ops/' + name + '.py' for name in declarations['INVARIANTS'])
+    return frozenset(path for path in paths if not any(
+        fnmatch.fnmatchcase(path, pattern) for pattern in declarations['PROGRAM_PATTERNS']))
+
+
+CI_REVIEW_PATHS = ci_review_paths()
+
+
 # GitHub skips every push workflow for these title markers, so a merged PR would never deploy.
 SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
 
@@ -41,7 +62,7 @@ def card_allowed(pr, files):
 
 def review_required(files):
     return any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
-           for f in files for key in ("filename", "previous_filename") for pattern in REVIEW_REQUIRED)
+           for f in files for key in ("filename", "previous_filename") for pattern in (*REVIEW_REQUIRED, *CI_REVIEW_PATHS))
 
 
 def review_exempt(pr, files):
@@ -82,10 +103,6 @@ def review_failure(pr, files, reviews, reviewer_login):
     if review_required(files):
         return "Gate, CI or review path changed; current-head App review required at any size"
     return "Current-head App approval required; submit via ops/review-submit.py"
-
-
-def approved(pr, files, reviews, reviewer_login):
-    return review_failure(pr, files, reviews, reviewer_login) is None
 
 
 def api(path, payload=None):
