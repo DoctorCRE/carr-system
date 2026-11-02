@@ -684,7 +684,7 @@ def _snapshot(home: Path, work: Path) -> None:
                                       'launch_failed')) from None
 
 
-CENSUS_TIMEOUT = 5
+CENSUS_TIMEOUT = 30
 CENSUS_METRICS = frozenset((
     'messages body_complete body_absent body_objects '
     'body_rejected body_inline body_sidecar sidecar_linked '
@@ -705,27 +705,42 @@ def _coverage_census(home: Path, out: Path, copy: Path, files: Path, account_id:
     except FileNotFoundError:
         return
     except OSError:
-        print('coverage_census_failed=1', file=sys.stderr)
+        print('coverage_census_failed=request_stat', file=sys.stderr)
         return
+    reason = 'request_consume'
     try:
         request.unlink()
+        reason = 'request_invalid'
         if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
                 or info.st_uid != os.getuid() or info.st_size != 0):
             raise ValueError
+        reason = 'setup'
+        decoder = load_settings(home).decoder
         with tempfile.TemporaryFile(dir=copy.parent) as output:
-            done = subprocess.run([str(load_settings(home).decoder), 'census', '--immutable-copy',
+            reason = 'launch'
+            done = subprocess.run([str(decoder), 'census', '--immutable-copy',
                                    str(copy), str(files), str(account_id)], stdout=output,
                                   stderr=subprocess.DEVNULL, timeout=CENSUS_TIMEOUT)
-            if done.returncode or output.tell() > 8 * 1024 * 1024:
+            reason = 'exit'
+            if done.returncode:
                 raise ValueError
+            reason = 'oversize'
+            if output.tell() > 8 * 1024 * 1024:
+                raise ValueError
+            reason = 'json'
             output.seek(0)
-            totals = json.load(output)['totals']
+            payload = json.load(output)
+            reason = 'totals'
+            totals = payload['totals']
         if (not isinstance(totals, dict) or not totals or not totals.keys() <= CENSUS_METRICS
                 or any(type(n) is not int or not 0 <= n < 2**64 for n in totals.values())):
             raise ValueError
+        reason = 'write'
         _private_write(out / 'coverage-census.json', json.dumps({'totals': totals}, sort_keys=True) + '\n')
+    except subprocess.TimeoutExpired:
+        print('coverage_census_failed=timeout', file=sys.stderr)
     except Exception:
-        print('coverage_census_failed=1', file=sys.stderr)
+        print(f'coverage_census_failed={reason}', file=sys.stderr)
 
 
 def _remove(work: Path) -> None:

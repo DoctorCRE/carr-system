@@ -1,8 +1,8 @@
 # Count-only coverage census
 
 `hxprobe census --immutable-copy <copy.hxd> <copied-Files-directory> <account-key>`
-returns JSON with `totals` and `messages`. Each message entry uses its opaque
-store-local key. Every value is an integer count. The output contains no subjects,
+returns totals-only JSON. The `totals` map has fixed metric names and integer
+counts. Per-message rows are never serialized. The output contains no subjects,
 addresses, display names, body text, folder names, sidecar paths, or account keys.
 Errors use the fixed text `census input rejected` and exit code 2.
 
@@ -10,24 +10,29 @@ Enable one census on the next scheduled intake after installing this revision th
 the normal intake install path. Run this command as the intake's user:
 
 ```sh
-python3 -c 'import os; from pathlib import Path; p=Path("/Users/booko/carr-system/out/outlook-intake/coverage-census.request"); fd=os.open(p, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600); os.close(fd)'
+python3 /Users/booko/carr-system/ops/outlook-census-request.py
 ```
 
 The request is an empty 0600 regular file owned by the intake user. The command
-fails if a request already exists. On another machine, use its configured repo's
-`out/outlook-intake/coverage-census.request` path. No profile or executable can be
+fails if a request already exists and prints only a fixed status code. It resolves
+the output directory from the intake user's validated Outlook settings. On another
+machine, run the same wrapper from its checkout. Automation uses this wrapper too. No profile or executable can be
 selected by a request. No LaunchAgent change or new macOS permission is needed.
 
 Intake consumes the request once after its native helper creates the fresh private
 `store.hxd` and `Files` copy. Before normal decoding it runs the configured hxprobe
-census with the configured folder account. The subprocess has a five-second timeout.
-Failure, invalid output, or output larger than 8 MiB logs only
-`coverage_census_failed=1` and normal intake continues. No diagnostic retry occurs.
+census with the configured folder account. The subprocess has a 30-second timeout.
+Failure logs only `coverage_census_failed=REASON` and normal intake continues.
+The fixed reasons are `request_stat`, `request_consume`, `request_invalid`,
+`setup`, `launch`, `timeout`, `exit`, `oversize`, `json`, `totals`, and `write`.
+`setup` covers settings and temporary-file failures. `totals` covers missing,
+unknown, empty, or invalid counts. `oversize` rejects stdout larger than 8 MiB.
+No exception text, stderr, message content, or address is logged. No diagnostic retry occurs.
 A request waits until intake actually creates a fresh snapshot.
 
 The latest successful totals are atomically saved as 0600
 `out/outlook-intake/coverage-census.json`. Only fixed metric labels and integer counts
-are retained; per-message entries are discarded. A failed attempt leaves the previous
+are retained; the census emits no per-message entries. A failed attempt leaves the previous
 successful result unchanged, so use the result file's modification time to distinguish
 it from a new result. The existing intake finally block deletes the copy, decoded
 database, sidecars, and diagnostic temporary output, including after a decoder error.
@@ -73,3 +78,16 @@ wrong links to existing keys, rejected revisions, or unrecognized object shapes.
 A zero absence count cannot establish full mailbox hydration on the mail server.
 
 Synthetic regression coverage lives in `ops/hxstore-local-key-selftest.py`.
+
+## Synthetic timeout sizing
+
+Release runs on a 982,928,089-byte synthetic store containing 140,000 messages
+and 3,500 verified blocks took 4.83 to 5.09 seconds, median 4.90 seconds over five
+runs. Each run verified all message and block counts, with zero errors and 879
+stdout bytes. The earlier output was 86,552,892 bytes for the same counts.
+The 30-second budget is over five times the slowest observed totals-only run,
+with room for background contention. This is a bounded one-shot budget, not a
+latency guarantee for arbitrary larger stores, hardware, or sidecar workloads.
+The fixture used inline 3,000-character HTML bodies and one recipient per message.
+No real store was opened. Reproduce the small cap regression with
+`python3 ops/hxstore-local-key-selftest.py LocalKeyExportTests.test_large_census_emits_only_totals_below_intake_cap`.

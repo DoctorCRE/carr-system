@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline tests for the Outlook intake. Made-up fixtures and fake ports only:
 no Outlook store, no record layer, no model."""
+from io import StringIO
 from datetime import datetime, timedelta, timezone
 import errno
 import fcntl
@@ -21,7 +22,7 @@ import unittest
 import uuid
 from urllib.parse import quote
 from unittest.mock import patch
-from contextlib import closing
+from contextlib import closing, redirect_stderr
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -327,7 +328,8 @@ class IntakeTest(unittest.TestCase):
         from contextlib import redirect_stderr
         from io import StringIO
         reasons = dict(exit='exit', timeout='timeout', launch='launch', json='json',
-                       label='totals', value='totals', bool='totals', oversized='oversize')
+                       label='totals', value='totals', bool='totals', oversized='oversize',
+                       missing='totals', scalar='totals', empty='totals', negative='totals', overflow='totals')
         failures = list(reasons)
         for failure in failures:
             with self.subTest(failure=failure):
@@ -337,7 +339,7 @@ class IntakeTest(unittest.TestCase):
                 def execute(command, **kwargs):
                     if 'census' not in command:
                         return original(command, **kwargs)
-                    self.assertEqual(kwargs['timeout'], 5)
+                    self.assertEqual(kwargs['timeout'], 30)
                     if failure == 'timeout':
                         raise subprocess.TimeoutExpired(command, 5, output=b'PRIVATE-TOKEN')
                     if failure == 'launch':
@@ -346,7 +348,10 @@ class IntakeTest(unittest.TestCase):
                                'label': b'{"totals":{"PRIVATE-TOKEN":1}}',
                                'value': b'{"totals":{"messages":"PRIVATE-TOKEN"}}',
                                'bool': b'{"totals":{"messages":true}}',
-                               'oversized': b' ' * (8 * 1024 * 1024 + 1)}[failure]
+                               'oversized': b' ' * (8 * 1024 * 1024 + 1),
+                               'missing': b'{}', 'scalar': b'[]', 'empty': b'{"totals":{}}',
+                               'negative': b'{"totals":{"messages":-1}}',
+                               'overflow': b'{"totals":{"messages":18446744073709551616}}'}[failure]
                     kwargs['stdout'].write(payload)
                     return subprocess.CompletedProcess(command, int(failure == 'exit'))
                 log = StringIO()
@@ -371,10 +376,41 @@ class IntakeTest(unittest.TestCase):
                 else:
                     request.write_text('PRIVATE-TOKEN' if kind == 'content' else '')
                     request.chmod(0o644 if kind == 'mode' else 0o600)
-                self.assertEqual(self.run_intake().state, 'succeeded')
+                log = StringIO()
+                with redirect_stderr(log):
+                    self.assertEqual(self.run_intake().state, 'succeeded')
+                self.assertEqual(log.getvalue(), 'coverage_census_failed=request_invalid\n')
                 self.assertFalse(request.exists())
                 self.assertFalse((self.out() / 'coverage-census.json').exists())
                 self.assertEqual(target.read_text(), 'PRIVATE-TOKEN')
+
+    def test_census_file_failures_print_fixed_reasons_and_preserve_previous_receipt(self):
+        self.out().mkdir(parents=True)
+        request = self.out() / 'coverage-census.request'
+        receipt = self.out() / 'coverage-census.json'
+        receipt.write_text('{"totals":{"messages":9}}')
+        failures = {
+            'request_stat': 'pathlib.Path.lstat',
+            'request_consume': 'pathlib.Path.unlink',
+            'setup': 'lib.outlook_intake.load_settings',
+            'temporary': 'tempfile.TemporaryFile',
+            'write': 'lib.outlook_intake._private_write',
+        }
+        def census(command, **kwargs):
+            kwargs['stdout'].write(b'{"totals":{"messages":1}}')
+            return subprocess.CompletedProcess(command, 0)
+        for reason, symbol in failures.items():
+            with self.subTest(reason=reason):
+                request.touch(mode=0o600, exist_ok=True)
+                log = StringIO()
+                with patch(symbol, side_effect=OSError('PRIVATE-TOKEN')), redirect_stderr(log), \
+                        patch('subprocess.run', side_effect=census):
+                    intake._coverage_census(self.home, self.out(), self.tmp / 'copy.hxd', self.tmp, 7)
+                expected = 'setup' if reason == 'temporary' else reason
+                self.assertEqual(log.getvalue(), f'coverage_census_failed={expected}\n')
+                self.assertEqual(receipt.read_text(), '{"totals":{"messages":9}}')
+                self.assertEqual(request.exists(), reason in ('request_stat', 'request_consume'))
+                request.unlink(missing_ok=True)
 
     def copy_snapshot(self, command, *, cwd=None, **kwargs):
         if command[-1] == '--scope':
