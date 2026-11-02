@@ -38,8 +38,9 @@ class CaptureOutcomesTests(unittest.TestCase):
     def test_publish_binds_partner_evidence_receipt_and_retry_key_to_stored_source(self) -> None:
         quote = "Move Synthetic Dental into legal"
         report = {"deal_updates": [{"deal_id": "synthetic-deal", "candidate_id": "activity-existing",
-                  "summary": "Phase proposal", "evidence": quote,
-                  "phase_move": {"value": "legal", "started_on": None}}]}
+                  "summary": "Phase proposal", "evidence": quote, "participant_ids": [],
+                  "fact_ids": ["phase-discussion"],
+                  "phase_move": {"value": "legal", "started_on": None, "fact_ids": ["phase-instruction"]}}]}
         requests = []
 
         def request(_method, _url, body, _headers):
@@ -50,10 +51,6 @@ class CaptureOutcomesTests(unittest.TestCase):
             transcript = {"segments": [{"speaker": "Joe", "text": quote + extra}]}
             coverage = bridge.post_call.coverage
             context = {"session": self.session.name, "deals": [{"id": "synthetic-deal", "participants": []}]}
-            update = report["deal_updates"][0]
-            update["participant_ids"] = []
-            update["fact_ids"] = ["phase-discussion"]
-            update["phase_move"]["fact_ids"] = ["phase-instruction"]
             extraction = {
                 "topics": [{"topic_id": "synthetic", "identity": {"deal_id": "synthetic-deal", "participant_ids": []}}],
                 "facts": [{"fact_id": fact_id, "topic_id": "synthetic", "kind": kind,
