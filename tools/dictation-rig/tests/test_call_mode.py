@@ -65,6 +65,7 @@ _COVERAGE_ADAPTER = SimpleNamespace(
     reconcile_coverage=lambda ledger, report: ledger,
     require_coverage=lambda *args: None,
     CoverageError=post_call.coverage.CoverageError,
+    ExtractionTransportError=post_call.coverage.ExtractionTransportError,
 )
 _COVERAGE_PATCHES = (
     patch.object(post_call, "coverage", _COVERAGE_ADAPTER),

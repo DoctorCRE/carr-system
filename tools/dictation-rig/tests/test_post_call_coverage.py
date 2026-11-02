@@ -286,6 +286,16 @@ class LedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(cov.CoverageError, 'duplicate_fact_id'):
             cov.build_call_ledger(transcript, self.context, lambda _: response)
 
+    def test_transport_failure_preserves_existing_reason_and_coverage_receipt(self):
+        def failing(request):
+            raise cov.ExtractionTransportError('local post-call distiller failed')
+        status = pc.process_session(self.session, failing, run_checks=False, max_attempts=1)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertEqual(status['reason'], 'local post-call distiller failed')
+        self.assertEqual(status['coverage_counts']['sources'], len(self.transcript['segments']))
+        self.assertEqual(pc.read_json(self.session / cov.FILE)['failures'][0]['code'], 'extraction_failed')
+        self.assertFalse((self.session / pc.REPORT_FILE).exists())
+
     def test_invalid_foreign_and_stale_spans(self):
         for field, value in (('segment_index', 999), ('segment_sha256', 'stale'), ('char_end', 99999), ('source_id', 'foreign')):
             with self.subTest(field=field):

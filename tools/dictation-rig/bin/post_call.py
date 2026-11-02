@@ -637,13 +637,13 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
 def command_distiller(request: dict[str, Any], command: str | None = None, runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
     command = command or os.environ.get("CARR_POST_CALL_DISTILLER_COMMAND")
     if not command:
-        raise RuntimeError("no local post-call distiller configured")
+        raise coverage.ExtractionTransportError("no local post-call distiller configured")
     argv = shlex.split(command)
     if not argv:
-        raise RuntimeError("local post-call distiller command is empty")
+        raise coverage.ExtractionTransportError("local post-call distiller command is empty")
     result = runner(argv, input=json.dumps(request), text=True, capture_output=True, shell=False, timeout=120, check=False)
     if result.returncode != 0:
-        raise RuntimeError("local post-call distiller failed")
+        raise coverage.ExtractionTransportError("local post-call distiller failed")
     try:
         parsed = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -747,12 +747,12 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
             done = subprocess.run(argv, input=prompt, text=True, capture_output=True,
                                   cwd=empty, env=child_env, timeout=180, check=False)
     except FileNotFoundError as exc:
-        raise RuntimeError("headless Sonnet requires the Claude CLI; install claude in "
+        raise coverage.ExtractionTransportError("headless Sonnet requires the Claude CLI; install claude in "
                            "~/.local/bin, /opt/homebrew/bin or /usr/local/bin") from exc
     except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("headless Sonnet could not complete the post-call review pack") from exc
+        raise coverage.ExtractionTransportError("headless Sonnet could not complete the post-call review pack") from exc
     if done.returncode:
-        raise RuntimeError(f"headless Sonnet exited with code {done.returncode}")
+        raise coverage.ExtractionTransportError(f"headless Sonnet exited with code {done.returncode}")
     try:
         reply = json.loads(done.stdout)
     except json.JSONDecodeError as exc:
@@ -1058,7 +1058,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         write_private(session_dir / coverage.FILE, ledger)
         result["coverage_sha256"] = coverage.digest(ledger)
     except (RuntimeError, ContractError, OSError, subprocess.SubprocessError) as exc:
-        if isinstance(exc, coverage.CoverageError):
+        if isinstance(exc, (coverage.CoverageError, coverage.ExtractionTransportError)):
             failed_ledger = read_json(session_dir / coverage.FILE)
             if failed_ledger is not None:
                 if failed_ledger.get("state") != "incomplete":

@@ -14,6 +14,10 @@ class CoverageError(RuntimeError):
     pass
 
 
+class ExtractionTransportError(RuntimeError):
+    pass
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -178,6 +182,8 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
             code = str(exc) if isinstance(exc, CoverageError) else 'extraction_failed'
             ledger.update(state='incomplete', failures=[{'code': code, 'ids': receipt['core_range']}])
             persist(ledger)
+            if isinstance(exc, ExtractionTransportError):
+                raise
             raise CoverageError(code) from exc
     topics, facts = {}, {}
     accounting = {s['segment_index']: {'segment_index': s['segment_index'], 'fact_ids': [],
@@ -303,6 +309,8 @@ def reconcile_history(ledger, transcript, reconciler, *, persist=lambda _: None,
             code = str(exc) if isinstance(exc, CoverageError) else 'history_failed'
             ledger = incomplete_ledger(ledger, code)
             persist(ledger)
+            if isinstance(exc, ExtractionTransportError):
+                raise
             raise CoverageError(code) from exc
     persist(ledger)
     return ledger
