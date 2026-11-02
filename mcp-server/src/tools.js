@@ -9405,6 +9405,7 @@ registerTools({
       if (!deal || deal.operating_state !== "active" || deal.outcome != null || deal.closed_on || deal.invoiced_on || ["closed", "invoiced"].includes(deal.phase))
         return { ...result, reason: "deal_not_active" };
       if (!PARTNER_SLUGS.includes(deal.owner)) return { ...result, reason: "partner_owner_not_recorded" };
+      await c.query("select pg_advisory_xact_lock(hashtextextended('deal-checklist:' || $1, 0))", [deal.id]);
       const dates = (await c.query(
         "select id, kind, due_on::text as due_on, source, status from critical_date where deal_id=$1 order by due_on, id",
         [deal.id])).rows;
@@ -9415,7 +9416,6 @@ registerTools({
         .filter(item => item.status === "open" && item.source_ref?.trim()
           && isCalendarDate(item.due_on) && item.due_on <= checklist.observed_on)
         .map(item => ({ id: `deal-item:${item.id}`, due_on: item.due_on }));
-      await c.query("select pg_advisory_xact_lock(hashtextextended('deal-checklist:' || $1, 0))", [deal.id]);
       for (const item of [...checklist.due_items, ...storedDue]) {
         const eventQuery = `select id from event where subject_type='deal' and subject_id=$1 and verb='ping-deal-checklist'
              and field='checklist_ping' and new_value->>'checklist_item_id'=$2

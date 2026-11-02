@@ -20,6 +20,7 @@ export async function applyPendingDealRoomReads(client) {
     await client.query(readFileSync(new URL('../../../migrations/1105_requirement_requests.sql', import.meta.url), 'utf8'));
   if (!(await client.query("select to_regclass('public.v_requirement_reply_proposal') as view")).rows[0].view)
     await client.query(readFileSync(new URL('../../../migrations/1116_requirement_document_replies.sql', import.meta.url), 'utf8'));
+  await client.query(readFileSync(new URL('../../../migrations/1133_checklist_receipt_filename.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1064_deal_sent_correspondence.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1117_preserve_call_plan_projection.sql', import.meta.url), 'utf8'));
   await client.query(readFileSync(new URL('../../../migrations/1123_closed_current_step_projection.sql', import.meta.url), 'utf8'));
