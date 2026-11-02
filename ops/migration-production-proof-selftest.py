@@ -153,6 +153,60 @@ class ProofTests(unittest.TestCase):
         credentials.assert_called_once_with()
         source.assert_called_once_with('fixture', None, include_acl=True)
 
+    def test_schema_pending_refuses_before_production_access(self):
+        applied = snapshot_ledger()
+        repository = dict(applied, **{'9999_future.sql': 'f' * 64})
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(proof, 'repository_ledger', return_value=repository), \
+             patch.object(proof, 'production_dsn', side_effect=AssertionError('credential fetch forbidden')) as credentials, \
+             patch.object(proof, 'read_source', side_effect=AssertionError('production read forbidden')) as source, \
+             patch.object(sys, 'argv', ['proof', '--schema', '--report', str(Path(directory) / 'report.json')]), \
+             patch.dict(os.environ, GITHUB_ACTIONS='false', CARR_CI_PORTABLE_ONLY='0'), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(proof.main(), 1)
+            import json
+            report = json.loads((Path(directory) / 'report.json').read_text())
+        credentials.assert_not_called()
+        source.assert_not_called()
+        self.assertIn('pending migrations', report['detail'])
+        self.assertIn('9999_future.sql', report['detail'])
+
+    def test_nonbaseline_file_content_drift_refuses_before_production_access(self):
+        baseline = proof.MigrationBaseline.load(ROOT)
+        fixture = ROOT / 'ops/fixtures/migration-production-proof/9999_drift.sql'
+        self.assertNotIn(fixture.name, dict(baseline.migrations))
+        digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
+        snapshot = (ROOT / 'db/schema.sql').read_text()
+        row = next(line for line in snapshot.splitlines() if line.startswith('0001_init.sql\t'))
+        snapshot = snapshot.replace(row, row + f'\n{fixture.name}\t{digest}\tfixture', 1)
+        read_text = Path.read_text
+        real_repository_ledger = proof.repository_ledger
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            shutil.copytree(ROOT / 'migrations', repo / 'migrations')
+            target = repo / 'migrations' / fixture.name
+            shutil.copyfile(fixture, target)
+            applied = snapshot_ledger()
+            applied[fixture.name] = digest
+            with patch.object(proof, 'repository_ledger', side_effect=lambda root, baseline: real_repository_ledger(repo, baseline)), \
+                 patch.object(Path, 'read_text', autospec=True,
+                              side_effect=lambda path, *args, **kwargs: snapshot
+                              if path == ROOT / 'db/schema.sql' else read_text(path, *args, **kwargs)), \
+                 patch.object(proof, 'production_dsn', return_value='fixture') as credentials, \
+                 patch.object(proof, 'read_source', return_value=(applied, None, None)) as source:
+                self.assertTrue(proof.live_proof()['ledger']['ok'])
+                target.write_text('select 2;\n')
+                credentials.reset_mock()
+                source.reset_mock()
+                credentials.side_effect = AssertionError('credential fetch forbidden')
+                source.side_effect = AssertionError('production read forbidden')
+                for ledger_only in (True, False):
+                    with self.subTest(ledger_only=ledger_only):
+                        with self.assertRaisesRegex(RuntimeError, '9999_drift.sql.*EDITED after being applied'):
+                            proof.live_proof(ledger_only=ledger_only)
+                        credentials.assert_not_called()
+                        source.assert_not_called()
+
     def test_snapshot_drift_refuses(self):
         read_text = Path.read_text
         applied = snapshot_ledger()

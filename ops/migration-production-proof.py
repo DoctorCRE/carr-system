@@ -283,6 +283,9 @@ def live_proof(ledger_only=True):
     snapshot_proof = ledger_proof(repository, snapshot_ledger, baseline)
     if not snapshot_proof['ok']:
         raise RuntimeError('db/schema.sql ledger differs from repository: ' + snapshot_proof['error'])
+    if not ledger_only and snapshot_proof['pending']:
+        raise RuntimeError('db/schema.sql has pending migrations; refresh snapshot before --schema: '
+                           + ', '.join(snapshot_proof['pending']))
     bins = comparison.find_pg18(None) if not ledger_only else None
     if not ledger_only and bins is None:
         raise RuntimeError('PostgreSQL 18 binaries required for schema equivalence')
