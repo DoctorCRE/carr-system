@@ -1858,7 +1858,7 @@ def shell_expansions(text):
             if char == quote:
                 quote = None
         elif char == '`':
-            end = re.match(r'`(?:\\[\s\S]|[^`])*`', text[i:])
+            end = re.match(r'`(?:\\[\s\S]|[^`\\])*`', text[i:])
             if end is None:
                 raise ValueError('unterminated command substitution')
             if not stack:
