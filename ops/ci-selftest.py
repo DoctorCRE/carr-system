@@ -202,8 +202,8 @@ def test_controller_sigterm_cleans_children_and_temp_state():
                  "    child.wait(timeout=5)\n    sys.exit(143)\n") +
                 "signal.signal(signal.SIGTERM,stop)\n"
                 "while not Path('child-ready').exists(): time.sleep(.01)\n"
-                "Path('pids').write_text(f'{os.getpid()} {child.pid}')\n"
                 "print('cancellation fixture log', flush=True)\n"
+                "Path('pids').write_text(f'{os.getpid()} {child.pid}')\n"
                 "while True: time.sleep(1)\n")
             process = subprocess.Popen(["bash", "ops/ci.sh", "--only", name], cwd=root,
                 env={**fixture_env(), "RUNNER_TEMP": directory, "GITHUB_ACTIONS": "true"}, start_new_session=True,

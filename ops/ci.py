@@ -15,7 +15,6 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-TIMEOUT = runpy.run_path(str(ROOT / 'bin/with-timeout.py'))
 CI_SELFTEST_TIMEOUT_SECONDS = 120
 CLASS_DESCRIPTIONS = {
     'pushfloor': 'seeded defect that must not leave the machine (local pre-push floor)',
@@ -94,10 +93,11 @@ def run_command(command, **kwargs):
             stdout, stderr = process.communicate(data)
             return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
         except BaseException:
-            tree = TIMEOUT['_descendants'](process.pid)
+            timeout = runpy.run_path(str(ROOT / 'bin/with-timeout.py'))
+            tree = timeout['_descendants'](process.pid)
 
             def force_cleanup(*_):
-                TIMEOUT['_signal_tree'](tree, signal.SIGKILL)
+                timeout['_signal_tree'](tree, signal.SIGKILL)
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
@@ -106,7 +106,7 @@ def run_command(command, **kwargs):
             previous = {sig: signal.signal(sig, force_cleanup)
                         for sig in (signal.SIGINT, signal.SIGTERM)}
             try:
-                TIMEOUT['_terminate_group'](process)
+                timeout['_terminate_group'](process)
             finally:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
