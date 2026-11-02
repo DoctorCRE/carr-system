@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import importlib.util
 import json
 import os
 import subprocess
@@ -626,6 +627,11 @@ def main() -> int:
     elif args.command == "stop":
         print(json.dumps(stop_recording(), indent=2))
     elif args.command == "release":
+        if sys.version_info < (3, 10) or importlib.util.find_spec("typesafe_sdk") is None:
+            python = Path(__file__).resolve().parents[3] / ".venv" / "bin" / "python3"
+            raise SystemExit(
+                f"release requires the repository virtual environment; run {python} {__file__} release {args.session}"
+            )
         path = session_path(args.session)
         lock = post_call.session_lock(path, blocking=False)
         try:
