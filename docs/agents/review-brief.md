@@ -15,10 +15,19 @@ You run headless in a cloud sandbox; nobody answers questions.
 - Do not push, merge or edit code.
 - If an earlier App review requests changes, confirm each blocker is fixed.
 
-For DoctorCRE/carr-system, submit a native App review through
-`ops/review-submit.py N approve|request-changes --body-file FILE --reviewed-sha SHA`.
-The body includes the PR's Card line, reviewer identity, and findings with file:line.
-Use request-changes only for real blockers; label nits non-blocking.
-Never publish VERDICT comments. The orchestrator provides the authorized local
-App submission path when the cloud routine cannot access it. Do not copy keys.
-If the head moved, inspect the new head before submitting its SHA.
+Write a verdict file for the coordinator. Begin with these three lines:
+
+```text
+VERDICT: APPROVE or VERDICT: CHANGES
+Reviewed-SHA: <full inspected head SHA>
+Reviewer: <name>
+```
+
+Include the PR's Card line and findings with file:line after the header.
+Use CHANGES only for real blockers. Label nits non-blocking.
+If the head moves, inspect the new head before writing its SHA.
+
+Reviewers never post comments or reviews. The coordinator submits the verdict
+as a native App review through `ops/review-submit.py`, with
+`--repository jbookout/doctorcre-app` for the app repository.
+Never copy keys or publish VERDICT comments.

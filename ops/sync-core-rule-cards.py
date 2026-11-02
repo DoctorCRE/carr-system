@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the attach line and core cards into AGENTS.md, and validate repository paths in CLAUDE.md and AGENTS.md.
+"""Render shared core cards and validate paths in AGENTS.md and CLAUDE.md.
 
 CLAUDE.md imports AGENTS.md, so it carries no cards of its own.
 

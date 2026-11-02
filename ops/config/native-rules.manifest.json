@@ -1288,20 +1288,20 @@
   "startup_measurement": {
     "files": {
       ".claude/rules/carr-core.md": {
-        "sha256": "f8ce0ea22167643269bca7091d4bb908ec5970bf10547da6dfe7e03bdc3b406b",
-        "tokens": 502
+        "sha256": "3597d5d3085fa18bd31e9d9bd8e0cfb031fcd7cb3905a99d64c2b9df188a3421",
+        "tokens": 317
       },
       "AGENTS.md": {
-        "sha256": "5db6ef3304b176cedfe9f8e71926223e0e2782da6cb9fa345b06bf639fdaee76",
-        "tokens": 5076
+        "sha256": "deb83ff9d4802fb5323e24645de13340e70e8c01852ea0f009085df537fff434",
+        "tokens": 4913
       },
       "CLAUDE.md": {
-        "sha256": "14e0bccac6b30b0843e5f916442bb7b35cf2ccb7151d7182bc5630a5637ff7dd",
-        "tokens": 2402
+        "sha256": "144589e2ed88ffa3d6463ec919ba798ff860dc12ed1d2161f5c44b54d12d37bb",
+        "tokens": 854
       }
     },
     "tokenizer": "cl100k_base",
-    "tokens": 7980
+    "tokens": 6084
   },
   "unmatched_globs": [
     {
