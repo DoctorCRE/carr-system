@@ -91,16 +91,48 @@ class DeliveryTests(HookTestCase):
         self.assertEqual(list(hook.GAP_LOG.parent.iterdir()), [])
 
     def test_fixture_suites_leave_shared_rule_lookup_unchanged(self):
-        shared = Path.home() / 'carr-system/out/rule-lookup'
-        def snapshot():
-            return {p.name: (p.stat().st_size, hashlib.sha256(p.read_bytes()).hexdigest())
-                    for p in shared.glob('*') if p.is_file()}
-        before = snapshot()
-        for suite in ('rule-cards', 'grok-hook-payload'):
-            result = subprocess.run([sys.executable, str(REPO / f'ops/{suite}-selftest.py')],
-                                    cwd=REPO, capture_output=True, text=True, timeout=60)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(snapshot(), before, 'fixture suites changed the shared rule-lookup logs')
+        bootstrap = """
+import importlib.machinery
+import json
+from pathlib import Path
+import runpy
+import sys
+
+suite, shared, sessions = sys.argv[1:]
+execute = importlib.machinery.SourceFileLoader.exec_module
+
+def observe(loader, module):
+    execute(loader, module)
+    if Path(module.__file__).name != 'rule-pack-preuse-reselection.py':
+        return
+    module.GAP_LOG = Path(shared)
+    deliver = module.delivery_receipt
+    def delivery(payload, *args, **kwargs):
+        with open(sessions, 'a') as output:
+            output.write(json.dumps(payload['session_id']) + '\\n')
+        return deliver(payload, *args, **kwargs)
+    module.delivery_receipt = delivery
+
+importlib.machinery.SourceFileLoader.exec_module = observe
+sys.argv = [suite]
+sys.path.insert(0, str(Path(suite).parent))
+runpy.run_path(suite, run_name='__main__')
+"""
+        with tempfile.TemporaryDirectory() as raw:
+            shared = Path(raw) / 'selection-gaps.jsonl'
+            sessions = Path(raw) / 'sessions.jsonl'
+            shared.touch()
+            for suite in ('rule-cards', 'grok-hook-payload'):
+                result = subprocess.run(
+                    [sys.executable, '-c', bootstrap,
+                     str(REPO / f'ops/{suite}-selftest.py'), str(shared), str(sessions)],
+                    cwd=REPO, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            fixture_sessions = {json.loads(line) for line in sessions.read_text().splitlines()}
+            self.assertTrue(fixture_sessions, 'fixture suites exercised no delivery sessions')
+            leaked = sum(json.loads(line)['session_id'] in fixture_sessions
+                         for line in shared.read_text().splitlines())
+            self.assertEqual(leaked, 0, 'fixture sessions leaked into the shared rule-lookup log')
 
     def test_rotation_bounds_a_preexisting_oversized_log(self):
         hook.GAP_LOG.write_bytes(b'old defect\n' * 100)

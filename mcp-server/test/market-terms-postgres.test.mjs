@@ -1,4 +1,5 @@
 // Synthetic market history through the registered reader and disposable PostgreSQL.
+import { readMigration } from './migration-source.testhelper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -42,7 +43,7 @@ test('market terms project confirmed history with explicit coverage', async t =>
     return fact;
   };
   try {
-    await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
+    await c.query(readMigration('0001_init.sql'));
     await c.query(`create schema ops; create role carr_reader; create role carr_writer;
       create role carr_authority; create role dot_reader;
       create function ops.scac_current_grant_contract() returns jsonb language sql as

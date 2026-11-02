@@ -118,6 +118,35 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
             self.assertEqual(api.call_args.args[1]['state'], 'success')
 
+    def test_base_repository_activity_still_publishes_status(self):
+        pr = {**self.pr, 'base': {'ref': 'main', 'sha': 'base', 'repo': {
+            'pushed_at': '2026-01-01T00:00:00Z', 'open_issues_count': 4}}}
+        for field, value in [('pushed_at', '2026-01-01T00:01:00Z'), ('open_issues_count', 5)]:
+            latest = {**pr, 'base': {**pr['base'], 'repo': {**pr['base']['repo'], field: value}}}
+            for additions, expected in [(150, 'success'), (151, 'failure')]:
+                with self.subTest(field=field, expected=expected), patch.dict(
+                        gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
+                    with patch.object(gate, 'api', side_effect=[
+                            {**pr, 'additions': additions}, {}, self.files, [],
+                            {**latest, 'additions': additions}, {}]) as api:
+                        self.assertEqual(gate.run({'number': 4}, 'owner/repo'), int(expected == 'failure'))
+                        self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
+                        self.assertEqual(api.call_args.args[1]['state'], expected)
+
+    def test_base_commit_advance_still_publishes_status(self):
+        pr = {**self.pr, 'base': {'ref': 'main', 'sha': 'base'}}
+        latest = {**pr, 'base': {**pr['base'], 'sha': 'advanced'}}
+        with patch.object(gate, 'api', side_effect=[pr, {}, self.files, [], latest, {}]) as api:
+            self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 0)
+            self.assertEqual(api.call_args.args[1]['state'], 'success')
+
+    def test_changed_base_ref_refuses_final_status(self):
+        latest = {**self.pr, 'base': {'ref': 'release'}}
+        with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [], latest]) as api:
+            gate.run({'number': 4}, 'owner/repo')
+            statuses = [call.args[1]['state'] for call in api.call_args_list if len(call.args) > 1]
+            self.assertEqual(statuses, ['pending'])
+
     def test_arming_during_run_still_publishes_status(self):
         latest = {**self.pr, "auto_merge": {"enabled_by": {"login": "author"}}}
         with patch.object(gate, "api", side_effect=[self.pr, {}, self.files, [], latest, {}]) as api:
@@ -125,9 +154,11 @@ class ReviewGate(unittest.TestCase):
             self.assertEqual(api.call_args.args[1]["state"], "success")
 
     def test_adapter_checks_head_and_metadata(self):
-        with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [], {**self.pr, 'title': 'changed'}]) as api:
-            gate.run({'number': 4}, 'owner/repo')
-            self.assertEqual(api.call_count, 5)
+        for change in [{'head': {'sha': 'moved'}}, {'title': 'changed'}, {'body': 'changed'}]:
+            with self.subTest(change=change), patch.object(gate, 'api', side_effect=[
+                    self.pr, {}, self.files, [], {**self.pr, **change}]) as api:
+                gate.run({'number': 4}, 'owner/repo')
+                self.assertEqual(api.call_count, 5)
 
 class QueueAndCutover(unittest.TestCase):
     setUp = ReviewGate.setUp

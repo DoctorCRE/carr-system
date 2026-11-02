@@ -18,9 +18,9 @@ import stat
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
 from selftest_harness import temporary_directory
@@ -252,6 +252,26 @@ def _invoke(env: dict[str, str], *args: str, timeout: float = 8) -> subprocess.C
     )
 
 
+def _neutral_cancel(env: dict[str, str]) -> tuple[int, bool]:
+    module = _load_module(_STATUS_HELPER, "_backup_neutral_fixture")
+
+    class WaitingForCancellation(BaseException):
+        pass
+
+    def wait(seconds: float) -> None:
+        assert seconds == 60, seconds
+        raise WaitingForCancellation
+
+    # The real gh subprocess must return before neutral_cancel reaches its wait.
+    with patch.dict(os.environ, env, clear=True), patch.object(
+        module, "time", SimpleNamespace(sleep=wait)
+    ):
+        try:
+            return module.main(["neutral-cancel"]), False
+        except WaitingForCancellation:
+            return 0, True
+
+
 def _read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -421,34 +441,7 @@ def _behavioral_contract() -> None:
             Path(raw),
             {"run": _run_state(conclusion="cancelled"), "artifacts": [], "check_runs": []},
         )
-        proc: subprocess.Popen[str] | None = None
-        if _STATUS_HELPER.is_file():
-            proc = subprocess.Popen(
-                [sys.executable, str(_STATUS_HELPER), "neutral-cancel"],
-                cwd=_ROOT,
-                env=env,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            deadline = time.monotonic() + 4
-            while time.monotonic() < deadline:
-                observed = _calls(log_path)
-                if any(str(call.get("url", "")).endswith("/actions/runs/101/cancel")
-                       for call in observed):
-                    break
-                if proc.poll() is not None:
-                    break
-                time.sleep(0.05)
-            alive_after_cancel = proc.poll() is None
-            proc.terminate()
-            try:
-                proc.communicate(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.communicate()
-        else:
-            alive_after_cancel = False
+        _, waited_after_cancel = _neutral_cancel(env)
         neutral_state = _read_json(state_path)
         neutral_checks = neutral_state.get("check_runs", [])
         neutral_item = neutral_checks[0] if isinstance(neutral_checks, list) and neutral_checks else {}
@@ -475,11 +468,12 @@ def _behavioral_contract() -> None:
             -1,
         )
         _check(
-            "neutral path creates and reads back neutral, cancels only its run, then waits for kill",
+            "neutral path creates and reads back neutral, cancels only its run, then enters its cancellation wait",
             neutral_item.get("conclusion") == "neutral"
             and create_index >= 0 < readback_index < cancel_index
             and cancel_urls == ["/repos/DoctorCRE/carr-system/actions/runs/101/cancel"]
-            and alive_after_cancel,
+            and waited_after_cancel
+            and neutral_state.get("cancel_calls") == cancel_urls,
             json.dumps(neutral_calls, sort_keys=True),
         )
 
@@ -493,32 +487,13 @@ def _behavioral_contract() -> None:
                 "cancel_error": True,
             },
         )
-        if _STATUS_HELPER.is_file():
-            proc = subprocess.Popen(
-                [sys.executable, str(_STATUS_HELPER), "neutral-cancel"],
-                cwd=_ROOT,
-                env=env,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            deadline = time.monotonic() + 4
-            while time.monotonic() < deadline and proc.poll() is None:
-                if any(str(call.get("url", "")).endswith("/cancel") for call in _calls(log_path)):
-                    time.sleep(0.1)
-                    break
-                time.sleep(0.05)
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.communicate(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.communicate()
+        cancel_rc, waited_after_error = _neutral_cancel(env)
         cancel_error_checks = _read_json(state_path).get("check_runs", [])
         _check(
             "cancel API failure cannot turn a neutral Check into success or backup-failure",
-            isinstance(cancel_error_checks, list)
+            cancel_rc == 2
+            and not waited_after_error
+            and isinstance(cancel_error_checks, list)
             and len(cancel_error_checks) == 1
             and cancel_error_checks[0].get("conclusion") == "neutral"
             and "backup-failure" not in json.dumps(cancel_error_checks),

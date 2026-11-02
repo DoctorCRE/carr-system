@@ -1,6 +1,7 @@
 """Tests for native App review submission."""
 import importlib.util
 import os
+import sys
 import tempfile
 from pathlib import Path
 import unittest
@@ -27,6 +28,39 @@ class Submit(unittest.TestCase):
         with patch.object(submit, "private_key", return_value=b"test"), patch.object(submit.jwt, "encode", return_value="jwt"), patch.object(submit, "request", side_effect=[{"id": 42}, {"token": "app-token"}]) as request:
             self.assertEqual(submit.installation_token(), "app-token")
             self.assertEqual(request.call_args_list[1].args, ("/app/installations/42/access_tokens", "jwt", {"repositories": ["carr-system"], "permissions": {"pull_requests": "write", "metadata": "read"}}))
+
+    def test_cli_repository_controls_all_requests(self):
+        for repository, option in [(submit.CONFIG['repository'], []),
+                                   ('jbookout/doctorcre-app', ['--repository', 'jbookout/doctorcre-app'])]:
+            with self.subTest(repository=repository), tempfile.TemporaryDirectory() as raw:
+                body = Path(raw) / 'review.md'
+                body.write_text('Synthetic review')
+                argv = ['review-submit.py', '12', 'approve', '--body-file', str(body),
+                        '--reviewed-sha', 'a' * 40, *option]
+                responses = [{'id': 42}, {'token': 'app-token'},
+                             {'head': {'sha': 'a' * 40}}, {'id': 1}, {}]
+                with patch.object(sys, 'argv', argv), patch.object(submit, 'private_key', return_value=b'test'), \
+                        patch.object(submit.jwt, 'encode', return_value='jwt'), \
+                        patch.object(submit, 'request', side_effect=responses) as request:
+                    submit.main()
+                self.assertEqual(request.call_args_list[0].args[0], f'/repos/{repository}/installation')
+                self.assertEqual(request.call_args_list[1].args[2]['repositories'], [repository.split('/')[1]])
+                self.assertEqual(request.call_args_list[2].args[0], f'/repos/{repository}/pulls/12')
+                self.assertEqual(request.call_args_list[3].args[0], f'/repos/{repository}/pulls/12/reviews')
+                self.assertEqual(request.call_args_list[3].args[2]['commit_id'], 'a' * 40)
+                self.assertEqual(request.call_args_list[4].args[0], '/installation/token')
+                self.assertEqual(request.call_args_list[4].kwargs, {'method': 'DELETE'})
+
+    def test_invalid_repository_never_authenticates(self):
+        for repository in ['repo', 'owner/repo/extra', '/repo', 'owner/', 'owner/repo?query']:
+            with self.subTest(repository=repository), patch.object(sys, 'argv', [
+                    'review-submit.py', '12', 'approve', '--body-file', 'unused.md',
+                    '--reviewed-sha', 'a' * 40, '--repository', repository]), \
+                    patch.object(submit, 'private_key') as key:
+                with self.assertRaises(SystemExit) as error:
+                    submit.main()
+                self.assertEqual(error.exception.code, 2)
+                key.assert_not_called()
 
     def test_exact_key_mode(self):
         for mode in (0o400, 0o700, 0o1600):

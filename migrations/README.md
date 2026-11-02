@@ -40,6 +40,26 @@ Run `./run.sh local-db-ci --class migration` to prove migrations on disposable P
 Run `python3 ops/migration-shadow.py --base origin/main` to rehearse a base-first upgrade.
 A pre-push migration result marked `skipped` is not a proof.
 
+## Covered historical source
+
+`db/migration-baseline.json` preserves historical filenames and their original
+SHA-256 checksums. A covered SQL file may be removed from the checkout without
+changing its ledger identity. The baseline manifest and the applied ledger rows
+remain unchanged. Files outside the baseline must remain present once applied.
+
+When any covered source is absent, `tools/migrate.py` requires every baseline
+row in the database with its original checksum. Missing rows or changed hashes
+stop the runner before SQL executes. Rebuilds still start from `db/schema.sql`,
+which includes the applied ledger. Removing source does not undo applied SQL
+or authorize replaying history from empty.
+
+Tests and tools that inspect historical definitions use
+`migration_source.read_migration(repository, filename)`. It reads a retained
+file or retrieves an absent covered file from the baseline's pinned Git commit,
+then checks the covered source against its original checksum. The pinned commit
+must be available locally. `python3 tools/migration_source.py names` lists
+both retained and covered filenames. Git history still contains removed source.
+
 ## Rules
 
 - **Forward-only, numbered.** `NNNN_name.sql`, applied in filename order by
@@ -166,9 +186,9 @@ other two merged. **All three filenames and contents are now immutable.** An
 environment with the Control Plane filename already in its ledger correctly sees
 only the Hermes and Program 5 filenames as pending. An existing environment
 with none of these files applied sees all three pending in lexical filename
-order. Renaming, deleting, consolidating, or editing
-any of them would turn a harmless numeric ambiguity into a new pending migration
-or an applied-file SHA mismatch.
+order. Renaming, consolidating, or editing these identities would create a new
+pending migration or an applied-file SHA mismatch. Source removal is allowed
+only through the immutable baseline described in Covered historical source.
 
 `tools/migration_number_contract.py` freezes the exact filename sets for every
 historical duplicate prefix, and `tools/migrate.py` refuses any new or altered
@@ -180,8 +200,9 @@ next number immediately before creating every new migration.
 ### Exact pre-renumber ledger aliases
 
 Isolated Control Plane staging also contains twelve filenames from an early
-branch that was applied before its migrations were renumbered. Those absent
-filenames are the only exception to the runner's missing-applied-file refusal:
+branch that was applied before its migrations were renumbered. These legacy
+filenames and baseline-covered filenames are the exceptions to the runner's
+missing-applied-file refusal:
 
 | applied legacy filename | required forward migration |
 |---|---|

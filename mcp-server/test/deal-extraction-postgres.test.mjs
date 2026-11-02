@@ -1,4 +1,5 @@
 // Exercise stored document job identity and review effects on disposable PostgreSQL.
+import { readMigration } from './migration-source.testhelper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -18,7 +19,7 @@ test('stored extraction jobs bind identity, replay one batch, and review abstent
     finally { await c.query('reset role'); }
   };
   try {
-    await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
+    await c.query(readMigration('0001_init.sql'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader');
     await c.query("create function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as $$select '{\"secdef_execute\":[]}'::jsonb$$");
     for (const file of ['0983_fact_store.sql', '1099_fact_review.sql', '1103_deal_extraction.sql', '1109_deal_schedules.sql'])

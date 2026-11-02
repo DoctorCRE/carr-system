@@ -2907,7 +2907,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-practice-origination-feed": {
     "ingress_key": "mcp-tool:record-practice-origination-feed",
     "source_locator": "mcp-server/src/practice-origination.ts",
-    "schema_digest": "2a56c673d765432e9da824371d464d7d340cdbeb9c520996c309d67bd702e2e7",
+    "schema_digest": "4aa51536d87e38c8145d529bb8d1128d58e058366c33544f5e1da15c89c670c5",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

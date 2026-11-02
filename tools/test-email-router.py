@@ -80,6 +80,98 @@ def route(server, classify, state=None, clock=None):
 
 
 class RouterTests(unittest.TestCase):
+    def test_contact_mail_reply_draft_does_not_require_a_deal(self):
+        source = dict(email('contact-reply', ASK), deal=None, kind='email_in', mailbox_owner='joe')
+        server = Server([source])
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'Thanks for asking. I will check the floor plan.'}
+        counts = email_router.route(server, lambda e, d: {'proposals': [draft]}, refusal_code, {}, NOW,
+            matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        self.assertEqual((counts['recorded'], counts['dropped']), (1, 0))
+        self.assertEqual(server.recorded()[0]['kind'], 'reply_draft')
+        self.assertNotIn('deal', server.recorded()[0])
+
+    def test_old_routing_state_reconsiders_mail_dropped_before_contact_drafts(self):
+        source = dict(email('old-contact-reply', ASK), deal=None, kind='email_in', mailbox_owner='joe')
+        server = Server([source])
+        state = {'routed': {source['activity_id']: NOW.timestamp()}, 'attempts': {}}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'Thanks for asking. I will check the floor plan.'}
+        def run():
+            return email_router.route(server, lambda e, d: {'proposals': [draft]}, refusal_code, state, NOW,
+                matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        self.assertEqual(run()['recorded'], 1)
+        self.assertEqual(run()['emails'], 0)
+
+    def test_recheck_does_not_duplicate_a_next_step_after_deal_filing(self):
+        source = dict(email('late-filed', ASK), deal=None, kind='email_in', mailbox_owner='joe')
+        server = Server([source])
+        state = {}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'I will check the floor plan.'}
+        def run(reply):
+            return email_router.route(server, lambda e, d: reply, refusal_code, state, NOW,
+                matching=lambda *args: email_matching.MatchDecision('contact_only'))
+        run(BOTH)
+        state.pop('version')
+        source['deal'] = DEAL
+        run({'proposals': [*BOTH['proposals'], draft]})
+        self.assertEqual([p['kind'] for p in server.stored.values()].count('next_step'), 1)
+        self.assertEqual([p['kind'] for p in server.recorded()], ['next_step', 'reply_draft'])
+        self.assertEqual(run(BOTH)['emails'], 0)
+
+    def test_recheck_does_not_restart_abandoned_mail_retry_budget(self):
+        server = Server([email('abandoned', ASK)])
+        state = {}
+        def broken(e, d):
+            raise RuntimeError('model unavailable')
+        for _ in range(email_router.MAX_ATTEMPTS):
+            route(server, broken, state)
+        state.pop('version')
+        calls = []
+        def still_broken(e, d):
+            calls.append(e['activity_id'])
+            return broken(e, d)
+        for _ in range(email_router.MAX_ATTEMPTS):
+            route(server, still_broken, state)
+        self.assertEqual(calls, ['abandoned'])
+        self.assertEqual(state['attempts'], {})
+
+    def test_recheck_preserves_attempts_for_unfinished_mail(self):
+        server = Server([email('unfinished', ASK)])
+        state = {'attempts': {'unfinished': email_router.MAX_ATTEMPTS - 1}}
+        def broken(e, d):
+            raise RuntimeError('model unavailable')
+        self.assertEqual(route(server, broken, state)['abandoned'], 1)
+        self.assertEqual(route(server, broken, state)['emails'], 0)
+
+    def test_contact_recheck_drafts_without_repeating_matching(self):
+        source = dict(email('recheck-contact', ASK), deal=None, kind='email_in')
+        server = Server([source])
+        state = {'routed': {source['activity_id']: NOW.timestamp()}}
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'I will check the floor plan.'}
+        def matching(*args):
+            raise AssertionError('handled mail must not be matched again')
+        counts = email_router.route(server, lambda e, d: {'proposals': [draft]}, refusal_code,
+            state, NOW, matching=matching)
+        self.assertEqual((counts['recorded'], counts['model_failed']), (1, 0))
+
+    def test_reply_recheck_drains_pages_across_saved_runs(self):
+        server = Server([email(f'recheck-{i}', ASK) for i in range(email_router.MAX_EMAILS + 1)])
+        draft = {'kind': 'reply_draft', 'evidence_quote': ASK, 'confidence': 0.95,
+                 'subject': 'Re: Floor plan', 'body': 'I will check the floor plan.'}
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)
+            (out / 'state.json').write_text(json.dumps({'routed': {
+                e['activity_id']: NOW.timestamp() for e in server.emails}}))
+            def run():
+                return email_router.run(out, server, lambda e, d: {'proposals': [draft]}, refusal_code, NOW)[1]
+            self.assertEqual(run()['recorded'], email_router.MAX_EMAILS)
+            self.assertEqual(run()['recorded'], 1)
+            self.assertEqual(run()['emails'], 0)
+        self.assertEqual(len(server.stored), email_router.MAX_EMAILS + 1)
+
     def test_contact_only_email_keeps_next_step_for_partner_review(self):
         source = dict(email('nondeal', ASK), deal=None, subject_name='Synthetic vendor')
         server = Server([source])
