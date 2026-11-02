@@ -2,11 +2,17 @@
 from copy import deepcopy
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import RLock
+from math import ceil
 
 SCHEMA = 'post-call-coverage/v1'
 FILE = 'post-call-coverage.json'
 KINDS = ('commitment', 'status', 'phase_change', 'next_step', 'operating_state',
          'workspace_change', 'rename', 'communication', 'no_change', 'other')
+MAX_CONCURRENT_CALLS = 8
+MAX_MODEL_WAVES = 6
+TERMINAL_FAILURES = {'topic_history_too_large', 'coverage_time_budget_exceeded'}
 LISTS = ('joe_tasks', 'dell_tasks', 'deal_updates', 'draft_proposals')
 
 
@@ -144,6 +150,31 @@ def incomplete_ledger(ledger, code):
     return {**ledger, 'state': 'incomplete', 'failures': [{'code': code, 'ids': []}]}
 
 
+def _parallel_model_work(items, work, model):
+    lock = RLock()
+
+    def invoke(request):
+        lock.release()
+        try:
+            return model(request)
+        finally:
+            lock.acquire()
+
+    def run(item):
+        with lock:
+            return work(item, invoke)
+
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
+        list(pool.map(run, items))
+
+
+def _require_time_budget(ledger, topic_count=0, *, persist):
+    waves = 2 * ceil(len(ledger['windows']) / MAX_CONCURRENT_CALLS)
+    if waves + ceil(topic_count / MAX_CONCURRENT_CALLS) + 1 > MAX_MODEL_WAVES:
+        persist(incomplete_ledger(ledger, 'coverage_time_budget_exceeded'))
+        raise CoverageError('coverage_time_budget_exceeded')
+
+
 def build_call_ledger(transcript, context, extractor, *, previous=None, persist=lambda _: None,
                       core_chars=8000, overlap_chars=2000, max_attempts=3, recording_started_at=None):
     sources, length = _layout(transcript)
@@ -155,9 +186,11 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
         'segment_accounting': [], 'windows': list(_windows(sources, length, core_chars, overlap_chars)),
         'state': 'building', 'failures': []}
     ledger.update(state='building', failures=[])
-    for receipt in ledger['windows']:
+    _require_time_budget(ledger, persist=persist)
+
+    def extract_window(receipt, invoke):
         if receipt['validated_completion']:
-            continue
+            return
         if receipt['attempts'] >= max_attempts:
             ledger.update(state='incomplete', failures=[{'code': 'window_budget_exhausted', 'ids': receipt['core_range']}])
             persist(ledger)
@@ -169,12 +202,12 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
         try:
             receipt['attempts'] += 1
             persist(ledger)
-            checked = _window_result(extractor(request), receipt, ledger, transcript, context)
+            checked = _window_result(invoke(request), receipt, ledger, transcript, context)
             if not checked['facts']:
                 _require(receipt['attempts'] < max_attempts, 'empty_window_unverified')
                 receipt['attempts'] += 1
                 persist(ledger)
-                second = _window_result(extractor({**request, 'second_check': True}), receipt, ledger, transcript, context)
+                second = _window_result(invoke({**request, 'second_check': True}), receipt, ledger, transcript, context)
                 _require(not second['facts'] and digest(second) == digest(checked), 'empty_window_disagreement')
             receipt.update(validated_completion=True, unresolved_ranges=[], result=checked)
             persist(ledger)
@@ -185,6 +218,7 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
             if isinstance(exc, ExtractionTransportError):
                 raise
             raise CoverageError(code) from exc
+    _parallel_model_work(ledger['windows'], extract_window, extractor)
     topics, facts = {}, {}
     accounting = {s['segment_index']: {'segment_index': s['segment_index'], 'fact_ids': [],
                                       'non_fact_spans': [], 'non_fact_reason': []} for s in sources}
@@ -271,11 +305,13 @@ def _validate_dispositions(ledger, facts, questions, *, allow_pending=False, pro
 def reconcile_history(ledger, transcript, reconciler, *, persist=lambda _: None, max_attempts=3):
     ledger = deepcopy(ledger)
     receipts = ledger.setdefault('history_receipts', {})
-    for topic in ledger['topics']:
+    _require_time_budget(ledger, len(ledger['topics']), persist=persist)
+
+    def reconcile_topic(topic, invoke):
         topic_id = topic['topic_id']
         facts = [f for f in ledger['facts'] if f['topic_id'] == topic_id]
         if not facts:
-            continue
+            return
         input_sha256 = digest([topic, [{k: v for k, v in f.items() if k != 'disposition'} for f in facts]])
         receipt = receipts.get(topic_id)
         if receipt is None or receipt['input_sha256'] != input_sha256:
@@ -290,7 +326,7 @@ def reconcile_history(ledger, transcript, reconciler, *, persist=lambda _: None,
                     {'span': span, 'text': transcript['segments'][span['segment_index']]['text'][span['char_start']:span['char_end']]}
                     for span in f['source_spans']]} for f in facts]
                 _require(len(json.dumps([facts, evidence], ensure_ascii=False)) <= 24000, 'topic_history_too_large')
-                response = reconciler({'stage': 'coverage_history', 'schema': SCHEMA,
+                response = invoke({'stage': 'coverage_history', 'schema': SCHEMA,
                     'topic': topic, 'facts': facts, 'evidence': evidence})
                 _require(isinstance(response, dict) and set(response) == {'dispositions'} and
                          isinstance(response['dispositions'], list), 'invalid_history')
@@ -307,11 +343,12 @@ def reconcile_history(ledger, transcript, reconciler, *, persist=lambda _: None,
                 fact['disposition'] = deepcopy(receipt['dispositions'][fact['fact_id']])
         except (CoverageError, RuntimeError, OSError, ValueError, KeyError, TypeError) as exc:
             code = str(exc) if isinstance(exc, CoverageError) else 'history_failed'
-            ledger = incomplete_ledger(ledger, code)
+            ledger.update(state='incomplete', failures=[{'code': code, 'ids': []}])
             persist(ledger)
             if isinstance(exc, ExtractionTransportError):
                 raise
             raise CoverageError(code) from exc
+    _parallel_model_work(ledger['topics'], reconcile_topic, reconciler)
     persist(ledger)
     return ledger
 

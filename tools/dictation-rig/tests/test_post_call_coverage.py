@@ -167,9 +167,19 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(pc.process_session(self.session, model, run_checks=False)['state'], 'needs_attention')
         self.assertEqual(model.call_count, count)
 
+    def test_over_budget_plan_fails_before_model_calls(self):
+        transcript = {'segments': [{'text': 'x' * 200001}]}
+        pc.write_private(self.session / 'transcript.json', transcript)
+        model = unittest.mock.Mock(side_effect=AssertionError('over-budget plan invoked model'))
+        status = pc.process_session(self.session, model, run_checks=False)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertEqual(status['reason'], 'coverage_time_budget_exceeded')
+        self.assertIsNone(status['next_attempt_at'])
+        model.assert_not_called()
+
     def test_long_call_latency_stays_inside_parent_budget(self):
         transcript = {'segments': [{'text': str(i) + 'x' * 2498} for i in range(20)]}
-        context = {**self.context, 'deals': [{'id': str(i), 'participants': []} for i in range(20)]}
+        context = {**self.context, 'deals': [{'id': str(i), 'name': f'Topic {i}', 'owner': 'joe', 'operating_state': 'active', 'participants': []} for i in range(20)]}
         active = 0
         peak = 0
         lock = threading.Lock()
@@ -183,6 +193,11 @@ class LedgerTests(unittest.TestCase):
                 time.sleep(0.3)
                 if request.get('stage') == 'coverage_history':
                     return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': None} for f in request['facts']]}
+                if request.get('stage') != 'coverage':
+                    return {'schema_version': 1, 'report': {'summary': 'Twenty synthetic topics', 'decisions': [], 'open_questions': []},
+                        'joe_tasks': [], 'dell_tasks': [], 'draft_proposals': [], 'review_questions': [],
+                        'deal_updates': [{'deal_id': str(i), 'participant_ids': [], 'summary': 'Synthetic update',
+                                          'evidence': 'Synthetic update', 'fact_ids': [str(i)]} for i in range(20)]}
                 facts, topics = [], []
                 for row in request['segments']:
                     i = row['segment_index']
@@ -195,9 +210,12 @@ class LedgerTests(unittest.TestCase):
                 with lock:
                     active -= 1
         start = time.monotonic()
-        ledger = cov.build_call_ledger(transcript, context, model)
-        ledger = cov.reconcile_history(ledger, transcript, model)
-        model({'stage': 'coverage_history', 'facts': []})
+        (self.session / pc.CONTEXT_FILE).unlink()
+        pc.store_context(self.session, context)
+        pc.write_private(self.session / 'transcript.json', transcript)
+        status = pc.process_session(self.session, model, run_checks=False)
+        self.assertEqual(status['state'], 'ready_review', status)
+        ledger = pc.read_json(self.session / cov.FILE)
         elapsed = (time.monotonic() - start) * 300
         self.assertLess(elapsed, 1800)
         self.assertGreater(peak, 1)
@@ -207,7 +225,7 @@ class LedgerTests(unittest.TestCase):
 
     def test_scored_recall_dispositions_and_no_false_proposals(self):
         status = pc.process_session(self.session, self.distill, run_checks=False)
-        self.assertEqual(status['state'], 'ready_review')
+        self.assertEqual(status['state'], 'ready_review', status)
         ledger = pc.read_json(self.session / cov.FILE)
         report = pc.read_json(self.session / pc.REPORT_FILE)
         gold = {f['id']: f for f in self.case['gold']}
@@ -298,7 +316,10 @@ class LedgerTests(unittest.TestCase):
             with self.assertRaises(cov.CoverageError):
                 cov.build_call_ledger(self.transcript, self.context, invalid,
                     previous=saved[-1] if saved else None, persist=lambda x: saved.append(deepcopy(x)))
-        self.assertEqual(len(calls), 3)
+        from collections import Counter
+        attempts = Counter(tuple(r['window']['core_range']) for r in calls)
+        self.assertTrue(attempts)
+        self.assertEqual(set(attempts.values()), {3})
         self.assertEqual(saved[-1]['failures'][0]['code'], 'window_budget_exhausted')
 
     def test_changed_proposal_content_and_context_refuse_publication(self):
@@ -306,12 +327,12 @@ class LedgerTests(unittest.TestCase):
         report = pc.read_json(self.session / pc.REPORT_FILE)
         report['joe_tasks'][0]['title'] = 'Unsupported extra work'
         pc.write_private(self.session / pc.REPORT_FILE, report)
-        with self.assertRaises(pc.ContractError):
+        with self.assertRaises(cov.CoverageError):
             pc.sanitized_candidates(self.session)
         report['joe_tasks'][0]['title'] = 'Call landlord Monday'
         pc.write_private(self.session / pc.REPORT_FILE, report)
         pc.write_private(self.session / pc.CONTEXT_FILE, {'call_context': {'changed': True}})
-        with self.assertRaises(pc.ContractError):
+        with self.assertRaises(cov.CoverageError):
             pc.sanitized_candidates(self.session)
 
     def test_failed_history_retries_only_failed_topics(self):
@@ -460,14 +481,14 @@ class LedgerTests(unittest.TestCase):
 
     def test_publication_refuses_legacy_incomplete_and_changed_transcript(self):
         pc.write_private(self.session / pc.REPORT_FILE, self.raw_report())
-        with self.assertRaises(pc.ContractError):
+        with self.assertRaises(cov.CoverageError):
             pc.sanitized_candidates(self.session)
         (self.session / pc.REPORT_FILE).unlink()
         pc.process_session(self.session, self.distill, run_checks=False)
         transcript = deepcopy(self.transcript)
         transcript['segments'][0]['text'] += ' Changed'
         pc.write_private(self.session / 'transcript.json', transcript)
-        with self.assertRaises(pc.ContractError):
+        with self.assertRaises(cov.CoverageError):
             pc.sanitized_candidates(self.session)
         self.assertIsNone(pc.retention_ready(self.session, 'b'*64))
 

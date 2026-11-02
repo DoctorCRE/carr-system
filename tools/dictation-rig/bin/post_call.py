@@ -917,8 +917,18 @@ def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dic
         return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
 
 
+def require_review_coverage(session_dir: Path, report: dict[str, Any]) -> None:
+    try:
+        coverage.require_coverage(session_dir, report, read_json)
+    except coverage.CoverageError as exc:
+        status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
+        status.update(state="needs_attention", reason=str(exc), next_attempt_at=None, updated_at=now())
+        write_private(session_dir / STATUS_FILE, status)
+        raise
+
+
 def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
-    coverage.require_coverage(session_dir, report, read_json)
+    require_review_coverage(session_dir, report)
     with context_lock(session_dir):
         stored = read_json(session_dir / CONTEXT_FILE) or {}
         stored.pop("call_context", None)
@@ -944,11 +954,9 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             raise ContractError("post-call report is unreadable")
         if existing.get("state") != "filed":
             try:
-                coverage.require_coverage(session_dir, report, read_json)
-            except coverage.CoverageError as exc:
-                existing.update(state="needs_attention", reason=str(exc), next_attempt_at=None)
-                write_private(session_dir / STATUS_FILE, existing)
-                return existing
+                require_review_coverage(session_dir, report)
+            except coverage.CoverageError:
+                return read_json(session_dir / STATUS_FILE) or {}
         if report.get("checks_hold") and any((item.get("checks") or {}).get("reason")
                                              for item in _report_candidates(report)):
             hold_day = report.get("checks_hold_day") or call_budget.budget_day(
@@ -990,6 +998,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     if held is not None:
         return held
     existing = read_json(session_dir / STATUS_FILE) or {}
+    if existing.get("coverage_terminal") and not releasing:
+        return existing
     attempts = 0 if releasing else existing.get("extraction_attempts", 0)
     if attempts >= max_attempts:
         existing.update({"state": "needs_attention", "next_attempt_at": None})
@@ -1070,6 +1080,9 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                     "total_windows": len(failed_ledger["windows"]),
                 }
                 status["coverage_source_ids"] = [s["source_id"] for s in failed_ledger["sources"]]
+        if isinstance(exc, coverage.CoverageError) and str(exc) in coverage.TERMINAL_FAILURES:
+            next_attempt_at = None
+            status["coverage_terminal"] = True
         failed_at = now()
         if next_attempt_at is not None:
             next_attempt_at = (datetime.fromisoformat(failed_at.replace("Z", "+00:00"))
@@ -1153,10 +1166,13 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
                 return None
-            try:
-                coverage.require_coverage(session_dir, report, read_json)
-            except coverage.CoverageError:
-                return None
+            filed_legacy = ((read_json(session_dir / STATUS_FILE) or {}).get("state") == "filed"
+                            and "coverage_sha256" not in report)
+            if not filed_legacy:
+                try:
+                    require_review_coverage(session_dir, report)
+                except coverage.CoverageError:
+                    return None
             if not review_complete(report):
                 return None
             items = _report_candidates(report)
@@ -1452,10 +1468,7 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
     report = read_json(session_dir / REPORT_FILE)
     if report is None:
         raise ContractError("post-call report is not ready")
-    try:
-        coverage.require_coverage(session_dir, report, read_json)
-    except coverage.CoverageError as exc:
-        raise ContractError(str(exc)) from exc
+    require_review_coverage(session_dir, report)
     post_call_items: list[dict[str, Any]] = []
     legacy_items: list[dict[str, Any]] = []
     bindings: list[dict[str, Any]] = []

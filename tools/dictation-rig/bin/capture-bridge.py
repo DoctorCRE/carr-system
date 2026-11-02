@@ -466,6 +466,9 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         return 1
     try:
         shaped = post_call.sanitized_candidates(session_dir)
+    except post_call.coverage.CoverageError as exc:
+        log_line(f"ERROR publish coverage failure session={session_dir.name}: {exc}")
+        return 1
     except post_call.ContractError as exc:
         log_line(f"NOOP publish post-call report unavailable session={session_dir.name}: {exc}")
         return 0

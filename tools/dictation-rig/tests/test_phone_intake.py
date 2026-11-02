@@ -884,7 +884,7 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertEqual(status['state'], 'needs_attention')
         self.assertEqual(status['reason'], 'coverage_audit_required')
         self.assertIsNone(post_call.retention_ready(session, 'b' * 64))
-        with self.assertRaises(post_call.ContractError):
+        with self.assertRaises(coverage.CoverageError):
             post_call.sanitized_candidates(session)
 
     def test_phone_retention_holds_unresolved_review_questions(self):

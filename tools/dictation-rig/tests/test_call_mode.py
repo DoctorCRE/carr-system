@@ -2687,7 +2687,34 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.cfg = {"base_url": "https://worker.test", "device_id": "joe", "token": "device"}
 
     def seed_coverage(self):
-        pass
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        transcript = post_call.read_json(self.session / 'transcript.json')
+        topics, facts = [], []
+        for number, (kind, item) in enumerate(_REAL_COVERAGE.proposal_items(report)):
+            fact_id = f'lifecycle-{number}'
+            item['fact_ids'] = [fact_id]
+            topics.append({'topic_id': fact_id, 'identity': {
+                'deal_id': item['deal_id'], 'participant_ids': item.get('participant_ids', [])}})
+            facts.append({'fact_id': fact_id, 'topic_id': fact_id,
+                'kind': 'status' if kind == 'deal_updates' else 'commitment',
+                'statement': 'Synthetic lifecycle assertion', 'asserted_value': None,
+                'source_spans': [_REAL_COVERAGE.source_span(transcript, i)
+                                 for i in range(len(transcript['segments']))], 'disposition': None})
+        context = {'session': self.session.name, 'deals': [{'id': t['identity']['deal_id'],
+            'participants': [{'party_id': i} for i in t['identity']['participant_ids']]} for t in topics]}
+        response = {'topics': topics, 'facts': facts, 'non_fact_spans': []}
+        def model(request):
+            if request.get('stage') == 'coverage_history':
+                return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': None}
+                                         for f in request['facts']]}
+            return response
+        ledger = _REAL_COVERAGE.build_call_ledger(transcript, context, model)
+        ledger = _REAL_COVERAGE.reconcile_history(ledger, transcript, model)
+        ledger = _REAL_COVERAGE.reconcile_coverage(ledger, report)
+        post_call.write_private(self.session / _REAL_COVERAGE.FILE, ledger)
+        report['coverage_sha256'] = _REAL_COVERAGE.digest(ledger)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        return report
 
     @patch.object(post_call, "coverage", _REAL_COVERAGE)
     @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
@@ -2698,7 +2725,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
         post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
         post_call.hold_transcript_repeat(self.session, report)
-        self.seed_coverage()
+        report = self.seed_coverage()
         output = io.StringIO()
         with (patch.object(call_mode, "RECORDINGS", self.session.parent),
               patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
@@ -2728,7 +2755,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
                 post_call.write_private(self.session / post_call.REPORT_FILE, report)
                 post_call.write_private(self.session / post_call.STATUS_FILE,
                                         {"state": "held_review", "reason": "summary_repeats_transcript", "sync_attempts": 3})
-                self.seed_coverage()
+                report = self.seed_coverage()
                 ledger = self.session.parent / ".jev-budget.json"
                 post_call.write_private(ledger, {"2026-08-10": 490000})
                 client = PostCallJevChecksTests.fake_client()
@@ -2773,7 +2800,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
         post_call.write_private(self.session / "transcript.json", {"segments": [{"text": "Original call"}]})
         post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
-        self.seed_coverage()
+        report = self.seed_coverage()
         write = post_call.write_private
         polled = []
 
