@@ -137,4 +137,3 @@ begin
 end $$;
 revoke all on function ops.read_home_inbox() from public,carr_reader;
 grant execute on function ops.read_home_inbox() to carr_writer;
-
