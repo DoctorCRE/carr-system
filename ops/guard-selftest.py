@@ -1665,6 +1665,9 @@ ZSH_GLOB_EXISTING_DENIALS = [
 ZSH_GLOB_ADDITIONS = [item for item in ZSH_GLOB_ADDITIONS if item not in ZSH_GLOB_EXISTING_DENIALS]
 for name, command in ZSH_GLOB_ADDITIONS + ZSH_GLOB_EXISTING_DENIALS:
     case(name, bash(command, '/tmp'), DENY)
+for modifier in ('noglob', 'nocorrect', '-', 'nocorrect noglob -'):
+    case('J134 zsh modifier ' + modifier,
+         bash(modifier + ' rm -rf /tmp/x/(a|b) /Users/booko/important', '/tmp'), DENY)
 for adapter in (direct_exec, codex_exec):
     case('J134 native ' + adapter.__name__,
          adapter('rm -rf /tmp/x/(a|b) /Users/booko/important'), DENY)
