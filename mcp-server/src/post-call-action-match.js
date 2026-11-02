@@ -28,7 +28,7 @@ export async function withPostCallActionComparisons(c, rows) {
       [candidate.assignee_slug])).rows[0]?.id;
     const exact = ownerId ? await findExactPostCallAction(c, candidate, ownerId) : null;
     const comparison = { schema_version: 'post-call-action-comparison.v2',
-      status: ownerId ? 'no_match' : 'assignee_unavailable', exact_match: null, date_effect: null, related_open_tasks: [] };
+      status: ownerId ? 'no_match' : 'assignee_unavailable', exact_match: null, date_effect: null, related_open_tasks: [], related_open_task_total: null };
     if (exact) {
       const stated = due_defaulted === false && candidate.due_on != null;
       const resulting = stated ? candidate.due_on : exact.due_on;
@@ -38,14 +38,15 @@ export async function withPostCallActionComparisons(c, rows) {
         resulting_due_on: resulting, changes_due_on: resulting !== exact.due_on,
         reason: candidate.due_on == null ? 'unstated_date' : stated ? 'stated_date' : 'defaulted_date' };
     } else if (ownerId) {
-      const actions = (await c.query(`select actions.*, a.slug as owner from (
+      const actions = (await c.query(`select actions.*, a.slug as owner, count(*) over () as total from (
         select id,owner_id,description,status,due_on::text as due_on,'next_action' as source,created_at as ordered_at
           from next_action where subject_type='deal' and subject_id=$1 and status='open'
         union all
         select id,owner_id,description,status,due_on::text as due_on,'capture_post_call_action' as source,accepted_at as ordered_at
           from capture_post_call_action where deal_id=$1 and status='open'
-        ) actions join actor a on a.id=actions.owner_id order by ordered_at,id /* capture:preview-related-open */`,
+        ) actions join actor a on a.id=actions.owner_id order by ordered_at desc nulls last, actions.id desc limit 5 /* capture:preview-related-open */`,
       [candidate.deal_id])).rows;
+      comparison.related_open_task_total = Number(actions[0]?.total ?? 0);
       comparison.related_open_tasks = actions.map(action => actionSnapshot(action));
       if (comparison.related_open_tasks.length) comparison.status = 'related_open_tasks';
     }

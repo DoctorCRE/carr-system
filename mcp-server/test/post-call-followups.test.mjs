@@ -107,6 +107,20 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       assert.equal(before.exact_match, null);
       assert.deepEqual(before.related_open_tasks, []);
     });
+    await caseTest('open task context is capped to the five newest with a total', async () => {
+      const id = await proposal('A distinct proposed task');
+      const ids = [];
+      for (let i = 0; i < 6; i++) {
+        const action = await seed('capture_post_call_action', id, `Existing task ${i}`);
+        await c.query("update capture_post_call_action set accepted_at = timestamp '2027-01-01' + $2 * interval '1 day' where id=$1", [action, i]);
+        ids.push(action);
+      }
+      const stored = (await c.query('select * from capture_post_call_action where deal_id=$1 order by id', [deal])).rows;
+      const before = await preview(id);
+      assert.deepEqual(before.related_open_tasks.map(action => action.id), ids.slice(1).reverse());
+      assert.equal(before.related_open_task_total, 6);
+      assert.deepEqual((await c.query('select * from capture_post_call_action where deal_id=$1 order by id', [deal])).rows, stored);
+    });
     await caseTest('identical text on another deal gives no match', async () => {
       const text = 'Request synthetic zoning certificate';
       const id = await proposal(text);

@@ -212,8 +212,10 @@ uses `defaulted_date` and preserves the current date. Exact eligibility and
 oldest-action selection use the same matcher as acceptance. Legacy Call Mode
 actions without a structured title cannot be exact matches.
 
-Without an exact match, the comparison returns all open actions on the same
-deal under `related_open_tasks`. The app labels this list "Other open tasks on
+Without an exact match and with a known assignee, the comparison returns up to five
+open actions on the same deal, newest first, under `related_open_tasks`.
+`related_open_task_total` is the total number of open actions on the deal. It is
+null for exact matches and unavailable assignees. The app labels this list "Other open tasks on
 this deal". It includes different owners and legacy unstructured actions,
 regardless of wording. It excludes completed and dropped history. No lexical
 similarity or possible-duplicate claim is made. For example, "Call the landlord

@@ -10211,7 +10211,7 @@ registerTools({
   // on Home until a partner has looked it over, in case one was wrong.
   "read-call-outcomes": {
     writerConnection: true,
-    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists other open tasks on the same deal as neutral context, with no similarity claim. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
+    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const sessions = (await c.query(`
