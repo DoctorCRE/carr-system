@@ -108,9 +108,10 @@ accurately.
 ## Jev in reviews
 
 Joe authorized Jev for all reviews (decision
-`d57501f6-00e7-4ff5-a886-c28a5d5501d6`). Use bounded Jev judgments for code, CI,
-PRs, product behavior and CARR records without separate approval. Preserve
-source evidence, required checks and distinct reviewer-of-record requirements.
+`d57501f6-00e7-4ff5-a886-c28a5d5501d6`). Use bounded Jev judgments in any
+review, including code, CI, PRs, product behavior and CARR records, without
+separate approval. Preserve source evidence, required checks and distinct
+reviewer-of-record requirements.
 
 ## Dispatch work
 
