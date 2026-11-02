@@ -531,12 +531,12 @@ class MatchingTests(unittest.TestCase):
             self.assertNotEqual(decision.kind, 'inherit_thread', case['id'])
         print('Synthetic fixed-score policy eval (expected, old, new):', counts)
 
-    def test_unresolved_identity_prevents_automatic_filing_even_with_a_thread(self):
+    def test_unknown_participant_on_proven_thread_still_inherits(self):
         mail = self.mail(sender={'email': 'vendor@example.test', 'unknown': True})
-        self.assertIsNone(email_matching.thread_match(mail, [{'id': DEAL}], [self.prior()]))
+        self.assertIsNotNone(email_matching.thread_match(mail, [{'id': DEAL}], [self.prior()]))
 
-    def test_rejected_learned_association_falls_back_to_a_reviewed_suggestion(self):
-        mail = self.mail(learned_associations=[self.prior()])
+    def test_rejected_thread_falls_back_to_a_reviewed_suggestion(self):
+        mail = self.mail(thread_history=[self.prior()])
         calls = []
         def carr(verb, args):
             calls.append((verb, args))
@@ -546,7 +546,7 @@ class MatchingTests(unittest.TestCase):
                 raise Refused('email_thread_identity_uncertain')
             return {'ok': True}
         def matching(source, deals, history):
-            if source.get('learned_associations'):
+            if history:
                 return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
             return email_matching.MatchDecision('file_to_deal', DEAL, confidence=.8)
         counts = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW, matching=matching)
@@ -560,16 +560,29 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(len(fake.calls), 1)
         self.assertEqual(fake.calls[0]['state']['open_deals'][0]['id'], DEAL)
 
-    def test_learned_association_reuses_only_the_confirmed_thread(self):
-        mail = self.mail(learned_associations=[self.prior()])
-        fake = FakeJev()
-        decision = email_matching.match(mail, [{'id': DEAL}], [], client=fake)
-        self.assertEqual(decision.kind, 'inherit_thread')
-        self.assertEqual(fake.calls, [])
-        mail['conversation_id'] = 'separate-transaction'
-        decision = email_matching.match(mail, [{'id': DEAL}], [], client=fake)
-        self.assertEqual(decision.kind, 'file_to_deal')
-        self.assertEqual(len(fake.calls), 1)
+    def test_low_existing_scores_do_not_offer_filing(self):
+        for existing, different in ((.1, .5), (.05, .35)):
+            result = email_matching.match(self.mail(), [{'id': DEAL}], [], client=FakeJev(existing, different))
+            self.assertEqual(result.kind, 'contact_only')
+
+    def test_exact_board_party_is_offered_regardless_of_model_scores(self):
+        for placement in ('sender', 'recipient'):
+            for edge in ('participant', 'lead_client'):
+                party = {'email': 'physician@example.test', 'party_id': 'lead-party',
+                         'related_clients': [{'client_id': 'client-a'}] if edge == 'lead_client' else []}
+                deals = [{'id': DEAL, 'client_id': 'client-a',
+                          'participants': [{'party_id': 'lead-party'}] if edge == 'participant' else []}]
+                mail = self.mail(**({'sender': party} if placement == 'sender' else
+                                    {'recipients': [party, *self.mail()['recipients']]}))
+                decision = email_matching.match(mail, deals, [], client=FakeJev(.25, .82))
+                self.assertEqual((decision.kind, decision.deal), ('file_to_deal', DEAL))
+                self.assertEqual(decision.outcome, 'uncertain')
+                server = Server([mail])
+                server.open_deals = deals
+                email_router.route(server, lambda *args: {'proposals': []}, refusal_code, {}, NOW,
+                                   matching=lambda *args: decision)
+                self.assertEqual(server.recorded()[0]['kind'], 'file_to_deal')
+                self.assertEqual(server.recorded()[0]['deal'], DEAL)
 
     def test_shared_vendor_ambiguity_produces_review_candidates(self):
         deals = [{'id': DEAL, 'participants': [{'party_id': 'vendor'}]},
