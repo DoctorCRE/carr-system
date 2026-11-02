@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Render the attach line and core cards, and validate repository paths in CLAUDE.md and AGENTS.md.
+"""Render the attach line and core cards into AGENTS.md, and validate repository paths in CLAUDE.md and AGENTS.md.
+
+CLAUDE.md imports AGENTS.md, so it carries no cards of its own.
 
 --from-store first rewrites ops/config/rule-cards.v1.json from the adopted
 rule cards in the record layer (the rule-cards verb, WR-000562 D16), so the
 always-on block renders from the store. --check stays offline for CI: it fails
-when CLAUDE.md or AGENTS.md drifts from the cards file.
+when AGENTS.md drifts from the cards file or CLAUDE.md stops importing it.
 """
 import argparse
 import json
@@ -91,6 +93,10 @@ def missing_paths(text):
     return sorted(set(missing))
 
 
+def imports_agents(text):
+    return text.split('\n', 1)[0] == "@AGENTS.md"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
@@ -103,20 +109,23 @@ def main():
     stale = []
     broken = []
     for name in ('CLAUDE.md', 'AGENTS.md'):
-        path = ROOT / name
-        text = path.read_text()
-        output = render(text)
-        broken.extend(f"{name}: {path}" for path in missing_paths(text))
-        if output != text:
-            if args.check:
-                stale.append(name)
-            else:
-                path.write_text(output)
+        broken.extend(f"{name}: {path}" for path in missing_paths((ROOT / name).read_text()))
+    path = ROOT / 'AGENTS.md'
+    text = path.read_text()
+    output = render(text)
+    if output != text:
+        if args.check:
+            stale.append('AGENTS.md')
+        else:
+            path.write_text(output)
+    unimported = not imports_agents((ROOT / 'CLAUDE.md').read_text())
+    if unimported:
+        print('CLAUDE.md must begin with the line @AGENTS.md')
     if stale:
         print(f"Stale core cards: {', '.join(stale)}; run python3 ops/sync-core-rule-cards.py")
     for reference in broken:
         print(f"Missing guidance path: {reference}")
-    return int(bool(stale or broken))
+    return int(bool(stale or broken or unimported))
 
 
 if __name__ == '__main__':

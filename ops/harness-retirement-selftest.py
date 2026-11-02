@@ -69,10 +69,11 @@ class HarnessRetirement(unittest.TestCase):
         cards = json.loads((ROOT / 'ops/config/rule-cards.v1.json').read_text())['cards']
         core = [c for c in cards if c['placement'] == 'CORE']
         self.assertEqual(len(core), 12)
-        for source in ('CLAUDE.md', 'AGENTS.md'):
-            text = (ROOT / source).read_text()
-            for card in core:
-                self.assertTrue(card['wording'] in text, card['id'])
+        text = (ROOT / 'AGENTS.md').read_text()
+        for card in core:
+            self.assertTrue(card['wording'] in text, card['id'])
+        self.assertTrue((ROOT / 'CLAUDE.md').read_text().startswith("@AGENTS.md\n"),
+                        'Claude Code loads the cards through the AGENTS.md import')
 
 
 if __name__ == '__main__':

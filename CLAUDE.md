@@ -1,54 +1,9 @@
-# carr-system — repo pointer for sessions
+@AGENTS.md
 
-Code lives here. The CARR Record Layer owns business, brand, persona, deal
-context and doctrine. Query its verbs or `./run.sh retrieve "<question>"`
-before declaring anything absent.
+# Claude Code rules
 
-To find a script and its purpose, run `./run.sh map` for a fresh path-and-description map.
-
-## Always-on rules
-
-<!-- Generated from mcp-server/src/doctrine.js and ops/config/rule-cards.v1.json by ops/sync-core-rule-cards.py. -->
-OPENING ACT, every session: call attach-memory once, first, with surface claude_code for a Claude Code session (terminal or Desktop) or codex for a Codex session; request access read_write for authorized lesson-writing sessions and build/review jobs, or read_only for research/read-only jobs, and pass native_session_id and transcript_ref when known; a claude.ai or other chat app does not attach and calls standing-context instead. Check its team-memory index before starting, read any section that bears on your task with doctrine-sections, and skip work a current section records as done or ruled out, citing it; as you learn or rule something out, write it with write-doctrine-section document=team-memory and your attach_id.
-
-These twelve core cards are loaded natively with this file.
-Before acting when a card applies, answer one line with applies yes/no and the action or reason.
-
-[K01] Assess when asked; finish when authorized: When Joe asks what you think, assess and stop. Once work is authorized, finish it and its necessary follow-ups without re-asking; backlog out-of-scope work with the product task it blocks.
-
-[K04] Verify before claiming: When you say something is done, fixed, or true, check the real artifact with a tool this session and current sources. Name anything unverified, skipped, or failed.
-
-[K03] Run it yourself before handing over: When you'd hand Joe a command or call work blocked, try it first: check permissions and wrappers, retry a classifier block once, try another route. Hand over only human-only sign-in, hardware taps, or human denials; file what stays blocked.
-
-[K05] Bound negative and capability claims: When you say something is missing or impossible, search every relevant collection (the full deployed verb list, not a cached one) or test it live there. Otherwise call it partial or unproven.
-
-[K02] Raise concerns and corrections plainly: When a partner's request, term, or model looks wrong or risky, or code disagrees with the agreed model, say what's off, why, the consequence, and a safer option. Don't soften; if reaffirmed, proceed. Save "I have a concern" for must-stop issues.
-
-[K06] Resolve source conflicts openly: When sources disagree, follow Joe's live direction, then the current store record, then the newer dated ruling, and say there was a conflict. Archives and backups are evidence, not authority.
-
-[K12] Capture durable corrections now: When a partner corrects or overrules you, or states a preference that would recur, write it this turn as a team-memory convention, adopt it with adopt-rule, and tell Joe in one line what you adopted. A how-to the same partner explains twice: quote both, offer a skill.
-
-[K08] End with one action or one decision: When ending a reply, do the doable steps yourself and leave at most one human action or decision, asked directly (approve or decline) in the question box. No closing menus or scripted replies.
-
-[K07] Make every item stand alone: When showing Joe a question, finding, draft, or review request, name the subject plainly, put IDs after the description, link files he should open, and explain automated findings from scratch.
-
-[K10] Write to the question: When writing to Joe, lead with the outcome in short plain prose sized to the question; tables or diagrams only for order, comparison, or flow. Keep evidence words exact; contrast only raised alternatives.
-
-[K09] Give runnable numbered steps: When giving a partner steps to run, number each, say all are required, one active-voice action per line under twenty words, ending with the check that proves it worked. Fill in real values, never placeholders; if a step prints secrets, say before it runs not to paste the output.
-
-[K11] Use observed clocks: When stating a date, time, age, or "today", take it from an observed timestamp or clock read and give it in Joe's timezone.
-
-Naming trap that cost a real search (2026-08-08): the app persona is
-**Dr. CRE** — "Doc" is only the spoken nickname. Search "Dr. CRE" or the
-slugs `dr-cre-concept` / `dr-cre-voice-doctrine`; searching "Doc" returns
-audio slugs and noise. The mascot/visual design is in `dr-cre-concept-2026-08-01`
-(vault record-layer folder + doctrine store); the living-orb panel visual is
-specced in open loop #250 (its origination conversation predates capture and
-was never recovered — loop #250 documents that gap).
-
-Drive gotcha: Google Drive File Stream serves online-only placeholders; a
-grep over the Drive mirror can miss content that exists. Materialize files
-offline before trusting a negative grep there.
+`AGENTS.md`, imported above, holds every shared rule. This file adds only the
+rules for Claude Code sessions.
 
 ## "carr needs authentication" is not a reason to ask Joe to sign in
 
@@ -75,51 +30,9 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
-## Build sessions
-
-Dispatch with T3 `delegate_task`, using worktree isolation and the task's provider and model. Completion wakes the parent; never poll. Watch PRs with `watch_pull_request`.
+## Stop gate
 
 A Stop gate holding the turn open gets the delta only. If it misread a compaction summary or a request for instructions as an order, fix the gate.
-
-## Migration and release state
-Read current canonical migration/release state before naming frontier/blocker.
-Dated incidents/WRs are history; source/CI grants no live authority.
-Resyncing a migration PR with main: [migrations/README.md](migrations/README.md#resync-a-migration-pr-with-main).
-
-## Map work has one mandatory front door
-
-For any request to recommend, design, build, revise, review, or publish a map,
-GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
-verb first. It returns the current doctrine and machine-contract pointer.
-
-## Guidance changes
-
-Follow [the guidance-file PR route](AGENTS.md#guidance-changes).
-
-## PR design and debt
-
-Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-debt-pass).
-
-## Agent skills
-
-Use `gh pr merge --auto <pr>` to join the merge queue (it sets the strategy and refuses `--squash`; the app repo keeps `--auto --squash`), `gh pr list` for open PRs, and [the brief rules](tools/room-bridge/brief-footer.md) for dispatch briefs.
-
-### Issue tracker
-
-Issues are CARR Work Requests in the record layer (`report-problem`, `work-request-card`), not GitHub Issues. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The five triage roles map to Work Request states and `review-and-triage` classes; triage itself is human-only. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context; the glossary and decisions live in the doctrine store and decision log, not repo files. See `docs/agents/domain.md`.
-
-## Production deployment
-
-`.github/workflows/deploy.yml` deploys a successful main canary. It runs
-`tools/migrate.py` and verifies the production `/release` identity.
 
 ## Orchestrator rotation
 
@@ -153,7 +66,3 @@ regardless of the window. PreCompact is the one-attempt backstop for that case.
 Its reason reaching the model during automatic compaction is unverified; Stop
 is the primary model-visible instruction channel. Rotation requests a handoff;
 it cannot guarantee that a model completes the handoff or never compacts.
-
-## Agent skills
-
-For pstack on Codex/Grok, read `tools/pstack/codex-grok.md` and `tools/pstack/routing.md`. Install or refresh with `python3 tools/pstack/update.py`. Dispatch briefs begin in poteto-mode and carry the program standing orders from `tools/room-bridge/brief-footer.md`.
