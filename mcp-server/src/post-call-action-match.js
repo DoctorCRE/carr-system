@@ -32,11 +32,11 @@ export async function withPostCallActionComparisons(c, rows) {
     if (row.kind !== 'assigned_action') { result.push(row); continue; }
     const candidate = { deal_id: row.deal_id, assignee_slug: row.payload.assignee,
       action_description: row.payload.action, due_on: row.payload.due_on, due_defaulted };
-    const owner = (await c.query('select id from actor where slug=$1 and active /* capture:preview-assignee */',
-      [candidate.assignee_slug])).rows[0];
-    const exact = owner ? await findExactPostCallAction(c, candidate, owner.id) : null;
+    const ownerId = (await c.query('select retrieval_visibility_actor_id($1) as id /* capture:preview-assignee */',
+      [candidate.assignee_slug])).rows[0]?.id;
+    const exact = ownerId ? await findExactPostCallAction(c, candidate, ownerId) : null;
     const comparison = { schema_version: 'post-call-action-comparison.v1',
-      status: owner ? 'no_match' : 'assignee_unavailable', exact_match: null, date_effect: null, possible_matches: [] };
+      status: ownerId ? 'no_match' : 'assignee_unavailable', exact_match: null, date_effect: null, possible_matches: [] };
     if (exact) {
       const stated = due_defaulted === false && candidate.due_on != null;
       const resulting = stated ? candidate.due_on : exact.due_on;
@@ -45,7 +45,7 @@ export async function withPostCallActionComparisons(c, rows) {
       comparison.date_effect = { current_due_on: exact.due_on, proposed_due_on: candidate.due_on,
         resulting_due_on: resulting, changes_due_on: resulting !== exact.due_on,
         reason: candidate.due_on == null ? 'unstated_date' : stated ? 'stated_date' : 'defaulted_date' };
-    } else if (owner) {
+    } else if (ownerId) {
       const actions = (await c.query(`select actions.*, a.slug as owner from (
         select id,owner_id,description,status,due_on::text as due_on,'next_action' as source,created_at as ordered_at
           from next_action where subject_type='deal' and subject_id=$1
