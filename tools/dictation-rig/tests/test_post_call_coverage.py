@@ -203,6 +203,51 @@ class LedgerTests(unittest.TestCase):
         self.assertFalse((session / 'transcript.json').exists())
         self.assertTrue((session / 'ingested.json').exists())
 
+    def test_legacy_poll_retains_recordings_until_backend_and_local_review_are_final(self):
+        spec = importlib.util.spec_from_file_location('legacy_hold_bridge', BIN / 'capture-bridge.py')
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)
+        for case in ('unfiled', 'covered_mismatch', 'backend_unfiled', 'missing_hash',
+                     'invalid_hash', 'question', 'pending', 'network_retry'):
+            with self.subTest(case=case):
+                session = self.session / case
+                session.mkdir()
+                report = self.raw_report()
+                for index, item in enumerate(pc._report_candidates(report)):
+                    item.update(candidate_id=f'legacy-{index}', candidate_status='confirmed')
+                report['review_questions'] = [{'resolved': case != 'question'}]
+                if case == 'covered_mismatch':
+                    report['coverage_sha256'] = '0' * 64
+                if case == 'pending':
+                    report['joe_tasks'][0]['candidate_status'] = 'pending'
+                pc.write_private(session / pc.REPORT_FILE, report)
+                pc.write_private(session / pc.STATUS_FILE,
+                                 {'state': 'ready_review' if case == 'unfiled' else 'filed'})
+                pc.write_private(session / 'transcript.json', self.transcript)
+                pc.write_private(session / '.capture.json', {'session_token': 'synthetic'})
+                response = {'state': 'done', 'post_call': True, 'meeting_record': None,
+                            'candidates': {'pending': 1 if case == 'backend_unfiled' else 0},
+                            'candidate_statuses': [],
+                            'post_call_report': {'filed': case != 'backend_unfiled',
+                                                 'sha256': '' if case == 'missing_hash' else
+                                                 'invalid' if case == 'invalid_hash' else 'a' * 64}}
+
+                def request(_cfg, _path, method, endpoint, body=None):
+                    if (method, endpoint) == ('GET', '/capture/session'):
+                        return (503, {}) if case == 'network_retry' else (200, response)
+                    self.fail(f'Unexpected publication request {method} {endpoint}')
+
+                with patch.object(bridge, 'LOG_PATH', session / 'bridge.log'), patch.object(
+                        bridge, 'session_request', side_effect=request) as remote:
+                    bridge.poll_cmd({}, session)
+                    self.assertFalse((session / 'ingested.json').exists())
+                    self.assertTrue((session / 'transcript.json').exists())
+                    if case in ('unfiled', 'covered_mismatch'):
+                        remote.assert_not_called()
+                        self.assertNotEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'ready_review')
+                    if case == 'network_retry':
+                        self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'filed')
+
     def test_oversized_history_is_terminal_without_model_retry(self):
         self.transcript = {'segments': [{'text': 'x' * 25000}]}
         pc.write_private(self.session / 'transcript.json', self.transcript)
