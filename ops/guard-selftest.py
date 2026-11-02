@@ -1443,6 +1443,12 @@ for command in ('git status >', "bash -c \"echo 'unterminated\"", nested_command
     case('unsupported shell ' + command, bash(command), DENY)
 
 
+for command in ("(g''it push --force origin feature)",
+                '(git ' + chr(92) + chr(10) + ' push --force origin feature)', "(r''m -rf /important)",
+                '("git" reset --hard HEAD~1)', "(g''it clean -fd)"):
+    case('normalized program rule ' + command, bash(command), DENY)
+
+
 def main():
     verbose = "-v" in sys.argv[1:]
     source_fails = source_restore_cases()
