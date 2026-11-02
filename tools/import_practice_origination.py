@@ -149,11 +149,7 @@ def import_file(path, *, source, published_on, call):
         acknowledged = int(checkpoint[len(prefix):]) if checkpoint and checkpoint.startswith(prefix) else 0
         with path.open(newline="", encoding="utf-8-sig" if source == "nppes" else "latin1") as stream:
             reader = (validated_florida_rows(stream, published_on=published_on)
-                      if source == "formation-fl" else csv.DictReader(stream))
-            if source != "formation-fl":
-                required = NPPES_ORIGINATION_COLUMNS if source == "nppes" else pecos.REQUIRED_COLUMNS
-                if not required.issubset(reader.fieldnames or []) or len(reader.fieldnames) != len(set(reader.fieldnames)):
-                    raise ValueError(source.upper() + " schema drift; missing or duplicate columns")
+                      if source == "formation-fl" else checked_csv_rows(stream, source, pecos))
             for raw in reader:
                 processed += 1
                 if source != "formation-fl" and (None in raw or any(value is None for value in raw.values())):
@@ -165,8 +161,7 @@ def import_file(path, *, source, published_on, call):
                 if source == "formation-fl":
                     pending.extend(raw)
                 else:
-                    pending.extend(nppes_rows([raw], as_of=published_on) if source == "nppes" else
-                                   pecos.origination_rows([raw], published_on=published_on))
+                    pending.extend(csv_records(raw, source=source, published_on=published_on, pecos=pecos))
                 if processed % 100 == 0:
                     submit(pending)
                     pending = []
@@ -182,6 +177,57 @@ def import_file(path, *, source, published_on, call):
             **({"skipped": skipped} if source == "formation-fl" else {})}
 
 
+def preflight_file(path, *, source, published_on):
+    """Report every local validation refusal without consulting the record layer."""
+    report = {"rows_read": 0, "accepted": 0, "skipped": 0, "refused": 0,
+              "refused_by_reason": {}, "first_refusals": [], "blocked": False}
+
+    def refuse(line, reason):
+        report["blocked"] = True
+        report["refused"] += 1
+        reasons = report["refused_by_reason"]
+        reasons[reason] = reasons.get(reason, 0) + 1
+        if len(report["first_refusals"]) < 10:
+            report["first_refusals"].append({"line": line, "reason": reason})
+
+    spec = importlib.util.spec_from_file_location("pecos", ROOT / "pipelines/radar/build-pecos-pool.py")
+    pecos = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pecos)
+    try:
+        with path.open(newline="", encoding="utf-8-sig" if source == "nppes" else "latin1") as stream:
+            reader = stream if source == "formation-fl" else checked_csv_rows(stream, source, pecos)
+            for number, raw in enumerate(reader, 1):
+                report["rows_read"] += 1
+                try:
+                    records = (florida_rows(raw, published_on=published_on, line_number=number)
+                               if source == "formation-fl" else
+                               csv_records(raw, source=source, published_on=published_on, pecos=pecos))
+                except ValueError as exc:
+                    reason = str(exc).removeprefix(f"Florida corporate line {number}: ")
+                    refuse(number, reason)
+                    continue
+                report["accepted" if records else "skipped"] += 1
+    except (OSError, ValueError, csv.Error) as exc:
+        report["blocked"] = True
+        report["file_error"] = str(exc)
+    return report
+
+
+def checked_csv_rows(stream, source, pecos):
+    reader = csv.DictReader(stream)
+    required = NPPES_ORIGINATION_COLUMNS if source == "nppes" else pecos.REQUIRED_COLUMNS
+    if not required.issubset(reader.fieldnames or []) or len(reader.fieldnames) != len(set(reader.fieldnames)):
+        raise ValueError(source.upper() + " schema drift; missing or duplicate columns")
+    return reader
+
+
+def csv_records(raw, *, source, published_on, pecos):
+    if None in raw or any(value is None for value in raw.values()):
+        raise ValueError(source.upper() + " row shape drift")
+    return (nppes_rows([raw], as_of=published_on) if source == "nppes" else
+            pecos.origination_rows([raw], published_on=published_on))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", choices=["nppes", "pecos", "formation-fl"])
@@ -190,7 +236,9 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Write evidence through authenticated CARR verbs")
     args = parser.parse_args()
     if not args.apply:
-        parser.error("--apply is required to import; no source files are fetched")
+        report = preflight_file(args.path, source=args.source, published_on=args.published_on)
+        print(json.dumps(report))
+        raise SystemExit(1 if report["blocked"] else 0)
 
     def call(verb, payload):
         result = subprocess.run([str(ROOT / "run.sh"), "call", verb, json.dumps(payload)],

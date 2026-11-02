@@ -48,8 +48,8 @@ class OriginationTests(unittest.TestCase):
         from tools.import_practice_origination import main
         variants = [florida_fixture(), florida_fixture(name='Synthetic Retail LLC'),
                     florida_fixture(registered_agent_state='Fl'),
-                    florida_fixture(registered_agent_zip='    32501'),
-                    florida_fixture(registered_agent_zip='32501-123'), florida_fixture()]
+                    florida_fixture(registered_agent_postal_code='    32501'),
+                    florida_fixture(registered_agent_postal_code='32501-123'), florida_fixture()]
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'synthetic.txt'
             path.write_bytes(('\r\n'.join(variants) + '\r\n').encode('latin1'))
@@ -72,6 +72,69 @@ class OriginationTests(unittest.TestCase):
         self.assertTrue(report['blocked'])
         self.assertEqual(sorted(report['refused_by_reason'].values()), [1, 2])
         self.assertEqual([row['line'] for row in report['first_refusals']], [3, 4, 5])
+
+    def test_preflight_valid_empty_and_invalid_files(self):
+        from tools.import_practice_origination import preflight_file
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.txt'
+            for rows, accepted, skipped, refused in [([], 0, 0, 0),
+                    ([florida_fixture(), florida_fixture(name='Synthetic Retail')], 1, 1, 0),
+                    ([florida_fixture()] * 150 + ['bad'] * 12, 150, 0, 12)]:
+                with self.subTest(rows=len(rows)):
+                    path.write_text(''.join(row + '\n' for row in rows))
+                    result = preflight_file(path, source='formation-fl', published_on=date(2026, 10, 21))
+                    self.assertEqual(result['rows_read'], len(rows))
+                    self.assertEqual((result['accepted'], result['skipped'], result['refused']),
+                                     (accepted, skipped, refused))
+                    self.assertEqual(result['blocked'], bool(refused))
+                    self.assertEqual(len(result['first_refusals']), min(refused, 10))
+            path.unlink()
+            self.assertTrue(preflight_file(path, source='formation-fl',
+                                          published_on=date(2026, 10, 21))['blocked'])
+            for source in ['nppes', 'pecos']:
+                path.write_text('NPI,NPI\n1234567890,1234567890\n')
+                result = preflight_file(path, source=source, published_on=date(2026, 10, 21))
+                self.assertTrue(result['blocked'])
+                self.assertIn('schema drift', result['file_error'])
+
+    def test_csv_preflight_uses_import_validation_and_counts_refusals(self):
+        from tools.import_practice_origination import preflight_file
+        rows = {
+            'nppes': {'NPI': '1234567890', 'Entity Type Code': '2',
+                      'Provider Enumeration Date': '10/20/2026', 'Last Update Date': '10/20/2026',
+                      'Provider Organization Name (Legal Business Name)': 'Synthetic Dental',
+                      'Provider Business Practice Location Address City Name': 'Pensacola',
+                      'Provider Business Practice Location Address State Name': 'FL',
+                      'Provider Business Practice Location Address Postal Code': '32501'},
+            'pecos': {'MULTIPLE_NPI_FLAG': '', 'PECOS_ASCT_CNTL_ID': '', 'PROVIDER_TYPE_CD': '',
+                      'FIRST_NAME': '', 'MDL_NAME': '', 'LAST_NAME': '', 'NPI': '1234567890', 'ENRLMT_ID': 'I20200101000100', 'STATE_CD': 'AL',
+                      'ORG_NAME': 'Synthetic Dental', 'PROVIDER_TYPE_DESC': 'Dentist'}}
+        for source, row in rows.items():
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / 'synthetic.csv'
+                with path.open('w', newline='') as stream:
+                    writer = csv.DictWriter(stream, fieldnames=list(row))
+                    writer.writeheader()
+                    writer.writerow(row)
+                    stream.write('bad\n')
+                    writer.writerow(row)
+                result = preflight_file(path, source=source, published_on=date(2026, 10, 21))
+                self.assertEqual((result['rows_read'], result['accepted'], result['refused']), (3, 2, 1))
+                self.assertTrue(result['blocked'])
+                self.assertEqual(result['first_refusals'][0]['line'], 2)
+                self.assertIn('row shape drift', result['first_refusals'][0]['reason'])
+
+    def test_cli_apply_still_checks_disabled_source_through_record_layer(self):
+        from tools.import_practice_origination import main
+        from subprocess import CompletedProcess
+        coverage = {'coverage': [{'source': 'formation-fl', 'enabled': False}]}
+        with patch.object(sys, 'argv', ['import', 'formation-fl', 'synthetic.txt',
+                                       '--published-on', '2026-10-21', '--apply']), \
+                patch('subprocess.run', return_value=CompletedProcess([], 0, json.dumps(coverage))) as call:
+            with self.assertRaisesRegex(ValueError, 'source disabled'):
+                main()
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(call.call_args.args[0][2], 'list-practice-origination')
 
     def test_npi_delta_keeps_evidence_date_without_claiming_practice_opening(self):
         row = {'NPI': '1234567890', 'Entity Type Code': '2',
