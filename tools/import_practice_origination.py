@@ -69,6 +69,8 @@ def florida_rows(line, *, published_on, line_number):
         return []
     if not row["city"]:
         raise ValueError(error + "missing principal city")
+    if len(row["postal_code"]) == 9:
+        row["postal_code"] = row["postal_code"][:5] + "-" + row["postal_code"][5:]
     return [{"record_key": row["document_number"], "document_number": row["document_number"],
              "name": row["name"], "city": row["city"], "state": row["state"],
              "filing_on": filing_on.isoformat(), "evidence_date": filing_on.isoformat(),

@@ -185,7 +185,7 @@ class OriginationTests(unittest.TestCase):
                 row = florida_rows(florida_fixture(filing_on=filed, postal_code=postal),
                                    published_on=date(2026, 10, 21), line_number=1)[0]
                 self.assertEqual(row['filing_on'], '2026-10-19')
-                self.assertEqual(row['facts']['postal_code'], postal)
+                self.assertEqual(row['facts']['postal_code'], '32501' if postal == '32501' else '32501-1234')
         for filed in ['20260230', '02302026', '20261022', '2026 019', '10111213', '']:
             with self.subTest(filed=filed), self.assertRaisesRegex(ValueError, 'filing date'):
                 florida_rows(florida_fixture(filing_on=filed),
