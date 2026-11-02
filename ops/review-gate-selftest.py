@@ -1,6 +1,4 @@
-"""Behavior tests for the conditional review gate."""
-import ast
-import fnmatch
+"""Behavior tests for the current-head review gate."""
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -23,18 +21,23 @@ class ReviewGate(unittest.TestCase):
         self.files = [{'filename': 'lib/safe.py', 'status': 'modified'}]
         self.approval = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': 'head', 'body': 'VERDICT: APPROVE\nReviewed-SHA: head\nReviewer: test', 'submitted_at': '2026-01-01T00:00:00Z'}
 
-    def test_safe_and_threshold(self):
-        self.assertTrue((gate.review_failure(self.pr, self.files, [], "reviewer[bot]") is None))
-        self.assertFalse((gate.review_failure({**self.pr, 'additions': 151}, self.files, [], "reviewer[bot]") is None))
-        self.assertTrue((gate.review_failure({**self.pr, 'additions': 151}, self.files, [self.approval], "reviewer[bot]") is None))
-        self.assertFalse((gate.review_failure(self.pr, [{'filename': 'migrations/a'}], [], 'reviewer[bot]') is None))
-        self.assertFalse((gate.review_failure(self.pr, [{'filename': 'safe', 'previous_filename': 'db/a'}], [], 'reviewer[bot]') is None))
-        self.assertFalse((gate.review_failure(self.pr, [], [], "reviewer[bot]") is None))
+    def test_one_line_changes_need_current_head_approval(self):
+        pr = {**self.pr, 'additions': 1, 'deletions': 0}
+        for path in ('docs/safe.md', 'bin/worker-boot-check.sh'):
+            files = [{'filename': path, 'status': 'modified'}]
+            for reviews, expected in (([], 1), ([self.approval], 0)):
+                with self.subTest(path=path, approved=bool(reviews)), patch.dict(
+                        gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
+                    with patch.object(gate, 'api', side_effect=[pr, {}, files, reviews, pr, {}]) as api:
+                        self.assertEqual(gate.run({'number': 4}, 'owner/repo'), expected)
+                        self.assertEqual(api.call_args.args[1]['state'],
+                                         'failure' if expected else 'success')
 
     def test_approval_requires_exact_reviewed_sha(self):
         pr = {**self.pr, 'additions': 151, 'head': {'sha': 'a' * 40}}
         for body, expected in [
                 ('VERDICT: APPROVE\nReviewed-SHA: ' + 'a' * 40 + '\nReviewer: test', True),
+                ('VERDICT: APPROVE\r\nReviewed-SHA: ' + 'a' * 40 + '\r\nReviewer: test', True),
                 ('Reviewed-SHA: ' + 'b' * 40, False),
                 ('VERDICT: APPROVE', False),
                 (None, False),
@@ -43,114 +46,12 @@ class ReviewGate(unittest.TestCase):
                 ('Reviewed-SHA: ' + 'a' * 40 + '\nReviewed-SHA: ' + 'b' * 40, False)]:
             with self.subTest(body=body):
                 review = {**self.approval, 'commit_id': pr['head']['sha'], 'body': body}
-                self.assertEqual((gate.review_failure(pr, self.files, [review], 'reviewer[bot]') is None), expected)
-
-    def test_markdown_exempt_at_any_size_with_app_veto(self):
-        self.assertTrue((gate.review_failure(self.pr, [{"filename": "docs/safe.md"}], [], "reviewer[bot]") is None))
-        self.assertTrue((gate.review_failure({**self.pr, "additions": 900}, [{"filename": "docs/safe.md"}], [], "reviewer[bot]") is None))
-        self.assertTrue((gate.review_failure(self.pr, [{"filename": "migrations/notes.md"}], [], "reviewer[bot]") is None))
-        self.assertFalse((gate.review_failure(self.pr, [{"filename": "docs/safe.md"}], [{**self.approval, "state": "CHANGES_REQUESTED"}], "reviewer[bot]") is None))
-
-    def test_risky_paths_and_renames(self):
-        paths = ['LaunchAgents/job', 'a/job.plist', 'ops/install-job.sh', 'outlook/a', 'hxstore/a', 'hxprobe/a', 'calendar.js', '.github/workflows/deploy.yml', 'migrations/a', 'db/a', 'wrangler.toml', 'tools/migrate.py', 'CLAUDE.md', 'AGENTS.md', '.claude/settings.json', '.agents/skills/a.md', 'docs/agents/guide.md']
-        for path in [p for p in paths if not p.lower().endswith('.md')]:
-            for key in ('filename', 'previous_filename'):
-                with self.subTest(path=path, key=key):
-                    self.assertFalse((gate.review_failure(self.pr, [{'filename': 'lib/code.py', key: path}], [], 'reviewer[bot]') is None))
-        self.assertFalse((gate.review_failure(self.pr, [{'filename': 'ops/new.py', 'status': 'added'}], [], 'reviewer[bot]') is None))
-
-    def test_gate_and_merge_paths_always_require_review(self):
-        paths = ['ops/review-gate.py', 'ops/review-gate-selftest.py',
-                 'ops/review-submit.py', 'ops/migration-safety-gate.py',
-                 'ops/config/gate-baseline.json', 'ops/config/review-ruleset.json',
-                 'ops/ci.py', 'ops/ci.sh', 'ops/ci-gates.py', 'ops/ci-pushfloor.py',
-                 'ops/pr-hygiene-check.py', 'ops/pr-overlap.py',
-                 'hooks/gate-integrity.py', 'hooks/guard-unattended.py',
-                 'hooks/README.md', 'ops/githooks/pre-push', 'ops/githooks/pre-commit',
-                 '.github/workflows/ci.yml', '.github/workflows/review-gate.yml',
-                 '.github/actions/check/action.yml', 'security/pre-push',
-                 'lib/hook_runtime.py', 'lib/native_shell.py', 'run.sh', 'bin/review-pr']
-        for path in paths:
-            for status in ('added', 'modified', 'removed', 'renamed'):
-                for key in ('filename', 'previous_filename'):
-                    file = {'filename': 'docs/moved.md', 'status': status, key: path}
-                    with self.subTest(path=path, status=status, key=key):
-                        self.assertFalse((gate.review_failure(self.pr, [file], [], 'reviewer[bot]') is None))
-                        self.assertTrue((gate.review_failure(self.pr, [file], [self.approval], 'reviewer[bot]') is None))
-        self.assertFalse((gate.review_failure({**self.pr, 'additions': 1, 'deletions': 900},
-                                      [{'filename': 'ops/review-gate.py'}], [], 'reviewer[bot]') is None))
-
-    def test_ci_fixture_dependencies_require_review(self):
-        tree = ast.parse(Path(__file__).with_name('ci-selftest.py').read_text())
-        fixture = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'ci_fixture')
-        paths = ast.literal_eval(next(n.iter for n in ast.walk(fixture)
-                                     if isinstance(n, ast.For) and isinstance(n.target, ast.Name)
-                                     and n.target.id == 'rel'))
-        for path in paths:
-            for key in ('filename', 'previous_filename'):
-                files = [{'filename': 'docs/moved.md', key: path, 'status': 'modified'}]
-                with self.subTest(path=path, key=key), patch.dict(
-                        gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
-                    with patch.object(gate, 'api', side_effect=[self.pr, {}, files, [], self.pr, {}]) as api:
-                        self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 1)
-                        self.assertEqual(api.call_args.args[1]['state'], 'failure')
-                    self.assertTrue((gate.review_failure(self.pr, files, [self.approval], 'reviewer[bot]') is None))
-
-    def test_ci_executed_scripts_require_review(self):
-        root = Path(__file__).resolve().parents[1]
-        sources = ['ci.py', 'ci-gates.py', 'ci-migration.py']
-        trees = [ast.parse((root / 'ops' / name).read_text()) for name in sources]
-        assignments = {node.targets[0].id: ast.literal_eval(node.value)
-                       for node in trees[1].body if isinstance(node, ast.Assign)
-                       and isinstance(node.targets[0], ast.Name)
-                       and node.targets[0].id in ('INVARIANTS', 'PROGRAM_PATTERNS')}
-        paths = {node.value for tree in trees for node in ast.walk(tree)
-                 if isinstance(node, ast.Constant) and isinstance(node.value, str)
-                 and node.value.startswith(('ops/', 'tools/', 'bin/'))
-                 and node.value.endswith(('.py', '.sh', '.mjs'))}
-        paths.update('ops/' + name + '.py' for name in assignments['INVARIANTS'])
-        paths = {path for path in paths if not any(fnmatch.fnmatchcase(path, pattern)
-                 for pattern in assignments['PROGRAM_PATTERNS'])}
-        self.assertIn('ops/rule-load-layer-check.py', paths)
-        self.assertIn('ops/trigger-grant-check.py', paths)
-        self.assertIn('tools/native_rules.py', paths)
-        for path in sorted(paths):
-            for status in ('modified', 'removed', 'renamed'):
-                for key in ('filename', 'previous_filename'):
-                    files = [{'filename': 'docs/moved.md', key: path, 'status': status}]
-                    with self.subTest(path=path, status=status, key=key), patch.dict(
-                            gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
-                        with patch.object(gate, 'api', side_effect=[
-                                self.pr, {}, files, [], self.pr, {}]) as api:
-                            self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 1)
-                            self.assertEqual(api.call_args.args[1]['state'], 'failure')
-                        self.assertIsNone(gate.review_failure(
-                            self.pr, files, [self.approval], 'reviewer[bot]'))
-
-    def test_new_ci_dependencies_cannot_silently_become_exempt(self):
-        read_text = Path.read_text
-
-        def source(path, *args, **kwargs):
-            text = read_text(path, *args, **kwargs)
-            if path.name == 'ci.py':
-                text += "\nnew_check = ['python3', 'tools/new-ci-check.py']\n"
-            if path.name == 'ci-gates.py':
-                text = text.replace("'rule-load-layer-check',", "'new-invariant', 'rule-load-layer-check',")
-            return text
-
-        with patch.object(Path, 'read_text', source):
-            paths = gate.ci_review_paths()
-        with patch.object(gate, 'CI_REVIEW_PATHS', paths):
-            for path in ('tools/new-ci-check.py', 'ops/new-invariant.py'):
-                files = [{'filename': path}]
-                self.assertIsNotNone(gate.review_failure(self.pr, files, [], 'reviewer[bot]'))
-                self.assertIsNone(gate.review_failure(self.pr, files, [self.approval], 'reviewer[bot]'))
-        self.assertNotIn('tools/test_native_rules.py', paths)
+                self.assertEqual((gate.review_failure(pr, [review], 'reviewer[bot]') is None), expected)
 
     def test_refusals_explain_required_action(self):
         cases = [
             (self.pr, [{'filename': 'ops/review-gate.py'}], [],
-             'Gate, CI or review path changed; current-head App review required at any size'),
+             'Current-head App approval required; submit via ops/review-submit.py'),
             ({**self.pr, 'additions': 151}, self.files, [],
              'Current-head App approval required; submit via ops/review-submit.py'),
             (self.pr, self.files, [{**self.approval, 'state': 'CHANGES_REQUESTED'}],
@@ -177,28 +78,22 @@ class ReviewGate(unittest.TestCase):
                     self.assertEqual(status['description'], description)
                     self.assertLessEqual(len(status['description']), 140)
 
-    def test_armed_safe_needs_no_review(self):
+    def test_armed_pr_still_needs_review(self):
         armed = {**self.pr, 'auto_merge': {'enabled_by': {'login': 'author'}}}
-        self.assertTrue((gate.review_failure(armed, self.files, [], "reviewer[bot]") is None))
-        self.assertTrue((gate.review_failure(armed, self.files, [self.approval], "reviewer[bot]") is None))
-
-    def test_added_machinery(self):
-        pr = {"changed_files": 1, "additions": 1, "deletions": 0, "head": {"sha": "abc"}}
-        for path, status, expected in [("bin/foo", "added", False), ("bin/existing", "modified", True), ("docs/x.md", "added", True)]:
-            with self.subTest(path=path, status=status):
-                self.assertEqual((gate.review_failure(pr, [{"filename": path, "status": status}], [], "reviewer[bot]") is None), expected)
+        self.assertIsNotNone(gate.review_failure(armed, [], "reviewer[bot]"))
+        self.assertTrue((gate.review_failure(armed, [self.approval], "reviewer[bot]") is None))
 
     def test_review_states_and_identity(self):
         large = {**self.pr, 'additions': 151}
         for review in [{**self.approval, 'commit_id': 'old'}, {**self.approval, 'state': 'DISMISSED'}, {**self.approval, 'user': {'login': 'author'}}, {'body': 'VERDICT: APPROVE\nReviewed-SHA: head\nReviewer: x'}]:
-            self.assertFalse((gate.review_failure(large, self.files, [review], "reviewer[bot]") is None))
+            self.assertFalse((gate.review_failure(large, [review], "reviewer[bot]") is None))
         changes = {**self.approval, 'state': 'CHANGES_REQUESTED', 'submitted_at': '2026-01-02T00:00:00Z'}
-        self.assertFalse((gate.review_failure(large, self.files, [self.approval, changes], "reviewer[bot]") is None))
-        self.assertFalse((gate.review_failure(self.pr, self.files, [changes], "reviewer[bot]") is None))
-        self.assertTrue((gate.review_failure(large, self.files, [changes, {**self.approval, 'submitted_at': '2026-01-03T00:00:00Z'}], 'reviewer[bot]') is None))
+        self.assertFalse((gate.review_failure(large, [self.approval, changes], "reviewer[bot]") is None))
+        self.assertFalse((gate.review_failure(self.pr, [changes], "reviewer[bot]") is None))
+        self.assertTrue((gate.review_failure(large, [changes, {**self.approval, 'submitted_at': '2026-01-03T00:00:00Z'}], 'reviewer[bot]') is None))
 
-    def test_missing_app_setting_depends_only_on_diff(self):
-        cases = [(self.pr, self.files, 0),
+    def test_missing_app_setting_always_fails(self):
+        cases = [(self.pr, self.files, 1),
                  ({**self.pr, 'additions': 151}, self.files, 1),
                  (self.pr, [{'filename': 'migrations/a'}], 1)]
         for pr, files, expected in cases:
@@ -215,12 +110,12 @@ class ReviewGate(unittest.TestCase):
         for login, configured in [('author', 'author'), ('someone', 'reviewer[bot]')]:
             with self.subTest(login=login):
                 review = {**self.approval, 'user': {'login': login}}
-                self.assertFalse((gate.review_failure(pr, self.files, [review], configured) is None))
+                self.assertFalse((gate.review_failure(pr, [review], configured) is None))
 
     def test_human_app_setting_fails_closed(self):
         pr = {**self.pr, 'additions': 151}
         human = {**self.approval, 'user': {'login': 'human', 'type': 'User'}}
-        self.assertFalse((gate.review_failure(pr, self.files, [human], 'human') is None))
+        self.assertFalse((gate.review_failure(pr, [human], 'human') is None))
         for candidate in (pr, self.pr):
             with self.subTest(pr=candidate), patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'human'}):
                 with patch.object(gate, 'api', side_effect=[candidate, {}, self.files, [human], candidate, {}]) as api:
@@ -232,22 +127,21 @@ class ReviewGate(unittest.TestCase):
         pr = {**self.pr, 'additions': 151}
         for kind in ('User', None):
             review = {**self.approval, 'user': {'login': 'reviewer[bot]', 'type': kind}}
-            self.assertFalse((gate.review_failure(pr, self.files, [review], 'reviewer[bot]') is None))
-        self.assertTrue((gate.review_failure(pr, self.files, [self.approval], 'reviewer[bot]') is None))
-        self.assertFalse((gate.review_failure({**pr, 'user': self.approval['user']}, self.files,
-                                       [self.approval], 'reviewer[bot]') is None))
+            self.assertFalse((gate.review_failure(pr, [review], 'reviewer[bot]') is None))
+        self.assertTrue((gate.review_failure(pr, [self.approval], 'reviewer[bot]') is None))
+        self.assertFalse((gate.review_failure({**pr, 'user': self.approval['user']}, [self.approval], 'reviewer[bot]') is None))
 
     def test_unknown_reviewer_never_approves(self):
         large = {**self.pr, "additions": 151}
-        self.assertFalse((gate.review_failure(large, self.files, [self.approval], "") is None))
-        self.assertFalse((gate.review_failure(large, self.files, [self.approval], "other[bot]") is None))
+        self.assertFalse((gate.review_failure(large, [self.approval], "") is None))
+        self.assertFalse((gate.review_failure(large, [self.approval], "other[bot]") is None))
 
     def test_card_and_skip_ci(self):
         self.assertFalse(gate.card_allowed({**self.pr, 'body': ''}, self.files))
-        self.assertFalse((gate.review_failure({**self.pr, 'title': '[skip ci] fix'}, self.files, [self.approval], "reviewer[bot]") is None))
+        self.assertFalse((gate.review_failure({**self.pr, 'title': '[skip ci] fix'}, [self.approval], "reviewer[bot]") is None))
 
     def test_adapter_publishes_current_head_decision(self):
-        with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [], self.pr, {}]) as api:
+        with patch.object(gate, 'api', side_effect=[self.pr, {}, self.files, [self.approval], self.pr, {}]) as api, patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
             self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 0)
             self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
             self.assertEqual(api.call_args.args[1]['state'], 'success')
@@ -265,17 +159,24 @@ class ReviewGate(unittest.TestCase):
                     self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
                     self.assertEqual(api.call_args.args[1]['state'], expected)
 
+    def test_reviews_api_error_never_publishes_success(self):
+        with patch.object(gate, 'api', side_effect=[
+                self.pr, {}, self.files, subprocess.CalledProcessError(1, ['gh', 'api'])]) as api:
+            with self.assertRaises(subprocess.CalledProcessError):
+                gate.run({'number': 4}, 'owner/repo')
+            statuses = [call.args[1]['state'] for call in api.call_args_list if len(call.args) > 1]
+            self.assertEqual(statuses, ['pending'])
+
     def test_base_repository_activity_still_publishes_status(self):
         pr = {**self.pr, 'base': {'ref': 'main', 'sha': 'base', 'repo': {
             'pushed_at': '2026-01-01T00:00:00Z', 'open_issues_count': 4}}}
         for field, value in [('pushed_at', '2026-01-01T00:01:00Z'), ('open_issues_count', 5)]:
             latest = {**pr, 'base': {**pr['base'], 'repo': {**pr['base']['repo'], field: value}}}
-            for additions, expected in [(150, 'success'), (151, 'failure')]:
+            for reviews, expected in [([self.approval], 'success'), ([], 'failure')]:
                 with self.subTest(field=field, expected=expected), patch.dict(
                         gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
                     with patch.object(gate, 'api', side_effect=[
-                            {**pr, 'additions': additions}, {}, self.files, [],
-                            {**latest, 'additions': additions}, {}]) as api:
+                            pr, {}, self.files, reviews, latest, {}]) as api:
                         self.assertEqual(gate.run({'number': 4}, 'owner/repo'), int(expected == 'failure'))
                         self.assertEqual(api.call_args.args[0], 'repos/owner/repo/statuses/head')
                         self.assertEqual(api.call_args.args[1]['state'], expected)
@@ -283,7 +184,7 @@ class ReviewGate(unittest.TestCase):
     def test_base_commit_advance_still_publishes_status(self):
         pr = {**self.pr, 'base': {'ref': 'main', 'sha': 'base'}}
         latest = {**pr, 'base': {**pr['base'], 'sha': 'advanced'}}
-        with patch.object(gate, 'api', side_effect=[pr, {}, self.files, [], latest, {}]) as api:
+        with patch.object(gate, 'api', side_effect=[pr, {}, self.files, [self.approval], latest, {}]) as api, patch.dict(gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
             self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 0)
             self.assertEqual(api.call_args.args[1]['state'], 'success')
 
@@ -296,7 +197,7 @@ class ReviewGate(unittest.TestCase):
 
     def test_arming_during_run_still_publishes_status(self):
         latest = {**self.pr, "auto_merge": {"enabled_by": {"login": "author"}}}
-        with patch.object(gate, "api", side_effect=[self.pr, {}, self.files, [], latest, {}]) as api:
+        with patch.object(gate, "api", side_effect=[self.pr, {}, self.files, [self.approval], latest, {}]) as api, patch.dict(gate.os.environ, {"CARR_REVIEW_APP_LOGIN": "reviewer[bot]"}):
             self.assertEqual(gate.run({"number": 4}, "owner/repo"), 0)
             self.assertEqual(api.call_args.args[1]["state"], "success")
 
@@ -448,8 +349,7 @@ class MergeHistory(unittest.TestCase):
             self.assertNotEqual(old, head)
             pr = {'head': {'sha': head}, 'additions': 151, 'deletions': 0, 'changed_files': 1}
             review = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': old, 'body': f'Reviewed-SHA: {old}'}
-            self.assertFalse((gate.review_failure(pr, [{'filename': 'feature'}], [review], 'reviewer[bot]') is None))
-            self.assertTrue((gate.review_failure(pr, [{'filename': 'feature'}],
-                [{**review, 'commit_id': head, 'body': f'Reviewed-SHA: {head}'}], 'reviewer[bot]') is None))
+            self.assertFalse((gate.review_failure(pr, [review], 'reviewer[bot]') is None))
+            self.assertTrue((gate.review_failure(pr, [{**review, 'commit_id': head, 'body': f'Reviewed-SHA: {head}'}], 'reviewer[bot]') is None))
 
 if __name__ == '__main__': unittest.main()

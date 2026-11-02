@@ -1,49 +1,10 @@
 """Publish a SHA-bound review-gate commit status using trusted GitHub event data."""
-import ast
-import fnmatch
 import re
 import json
 import os
 import subprocess
 import time
 from pathlib import Path
-
-RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
-         "claude.md", "agents.md", "*/claude.md", "*/agents.md",
-         ".claude/*", ".agents/*", "docs/agents/*",
-         "*outlook*", "*hxstore*", "*hxprobe*", "*calendar*",
-         ".github/workflows/deploy*", "migrations/*", "db/*", "*wrangler*", "tools/migrate.py")
-
-
-REVIEW_REQUIRED = ("hooks/*", "ops/githooks/*", "ops/*gate*", "ops/ci*",
-                   "ops/review-*", "ops/pr-*", "ops/config/*", ".github/workflows/*",
-                   ".github/actions/*", "security/*", "lib/hook_runtime.py",
-                   "lib/native_shell.py", "run.sh", "bin/review-pr",
-                   ".gitleaks.toml", "ops/gitleaks.py", "ops/pii_guard.py",
-                   "ops/hook-deletion-check.py", "ops/git_env.py", "ops/node_test_summary.py",
-                   "tools/codemap.py", "bin/type-check.sh", "bin/with-timeout.py",
-                   "mypy.ini", "tools/migration_*.py")
-
-
-def ci_review_paths():
-    root = Path(__file__).resolve().parent
-    trees = [ast.parse((root / name).read_text())
-             for name in ('ci.py', 'ci-gates.py', 'ci-migration.py')]
-    declarations = {node.targets[0].id: ast.literal_eval(node.value)
-                    for node in trees[1].body if isinstance(node, ast.Assign)
-                    and isinstance(node.targets[0], ast.Name)
-                    and node.targets[0].id in ('INVARIANTS', 'PROGRAM_PATTERNS')}
-    paths = {node.value for tree in trees for node in ast.walk(tree)
-             if isinstance(node, ast.Constant) and isinstance(node.value, str)
-             and node.value.startswith(('ops/', 'tools/', 'bin/'))
-             and node.value.endswith(('.py', '.sh', '.mjs'))}
-    paths.update('ops/' + name + '.py' for name in declarations['INVARIANTS'])
-    return frozenset(path for path in paths if not any(
-        fnmatch.fnmatchcase(path, pattern) for pattern in declarations['PROGRAM_PATTERNS']))
-
-
-CI_REVIEW_PATHS = ci_review_paths()
-
 
 # GitHub skips every push workflow for these title markers, so a merged PR would never deploy.
 SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
@@ -60,23 +21,7 @@ def card_allowed(pr, files):
                 for line in (pr.get("body") or "").splitlines()))
 
 
-def review_required(files):
-    return any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
-           for f in files for key in ("filename", "previous_filename") for pattern in (*REVIEW_REQUIRED, *CI_REVIEW_PATHS))
-
-
-def review_exempt(pr, files):
-    if review_required(files):
-        return False
-    if docs_only(pr, files):
-        return True
-    risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
-                for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
-    complete = len(files) == pr["changed_files"]
-    return complete and pr["additions"] - pr["deletions"] <= 150 and not risky
-
-
-def review_failure(pr, files, reviews, reviewer_login):
+def review_failure(pr, reviews, reviewer_login):
     if reviewer_login and not reviewer_login.endswith("[bot]"):
         return "CARR_REVIEW_APP_LOGIN must name an App bot ending in [bot]"
     if SKIP_CI.search(pr.get("title") or ""):
@@ -90,8 +35,6 @@ def review_failure(pr, files, reviews, reviewer_login):
     current_review = latest.get(reviewer_login.lower(), {}) if reviewer_login else {}
     if current_review.get("state") == "CHANGES_REQUESTED" and current_review.get("commit_id") == pr["head"]["sha"]:
         return "App requested changes at this head; resolve findings and resubmit via ops/review-submit.py"
-    if review_exempt(pr, files):
-        return None
     if not reviewer_login:
         return "Missing CARR_REVIEW_APP_LOGIN; review-required PR cannot pass"
     author = (pr.get("user") or {}).get("login", "").lower()
@@ -100,8 +43,6 @@ def review_failure(pr, files, reviews, reviewer_login):
         if [line for line in (current_review.get("body") or "").splitlines() if line.startswith("Reviewed-SHA:")] != [f'Reviewed-SHA: {pr["head"]["sha"]}']:
             return f"App approval body needs exactly one line 'Reviewed-SHA: {pr['head']['sha']}'; resubmit via ops/review-submit.py"
         return None
-    if review_required(files):
-        return "Gate, CI or review path changed; current-head App review required at any size"
     return "Current-head App approval required; submit via ops/review-submit.py"
 
 
@@ -181,7 +122,7 @@ def run(event, repo):
         def status(state):
             api(f"{root}/statuses/{group['head_sha']}", {
                 "context": "review-gate", "state": state,
-                "description": "Every queued PR needs exemption or current-head App approval"})
+                "description": "Every queued PR needs current-head App approval"})
         status("pending")
         try:
             if not os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip():
@@ -216,7 +157,7 @@ def evaluate_pr(root, number, queue_head=None):
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
     card_ok = card_allowed(pr, files)
     reviewer_login = os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip()
-    failure = review_failure(pr, files, reviews, reviewer_login)
+    failure = review_failure(pr, reviews, reviewer_login)
     passed = card_ok and failure is None
     latest = api(f"{root}/pulls/{number}")
     if (latest["head"]["sha"] == sha and latest["base"]["ref"] == pr["base"]["ref"] and

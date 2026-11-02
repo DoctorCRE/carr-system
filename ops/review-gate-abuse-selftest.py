@@ -38,9 +38,8 @@ class ReviewHistoryAbuse(unittest.TestCase):
             self.assertNotEqual(old, head, name)
             pr = {'head': {'sha': head}, 'changed_files': 1, 'additions': 151, 'deletions': 0}
             review = {'user': {'login': 'reviewer[bot]', 'type': 'Bot'}, 'state': 'APPROVED', 'commit_id': old, 'body': f'Reviewed-SHA: {old}'}
-            self.assertFalse((gate.review_failure(pr, [{'filename': 'feat'}], [review], 'reviewer[bot]') is None), name)
-            self.assertTrue((gate.review_failure(pr, [{'filename': 'feat'}],
-                [{**review, 'commit_id': head, 'body': f'Reviewed-SHA: {head}'}], 'reviewer[bot]') is None), name)
+            self.assertFalse((gate.review_failure(pr, [review], 'reviewer[bot]') is None), name)
+            self.assertTrue((gate.review_failure(pr, [{**review, 'commit_id': head, 'body': f'Reviewed-SHA: {head}'}], 'reviewer[bot]') is None), name)
         def clean(root,git,old,base):
             git('merge','--no-edit','main');return git('rev-parse','HEAD'),base
         scenario('clean main merge',clean)
