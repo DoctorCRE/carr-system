@@ -56,6 +56,19 @@ _OFFLINE_CLIENT = Mock()
 _OFFLINE_CLIENT.system_one.side_effect = TypeSafeError("live SDK refused inside the offline suite")
 _OFFLINE_CLIENT.__enter__ = Mock(return_value=_OFFLINE_CLIENT)
 _OFFLINE_CLIENT.__exit__ = Mock(return_value=False)
+_COVERAGE_ADAPTER = SimpleNamespace(
+    FILE=post_call.coverage.FILE,
+    digest=post_call.coverage.digest,
+    build_call_ledger=lambda *args, **kwargs: {},
+    add_identity_questions=lambda *args: None,
+    reconcile_coverage=lambda ledger, report: ledger,
+    require_coverage=lambda *args: None,
+    CoverageError=post_call.coverage.CoverageError,
+)
+_COVERAGE_PATCHES = (
+    patch.object(post_call, "coverage", _COVERAGE_ADAPTER),
+    patch.object(call_mode.post_call, "coverage", _COVERAGE_ADAPTER),
+)
 _CLIENT_PATCHES = (
     patch.object(post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
     patch.object(runtime_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
@@ -79,6 +92,8 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    for coverage_patch in _COVERAGE_PATCHES:
+        coverage_patch.start()
     _BUDGET_ENV.start()
     for log_patch in _LOG_PATCHES:
         log_patch.start()
@@ -88,6 +103,8 @@ def tearDownModule() -> None:
     for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
     _BUDGET_ENV.stop()
+    for coverage_patch in reversed(_COVERAGE_PATCHES):
+        coverage_patch.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
 
@@ -2193,9 +2210,9 @@ class PostCallTests(unittest.TestCase):
         update = schema["properties"]["deal_updates"]["items"]
         self.assertIn("next_step", update["required"])
         step = update["properties"]["next_step"]["anyOf"][1]
-        self.assertEqual(step["required"], ["text", "next_date", "needs_review"])
+        self.assertEqual(step["required"], ["text", "next_date", "needs_review", "fact_ids"])
         phase = update["properties"]["phase_move"]["anyOf"][1]
-        self.assertEqual(phase["required"], ["value", "started_on", "needs_review"])
+        self.assertEqual(phase["required"], ["value", "started_on", "needs_review", "fact_ids"])
         self.assertFalse(step["additionalProperties"])
         self.assertEqual(step["properties"]["next_date"]["type"], ["string", "null"])
         source = json.loads(runner.call_args.kwargs["input"])

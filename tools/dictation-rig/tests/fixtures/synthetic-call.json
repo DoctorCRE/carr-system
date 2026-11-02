@@ -3,21 +3,213 @@
     "session": "synthetic-call",
     "workspace_kind": "deal_room",
     "generated_at": "2026-01-01T00:00:00Z",
-    "deals": [{"id": "synthetic-clinic", "name": "Synthetic Clinic", "owner": "Joe", "operating_state": "active", "participants": []}]
+    "deals": [
+      {
+        "id": "synthetic-clinic",
+        "name": "Synthetic Clinic",
+        "owner": "Joe",
+        "operating_state": "active",
+        "participants": []
+      }
+    ]
   },
   "transcript": {
     "segments": [
-      {"speaker": "Joe", "text": "For Synthetic Clinic, I will call the landlord about renewal."},
-      {"speaker": "Dell", "text": "For Synthetic Clinic, I will send the revised proposal."}
+      {
+        "speaker": "Joe",
+        "text": "For Synthetic Clinic, I will call the landlord about renewal."
+      },
+      {
+        "speaker": "Dell",
+        "text": "For Synthetic Clinic, I will send the revised proposal."
+      }
     ]
   },
   "distillation": {
     "schema_version": 1,
-    "report": {"summary": "Joe will call the Synthetic Clinic landlord. Dell will send the revised proposal.", "decisions": [], "open_questions": []},
-    "joe_tasks": [{"title": "Call the landlord about renewal", "deal_id": "synthetic-clinic", "participant_ids": [], "evidence": "I will call the landlord about renewal"}],
-    "dell_tasks": [{"title": "Send the revised proposal", "deal_id": "synthetic-clinic", "participant_ids": [], "evidence": "I will send the revised proposal"}],
+    "report": {
+      "summary": "Joe will call the Synthetic Clinic landlord. Dell will send the revised proposal.",
+      "decisions": [],
+      "open_questions": []
+    },
+    "joe_tasks": [
+      {
+        "title": "Call the landlord about renewal",
+        "deal_id": "synthetic-clinic",
+        "participant_ids": [],
+        "evidence": "I will call the landlord about renewal"
+      }
+    ],
+    "dell_tasks": [
+      {
+        "title": "Send the revised proposal",
+        "deal_id": "synthetic-clinic",
+        "participant_ids": [],
+        "evidence": "I will send the revised proposal"
+      }
+    ],
     "deal_updates": [],
     "draft_proposals": [],
     "review_questions": []
+  },
+  "coverage_case": {
+    "context": {
+      "session": "coverage-synthetic",
+      "workspace_kind": "deal_room",
+      "generated_at": "2026-01-01T00:00:00Z",
+      "deals": [
+        {
+          "id": "harbor",
+          "name": "Harbor Clinic",
+          "owner": "Joe",
+          "operating_state": "active",
+          "participants": []
+        },
+        {
+          "id": "cedar",
+          "name": "Cedar Practice",
+          "owner": "Dell",
+          "operating_state": "active",
+          "participants": []
+        }
+      ]
+    },
+    "transcript": {
+      "segments": [
+        {
+          "speaker": "Joe",
+          "text": "For Harbor Clinic, I will call the landlord Friday.",
+          "start_ms": 0,
+          "end_ms": 9000
+        },
+        {
+          "speaker": "Dell",
+          "text": "Thanks. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. Well, okay. ",
+          "start_ms": 10000,
+          "end_ms": 19000
+        },
+        {
+          "speaker": "Joe",
+          "text": "For Harbor Clinic, I will call the landlord Friday.",
+          "start_ms": 20000,
+          "end_ms": 29000
+        },
+        {
+          "speaker": "Dell",
+          "text": "For Cedar Practice, the survey is complete.",
+          "start_ms": 30000,
+          "end_ms": 39000
+        },
+        {
+          "speaker": "Joe",
+          "text": "Okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. Right, okay. ",
+          "start_ms": 40000,
+          "end_ms": 49000
+        },
+        {
+          "speaker": "Joe",
+          "text": "Correction for Harbor Clinic: Monday replaces Friday for my landlord call.",
+          "start_ms": 50000,
+          "end_ms": 59000
+        },
+        {
+          "speaker": "Dell",
+          "text": "For Cedar Practice, move the phase to negotiation.",
+          "start_ms": 60000,
+          "end_ms": 69000
+        },
+        {
+          "speaker": "Joe",
+          "text": "For the unknown Oak office, I will ask for availability.",
+          "start_ms": 70000,
+          "end_ms": 79000
+        },
+        {
+          "speaker": "Dell",
+          "text": "For Cedar Practice, keep the current next step unchanged.",
+          "start_ms": 80000,
+          "end_ms": 89000
+        },
+        {
+          "speaker": "Joe",
+          "text": "For Cedar Practice, I will send",
+          "start_ms": 90000,
+          "end_ms": 99000
+        },
+        {
+          "speaker": "Joe",
+          "text": "the survey to the architect on November 6, 2026.",
+          "start_ms": 100000,
+          "end_ms": 109000
+        },
+        {
+          "speaker": "Joe",
+          "text": "For Cedar Practice, I will send the survey to the architect on November 6, 2026.",
+          "start_ms": 110000,
+          "end_ms": 119000
+        }
+      ]
+    },
+    "gold": [
+      {
+        "id": "friday",
+        "kind": "commitment",
+        "occurrences": [
+          0,
+          2
+        ],
+        "disposition": "superseded"
+      },
+      {
+        "id": "survey",
+        "kind": "status",
+        "occurrences": [
+          3
+        ],
+        "disposition": "proposal"
+      },
+      {
+        "id": "monday",
+        "kind": "commitment",
+        "occurrences": [
+          5
+        ],
+        "disposition": "proposal"
+      },
+      {
+        "id": "phase",
+        "kind": "phase_change",
+        "occurrences": [
+          6
+        ],
+        "disposition": "proposal"
+      },
+      {
+        "id": "oak",
+        "kind": "commitment",
+        "occurrences": [
+          7
+        ],
+        "disposition": "unresolved_identity"
+      },
+      {
+        "id": "unchanged",
+        "kind": "no_change",
+        "occurrences": [
+          8
+        ],
+        "disposition": "no_change"
+      },
+      {
+        "id": "send",
+        "kind": "commitment",
+        "occurrences": [
+          9,
+          10,
+          11
+        ],
+        "disposition": "proposal"
+      }
+    ]
   }
 }
