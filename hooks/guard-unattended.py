@@ -1840,12 +1840,13 @@ def _raw_github_api_dispatch(arguments):
     method, has_body, endpoint = None, False, False
     words = iter(arguments[1:])
     for word in words:
+        word = re.sub(r'^-[is]+(?=[XfF])', '-', word)
         if word in {'-X', '--method'}:
             method = next(words, '').upper()
         elif word.startswith('--method='):
             method = word.split('=', 1)[1].upper()
         elif word.startswith('-X'):
-            method = word[2:].upper()
+            method = word[2:].lstrip('=').upper()
         elif word in _GH_API_BODY_FLAGS:
             has_body = True
             next(words, None)

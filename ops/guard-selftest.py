@@ -777,7 +777,7 @@ case("direct GitHub workflow dispatch is metering-refused",
      bash("gh workflow run ci.yml"), DENY)
 for _endpoint in ("repos/o/r/actions/workflows/deploy.yml/dispatches",
                   "/repos/o/r/dispatches", "https://api.github.com/repos/o/r/dispatches"):
-    for _flags in ("-X POST", "--method POST", "--method=POST", "-XPOST",
+    for _flags in ("-X POST", "--method POST", "--method=POST", "-XPOST", "-X=POST", "-iXPOST", "-siX=POST",
                    "-f ref=main", "-F event_type=x", "--field event_type=x",
                    "--raw-field=ref=main", "--field=ref=main", "-fref=main",
                    "-Fref=main", "--input /tmp/payload.json", "--input=/tmp/payload.json"):
