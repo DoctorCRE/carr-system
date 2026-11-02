@@ -1684,6 +1684,27 @@ for command in (
     case('J134 ordinary ' + command, bash(command, '/tmp'), ALLOW)
 
 
+
+for read in ('git status', 'git log -1', 'git diff --stat', 'gh pr view 1', 'gh pr checks 1'):
+    for literal in ('issue#123', 'ticket#456', '/tmp/name#part', 'prefix##suffix'):
+        for command in (read + ' && echo ' + literal, 'echo ' + literal + ' && ' + read):
+            case('J141 read hash ' + command, bash(command, '/tmp'), ALLOW)
+    for command in (read + ' && ls /tmp/x/(a|b)', 'ls /tmp/x/(a|b) && ' + read):
+        case('J141 read alternation ' + command, bash(command, '/tmp'), ALLOW)
+for command in ('gh api repos/a/b/pulls/1#fragment',
+                'git show HEAD:path#foo', 'git diff -- src/foo#bar',
+                'git log --grep=foo#bar'):
+    case('J141 read operand ' + command, bash(command, '/tmp'), ALLOW)
+for command in ('git status && rm -rf /tmp/x/(a|b) /tmp/second',
+                'gh pr view 1 && mv /tmp/x/(a|b) /tmp/second',
+                'git status && git clean -n /tmp/x/(a|b)',
+                'git diff --output=/tmp/x/(a|b)',
+                'git log --output=/tmp/x/(a|b)',
+                'gh api repos/a/b/pulls/1#fragment -fstate=closed',
+                'gh api repos/a/b/pulls/1#fragment -XPOST'):
+    case('J141 mutation stays sensitive ' + command, bash(command, '/tmp'), DENY)
+
+
 def zsh_glob_addition_cases():
     failures = []
     for name, command in ZSH_GLOB_ADDITIONS:
