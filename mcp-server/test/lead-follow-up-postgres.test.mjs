@@ -37,7 +37,9 @@ test('every lead has safe handling advice and deeper strategy, including suppres
     assert.equal(typeof row.strategy.objective, 'string');
     assert.ok(row.strategy.discovery.length >= 3);
     assert.equal(row.strategy.sent, false);
-    if (result.detail) assert.equal(result.detail.handling_advice, row.handling_advice);
+    assert.deepEqual(row.strategy.hold, stage === 'do_not_contact' ? { reason: 'suppressed' } :
+      stage === 'archived' ? { reason: 'unsupported_stage' } : null);
+    if (result.detail) assert.deepEqual(result.detail.strategy, row.strategy);
     if (stage === 'opportunity' || stage === 'active_deal') assert.match(row.handling_advice, /Coordinate with the linked client and deal/);
     if (stage === 'closed_won') assert.match(row.handling_advice, /closed won/i);
     if (stage === 'closed_lost') assert.match(row.handling_advice, /closed lost/i);
@@ -186,8 +188,9 @@ test('party contact state controls advice on both boards and quiet lead and vend
         const result = await read('lead-board', args);
         const row = result.leads.find(row => row.id === lead);
         assert.equal(row.contact_eligible, contactable, state);
+        assert.deepEqual(row.strategy.hold, contactable ? null : { reason: 'contact_ineligible' }, state);
         assert.match(row.handling_advice, contactable ? /Respect the requested timing and return with useful, relevant information/ : /Do not contact/, state);
-        if (result.detail) assert.equal(result.detail.handling_advice, row.handling_advice);
+        if (result.detail) assert.deepEqual(result.detail.strategy, row.strategy);
       }
       const quiet = await read('quiet-follow-ups');
       for (const id of [lead,vendor]) assert.equal(quiet.proposals.some(row => row.subject_id === id), contactable, state);
