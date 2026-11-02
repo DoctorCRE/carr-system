@@ -220,7 +220,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                 counts['contact_only'] += 1
                 return []
             args = {'kind': decision.kind, 'activity_id': activity, 'confidence': decision.confidence,
-                    'sender_role': decision.sender_role,
+                    'sender_role': decision.sender_role, 'match_evidence': decision.diagnostics(),
                     'evidence_quote': (email.get('body') or email.get('subject') or '')[:MAX_QUOTE]}
             if decision.deal:
                 args['deal'] = decision.deal

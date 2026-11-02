@@ -515,6 +515,37 @@ class RouterTests(unittest.TestCase):
 
 
 class MatchingTests(unittest.TestCase):
+    def test_matching_policy_eval(self):
+        counts = {}
+        for line in (ROOT / 'evals/email-followup-matching.jsonl').read_text().splitlines():
+            case = json.loads(line)
+            mail = self.mail(**{k: case[k] for k in ('sender','recipients','conversation_id','body')})
+            decision = email_matching.match(mail, [{'id': DEAL, 'client_id': 'synthetic-client'}], [],
+                client=FakeJev(case['existing'], case['different'], case['confidence']))
+            old = 'new' if case['different'] >= .7 or case['existing'] <= .3 else (
+                'existing' if case['existing'] >= .7 and case['different'] <= .3 and case['confidence'] >= .7 else 'uncertain')
+            actual = 'existing' if decision.kind == 'file_to_deal' else decision.outcome
+            key = (case['expected'], old, actual)
+            counts[key] = counts.get(key, 0) + 1
+            self.assertEqual(actual, case['expected'], case['id'])
+            self.assertNotEqual(decision.kind, 'inherit_thread', case['id'])
+        print('Synthetic fixed-score policy eval (expected, old, new):', counts)
+
+    def test_unresolved_identity_prevents_automatic_filing_even_with_a_thread(self):
+        mail = self.mail(sender={'email': 'vendor@example.test', 'unknown': True})
+        self.assertIsNone(email_matching.thread_match(mail, [{'id': DEAL}], [self.prior()]))
+
+    def test_learned_association_reuses_only_the_confirmed_thread(self):
+        mail = self.mail(learned_associations=[self.prior()])
+        fake = FakeJev()
+        decision = email_matching.match(mail, [{'id': DEAL}], [], client=fake)
+        self.assertEqual(decision.kind, 'inherit_thread')
+        self.assertEqual(fake.calls, [])
+        mail['conversation_id'] = 'separate-transaction'
+        decision = email_matching.match(mail, [{'id': DEAL}], [], client=fake)
+        self.assertEqual(decision.kind, 'file_to_deal')
+        self.assertEqual(len(fake.calls), 1)
+
     def test_existing_matters_survive_conflicting_scores_and_missing_identity(self):
         deals = [{'id': DEAL, 'name': 'Synthetic Dental search', 'client_id': 'client-a'}]
         for mail in (self.mail(sender={'name': 'Synthetic Doctor', 'party_id': 'lead-party',
@@ -597,9 +628,9 @@ class MatchingTests(unittest.TestCase):
 
     def test_confidence_gates_choices_without_a_none_option(self):
         for existing, different, confidence, expected in [
-                (0.9, 0.1, 0.8, 'file_to_deal'), (0.9, 0.1, 0.5, 'contact_only'),
-                (0.5, 0.1, 0.9, 'contact_only'), (0.9, 0.5, 0.9, 'contact_only'),
-                (0.2, 0.1, 0.9, 'possible_new_deal'), (0.9, 0.9, 0.99, 'possible_new_deal')]:
+                (0.9, 0.1, 0.8, 'file_to_deal'), (0.9, 0.1, 0.5, 'file_to_deal'),
+                (0.5, 0.1, 0.9, 'contact_only'), (0.9, 0.5, 0.9, 'file_to_deal'),
+                (0.2, 0.1, 0.9, 'contact_only'), (0.9, 0.9, 0.99, 'file_to_deal')]:
             with self.subTest(existing=existing, different=different, confidence=confidence):
                 result = email_matching.match(self.mail(), [{'id': DEAL}], [],
                                                client=FakeJev(existing, different, confidence))
@@ -640,7 +671,7 @@ class MatchingTests(unittest.TestCase):
         written = calls[1][1]
         self.assertEqual(written['kind'], 'possible_new_deal')
         self.assertNotIn('deal', written)
-        self.assertIn('vendor@example.test', written['text'])
+        self.assertIn('separate transaction', written['text'])
         self.assertEqual(classified, [self.mail()['activity_id']])
 
     def test_router_persists_thread_inheritance_and_retries_failed_writes(self):
@@ -706,7 +737,8 @@ class MatchingTests(unittest.TestCase):
     def test_missing_current_conversation_never_joins_prior_known_conversation(self):
         fake = FakeJev(existing=0.1, different=0.95)
         decision = email_matching.match(self.mail(conversation_id=None), [{'id': DEAL}], [self.prior()], client=fake)
-        self.assertEqual(decision.kind, 'possible_new_deal')
+        self.assertEqual(decision.kind, 'file_to_deal')
+        self.assertEqual(decision.outcome, 'uncertain')
 
     def test_future_or_same_time_history_cannot_inherit(self):
         for moment in ('2026-10-26T14:00:00Z', '2026-10-27T14:00:00Z'):
