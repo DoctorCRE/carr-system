@@ -1837,6 +1837,8 @@ def executed_invocations(cmd):
 def direct_metered_dispatch(cmd):
     """Refuse paid dispatches that bypass their reviewed budget wrapper.
 
+    `./run.sh ci dispatch` admits main recovery in ops/ci-dispatch.py.
+    It needs no exemption here: only raw provider commands are refused.
     The wrapper itself is not an escape flag.  The guard sees only the command
     issued by the session; reviewed scripts perform their own in-process
     admission before reaching the vendor.  Inert PR bodies and documentation
