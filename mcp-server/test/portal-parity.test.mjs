@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parityLaunchOptions } from '../portal-parity/browser.mjs';
 import { runParity } from '../portal-parity/harness.mjs';
-import { FILE_FETCH_PACE_MS } from '../portal-parity/http.mjs';
+import { FILE_FETCH_PACE_MS, signIn, sourceFidelity } from '../portal-parity/http.mjs';
 import { loadProbes, schemaHasField } from '../portal-parity/probes.mjs';
 import { selectRows } from '../portal-parity/rows.mjs';
 
@@ -219,17 +219,34 @@ test('Stage 0 writes no baseline when any row is rate-limited, so a good baselin
 });
 
 test('Stage 0 paces its file fetches so they cannot trip the burst limit', async t => {
-  const { source, manifest } = await stageZeroSource({ 'index.html': 'home', 'a.txt': 'a', 'b.txt': 'b', 'c.txt': 'c' },
-    ['/portal/index.html', '/portal/a.txt', '/portal/b.txt', '/portal/c.txt']);
-  const log = [];
-  const { server, base } = await gatedSite({ 'index.html': 'home', 'a.txt': 'a', 'b.txt': 'b', 'c.txt': 'c' }, { log });
+  const burstWindowMs = 10_000;
+  // The pace implies this ceiling; the live zone's numeric limit is external.
+  const burstLimit = Math.ceil(burstWindowMs / FILE_FETCH_PACE_MS);
+  const files = Object.fromEntries(Array.from({ length: burstLimit * 2 + 1 }, (_, i) => [`file-${i}.txt`, `${i}`]));
+  const served = Object.fromEntries(Object.entries(files).slice(0, burstLimit));
+  const manifestPaths = Object.keys(served).map(name => `/portal/${name}`);
+  const { source, out } = await stageZeroSource(files, manifestPaths);
+  t.after(() => Promise.all([rm(source, { recursive: true }), rm(out, { recursive: true })]));
+  const { server, base } = await gatedSite(served);
   t.after(() => server.close());
-  await runParity({ stage: 0, site: 'REF-V', probesFile: PROBES, reference: base, password: 'example-health',
-    sourceDir: source, manifest, rows: 'V-G01' });
-  const fetches = log.filter(entry => /\/(index\.html|[abc]\.txt)$/.test(entry.path)).map(entry => entry.at);
-  assert.equal(fetches.length, 4);
+  const cookie = await signIn(base, 'example-health');
+  let time = 0;
+  const fetches = [];
+  const clock = {
+    now: () => time,
+    sleep: async ms => { time += ms; fetches.push(time); },
+  };
+  const run = await sourceFidelity(base, source, cookie, manifestPaths, clock);
+  assert.equal(run.failed, 0);
+  assert.equal(run.unserved, Object.keys(files).length - manifestPaths.length);
+  assert.equal(fetches.length, Object.keys(files).length);
+  assert.equal(run.total, fetches.length);
   const gaps = fetches.slice(1).map((at, i) => at - fetches[i]);
-  assert.ok(gaps.every(gap => gap >= FILE_FETCH_PACE_MS - 5), `gaps ${gaps.map(Math.round)} ms`);
+  assert.ok(gaps.every(gap => gap >= FILE_FETCH_PACE_MS), `scheduled gaps ${gaps} ms`);
+  for (const start of fetches) {
+    const count = fetches.filter(at => at >= start && at < start + burstWindowMs).length;
+    assert.ok(count <= burstLimit, `${count} fetches in the window starting at ${start} ms`);
+  }
 });
 
 // The doc: "A wrong-password probe counts toward nothing today ... and the run
