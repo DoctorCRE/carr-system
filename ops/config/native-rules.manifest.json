@@ -1292,8 +1292,8 @@
         "tokens": 317
       },
       "AGENTS.md": {
-        "sha256": "deb83ff9d4802fb5323e24645de13340e70e8c01852ea0f009085df537fff434",
-        "tokens": 4913
+        "sha256": "e83e7f91e9a745e7891ad5a76826abc6cdab31dc238dd003469d1c7991ea6dc9",
+        "tokens": 4939
       },
       "CLAUDE.md": {
         "sha256": "144589e2ed88ffa3d6463ec919ba798ff860dc12ed1d2161f5c44b54d12d37bb",
@@ -1301,7 +1301,7 @@
       }
     },
     "tokenizer": "cl100k_base",
-    "tokens": 6084
+    "tokens": 6110
   },
   "unmatched_globs": [
     {

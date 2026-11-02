@@ -15,7 +15,9 @@ You run headless in a cloud sandbox; nobody answers questions.
 - Do not push, merge or edit code.
 - If an earlier App review requests changes, confirm each blocker is fixed.
 
-Write a verdict file for the coordinator. Begin with these three lines:
+Begin your final reply with these three lines so the coordinator receives the
+verdict even when the cloud sandbox disappears. Local reviewers also write
+`/tmp/review-<pr>-<card>.md` with the same header and findings:
 
 ```text
 VERDICT: APPROVE or VERDICT: CHANGES

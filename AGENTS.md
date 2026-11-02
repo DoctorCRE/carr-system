@@ -107,21 +107,24 @@ accurately.
 
 ## Jev in reviews
 
-Joe authorized Jev for every kind of review (decision
-`d57501f6-00e7-4ff5-a886-c28a5d5501d6`). Use it for bounded review judgments
-wherever it helps, including code, CI, pull requests, product behavior and CARR
-records, with no separate Jev approval. Preserve source evidence, required
-checks and any distinct reviewer-of-record requirement.
+Joe authorized Jev for all reviews (decision
+`d57501f6-00e7-4ff5-a886-c28a5d5501d6`). Use bounded Jev judgments for code, CI,
+PRs, product behavior and CARR records without separate approval. Preserve
+source evidence, required checks and distinct reviewer-of-record requirements.
 
 ## Dispatch work
 
 Use T3 `delegate_task` with worktree isolation and the task's provider and model. Completion wakes the parent; never poll. Watch PRs with `watch_pull_request`.
 
-Every delegated launch prompt carries exactly one standalone line
-`Card: WRn.Sn.Jn` naming a card that `dispatch-job` minted. The Claude Code hook
-`hooks/agent-card-gate.py` refuses an `Agent`, T3 launch or inline `codex exec`
-prompt with no such line, several, or an unregistered card. `Explore` and
-`web-fetch` agents are exempt.
+Each gated prompt needs exactly one standalone `Card: WRn.Sn.Jn` line naming
+a card minted by `dispatch-job`. `hooks/agent-card-gate.py` checks `Agent`
+(except `Explore` and `web-fetch`), inline `codex exec`, and T3 `delegate_task`,
+`t3_thread_launch`, `t3_thread_send`, `t3_thread_send_attachments`, `create_threads`,
+`schedule_task`, `t3_queue` edits and `t3_pending_request` responses, including
+follow-ups to existing threads. Missing, multiple or unregistered cards fail.
+`run_scheduled_task_now` and queue `promote_to_steer` always fail because their
+stored prompts cannot be inspected. Other uninspectable queue or pending-request
+actions fail too.
 
 ## Authorized code homes and repository boundaries
 
@@ -135,34 +138,31 @@ above record this projection's provenance, not a current-version gate.
 
 The only authorized code homes are:
 
-- [DoctorCRE/carr-system](https://github.com/DoctorCRE/carr-system): the CARR-specific runtime and authority — canonical
-  business records, domain rules and doctrine, versioned APIs and MCP,
-  migrations, runtime control plane, assurance fabric, authentication,
-  environments, and CARR releases.
-- [jbookout/doctorcre-app](https://github.com/jbookout/doctorcre-app): DoctorCRE's independently built and deployed human
-  application, including its UI, interaction logic, project knowledge, and
-  app-only state. It uses authenticated versioned CARR contracts and never
-  accesses the CARR database directly.
-- [jbookout/software-factory](https://github.com/jbookout/software-factory): development-time orchestration and tooling —
-  bounded agent workflows, skills, prompts, templates, scaffolds, CI and review
-  conventions, evals, release helpers, and factory job/evidence records. It is
-  not a product runtime and owns no product data, domain rules, standing
-  credentials, or deployment authority.
+- [DoctorCRE/carr-system](https://github.com/DoctorCRE/carr-system) owns the CARR runtime,
+  canonical business records, domain rules, doctrine, versioned APIs and MCP,
+  migrations, control plane, assurance, authentication, environments and releases.
+- [jbookout/doctorcre-app](https://github.com/jbookout/doctorcre-app) owns the independently
+  built and deployed human app, UI, interactions, project knowledge and app-only
+  state. It uses authenticated versioned CARR contracts, never the CARR database.
+- [jbookout/software-factory](https://github.com/jbookout/software-factory) owns development
+  orchestration, bounded agent workflows, skills, prompts, templates, scaffolds,
+  CI and review conventions, evals, release helpers and job/evidence records.
+  It owns no product runtime, product data, domain rules, standing credentials
+  or deployment authority.
 
-Do not improvise another repository or silently move code between these homes.
-Cross-repository work binds exact source revisions and versioned contracts.
-Products must not depend on the software factory at runtime. CARR runtime code
-remains here until a second real production consumer proves a neutral,
-independently pinnable, testable, and replaceable boundary with measurable
-duplication. If an authorized repository is unreachable, STOP and name the
-missing repository rather than substituting an unrelated scaffold.
+Use only these repositories. Never silently move code between them. Bind
+cross-repository work to exact revisions and versioned contracts. Products
+must not depend on software-factory at runtime. CARR runtime stays here until a
+second real production consumer proves a neutral, independently pinnable,
+testable and replaceable boundary with measurable duplication. If a repository
+is unreachable, STOP and name it. Never substitute an unrelated scaffold.
 
 ## The shared root is NOT an agent work surface
 
 `~/carr-system` is for bootstrap, coordination and read-only inspection.
 Implement changes only in a session-owned worktree or clone.
 
-Before the first repository edit, create and enter a session-owned tree:
+Before editing, create and enter your tree:
 
 ```
 ./run.sh worktree <name>
@@ -171,12 +171,13 @@ cd .claude/worktrees/<name>
 
 If the helper is unavailable, use a separate clone. One session owns one tree,
 one branch and the full delivery path defined above, including explicit-path
-staging and cleanup. Stop short only for a concrete human-only gate. Name it
+staging and cleanup. A patch, commit, pushed branch, or open PR is intermediate
+state, not completion. Stop short only for a concrete human-only gate. Name it
 and the exact remaining action.
 
-The only permitted writes in the shared root are deliberate bootstrap or
-coordination-state changes to the session machinery itself. Those changes still
-must be copied into an isolated tree and delivered through the normal PR path.
+Shared-root writes are limited to deliberate bootstrap or coordination-state
+changes to session machinery. Copy them into an isolated tree and deliver
+through the normal PR path.
 
 ## Map work has one mandatory front door
 
