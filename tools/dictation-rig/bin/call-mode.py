@@ -247,6 +247,7 @@ def session_status(path: Path) -> dict[str, Any] | None:
         "awaiting_context": "Waiting for call context before extraction.",
         "blocked": "Post-call extraction is blocked. The local transcript is saved for retry.",
         "ready_review": "The call summary is ready for review.",
+        "held_review": "The call summary is held for review. You can start another recording.",
         "filed": "The confirmed meeting summary has been saved.",
         "ready_to_extract": "The local transcript is ready for extraction.",
         "transcribing": "Quill is transcribing both audio tracks locally.",
