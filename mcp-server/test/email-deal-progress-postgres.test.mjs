@@ -1189,7 +1189,7 @@ test('a proposal the deal has outgrown stays listed with its refusal so a partne
   assert.equal(item.preview_error, 'email_deal_phase_not_eligible');
 });
 
-test('a vendor email stays unfiled until a partner confirms, then records a participant hint', async () => {
+test('a vendor email stays unfiled until a partner confirms, without promoting a classifier hint', async () => {
   const address = `synthetic-${randomUUID()}@vendor.example`;
   const party = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic lender',$1,$2,$2) returning id", [address,actor.id])).rows[0].id;
   const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
@@ -1205,7 +1205,7 @@ test('a vendor email stays unfiled until a partner confirms, then records a part
   await assert.rejects(command('confirm-email-filing', args, router()), error => ['human_caller_required','human_only_verb_requires_verified_partner'].includes(error.payload?.error));
   await command('confirm-email-filing', args);
   assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, deal);
-  assert.equal((await c.query("select role from deal_participant where deal_id=$1 and party_id=$2", [deal,party])).rows[0].role, 'lender');
+  assert.equal((await c.query("select role from deal_participant where deal_id=$1 and party_id=$2", [deal,party])).rows.length, 0);
   assert.equal((await command('confirm-email-filing', args)).replayed, true);
 });
 
@@ -1235,11 +1235,12 @@ test('new matter confirmation files to a created deal and respects the activity 
   const target = created.deal_id;
   for (const vendor of [false, true]) {
     const { source, args } = await makeProposal(vendor);
-    await command('confirm-email-filing', { ...args, deal: target });
+    const shown = await command('preview-email-filing', { proposal_id: args.proposal_id, deal: target });
+    await command('confirm-email-filing', { ...args, deal: target, proposal_digest: shown.proposal_digest });
     const activity = (await c.query('select deal_id,client_id from activity where id=$1', [source.activity_id])).rows[0];
     const client = (await c.query('select client_id from deal where id=$1', [target])).rows[0].client_id;
     assert.deepEqual([activity.deal_id, activity.client_id], [target, client]);
-    assert.equal((await c.query("select role from deal_participant where deal_id=$1 and party_id=$2 and to_at is null", [target,party])).rows[0].role, 'lender');
+    assert.equal((await c.query("select role from deal_participant where deal_id=$1 and party_id=$2 and to_at is null", [target,party])).rows.length, 0);
   }
   const missing = await makeProposal();
   await assert.rejects(command('confirm-email-filing', missing.args), e => e.payload?.error === 'email_new_deal_not_found');
@@ -2452,7 +2453,7 @@ test('matching evidence persists and a version-checked repair keeps the quote an
 
 });
 
-test('human-confirmed filing enters ordinary thread history with auditable Undo', async () => {
+test('handled filing teaches the next thread match with auditable Undo', async () => {
   const address = `association-${randomUUID()}@example.test`;
   await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic consultant',$1,$2,$2)", [address,actor.id]);
   const context = { subject: 'Synthetic specific transaction', conversation_id: randomUUID(),
@@ -2463,7 +2464,7 @@ test('human-confirmed filing enters ordinary thread history with auditable Undo'
   const stored = await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'other_vendor' });
   const item = (await listed()).find(row => row.id === stored.proposal_id);
   await command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: item.id,
-    base_version: item.version, proposal_digest: item.preview.proposal_digest });
+    base_version: item.version, deal, disposition: 'handled', proposal_digest: (await command('preview-email-filing', { proposal_id: item.id, deal })).proposal_digest });
   await c.query("update activity set occurred_at=now()-interval '60 days',recorded_at=now()-interval '60 days' where id=$1", [source.activity_id]);
   const reply = await make(context);
   const separate = await make({ ...context, conversation_id: randomUUID() });
@@ -2620,4 +2621,166 @@ test('twenty matching cards share one grouped contacts load and skip unrelated e
   assert.ok(!loads[0].rows.some(row => row.name.startsWith('Synthetic email-less scale ')));
   const plan = await c.query('explain (format json) '+loads[0].sql,loads[0].args);
   assert.ok(!JSON.stringify(plan.rows).includes('SubPlan'));
+});
+
+
+async function filingAction(kind = 'possible_new_deal') {
+  const source = await email();
+  const stored = await record({ kind, ...(kind === 'possible_new_deal' ? { deal: undefined } : {}),
+    activity_id: source.activity_id, evidence_quote: quote, sender_role: 'landlord_side' });
+  return { source, stored };
+}
+const targetPreview = (stored, target = deal, extra = {}) => command('preview-email-filing', {
+  proposal_id: stored.proposal_id, deal: target, ...extra });
+
+test('target-specific handled filing persists a note and provenance exactly once without promoting classifier roles', async () => {
+  const { source, stored } = await filingAction();
+  const shown = await targetPreview(stored);
+  assert.equal(shown.contract, 'email-followups.v2');
+  assert.equal(shown.deal, deal);
+  const args = { idempotency_key: randomUUID(), proposal_id: stored.proposal_id, base_version: 1,
+    proposal_digest: shown.proposal_digest, deal, disposition: 'handled', note: 'Called the client already.' };
+  const receipt = await command('confirm-email-filing', args, actor, 'carr_writer');
+  assert.equal(receipt.disposition, 'handled');
+  assert.equal(receipt.note, args.note);
+  assert.equal(receipt.deal, deal);
+  const history = await command('list-email-proposals',{status:'confirmed',deal},actor,'carr_reader');
+  const persisted = history.proposals.find(p => p.id===stored.proposal_id);
+  assert.equal(persisted.deal,deal);
+  assert.equal(persisted.note,args.note);
+  assert.equal(persisted.disposition,'handled');
+  assert.deepEqual(await command('confirm-email-filing', args), { ...receipt, replayed: true });
+  const row = (await c.query('select disposition,resolution_note,correction_provenance from email_proposal where id=$1', [stored.proposal_id])).rows[0];
+  assert.equal(row.disposition, 'handled');
+  assert.equal(row.resolution_note, args.note);
+  assert.equal(row.correction_provenance.target_deal, deal);
+  assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, deal);
+  const party = (await c.query('select party_id from client where roster_ref=$1', [clientRef])).rows[0].party_id;
+  assert.equal((await c.query("select count(*)::int n from deal_participant where deal_id=$1 and party_id=$2 and role='landlord_side'", [deal,party])).rows[0].n, 0);
+  assert.equal((await c.query("select count(*)::int n from event where verb='confirm-email-filing' and new_value->>'proposal_id'=$1", [stored.proposal_id])).rows[0].n, 1);
+});
+
+test('handled requires a selected deal and exact-target preview, including fresh new-deal conversion', async () => {
+  const { stored } = await filingAction('file_to_deal');
+  const original = await targetPreview(stored);
+  const target = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) select 'Synthetic separate transaction',client_id,'purchase','site_selection','joe',$2,$2 from deal where id=$1 returning id", [deal,actor.id])).rows[0].id;
+  await assert.rejects(command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: stored.proposal_id,
+    base_version: 1, proposal_digest: original.proposal_digest, disposition: 'handled' }));
+  await assert.rejects(command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: stored.proposal_id,
+    base_version: 1, proposal_digest: original.proposal_digest, deal: target }), e => e.payload?.error === 'email_proposal_stale');
+  const fresh = await targetPreview(stored, target);
+  const receipt = await command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: stored.proposal_id,
+    base_version: 1, proposal_digest: fresh.proposal_digest, deal: target, note: 'Separate transaction.' });
+  assert.equal(receipt.deal, target);
+});
+
+test('source client correction needs a target-bound reason and leaves identities unchanged', async () => {
+  const { stored, source } = await filingAction();
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic correction client',$1,$1) returning id", [actor.id])).rows[0].id;
+  const client = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id", [party,actor.id])).rows[0].id;
+  const target = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic corrected target',$1,'purchase','site_selection','joe',$2,$2) returning id", [client,actor.id])).rows[0].id;
+  await assert.rejects(targetPreview(stored,target), e => e.payload?.error === 'email_new_deal_client_mismatch');
+  const reason = 'Source was captured against the wrong client.';
+  const shown = await targetPreview(stored,target,{ correction_reason: reason });
+  await assert.rejects(command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: stored.proposal_id,
+    base_version: 1, proposal_digest: shown.proposal_digest, deal: target }), e => e.payload?.error === 'email_new_deal_client_mismatch');
+  await command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: stored.proposal_id,
+    base_version: 1, proposal_digest: shown.proposal_digest, deal: target, correction_reason: reason });
+  assert.equal((await c.query('select client_id from activity where id=$1', [source.activity_id])).rows[0].client_id, client);
+  assert.equal((await c.query('select merged_into from party where id=$1', [party])).rows[0].merged_into, null);
+});
+
+test('snooze survives sessions, returns UTC, rejects stale versions, and expires at read time', async () => {
+  const { stored } = await filingAction();
+  const until = '2099-11-01T09:00:00-06:00';
+  const args = { idempotency_key: randomUUID(), proposal_id: stored.proposal_id, base_version: 1,
+    deferred_until: until, note: 'Review after the call.' };
+  const receipt = await command('snooze-email-proposal', args, actor, 'carr_writer');
+  assert.equal(receipt.deferred_until, '2099-11-01T15:00:00.000Z');
+  assert.equal(receipt.note, args.note);
+  assert.deepEqual(await command('snooze-email-proposal', args), { ...receipt, replayed: true });
+  assert.ok(!(await listed()).some(p => p.id === stored.proposal_id));
+  const other = new pg.Client(connection); await other.connect();
+  try { assert.ok(!(await command('list-email-proposals', {}, actor, 'carr_reader', other)).proposals.some(p => p.id === stored.proposal_id)); }
+  finally { await other.end(); }
+  await assert.rejects(command('snooze-email-proposal', { ...args,idempotency_key: randomUUID() }), e => e.payload?.error === 'version_conflict');
+  const again = await command('snooze-email-proposal', { ...args,idempotency_key: randomUUID(),base_version: 2,deferred_until: '2099-11-02T09:00:00-06:00' });
+  assert.equal(again.version, 3);
+  await c.query("update email_proposal set deferred_until=now() where id=$1", [stored.proposal_id]);
+  const returned = (await listed()).find(p => p.id === stored.proposal_id);
+  assert.equal(returned.version, 3);
+  assert.equal(returned.note, args.note);
+  await assert.rejects(command('snooze-email-proposal', { ...args,idempotency_key: randomUUID(),base_version: 3,deferred_until: '2020-01-01T00:00:00Z' }));
+});
+
+
+test('a target or source change invalidates preview and machines cannot resolve followups', async () => {
+  const { stored, source } = await filingAction();
+  const shown = await targetPreview(stored);
+  await c.query('update activity set version=version+1 where id=$1', [source.activity_id]);
+  const args = { idempotency_key: randomUUID(),proposal_id: stored.proposal_id,base_version: 1,
+    deal,proposal_digest: shown.proposal_digest };
+  await assert.rejects(command('confirm-email-filing',args), e => e.payload?.error === 'email_proposal_stale');
+  const fresh = await targetPreview(stored);
+  await c.query('update deal set version=version+1 where id=$1', [deal]);
+  await assert.rejects(command('confirm-email-filing',{ ...args,proposal_digest: fresh.proposal_digest }), e => e.payload?.error === 'email_proposal_stale');
+  for (const [name,extra] of [['snooze-email-proposal',{deferred_until:'2099-01-01T00:00:00Z'}],['handle-email-proposal',{}]])
+    await assert.rejects(command(name,{ idempotency_key:randomUUID(),proposal_id:stored.proposal_id,base_version:1,...extra },router()),
+      e => ['human_caller_required','human_only_verb_requires_verified_partner'].includes(e.payload?.error));
+});
+
+test('contact next steps and reply cards can be handled with notes and no invented deal', async () => {
+  const source = await email(askQuote);
+  const step = await record({ kind:'next_step', deal:undefined, activity_id:source.activity_id,evidence_quote:askQuote,
+    text:'Call the contact',next_date:'2027-01-01' });
+  const args = { idempotency_key:randomUUID(),proposal_id:step.proposal_id,base_version:1,note:'Completed by phone.' };
+  const receipt = await command('handle-email-proposal',args,actor,'carr_writer');
+  assert.equal(receipt.disposition,'handled');
+  assert.equal(receipt.note,args.note);
+  assert.equal((await command('handle-email-proposal',args)).replayed,true);
+  assert.equal((await c.query('select deal_id from activity where id=$1',[source.activity_id])).rows[0].deal_id,null);
+  const {stored} = await filingAction();
+  await assert.rejects(command('handle-email-proposal',{ ...args,idempotency_key:randomUUID(),proposal_id:stored.proposal_id }),
+    e => e.payload?.error === 'email_proposal_deal_invalid');
+  const draft = await draftFor();
+  const handled = await command('handle-email-proposal',{ ...args,idempotency_key:randomUUID(),proposal_id:draft.proposal_id });
+  assert.equal(handled.disposition,'handled');
+  assert.equal((await c.query('select submitted_email from email_proposal where id=$1',[draft.proposal_id])).rows[0].submitted_email,null);
+});
+
+test('router repair and alternate proposals cannot bypass dismissal or active deferral', async () => {
+  for (const disposition of ['dismissed','deferred']) {
+    const {stored,source} = await filingAction();
+    if (disposition === 'dismissed') await command('dismiss-email-proposal', { idempotency_key:randomUUID(),proposal_id:stored.proposal_id,base_version:1,reason:'Wrong source.' });
+    else await command('snooze-email-proposal',{ idempotency_key:randomUUID(),proposal_id:stored.proposal_id,base_version:1,deferred_until:'2099-01-01T00:00:00Z' });
+    await assert.rejects(record({kind:'file_to_deal',activity_id:source.activity_id,evidence_quote:quote,sender_role:'client'}),
+      e => e.payload?.error === 'email_proposal_not_pending');
+    const row = (await c.query('select status,disposition,version from email_proposal where id=$1',[stored.proposal_id])).rows[0];
+    assert.equal(row.version,2);
+    assert.equal(row.status,disposition === 'dismissed' ? 'dismissed' : 'pending');
+    await assert.rejects(command('record-email-proposal',{idempotency_key:randomUUID(),mode:'repair_match',
+      proposal_id:stored.proposal_id,base_version:2,kind:'file_to_deal',deal,activity_id:source.activity_id,
+      evidence_quote:quote,confidence:.9,sender_role:'client',match_evidence:{version:2,outcome:'existing',candidates:[],evidence:{}}},router()),
+      e => e.payload?.error === 'email_proposal_not_pending');
+  }
+});
+
+test('snooze boundary is inclusive at the stored instant and same-key concurrency replays once', async () => {
+  const {stored} = await filingAction();
+  const args = {idempotency_key:randomUUID(),proposal_id:stored.proposal_id,base_version:1,
+    deferred_until:'2099-03-08T09:00:00-05:00',note:'After daylight saving transition.'};
+  const other = new pg.Client(connection); await other.connect();
+  try {
+    const receipts = await Promise.all([command('snooze-email-proposal',args),command('snooze-email-proposal',args,actor,null,other)]);
+    assert.equal(receipts.filter(r => r.replayed).length,1);
+    assert.equal(receipts[0].deferred_until,'2099-03-08T14:00:00.000Z');
+  } finally { await other.end(); }
+  await c.query('begin');
+  try {
+    await c.query("update email_proposal set deferred_until=now()+interval '1 microsecond' where id=$1",[stored.proposal_id]);
+    assert.equal((await executeRegisteredTool(c,actor,'list-email-proposals',{})).proposals.some(p => p.id===stored.proposal_id),false);
+    await c.query('update email_proposal set deferred_until=now() where id=$1',[stored.proposal_id]);
+    assert.equal((await executeRegisteredTool(c,actor,'list-email-proposals',{})).proposals.some(p => p.id===stored.proposal_id),true);
+  } finally { await c.query('rollback'); }
+  assert.equal((await c.query("select count(*)::int n from event where verb='snooze-email-proposal' and new_value->>'proposal_id'=$1",[stored.proposal_id])).rows[0].n,1);
 });

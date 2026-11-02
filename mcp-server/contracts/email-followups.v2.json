@@ -1,8 +1,8 @@
 {
   "schema": "carr-email-followups.v2",
-  "version": "2.0.0",
-  "card": "WR634.S1.J15",
-  "transport": "Authenticated MCP email-router-queue, record-email-proposal, list-email-proposals, confirm-email-filing and inherit-email-thread",
+  "version": "2.1.0",
+  "card": "WR634.S1.J26",
+  "transport": "Authenticated MCP email-router-queue, record-email-proposal, list-email-proposals, confirm-email-filing and inherit-email-thread, preview-email-filing, snooze-email-proposal and handle-email-proposal",
   "matching": {
     "version": 2,
     "outcome": "existing, new or uncertain. Proposal kind is a transport hint, never automatic filing authority.",
@@ -15,17 +15,43 @@
     "schema_version": "Existing email-proposals.v1 response remains additive.",
     "match_evidence": "Nullable stored diagnostic result. Legacy rows return null.",
     "suggested_deals": "Current accessible open deals with deal UUID, name, reasons and requires_confirmation=true. Computed for every pending matching card regardless of age. Closed and invoiced deals are excluded. Name similarities remain identity candidates and never write links.",
-    "digest": "email-filing.v1 retains its contract name. Enriched sender and recipient fields change digest inputs. Cards loaded before deployment must refresh after email_proposal_stale. Suggestions and diagnostics do not authorize confirmation."
+    "digest": "email-filing.v1 retains its contract name. Enriched sender and recipient fields change digest inputs. Cards loaded before deployment must refresh after email_proposal_stale. Suggestions and diagnostics do not authorize confirmation.",
+    "email_summary": {
+      "type": "object|null",
+      "default": null,
+      "presentation": "Nullable producer metadata. Null means summary unavailable. Evidence quote remains separate and unchanged.",
+      "properties": {
+        "text": "Plain short email summary",
+        "source_hash": "Captured source digest",
+        "generator_version": "Producer revision",
+        "status": "available or unavailable",
+        "provenance": "Producer evidence"
+      }
+    },
+    "disposition": "Nullable filed, handled or deferred. Independent of pending/confirmed/dismissed transport status.",
+    "note": "Nullable optional action note, at most 2000 characters. Stored on the proposal and in the atomic action event.",
+    "deferred_until": "Nullable ISO UTC instant. Pending reads omit a card strictly before this time and include it at or after this instant. No scheduler or session state is involved."
   },
   "association": {
-    "reuse": "Human confirmation files the source activity. Ordinary thread_history includes that filing, including older messages in the same conversation. No separate learned association authority exists.",
-    "undo": "Automatic filings use inherit-email-thread receipts and undo-email-thread-filing. Undo prevents refiling."
+    "reuse": "A confirmed or handled filing stores correction_provenance with proposed and selected deal, source client/deal, source activity, sender party, proposed role, reason and message or conversation scope. The filed source is the scoped association consumed by subsequent thread matching. Only server-revalidated conversation/subject continuity and unchanged participants authorize automatic filing. Equal sender identity alone never authorizes another transaction.",
+    "undo": "Automatic filings use inherit-email-thread receipts and undo-email-thread-filing. Undo prevents refiling.",
+    "roles": "Classifier sender_role is retained only as proposed_sender_role in provenance; confirmation no longer inserts an authoritative deal_participant role."
   },
   "repair": {
     "command": "record-email-proposal mode=repair_match",
     "bound": "Exactly one pending matching proposal per command, addressed by proposal_id and base_version. Supply the existing activity_id and unchanged evidence_quote, new matching fields and match_evidence.",
-    "effect": "Revalidates source and target, updates proposal kind and target atomically, increments version and writes an event preserving old and new classification. Resolved rows cannot be repaired. Conflicting tuples refuse with email_proposal_repair_conflict; stale versions refuse with version_conflict. Both preserve the transaction. An identical idempotency key replays the receipt.",
+    "effect": "Revalidates source and target, updates proposal kind and target atomically, increments version and writes an event preserving old and new classification. Resolved rows cannot be repaired. Conflicting tuples refuse with email_proposal_repair_conflict; stale versions refuse with version_conflict. Both preserve the transaction. An identical idempotency key replays the receipt. Active deferrals and matching dismissals prevent alternate proposal tuples or repair from resurrecting the same source. inherit-email-thread also checks source-level dismissal and active deferral.",
     "execution": "No automatic historical reclassification or production repair is performed by this source change."
   },
-  "consumer_adoption": "Pin the merged producer revision and verify its deployed release before relying on these fields."
+  "consumer_adoption": "Pin the merged producer revision and verify its deployed release before relying on these fields.",
+  "actions": {
+    "preview": "preview-email-filing {proposal_id,deal,correction_reason?}. Exact selected open, uninvoiced deal, source version, target version, proposal version and correction reason enter the email-followups.v2 digest. A client or existing activity-deal conflict requires a nonblank correction_reason. No identities are merged.",
+    "file": "confirm-email-filing {idempotency_key,proposal_id,base_version,proposal_digest,deal,disposition?:filed|handled,note?,correction_reason?}. Use a fresh exact-target preview for both possible_new_deal and file_to_deal. Handled always requires explicit deal. Atomically files activity, confirms proposal, stores note, disposition and correction provenance, and appends an event. No deal is created here.",
+    "new_deal": "Use the existing new-deal command and retain its uncertain-outcome key. Then preview-email-filing against that created deal and confirm-email-filing. This also converts a file_to_deal suggestion to a separate new deal. No new-deal call is needed to select an existing deal.",
+    "contact_handled": "handle-email-proposal {idempotency_key,proposal_id,base_version,note?} confirms next_step or reply_draft with disposition handled. Reply drafts require their mailbox owner. No filing, task creation, send or invented deal. Matching cards must use exact-target filing.",
+    "not_now": "snooze-email-proposal {idempotency_key,proposal_id,base_version,deferred_until,note?}. Any pending card; reply drafts require their owner. Requires a future absolute instant with timezone. Stores disposition deferred and leaves status pending. Repeated snoozes require current version; each event retains its note. Receipt returns stored UTC deferred_until, version and note. App default is tomorrow at 09:00 America/Chicago with a picker. Server never computes or substitutes a default.",
+    "replay": "All writes use the existing envelope. Same key and request replays without duplicate notes, activity filing or association history. Version conflicts require human reread. Automation cannot confirm, handle or snooze. Reply submission, send grace and undo paths are unchanged.",
+    "legacy": "The existing file_to_deal list preview remains valid only for its original exact target. An unbound possible_new_deal list digest cannot authorize filing to a supplied deal. Refresh with preview-email-filing.",
+    "notes": "New deal filing, existing deal filing, handled and snooze all accept note atomically with their result. Cancel sends no command and saves nothing. Existing dismissal also accepts note; it is not used for handled or snooze."
+  }
 }
