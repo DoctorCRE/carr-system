@@ -60,6 +60,11 @@ then checks the covered source against its original checksum. The pinned commit
 must be available locally. `python3 tools/migration_source.py names` lists
 both retained and covered filenames. Git history still contains removed source.
 
+The covered removals include `0051_intro_graph.sql`,
+`0055_repair_orphaned_roles.sql`, `0058_assert_view_disjoint.sql`, and
+`0074_deal_city_lane.sql`. Their original definitions remain available through
+the historical-source reader above.
+
 ## Rules
 
 - **Forward-only, numbered.** `NNNN_name.sql`, applied in filename order by
