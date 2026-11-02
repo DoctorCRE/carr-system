@@ -298,7 +298,7 @@ test('a reserved provider failure cannot refund credits for a retry', async () =
 });
 
 for (const stage of ['fetch', 'body']) test(`stalled reservation ${stage} times out without refund or late provider work`, async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 27) });
   const f = fixture({ budget: '1' });
   const original = f.env.AI_NEURON_BUDGET.get;
   let resolve, requestSignal;
@@ -318,7 +318,7 @@ for (const stage of ['fetch', 'body']) test(`stalled reservation ${stage} times 
   t.mock.timers.tick(100);
   assert.equal(await observed, 'ai_budget_unavailable');
   assert.equal(requestSignal.aborted, true);
-  const receipt = { day: new Date().toISOString().slice(0, 10), spent: 1, limit: 1, remaining: 0 };
+  const receipt = { day: '2026-10-27', spent: 1, limit: 1, remaining: 0 };
   resolve(stage === 'fetch' ? Response.json(receipt) : receipt);
   for (let i = 0; i < 30; i++) await Promise.resolve();
   assert.equal(f.providerCalls, 0);
@@ -327,7 +327,7 @@ for (const stage of ['fetch', 'body']) test(`stalled reservation ${stage} times 
 
 for (const stage of ['body', 'provider']) test(`semantic timeout during ${stage} retains the whole multi-batch reservation`, async t => {
   const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 27) });
   let finish, calls = 0;
   const stalled = new Promise(done => { finish = done; });
   const f = fixture({ budget: '33', run: () => { calls++; return stalled; } });
@@ -346,7 +346,7 @@ for (const stage of ['body', 'provider']) test(`semantic timeout during ${stage}
   t.mock.timers.tick(2000);
   assert.equal((await pending).status, 'unavailable');
   finish(stage === 'body'
-    ? { day: new Date().toISOString().slice(0, 10), spent: 33, limit: 33, remaining: 0 }
+    ? { day: '2026-10-27', spent: 33, limit: 33, remaining: 0 }
     : { data: Array.from({ length: 16 }, () => [1, ...Array(383).fill(0)]) });
   for (let i = 0; i < 40; i++) await Promise.resolve();
   assert.equal(f.values.get('daily').spent, 33);
