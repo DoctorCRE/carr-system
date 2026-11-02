@@ -35,7 +35,8 @@ class AgentCardGate(unittest.TestCase):
                                'assert sys.argv[1] == "job-card-registration"\n'
                                'card = json.loads(sys.argv[2])["card_id"]\n'
                                'print(json.dumps({"ok": True, "card_id": card, '
-                               f'"registered": {registered!r}, '
+                               f'"registered": {registered!r} and card in '
+                               '("WR557.S6.J1", "WR557.S6.J2"), '
                                '"executor": "codex", "model": "synthetic", '
                                '"repository": None, "work_request_state": "captured"}))\n')
 
