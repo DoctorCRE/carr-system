@@ -1516,6 +1516,23 @@ case('J123 ok grep hash', bash("grep -n '#' hooks/guard-unattended.py"), ALLOW)
 case('J123 ok param length', bash('x=abc; echo ${#x}'), ALLOW)
 
 
+case('unsupported construct echo "$(case x in x) git status;; esac)"', bash('echo "$(case x in x) git status;; esac)"'), DENY)
+case('unsupported construct echo "$(true # )\ngit status\n)"', bash('echo "$(true # )\ngit status\n)"'), DENY)
+case('unsupported construct echo `true # )\ngit status`', bash('echo `true # )\ngit status`'), DENY)
+case('unsupported construct git --unknown-option push --force origin x', bash('git --unknown-option push --force origin x'), DENY)
+case('unsupported construct git --super-prefix /tmp/x push origin main', bash('git --super-prefix /tmp/x push origin main'), DENY)
+case('unsupported construct git --attr-source HEAD reset --hard', bash('git --attr-source HEAD reset --hard'), DENY)
+case('escaped operator comment echo \\;#; git push --force origin x', bash('echo \\;#; git push --force origin x'), DENY)
+case('escaped operator comment echo \\|#; git push --force origin x', bash('echo \\|#; git push --force origin x'), DENY)
+case("ordinary real comment hides quoted prose", bash("echo hi #; git push --force origin x"), ALLOW)
+
+
+case("unsupported dollar quoting $'git' push --force origin x", bash("$'git' push --force origin x"), DENY)
+case("unsupported dollar quoting $'gh' workflow run deploy.yml", bash("$'gh' workflow run deploy.yml"), DENY)
+case("unsupported dollar quoting $'g\\x69t' push origin main", bash("$'g\\x69t' push origin main"), DENY)
+case("unsupported dollar quoting $'rm' -rf /important", bash("$'rm' -rf /important"), DENY)
+case('unsupported dollar quoting $"git" push --force origin x', bash('$"git" push --force origin x'), DENY)
+
 def decision_error_cases():
     failures = []
     script = (
