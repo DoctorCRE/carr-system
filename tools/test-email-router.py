@@ -535,6 +535,31 @@ class MatchingTests(unittest.TestCase):
         mail = self.mail(sender={'email': 'vendor@example.test', 'unknown': True})
         self.assertIsNone(email_matching.thread_match(mail, [{'id': DEAL}], [self.prior()]))
 
+    def test_rejected_learned_association_falls_back_to_a_reviewed_suggestion(self):
+        mail = self.mail(learned_associations=[self.prior()])
+        calls = []
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                return {'emails': [mail], 'open_deals': [{'id': DEAL}]}
+            if verb == 'inherit-email-thread':
+                raise Refused('email_thread_identity_uncertain')
+            return {'ok': True}
+        def matching(source, deals, history):
+            if source.get('learned_associations'):
+                return email_matching.MatchDecision('inherit_thread', DEAL, thread_activity_id='prior')
+            return email_matching.MatchDecision('file_to_deal', DEAL, confidence=.8)
+        counts = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW, matching=matching)
+        self.assertEqual(counts['recorded'], 1)
+        self.assertEqual(calls[-1][1]['kind'], 'file_to_deal')
+
+    def test_suppressed_deal_stays_visible_to_matching_without_inheriting(self):
+        fake = FakeJev()
+        result = email_matching.match(self.mail(suppressed_deals=[DEAL]), [{'id': DEAL}], [self.prior()], client=fake)
+        self.assertEqual(result.kind, 'file_to_deal')
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(fake.calls[0]['state']['open_deals'][0]['id'], DEAL)
+
     def test_learned_association_reuses_only_the_confirmed_thread(self):
         mail = self.mail(learned_associations=[self.prior()])
         fake = FakeJev()

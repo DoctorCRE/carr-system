@@ -96,8 +96,8 @@ def _probability(value) -> float:
 
 def match(email: dict, deals: list[dict], history: list[dict], *, client=None, shuffle=None) -> MatchDecision:
     history = [*history, *email.get('learned_associations', [])]
-    deals = [d for d in deals if d['id'] not in email.get('suppressed_deals', [])]
-    prior = thread_match(email, deals, history)
+    eligible = [d for d in deals if d['id'] not in email.get('suppressed_deals', [])]
+    prior = thread_match(email, eligible, history)
     if prior is not None:
         return MatchDecision('inherit_thread', prior['deal'], thread_activity_id=prior['activity_id'], confidence=1.0, outcome='existing')
     ordered = list(deals)

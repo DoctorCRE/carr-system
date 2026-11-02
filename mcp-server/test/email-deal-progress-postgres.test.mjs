@@ -2450,6 +2450,14 @@ test('matching evidence persists and a version-checked repair keeps the quote an
   await assert.rejects(command('record-email-proposal', { ...args, idempotency_key: randomUUID() }, router()),
     e => e.payload?.error === 'version_conflict');
   assert.equal((await c.query("select count(*)::int as n from event where verb='record-email-proposal' and new_value->>'proposal_id'=$1", [item.id])).rows[0].n, 1);
+  assert.equal((await command('record-email-proposal', args, router())).replayed, true);
+  await command('dismiss-email-proposal', { idempotency_key: randomUUID(), proposal_id: item.id,
+    base_version: 2, reason: 'Synthetic reviewed decision' });
+  await assert.rejects(command('record-email-proposal', { ...args, base_version: 3, idempotency_key: randomUUID() }, router()),
+    e => e.payload?.error === 'email_proposal_not_pending');
+  const resolved = (await c.query('select status,resolution_reason,evidence_quote from email_proposal where id=$1', [item.id])).rows[0];
+  assert.deepEqual(resolved, { status: 'dismissed', resolution_reason: 'Synthetic reviewed decision', evidence_quote: quote });
+
 });
 
 test('a human-confirmed association is transaction scoped and automatic reuse has an auditable Undo', async () => {
@@ -2512,6 +2520,15 @@ test('explicit lead-client edges and equal names remain suggestions without merg
 
 test('an unresolved identity on an otherwise continuous thread stays unfiled', async () => {
   const { prior } = await automaticThreadFiling();
+  const otherParty = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic conflicting client',$1,$1) returning id", [actor.id])).rows[0].id;
+  const otherClient = (await c.query("insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,'C-999639') returning id", [otherParty,actor.id])).rows[0].id;
+  const conflicting = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Synthetic conflicting identity', detail: quote,
+    email_context: (await c.query('select email_context from activity where id=$1', [prior.activity_id])).rows[0].email_context });
+  await c.query('update activity set client_id=$2 where id=$1', [conflicting.activity_id,otherClient]);
+  await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: conflicting.activity_id,
+    thread_activity_id: prior.activity_id }, router(), 'carr_writer'), e => e.payload?.error === 'email_thread_identity_uncertain');
+  assert.equal((await c.query('select deal_id from activity where id=$1', [conflicting.activity_id])).rows[0].deal_id, null);
   await c.query("update party set email=null where email='sender@example.test'");
   const context = (await c.query('select email_context from activity where id=$1', [prior.activity_id])).rows[0].email_context;
   const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
