@@ -31,7 +31,7 @@ class SafetyHooks(unittest.TestCase):
             hooks.mkdir()
             config.mkdir(parents=True)
             (hooks / 'gate-integrity.py').write_bytes((REPO / 'hooks/gate-integrity.py').read_bytes())
-            required = {'guard-unattended.py', 'record-home-gate.py'}
+            required = {'guard-unattended.py', 'record-home-gate.py', 'orchestrator-question.py'}
             for name in required | {'lint-gate.py'}:
                 (hooks / name).write_text('# fixture hook\n')
             baseline = {'hashes': {
@@ -71,6 +71,8 @@ class SafetyHooks(unittest.TestCase):
                     self.assertIn(f'CHANGED: hooks/{name}', result.stderr)
                     script.write_bytes(original)
                 for client, config_name in [('claude', 'hooks'), ('codex', 'codex-hooks')]:
+                    if name == 'orchestrator-question.py' and client == 'codex':
+                        continue
                     with self.subTest(hook=name, client=client, mutation='removed registration'):
                         path = config / f'{config_name}.json'
                         removed = {'PreToolUse': [{'hooks': [
@@ -83,6 +85,27 @@ class SafetyHooks(unittest.TestCase):
                         self.assertIn(f'{client}: required safety hook is not installed: {name}', result.stderr)
                         path.write_text(json.dumps(document))
             self.assertEqual(run().returncode, 0)
+
+    def test_session_start_requires_installed_question_gate(self):
+        document = json.loads((REPO / 'ops/config/hooks.json').read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            settings = home / '.claude/settings.json'
+            settings.parent.mkdir()
+            settings.write_text(json.dumps(document).replace('{{REPO}}', str(REPO)))
+            with patch.object(gate.Path, 'home', return_value=home), \
+                    patch.object(gate, 'check_baseline', return_value=[]), \
+                    patch.object(gate.sys, 'argv', ['gate-integrity.py']), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(gate.main(), 0)
+                document['PreToolUse'] = [group for group in document['PreToolUse']
+                    if not any('orchestrator-question.py' in hook.get('command', '')
+                               for hook in group['hooks'])]
+                settings.write_text(json.dumps(document).replace('{{REPO}}', str(REPO)))
+                self.assertEqual(gate.main(), 1)
+                self.assertIn('claude: required safety hook is not installed: orchestrator-question.py',
+                              errors.getvalue())
 
     def test_native_configuration(self):
         for client, name in [('claude', 'hooks'), ('codex', 'codex-hooks')]:

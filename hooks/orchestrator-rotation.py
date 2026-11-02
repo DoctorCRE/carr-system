@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 
-MARKER = 'CARR-Session-Role: orchestrator'
+from orchestrator_session import transcript_snapshot
 TOKEN_FIELDS = ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
 HANDOFF = '''Rotate this orchestrator now before context compaction.
 Use write-doctrine-section through the record layer to write team-memory section
@@ -29,21 +29,8 @@ Post the successor's returned link to Joe, then stop this session.'''
 
 
 def snapshot(path, session):
-    first_prompt = None
-    latest = None
-    with Path(path).open() as transcript:
-        for line in transcript:
-            record = json.loads(line)
-            if record.get('sessionId', session) != session or record.get('isSidechain'):
-                continue
-            if record.get('type') == 'user' and first_prompt is None and not record.get('isMeta'):
-                content = record['message']['content']
-                if isinstance(content, list):
-                    content = '\n'.join(b.get('text', '') for b in content if b.get('type') == 'text')
-                first_prompt = content
-            if record.get('type') == 'assistant':
-                latest = record['message'].get('usage')
-    if not isinstance(first_prompt, str) or MARKER not in first_prompt.splitlines():
+    marked, latest = transcript_snapshot(path, session)
+    if not marked:
         return None
     if latest is None:
         return 0
