@@ -47,9 +47,29 @@ class CaptureOutcomesTests(unittest.TestCase):
             return 200, {"candidate_ids": ["phase-receipt"]}
 
         for extra in ("", " Another sentence."):
+            transcript = {"segments": [{"speaker": "Joe", "text": quote + extra}]}
+            coverage = bridge.post_call.coverage
+            context = {"session": self.session.name, "deals": [{"id": "synthetic-deal", "participants": []}]}
+            update = report["deal_updates"][0]
+            update["participant_ids"] = []
+            update["fact_ids"] = ["phase-discussion"]
+            update["phase_move"]["fact_ids"] = ["phase-instruction"]
+            extraction = {
+                "topics": [{"topic_id": "synthetic", "identity": {"deal_id": "synthetic-deal", "participant_ids": []}}],
+                "facts": [{"fact_id": fact_id, "topic_id": "synthetic", "kind": kind,
+                           "statement": statement, "asserted_value": value,
+                           "source_spans": [coverage.source_span(transcript, 0)], "disposition": None}
+                          for fact_id, kind, statement, value in (
+                              ("phase-discussion", "other", "Phase proposal discussed", "discussed"),
+                              ("phase-instruction", "phase_change", "Move to legal", "legal"))],
+                "non_fact_spans": [],
+            }
+            ledger = coverage.build_call_ledger(transcript, context, lambda _: extraction)
+            ledger = coverage.reconcile_coverage(ledger, report)
+            bridge.post_call.write_private(self.session / coverage.FILE, ledger)
+            report["coverage_sha256"] = coverage.digest(ledger)
             bridge.post_call.write_private(self.session / bridge.post_call.REPORT_FILE, report)
-            bridge.post_call.write_private(self.session / "transcript.json",
-                                           {"segments": [{"speaker": "Joe", "text": quote + extra}]})
+            bridge.post_call.write_private(self.session / "transcript.json", transcript)
             shaped = bridge.post_call.sanitized_candidates(self.session)
             with patch.object(bridge, "http_request", side_effect=request):
                 self.assertTrue(bridge.post_batch(self.cfg, self.session, "/capture/candidates",
