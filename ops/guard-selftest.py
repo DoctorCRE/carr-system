@@ -30,6 +30,7 @@ import sys
 import pathlib
 import shlex
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from git_env import fixture_env
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -43,10 +44,10 @@ OUTSIDE = os.path.realpath(tempfile.mkdtemp(prefix="guard-selftest-"))
 atexit.register(shutil.rmtree, OUTSIDE, True)
 
 
-def run(payload):
+def run(payload, guard=GUARD):
     payload = dict(payload)
     env = {**ENV, **payload.pop("__env", {})}
-    p = subprocess.run([sys.executable, GUARD], input=json.dumps(payload),
+    p = subprocess.run([sys.executable, guard], input=json.dumps(payload),
                        capture_output=True, text=True, timeout=20, env=env)
     return p.returncode, (p.stderr or "").strip()
 
@@ -1229,7 +1230,9 @@ for _cmd in (
     case(f"replay sample: {_cmd!r} is allowed", bash(_cmd, cwd=WORKTREE), ALLOW)
 
 
-REVIEW_FIXTURE = json.loads(pathlib.Path(REPO, 'ops/fixtures/guard-main.json').read_text())
+MAIN_FIXTURE = pathlib.Path(REPO, 'ops/fixtures/guard-main')
+MAIN_GUARD = str(MAIN_FIXTURE / 'hooks/guard-unattended.py')
+REVIEW_FIXTURE = json.loads((MAIN_FIXTURE / 'probes.json').read_text())
 for name, command, *expected in REVIEW_FIXTURE['reviewer_probes']:
     expectation = REVIEW_FIXTURE['contract_overrides'].get(name, {}).get('expect')
     if expectation is None and expected:
@@ -1238,36 +1241,45 @@ for name, command, *expected in REVIEW_FIXTURE['reviewer_probes']:
         case(name, bash(command, '/tmp'), ALLOW if expectation == 'ALLOW' else DENY)
 
 
+def fixture_identity_cases():
+    revision = REVIEW_FIXTURE['revision']
+    failures = []
+    for path in REVIEW_FIXTURE['files']:
+        blob = subprocess.run(['git', '-C', REPO, 'show', f'{revision}:{path}'],
+                              capture_output=True, env=ENV, timeout=20)
+        if blob.returncode or (MAIN_FIXTURE / path).read_bytes() != blob.stdout:
+            failures.append('main fixture differs from pinned merge-base blob: ' + path)
+    for failure in failures:
+        print('FAIL ' + failure)
+    print(f"main fixture byte identity: {len(REVIEW_FIXTURE['files']) - len(failures)}/{len(REVIEW_FIXTURE['files'])}")
+    return failures
+
+
 def monotonicity_cases(head_results):
-    fixture = REVIEW_FIXTURE
     probes = [(name, payload) for name, payload, _ in CASES]
-    probes += [(name, bash(command, '/tmp')) for name, command, *_ in fixture['reviewer_probes']]
+    probes += [(name, bash(command, '/tmp')) for name, command, *_ in REVIEW_FIXTURE['reviewer_probes']]
+    payloads = {json.dumps(payload, sort_keys=True): payload for _, payload in probes}
+    def replay(item):
+        key, payload = item
+        return key, run(payload), run(payload, MAIN_GUARD)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(replay, payloads.items()))
+    baseline_results = {}
+    for key, head, baseline in results:
+        head_results[key] = head
+        baseline_results[key] = baseline
     failures = []
     blocked = 0
-    original_env = dict(os.environ)
-    try:
-        os.environ.clear()
-        os.environ.update(ENV)
-        namespace = {'__file__': GUARD, '__name__': 'frozen_guard'}
-        exec(compile(pathlib.Path(GUARD).read_text(), GUARD, 'exec'), namespace)
-        exec(compile(fixture['guard_source'], GUARD, 'exec'), namespace)
-        for name, head_payload in probes:
-            payload = dict(head_payload)
-            os.environ.clear()
-            os.environ.update({**ENV, **payload.pop('__env', {})})
-            baseline = namespace['decide'](payload)
-            if baseline.code not in (ALLOW, DENY):
-                failures.append(name + ': frozen guard failed ' + baseline.stderr[:100])
-            elif baseline.code == DENY:
-                blocked += 1
-                key = json.dumps(head_payload, sort_keys=True)
-                if key not in head_results:
-                    head_results[key] = run(head_payload)
-                if head_results[key][0] != DENY:
-                    failures.append(name + ': head allows, main blocks')
-    finally:
-        os.environ.clear()
-        os.environ.update(original_env)
+    for name, payload in probes:
+        key = json.dumps(payload, sort_keys=True)
+        baseline, error = baseline_results[key]
+        head, head_error = head_results[key]
+        if baseline not in (ALLOW, DENY) or head not in (ALLOW, DENY):
+            failures.append(name + ': hook process failed ' + error[:100] + head_error[:100])
+        elif baseline == DENY:
+            blocked += 1
+            if head != DENY:
+                failures.append(name + ': head allows, main blocks')
     for failure in failures:
         print('FAIL monotonicity: ' + failure)
     print(f'monotonicity: {len(probes)} probes, {blocked} frozen-main denials, {len(failures)} regressions')
@@ -1318,6 +1330,25 @@ def source_restore_cases():
                     ok = ok and "explicit" in error
                 if not ok:
                     failures.append(f"{adapter.__name__}: {command}: {rc} {error}")
+        restore_probes = 0
+        for base in ('git checkout -q origin/main -- .',
+                     'git restore --source=origin/main --staged --worktree .'):
+            for shape in ('{}', '({})', '{} >', "{} # it's", '{} # (',
+                          'true; ({})', 'echo $({})', '{{ {}; }}', '{} \\',
+                          'x=$({})', '{} > /dev/null', '{} 2>&1 | cat',
+                          '(cd . && {})', 'GITC', 'env {}', 'command {}',
+                          '{} &', "bash -c '{}'", 'echo "$( ({}) )"',
+                          "{} <<EOF\nit's\nEOF", 'echo `{}`'):
+                command = ('git -C . ' + base[4:]) if shape == 'GITC' else shape.format(base)
+                payload = bash(command, directory)
+                baseline, _ = run(payload, MAIN_GUARD)
+                head, _ = run(payload)
+                restore_probes += 1
+                if baseline not in (ALLOW, DENY) or head not in (ALLOW, DENY):
+                    failures.append('source restore hook process failed: ' + command)
+                elif baseline == DENY and head != DENY:
+                    failures.append('source restore head allows, main blocks: ' + command)
+        print(f'source restore monotonicity: {restore_probes} J128 probes')
         assert index == git("write-tree")
         assert (root / "README.md").read_text() == "feature\n"
         assert (root / "module.js").read_text() == "feature\n"
@@ -1624,7 +1655,10 @@ def decision_error_cases():
 
 def main():
     verbose = "-v" in sys.argv[1:]
-    source_fails = source_restore_cases()
+    source_fails = fixture_identity_cases()
+    if source_fails:
+        return 1
+    source_fails += source_restore_cases()
     head_results = {}
     source_fails += monotonicity_cases(head_results) + decision_error_cases()
     fails = []

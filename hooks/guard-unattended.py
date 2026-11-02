@@ -2028,7 +2028,8 @@ def direct_metered_dispatch(cmd):
     for program, arguments in executed_invocations(cmd):
         if program == 'gh':
             arguments = _gh_command_words(arguments)
-            if any(char in word for word in arguments[:2] for char in ('$', '`')):
+            command_words = arguments[:1] if arguments[:1] == ['api'] else arguments[:2]
+            if any(char in word for word in command_words for char in ('$', '`')):
                 return 'cannot classify dynamic gh command safely'
         if program == 'gh' and _raw_github_api_dispatch(arguments):
             return 'direct GitHub API dispatch bypasses the remote-CI budget gate'
@@ -2524,7 +2525,9 @@ def _check_candidate(cmd, cwd, invocations, shell_context):
                 return 'cannot classify dynamic git subcommand safely'
             if words[:1] and words[0] in {'push', 'reset', 'clean', 'filter-branch', 'filter-repo'} and any(
                     '$' in word or '`' in word for word in words[1:]):
-                return 'cannot classify dynamic git mutation arguments safely; push the current branch using HEAD'
+                return (f'cannot classify dynamic git {words[0]} arguments safely; '
+                        + ('push the current branch using HEAD' if words[0] == 'push'
+                           else 'use literal arguments'))
             if words[:1] == ['push'] and any(
                     word.split(':')[-1].removeprefix('refs/heads/') in {'main', 'master'}
                     for word in words[1:] if not word.startswith('-')):
