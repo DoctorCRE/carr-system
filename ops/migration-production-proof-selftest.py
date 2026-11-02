@@ -141,6 +141,18 @@ class ProofTests(unittest.TestCase):
     def test_empty_production_fails_closed(self):
         self.assertFalse(proof.ledger_proof({'0001_a.sql': 'a'}, {})['ok'])
 
+    def test_snapshot_allows_pending_migration_before_production_read(self):
+        applied = snapshot_ledger()
+        repository = dict(applied, **{'9999_future.sql': 'f' * 64})
+        with patch.object(proof, 'repository_ledger', return_value=repository), \
+             patch.object(proof, 'production_dsn', return_value='fixture') as credentials, \
+             patch.object(proof, 'read_source', return_value=(applied, None, None)) as source:
+            result = proof.live_proof()
+        self.assertTrue(result['ledger']['ok'])
+        self.assertEqual(result['ledger']['pending'], ['9999_future.sql'])
+        credentials.assert_called_once_with()
+        source.assert_called_once_with('fixture', None, include_acl=True)
+
     def test_snapshot_drift_refuses(self):
         read_text = Path.read_text
         applied = snapshot_ledger()
