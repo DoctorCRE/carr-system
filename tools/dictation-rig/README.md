@@ -223,6 +223,10 @@ blocked-but-listening server now reports as failed.
   by its `meta.json` offset onto one clock, merges by timestamp into a labeled
   `me`/`them` transcript. Quill's own Parakeet engine is disabled in config; the raw
   audio and the transcript both stay on this Mac.
+  The hook adds `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and
+  macOS system directories to the inherited PATH before launching any children.
+  Claude and its interpreter remain available when Quill starts through launchd
+  without a shell profile. Explicit caller PATH entries keep their precedence.
 - `vocab-prompt.txt` — the whisper `--prompt` seed: CARR nouns, platforms, and
   market towns. PURE PROMPT TEXT, no comments — the whole file is fed to the
   model (~224-token budget). Tracked; this repo is public (WR-000049,

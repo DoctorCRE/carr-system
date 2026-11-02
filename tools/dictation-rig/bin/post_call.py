@@ -730,6 +730,9 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
         with tempfile.TemporaryDirectory() as empty:
             done = subprocess.run(argv, input=prompt, text=True, capture_output=True,
                                   cwd=empty, env=child_env, timeout=180, check=False)
+    except FileNotFoundError as exc:
+        raise RuntimeError("headless Sonnet requires the Claude CLI; install claude in "
+                           "~/.local/bin, /opt/homebrew/bin or /usr/local/bin") from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError("headless Sonnet could not complete the post-call review pack") from exc
     if done.returncode:

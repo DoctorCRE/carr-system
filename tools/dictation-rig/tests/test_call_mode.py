@@ -2227,7 +2227,8 @@ class PostCallTests(unittest.TestCase):
                 self.assertTrue((self.session / "transcript.json").exists())
 
     def test_sonnet_execution_failures_block_without_a_report(self) -> None:
-        for failure in (OSError("missing CLI"), subprocess.TimeoutExpired("claude", 180)):
+        for failure in (FileNotFoundError("missing CLI"), OSError("cannot launch CLI"),
+                        subprocess.TimeoutExpired("claude", 180)):
             with self.subTest(failure=type(failure).__name__):
                 (self.session / post_call.STATUS_FILE).unlink(missing_ok=True)
                 post_call.store_context(self.session, self.context)
@@ -2235,6 +2236,8 @@ class PostCallTests(unittest.TestCase):
                      patch.object(post_call.subprocess, "run", side_effect=failure):
                     status = post_call.process_session(self.session)
                 self.assertEqual(status["state"], "blocked")
+                if isinstance(failure, FileNotFoundError):
+                    self.assertIn("requires the Claude CLI", status["reason"])
                 self.assertFalse((self.session / post_call.REPORT_FILE).exists())
 
     def test_nonzero_sonnet_exit_blocks_even_with_valid_json(self) -> None:

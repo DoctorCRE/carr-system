@@ -19,7 +19,6 @@ class HookPathTests(unittest.TestCase):
             home = root / 'home'
             local_bin = home / '.local/bin'
             local_bin.mkdir(parents=True)
-            (local_bin / 'python3').symlink_to(sys.executable)
             claude = local_bin / 'claude'
             claude.write_text(
                 f'#!{sys.executable}\n'
