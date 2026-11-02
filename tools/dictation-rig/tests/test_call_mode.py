@@ -279,8 +279,10 @@ class CallModeTests(unittest.TestCase):
                     continue
                 writes_status = any(
                     isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id in {"write_private", "write_json_atomic"}
+                    and ((isinstance(node.func, ast.Name)
+                          and node.func.id in {"write_private", "write_json_atomic"})
+                         or (isinstance(node.func, ast.Attribute)
+                             and node.func.attr in {"write_private", "write_json_atomic"}))
                     and node.args and "STATUS_FILE" in ast.unparse(node.args[0])
                     for node in ast.walk(function)
                 )
