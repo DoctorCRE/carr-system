@@ -2468,7 +2468,7 @@ test('human-confirmed filing enters ordinary thread history with auditable Undo'
   const separate = await make({ ...context, conversation_id: randomUUID() });
   const queue = await wholeQueue(router(), 'carr_reader');
   assert.ok(queue.emails.find(row => row.activity_id === reply.activity_id).thread_history.some(row => row.activity_id === source.activity_id));
-  assert.equal(queue.emails.find(row => row.activity_id === separate.activity_id).thread_history.length, 0);
+  assert.ok(!queue.emails.find(row => row.activity_id === separate.activity_id).thread_history.some(row => row.activity_id === source.activity_id));
   await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: separate.activity_id,
     thread_activity_id: source.activity_id }, router(), 'carr_writer'), e => e.payload?.error === 'email_thread_not_continuous');
   await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
@@ -2507,7 +2507,7 @@ test('explicit lead-client edges and equal names remain suggestions without merg
 });
 
 
-test('an unresolved identity on an otherwise continuous thread stays unfiled', async () => {
+test('a conflicting client blocks continuity while unknown existing participants still inherit', async () => {
   const { prior } = await automaticThreadFiling();
   const otherParty = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic conflicting client',$1,$1) returning id", [actor.id])).rows[0].id;
   const otherClient = (await c.query("insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,'C-999639') returning id", [otherParty,actor.id])).rows[0].id;
@@ -2522,9 +2522,9 @@ test('an unresolved identity on an otherwise continuous thread stays unfiled', a
   const context = (await c.query('select email_context from activity where id=$1', [prior.activity_id])).rows[0].email_context;
   const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Synthetic uncertain identity', detail: quote, email_context: context });
-  await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: source.activity_id,
-    thread_activity_id: prior.activity_id }, router(), 'carr_writer'), e => e.payload?.error === 'email_thread_identity_uncertain');
-  assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, null);
+  await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: source.activity_id,
+    thread_activity_id: prior.activity_id }, router(), 'carr_writer');
+  assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, deal);
 });
 
 test('equal names suggest an identity candidate without creating a client association', async () => {
@@ -2579,11 +2579,34 @@ test('a conflicting matching repair returns a named refusal and preserves both p
 test('a client mismatch blocks the filing preview as well as confirmation', async () => {
   const source = await email();
   const stored = await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'client' });
-  const other = (await c.query("select id from client where id<>(select client_id from deal where id=$1) limit 1", [deal])).rows[0];
-  assert.ok(other);
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic mismatch client',$1,$1) returning id", [actor.id])).rows[0].id;
+  const other = (await c.query("insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,'C-999650') returning id", [party,actor.id])).rows[0];
   await c.query('update activity set client_id=$2 where id=$1', [source.activity_id, other.id]);
   const item = (await listed()).find(row => row.id === stored.proposal_id);
   assert.equal(item.preview, null);
   assert.equal(item.preview_error, 'email_new_deal_client_mismatch');
   assert.equal(item.confirm_verb, null);
+});
+
+test('twenty matching cards share one grouped contacts load and skip unrelated email-less parties', async () => {
+  await c.query('delete from email_proposal');
+  await c.query(`insert into party(kind,name,created_by,updated_by)
+    select 'person','Synthetic email-less scale '||g,$1,$1 from generate_series(1,2000) g`, [actor.id]);
+  for (let i=0;i<20;i++) {
+    const source = await email();
+    await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'client' });
+  }
+  const loads = [];
+  const counted = { query: async (sql, args) => {
+    const result = await c.query(sql,args);
+    if (sql.includes('as related_clients')) loads.push({ sql, args, rows: result.rows });
+    return result;
+  } };
+  const result = await command('list-email-proposals', { limit: 20 }, actor, 'carr_reader', counted);
+  assert.equal(result.proposals.length,20);
+  assert.equal(result.proposals.filter(row => row.preview && !row.preview_error).length,20);
+  assert.equal(loads.length,1);
+  assert.ok(!loads[0].rows.some(row => row.name.startsWith('Synthetic email-less scale ')));
+  const plan = await c.query('explain (format json) '+loads[0].sql,loads[0].args);
+  assert.ok(!JSON.stringify(plan.rows).includes('SubPlan'));
 });

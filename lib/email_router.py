@@ -269,7 +269,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
                         if not (refusal_code(error) or '').startswith('email_thread_'):
                             raise WriteFailed() from error
                         try:
-                            decision = matching({**email, 'learned_associations': []}, queue['open_deals'], [])
+                            decision = matching(email, queue['open_deals'], [])
                         except Exception as error:
                             model_failed(error)
                             continue

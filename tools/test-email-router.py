@@ -578,7 +578,6 @@ class MatchingTests(unittest.TestCase):
                 self.assertEqual((decision.kind, decision.deal), ('file_to_deal', DEAL))
                 self.assertEqual(decision.outcome, 'uncertain')
                 server = Server([mail])
-                server.open_deals = deals
                 email_router.route(server, lambda *args: {'proposals': []}, refusal_code, {}, NOW,
                                    matching=lambda *args: decision)
                 self.assertEqual(server.recorded()[0]['kind'], 'file_to_deal')

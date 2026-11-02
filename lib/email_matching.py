@@ -55,7 +55,7 @@ def _people(email: dict) -> set[str]:
 def thread_match(email: dict, deals: list[dict], history: list[dict]) -> dict | None:
     """Return one unambiguous filed predecessor after checking every added recipient."""
     people = [email.get('sender') or {}, *email.get('recipients', [])]
-    if not _people(email) or any(not p.get('internal') and (p.get('unknown') or not p.get('email')) for p in people):
+    if not _people(email) or any(not p.get('internal') and not p.get('email') for p in people):
         return None
     deal_by_id = {d['id']: d for d in deals}
     current_time = datetime.fromisoformat(email['occurred_at'].replace('Z', '+00:00'))
@@ -95,7 +95,6 @@ def _probability(value) -> float:
 
 
 def match(email: dict, deals: list[dict], history: list[dict], *, client=None, shuffle=None) -> MatchDecision:
-    history = [*history, *email.get('learned_associations', [])]
     eligible = [d for d in deals if d['id'] not in email.get('suppressed_deals', [])]
     prior = thread_match(email, eligible, history)
     if prior is not None:
@@ -159,6 +158,20 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
     if chosen and chosen.choice not in {d['id'] for d in ordered}:
         raise ValueError('email match selected an unknown deal')
     evidence['choice_confidence'] = confidence
+    people = [p for p in [email.get('sender') or {}, *email.get('recipients', [])]
+              if p.get('party_id') and not p.get('internal')]
+    identity_candidates = tuple({'deal': d['id'], 'reason': 'Exact board party or explicit client relationship. Human review required.',
+                                 'confidence': min(existing, confidence)} for d in sorted(deals, key=lambda d: d['id'])
+        if any(p['party_id'] == d.get('client_party_id')
+               or any(member.get('party_id') == p['party_id'] for member in d.get('participants', []))
+               or (d.get('client_id') and (p.get('client_id') == d['client_id']
+                   or any(edge.get('client_id') == d['client_id'] for edge in p.get('related_clients', []))))
+               for p in people))
+    if identity_candidates:
+        selected = next((candidate for candidate in identity_candidates if chosen and candidate['deal'] == chosen.choice),
+                        identity_candidates[0])
+        return MatchDecision('file_to_deal', selected['deal'], role, min(existing, confidence),
+                             candidates=identity_candidates, evidence=evidence)
     if existing <= LOW and different >= HIGH and not missing:
         return MatchDecision('possible_new_deal', sender_role=role, confidence=min(different, 1-existing),
                              text='Possible separate transaction. Review existing deals before creating one.',
@@ -172,7 +185,7 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
     if chosen and existing >= HIGH and different <= LOW and confidence >= CHOICE_CONFIDENCE:
         return MatchDecision('file_to_deal', chosen.choice, role, min(existing, 1-different, confidence),
                              outcome='existing', candidates=candidates, evidence=evidence)
-    if chosen and (existing > LOW or different > LOW or missing):
+    if chosen and (existing > LOW or missing):
         return MatchDecision('file_to_deal', chosen.choice, role, min(existing, confidence),
                              candidates=candidates, evidence=evidence)
     return MatchDecision('contact_only', sender_role=role, candidates=candidates, evidence=evidence)
