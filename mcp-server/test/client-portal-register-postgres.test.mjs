@@ -3,11 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { readFile } from 'node:fs/promises';
+import { readMigration } from './migration-source.testhelper.mjs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001' };
-const migration = name => readFile(new URL(`../../migrations/${name}`, import.meta.url), 'utf8');
+const migration = readMigration;
 
 test('registering a client portal stores only a verifier and exposes only a derived link', async t => {
   const db = await postgresDatabase('client-portal-register-');

@@ -1,11 +1,9 @@
 // Test Deal Room release verb registration and account migration.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readMigration } from "./migration-source.testhelper.mjs";
 import { createHash } from "node:crypto";
 import { TOOLS } from "../src/tools.js";
-
-const file = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
 test("release 1–5 verbs are registered with human gates on structural creation", () => {
   for (const name of ["start-deal-review","review-deal","end-deal-review",
@@ -29,7 +27,7 @@ test("release 1–5 verbs are registered with human gates on structural creation
 const MIGRATION_0090_SHA256 = "6599fdf05e4e140bb0ea354993c1904d73a5dc0dc2f2bb197d32feb1c60df17d";
 
 test("national-account migration keeps the 0061 hierarchy and explicitly assigns the national account", async () => {
-  const sql = await file("migrations/0090_deal_room_workspaces.sql");
+  const sql = readMigration("0090_deal_room_workspaces.sql");
   assert.match(sql, /left join v_client_account vca/);
   const assigned = sql.match(/lower\(p\.name\) = '([^']+)'/);
   assert.ok(assigned, "the migration assigns an account by exact lowercased name");

@@ -1,4 +1,5 @@
 // Test fact store promotion, isolation, and grants on PostgreSQL.
+import { readMigration } from './migration-source.testhelper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -56,7 +57,7 @@ test('E09a fact store: lineage-proven promotion, conflicts, tenancy, idempotency
   const conflicts = (args = {}) => as('carr_reader', partner, 'list-fact-conflicts', args);
   const ids = out => out.observations.map(o => o.id);
   try {
-    let initial = await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8');
+    let initial = readMigration('0001_init.sql');
     const schema = await readFile(new URL('../../db/schema.sql', import.meta.url), 'utf8');
     for (const name of ['event', 'tool_call']) {
       const definition = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))[0];
