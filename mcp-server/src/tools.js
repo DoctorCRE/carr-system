@@ -4025,7 +4025,8 @@ export const TOOLS = {
                else jsonb_build_object('deal_id', c.deal_id,
                  'recipient_party_id', c.recipient_party_id, 'recipient_ref', c.recipient_ref,
                  'subject', c.email_subject, 'body_sha256', c.body_sha256) end as payload,
-               c.evidence_quote, to_jsonb(c.created_at)#>>'{}' as created_at
+               c.evidence_quote, to_jsonb(c.created_at)#>>'{}' as created_at,
+               to_jsonb(s.started_at)#>>'{}' as source_call_started_at, s.id::text as source_call_label_key
           from capture_post_call_candidate c
           join capture_session s on s.id=c.session_id
           join v_deal_room_board b on b.id=c.deal_id

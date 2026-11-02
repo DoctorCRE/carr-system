@@ -421,7 +421,7 @@ test('Home discovers pending call follow-ups through existing grants without exe
   const nonce = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
       consent_announced_at,session_token_hash,expires_at,state_at,state,post_call)
-    values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now(),'distilling',true)
+    values($1,'synthetic-device',$2,'meeting',now()-interval '7 days',now()-interval '7 days',$1,now()+interval '1 hour',now(),'distilling',true)
     returning id`, [nonce,actor.id])).rows[0].id;
   const recipient = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic vendor contact',$1,$1) returning id,ref", [actor.id])).rows[0];
   const first = 'ab000000-0000-4000-8000-000000000001';
@@ -444,9 +444,66 @@ test('Home discovers pending call follow-ups through existing grants without exe
       return result;
     } finally { await c.query('rollback'); }
   };
+  await t.test('source call time stays seven days old when the proposal is two days old', async () => {
+    await c.query("update capture_post_call_candidate set created_at=now()-interval '2 days' where id=$1", [first]);
+    try {
+      const row = (await read()).candidates.find(row => row.id === first);
+      const clock = (await c.query('select started_at from capture_session where id=$1', [session])).rows[0];
+      assert.equal(Date.parse(row.source_call_started_at), clock.started_at.getTime());
+      assert.ok(Date.parse(row.created_at) - Date.parse(row.source_call_started_at) >= 5 * 86400000 - 1000);
+      assert.equal(row.source_call_label_key, session);
+    } finally {
+      await c.query("update capture_post_call_candidate set created_at='2026-10-20T12:00:00Z' where id=$1", [first]);
+    }
+  });
+  await t.test('same-party calls keep distinct same-day label keys even at the same instant', async () => {
+    const newer = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+        consent_announced_at,session_token_hash,expires_at,state_at,state,post_call)
+      select $2,device_id,actor_id,mode,started_at,consent_announced_at,$2,expires_at,state_at,state,post_call
+        from capture_session where id=$1 returning id`, [session, randomUUID()])).rows[0].id;
+    const other = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,
+        recipient_party_id,recipient_ref,email_subject,body_sha256,evidence_quote,confidence)
+      values($1,'synthetic-same-party','synthetic',0,'email_draft',$2,$3,$4,'Synthetic other call',$5,
+        'Draft another follow-up',0.9) returning id`, [newer,deal,recipient.id,recipient.ref,'b'.repeat(64)])).rows[0].id;
+    try {
+      const rows = (await read()).candidates;
+      const oldRow = rows.find(row => row.id === second);
+      const newRow = rows.find(row => row.id === other);
+      assert.equal(oldRow.source_call_label_key, session);
+      assert.equal(newRow.source_call_label_key, newer);
+      assert.notEqual(oldRow.source_call_label_key, newRow.source_call_label_key);
+      assert.equal(oldRow.source_call_started_at, newRow.source_call_started_at);
+      await c.query("update capture_session set started_at=now() where id=$1", [newer]);
+      const reread = (await read()).candidates;
+      assert.equal(reread.find(row => row.id === second).source_call_started_at, oldRow.source_call_started_at);
+      assert.ok(Date.parse(reread.find(row => row.id === other).source_call_started_at) > Date.parse(oldRow.source_call_started_at));
+    } finally {
+      await c.query('delete from capture_post_call_candidate where id=$1', [other]);
+      await c.query('delete from capture_session where id=$1', [newer]);
+    }
+  });
+  await t.test('reviewed source calls retain provenance beyond the outcomes page', async () => {
+    await c.query('update capture_session set outcome_reviewed_at=now(),outcome_reviewed_by=$2 where id=$1', [session,actor.id]);
+    try {
+      const rows = (await read()).candidates;
+      assert.equal(rows.length, 2);
+      for (const row of rows) {
+        assert.equal(row.source_call_label_key, session);
+        assert.ok(Date.parse(row.source_call_started_at) < Date.now() - 6 * 86400000);
+      }
+    } finally {
+      await c.query('update capture_session set outcome_reviewed_at=null,outcome_reviewed_by=null where id=$1', [session]);
+    }
+  });
   await t.test('task and email metadata retain exact refs and local-body hash in stable order', async () => {
     const result = await read();
-    for (const candidate of result.candidates) candidate.created_at = Temporal.Instant.from(candidate.created_at).toString({ fractionalSecondDigits: 3 });
+    for (const candidate of result.candidates) {
+      assert.equal(candidate.source_call_label_key, session);
+      assert.ok(Number.isFinite(Date.parse(candidate.source_call_started_at)));
+      delete candidate.source_call_started_at;
+      delete candidate.source_call_label_key;
+      candidate.created_at = Temporal.Instant.from(candidate.created_at).toString({ fractionalSecondDigits: 3 });
+    }
     assert.deepEqual(result, { schema_version:'post-call-followups.v1', send:false, candidates:[
       { id:first, session_id:session, kind:'assigned_action', deal_id:deal, deal_name:'Synthetic coastal purchase', contact_name:null,
         payload:{deal_id:deal,assignee:'dell',action:'Call the synthetic lender',due_on:null},
