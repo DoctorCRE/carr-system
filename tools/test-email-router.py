@@ -515,6 +515,21 @@ class RouterTests(unittest.TestCase):
 
 
 class MatchingTests(unittest.TestCase):
+    def test_existing_matters_survive_conflicting_scores_and_missing_identity(self):
+        deals = [{'id': DEAL, 'name': 'Synthetic Dental search', 'client_id': 'client-a'}]
+        for mail in (self.mail(sender={'name': 'Synthetic Doctor', 'party_id': 'lead-party',
+                                      'email': 'doctor@example.test'}),
+                     self.mail(sender={'name': 'Synthetic Dental', 'address_unavailable': True},
+                               recipients=[], conversation_id=None)):
+            result = email_matching.match(mail, deals, [], client=FakeJev(.85, .8, .95))
+            self.assertEqual(result.kind, 'file_to_deal')
+            self.assertEqual(result.outcome, 'uncertain')
+            self.assertEqual(result.candidates[0]['deal'], DEAL)
+
+    def test_new_transaction_requires_positive_evidence_not_low_existing_alone(self):
+        result = email_matching.match(self.mail(), [{'id': DEAL}], [], client=FakeJev(.2, .1))
+        self.assertNotEqual(result.kind, 'possible_new_deal')
+
     def test_vendor_new_doctor_stays_unfiled_even_with_thread_and_prior_deal(self):
         original = {'activity_id': 'prior', 'deal': DEAL, 'subject': 'Practice space',
                     'conversation_id': 'conversation', 'occurred_at': '2026-10-25T14:00:00Z',
