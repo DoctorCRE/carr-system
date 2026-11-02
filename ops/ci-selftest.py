@@ -158,6 +158,78 @@ def test_doc_drift_keeps_its_argument_and_interpreter_handoff():
               rc == 64 and 'unknown argument: --doc-drift' in output, output)
 
 
+def test_migration_requires_newline_terminated_verdict():
+    with ci_fixture() as root:
+        for content, expected in (("ok\tfixture migration", 1),
+                                  ("ok\tfixture migration\r", 1),
+                                  ("ok\tfixture migration\n", 0)):
+            (root / "ops/ci-migration.py").write_text(
+                "import sys\nfrom pathlib import Path\n"
+                f"Path(sys.argv[sys.argv.index('--result')+1]).write_text({content!r})\n")
+            rc, output = run(["--strict", "--only", "migration"], root=root)
+            check(f"migration verdict newline={content.endswith(chr(10))} exits {expected}",
+                  rc == expected, output)
+            check("only a complete migration record can report OK",
+                  bool(re.search(r"OK\s+migration\s", output)) == (expected == 0), output)
+
+
+def test_controller_sigterm_cleans_children_and_temp_state():
+    for name, runner in (("dependency", "ci-dep-check.py"),
+                         ("secret", "ci-secret.py"),
+                         ("migration", "ci-migration.py")):
+        with ci_fixture() as root, tempfile.TemporaryDirectory() as directory:
+            state = pathlib.Path(directory)
+            (root / "child.py").write_text(
+                "import signal,time\nfrom pathlib import Path\n"
+                "signal.signal(signal.SIGTERM, lambda *_: exit(0))\n"
+                "Path('child-ready').touch()\n"
+                "while True: time.sleep(1)\n")
+            (root / "ops" / runner).write_text(
+                "import os,signal,subprocess,sys,time\nfrom pathlib import Path\n"
+                "child=subprocess.Popen([sys.executable,'child.py'],start_new_session=True)\n"
+                "def stop(*_):\n"
+                "    child.wait(timeout=5)\n    sys.exit(143)\n"
+                "signal.signal(signal.SIGTERM,stop)\n"
+                "while not Path('child-ready').exists(): time.sleep(.01)\n"
+                "Path('pids').write_text(f'{os.getpid()} {child.pid}')\n"
+                "while True: time.sleep(1)\n")
+            process = subprocess.Popen(["bash", "ops/ci.sh", "--only", name], cwd=root,
+                env={**fixture_env(), "RUNNER_TEMP": directory}, start_new_session=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            pids = []
+            try:
+                deadline = time.monotonic() + 15
+                while not (root / "pids").exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                if (root / "pids").exists():
+                    pids = [int(pid) for pid in (root / "pids").read_text().split()]
+                check(f"{name} cancellation fixture starts runner and descendant", len(pids) == 2)
+                process.send_signal(signal.SIGTERM)
+                stdout, stderr = process.communicate(timeout=15)
+                check(f"{name} SIGTERM exits 143 without claiming success",
+                      process.returncode == 143 and "CI passed" not in stdout, stdout + stderr)
+                for pid in pids:
+                    try:
+                        os.kill(pid, 0)
+                        alive = True
+                    except ProcessLookupError:
+                        alive = False
+                    check(f"{name} child {pid} exits before controller returns", not alive)
+                check(f"{name} SIGTERM removes controller temporary state",
+                      not list(state.glob("carr-ci.*")), stderr)
+            finally:
+                for pid in [process.pid, *pids]:
+                    try:
+                        os.killpg(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                process.wait(timeout=10)
+
+
 def test_controller_requires_runner_verdicts():
     with ci_fixture() as root:
         for name in ("gates", "secret", "pushfloor", "migration"):
@@ -1637,6 +1709,8 @@ def main(argv=None):
     for fn in (test_artifact_requires_native_rule_projection_and_tests,
                test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
+               test_migration_requires_newline_terminated_verdict,
+               test_controller_sigterm_cleans_children_and_temp_state,
                test_controller_requires_runner_verdicts,
                test_controller_consumes_evidence_destination_before_nested_runs,
                test_python_controller_entrypoint, test_failed_gate_logs_survive_exit, test_worktree_python_selection,
