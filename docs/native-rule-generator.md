@@ -38,6 +38,14 @@ The snapshot records the generated root CORE block's cl100k_base token count
 and hash. Offline checks validate that block. The Claude adapter uses the same
 index with reference links relative to its directory.
 
+Claude's `CLAUDE.md` imports the root `AGENTS.md`, including its CORE index.
+Both copies stay until an authenticated loading probe verifies the import alone
+at startup and after compaction. The current probe in
+`tools/probe_native_rule_loading.py` requires `carr-core.md` and does not assert
+that the imported `AGENTS.md` loads. Offline generator tests cannot establish
+Claude runtime loading. This guidance-only follow-up does not run authenticated
+provider probes, so removing the adapter would lack that proof.
+
 The manifest's `startup_measurement` is the last optional whole-file measurement,
 not a drift constraint. Maintained AGENTS.md and CLAUDE.md edits do not require
 remeasurement. Run `./run.sh native-rules --measure` with `tiktoken==0.14.0`
