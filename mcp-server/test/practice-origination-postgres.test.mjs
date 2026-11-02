@@ -158,6 +158,22 @@ test('Florida document identity stays research-only, deduplicates and holds agen
     await assert.rejects(()=>ingest('nppes',[row]));
     const {npi,...missingNpi}=record();
     await assert.rejects(()=>ingest('nppes',[missingNpi]));
+    for (const document of ['A00001','000001']) {
+      const short={...row,record_key:document,document_number:document};
+      assert.equal((await ingest('formation-fl',[short])).inserted,1);
+      assert.equal((await ingest('formation-fl',[short])).inserted,0);
+      assert.equal((await read()).cards.find(x=>x.document_number===document).record_key,document);
+    }
+    for (const document of ['A0000','A000001','L2600000000','A!0001']) {
+      await assert.rejects(()=>ingest('formation-fl',[{...row,record_key:document,document_number:document}]),
+        /origination_input_invalid/);
+    }
+    await c.query('begin');
+    try {
+      await assert.rejects(()=>c.query(`update practice_origination_event
+        set document_number='A000001',record_key='A000001' where document_number='A00001'`),
+        /practice_origination_event_identity_check/);
+    } finally {await c.query('rollback');}
     const saved=(await read()).coverage.find(x=>x.source==='formation-fl');
     await ingest('formation-fl',[],{status:'blocked',detail:'Florida corporate line 101: invalid filing date'});
     assert.equal((await read()).coverage.find(x=>x.source==='formation-fl').checkpoint,saved.checkpoint);

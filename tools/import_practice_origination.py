@@ -44,20 +44,20 @@ def florida_rows(line, *, published_on, line_number):
     if len(raw) != max(end for _, end in FLORIDA_LAYOUT.values()):
         raise ValueError(error + "fixed-width schema drift")
     row = {key: raw[start:end].strip() for key, (start, end) in FLORIDA_LAYOUT.items()}
-    if not re.fullmatch(r"[A-Z0-9]{12}", row["document_number"]) or not row["name"] or not row["city"]:
-        raise ValueError(error + "missing or invalid document identity or principal city")
-    if not re.fullmatch(r"[A-Z]{2}", row["state"]):
-        raise ValueError(error + "invalid principal state")
+    if not re.fullmatch(r"[A-Z0-9]{6}(?:[A-Z0-9]{6})?", row["document_number"]) or not row["name"]:
+        raise ValueError(error + "missing or invalid document identity")
     try:
         filing_on = datetime.strptime(row["filing_on"], "%Y%m%d").date()
         if len(row["filing_on"]) != 8 or filing_on > published_on:
             raise ValueError()
     except ValueError as exc:
         raise ValueError(error + "invalid filing date") from exc
-    if not re.fullmatch(r"[0-9]{5}(?:-[0-9]{4})?", row["postal_code"]):
-        raise ValueError(error + "invalid principal postal code")
-    if row["state"] != "FL" or row["postal_code"][:3] not in FLORIDA_SOURCE["territory_zip_prefixes"] or not HEALTHCARE_NAME.search(row["name"]):
+    if (row["state"] != "FL" or not re.fullmatch(r"[0-9]{5}(?:-[0-9]{4})?", row["postal_code"])
+            or row["postal_code"][:3] not in FLORIDA_SOURCE["territory_zip_prefixes"]
+            or not HEALTHCARE_NAME.search(row["name"])):
         return []
+    if not row["city"]:
+        raise ValueError(error + "missing principal city")
     return [{"record_key": row["document_number"], "document_number": row["document_number"],
              "name": row["name"], "city": row["city"], "state": row["state"],
              "filing_on": filing_on.isoformat(), "evidence_date": filing_on.isoformat(),
@@ -81,9 +81,12 @@ def import_file(path, *, source, published_on, call):
     acknowledged = 0
     inserted = 0
     processed = 0
+    skipped = 0
 
     def submit(records, status="available", detail="Local public file imported"):
         nonlocal checkpoint, inserted
+        if source == "formation-fl" and status == "available":
+            detail = f"Local public file imported; {skipped} out-of-scope rows skipped in this attempt"
         result = call("record-practice-origination-feed", {
             "idempotency_key": str(uuid4()), "source": source,
             "expected_checkpoint": checkpoint, "checkpoint": prefix + str(processed),
@@ -113,7 +116,9 @@ def import_file(path, *, source, published_on, call):
                 if processed <= acknowledged:
                     continue
                 if source == "formation-fl":
-                    pending.extend(florida_rows(raw, published_on=published_on, line_number=processed))
+                    records = florida_rows(raw, published_on=published_on, line_number=processed)
+                    skipped += not records
+                    pending.extend(records)
                 else:
                     pending.extend(nppes_rows([raw], as_of=published_on) if source == "nppes" else
                                    pecos.origination_rows([raw], published_on=published_on))
@@ -128,7 +133,8 @@ def import_file(path, *, source, published_on, call):
     except (ValueError, csv.Error) as exc:
         submit([], "blocked", str(exc))
         raise
-    return {"inserted": inserted, "checkpoint": checkpoint, "processed": processed}
+    return {"inserted": inserted, "checkpoint": checkpoint, "processed": processed,
+            **({"skipped": skipped} if source == "formation-fl" else {})}
 
 
 def main():

@@ -98,6 +98,32 @@ class OriginationTests(unittest.TestCase):
         self.assertEqual(batches[0]['records'][0]['document_number'], 'L26000000001')
         self.assertIn('6 out-of-scope rows skipped', batches[0]['detail'])
 
+    def test_florida_document_number_accepts_only_six_or_twelve_characters(self):
+        from tools.import_practice_origination import florida_rows
+        suffix = ("Synthetic Dental LLC".ljust(192) + "20261019" +
+                  "SYNTHETIC_LOCATION_A".ljust(42) + "Pensacola".ljust(28) + "FL" +
+                  "".ljust(42) + "32501".ljust(10))
+        for document in ['A00001', '000001', 'L26000000001']:
+            with self.subTest(document=document):
+                row = florida_rows(document.ljust(12) + suffix,
+                                   published_on=date(2026, 10, 21), line_number=1)[0]
+                self.assertEqual(row['document_number'], document)
+                self.assertEqual(row['record_key'], document)
+        for document in ['', 'A0000', 'A000001', 'L2600000000', 'A!0001']:
+            with self.subTest(document=document), self.assertRaisesRegex(ValueError, 'document identity'):
+                florida_rows(document.ljust(12) + suffix, published_on=date(2026, 10, 21), line_number=2)
+
+    def test_florida_unreadable_rows_still_fail_even_out_of_scope(self):
+        from tools.import_practice_origination import florida_rows
+        line = ("L26000000001" + "Synthetic Retail LLC".ljust(192) + "20261019" +
+                "SYNTHETIC_LOCATION_A".ljust(42) + "".ljust(28) + "  " +
+                "".ljust(42) + "".ljust(10))
+        self.assertEqual(florida_rows(line, published_on=date(2026, 10, 21), line_number=1), [])
+        for bad, error in [(line[:-1], 'width'), ('!' + line[1:], 'document identity'),
+                           (line[:204] + '20260230' + line[212:], 'filing date')]:
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                florida_rows(bad, published_on=date(2026, 10, 21), line_number=2)
+
     def test_florida_import_disabled_and_bad_batch_preserves_checkpoint(self):
         from tools.import_practice_origination import import_file, FLORIDA_SOURCE
         state = {'checkpoint': None, 'status': 'available', 'enabled': False}

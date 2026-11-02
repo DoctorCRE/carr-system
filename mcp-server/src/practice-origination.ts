@@ -29,7 +29,7 @@ const recordSchema: Schema = {anyOf:[
   {type:'object',additionalProperties:false,properties:{...recordProperties,
     npi:{type:'string',pattern:'^[0-9]{10}$'}},required:[...recordRequired,'npi']},
   {type:'object',additionalProperties:false,properties:{...recordProperties,
-    document_number:{type:'string',pattern:'^[A-Z0-9]{12}$'},filing_on:{type:'string',format:'date'}},
+    document_number:{type:'string',pattern:'^[A-Z0-9]{6}([A-Z0-9]{6})?$'},filing_on:{type:'string',format:'date'}},
     required:[...recordRequired,'document_number','filing_on']},
 ]};
 const importSchema: Schema = {type:'object',additionalProperties:false,properties:{
