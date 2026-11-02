@@ -195,6 +195,33 @@ def test_controller_consumes_evidence_destination_before_nested_runs():
               rc == 0 and len(rows) == 1 and rows[0].split('\t')[:3] == ["unit", "unit", "0"], text)
 
 
+def test_artifact_requires_native_rule_projection_and_tests():
+    for failing in ('native_rules.py', 'test_native_rules.py', None):
+        with ci_fixture() as root:
+            for script in ('native_rules.py', 'test_native_rules.py'):
+                (root / 'tools' / script).write_text(
+                    "import sys\n"
+                    "from pathlib import Path\n"
+                    f"Path('{script}.ran').write_text(' '.join(sys.argv[1:]))\n"
+                    f"print('native-rule-probe-{script}')\n"
+                    f"raise SystemExit({1 if script == failing else 0})\n")
+            (root / 'tools/release-manifest.py').write_text(
+                "from pathlib import Path\nPath('release.ran').touch()\nraise SystemExit(1)\n")
+            rc, output = run(['--only', 'artifact'], root=root)
+            projection = root / 'native_rules.py.ran'
+            coverage = root / 'test_native_rules.py.ran'
+            check(f'artifact checks projection before release, failure={failing}',
+                  rc == 1 and projection.is_file() and projection.read_text() == '--check', output)
+            check(f'artifact stops at the first native-rule failure, failure={failing}',
+                  coverage.is_file() == (failing != 'native_rules.py')
+                  and (root / 'release.ran').exists() == (failing is None), output)
+            if failing:
+                check(f'artifact reports and retains native-rule failure from {failing}',
+                      'FAIL' in output and 'artifact' in output
+                      and 'native rule projection is stale or coverage tests failed' in output
+                      and f'native-rule-probe-{failing}' in output, output)
+
+
 def test_retired_freshness_class_is_not_available():
     rc, out = run(["--list"])
     check("freshness is absent from the class inventory", rc == 0 and "freshness" not in out, out)
@@ -1607,7 +1634,8 @@ def main(argv=None):
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_controller_selection_and_invalid_arguments,
+    for fn in (test_artifact_requires_native_rule_projection_and_tests,
+               test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
                test_controller_requires_runner_verdicts,
                test_controller_consumes_evidence_destination_before_nested_runs,

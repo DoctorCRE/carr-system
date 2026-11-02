@@ -31,7 +31,7 @@ const record=(patch={})=>({...structuredClone(evaluation.records.nppes),...patch
 async function ingest(source,records,patch={}) {
   const coverage=(await read()).coverage.find(x=>x.source===source);
   return command('record-practice-origination-feed',{idempotency_key:randomUUID(),source,
-    expected_checkpoint:coverage.checkpoint,checkpoint:randomUUID(),published_on:'2026-10-21',
+    expected_checkpoint:coverage.checkpoint ?? null,checkpoint:randomUUID(),published_on:'2026-10-21',
     status:'available',detail:'Synthetic public-file import',records,...patch});
 }
 
@@ -111,4 +111,56 @@ test('schema drift blocks the affected feed and preserves recovery; stale writer
   await assert.rejects(()=>ingest('formation-al',[]));
   await assert.rejects(()=>ingest('nppes',[record({source_url:'https://example.invalid/synthetic'})]));
   await assert.rejects(()=>ingest('pecos',[],{published_on:'2026-10-20'}));
+});
+
+test('Florida document identity stays research-only, deduplicates and holds agent clusters for review',async()=>{
+  const sources=(await import('../src/origination-sources.json',{with:{type:'json'}})).default;
+  const source=sources.find(x=>x.source==='formation-fl');
+  const row={record_key:'L26000000001',document_number:'L26000000001',
+    name:'Synthetic Formation Dental',city:'Pensacola',state:'FL',filing_on:'2026-10-19',
+    evidence_date:'2026-10-19',date_basis:'filing',
+    source_url:'https://dos.fl.gov/sunbiz/other-services/data-downloads/daily-data/',
+    facts:{address:'SYNTHETIC_LOCATION_A',registered_agent_address:'SYNTHETIC_AGENT_LOCATION',postal_code:'32501',healthcare_name_match:true}};
+  await assert.rejects(()=>ingest('formation-fl',[row]),/origination_source_disabled/);
+  const before=(await c.query('select (select count(*) from party) parties,(select count(*) from client) clients')).rows;
+  source.enabled=true;
+  try {
+    assert.equal((await ingest('formation-fl',[row])).inserted,1);
+    assert.equal((await ingest('formation-fl',[row])).inserted,0);
+    let cards=(await read()).cards.filter(x=>x.source==='formation-fl');
+    assert.equal(cards.length,1);
+    assert.equal(cards[0].npi,null);
+    assert.equal(cards[0].document_number,row.document_number);
+    assert.equal(cards[0].filing_on,'2026-10-19');
+    assert.equal(cards[0].published_on,'2026-10-21');
+    assert.ok(cards[0].recorded_at);
+    assert.equal(cards[0].route,'research');
+    assert.match(cards[0].why_now,/healthcare-name research candidate.*2026-10-19.*unverified/i);
+    await ingest('formation-fl',[{...row,record_key:'L26000000002',document_number:'L26000000002',
+      name:'Synthetic Formation Medical',facts:{...row.facts,address:'SYNTHETIC_LOCATION_B'}}]);
+    cards=(await read()).cards.filter(x=>x.source==='formation-fl');
+    assert.equal(cards.length,2);
+    assert.ok(cards.every(x=>x.route==='identity_review'));
+    await ingest('formation-fl',[{...row,record_key:'L26000000003',document_number:'L26000000003',
+      facts:{...row.facts,registered_agent_address:row.facts.address}}]);
+    assert.equal((await read()).cards.find(x=>x.document_number==='L26000000003').route,'identity_review');
+    const party=(await c.query(`insert into party(kind,name,city,state,created_by,updated_by)
+      values('org',$1,'Pensacola','FL',$2,$2) returning id`,[row.name,actor.id])).rows[0].id;
+    await ingest('formation-fl',[{...row,facts:{...row.facts,registered_agent_address:''}}]);
+    assert.equal((await read()).cards.find(x=>x.document_number===row.document_number).route,'identity_review');
+    await c.query('delete from party where id=$1',[party]);
+    await assert.rejects(()=>ingest('formation-fl',[{...row,npi:'1234567890'}]));
+    await assert.rejects(()=>ingest('formation-fl',[{...row,state:'AL'}]));
+    await assert.rejects(()=>ingest('formation-fl',[{...row,facts:{...row.facts,postal_code:'33101'}}]));
+    await assert.rejects(()=>ingest('formation-fl',[{...row,name:'Synthetic Retail'}]));
+    await assert.rejects(()=>ingest('formation-fl',[{...row,date_basis:'publication'}]));
+    await assert.rejects(()=>ingest('formation-fl',[{...row,filing_on:'2026-10-18'}]));
+    await assert.rejects(()=>ingest('nppes',[row]));
+    const {npi,...missingNpi}=record();
+    await assert.rejects(()=>ingest('nppes',[missingNpi]));
+    const saved=(await read()).coverage.find(x=>x.source==='formation-fl');
+    await ingest('formation-fl',[],{status:'blocked',detail:'Florida corporate line 101: invalid filing date'});
+    assert.equal((await read()).coverage.find(x=>x.source==='formation-fl').checkpoint,saved.checkpoint);
+    assert.deepEqual((await c.query('select (select count(*) from party) parties,(select count(*) from client) clients')).rows,before);
+  } finally {source.enabled=false;}
 });

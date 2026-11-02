@@ -310,6 +310,13 @@ if(/DATABASE_URL\s*=/.test(t)){console.error("wrangler.toml declares a DATABASE_
             self.verdict('ok', 'worker config declared; worker boot passed')
 
     def check_artifact(self):
+        for name, command in (
+                ('native-rules', [self.python, 'tools/native_rules.py', '--check']),
+                ('native-rules-tests', [self.python, 'tools/test_native_rules.py'])):
+            if self.run_quiet(name, command):
+                self.fail_tail(name)
+                self.verdict('bad', 'native rule projection is stale or coverage tests failed')
+                return
         if self.run_quiet('doctorcre-artifact', [self.python, 'tools/release-manifest.py',
                 'doctorcre-artifact', 'verify', '--pin', 'ops/config/doctorcre-artifact.v1.json']):
             self.show('doctorcre-artifact', tail=20, error=True)

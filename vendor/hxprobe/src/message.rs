@@ -121,6 +121,11 @@ pub struct Message {
     pub recipients: Option<Vec<Recipient>>,
     /// Stored bodies, best first: the longest inline HTML, then sidecar paths.
     pub bodies: Vec<Body>,
+    pub body_objects: usize,
+    pub body_rejected: usize,
+    pub recipient_objects: usize,
+    pub recipient_children: usize,
+    pub recipient_rejected: usize,
 }
 
 #[derive(Default)]
@@ -130,6 +135,12 @@ pub struct Index {
     revisions: BTreeMap<u64, Vec<Revision>>,
     recipients: BTreeMap<u64, BTreeMap<u64, BTreeSet<RecipientKey>>>,
     bodies: BTreeMap<u64, BTreeSet<Body>>,
+    body_objects: BTreeMap<u64, usize>,
+    body_rejected: BTreeMap<u64, usize>,
+    recipient_objects: BTreeMap<u64, BTreeSet<u64>>,
+    recipient_rejected: BTreeMap<u64, usize>,
+    pub unlinked_bodies: usize,
+    pub unlinked_recipients: usize,
 }
 
 /// Kind, address and display name; the name is unset until Outlook resolves the address.
@@ -234,12 +245,34 @@ impl Index {
             }
         }
         for (_, object) in envelopes(data, RECIPIENT) {
-            if let Some((owner, id, value)) = recipient(object) {
+            let kind = super::object::u32_at(object, 18).unwrap_or(0);
+            let identity = super::object::reference(object, RECIPIENT.1, kind);
+            let decoded = recipient(object);
+            if let Some((id, owner)) = identity {
+                self.recipient_objects.entry(owner).or_default().insert(id);
+                if decoded.is_none() {
+                    *self.recipient_rejected.entry(owner).or_default() += 1;
+                }
+            } else {
+                self.unlinked_recipients += 1;
+            }
+            if let Some((owner, id, value)) = decoded {
                 self.recipients.entry(owner).or_default().entry(id).or_default().insert(value);
             }
         }
         for (_, object) in envelopes(data, BODY) {
-            if let Some((key, b)) = body(object) {
+            let decoded = body(object);
+            let owner = object.get(BODY_OWNER..)
+                .and_then(|v| super::object::reference(v, MESSAGE.1, MESSAGE_KIND)).map(|(k, _)| k);
+            if let Some(owner) = owner {
+                *self.body_objects.entry(owner).or_default() += 1;
+                if decoded.is_none() {
+                    *self.body_rejected.entry(owner).or_default() += 1;
+                }
+            } else {
+                self.unlinked_bodies += 1;
+            }
+            if let Some((key, b)) = decoded {
                 self.bodies.entry(key).or_default().insert(b);
             }
         }
@@ -294,6 +327,11 @@ impl Index {
                     sender_name: newest(revs, |r| r.sender_name.clone()),
                     recipients,
                     bodies,
+                    body_objects: self.body_objects.get(&key).copied().unwrap_or(0),
+                    body_rejected: self.body_rejected.get(&key).copied().unwrap_or(0),
+                    recipient_objects: self.recipient_objects.get(&key).map_or(0, |v| v.len()),
+                    recipient_children: self.recipients.get(&key).map_or(0, |v| v.len()),
+                    recipient_rejected: self.recipient_rejected.get(&key).copied().unwrap_or(0),
                 };
                 (key, message)
             })

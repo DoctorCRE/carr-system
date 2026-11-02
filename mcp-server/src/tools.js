@@ -15,7 +15,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
-import { dealExtractionTools } from "./deal-extraction.js";
+import { dealExtractionTools } from "./deal-extraction.ts";
 import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
 import { marketTermsTools } from "./market-terms.ts";
@@ -9182,7 +9182,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "fact-review": "mcp-server/src/fact-review.ts",
   "market-terms": "mcp-server/src/market-terms.ts",
   "fact-generation": "mcp-server/src/fact-generation.ts",
-  "deal-extraction": "mcp-server/src/deal-extraction.js",
+  "deal-extraction": "mcp-server/src/deal-extraction.ts",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",

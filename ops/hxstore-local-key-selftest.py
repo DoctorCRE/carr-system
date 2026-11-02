@@ -5,6 +5,7 @@ Every value is synthetic; the real decoder runs. The builders here lay objects o
 (class 00c9 message, 0055 recipient, 00ca body, 004f view row, 004d folder); other selftests import them."""
 import atexit
 import gzip
+import json
 import runpy
 import shutil
 from pathlib import Path
@@ -136,6 +137,78 @@ class LocalKeyExportTests(unittest.TestCase):
                     dict(db.execute('SELECT key, value FROM meta')))
         finally:
             db.close()
+
+    def census(self, *objects, files=None):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / 'copy.hxd'
+            source.write_bytes(STORE(b''.join(objects)))
+            cache = Path(files) if files else root / 'Files'
+            cache.mkdir(exist_ok=True)
+            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'census', '--immutable-copy',
+                                     str(source), str(cache), '7'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, 'census rejected synthetic input')
+            for secret in ('PRIVATE-SUBJECT', 'private@example.test', 'PRIVATE-BODY', 'PRIVATE-NAME'):
+                self.assertNotIn(secret, result.stdout + result.stderr)
+            self.assertEqual(result.stderr, '')
+            return json.loads(result.stdout)
+
+    def test_census_distinguishes_absent_rejected_and_conflicting_children(self):
+        bad_body = bytearray(body(102, html='PRIVATE-BODY'))
+        struct.pack_into('<I', bad_body, 10 + 1650, 0xffffffff)
+        bad_recipient = recipient(102, 202, TO, 'not-an-address')
+        got = self.census(folder(50, 'Inbox'),
+                          message(100, subject='PRIVATE-SUBJECT', sender='private@example.test', sender_name='PRIVATE-NAME'),
+                          message(101), body(101, html='<p>PRIVATE-BODY</p>'),
+                          recipient(101, 201, TO, 'private@example.test', 'PRIVATE-NAME'),
+                          recipient(101, 201, TO, 'other@example.test'),
+                          message(102, folder=999), bytes(bad_body), bad_recipient,
+                          message(103, account=8))
+        rows = got['messages']
+        self.assertEqual(set(rows), {'100', '101', '102'})
+        self.assertEqual((rows['100']['body_objects'], rows['100']['recipient_objects']), (0, 0))
+        self.assertEqual((rows['101']['body_inline'], rows['101']['recipients_conflict'],
+                          rows['101']['recipient_children']), (1, 1, 1))
+        self.assertEqual((rows['102']['body_objects'], rows['102']['body_rejected'],
+                          rows['102']['recipient_rejected'], rows['102']['folder_uncatalogued']), (1, 1, 1, 1))
+        self.assertEqual(got['totals']['messages'], 3)
+        self.assertEqual(got['totals']['body_complete'], 1)
+        self.assertEqual(got['totals']['body_absent'], 1)
+        self.assertEqual(got['totals']['recipients_none'], 2)
+        self.assertEqual(got['totals']['recipient_children'], 1)
+        self.assertEqual(got['totals']['recipient_objects'], 2)
+        self.assertEqual(got['totals']['unknown_folder_messages'], 1)
+        self.assertTrue(all(type(v) is int for row in rows.values() for v in row.values()))
+
+    def test_census_names_sidecar_failure_reasons_without_paths_or_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            files = Path(temp)
+            efm = files / 'S0/3/EFMData'
+            efm.mkdir(parents=True)
+            (efm / 'ok.dat').write_bytes(gzip.compress(b'<p>PRIVATE-BODY</p>'))
+            (efm / 'bad.dat').write_bytes(b'PRIVATE-BODY')
+            got = self.census(folder(50, 'Inbox'), *(obj for key, name in
+                              [(100, 'ok'), (101, 'missing'), (102, 'bad')] for obj in
+                              (message(key), body(key, sidecar=f'~/Files/S0/3/EFMData/{name}.dat'))), files=files)
+        self.assertEqual(got['totals']['body_sidecar'], 3)
+        self.assertEqual(got['totals']['sidecar_linked'], 1)
+        self.assertEqual(got['totals']['sidecar_missing'], 1)
+        self.assertEqual(got['totals']['sidecar_decode_failed'], 1)
+        self.assertNotIn('EFMData', json.dumps(got))
+
+    def test_census_rejects_invalid_inputs_without_echoing_paths_or_bytes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / 'PRIVATE-SUBJECT.hxd'
+            source.write_bytes(b'PRIVATE-BODY')
+            command = [str(CRATE / 'target/debug/hxprobe'), 'census', '--immutable-copy',
+                       str(source), str(root), '7']
+            bad = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual((bad.returncode, bad.stdout, bad.stderr), (2, '', 'census input rejected\n'))
+            source.write_bytes(STORE(message(100)))
+            (root / 'HxStore.lock').touch()
+            live = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual((live.returncode, live.stdout, live.stderr), (2, '', 'census input rejected\n'))
 
     def test_revisions_of_one_message_export_one_row_with_its_key(self):
         rows, meta = self.export(message(0x1001), message(0x1001, modified=1_793_000_060))

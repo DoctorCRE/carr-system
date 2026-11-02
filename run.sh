@@ -79,6 +79,7 @@ key_recovery_test(){ "$REPO/bin/key-recovery-test.sh" "$@"; }
 call_verb()    { shift; python3 "$REPO/tools/call-verb.py" "$@"; }
 
 case "${1:-}" in
+  native-rules) shift; "$PY" "$REPO/tools/native_rules.py" "$@" ;;
   map)          shift; "$PY" "$REPO/tools/codemap.py" "$@" ;;
   deal-room)    shift; deal_room "$@" ;;
   lead-board)   shift; lead_board "$@" ;;

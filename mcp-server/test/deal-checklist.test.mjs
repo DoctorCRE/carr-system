@@ -79,3 +79,43 @@ test('requested deadlines enter the existing due list', () => {
   ] });
   assert.deepEqual(result.due_items.map(item => [item.id, item.status]), [['requirements', 'overdue'], ['market_survey', 'due']]);
 });
+
+test('a confirmed document receipt leaves delivery reminders without satisfying the row', () => {
+  const request = { id: 'received', row_key: 'requirements', owner: 'joe', due_on: '2026-10-19',
+    document_type: 'requirements', status: 'fulfilled', fulfilled_at: '2026-10-20T12:00:00Z',
+    fulfilled_by: 'partner', evidence_attachment_id: 'stored-document', satisfied: false, receipts: [] };
+  const result = checklist({ requests: [request] });
+  const row = result.phases.flatMap(phase => phase.items).find(item => item.id === request.row_key);
+  assert.equal(row.status, 'received');
+  assert.equal(row.request.satisfied, false);
+  assert.equal(row.evidence_ref, 'attachment:stored-document');
+  assert.equal(result.due_items.some(item => item.id === request.row_key), false);
+});
+
+test('quarantined uploads remain overdue and cannot prove receipt or satisfaction', () => {
+  const result = checklist({ requests: [{ id: 'upload', row_key: 'requirements', owner: 'joe',
+    due_on: '2026-10-19', status: 'open', satisfied: false,
+    receipts: [{ id: 'guest-upload', state: 'quarantined' }] }] });
+  const row = result.due_items.find(item => item.id === 'requirements');
+  assert.equal(row.status, 'overdue');
+  assert.equal(row.evidence_ref, null);
+  assert.equal(row.request.satisfied, false);
+});
+
+test('confirmed receipt preserves authoritative lease, invoice and commission completion', () => {
+  const ids = ['executed_lease', 'invoice_recorded', 'commission_received'];
+  const result = checklist({ id: 'deal', invoiced_on: '2026-10-19',
+    lease: { status: 'current', executed_on: '2026-10-19', evidence_ref: 'fixture:executed-lease' },
+    commissions: [{ commission_id: 'paid', status: 'received', received_on: '2026-10-19' }],
+    requests: ids.map(row_key => ({ id: row_key, row_key, owner: 'joe', due_on: '2026-10-19',
+      status: 'fulfilled', evidence_attachment_id: 'stored-document', satisfied: false, receipts: [] })),
+  });
+  const items = result.phases.flatMap(phase => phase.items);
+  for (const id of ids) {
+    const row = items.find(item => item.id === id);
+    assert.equal(row.status, 'complete');
+    assert.notEqual(row.evidence_ref, 'attachment:stored-document');
+    assert.equal(row.request.satisfied, false);
+  }
+  assert.deepEqual(result.due_items, []);
+});

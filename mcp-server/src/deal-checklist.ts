@@ -5,7 +5,9 @@ import type { Db } from './verb-contract.ts';
 
 type DealType = 'lease' | 'renewal' | 'purchase' | 'land';
 type RequirementRequest = { id: string; row_key: string; owner: string; due_on: string;
-  document_type: string; satisfied: false; receipts: { id: string; state: 'quarantined' }[] };
+  document_type: string; satisfied: false; receipts: { id: string; state: 'quarantined' }[];
+  status: 'open' | 'fulfilled'; fulfilled_at: string | null; fulfilled_by: string | null;
+  evidence_attachment_id: string | null };
 type ChecklistItem = { id: string; label: string; status: string; due_on: string | null;
   evidence_ref: string | null; owner: string | null; document_type: string | null; request?: RequirementRequest; source: object };
 type ChecklistPhase = { id: string; label: string; items: ChecklistItem[] };
@@ -116,7 +118,10 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
     const request = record.requests?.find(row => row.row_key === item.id);
     if (request) {
       Object.assign(item, { request, owner: request.owner, due_on: request.due_on });
-      if (item.status !== 'complete') item.status = request.due_on < today ? 'overdue' : request.due_on === today ? 'due' : 'upcoming';
+      if (item.status !== 'complete') {
+        if (request.status === 'fulfilled') Object.assign(item, { status: 'received', evidence_ref: `attachment:${request.evidence_attachment_id}` });
+        else item.status = request.due_on < today ? 'overdue' : request.due_on === today ? 'due' : 'upcoming';
+      }
     }
   }
   result.due_items = items
@@ -146,7 +151,7 @@ export async function readDealChecklist(client: Db, record: ChecklistDeal, now =
   }
   const available = await client.query("select to_regclass('v_requirement_request') as relation /* checklist:requests-available */");
   requests = available.rows[0]?.relation ? await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
-    document_type,satisfied,receipts from v_requirement_request
+    document_type,satisfied,receipts,status,fulfilled_at,fulfilled_by,evidence_attachment_id from v_requirement_request
     where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]) : null;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
   return { ...deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests?.rows }, sources.rows, today),

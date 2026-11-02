@@ -15,7 +15,7 @@ const PLACEMENTS = new Set(["CORE", "PROMPT", "TOOL", "PLANNING"]);
 // Mirrors ops.adopt_rule: Convention with Card or Packs, optionally Retires;
 // a retirement-only proposal starts with Retires and has no delivery metadata.
 function parseProposal(text) {
-  text = String(text ?? "").split("\n").filter(line => !/^Card: WR\d+\.S\d+\.J\d+\s*$/.test(line)).join("\n");
+  text = String(text ?? "").split("\n").filter(line => !/^Card: WR\d+\.S\d+\.J\d+[ \t\r]*$/.test(line)).join("\n");
   const retireLines = text.match(/^Retires:.*$/gm) ?? [];
   let retires = [];
   if (retireLines.length) {

@@ -29,6 +29,7 @@ use memmap2::Mmap;
 mod attachment;
 mod block;
 mod body;
+mod census;
 mod calendar;
 mod category;
 mod detail;
@@ -584,6 +585,8 @@ const USAGE: &str = "\
 hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
 
 usage:
+  hxprobe census --immutable-copy <copy> <files-dir> <account-key>
+                                     emit count-only child-object census JSON
   hxprobe observe <copy>             emit count-only structural JSON
   hxprobe blocks <file>              verify every block, report coverage
   hxprobe db     <file> [out.db] [files-dir]
@@ -595,6 +598,20 @@ rewrites the file while it runs.";
 
 fn main() {
     let raw: Vec<_> = env::args_os().collect();
+    if raw.get(1).is_some_and(|arg| arg == "census") {
+        let result = if raw.len() == 6 && raw[2] == "--immutable-copy" {
+            raw[5].to_str().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0)
+                .ok_or(()).and_then(|account| census::run(&raw[3], &raw[4], account))
+        } else { Err(()) };
+        match result {
+            Ok(json) => println!("{json}"),
+            Err(()) => {
+                eprintln!("census input rejected");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if raw.get(1).is_some_and(|arg| arg == "identity-compare") {
         let result = if raw.len() == 7 && raw[2] == "--immutable-copies" {
             identity::run(&raw[3], &raw[4], &raw[5], &raw[6])
