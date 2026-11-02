@@ -143,19 +143,28 @@ def codex_operands(args):
     return words
 
 
-def registration_cache(registered=None):
+def registration_cache(registered=None, removed=()):
     path = Path.home() / '.cache/carr/agent-card-registrations.json'
     temporary = None
     try:
-        if registered is None:
+        try:
             entries = json.loads(path.read_text())
-            now = time.time()
-            return {card for card, seen in entries.items()
-                    if isinstance(seen, (int, float)) and 0 <= now - seen < 24 * 60 * 60}
+        except (FileNotFoundError, ValueError):
+            entries = {}
+        if not isinstance(entries, dict):
+            entries = {}
+        now = time.time()
+        entries = {card: seen for card, seen in entries.items()
+                   if isinstance(seen, (int, float)) and 0 <= now - seen < 24 * 60 * 60}
+        if registered is None:
+            return set(entries)
+        for card in removed:
+            entries.pop(card, None)
+        entries.update(dict.fromkeys(registered, now))
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as output:
             temporary = Path(output.name)
-            json.dump(dict.fromkeys(registered, time.time()), output)
+            json.dump(entries, output)
         temporary.replace(path)
     except (OSError, ValueError, AttributeError, TypeError):
         return set()
@@ -174,35 +183,47 @@ def check_prompts(prompts):
         cards.extend(found)
     if not cards:
         return
-    try:
-        with subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent.parent / 'tools/call-verb.py'),
-                               'work-queue', '{}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, stdin=subprocess.DEVNULL, start_new_session=True) as lookup:
-            try:
-                stdout, _ = lookup.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(lookup.pid, signal.SIGKILL)
-                lookup.communicate()
-                raise
-            if lookup.returncode:
-                raise ValueError('queue call failed')
-        queue = json.loads(stdout)
-        if not isinstance(queue, dict) or queue.get('ok') is not True or not isinstance(queue.get('jobs'), list):
-            raise ValueError('invalid queue response')
-        registered = {job['card_id'] for job in queue['jobs']}
-        if not all(isinstance(card, str) for card in registered):
-            raise ValueError('invalid queue Card')
-    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
-        cached = registration_cache()
-        if all(card in cached for card in cards):
-            return
-        unseen = ', '.join(card for card in cards if card not in cached)
-        return refuse('Work queue lookup unreachable or invalid (' + type(exc).__name__ + '). '
-                      'No registration cached within 24 hours for ' + unseen + '.')
-    registration_cache(registered)
-    for card in cards:
-        if card not in registered:
+    deadline = time.monotonic() + 8
+    for card in dict.fromkeys(cards):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return refuse('Card registration lookup deadline exceeded. Retry the launch.')
+        try:
+            with subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent.parent / 'tools/call-verb.py'),
+                                   'job-card-registration', json.dumps({'card_id': card})],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, stdin=subprocess.DEVNULL, start_new_session=True) as lookup:
+                try:
+                    stdout, _ = lookup.communicate(timeout=min(5, remaining))
+                except subprocess.TimeoutExpired:
+                    os.killpg(lookup.pid, signal.SIGKILL)
+                    lookup.communicate()
+                    raise
+                if lookup.returncode:
+                    raise ValueError('registration call exited ' + str(lookup.returncode))
+            registration = json.loads(stdout)
+            if (not isinstance(registration, dict) or registration.get('ok') is not True
+                    or registration.get('card_id') != card
+                    or type(registration.get('registered')) is not bool):
+                raise ValueError('invalid registration response')
+            if registration['registered'] and (
+                    not all(isinstance(registration.get(key), str) and registration[key]
+                            for key in ('executor', 'model', 'work_request_state'))
+                    or 'repository' not in registration
+                    or not (registration['repository'] is None or isinstance(registration['repository'], str))):
+                raise ValueError('invalid registration facts')
+        except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
+            if time.monotonic() >= deadline:
+                return refuse('Card registration lookup deadline exceeded. Retry the launch.')
+            if card in registration_cache():
+                continue
+            reason = str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else type(exc).__name__
+            return refuse('Card registration lookup unreachable or invalid (' + reason + '). '
+                          'No registration cached within 24 hours for ' + card + '.')
+        if not registration['registered']:
+            registration_cache([], removed=[card])
             return refuse(card + ' is not registered in the work queue.')
+        registration_cache([card])
 
 
 if __name__ == '__main__':

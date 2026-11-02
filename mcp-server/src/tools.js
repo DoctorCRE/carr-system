@@ -10835,7 +10835,7 @@ registerTools({
 // Evidence-backed implementation form, linked to canonical Work Requests.
 registerTools(workShapeTools({ withEnvelope, writeEvent, ToolError }), "work-shape");
 
-// Program 6: sourced additive capture and a safe card only. No lifecycle verbs.
+// Work queue registrations and dashboard projections share the visible Work Request contract.
 registerTools(workQueueTools({ withEnvelope, writeEvent, ToolError,
   completeWorkRequest: (c, actor, args, attestor) => TOOLS["complete-work-request"].handler(c, actor, args, attestor),
 }), "work-queue");

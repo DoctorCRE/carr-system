@@ -517,6 +517,21 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
         }
         return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), priority: slots[args.position - 1] };
       }),
+    'job-card-registration': { write: false,
+      description: 'Read one visible job registration by canonical WRn.Sn.Jn Card ID. Returns registered false for unknown or invisible Cards. Registered replies include executor, model, nullable repository and the stored parent work_request_state, not a derived PR stage. Uses indexed keys only and never calls GitHub or production projections.',
+      inputSchema: { type: 'object', additionalProperties: false,
+        properties: { card_id: { type: 'string', maxLength: 40, pattern: '^WR[1-9][0-9]{0,5}\\.S[1-9][0-9]{0,9}\\.J[1-9][0-9]{0,9}$' } }, required: ['card_id'] },
+      handler: async (c, actor, args) => {
+        validate(args, { card_id: text(40) }, ['card_id']);
+        const match = /^WR([1-9][0-9]{0,5})\.S([1-9][0-9]{0,9})\.J([1-9][0-9]{0,9})$/u.exec(args.card_id);
+        if (!match || match.slice(2).some(value => Number(value) > positive.maximum)) refuse('invalid_card_id');
+        const rows = (await c.query(`select j.executor,j.model,j.repository,w.state as work_request_state
+          from ops.work_request w join ops.work_request_job j on j.work_request_id=w.id
+          where w.ref=$1 and w.organization_tenant_id=$2 and j.slice_ordinal=$3 and j.j_number=$4
+          and ${readableWorkRequestSql('w')}`,
+        [`WR-${match[1].padStart(6, '0')}`, organizationTenantForActor(actor), Number(match[2]), Number(match[3])])).rows;
+        return { ok: true, card_id: args.card_id, registered: rows.length === 1, ...rows[0] };
+      } },
     'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {

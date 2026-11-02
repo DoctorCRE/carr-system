@@ -665,3 +665,44 @@ for (const [title, suggested] of [['Update cards', 'Revise cards'], ['Rereview c
     });
   });
 }
+
+
+test('single registration reads stored facts as reader without dashboard dependencies', async () => {
+  const work_request = await request('WR-000814');
+  const { card_id } = await command('dispatch-job', job(work_request, { repository: 'DoctorCRE/carr-system' }));
+  c.pullRequests = c.production = async () => { throw new Error('dashboard must not run'); };
+  try {
+    assert.equal(TOOLS['job-card-registration'].write, false);
+    assert.deepEqual(await command('job-card-registration', { card_id }, c, 'carr_reader'), {
+      ok: true, card_id, registered: true, executor: 'codex', model: 'synthetic-model',
+      repository: 'DoctorCRE/carr-system', work_request_state: 'captured',
+    });
+    assert.deepEqual(await command('job-card-registration', { card_id: 'WR814.S1.J99999' }, c, 'carr_reader'),
+      { ok: true, card_id: 'WR814.S1.J99999', registered: false });
+  } finally { delete c.pullRequests; delete c.production; }
+});
+
+test('registration refuses malformed IDs and hides other tenants and private requests', async () => {
+  for (const card_id of ['WR0.S1.J1', 'WR0814.S1.J1', 'WR814.S0.J1', 'WR814.S1.J2147483648', 'WR814.S1.J1 extra', null]) {
+    await assert.rejects(command('job-card-registration', { card_id }, c, 'carr_reader'));
+  }
+  const card_id = 'WR814.S1.J1';
+  await c.query('begin');
+  try {
+    await c.query('alter table ops.work_request drop constraint work_request_sourced_capture_shape');
+    await c.query("update ops.work_request set organization_tenant_id='other-tenant' where ref='WR-000814'");
+    await c.query('set local role carr_reader');
+    assert.deepEqual(await executeRegisteredTool(c, actor, 'job-card-registration', { card_id }), { ok: true, card_id, registered: false });
+  } finally { await c.query('rollback'); }
+  await c.query('begin');
+  try {
+    const doc = (await c.query(`insert into public.doctrine_document(slug,title,content_class,visibility,owner_actor_id)
+      values('registration-private','Synthetic private','reference','personal',$1) returning id`, [actor.id])).rows[0];
+    const section = (await c.query(`insert into public.doctrine_section(document_id,section_key,title,ordinal,status,current_version)
+      values($1,'origin','Synthetic origin',1,'active',1) returning id`, [doc.id])).rows[0];
+    await c.query('alter table ops.work_request drop constraint work_request_sourced_capture_shape');
+    await c.query("update ops.work_request set doctrine_section_id=$1 where ref='WR-000814'", [section.id]);
+    await c.query('set local role carr_reader');
+    assert.deepEqual(await executeRegisteredTool(c, actor, 'job-card-registration', { card_id }), { ok: true, card_id, registered: false });
+  } finally { await c.query('rollback'); }
+});
