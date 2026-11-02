@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import sys
@@ -43,13 +44,13 @@ def request(path, bearer, payload=None, method=None):
         raise ValueError('GitHub App API request failed') from None
 
 
-def installation_token():
+def installation_token(repository=CONFIG['repository']):
     try:
         now = int(time.time())
         signed = jwt.encode({'iat': now - 60, 'exp': now + 540, 'iss': str(CONFIG['app_id'])}, private_key(), algorithm='RS256')
-        installation = request('/repos/' + CONFIG['repository'] + '/installation', signed)
+        installation = request('/repos/' + repository + '/installation', signed)
         token = request('/app/installations/' + str(installation['id']) + '/access_tokens', signed, {
-            'repositories': [CONFIG['repository'].split('/')[1]],
+            'repositories': [repository.split('/')[1]],
             'permissions': {'pull_requests': 'write', 'metadata': 'read'}})['token']
         if not isinstance(token, str) or not token:
             raise ValueError
@@ -58,10 +59,10 @@ def installation_token():
         raise ValueError('GitHub App authentication failed') from None
 
 
-def submit(number, decision, body, reviewed_sha):
-    token = installation_token()
+def submit(number, decision, body, reviewed_sha, repository=CONFIG['repository']):
+    token = installation_token(repository)
     try:
-        path = f"/repos/{CONFIG['repository']}/pulls/{number}"
+        path = f"/repos/{repository}/pulls/{number}"
         if request(path, token)['head']['sha'] != reviewed_sha:
             raise ValueError('PR head moved; review not submitted')
         review = request(path + '/reviews', token, {
@@ -78,14 +79,17 @@ def main():
     parser.add_argument('decision', choices=['approve', 'request-changes', 'comment'])
     parser.add_argument('--body-file', required=True, type=Path)
     parser.add_argument('--reviewed-sha', required=True, help='full SHA actually reviewed')
+    parser.add_argument('--repository', default=CONFIG['repository'], help='target OWNER/NAME, defaults to App config')
     args = parser.parse_args()
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', args.repository):
+        parser.error('repository must be OWNER/NAME')
     if args.number < 1 or len(args.reviewed_sha) != 40 or any(c not in '0123456789abcdef' for c in args.reviewed_sha):
         parser.error('provide a positive PR number and full lowercase reviewed SHA')
     try:
         body = args.body_file.read_text()
         if not body.strip():
             raise ValueError('review body is empty')
-        review_id = submit(args.number, args.decision, body, args.reviewed_sha)
+        review_id = submit(args.number, args.decision, body, args.reviewed_sha, args.repository)
     except (OSError, ValueError, KeyError):
         raise SystemExit('Review not submitted: App authentication, input, or GitHub request failed') from None
     print(f'Review submitted: {review_id}')
