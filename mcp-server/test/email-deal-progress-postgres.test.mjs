@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
+import { acceptsConfirmVerb } from './fixtures/email-followups-app-confirm-verb.mjs';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 
@@ -2585,7 +2586,17 @@ test('a client mismatch blocks the filing preview as well as confirmation', asyn
   const item = (await listed()).find(row => row.id === stored.proposal_id);
   assert.equal(item.preview, null);
   assert.equal(item.preview_error, 'email_new_deal_client_mismatch');
-  assert.equal(item.confirm_verb, null);
+  assert.ok(acceptsConfirmVerb(item), 'app accepts a client-mismatch card for dismissal');
+});
+
+test('a closed-deal filing card remains accepted by the app with no preview', async () => {
+  const source = await email();
+  const stored = await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'client' });
+  await c.query("update deal set phase='closed' where id=$1", [deal]);
+  const item = (await listed()).find(row => row.id === stored.proposal_id);
+  assert.equal(item.preview, null);
+  assert.ok(item.preview_error);
+  assert.ok(acceptsConfirmVerb(item), 'app accepts a closed-deal card for dismissal');
 });
 
 test('twenty matching cards share one grouped contacts load and skip unrelated email-less parties', async () => {
