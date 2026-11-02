@@ -30,6 +30,16 @@
           "timeout": 10
         }
       ]
+    },
+    {
+      "matcher": "AskUserQuestion|ExitPlanMode",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "if [ ! -f \"{{REPO}}/hooks/orchestrator-question.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/orchestrator-question.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/orchestrator-question.py",
+          "timeout": 10
+        }
+      ]
     }
   ],
   "PostToolUse": [

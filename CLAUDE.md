@@ -123,6 +123,8 @@ Single-context; the glossary and decisions live in the doctrine store and decisi
 
 ## Orchestrator rotation
 
+The PreToolUse question hook denies `AskUserQuestion` and `ExitPlanMode` in marked orchestrator sessions (rule d1a7973a, standing order 24).
+
 Claude Code coordinator launch prompts must contain the exact standalone line
 `CARR-Session-Role: orchestrator` in the first user message. Worker prompts must
 omit it. The rotation hook reads only that first non-meta user message, ignores
