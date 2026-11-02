@@ -38,8 +38,9 @@ class CaptureOutcomesTests(unittest.TestCase):
     def test_publish_binds_partner_evidence_receipt_and_retry_key_to_stored_source(self) -> None:
         quote = "Move Synthetic Dental into legal"
         report = {"deal_updates": [{"deal_id": "synthetic-deal", "candidate_id": "activity-existing",
-                  "summary": "Phase proposal", "evidence": quote,
-                  "phase_move": {"value": "legal", "started_on": None}}]}
+                  "summary": "Phase proposal", "evidence": quote, "participant_ids": [],
+                  "fact_ids": ["phase-discussion"],
+                  "phase_move": {"value": "legal", "started_on": None, "fact_ids": ["phase-instruction"]}}]}
         requests = []
 
         def request(_method, _url, body, _headers):
@@ -47,9 +48,27 @@ class CaptureOutcomesTests(unittest.TestCase):
             return 200, {"candidate_ids": ["phase-receipt"]}
 
         for extra in ("", " Another sentence."):
+            transcript = {"segments": [{"speaker": "Joe", "text": quote + extra}]}
+            coverage = bridge.post_call.coverage
+            context = {"session": self.session.name, "deals": [{"id": "synthetic-deal", "participants": []}]}
+            extraction = {
+                "topics": [{"topic_id": "synthetic", "identity": {"deal_id": "synthetic-deal", "participant_ids": []}}],
+                "facts": [{"fact_id": fact_id, "topic_id": "synthetic", "kind": kind,
+                           "statement": statement, "asserted_value": value,
+                           "source_spans": [coverage.source_span(transcript, 0)], "disposition": None}
+                          for fact_id, kind, statement, value in (
+                              ("phase-discussion", "other", "Phase proposal discussed", "discussed"),
+                              ("phase-instruction", "phase_change", "Move to legal", "legal"))],
+                "non_fact_spans": [],
+            }
+            ledger = coverage.build_call_ledger(transcript, context, lambda _: extraction)
+            ledger = coverage.reconcile_history(ledger, transcript, lambda request: {
+                'dispositions': [{'fact_id': f['fact_id'], 'disposition': f['disposition']} for f in request['facts']]})
+            ledger = coverage.reconcile_coverage(ledger, report)
+            bridge.post_call.write_private(self.session / coverage.FILE, ledger)
+            report["coverage_sha256"] = coverage.digest(ledger)
             bridge.post_call.write_private(self.session / bridge.post_call.REPORT_FILE, report)
-            bridge.post_call.write_private(self.session / "transcript.json",
-                                           {"segments": [{"speaker": "Joe", "text": quote + extra}]})
+            bridge.post_call.write_private(self.session / "transcript.json", transcript)
             shaped = bridge.post_call.sanitized_candidates(self.session)
             with patch.object(bridge, "http_request", side_effect=request):
                 self.assertTrue(bridge.post_batch(self.cfg, self.session, "/capture/candidates",
@@ -125,6 +144,7 @@ class CaptureOutcomesTests(unittest.TestCase):
         self.assertIn("error=device_actor_not_provisioned", bridge.LOG_PATH.read_text())
 
     def test_rejections_log_only_valid_public_codes(self) -> None:
+        bridge.post_call.write_private(self.session / bridge.post_call.REPORT_FILE, {})
         calls = (
             lambda: bridge.status_cmd(self.cfg, self.session, "recording", None),
             lambda: bridge.post_batch(self.cfg, self.session, "/capture/items", [{}], [], "fixture"),

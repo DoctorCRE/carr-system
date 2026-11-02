@@ -56,6 +56,22 @@ _OFFLINE_CLIENT = Mock()
 _OFFLINE_CLIENT.system_one.side_effect = TypeSafeError("live SDK refused inside the offline suite")
 _OFFLINE_CLIENT.__enter__ = Mock(return_value=_OFFLINE_CLIENT)
 _OFFLINE_CLIENT.__exit__ = Mock(return_value=False)
+_REAL_COVERAGE = post_call.coverage
+_COVERAGE_ADAPTER = SimpleNamespace(
+    FILE=post_call.coverage.FILE,
+    digest=post_call.coverage.digest,
+    build_call_ledger=lambda *args, **kwargs: {},
+    add_identity_questions=lambda *args: None,
+    reconcile_history=lambda ledger, *args, **kwargs: ledger,
+    reconcile_coverage=lambda ledger, report: ledger,
+    require_coverage=lambda *args: None,
+    CoverageError=post_call.coverage.CoverageError,
+    ExtractionTransportError=post_call.coverage.ExtractionTransportError,
+)
+_COVERAGE_PATCHES = (
+    patch.object(post_call, "coverage", _COVERAGE_ADAPTER),
+    patch.object(call_mode.post_call, "coverage", _COVERAGE_ADAPTER),
+)
 _CLIENT_PATCHES = (
     patch.object(post_call_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
     patch.object(runtime_jev, "TypeSafeClient", return_value=_OFFLINE_CLIENT, create=True),
@@ -79,6 +95,8 @@ def setUpModule() -> None:
     # Injected ask functions and loopback distiller fakes still run normally.
     for client_patch in _CLIENT_PATCHES:
         client_patch.start()
+    for coverage_patch in _COVERAGE_PATCHES:
+        coverage_patch.start()
     _BUDGET_ENV.start()
     for log_patch in _LOG_PATCHES:
         log_patch.start()
@@ -88,6 +106,8 @@ def tearDownModule() -> None:
     for log_patch in reversed(_LOG_PATCHES):
         log_patch.stop()
     _BUDGET_ENV.stop()
+    for coverage_patch in reversed(_COVERAGE_PATCHES):
+        coverage_patch.stop()
     for client_patch in reversed(_CLIENT_PATCHES):
         client_patch.stop()
 
@@ -2193,9 +2213,9 @@ class PostCallTests(unittest.TestCase):
         update = schema["properties"]["deal_updates"]["items"]
         self.assertIn("next_step", update["required"])
         step = update["properties"]["next_step"]["anyOf"][1]
-        self.assertEqual(step["required"], ["text", "next_date", "needs_review"])
+        self.assertEqual(step["required"], ["text", "next_date", "needs_review", "fact_ids"])
         phase = update["properties"]["phase_move"]["anyOf"][1]
-        self.assertEqual(phase["required"], ["value", "started_on", "needs_review"])
+        self.assertEqual(phase["required"], ["value", "started_on", "needs_review", "fact_ids"])
         self.assertFalse(step["additionalProperties"])
         self.assertEqual(step["properties"]["next_date"]["type"], ["string", "null"])
         source = json.loads(runner.call_args.kwargs["input"])
@@ -2666,6 +2686,38 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         )
         self.cfg = {"base_url": "https://worker.test", "device_id": "joe", "token": "device"}
 
+    def seed_coverage(self):
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        transcript = post_call.read_json(self.session / 'transcript.json')
+        topics, facts = [], []
+        for number, (kind, item) in enumerate(_REAL_COVERAGE.proposal_items(report)):
+            fact_id = f'lifecycle-{number}'
+            item['fact_ids'] = [fact_id]
+            topics.append({'topic_id': fact_id, 'identity': {
+                'deal_id': item['deal_id'], 'participant_ids': item.get('participant_ids', [])}})
+            facts.append({'fact_id': fact_id, 'topic_id': fact_id,
+                'kind': 'status' if kind == 'deal_updates' else 'commitment',
+                'statement': 'Synthetic lifecycle assertion', 'asserted_value': None,
+                'source_spans': [_REAL_COVERAGE.source_span(transcript, i)
+                                 for i in range(len(transcript['segments']))], 'disposition': None})
+        context = {'session': self.session.name, 'deals': [{'id': t['identity']['deal_id'],
+            'participants': [{'party_id': i} for i in t['identity']['participant_ids']]} for t in topics]}
+        response = {'topics': topics, 'facts': facts, 'non_fact_spans': []}
+        def model(request):
+            if request.get('stage') == 'coverage_history':
+                return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': None}
+                                         for f in request['facts']]}
+            return response
+        ledger = _REAL_COVERAGE.build_call_ledger(transcript, context, model)
+        ledger = _REAL_COVERAGE.reconcile_history(ledger, transcript, model)
+        ledger = _REAL_COVERAGE.reconcile_coverage(ledger, report)
+        post_call.write_private(self.session / _REAL_COVERAGE.FILE, ledger)
+        report['coverage_sha256'] = _REAL_COVERAGE.digest(ledger)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        return report
+
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
     def test_release_requires_edit_then_publishes(self) -> None:
         words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
@@ -2673,6 +2725,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
         post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
         post_call.hold_transcript_repeat(self.session, report)
+        report = self.seed_coverage()
         output = io.StringIO()
         with (patch.object(call_mode, "RECORDINGS", self.session.parent),
               patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
@@ -2687,6 +2740,8 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             publish.assert_called_once_with(self.session.resolve())
             self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
 
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
     def test_corrected_report_budget_hold_recovers_under_polling(self) -> None:
         for recovery in ("next_day", "budget_restored", "manual_release"):
             with self.subTest(recovery=recovery):
@@ -2700,6 +2755,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
                 post_call.write_private(self.session / post_call.REPORT_FILE, report)
                 post_call.write_private(self.session / post_call.STATUS_FILE,
                                         {"state": "held_review", "reason": "summary_repeats_transcript", "sync_attempts": 3})
+                report = self.seed_coverage()
                 ledger = self.session.parent / ".jev-budget.json"
                 post_call.write_private(ledger, {"2026-08-10": 490000})
                 client = PostCallJevChecksTests.fake_client()
@@ -2736,12 +2792,15 @@ class CaptureBridgePostCallTests(unittest.TestCase):
                 self.assertEqual(spending, 8259)
                 self.assertLess(spending, 500000)
 
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
     def test_release_keeps_edited_report_when_poll_interleaves(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         report["report"]["summary"] = "Partner edit"
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
         post_call.write_private(self.session / "transcript.json", {"segments": [{"text": "Original call"}]})
         post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        report = self.seed_coverage()
         write = post_call.write_private
         polled = []
 

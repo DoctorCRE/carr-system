@@ -19,6 +19,36 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import phone_intake
 import post_call
+import post_call_coverage as coverage
+
+
+def coverage_response(transcript, context, report):
+    facts = []
+    for number, (kind, item) in enumerate(coverage.proposal_items(report)):
+        fact_id = f'phone-fact-{number}'
+        item['fact_ids'] = [fact_id]
+        facts.append({'fact_id': fact_id, 'topic_id': 'phone',
+            'kind': {'phase_move': 'phase_change', 'next_step': 'next_step',
+                     'deal_updates': 'status'}.get(kind, 'commitment'),
+            'statement': item.get('title', item.get('summary', item.get('text', 'Fixture assertion'))),
+            'asserted_value': item.get('value', item.get('text', item.get('title', item.get('summary')))),
+            'source_spans': [coverage.source_span(transcript, i) for i in range(len(transcript['segments']))],
+            'disposition': None})
+    return {'topics': [{'topic_id': 'phone', 'identity': {
+                'deal_id': context['deals'][0]['id'], 'participant_ids': []}}] if facts else [],
+            'facts': facts, 'non_fact_spans': [] if facts else [
+                {'span': coverage.source_span(transcript, i), 'reason': 'Greeting'}
+                for i in range(len(transcript['segments']))]}
+
+
+def store_validated_coverage(session, transcript, context, report):
+    response = coverage_response(transcript, context, report)
+    ledger = coverage.build_call_ledger(transcript, context, lambda _: response)
+    ledger = coverage.reconcile_history(ledger, transcript, lambda request: {
+        'dispositions': [{'fact_id': f['fact_id'], 'disposition': f['disposition']} for f in request['facts']]})
+    ledger = coverage.reconcile_coverage(ledger, report)
+    post_call.write_private(session / coverage.FILE, ledger)
+    report['coverage_sha256'] = coverage.digest(ledger)
 
 
 def test_bridge_paths_are_isolated(tmp_path):
@@ -326,13 +356,18 @@ class PhoneIntakeTests(unittest.TestCase):
         session = self.root / f"phone-{self.metadata['session_id']}"
         transcript = {'segments': [{'speaker': 'Joe', 'text': 'Review the proposal'}]}
         context = {'session': session.name, 'workspace_kind': 'all',
-                   'generated_at': '2026-01-01T12:00:00Z', 'deals': []}
+                   'generated_at': '2026-01-01T12:00:00Z', 'deals': [
+                       {'id': 'synthetic-phone', 'name': 'Synthetic phone', 'owner': 'joe',
+                        'operating_state': 'active', 'participants': []}]}
         post_call.store_context(session, context)
         post_call.write_private(session / 'transcript.json', transcript)
         report = {'session': session.name, 'report': {'summary': 'Review proposals', 'open_questions': []},
                   'joe_tasks': [{'title': 'Review proposal', 'evidence': 'Review the proposal'}] * 2,
                   'dell_tasks': [], 'deal_updates': [], 'draft_proposals': [], 'review_questions': []}
-        report['joe_tasks'] = [dict(item) for item in report['joe_tasks']]
+        report['joe_tasks'] = [{**item, 'deal_id': 'synthetic-phone', 'participant_ids': []}
+                               for item in report['joe_tasks']]
+        report['joe_tasks'][1]['title'] = 'Confirm proposal terms'
+        store_validated_coverage(session, transcript, context, report)
         client = Mock()
         client.system_one.return_value = SimpleNamespace(answers={
             'deal_match': SimpleNamespace(choice='none', confidence=0.9),
@@ -731,7 +766,7 @@ class PhoneIntakeTests(unittest.TestCase):
         decoder = self.root / 'decoder'
         decoder.write_text(f'#!{sys.executable}\nimport os,shutil,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\nshutil.copyfile(sys.argv[sys.argv.index("-i")+1],sys.argv[-1])\n')
         whisper = self.root / 'whisper'
-        whisper.write_text(f'#!{sys.executable}\nimport json,os,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\njson.dump({{"transcription":[{{"offsets":{{"from":0,"to":1000}},"text":"Synthetic Clinic needs a revised proposal."}}]}},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\n')
+        whisper.write_text(f'#!{sys.executable}\nimport json,os,sys\nassert not os.environ.get("SYNTHETIC_UNRELATED_SECRET")\njson.dump({{"transcription":[{{"offsets":{{"from":0,"to":1000}},"text":"Synthetic Clinic needs a revised proposal. Joe will revise it. Set the next step to revise proposal."}}]}},open(sys.argv[sys.argv.index("-of")+1]+".json","w"))\n')
         decoder.chmod(0o700)
         whisper.chmod(0o700)
         import transcribe_session
@@ -742,14 +777,21 @@ class PhoneIntakeTests(unittest.TestCase):
         post_call.store_context(session, context)
 
         def distiller(request):
+            if request.get('stage') == 'coverage_history':
+                return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': f['disposition']} for f in request['facts']]}
+            if request.get('stage') == 'coverage':
+                return coverage_response(post_call.read_json(session / 'transcript.json'), context, distiller({
+                    'transcript': post_call.read_json(session / 'transcript.json')}))
             self.assertEqual(request['transcript']['segments'][0]['speaker'], 'Imported speaker')
-            self.assertEqual(request['transcript']['segments'][0]['text'], 'Synthetic Clinic needs a revised proposal.')
-            return {'schema_version': 1, 'report': {'summary': 'The proposal needs revision.', 'decisions': [], 'open_questions': []},
+            self.assertEqual(request['transcript']['segments'][0]['text'], 'Synthetic Clinic needs a revised proposal. Joe will revise it. Set the next step to revise proposal.')
+            result = {'schema_version': 1, 'report': {'summary': 'The proposal needs revision.', 'decisions': [], 'open_questions': []},
                     'joe_tasks': [{'title': 'Revise the proposal', 'deal_id': deal, 'participant_ids': [], 'evidence': 'needs a revised proposal'}],
                     'dell_tasks': [], 'deal_updates': [{'deal_id': deal, 'summary': 'Proposal revision discussed.',
                         'participant_ids': [], 'evidence': 'Synthetic Clinic needs a revised proposal',
                         'next_step': {'text': 'Revise proposal', 'next_date': '2026-01-02', 'needs_review': None}}],
                     'draft_proposals': [], 'review_questions': []}
+            coverage_response(request['transcript'], context, result)
+            return result
 
         with patch.dict('os.environ', {'CARR_WHISPER_MODEL': str(model), 'SYNTHETIC_UNRELATED_SECRET': 'fixture'}), patch.object(transcribe_session, 'WHISPER_CLI_BIN', str(whisper)):
             status = phone_intake.extract(session, decoder=str(decoder), distiller=distiller)
@@ -830,11 +872,30 @@ class PhoneIntakeTests(unittest.TestCase):
         self.assertEqual(model.call_count, 3)
         self.assertEqual(status['state'], 'needs_attention')
 
+    def test_legacy_report_without_ledger_stays_held(self):
+        session = self.root / 'legacy-phone'
+        session.mkdir()
+        report = {'joe_tasks': [], 'dell_tasks': [], 'deal_updates': [], 'draft_proposals': [],
+                  'review_questions': []}
+        post_call.write_private(session / 'transcript.json', {'segments': [{'text': 'Hello.'}]})
+        post_call.write_private(session / post_call.REPORT_FILE, report)
+        post_call.write_private(session / post_call.STATUS_FILE, {'state': 'ready_review'})
+        status = post_call.process_session(session)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertEqual(status['reason'], 'coverage_audit_required')
+        self.assertIsNone(post_call.retention_ready(session, 'b' * 64))
+        with self.assertRaises(coverage.CoverageError):
+            post_call.sanitized_candidates(session)
+
     def test_phone_retention_holds_unresolved_review_questions(self):
         session = self.root / f"phone-{self.metadata['session_id']}"
         session.mkdir()
         report = {'joe_tasks': [], 'dell_tasks': [], 'deal_updates': [], 'draft_proposals': [],
                   'review_questions': [{'id': 'synthetic', 'resolved': False}]}
+        transcript = {'segments': [{'text': 'Hello.'}]}
+        context = {'session': session.name, 'deals': []}
+        post_call.write_private(session / 'transcript.json', transcript)
+        store_validated_coverage(session, transcript, context, report)
         phone_intake.post_call.write_private(session / 'post-call-report.json', report)
         self.assertIsNone(phone_intake.post_call.retention_ready(session, 'b' * 64))
         phone_intake.post_call.resolve_question(session, 'synthetic', 'Reviewed synthetic fixture')
