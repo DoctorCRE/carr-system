@@ -111,6 +111,10 @@ class ReviewGate(unittest.TestCase):
             cases.append(({**self.pr, 'additions': 151}, self.files,
                           [{**self.approval, 'body': body}],
                           "App approval body needs exactly one line 'Reviewed-SHA: head'; resubmit via ops/review-submit.py"))
+        sha = 'a' * 40
+        cases.append(({**self.pr, 'additions': 151, 'head': {'sha': sha}}, self.files,
+                      [{**self.approval, 'commit_id': sha, 'body': 'VERDICT: APPROVE'}],
+                      f"App approval body needs exactly one line 'Reviewed-SHA: {sha}'; resubmit via ops/review-submit.py"))
         for pr, files, reviews, description in cases:
             with self.subTest(description=description, reviews=reviews), patch.dict(
                     gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):

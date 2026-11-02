@@ -31,6 +31,17 @@ class Submit(unittest.TestCase):
                 token.assert_not_called()
                 request.assert_not_called()
 
+    def test_cli_body_error_is_actionable_before_authentication(self):
+        with tempfile.TemporaryDirectory() as raw:
+            body = Path(raw) / 'review.md'
+            body.write_text('VERDICT: APPROVE')
+            argv = ['review-submit.py', '12', 'approve', '--body-file', str(body),
+                    '--reviewed-sha', 'a' * 40]
+            with patch.object(sys, 'argv', argv), patch.object(submit, 'installation_token') as token:
+                with self.assertRaisesRegex(SystemExit, 'exactly one line.*Reviewed-SHA'):
+                    submit.main()
+                token.assert_not_called()
+
     def test_moved_head_never_posts(self):
         with patch.object(submit, 'installation_token', return_value='secret'), patch.object(submit, 'request', return_value={'head': {'sha': 'new'}}) as request:
             with self.assertRaises(ValueError): submit.submit(12, 'approve', 'Reviewed-SHA: old', 'old')
@@ -82,7 +93,7 @@ class Submit(unittest.TestCase):
 
     def test_comment_and_revoke(self):
         with patch.object(submit, 'installation_token', return_value='secret'), patch.object(submit, 'request', side_effect=[{'head': {'sha': 'abc'}}, {'id': 7}, {}]) as request:
-            self.assertEqual(submit.submit(12, 'comment', 'App submission smoke test', 'abc'), 7)
+            self.assertEqual(submit.submit(12, 'comment', 'App submission smoke test\nReviewed-SHA: abc', 'abc'), 7)
             self.assertEqual(request.call_args_list[1].args[2]['event'], 'COMMENT')
             self.assertEqual(request.call_args.kwargs, {'method': 'DELETE'})
             self.assertEqual(request.call_args.args[0], '/installation/token')
