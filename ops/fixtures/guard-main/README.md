@@ -2,7 +2,8 @@
 
 The files listed in `probes.json` are byte-identical to their Git blobs at its
 `revision`, the merge base used for PR 2903. The fixture includes every local
-Python import, including lazy imports, and the corpus policy manifest. It runs
+Python import, including lazy imports and the filename-loaded record-home gate,
+its AST-read exporter source and sibling constants, and the corpus policy manifest. It runs
 through stdin JSON and process exit codes, using the same runner and fixture
 environment as head. It never overlays head functions or imports head helpers.
 
