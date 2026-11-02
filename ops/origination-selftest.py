@@ -157,6 +157,23 @@ class OriginationTests(unittest.TestCase):
             with self.subTest(document=document), self.assertRaisesRegex(ValueError, 'document identity'):
                 florida_rows(florida_fixture(document_number=document), published_on=date(2026, 10, 21), line_number=2)
 
+    def test_florida_shape_fields_validate_before_scope_filtering(self):
+        from tools.import_practice_origination import florida_rows
+        for status in ['A', 'I']:
+            for filing_type in ['DOMP', 'DOMNP', 'FORP', 'FORNP', 'DOMLP', 'FORLP',
+                                'FLAL', 'FORL', 'NPREG', 'TRUST', 'AGENT']:
+                self.assertEqual(florida_rows(florida_fixture(status=status, filing_type=filing_type,
+                                                              state='NY', postal_code='10001'),
+                                             published_on=date(2026, 10, 21), line_number=1), [])
+        for changes, error in [({'status': ''}, 'Status'), ({'status': 'X'}, 'Status'),
+                               ({'filing_type': ''}, 'Filing Type'),
+                               ({'filing_type': 'flal'}, 'Filing Type'),
+                               ({'country': ''}, 'Country'), ({'country': 'U1'}, 'Country'),
+                               ({'country': 'us'}, 'Country')]:
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'line 2.*' + error):
+                florida_rows(florida_fixture(name='Synthetic Retail LLC', **changes),
+                             published_on=date(2026, 10, 21), line_number=2)
+
     def test_florida_unreadable_rows_still_fail_even_out_of_scope(self):
         from tools.import_practice_origination import florida_rows
         line = florida_fixture(name='Synthetic Retail LLC', city='', state='', postal_code='')
@@ -225,11 +242,18 @@ class OriginationTests(unittest.TestCase):
         line = florida_fixture()
         skipped = florida_fixture(name='Synthetic Retail LLC')
         shifted = line[:332] + line[333:] + ' '
-        cases = [([], 'all 0 rows skipped'), ([skipped] * 3, 'all 3 rows skipped'),
-                 ([line] * 100 + [line[:336]], 'width'),
-                 ([line[:332] + 'NY' + line[334:]] * 3, 'all 3 rows skipped'),
-                 ([line] * 100 + [shifted], 'filing date'),
-                 ([line] + [skipped] * 1000, 'implausible skip share')]
+        same_width_shift = line[:304] + ' ' + line[304:399] + line[400:]
+        cases = [([line] * 150 + [line[:336]], 'line 151.*width'),
+                 ([line] * 150 + [shifted], 'line 151.*Country'),
+                 ([line] * 150 + [same_width_shift], 'line 151.*Country'),
+                 ([skipped] * 150 + [same_width_shift], 'line 151.*Country'),
+                 ([line] * 150 + [florida_fixture(status='X')], 'line 151.*Status'),
+                 ([skipped] * 150 + [florida_fixture(filing_type='INVALID')], 'line 151.*Filing Type'),
+                 ([line] * 150 + [florida_fixture(filing_on='20260230')], 'line 151.*filing date'),
+                 ([line] * 150 + [florida_fixture(postal_code='32501 1234')], 'line 151.*ZIP'),
+                 ([line] * 150 + [florida_fixture(document_number='   A00001   ')],
+                  'line 151.*document identity'),
+                 ([florida_fixture(status='X'), line[:336]], 'line 1.*Status')]
         for lines, error in cases:
             batches = []
 
@@ -249,7 +273,7 @@ class OriginationTests(unittest.TestCase):
                 self.assertEqual(batches[0]['status'], 'blocked')
                 self.assertEqual(batches[0]['records'], [])
 
-    def test_florida_skip_threshold_and_resume_count_the_whole_file(self):
+    def test_florida_sparse_matches_and_resume_count_the_whole_file(self):
         from tools.import_practice_origination import import_file
         state = {'checkpoint': None, 'status': 'available'}
         batches = []
@@ -269,14 +293,14 @@ class OriginationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'synthetic.txt'
             path.write_text((florida_fixture() + '\n') +
-                            (florida_fixture(name='Synthetic Retail LLC') + '\n') * 999)
+                            (florida_fixture(name='Synthetic Retail LLC') + '\n') * 1000)
             with self.assertRaisesRegex(RuntimeError, 'interruption'):
                 import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
             result = import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
-            self.assertEqual(result['processed'], 1000)
-            self.assertEqual(result['skipped'], 999)
+            self.assertEqual(result['processed'], 1001)
+            self.assertEqual(result['skipped'], 1000)
             self.assertEqual(sum(len(batch['records']) for batch in batches), 1)
-            self.assertIn('999 out-of-scope rows skipped through checkpoint in this file', batches[-1]['detail'])
+            self.assertIn('1000 out-of-scope rows skipped through checkpoint in this file', batches[-1]['detail'])
             count = len(batches)
             import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
             self.assertEqual(len(batches), count)

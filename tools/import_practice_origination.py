@@ -23,10 +23,12 @@ from tools.routines.lead_signals import NPPES_ORIGINATION_COLUMNS, origination_r
 FLORIDA_SOURCE = next(source for source in json.loads(
     (ROOT / "mcp-server/src/origination-sources.json").read_text()) if source["source"] == "formation-fl")
 FLORIDA_RECORD_LENGTH = 1440
-FLORIDA_MAX_SKIP_PER_THOUSAND = 999
 FLORIDA_LAYOUT = {
     "document_number": (0, 12),
     "name": (12, 204),
+    "status": (204, 205),
+    "filing_type": (205, 220),
+    "country": (344, 346),
     "filing_on": (472, 480),
     "address": (220, 262),
     "city": (304, 332),
@@ -34,6 +36,8 @@ FLORIDA_LAYOUT = {
     "registered_agent_address": (587, 629),
     "postal_code": (334, 344),
 }
+FLORIDA_FILING_TYPES = frozenset({"DOMP", "DOMNP", "FORP", "FORNP", "DOMLP", "FORLP",
+                                 "FLAL", "FORL", "NPREG", "TRUST", "AGENT"})
 HEALTHCARE_NAME = re.compile(FLORIDA_SOURCE["healthcare_name_pattern"], re.I)
 
 
@@ -46,6 +50,12 @@ def florida_rows(line, *, published_on, line_number):
     row = {key: raw[start:end].strip() for key, (start, end) in FLORIDA_LAYOUT.items()}
     if not re.fullmatch(r"(?:[A-Z0-9]{12}|[A-Z0-9]{6} {6}| {6}[A-Z0-9]{6})", raw[:12]) or not row["name"]:
         raise ValueError(error + "missing or invalid document identity")
+    if row["status"] not in {"A", "I"}:
+        raise ValueError(error + "invalid Status field; fixed-width schema drift")
+    if row["filing_type"] not in FLORIDA_FILING_TYPES:
+        raise ValueError(error + "invalid Filing Type field; fixed-width schema drift")
+    if not re.fullmatch(r"[A-Z]{2}", row["country"]):
+        raise ValueError(error + "invalid Country field; fixed-width schema drift")
     dates = set()
     if re.fullmatch(r"[0-9]{8}", row["filing_on"]):
         for form in ("%Y%m%d", "%m%d%Y"):
@@ -82,17 +92,10 @@ def florida_rows(line, *, published_on, line_number):
 
 def validated_florida_rows(stream, *, published_on):
     """Spool validated rows before exposing any candidate to the batch writer."""
-    processed = skipped = 0
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as spool:
         for processed, raw in enumerate(stream, 1):
             records = florida_rows(raw, published_on=published_on, line_number=processed)
-            skipped += not records
             spool.write(json.dumps(records) + "\n")
-        if not processed or skipped == processed:
-            raise ValueError(f"Florida corporate file: all {processed} rows skipped; check layout and scope")
-        if skipped * 1000 > processed * FLORIDA_MAX_SKIP_PER_THOUSAND:
-            raise ValueError(f"Florida corporate file: implausible skip share ({skipped}/{processed}); "
-                             "more than 99.9% skipped; check layout and scope")
         spool.seek(0)
         for line in spool:
             yield json.loads(line)
