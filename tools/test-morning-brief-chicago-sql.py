@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
+from migration_source import read_migration
 
 spec = importlib.util.spec_from_file_location('local_pg', ROOT / 'ops/local-pg-ci.py')
 assert spec is not None and spec.loader is not None
@@ -67,7 +68,7 @@ insert into deal values(1,1);
 
 
 def definition(name, source):
-    text = (ROOT / 'migrations' / source).read_text()
+    text = read_migration(ROOT, source)
     statement = re.search(r'create (?:or replace )?view ' + name + r'\s+as\b.*?;', text, re.I | re.S)[0]
     return re.sub(r'^create view', 'create or replace view', statement, flags=re.I)
 
@@ -88,7 +89,7 @@ class ChicagoCalendar(unittest.TestCase):
                    check=True,capture_output=True,timeout=60)
         cls.command = [b.psql,'-XAt','-h',cls.pg.root,'-U','fixture','-d','postgres','-v','ON_ERROR_STOP=1']
         cls.sql(SCHEMA)
-        days = (ROOT / 'migrations/0088_triage_names_and_age.sql').read_text()
+        days = read_migration(ROOT, '0088_triage_names_and_age.sql')
         cls.sql(re.search(r'create or replace function carr_business_days\b.*?\$\$;',days,re.S)[0])
 
     @classmethod
