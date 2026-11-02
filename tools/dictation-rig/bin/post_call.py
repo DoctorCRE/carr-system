@@ -1052,8 +1052,15 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         if isinstance(exc, coverage.CoverageError):
             failed_ledger = read_json(session_dir / coverage.FILE)
             if failed_ledger is not None:
-                failed_ledger = coverage.incomplete_ledger(failed_ledger, str(exc))
+                if failed_ledger.get("state") != "incomplete":
+                    failed_ledger = coverage.incomplete_ledger(failed_ledger, str(exc))
                 write_private(session_dir / coverage.FILE, failed_ledger)
+                status["coverage_counts"] = {
+                    "sources": len(failed_ledger["sources"]), "merged_facts": len(failed_ledger["facts"]),
+                    "validated_windows": sum(w["validated_completion"] for w in failed_ledger["windows"]),
+                    "total_windows": len(failed_ledger["windows"]),
+                }
+                status["coverage_source_ids"] = [s["source_id"] for s in failed_ledger["sources"]]
         failed_at = now()
         if next_attempt_at is not None:
             next_attempt_at = (datetime.fromisoformat(failed_at.replace("Z", "+00:00"))

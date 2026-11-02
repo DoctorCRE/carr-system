@@ -145,6 +145,8 @@ class LedgerTests(unittest.TestCase):
                     return result
                 status = pc.process_session(self.session, incomplete, run_checks=False, max_attempts=1)
                 self.assertEqual(status['state'], 'needs_attention')
+                self.assertEqual(status['coverage_counts']['sources'], len(self.transcript['segments']))
+                self.assertEqual(status['coverage_source_ids'][0], 'segment-0')
                 self.assertFalse((self.session / pc.REPORT_FILE).exists())
                 self.assertIsNotNone(pc.context_from_session(self.session))
                 self.assertIsNone(pc.retention_ready(self.session, 'a'*64))
@@ -237,6 +239,17 @@ class LedgerTests(unittest.TestCase):
                 cov.add_identity_questions(ledger, report, pc._review_id)
                 with self.assertRaises(cov.CoverageError):
                     cov.reconcile_coverage(ledger, report)
+
+    def test_earlier_correction_cannot_dispose_of_a_later_repeated_assertion(self):
+        self.transcript['segments'].append({
+            'speaker': 'Joe', 'text': 'For Harbor Clinic, I will call the landlord Friday.'})
+        self.response['facts'][0]['source_spans'].append(cov.source_span(self.transcript, 12))
+        ledger = self.build()
+        report = pc.normalize_distillation(self.raw_report(), self.context, self.context['session'],
+                                          transcript=self.transcript)
+        cov.add_identity_questions(ledger, report, pc._review_id)
+        with self.assertRaisesRegex(cov.CoverageError, 'nonlater_correction'):
+            cov.reconcile_coverage(ledger, report)
 
     def test_supersession_requires_correction_and_has_no_cycles(self):
         for mode in ('missing', 'cycle', 'recorded', 'no_change'):

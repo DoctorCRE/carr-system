@@ -280,8 +280,8 @@ def reconcile_coverage(ledger, report):
             for span in spans:
                 _validate_span(span, ledger['sources'])
                 _require(span in facts[target]['source_spans'], 'foreign_correction')
-                _require(_validate_span(span, ledger['sources'])[0] >
-                         min(_validate_span(s, ledger['sources'])[0] for s in fact['source_spans']), 'nonlater_correction')
+                _require(_validate_span(span, ledger['sources'])[0] >=
+                         max(_validate_span(s, ledger['sources'])[1] for s in fact['source_spans']), 'nonlater_correction')
         elif kind == 'no_change':
             _require(set(detail) == {'decision_spans'}, 'invalid_no_change')
             _require(fact['kind'] == 'no_change' and isinstance(detail.get('decision_spans'), list) and bool(detail['decision_spans']), 'unspoken_no_change')
