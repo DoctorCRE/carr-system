@@ -1353,6 +1353,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "job-card-registration": {
+    "ingress_key": "mcp-tool:job-card-registration",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "55cd59b5dee4124c8d94723aa48a071f9eefd240aa40943150b60bf14027cad6",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "last-new-lead-search": {
     "ingress_key": "mcp-tool:last-new-lead-search",
     "source_locator": "mcp-server/src/lead-automation.js",

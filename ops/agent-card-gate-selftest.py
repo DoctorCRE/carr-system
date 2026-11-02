@@ -28,8 +28,17 @@ class AgentCardGate(unittest.TestCase):
         self.home = self.root / 'home'
         self.home.mkdir()
         self.lookup = self.root / 'tools/call-verb.py'
-        self.lookup.write_text('import json, sys\nassert sys.argv[1:] == ["work-queue", "{}"]\n'
-                               'print(json.dumps({"ok": True, "jobs": []}))\n')
+        self.reply_fixture(False)
+
+    def reply_fixture(self, registered):
+        self.lookup.write_text('import json, sys\n'
+                               'assert sys.argv[1] == "job-card-registration"\n'
+                               'card = json.loads(sys.argv[2])["card_id"]\n'
+                               'print(json.dumps({"ok": True, "card_id": card, '
+                               f'"registered": {registered!r}, '
+                               '"executor": "codex", "model": "synthetic", '
+                               '"repository": None, "work_request_state": "captured"}))\n')
+
 
     def run_hook(self, tool='Agent', **inputs):
         if tool == 'Agent':
@@ -58,8 +67,7 @@ class AgentCardGate(unittest.TestCase):
         self.assertIn('not registered', result.stderr)
 
     def register_fixture(self):
-        self.lookup.write_text('import json, sys\nassert sys.argv[1:] == ["work-queue", "{}"]\n'
-                               'print(json.dumps({"ok": True, "jobs": [{"card_id": "WR557.S6.J1"}]}))\n')
+        self.reply_fixture(True)
 
     def test_registered_card_allowed(self):
         self.register_fixture()
@@ -172,7 +180,7 @@ class AgentCardGate(unittest.TestCase):
     def test_live_unregistered_result_overrides_cache(self):
         self.register_fixture()
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
-        self.lookup.write_text('print(\'{"ok": true, "jobs": []}\')')
+        self.reply_fixture(False)
         result = self.run_hook(prompt='Card: WR557.S6.J1')
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('not registered', result.stderr)
@@ -205,6 +213,58 @@ class AgentCardGate(unittest.TestCase):
                 result = self.run_hook(prompt='Card: WR557.S6.J1\nReview.')
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn('lookup unreachable or invalid', result.stderr)
+
+    def test_registration_lookup_avoids_slow_dashboard(self):
+        self.lookup.write_text('import json, sys, time\n'
+                               'if sys.argv[1] == "work-queue": time.sleep(8)\n'
+                               'assert sys.argv[1] == "job-card-registration"\n'
+                               'card = json.loads(sys.argv[2])["card_id"]\n'
+                               'print(json.dumps({"ok": True, "card_id": card, "registered": True, '
+                               '"executor": "codex", "model": "synthetic", '
+                               '"repository": None, "work_request_state": "captured"}))\n')
+        result = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_mismatched_or_duplicate_registration_response_denied(self):
+        for reply in (
+            {'ok': True, 'card_id': 'WR557.S6.J2', 'registered': True},
+            {'ok': True, 'card_id': 'WR557.S6.J1', 'registered': 1},
+            {'ok': True, 'card_id': 'WR557.S6.J1', 'registered': True},
+            [{'card_id': 'WR557.S6.J1'}, {'card_id': 'WR557.S6.J1'}],
+        ):
+            with self.subTest(reply=reply):
+                self.lookup.write_text('print(' + repr(json.dumps(reply)) + ')')
+                result = self.run_hook(prompt='Card: WR557.S6.J1')
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('invalid registration', result.stderr)
+
+    def test_absent_verb_names_deployment_gap(self):
+        self.lookup.write_text('raise SystemExit(1)')
+        result = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('registration call exited 1', result.stderr)
+        self.assertIn('verify job-card-registration is deployed and reachable', result.stderr)
+
+    def test_single_card_refresh_preserves_other_cards_without_extending_ttl(self):
+        self.now = 1000000
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.now += 100
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.now = 1000000 + 24 * 60 * 60
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 0)
+
+    def test_successful_registration_repairs_corrupt_cache(self):
+        cache = self.home / '.cache/carr/agent-card-registrations.json'
+        cache.parent.mkdir(parents=True)
+        cache.write_text('invalid')
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
 
     def test_project_settings_guard_both_launch_tools(self):
         groups = json.loads((REPO / '.claude/settings.json').read_text())['hooks']['PreToolUse']
