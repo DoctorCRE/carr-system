@@ -1643,6 +1643,10 @@ ZSH_GLOB_ADDITIONS = [
                    '/tmp/x/(#i)a*', '/tmp/x/"prefix"(a|b)')
 ]
 ZSH_GLOB_ADDITIONS += [
+    ('J134 escaped expansion lead ' + target, 'rm -rf ' + target + ' /Users/booko/important')
+    for target in (r'/tmp/x/\$(a|b)', r'/tmp/x/\>(a|b)')
+]
+ZSH_GLOB_ADDITIONS += [
     ('J134 safe-only ' + target, 'rm -rf ' + target)
     for target in ('/tmp/x/*(N)', '/tmp/x/*(.)', '/tmp/x/a#')
 ]
@@ -1655,11 +1659,18 @@ ZSH_GLOB_EXISTING_DENIALS = [
     (name, command) for name, command in ZSH_GLOB_ADDITIONS
     if (command.startswith('rm -rf ') and '(a|' not in command
         and not name.startswith('J134 safe-only'))
-    or command.startswith(('zsh -c', 'bash -c'))
+    or command.startswith(('zsh -c', 'bash -c', 'echo '))
+    or r'\$' in command
 ]
 ZSH_GLOB_ADDITIONS = [item for item in ZSH_GLOB_ADDITIONS if item not in ZSH_GLOB_EXISTING_DENIALS]
 for name, command in ZSH_GLOB_ADDITIONS + ZSH_GLOB_EXISTING_DENIALS:
     case(name, bash(command, '/tmp'), DENY)
+for adapter in (direct_exec, codex_exec):
+    case('J134 native ' + adapter.__name__,
+         adapter('rm -rf /tmp/x/(a|b) /Users/booko/important'), DENY)
+payload = direct_exec('rm -rf /tmp/x/(a|b) /Users/booko/important')
+payload['tool_input']['shell'] = '/bin/bash'
+case('J134 declared bash cannot establish glob option state', payload, DENY)
 for command in (
     "rm -rf '/tmp/x/(a|b)'", 'rm -rf "/tmp/x/(a|b)"',
     r'rm -rf /tmp/x/\(a\|b\)', "mv '/tmp/x/(a|b)' /tmp/y",

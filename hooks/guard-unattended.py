@@ -2470,11 +2470,82 @@ def source_restore_reason(cmd, cwd=None):
     return None
 
 
+def zsh_glob_reason(cmd, invocations, depth=0):
+    """Refuse ambiguous word globs in commands containing a guarded program.
+
+    Hook payloads carry no authoritative shell or option state. Even a bash
+    wrapper can launch zsh, so assume zsh with EXTENDED_GLOB enabled. This is
+    an additional refusal, never a replacement interpretation of raw text.
+    """
+    if depth >= 4:
+        raise ValueError('shell glob inspection nesting exceeds limit')
+    text = strip_inert_text(cmd).replace('\\\n', '')
+    quote, word, groups, hashes, i = None, False, False, False, 0
+    expansion_lead = False
+    while i < len(text):
+        char = text[i]
+        expansion, expansion_lead = expansion_lead, False
+        if char == '\\' and quote != "'":
+            word = True
+            i += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in {'"', "'", '`'}:
+            quote, word = char, True
+        elif char == '(':
+            # A glued group is a glob or an unsupported expansion. A bare
+            # (a|b) operand is indistinguishable from a compact subshell pipe.
+            compact = re.match(r'\([^\s]*\||\((?:#|N\)|\.\))', text[i:])
+            groups |= (word or compact is not None) and not expansion
+            word = False
+        elif char == '#':
+            if not word and (i == 0 or text[i - 1] != '('):
+                end = text.find('\n', i)
+                if end < 0:
+                    break
+                i = end
+                continue
+            hashes |= word
+            word = True
+        elif char.isspace() or char in ';&|<>':
+            word = False
+            expansion_lead = char in '<>'
+        else:
+            word = char != ')'
+            expansion_lead = char == '$'
+        i += 1
+    guarded = {'rm', 'mv', 'cp', 'rsync', 'srm', 'shred', 'find', 'git', 'gh',
+               'curl', 'wget', 'dd', 'tee', 'diskutil', 'age', 'psql', 'sqlite3'}
+    # Fragment identifiers in PR reads cannot write or select local paths.
+    hash_sensitive = any(program in guarded and not (
+        program == 'gh' and _gh_command_words(arguments)[:2] == ['pr', 'view'])
+        for program, arguments in invocations)
+    if (groups and any(program in guarded for program, _ in invocations)) or (hashes and hash_sensitive):
+        return 'cannot classify zsh word glob safely; quote literal operands or use explicit paths'
+    for program, arguments in invocations:
+        script = ' '.join(arguments) if program == 'eval' else (
+            _shell_c_script(arguments) if _SHELLS.match(program) else None)
+        if script:
+            reason = zsh_glob_reason(script, list(executed_invocations(script)), depth + 1)
+            if reason:
+                return reason
+    for body in shell_expansions(without_shell_comments(text)):
+        reason = zsh_glob_reason(body, list(executed_invocations(body)), depth + 1)
+        if reason:
+            return reason
+    return None
+
+
 def check(cmd, cwd=None):
     """Normalization adds checks and can never replace the raw decision."""
     try:
         invocations = list(executed_invocations(cmd))
         reason = _check_candidate(cmd, cwd, invocations, cmd)
+        if reason:
+            return reason
+        reason = zsh_glob_reason(cmd, invocations)
         if reason:
             return reason
         for program, arguments in invocations:
