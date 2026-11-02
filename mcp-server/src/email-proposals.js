@@ -521,12 +521,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               and (a.email_source->>'mailbox_owner'=$1 or (a.email_source is null and a.actor_id=$2))
               and ($3::uuid is null or (p.created_at,p.id)>(select created_at,id from email_proposal where id=$3))
             order by p.created_at,p.id limit 201 for update of p skip locked`, [owner,actor.id,args.cursor ?? null])).rows;
+          const people = rows.some(row => MATCHING.has(row.kind)) ? await contacts(c, rows.slice(0,200).map(row => row.activity_id)) : [];
           let expired = 0;
           for (const row of rows.slice(0,200)) {
             await c.query('select id from activity where id=$1 for share', [row.activity_id]);
             try {
               if (row.kind === 'reply_draft') await draftRecipients(c,row);
-              else await show(c,actor,row);
+              else await show(c,actor,row,people);
             } catch (error) {
               if (!(error instanceof ToolError)) throw error;
               const reason = `Expired after 30 days; still blocked: ${error.payload?.error ?? 'preview_failed'}`;
@@ -572,6 +573,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             fail('email_thread_filing_suppressed');
         }
         if (args.match_evidence && !matching) fail('email_proposal_fields_invalid');
+        const matchingPeople = matching ? await contacts(c, [row.activity_id]) : null;
         if (args.mode === 'repair_match') {
           if (!matching || !args.proposal_id || !args.base_version || !args.match_evidence)
             fail('email_proposal_fields_invalid');
@@ -583,7 +585,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if ((await c.query(`select 1 from email_proposal where id<>$1 and kind=$2
             and deal_id is not distinct from $3::uuid and activity_id=$4`,
             [prior.id,row.kind,row.deal_id,row.activity_id])).rows.length) fail('email_proposal_repair_conflict');
-          await show(c, actor, row);
+          await show(c, actor, row, matchingPeople);
           await c.query(`update email_proposal set kind=$2,deal_id=$3,task_text=$4,sender_role=$5,
             confidence=$6,match_evidence=$7::jsonb,version=version+1 where id=$1`,
             [prior.id,row.kind,row.deal_id,row.task_text,row.sender_role,args.confidence,JSON.stringify(args.match_evidence)]);
@@ -603,7 +605,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               and deal_id is null and occurred_at<=now() for share`, [row.activity_id])).rows[0];
             if (!source?.detail?.includes(row.evidence_quote)) fail('email_proposal_quote_invalid');
             if (row.evidence_quote.trim().length < 10) fail('email_next_step_quote_invalid');
-          } else await show(c, actor, row);
+          } else await show(c, actor, row, matchingPeople);
         }
         const stored = (await c.query(`insert into email_proposal
           (kind,deal_id,activity_id,evidence_quote,task_text,sender_role,next_date,owner,confidence,created_by,draft_subject,draft_body,match_evidence)
@@ -613,7 +615,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           [row.kind,row.deal_id,row.activity_id,row.evidence_quote,row.task_text,row.sender_role,row.next_date,row.owner,
             args.confidence,actor.id,draft ? args.subject : null,draft ? args.body : null,JSON.stringify(args.match_evidence ?? null)])).rows[0];
         let shown=null, previewError=null;
-        try { if (!draft) shown=await show(c,actor,stored); }
+        try { if (!draft) shown=await show(c,actor,stored,matchingPeople); }
         catch (error) { if (!(error instanceof ToolError)) throw error; previewError=error.payload?.error ?? 'preview_failed'; }
         return { ok:true,proposal_id:stored.id,status:stored.status,version:stored.version,
           proposal_digest:shown?.proposal_digest ?? null,preview_error:previewError,
