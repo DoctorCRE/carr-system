@@ -1158,6 +1158,11 @@ def review_complete(report: dict[str, Any]) -> bool:
     return all(question.get("resolved") is True for question in report.get("review_questions", []))
 
 
+def is_filed_legacy_report(session_dir: Path, report: dict[str, Any]) -> bool:
+    return ((read_json(session_dir / STATUS_FILE) or {}).get("state") == "filed"
+            and "coverage_sha256" not in report)
+
+
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     with session_lock(session_dir):
@@ -1166,9 +1171,7 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
                 return None
-            filed_legacy = ((read_json(session_dir / STATUS_FILE) or {}).get("state") == "filed"
-                            and "coverage_sha256" not in report)
-            if not filed_legacy:
+            if not is_filed_legacy_report(session_dir, report):
                 try:
                     require_review_coverage(session_dir, report)
                 except coverage.CoverageError:

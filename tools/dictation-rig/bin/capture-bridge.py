@@ -460,6 +460,8 @@ def publish_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         log_line(f"NOOP publish no-capture-marker session={session_dir.name}")
         return 0
     report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+    if report is not None and post_call.is_filed_legacy_report(session_dir, report):
+        return 0
     if report is not None and post_call.hold_transcript_repeat(session_dir, report) is not None:
         return 1
     if (post_call.read_json(session_dir / post_call.STATUS_FILE) or {}).get("state") == "held_review":
@@ -590,6 +592,7 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     timestamp = iso_now_utc()
     attempts = retry.get("attempts", 0)
     report = post_call.read_json(session_dir / post_call.REPORT_FILE) if has_report else None
+    filed_legacy = report is not None and post_call.is_filed_legacy_report(session_dir, report)
     if report is not None and post_call.hold_transcript_repeat(session_dir, report) is not None:
         # A held summary waits for the partner; it is not a failed sync.
         if attempts:
@@ -605,7 +608,7 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         next_at = (datetime.fromisoformat(timestamp.replace("Z", "+00:00")) + timedelta(seconds=delay)).strftime("%Y-%m-%dT%H:%M:%SZ") if delay else None
         write_json_atomic(retry_path, {"attempts": attempts, "next_attempt_at": next_at}, mode=0o600)
         status = read_json(session_dir / post_call.STATUS_FILE) or {"session": session_dir.name}
-        status.update({"state": "needs_attention" if delay is None else "blocked", "updated_at": timestamp,
+        status.update({"state": "filed" if filed_legacy else "needs_attention" if delay is None else "blocked", "updated_at": timestamp,
                        "reason": "Post-call synchronization failed; recordings retained.", "sync_attempts": attempts})
         write_json_atomic(session_dir / post_call.STATUS_FILE, status, mode=0o600)
     elif attempts:
@@ -613,7 +616,7 @@ def poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         status = read_json(session_dir / post_call.STATUS_FILE) or {}
         if status.pop("sync_attempts", None) is not None:
             status.pop("reason", None)
-            status.update({"state": "ready_review", "updated_at": timestamp})
+            status.update({"state": "filed" if filed_legacy else "ready_review", "updated_at": timestamp})
             write_json_atomic(session_dir / post_call.STATUS_FILE, status, mode=0o600)
     return result
 

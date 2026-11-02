@@ -247,6 +247,16 @@ class LedgerTests(unittest.TestCase):
                         self.assertNotEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'ready_review')
                     if case == 'network_retry':
                         self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'filed')
+                        retry = pc.read_json(session / 'post-call-sync.json')
+                        retry['next_attempt_at'] = None
+                        pc.write_private(session / 'post-call-sync.json', retry)
+                        remote.side_effect = lambda _cfg, _path, method, endpoint, body=None: (
+                            (200, response) if (method, endpoint) == ('GET', '/capture/session')
+                            else (200, {'ok': True}) if (method, endpoint) == ('POST', '/capture/status')
+                            else self.fail(f'Unexpected publication request {method} {endpoint}'))
+                        self.assertEqual(bridge.poll_cmd({}, session), 0)
+                        self.assertTrue((session / 'ingested.json').exists())
+                        self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'filed')
 
     def test_oversized_history_is_terminal_without_model_retry(self):
         self.transcript = {'segments': [{'text': 'x' * 25000}]}
