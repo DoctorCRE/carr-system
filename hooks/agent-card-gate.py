@@ -183,21 +183,24 @@ def check_prompts(prompts):
         cards.extend(found)
     if not cards:
         return
+    deadline = time.monotonic() + 8
     for card in dict.fromkeys(cards):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return refuse('Card registration lookup deadline exceeded. Retry the launch.')
         try:
             with subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent.parent / 'tools/call-verb.py'),
                                    'job-card-registration', json.dumps({'card_id': card})],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   text=True, stdin=subprocess.DEVNULL, start_new_session=True) as lookup:
                 try:
-                    stdout, _ = lookup.communicate(timeout=5)
+                    stdout, _ = lookup.communicate(timeout=min(5, remaining))
                 except subprocess.TimeoutExpired:
                     os.killpg(lookup.pid, signal.SIGKILL)
                     lookup.communicate()
                     raise
                 if lookup.returncode:
-                    raise ValueError('registration call exited ' + str(lookup.returncode)
-                                     + '; verify job-card-registration is deployed and reachable')
+                    raise ValueError('registration call exited ' + str(lookup.returncode))
             registration = json.loads(stdout)
             if (not isinstance(registration, dict) or registration.get('ok') is not True
                     or registration.get('card_id') != card
@@ -210,6 +213,8 @@ def check_prompts(prompts):
                     or not (registration['repository'] is None or isinstance(registration['repository'], str))):
                 raise ValueError('invalid registration facts')
         except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
+            if time.monotonic() >= deadline:
+                return refuse('Card registration lookup deadline exceeded. Retry the launch.')
             if card in registration_cache():
                 continue
             reason = str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else type(exc).__name__

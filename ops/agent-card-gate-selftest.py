@@ -240,12 +240,12 @@ class AgentCardGate(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn('invalid registration', result.stderr)
 
-    def test_absent_verb_names_deployment_gap(self):
+    def test_lookup_exit_does_not_assume_deployment_gap(self):
         self.lookup.write_text('raise SystemExit(1)')
         result = self.run_hook(prompt='Card: WR557.S6.J1')
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('registration call exited 1', result.stderr)
-        self.assertIn('verify job-card-registration is deployed and reachable', result.stderr)
+        self.assertNotIn('deployed', result.stderr)
 
     def test_single_card_refresh_preserves_other_cards_without_extending_ttl(self):
         self.now = 1000000
@@ -291,6 +291,20 @@ class AgentCardGate(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 9)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('agent-card-gate: Card registration lookup deadline exceeded', result.stderr)
+
+    def test_shared_deadline_refuses_even_with_cached_cards(self):
+        cache = self.home / '.cache/carr/agent-card-registrations.json'
+        cache.parent.mkdir(parents=True)
+        cache.write_text(json.dumps(dict.fromkeys(
+            (f'WR557.S6.J{job}' for job in (1, 2, 3)), time.time())))
+        self.lookup.write_text('import time\ntime.sleep(30)\n')
+        started = time.monotonic()
+        result = self.run_hook('mcp__t3-code__create_threads', threads=[
+            {'prompt': f'Card: WR557.S6.J{job}'} for job in (1, 2, 3)
+        ])
+        self.assertLess(time.monotonic() - started, 9)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('Card registration lookup deadline exceeded', result.stderr)
 
     def test_malformed_or_duplicate_card_denied(self):
         self.register_fixture()

@@ -528,9 +528,8 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
         const rows = (await c.query(`select j.executor,j.model,j.repository,w.state as work_request_state
           from ops.work_request w join ops.work_request_job j on j.work_request_id=w.id
           where w.ref=$1 and w.organization_tenant_id=$2 and j.slice_ordinal=$3 and j.j_number=$4
-          and ${readableWorkRequestSql('w')} limit 2`,
+          and ${readableWorkRequestSql('w')}`,
         [`WR-${match[1].padStart(6, '0')}`, organizationTenantForActor(actor), Number(match[2]), Number(match[3])])).rows;
-        if (rows.length > 1) refuse('duplicate_job_registration');
         return { ok: true, card_id: args.card_id, registered: rows.length === 1, ...rows[0] };
       } },
     'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
