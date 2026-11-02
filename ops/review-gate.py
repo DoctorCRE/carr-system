@@ -1,18 +1,10 @@
 """Publish a SHA-bound review-gate commit status using trusted GitHub event data."""
-import fnmatch
 import re
 import json
 import os
 import subprocess
 import time
 from pathlib import Path
-
-RISKY = ("*launchagents*", "*.plist", "install-*.sh", "*/install-*.sh",
-         "claude.md", "agents.md", "*/claude.md", "*/agents.md",
-         ".claude/*", ".agents/*", "docs/agents/*",
-         "*outlook*", "*hxstore*", "*hxprobe*", "*calendar*",
-         ".github/workflows/deploy*", "migrations/*", "db/*", "*wrangler*", "tools/migrate.py")
-
 
 # GitHub skips every push workflow for these title markers, so a merged PR would never deploy.
 SKIP_CI = re.compile(r"\[(skip ci|ci skip|no ci|skip actions|actions skip)\]", re.I)
@@ -29,20 +21,11 @@ def card_allowed(pr, files):
                 for line in (pr.get("body") or "").splitlines()))
 
 
-def review_exempt(pr, files):
-    if docs_only(pr, files):
-        return True
-    risky = any(f.get("status") == "added" and f.get("filename", "").startswith(("bin/", "hooks/", "ops/", ".github/workflows/")) for f in files) or any(fnmatch.fnmatchcase(f.get(key, "").lower(), pattern)
-                for f in files for key in ("filename", "previous_filename") for pattern in RISKY)
-    complete = len(files) == pr["changed_files"]
-    return complete and pr["additions"] - pr["deletions"] <= 150 and not risky
-
-
-def approved(pr, files, reviews, reviewer_login):
+def review_failure(pr, reviews, reviewer_login):
     if reviewer_login and not reviewer_login.endswith("[bot]"):
-        return False
+        return "CARR_REVIEW_APP_LOGIN must name an App bot ending in [bot]"
     if SKIP_CI.search(pr.get("title") or ""):
-        return False
+        return "Remove skip-CI markers from the PR title"
     latest = {}
     for review in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
         user = (review.get("user") or {}).get("login")
@@ -51,12 +34,16 @@ def approved(pr, files, reviews, reviewer_login):
             latest[user.lower()] = review
     current_review = latest.get(reviewer_login.lower(), {}) if reviewer_login else {}
     if current_review.get("state") == "CHANGES_REQUESTED" and current_review.get("commit_id") == pr["head"]["sha"]:
-        return False
-    if review_exempt(pr, files):
-        return True
+        return "App requested changes at this head; resolve findings and resubmit via ops/review-submit.py"
+    if not reviewer_login:
+        return "Missing CARR_REVIEW_APP_LOGIN; review-required PR cannot pass"
     author = (pr.get("user") or {}).get("login", "").lower()
-    return any(reviewer_login and user == reviewer_login.lower() and user != author and (r.get("user") or {}).get("type") == "Bot" and r["state"] == "APPROVED" and r.get("commit_id") == pr["head"]["sha"]
-               for user, r in latest.items())
+    if (reviewer_login.lower() != author and (current_review.get("user") or {}).get("type") == "Bot"
+            and current_review.get("state") == "APPROVED" and current_review.get("commit_id") == pr["head"]["sha"]):
+        if [line for line in (current_review.get("body") or "").splitlines() if line.startswith("Reviewed-SHA:")] != [f'Reviewed-SHA: {pr["head"]["sha"]}']:
+            return f"App approval body needs exactly one line 'Reviewed-SHA: {pr['head']['sha']}'; resubmit via ops/review-submit.py"
+        return None
+    return "Current-head App approval required; submit via ops/review-submit.py"
 
 
 def api(path, payload=None):
@@ -135,7 +122,7 @@ def run(event, repo):
         def status(state):
             api(f"{root}/statuses/{group['head_sha']}", {
                 "context": "review-gate", "state": state,
-                "description": "Every queued PR needs exemption or current-head App approval"})
+                "description": "Every queued PR needs current-head App approval"})
         status("pending")
         try:
             if not os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip():
@@ -156,7 +143,7 @@ def run(event, repo):
 
 
 def evaluate_pr(root, number, queue_head=None):
-    def status(sha, state, description="No skip-CI title; small safe diff or current-head approval required"):
+    def status(sha, state, description="Checking PR card, title and current-head App approval"):
         api(f"{root}/statuses/{sha}", {"context": "review-gate", "state": state,
             "description": description})
     pr = api(f"{root}/pulls/{number}")
@@ -170,16 +157,13 @@ def evaluate_pr(root, number, queue_head=None):
     reviews = api(f"{root}/pulls/{number}/reviews?per_page=100")
     card_ok = card_allowed(pr, files)
     reviewer_login = os.environ.get("CARR_REVIEW_APP_LOGIN", "").strip()
-    passed = card_ok and approved(pr, files, reviews, reviewer_login)
+    failure = review_failure(pr, reviews, reviewer_login)
+    passed = card_ok and failure is None
     latest = api(f"{root}/pulls/{number}")
     if (latest["head"]["sha"] == sha and latest["base"]["ref"] == pr["base"]["ref"] and
             all(latest.get(k) == pr.get(k) for k in ("body", "title"))):
-        description = ("No skip-CI title; small safe diff or current-head approval required" if card_ok else
-                       "Missing PR body line: Card: WR<number>.S<number>.J<number>")
-        if card_ok and not reviewer_login and not review_exempt(pr, files):
-            description = "Missing CARR_REVIEW_APP_LOGIN; review-required PR cannot pass"
-        if reviewer_login and not reviewer_login.endswith("[bot]"):
-            description = "CARR_REVIEW_APP_LOGIN must name an App bot ending in [bot]"
+        description = (failure or "Review requirements satisfied") if card_ok else (
+            "Missing PR body line: Card: WR<number>.S<number>.J<number>")
         status(sha, "success" if passed else "failure", description)
         print(description)
         return int(not passed)

@@ -60,6 +60,8 @@ def installation_token(repository=CONFIG['repository']):
 
 
 def submit(number, decision, body, reviewed_sha, repository=CONFIG['repository']):
+    if [line for line in body.splitlines() if line.startswith('Reviewed-SHA:')] != [f'Reviewed-SHA: {reviewed_sha}']:
+        raise ValueError(f"review body needs exactly one line 'Reviewed-SHA: {reviewed_sha}'")
     token = installation_token(repository)
     try:
         path = f"/repos/{repository}/pulls/{number}"
@@ -90,7 +92,9 @@ def main():
         if not body.strip():
             raise ValueError('review body is empty')
         review_id = submit(args.number, args.decision, body, args.reviewed_sha, args.repository)
-    except (OSError, ValueError, KeyError):
+    except ValueError as error:
+        raise SystemExit(f'Review not submitted: {error}') from None
+    except (OSError, KeyError):
         raise SystemExit('Review not submitted: App authentication, input, or GitHub request failed') from None
     print(f'Review submitted: {review_id}')
 
