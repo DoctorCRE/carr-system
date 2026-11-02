@@ -1230,8 +1230,9 @@ def test_hosted_draft_lifecycle():
                   and weekly['on']['schedule'] == [{'cron': '20 6 * * 1'}]
                   and 'fallow' not in jobs)
         verdict = jobs.get(verdict_name, {})
+        expected_needs = set(lanes) | ({"launchd-python39"} if filename == "ci.yml" else set())
         check(f"{filename}: verdict always evaluates and waits for every lane",
-              verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == set(lanes))
+              verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == expected_needs)
         if not verdict:
             continue
         step = next(st for st in verdict["steps"] if st.get("run") == f"python3 ops/ci-evidence.py {command}")
