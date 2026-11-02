@@ -1,0 +1,31 @@
+{
+  "schema": "carr-email-followups.v2",
+  "version": "2.0.0",
+  "card": "WR634.S1.J15",
+  "transport": "Authenticated MCP email-router-queue, record-email-proposal, list-email-proposals, confirm-email-filing and inherit-email-thread",
+  "matching": {
+    "version": 2,
+    "outcome": "existing, new or uncertain. Proposal kind is a transport hint, never automatic filing authority.",
+    "candidates": "Array of deal UUID, literal explanation in reason and confidence between zero and one. Model suggestions require human review.",
+    "evidence": "Diagnostic object with model revision, existing and different scores, choice_confidence, missing metadata and body_truncated. Diagnostic text is untrusted data.",
+    "new": "A genuinely separate transaction requires positive different evidence and low existing evidence with structured sender, recipients and conversation metadata. Another property within an existing search is not a new transaction. An exact party on the board produces file_to_deal before possible_new_deal, even when scores favor a separate transaction. A human must review and choose a new deal instead when appropriate; Unit 3 adds that action.",
+    "uncertain": "Contradictory scores, incomplete metadata or exact board-party relationships produce reviewed existing-deal filing cards. Identity alone never authorizes automatic filing."
+  },
+  "read": {
+    "schema_version": "Existing email-proposals.v1 response remains additive.",
+    "match_evidence": "Nullable stored diagnostic result. Legacy rows return null.",
+    "suggested_deals": "Current accessible open deals with deal UUID, name, reasons and requires_confirmation=true. Computed for every pending matching card regardless of age. Closed and invoiced deals are excluded. Name similarities remain identity candidates and never write links.",
+    "digest": "email-filing.v1 retains its contract name. Enriched sender and recipient fields change digest inputs. Cards loaded before deployment must refresh after email_proposal_stale. Suggestions and diagnostics do not authorize confirmation."
+  },
+  "association": {
+    "reuse": "Human confirmation files the source activity. Ordinary thread_history includes that filing, including older messages in the same conversation. No separate learned association authority exists.",
+    "undo": "Automatic filings use inherit-email-thread receipts and undo-email-thread-filing. Undo prevents refiling."
+  },
+  "repair": {
+    "command": "record-email-proposal mode=repair_match",
+    "bound": "Exactly one pending matching proposal per command, addressed by proposal_id and base_version. Supply the existing activity_id and unchanged evidence_quote, new matching fields and match_evidence.",
+    "effect": "Revalidates source and target, updates proposal kind and target atomically, increments version and writes an event preserving old and new classification. Resolved rows cannot be repaired. Conflicting tuples refuse with email_proposal_repair_conflict; stale versions refuse with version_conflict. Both preserve the transaction. An identical idempotency key replays the receipt.",
+    "execution": "No automatic historical reclassification or production repair is performed by this source change."
+  },
+  "consumer_adoption": "Pin the merged producer revision and verify its deployed release before relying on these fields."
+}

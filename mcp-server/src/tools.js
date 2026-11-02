@@ -1,5 +1,6 @@
 // Register MCP tools and their shared write envelope.
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
+import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
@@ -10174,18 +10175,7 @@ registerTools({
         ...shortFacts(candidate.evidence_quote).map(text => ({ date: null, kind: 'call', text })),
       ] });
       await c.query("select id from deal where id=$1 for update /* capture:followup-deal-lock */", [candidate.deal_id]);
-      const stepKey = candidate.action_description.trim().replace(/\s+/gu, ' ').toLowerCase();
-      const existing = (await c.query(
-        `select id,item_bullets,source from (
-           select id,item_bullets,'next_action' as source,created_at as ordered_at from next_action
-             where subject_type='deal' and subject_id=$1 and status='open' and owner_id=$3
-               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
-           union all
-           select id,item_bullets,'capture_post_call_action' as source,accepted_at as ordered_at from capture_post_call_action
-             where deal_id=$1 and status='open' and owner_id=$3 and item_title is not null
-               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
-         ) actions order by ordered_at,id limit 1 /* capture:followup-existing */`,
-        [candidate.deal_id, stepKey, assignee.rows[0].id])).rows[0];
+      const existing = await findExactPostCallAction(c, candidate, assignee.rows[0].id);
       const actionTable = existing?.source === 'next_action' ? 'next_action' : 'capture_post_call_action';
       if (existing) await c.query(`select id from ${actionTable} where id=$1 for update`, [existing.id]);
       const bullets = [...(existing?.item_bullets || []), ...item.bullets]
@@ -10221,7 +10211,7 @@ registerTools({
   // on Home until a partner has looked it over, in case one was wrong.
   "read-call-outcomes": {
     writerConnection: true,
-    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Nothing here sends anything.",
+    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const sessions = (await c.query(`
@@ -10243,14 +10233,14 @@ registerTools({
           left join deal d on d.id::text = coalesce(c.payload->>'deal', c.payload->>'ref')
          where c.session_id = any($1::uuid[]) and (c.applied_automatically or c.status='pending')
          order by c.created_at, c.item_index, c.id /* call-outcome:changes */`, [ids])).rows;
-      const postCall = (await c.query(`
-        select c.session_id, c.id as candidate_id, c.kind, c.deal_id, d.name as deal_name, c.evidence_quote,
+      const postCall = await withPostCallActionComparisons(c, (await c.query(`
+        select c.session_id, c.id as candidate_id, c.kind, c.due_defaulted, c.deal_id, d.name as deal_name, c.evidence_quote,
                case c.kind when 'assigned_action' then jsonb_build_object('assignee', c.assignee_slug,
                  'action', c.action_description, 'due_on', to_jsonb(c.due_on)#>>'{}')
                else jsonb_build_object('recipient_ref', c.recipient_ref, 'subject', c.email_subject) end as payload
           from capture_post_call_candidate c join deal d on d.id=c.deal_id
          where c.session_id = any($1::uuid[]) and c.status='pending'
-         order by c.created_at, c.item_index, c.id /* call-outcome:cards */`, [ids])).rows;
+         order by c.created_at, c.item_index, c.id /* call-outcome:cards */`, [ids])).rows);
       const calls = sessions.map(session => ({ ...session,
         applied: legacy.filter(row => row.session_id === session.session_id && row.applied_automatically)
           .map(({ session_id, status, applied_automatically, ...row }) => row),

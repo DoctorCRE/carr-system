@@ -1,0 +1,134 @@
+[
+  {
+    "id": "pair-01",
+    "proposed": "Send LOI to Dr. Smith",
+    "existing": "Send survey to Dr. Smith",
+    "duplicate": false
+  },
+  {
+    "id": "pair-02",
+    "proposed": "Call the landlord about HVAC",
+    "existing": "Call the broker about HVAC",
+    "duplicate": false
+  },
+  {
+    "id": "pair-03",
+    "proposed": "Follow up with the tenant about rent",
+    "existing": "Follow up with the lender about rent",
+    "duplicate": false
+  },
+  {
+    "id": "pair-04",
+    "proposed": "Find out what the tenant wants",
+    "existing": "Find out what the lender wants",
+    "duplicate": false
+  },
+  {
+    "id": "pair-05",
+    "proposed": "Email Dell the comps",
+    "existing": "Email Dell the survey",
+    "duplicate": false
+  },
+  {
+    "id": "pair-06",
+    "proposed": "Schedule tour with Dr. Patel",
+    "existing": "Schedule call with Dr. Patel",
+    "duplicate": false
+  },
+  {
+    "id": "pair-07",
+    "proposed": "Get signed LOI back",
+    "existing": "Get signed lease back",
+    "duplicate": false
+  },
+  {
+    "id": "pair-08",
+    "proposed": "Call the landlord",
+    "existing": "Call the broker",
+    "duplicate": false
+  },
+  {
+    "id": "pair-09",
+    "proposed": "Send Dr. Smith the floor plan",
+    "existing": "Email the floor plan to Dr. Smith",
+    "duplicate": true
+  },
+  {
+    "id": "pair-10",
+    "proposed": "Ask landlord for TI allowance",
+    "existing": "Request the TI allowance from the landlord",
+    "duplicate": true
+  },
+  {
+    "id": "pair-11",
+    "proposed": "Schedule site tour",
+    "existing": "Set up a tour of the site",
+    "duplicate": true
+  },
+  {
+    "id": "pair-12",
+    "proposed": "Get the rent roll",
+    "existing": "Obtain rent roll",
+    "duplicate": true
+  },
+  {
+    "id": "pair-13",
+    "proposed": "Call Bob re: lease",
+    "existing": "Phone Bob about the lease",
+    "duplicate": true
+  },
+  {
+    "id": "pair-14",
+    "proposed": "Get rent roll from landlord",
+    "existing": "Ask landlord for the rent roll",
+    "duplicate": true
+  },
+  {
+    "id": "pair-15",
+    "proposed": "Send revised floor plan to Dr. Smith",
+    "existing": "Send revised floor plan to Dr. Jones",
+    "duplicate": false
+  },
+  {
+    "id": "pair-16",
+    "proposed": "Ask Bob for signed lease amendment",
+    "existing": "Ask Bob for signed purchase amendment",
+    "duplicate": false
+  },
+  {
+    "id": "pair-17",
+    "proposed": "Call Dr. Patel about parking access",
+    "existing": "Call Dr. Patel about building access",
+    "duplicate": false
+  },
+  {
+    "id": "pair-18",
+    "proposed": "Email Dell the updated survey",
+    "existing": "Email Dell the updated comps",
+    "duplicate": false
+  },
+  {
+    "id": "pair-19",
+    "proposed": "Request building inspection report",
+    "existing": "Obtain building inspection report",
+    "duplicate": true
+  },
+  {
+    "id": "pair-20",
+    "proposed": "Send landlord the parking diagram",
+    "existing": "Email parking diagram to landlord",
+    "duplicate": true
+  },
+  {
+    "id": "pair-21",
+    "proposed": "Schedule inspection with engineer",
+    "existing": "Arrange engineer inspection",
+    "duplicate": true
+  },
+  {
+    "id": "pair-22",
+    "proposed": "Call tenant about lease renewal",
+    "existing": "Phone tenant regarding lease renewal",
+    "duplicate": true
+  }
+]
