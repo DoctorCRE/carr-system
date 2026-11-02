@@ -1,7 +1,7 @@
 // Gate probes over plain HTTP, sign-in, and the Stage 0 source-copy hash check.
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { setTimeout as timerSleep } from 'node:timers/promises';
 import { digest, relativeTo } from './observe.mjs';
 import { neutralize } from './probes.mjs';
 
@@ -118,13 +118,13 @@ const encodePath = served => served.split('/').map(encodeURIComponent).join('/')
 // releases its index.html). A source file outside the manifest must not be
 // served: a 404 is UNSERVED, counted so the partner can match it against the
 // inventory (V-A34). Entries carry ordinals, verdicts and hashes only.
-export async function sourceFidelity(base, sourceDir, cookie, manifestPaths) {
+export async function sourceFidelity(base, sourceDir, cookie, manifestPaths, { now = () => performance.now(), sleep = timerSleep } = {}) {
   const root = new URL(base).pathname;
   const entries = [], covered = new Set();
   let nextAt = 0;
   const fetchFile = async url => {
-    await sleep(Math.max(0, nextAt - performance.now()));
-    nextAt = performance.now() + FILE_FETCH_PACE_MS;
+    await sleep(Math.max(0, nextAt - now()));
+    nextAt = now() + FILE_FETCH_PACE_MS;
     return liveDigest(url, cookie);
   };
   for (const [index, served] of manifestPaths.entries()) {
