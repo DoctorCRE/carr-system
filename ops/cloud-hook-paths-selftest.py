@@ -20,7 +20,7 @@ THE CONTRACT, per layout:
       the canonical checkout, config-as-code install) that a container lacks.
       The launch Card gate runs from $CLAUDE_PROJECT_DIR. A missing canonical
       Card gate also falls back to the project copy. If both copies are missing,
-      warn and allow. Machine hooks remain optional.
+      refuse the call. Machine hooks remain optional.
 
 Each command is run exactly as written in the tracked settings file, under
 every POSIX shell present, against throwaway HOME and project directories.
@@ -153,8 +153,9 @@ def cloud_cases() -> None:
                     payload = cases[event][0]
                     r = run(shell, command, env2, payload, bare)
                     check(f"cloud/{os.path.basename(shell)} project dir {label}: {event} {script} missing policy",
-                          r.returncode == 0 and not blocked(r)
-                          and (script != "agent-card-gate.py" or "CARR HOOK WARNING" in r.stderr),
+                          (blocked(r) and "CARR_SAFETY_HOOK_MISSING" in r.stderr
+                           if script == "agent-card-gate.py"
+                           else r.returncode == 0 and not blocked(r)),
                           f"rc={r.returncode} stderr={r.stderr.strip()[-200:]!r}")
 
 

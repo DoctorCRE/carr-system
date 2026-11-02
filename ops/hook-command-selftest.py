@@ -80,11 +80,13 @@ class HookCommands(unittest.TestCase):
 
     def test_missing_safety_hook_denies(self):
         for source, event, template in commands():
-            if event != 'PreToolUse' or 'guard-unattended.py' not in template:
+            if event != 'PreToolUse' or not any(name in template for name in (
+                    'guard-unattended.py', 'agent-card-gate.py')):
                 continue
             with self.subTest(source=source), fixture(template) as (script, run):
                 result = run()
                 self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(result.stdout.strip(), 'missing safety hook allowed without a deny response')
                 decision = json.loads(result.stdout)['hookSpecificOutput']
                 self.assertEqual(decision['hookEventName'], 'PreToolUse')
                 self.assertEqual(decision['permissionDecision'], 'deny')
