@@ -6,6 +6,7 @@ macOS accessibility are intentionally never invoked here.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import http.client
 import io
@@ -244,8 +245,70 @@ class CallModeTests(unittest.TestCase):
     def test_unrecognized_post_call_state_is_visible_as_unknown(self) -> None:
         session = self.session("held")
         (session / "transcript.json").write_text("{}")
-        post_call.write_private(session / post_call.STATUS_FILE, {"state": "held_review"})
+        post_call.write_private(session / post_call.STATUS_FILE, {"state": "future_unknown_state"})
         self.assertEqual(self.state()["state"], "state_unknown")
+
+    def test_held_review_is_known_and_allows_a_new_recording(self) -> None:
+        held = self.session("held")
+        (held / "transcript.json").write_text("{}")
+        post_call.write_private(held / post_call.STATUS_FILE, {"state": "held_review"})
+        snapshot = self.state()
+        self.assertEqual(snapshot["state"], "held_review")
+        self.assertEqual(snapshot["status_text"], "The call summary is held for review. You can start another recording.")
+        fresh = self.recordings / "new-call"
+
+        def start_quill(title: str) -> None:
+            self.assertEqual(title, "Start recording")
+            fresh.mkdir()
+            (fresh / "mic.caf").touch()
+
+        with (
+            patch.object(call_mode, "LOCK_PATH", self.recordings / "operation.lock"),
+            patch.object(call_mode, "partner_from_device", return_value="Joe"),
+            patch.object(call_mode, "run_quill_menu_item", side_effect=start_quill),
+        ):
+            self.assertEqual(call_mode.start_recording("weekly_deal_call", self.recordings)["state"], "recording")
+        self.assertEqual(post_call.read_json(held / post_call.STATUS_FILE)["state"], "held_review")
+
+    def test_all_written_folder_states_have_known_status_text(self) -> None:
+        states = set()
+        for filename in ("post_call.py", "capture-bridge.py", "transcribe_session.py"):
+            tree = ast.parse((BIN_DIR / filename).read_text())
+            for function in tree.body:
+                if not isinstance(function, ast.FunctionDef):
+                    continue
+                writes_status = any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id in {"write_private", "write_json_atomic"}
+                    and node.args and "STATUS_FILE" in ast.unparse(node.args[0])
+                    for node in ast.walk(function)
+                )
+                if not writes_status:
+                    continue
+                for node in ast.walk(function):
+                    values = []
+                    if isinstance(node, ast.Dict):
+                        values = [value for key, value in zip(node.keys, node.values)
+                                  if isinstance(key, ast.Constant) and key.value == "state"]
+                    elif isinstance(node, ast.keyword) and node.arg == "state":
+                        values = [node.value]
+                    elif isinstance(node, ast.Assign) and any(
+                        isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Constant)
+                        and target.slice.value == "state" for target in node.targets
+                    ):
+                        values = [node.value]
+                    for value in values:
+                        states.update(child.value for child in ast.walk(value)
+                                      if isinstance(child, ast.Constant) and isinstance(child.value, str))
+        self.assertIn("held_review", states)
+        for state in sorted(states):
+            with self.subTest(state=state):
+                session = self.session(state)
+                post_call.write_private(session / post_call.STATUS_FILE, {"state": state})
+                status = call_mode.session_status(session)
+                self.assertEqual(status["state"], state)
+                self.assertTrue(status["status_text"])
 
     def test_stale_interrupted_transcription_retries_and_respects_cap(self) -> None:
         session = self.session("interrupted")
