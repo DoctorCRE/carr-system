@@ -25,6 +25,8 @@ def florida_fixture(**changes):
         'city': (305, 28, 'Pensacola'), 'state': (333, 2, 'FL'),
         'postal_code': (335, 10, '32501'), 'country': (345, 2, 'US'),
         'filing_on': (473, 8, '20261019'),
+        'registered_agent_name': (545, 42, 'SYNTHETIC_AGENT_NAME'),
+        'registered_agent_type': (587, 1, 'P'),
         'registered_agent_address': (588, 42, 'SYNTHETIC_AGENT_LOCATION'),
     }
     raw = [' '] * 1440
@@ -178,6 +180,14 @@ class OriginationTests(unittest.TestCase):
                 florida_rows(florida_fixture(name='Synthetic Retail LLC', **changes),
                              published_on=date(2026, 10, 21), line_number=2)
 
+    def test_florida_registered_agent_types_preserve_the_address(self):
+        from tools.import_practice_origination import florida_rows
+        for agent_type in ['P', 'C', '']:
+            with self.subTest(agent_type=agent_type):
+                row = florida_rows(florida_fixture(registered_agent_type=agent_type),
+                                   published_on=date(2026, 10, 21), line_number=1)[0]
+                self.assertEqual(row['facts']['registered_agent_address'], 'SYNTHETIC_AGENT_LOCATION')
+
     def test_florida_unreadable_rows_still_fail_even_out_of_scope(self):
         from tools.import_practice_origination import florida_rows
         line = florida_fixture(name='Synthetic Retail LLC', city='', state='', postal_code='')
@@ -247,7 +257,12 @@ class OriginationTests(unittest.TestCase):
         skipped = florida_fixture(name='Synthetic Retail LLC')
         shifted = line[:332] + line[333:] + ' '
         same_width_shift = line[:304] + ' ' + line[304:399] + line[400:]
-        cases = [([line] * 150 + [line[:336]], 'line 151.*width'),
+        full_agent_name = florida_fixture(registered_agent_name='S' * 42)
+        late_shift = full_agent_name[:500] + ' ' + full_agent_name[500:-1]
+        cases = [([line] * 150 + [late_shift], 'line 151.*Registered Agent Type'),
+                 ([skipped] * 150 + [florida_fixture(registered_agent_type='X')],
+                  'line 151.*Registered Agent Type'),
+                 ([line] * 150 + [line[:336]], 'line 151.*width'),
                  ([line] * 150 + [shifted], 'line 151.*Country'),
                  ([line] * 150 + [same_width_shift], 'line 151.*Country'),
                  ([skipped] * 150 + [same_width_shift], 'line 151.*Country'),
