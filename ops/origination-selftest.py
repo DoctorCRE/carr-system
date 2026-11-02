@@ -120,6 +120,31 @@ class OriginationTests(unittest.TestCase):
         self.assertEqual(batches[0]['records'][0]['document_number'], 'L26000000001')
         self.assertIn('6 out-of-scope rows skipped', batches[0]['detail'])
 
+    def test_florida_zero_matches_imports_empty_and_counted(self):
+        from tools.import_practice_origination import import_file
+        for lines in [[], [florida_fixture(name='Synthetic Retail LLC')],
+                      [florida_fixture(state='NY', postal_code='10001')] * 3]:
+            batches = []
+
+            def call(verb, args):
+                if verb == 'list-practice-origination':
+                    return {'coverage': [{'source': 'formation-fl', 'enabled': True, 'checkpoint': None}]}
+                batches.append(args)
+                return {'inserted': len(args['records']), 'checkpoint': args['checkpoint']}
+
+            with self.subTest(rows=len(lines)), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / 'synthetic.txt'
+                path.write_text(''.join(line + '\n' for line in lines))
+                result = import_file(path, source='formation-fl', published_on=date(2026, 10, 21), call=call)
+                self.assertEqual(result['inserted'], 0)
+                self.assertEqual(result['processed'], len(lines))
+                self.assertEqual(result['skipped'], len(lines))
+                self.assertEqual(len(batches), 1)
+                self.assertEqual(batches[0]['status'], 'available')
+                self.assertEqual(batches[0]['records'], [])
+                self.assertTrue(result['checkpoint'].endswith(':' + str(len(lines))))
+                self.assertIn(f"{len(lines)} out-of-scope rows skipped", batches[0]['detail'])
+
     def test_florida_document_number_accepts_only_six_or_twelve_characters(self):
         from tools.import_practice_origination import florida_rows
         for document in ['A00001', '000001', 'L26000000001', '      A00001']:
