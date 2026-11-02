@@ -775,6 +775,24 @@ case("direct Neon branch create is metering-refused",
      bash("neonctl branches create --project-id p --name x"), DENY)
 case("direct GitHub workflow dispatch is metering-refused",
      bash("gh workflow run ci.yml"), DENY)
+for _endpoint in ("repos/o/r/actions/workflows/deploy.yml/dispatches",
+                  "/repos/o/r/dispatches", "https://api.github.com/repos/o/r/dispatches"):
+    for _flags in ("-X POST", "--method POST", "--method=POST", "-XPOST",
+                   "-f ref=main", "-F event_type=x", "--field event_type=x",
+                   "--raw-field=ref=main", "--field=ref=main", "-fref=main",
+                   "-Fref=main", "--input /tmp/payload.json", "--input=/tmp/payload.json"):
+        for _args in (f"{_endpoint} {_flags}", f"{_flags} {_endpoint}"):
+            case(f"raw API dispatch metering-refused: {_args}", bash(f"gh api {_args}"), DENY)
+    for _flags in ("", "-X GET", "--method=GET", "-f ref=main --method GET"):
+        case(f"dispatch endpoint GET stays readable: {_flags}",
+             bash(f"gh api {_endpoint} {_flags}"), ALLOW)
+case("ordinary GitHub API read stays allowed", bash("gh api repos/o/r/actions/runs"), ALLOW)
+case("prose describing an API dispatch is inert",
+     bash("printf '%s' 'gh api repos/o/r/dispatches -X POST'"), ALLOW)
+case("API dispatch in shell wrapper is blocked",
+     bash("bash -c 'gh api repos/o/r/dispatches -F event_type=x'"), DENY)
+case("API dispatch in substitution is blocked",
+     bash('echo "$(gh api repos/o/r/dispatches --input /tmp/body.json)"'), DENY)
 case("plain GitHub job rerun is allowed",
      bash("gh run rerun 123 --failed"), ALLOW)
 case("prose describing a metered dispatch remains inert",

@@ -32,6 +32,9 @@ with open(Path.home() / 'gh.jsonl', 'a') as f:
 if '--method' in args:
     if os.environ.get('FAIL_DISPATCH'):
         sys.exit(1)
+    if 'DISPATCH_RESPONSE' in os.environ:
+        print(os.environ['DISPATCH_RESPONSE'])
+        sys.exit(0)
     print(json.dumps({'workflow_run_id':123, 'html_url':''' + repr(URL) + '''}))
 elif '/commits/main' in args[1]:
     print(json.dumps({'sha': 'a'*40}))
@@ -105,11 +108,27 @@ else:
         self.environment['FAIL_DISPATCH'] = '1'
         result = self.cli('main-canary.yml')
         self.assertEqual(result.returncode, 77)
+        self.assertIn('dispatch outcome unknown', result.stderr)
+        self.assertIn(SHA, result.stderr)
+        self.assertNotIn('refused', result.stderr)
         self.environment.pop('FAIL_DISPATCH')
         result = self.cli('main-canary.yml')
         self.assertEqual(result.returncode, 77)
         self.assertIn('budget exhausted', result.stderr)
         self.assertEqual(sum('--method' in call for call in self.calls()), 1)
+
+    def test_unexpected_dispatch_response_records_unknown_outcome(self):
+        for response in ('[]', '{"html_url": null}', 'null', '{"html_url": 123}', '{}', ''):
+            with self.subTest(response=response):
+                ledger = self.home / '.local/state/carr/ci-dispatch.jsonl'
+                ledger.unlink(missing_ok=True)
+                self.environment['DISPATCH_RESPONSE'] = response
+                result = self.cli('main-canary.yml')
+                self.assertEqual(result.returncode, 77, result.stderr)
+                self.assertIn('dispatch outcome unknown', result.stderr)
+                self.assertNotIn('refused', result.stderr)
+                rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+                self.assertEqual([row['status'] for row in rows], ['reserved', 'dispatch_unconfirmed'])
 
     def test_parallel_callers_share_one_reservation(self):
         argv = ['./run.sh', 'ci', 'dispatch', 'main-canary.yml']
@@ -142,6 +161,13 @@ else:
         for command, allowed in [('./run.sh ci dispatch main-canary.yml --ref main', True),
                                  ('./run.sh ci dispatch deploy.yml --dry-run', True),
                                  ('gh workflow run main-canary.yml --ref main', False),
+                                 ('gh api repos/o/r/actions/workflows/deploy.yml/dispatches -X POST -f ref=main', False),
+                                 ('gh api --method POST repos/o/r/actions/workflows/deploy.yml/dispatches -f ref=main', False),
+                                 ('gh api -X POST /repos/o/r/dispatches -f event_type=x', False),
+                                 ('gh api repos/o/r/dispatches -F event_type=x', False),
+                                 ('gh api repos/o/r/dispatches --input /tmp/payload.json', False),
+                                 ('gh api repos/o/r/dispatches --method GET', True),
+                                 ('gh api repos/o/r/actions/runs', True),
                                  ('gh run watch 123', False)]:
             payload = {'tool_name': 'Bash', 'tool_input': {'command': command}, 'cwd': str(ROOT)}
             result = subprocess.run(['python3', str(ROOT / 'hooks/guard-unattended.py')],
