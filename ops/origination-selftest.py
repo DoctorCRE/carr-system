@@ -14,6 +14,27 @@ sys.path.insert(0, str(ROOT))
 from tools.routines.lead_signals import origination_rows
 
 
+def florida_fixture(**changes):
+    """Synthetic corporate record using the official 1-based starts and widths."""
+    fields = {
+        'document_number': (1, 12, 'L26000000001'),
+        'name': (13, 192, 'Synthetic Dental LLC'),
+        'status': (205, 1, 'A'), 'filing_type': (206, 15, 'FLAL'),
+        'address': (221, 42, 'SYNTHETIC_LOCATION_A'),
+        'address_2': (263, 42, 'SYNTHETIC_SUITE'),
+        'city': (305, 28, 'Pensacola'), 'state': (333, 2, 'FL'),
+        'postal_code': (335, 10, '32501'), 'country': (345, 2, 'US'),
+        'filing_on': (473, 8, '20261019'),
+        'registered_agent_address': (588, 42, 'SYNTHETIC_AGENT_LOCATION'),
+    }
+    raw = [' '] * 1440
+    for key, (start, width, default) in fields.items():
+        value = changes.get(key, default)
+        assert len(value) <= width
+        raw[start - 1:start - 1 + width] = value.ljust(width)
+    return ''.join(raw)
+
+
 class OriginationTests(unittest.TestCase):
     def test_npi_delta_keeps_evidence_date_without_claiming_practice_opening(self):
         row = {'NPI': '1234567890', 'Entity Type Code': '2',
@@ -52,9 +73,7 @@ class OriginationTests(unittest.TestCase):
 
     def test_florida_fixed_width_document_identity_and_filing_date(self):
         from tools.import_practice_origination import florida_rows
-        line = ("L26000000001" + "Synthetic Dental LLC".ljust(192) + "20261019" +
-                "SYNTHETIC_LOCATION_A".ljust(42) + "Pensacola".ljust(28) + "FL" +
-                "SYNTHETIC_AGENT_LOCATION".ljust(42) + "32501".ljust(10))
+        line = florida_fixture()
         row = florida_rows(line, published_on=date(2026, 10, 21), line_number=1)[0]
         self.assertEqual(row['record_key'], 'L26000000001')
         self.assertEqual(row['document_number'], 'L26000000001')
@@ -62,6 +81,11 @@ class OriginationTests(unittest.TestCase):
         self.assertEqual(row['filing_on'], '2026-10-19')
         self.assertEqual(row['evidence_date'], '2026-10-19')
         self.assertEqual(row['date_basis'], 'filing')
+        self.assertEqual(row['city'], 'Pensacola')
+        self.assertEqual(row['state'], 'FL')
+        self.assertEqual(row['facts']['address'], 'SYNTHETIC_LOCATION_A')
+        self.assertEqual(row['facts']['registered_agent_address'], 'SYNTHETIC_AGENT_LOCATION')
+        self.assertEqual(row['facts']['postal_code'], '32501')
         self.assertEqual(florida_rows(line.replace('32501'.ljust(10), '33101'.ljust(10)),
                                     published_on=date(2026, 10, 21), line_number=2), [])
         self.assertEqual(florida_rows(line.replace('Dental', 'Retail'),
