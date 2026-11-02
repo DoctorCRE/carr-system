@@ -464,12 +464,25 @@ for (const route of ['tool', 'sql']) {
   test(`${route} ignores PR attribution in retirement-only proposals`, async () => {
     for (const first of [false, true]) {
       const old = await adoptCard(`attribution-retire-${route}-${first}`);
-      const lines = [`Retires: ["${old.rule_id}"]`, 'Card: WR1.S1.J1'];
+      const lines = [`Retires: ["${old.rule_id}"]`, 'Card: WR1.S1.J1 \t\r'];
       const p = await proposeText(`attribution-retirement-${route}-${first}`, (first ? lines.reverse() : lines).join('\n'));
       const out = await adoptVia(p);
       assert.equal(out.rule_id, null);
       assert.deepEqual(out.retired_rule_ids, [old.rule_id]);
       assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'retired');
+    }
+  });
+
+  test(`${route} keeps NBSP- and VT-terminated attribution significant`, async () => {
+    for (const [suffix, whitespace] of [['nbsp', '\u00a0'], ['vt', '\v']]) {
+      const old = await adoptCard(`attribution-${suffix}-${route}`);
+      const p = await proposeText(`attribution-${suffix}-proposal-${route}`,
+        `Retires: ["${old.rule_id}"]\nCard: WR1.S1.J1${whitespace}`);
+      const row = (await call(joe, 'governance-queue', {})).pending_convention_proposals
+        .find(row => row.section_id === p.section_id);
+      assert.equal(row.adoptable, false);
+      await assert.rejects(adoptVia(p), /convention_proposal_malformed/);
+      assert.equal((await c.query('select status from rule where id=$1', [old.rule_id])).rows[0].status, 'active');
     }
   });
 
