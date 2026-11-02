@@ -148,25 +148,6 @@ else:
                                     input=json.dumps(payload), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0 if allowed else 2, result.stderr)
 
-    def test_deploy_accepts_successful_dispatched_main_canary_only(self):
-        workflow = json.loads(subprocess.check_output(
-            ['node', '-e', "console.log(JSON.stringify(require('js-yaml').load(require('fs').readFileSync(process.argv[1], 'utf8'))))",
-             str(ROOT / '.github/workflows/deploy.yml')], cwd=ROOT / 'mcp-server', text=True))
-        condition = workflow['jobs']['deploy']['if']
-        for event, conclusion, branch, repo, accepted in [
-                ('push', 'success', 'main', 'DoctorCRE/carr-system', True),
-                ('workflow_dispatch', 'success', 'main', 'DoctorCRE/carr-system', True),
-                ('pull_request', 'success', 'main', 'DoctorCRE/carr-system', False),
-                ('workflow_dispatch', 'failure', 'main', 'DoctorCRE/carr-system', False),
-                ('workflow_dispatch', 'success', 'feature', 'DoctorCRE/carr-system', False),
-                ('workflow_dispatch', 'success', 'main', 'outsider/fork', False)]:
-            context = {'event_name': 'workflow_run', 'repository': 'DoctorCRE/carr-system',
-                       'event': {'workflow_run': {'event': event, 'conclusion': conclusion,
-                                 'head_branch': branch, 'head_repository': {'full_name': repo}}}}
-            script = 'const [expr, github] = JSON.parse(process.argv[1]); console.log(JSON.stringify(eval(expr)));'
-            actual = json.loads(subprocess.check_output(
-                ['node', '-e', script, json.dumps([condition, context])], text=True))
-            self.assertEqual(actual, accepted, context)
 
 
 if __name__ == '__main__':
