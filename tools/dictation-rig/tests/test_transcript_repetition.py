@@ -1,3 +1,4 @@
+"""Verify Whisper repetition recovery before call summaries."""
 import json
 import subprocess
 import sys
@@ -119,4 +120,8 @@ def test_recovery_cannot_return_loop_spread_across_chunks(tmp_path, monkeypatch)
 
 
 if __name__ == '__main__':
-    raise SystemExit(pytest.main([__file__, '-q']))
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as root:
+        result = pytest.main([__file__, '-q', '--basetemp', str(Path(root) / 'cases')])
+    raise SystemExit(result)
