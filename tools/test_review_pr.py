@@ -12,6 +12,7 @@ from unittest import TestCase, main, mock
 
 CLI = Path(__file__).resolve().parents[1] / 'bin/review-pr'
 spec = importlib.util.spec_from_file_location('review_submit', CLI.parents[1] / 'ops/review-submit.py')
+assert spec is not None and spec.loader is not None
 review_submit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(review_submit)
 
