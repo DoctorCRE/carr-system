@@ -71,13 +71,14 @@ with contextlib.redirect_stdout(buf):
     emitted = mod.emit_delivery_policy(repo)
 if not emitted or buf.getvalue().strip() != policy:
     failures.append("SessionStart policy emission must equal the AGENTS.md block")
-claude = open(os.path.join(repo, "CLAUDE.md"), encoding="utf-8").read()
+claude = "".join(open(os.path.join(repo, name), encoding="utf-8").read()
+                 for name in ("CLAUDE.md", "AGENTS.md"))
 if "Production stops at 0454" in claude:
     failures.append("Claude boot instructions retain a stale migration frontier")
 for required in (
-        "current canonical migration/release state",
-        "Dated incidents/WRs are history",
-        "grants no live authority",
+        "current canonical migration and release state",
+        "Dated incidents and Work Requests are history",
+        "grant no live authority",
 ):
     if required not in " ".join(claude.split()):
         failures.append(f"Claude current-state boot guidance is missing: {required}")

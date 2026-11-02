@@ -21,15 +21,18 @@ const OBJECTIVES: Record<string, string> = {
   opportunity: DEAL_OBJECTIVE,
   active_deal: DEAL_OBJECTIVE,
 };
+type StrategyHold = { reason: 'suppressed' | 'contact_ineligible' | 'unsupported_stage' } | null;
 export function leadAdvice<T extends Lead>(lead: T) {
   const contact_eligible = lead.contact_state === undefined ? lead.contact_eligible :
     !lead.suppressed && lead.stage !== 'do_not_contact' && contactable(lead.contact_state);
   const closed = CLOSED_OBJECTIVES[lead.stage];
-  const hold = lead.suppressed || contact_eligible === false || (!OBJECTIVES[lead.stage] && !closed);
+  const hold: StrategyHold = lead.suppressed ? { reason: 'suppressed' } :
+    contact_eligible === false ? { reason: 'contact_ineligible' } :
+    !OBJECTIVES[lead.stage] && !closed ? { reason: 'unsupported_stage' } : null;
   return { ...lead, contact_eligible,
     handling_advice: hold ? 'Do not contact. Review the recorded restriction or terminal stage with the owning partner.' : closed ||
       `${OBJECTIVES[lead.stage]} Research the handed record before preparing an outreach draft.`,
-    strategy: { basis: 'stage_based_guidance', objective: hold ? 'Resolve the recorded hold before any outreach.' : closed || OBJECTIVES[lead.stage],
+    strategy: { basis: 'stage_based_guidance', hold, objective: hold ? 'Resolve the recorded hold before any outreach.' : closed || OBJECTIVES[lead.stage],
       discovery: ['What has the practice already tried?', 'What constraints and timing are firm?',
         'Who approves the decision?', 'What would make the practice stop?', 'What would success look like in 90 days?'],
       decision_window: lead.est_lease_event || null, confidence: lead.event_confidence || 'unrecorded',

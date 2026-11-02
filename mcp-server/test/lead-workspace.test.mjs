@@ -47,6 +47,38 @@ test('workspace projection is optional/versioned, exact lifecycle flags, current
  assert.equal(result.schema_version,'lead-workspace.v1');assert.equal(result.last_search_at,null);assert.equal(result.search_run_coverage,'unavailable');assert.equal(result.detail.correspondence[0].id,id(10));assert.equal(result.detail.correspondence_coverage,'captured_entries_only');assert.equal(result.detail.notes,'Synthetic original entry');
  assert.equal(db.queries.length,1);
 });
+test('strategy hold is explicit on workspace detail, workspace board and legacy board', async () => {
+ const cases = [
+  ...['new','qualified','outreach_active','engaged','nurture_drip','opportunity','active_deal','closed_won','closed_lost']
+    .map(stage => ({ fields: { stage }, hold: null })),
+  { fields: { stage: 'archived' }, hold: { reason: 'unsupported_stage' } },
+  { fields: { stage: 'future_stage' }, hold: { reason: 'unsupported_stage' } },
+  { fields: { suppressed: true }, hold: { reason: 'suppressed' } },
+  { fields: { contact_state: 'paused' }, hold: { reason: 'contact_ineligible' } },
+  { fields: { contact_state: 'do_not_contact' }, hold: { reason: 'contact_ineligible' } },
+  { fields: { stage: 'do_not_contact', contact_state: 'active' }, hold: { reason: 'contact_ineligible' } },
+  { fields: { contact_eligible: false }, hold: { reason: 'contact_ineligible' } },
+  { fields: { contact_state: 'nurture', contact_eligible: false }, hold: null },
+  { fields: { suppressed: true, stage: 'archived', contact_eligible: false }, hold: { reason: 'suppressed' } },
+  { fields: { stage: 'archived', contact_state: 'paused' }, hold: { reason: 'contact_ineligible' } },
+ ];
+ for (const { fields, hold } of cases) {
+  const db = new Fake(); Object.assign(db.row, fields);
+  const workspace = await TOOLS['lead-board'].handler(db, human, { workspace: 'leads', lead_id: id(1) });
+  const legacy = await TOOLS['lead-board'].handler(db, human, {});
+  for (const row of [workspace.detail, workspace.leads[0], legacy.leads[0]]) {
+   assert.deepEqual(row.strategy.hold, hold, JSON.stringify(fields));
+   assert.equal(row.strategy.sent, false);
+   if (hold) {
+    assert.match(row.handling_advice, /^Do not contact/);
+    assert.equal(row.strategy.objective, 'Resolve the recorded hold before any outreach.');
+    assert.equal(row.strategy.next_step, 'Ask the owning partner to review the hold.');
+   } else {
+    assert.doesNotMatch(row.handling_advice, /^Do not contact/);
+   }
+  }
+ }
+});
 test('workspace detail refuses absent lead without any contact query',async()=>{const db=new Fake();const r=await TOOLS['lead-board'].handler(db,human,{workspace:'leads',lead_id:id(404)});assert.equal(r.detail,null);assert.equal(db.queries.length,1)});
 test('stage review validates exact lead evidence and records derived evidence date and literal answer',async()=>{
  const db=new Fake();const a=args({fields:{stage:'engaged'},stage_review:{reason:'Reply received',evidence_ids:[id(10)],human_quote:'Synthetic confirmation'}});await TOOLS['update-lead'].handler(db,human,a);

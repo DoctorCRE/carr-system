@@ -135,6 +135,15 @@ class NativeRulesTests(unittest.TestCase):
         self.assertIn("K01", core)
         self.assertIn("K08", core)
 
+    def test_core_index_does_not_repeat_native_card_titles(self):
+        outputs, _ = rules.render(self.snapshot, rules.ROOT)
+        core = outputs["AGENTS.md"].split(rules.START)[1].split(rules.END)[0]
+        cards = json.loads((rules.ROOT / "ops/config/rule-cards.v1.json").read_text())["cards"]
+        for card in cards:
+            if card["placement"] == "CORE":
+                self.assertNotIn(card["title"], core)
+        self.assertLessEqual(len(core.encode()), 1100)
+
     def test_retired_nested_block_deletes_empty_file_and_preserves_guidance(self):
         for maintained in ("", "Keep this guidance.\n"):
             with self.subTest(maintained=maintained), self.fixture() as root:

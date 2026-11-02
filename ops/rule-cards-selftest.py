@@ -49,11 +49,26 @@ class CardTests(unittest.TestCase):
             text = (REPO / footer).read_text()
             for required in ('attach-memory', 'read_write', 'read_only', 'native_session_id', 'transcript_ref'):
                 self.assertIn(required, text, footer)
-        for page in ('CLAUDE.md', 'AGENTS.md'):
-            with self.subTest(page=page):
-                text = (REPO / page).read_text()
-                self.assertIn(line + '\n', text)
-                self.assertNotIn('No boot fetch is required', text)
+        text = (REPO / 'AGENTS.md').read_text()
+        self.assertIn(line + '\n', text)
+        self.assertNotIn('No boot fetch is required', text)
+        self.assertTrue((REPO / 'CLAUDE.md').read_text().startswith("@AGENTS.md\n"),
+                        'Claude Code loads the attach line through the AGENTS.md import')
+
+    def test_guidance_checker_requires_the_claude_import(self):
+        script = REPO / 'ops/sync-core-rule-cards.py'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'AGENTS.md').write_text((REPO / 'AGENTS.md').read_text())
+            (root / 'CLAUDE.md').write_text('# Claude Code rules\n')
+            spec = importlib.util.spec_from_file_location('guidance', script)
+            checker = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(checker)
+            with mock.patch.object(checker, 'ROOT', root), mock.patch(
+                    'sys.argv', [str(script), '--check']), mock.patch(
+                    'sys.stdout', new_callable=io.StringIO) as output:
+                self.assertNotEqual(checker.main(), 0)
+            self.assertIn('CLAUDE.md must begin with the line @AGENTS.md', output.getvalue())
 
     def test_guidance_checker_rejects_missing_paths(self):
         script = REPO / 'ops/sync-core-rule-cards.py'
@@ -135,10 +150,9 @@ class CardTests(unittest.TestCase):
         emptied = sync.cards_from_store(document, [])
         self.assertEqual(emptied['cards'], [])
         with mock.patch.object(sync, 'load_cards', return_value=emptied['cards']):
-            for name in ('CLAUDE.md', 'AGENTS.md'):
-                rendered = sync.render((REPO / name).read_text())
-                self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
-                self.assertEqual(sync.render(rendered), rendered)
+            rendered = sync.render((REPO / 'AGENTS.md').read_text())
+            self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
+            self.assertEqual(sync.render(rendered), rendered)
 
     def test_retiring_last_core_card_preserves_other_sections_and_renders_twice(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
@@ -146,13 +160,12 @@ class CardTests(unittest.TestCase):
         spec.loader.exec_module(sync)
         remaining = [card for card in self.cards if card['placement'] != 'CORE']
         with mock.patch.object(sync, 'load_cards', return_value=remaining):
-            for name in ('CLAUDE.md', 'AGENTS.md'):
-                text = (REPO / name).read_text()
-                tail = text[text.index('\nNaming trap' if name == 'CLAUDE.md' else '\n## Active product-first delivery policy'):]
-                rendered = sync.render(text)
-                self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
-                self.assertTrue(rendered.endswith(tail))
-                self.assertEqual(sync.render(rendered), rendered)
+            text = (REPO / 'AGENTS.md').read_text()
+            tail = text[text.index('\n## Search traps'):]
+            rendered = sync.render(text)
+            self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
+            self.assertTrue(rendered.endswith(tail))
+            self.assertEqual(sync.render(rendered), rendered)
 
     def setUp(self):
         self.cards = load_cards()

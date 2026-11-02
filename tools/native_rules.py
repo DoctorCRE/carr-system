@@ -163,9 +163,8 @@ def render(snapshot, root):
     descriptions = defaultdict(list)
     nested = defaultdict(list)
     cards = json.loads((ROOT / "ops/config/rule-cards.v1.json").read_text())["cards"]
-    core = (NOTICE + "\n\nCORE index. Apply the named native K card already loaded in AGENTS.md or CLAUDE.md. "
-            "Before acting on a CORE rule, read its linked full text for conditions and exceptions. "
-            "Links resolve relative to this file.\n\n")
+    core = (NOTICE + "\n\nCORE index. Apply the native K cards in AGENTS.md. "
+            "Before acting, read the linked full text for conditions and exceptions.\n\n")
     full_core = NOTICE + "\n\n# Full CORE rules\n\n"
     tracked = [p for p in tracked_paths(root) if Path(p).name != "AGENTS.md"
                and not p.startswith(".agents/skills/carr-")]
@@ -177,10 +176,10 @@ def render(snapshot, root):
                          and marker(row) in c["source_rule_ids"]
                          and (marker(row) != "c864b8cb" or c["id"] == "K08")), None)
             if card:
-                label = f"{card['title']}. Apply {card['id']}."
+                label = card["id"]
             else:
                 label = text.split("Proposed wording: ", 1)[1].split(" Justification:", 1)[0]
-            core += f"- {label} [{marker(row)} full text]({CORE_REFERENCE}#{marker(row)}).\n"
+            core += f"- [{label}]({CORE_REFERENCE}#{marker(row)}).\n"
             homes[row["id"]] = "CORE"
         elif bucket == "PATH":
             name = "rule-" + row["id"][:8]
