@@ -213,9 +213,13 @@ oldest-action selection use the same matcher as acceptance. Legacy Call Mode
 actions without a structured title cannot be exact matches.
 
 Possible matches use equal normalized text or lexical overlap of at least two
-words and a Dice coefficient of at least 0.6. This is an advisory similarity
-signal, not semantic equivalence. It includes different owners, completed or
-dropped actions, and legacy unstructured actions. It never merges or reopens
+meaningful words and a Dice coefficient of at least 0.6. Lexical comparison
+ignores tokens of two characters or fewer and an explicit stoplist of common
+articles, conjunctions, prepositions, pronouns, and auxiliaries. For example,
+"Call the landlord" and "Call the broker" do not match, while "Get rent roll
+from landlord" and "Ask landlord for the rent roll" are possible matches.
+This is an advisory similarity signal, not semantic equivalence. It includes
+different owners, completed or dropped actions, and legacy unstructured actions. It never merges or reopens
 work. Acceptance still locks the deal and selected action and compares again,
 because actions may change after the preview. The app's Before panel consumes
 this additive field in a separate delivery.

@@ -14,10 +14,14 @@ export async function findExactPostCallAction(c, candidate, ownerId) {
         [candidate.deal_id, stepKey, ownerId])).rows[0] || null;
 }
 
+const stopWords = new Set(('the and for from with into onto about this that these those ' +
+  'they them their you your our its his her are was were been being ' +
+  'have has had does did can could should would will').split(' '));
 const normalized = text => text.trim().replace(/\s+/gu, ' ').toLowerCase();
 function similar(left, right) {
   if (normalized(left) === normalized(right)) return true;
-  const words = text => new Set(text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []);
+  const words = text => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
+    .filter(word => word.length > 2 && !stopWords.has(word)));
   const a = words(left), b = words(right);
   const shared = [...a].filter(word => b.has(word)).length;
   return shared >= 2 && 2 * shared / (a.size + b.size) >= 0.6;
