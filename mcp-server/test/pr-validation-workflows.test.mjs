@@ -10,8 +10,8 @@ import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
 const files = ["ci.yml", "doc-drift.yml"];
-const CI_PR_JOBS = ["fast", "gates", "secret", "unit", "unit-coverage", "checks"];
-const CI_FULL_JOBS = ["scope", "unit", "unit-coverage", "classes", "migration-fixtures", "checks"];
+const CI_PR_JOBS = ["launchd-python39", "fast", "gates", "secret", "unit", "unit-coverage", "checks"];
+const CI_FULL_JOBS = ["launchd-python39", "scope", "unit", "unit-coverage", "classes", "migration-fixtures", "checks"];
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
 // Unknown expressions fail closed; these tests make no claims about runner time.
@@ -152,7 +152,7 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
-  assert.deepEqual(gate.needs, ["fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"]);
+  assert.deepEqual(gate.needs, ["fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures", "launchd-python39"]);
   assert.equal(ci.jobs["unit-coverage"].needs, "unit", "coverage must wait for the entire shard matrix");
   assert.deepEqual(read("unit-shards.yml").jobs.unit.strategy.matrix.shard, [1, 2, 3, 4]);
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
@@ -244,4 +244,21 @@ test("MCP shards retain per-program evidence even after failure", () => {
   assert.equal(run.env.CARR_CI_PROGRAM_RECORDS, "${{ runner.temp }}/ci-programs.json");
   const retain = steps.find(step => step.with?.path?.includes("ci-programs.json"));
   assert.equal(retain.if, "${{ always() }}");
+});
+
+test("Python 3.9 imports block the required verdict except on draft PRs", () => {
+  const ci = read("ci.yml");
+  const job = ci.jobs["launchd-python39"];
+  assert.equal(job.steps.find(step => step.uses?.startsWith("actions/setup-python@")).with["python-version"], "3.9");
+  assert.equal(job.steps.at(-1).run, "python -I tools/dictation-rig/tests/test_python39_imports.py");
+  const guard = ci.jobs.checks.steps.find(step => step.name === "Require launchd Python 3.9 imports");
+  for (const draft of [true, false, undefined]) {
+    for (const result of ["success", "failure", "cancelled", "skipped", undefined]) {
+      const blocked = runInNewContext(guard.if.replaceAll("launchd-python39", "imports"), {
+        github: { event: { pull_request: { draft } } }, needs: { imports: { result } },
+      });
+      assert.equal(blocked, draft !== true && result !== "success");
+      if (blocked) assert.notEqual(spawnSync("bash", ["-e", "-c", guard.run]).status, 0);
+    }
+  }
 });

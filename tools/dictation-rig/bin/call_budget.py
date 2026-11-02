@@ -1,4 +1,6 @@
 """Durable, conservative dollar reservations for the Studio's call checks."""
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import fcntl
