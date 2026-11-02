@@ -64,12 +64,30 @@ from refused_content import REFUSAL, remember_refusal, was_refused  # noqa: E402
 
 
 def without_shell_comments(command):
-    quoted_or_escaped = r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|`(?:\\[\s\S]|[^`\\])*`|\\[\s\S]"
-    command = re.sub(quoted_or_escaped,
-                     lambda match: match[0] if match[0].startswith("'") else match[0].replace('\\\n', ''),
-                     command)
-    return re.sub(quoted_or_escaped + r"|(?P<prefix>^|[ \t\n;&|()])#[^\n]*",
-                  lambda match: match['prefix'] if match['prefix'] is not None else match[0], command)
+    """An additional parsing view; raw text is always inspected separately."""
+    result, quote, braces, i = [], None, 0, 0
+    while i < len(command):
+        char = command[i]
+        if char == '\\' and quote != "'" and i + 1 < len(command):
+            result.append(command[i:i + 2])
+            i += 2
+            continue
+        if char == quote:
+            quote = None
+        elif char in {"'", '"', '`'} and quote is None:
+            quote = char
+        elif quote is None:
+            if command.startswith('${', i):
+                braces += 1
+            elif char == '}' and braces:
+                braces -= 1
+            elif char == '#' and not braces and (i == 0 or command[i - 1] in ' \t\n;&|()'):
+                end = command.find('\n', i)
+                i = len(command) if end < 0 else end
+                continue
+        result.append(char)
+        i += 1
+    return ''.join(result)
 
 
 def shell_tokens(command):
@@ -79,7 +97,7 @@ def shell_tokens(command):
     simple commands, including glued subshells and process substitutions.
     Unsupported lexical forms raise ValueError, which check refuses.
     """
-    command = without_shell_comments(command).replace('-m <message>', '-m message')
+    command = command.replace('-m <message>', '-m message')
     pieces = re.findall(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|[^'\"\\]+|['\"\\]", command)
     normalized = []
     for piece in pieces:
@@ -1038,6 +1056,12 @@ def command_invocations(words, depth=0):
         return []
     exe, rest = _exe_name(words[i]), words[i + 1:]
     found = [(exe, rest)]
+    if exe == 'find':
+        for k, word in enumerate(rest):
+            if word in {'-exec', '-execdir', '-ok', '-okdir'}:
+                body = rest[k + 1:]
+                end = next((i for i, value in enumerate(body) if value in {';', '+'}), len(body))
+                found += command_invocations(body[:end], depth + 1)
     if exe in COMMAND_WRAPPERS:
         # A word with spaces is a quoted command string (`su -c '...'`,
         # `sudo sh -c '...'`, `watch '...'`), so it is read as a command.
@@ -1045,17 +1069,19 @@ def command_invocations(words, depth=0):
         # values and operands (`sudo -D /tmp`, `flock /tmp/lk`) can sit in front
         # of the sender. The scan stops only where _wrapped_program places the
         # program at a path or at another wrapper: the words after it are that
-        # program's arguments (`timeout 30 ./run.sh fetch <url>`). Past the
-        # recursion cap it does not stop at all, so deep nesting reads every word.
+        # program's arguments (`timeout 30 ./run.sh fetch <url>`).
         p = _wrapped_program(exe, rest)
         stop = p if p is not None and ("/" in rest[p] or
                                        _exe_name(rest[p]) in COMMAND_WRAPPERS) else None
         for k, w in enumerate(rest):
             if any(c.isspace() for c in w):
-                found += invocations_in(w, depth + 1) if depth < 4 else []
+                try:
+                    found += invocations_in(w, depth + 1)
+                except ValueError:
+                    found += command_invocations(_command_words(w), depth + 1)
             elif "://" in w:
                 continue
-            elif k == stop and depth < 4:
+            elif k == stop:
                 found += command_invocations(rest[k:], depth + 1)
                 break
             else:
@@ -1063,7 +1089,7 @@ def command_invocations(words, depth=0):
         return found
     script = " ".join(rest) if exe == "eval" else (
         _shell_c_script(rest) if _SHELLS.match(exe) else None)
-    if script and depth < 4:
+    if script:
         found += invocations_in(script, depth + 1)
     return found
 
@@ -1896,17 +1922,22 @@ def shell_expansions(text):
 
 
 def executed_invocations(cmd):
-    """Commands in shell positions, excluding quoted arguments and heredoc data."""
-    executable = without_shell_comments(strip_inert_text(cmd))
-    tokens = shell_tokens(executable)
-    segment = []
-    for token in tokens + [';']:
-        if token not in SHELL_BOUNDARIES:
-            segment.append(token)
-            continue
-        yield from command_invocations(_without_redirects(segment))
+    """Union the original raw reading with additional normalized readings."""
+    executable = strip_inert_text(cmd)
+    try:
+        raw_tokens = _shell_tokens(executable)
+    except ValueError:
+        raw_tokens = executable.split()
+    views = [raw_tokens, shell_tokens(without_shell_comments(executable))]
+    for tokens in views:
         segment = []
-    for body in shell_expansions(executable):
+        for token in tokens + [';']:
+            if token not in SHELL_BOUNDARIES:
+                segment.append(token)
+                continue
+            yield from command_invocations(_without_redirects(segment))
+            segment = []
+    for body in shell_expansions(without_shell_comments(executable)):
         yield from executed_invocations(body)
 
 
@@ -1917,8 +1948,12 @@ def _git_command_words(arguments):
         if words[0] in {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix', '--attr-source'}:
             if len(words) < 2:
                 raise ValueError('missing git option value')
+            if words[0] in {'-c', '--config-env'} and words[1].startswith('alias.'):
+                raise ValueError('inline git aliases cannot be classified safely')
             words = words[2:]
         elif words[0].startswith('-'):
+            if words[0].startswith(('--config-env=alias.', '-calias.')):
+                raise ValueError('inline git aliases cannot be classified safely')
             words = words[1:]
         else:
             break
@@ -1993,7 +2028,7 @@ def direct_metered_dispatch(cmd):
     for program, arguments in executed_invocations(cmd):
         if program == 'gh':
             arguments = _gh_command_words(arguments)
-            if arguments and any(char in arguments[0] for char in ('$', '`')):
+            if any(char in word for word in arguments[:2] for char in ('$', '`')):
                 return 'cannot classify dynamic gh command safely'
         if program == 'gh' and _raw_github_api_dispatch(arguments):
             return 'direct GitHub API dispatch bypasses the remote-CI budget gate'
@@ -2195,10 +2230,7 @@ def _polls_github(text, depth=0):
 
 def github_poll_reason(cmd):
     """Refuse a gh status read that the same command repeats."""
-    try:
-        polls = _polls_github(_bind_gh_aliases(strip_inert_text(cmd)))
-    except ValueError:
-        return None
+    polls = _polls_github(_bind_gh_aliases(strip_inert_text(cmd)))
     return GITHUB_POLL_REASON if polls else None
 
 
@@ -2438,6 +2470,25 @@ def source_restore_reason(cmd, cwd=None):
 
 
 def check(cmd, cwd=None):
+    """Normalization adds checks and can never replace the raw decision."""
+    try:
+        invocations = list(executed_invocations(cmd))
+        reason = _check_candidate(cmd, cwd, invocations, cmd)
+        if reason:
+            return reason
+        for program, arguments in invocations:
+            if program == 'git':
+                arguments = _git_command_words(arguments)
+            candidate = shlex.join([program, *arguments])
+            reason = _check_candidate(candidate, cwd, [(program, arguments)], cmd)
+            if reason:
+                return reason
+    except ValueError as exc:
+        return f'cannot parse shell command safely: {exc}'
+    return None
+
+
+def _check_candidate(cmd, cwd, invocations, shell_context):
     """Return a reason string to block, or None to allow."""
     if cmd.strip() in ALLOW_EXACT:
         return None
@@ -2447,10 +2498,12 @@ def check(cmd, cwd=None):
     # stay here for Codex and shell wrappers without blocking reviewed readers.
     try:
         invocations = [(program, _git_command_words(arguments) if program == 'git' else arguments)
-                       for program, arguments in executed_invocations(executable)]
+                       for program, arguments in invocations]
     except ValueError as exc:
         return f'cannot parse shell command safely: {exc}'
     for program, arguments in invocations:
+        if '$' in program or '`' in program:
+            return 'cannot classify dynamic guarded program safely'
         if program in {'cat', 'head', 'tail', 'less', 'more', 'sed', 'awk', 'grep', 'rg', 'cp', 'source', '.'}:
             paths = [word for word in arguments if not word.startswith('-')]
             if program in {'sed', 'awk', 'grep', 'rg'}:
@@ -2467,18 +2520,20 @@ def check(cmd, cwd=None):
                 return 'recursive/forced delete — blocked by the CARR unattended guard'
         if program == 'git':
             words = list(arguments)
+            if words and any(char in words[0] for char in ('$', '`')):
+                return 'cannot classify dynamic git subcommand safely'
             if words[:1] and words[0] in {'push', 'reset', 'clean', 'filter-branch', 'filter-repo'} and any(
                     '$' in word or '`' in word for word in words[1:]):
-                return 'cannot classify dynamic git mutation arguments safely'
+                return 'cannot classify dynamic git mutation arguments safely; push the current branch using HEAD'
             if words[:1] == ['push'] and any(
                     word.split(':')[-1].removeprefix('refs/heads/') in {'main', 'master'}
                     for word in words[1:] if not word.startswith('-')):
                 return 'direct push to main — use the branch and pull-request delivery path'
-    reason = source_restore_reason(cmd, cwd)
+    reason = source_restore_reason(shell_context, cwd)
     if reason:
         return reason
 
-    reason = broad_add_reason(cmd, cwd)
+    reason = broad_add_reason(shell_context, cwd)
     if reason:
         return reason
 
@@ -2497,10 +2552,7 @@ def check(cmd, cwd=None):
                     'history rewrite': {'git'}, 'forced clean': {'git'}}.get(label)
         if programs and not any(program in programs for program, _ in invocations):
             continue
-        rule_text = ('\n'.join(' '.join([program, *arguments])
-                               for program, arguments in invocations if program in programs)
-                     if programs else cmd)
-        if pat.search(rule_text):
+        if pat.search(cmd):
             # Destructive-fs rules are waived inside the sanctioned scratch zones.
             if label in ("recursive/forced delete", "secure delete") and in_safe_zone(cmd):
                 continue
@@ -2519,7 +2571,7 @@ def check(cmd, cwd=None):
             # absent from the executable remainder — so anything outside a
             # quoted prose flag or a heredoc body is still scanned exactly as
             # before. See PROSE_SAFE_LABELS for what is deliberately excluded.
-            if not programs and label in PROSE_SAFE_LABELS and not pat.search(strip_inert_text(cmd)):
+            if label in PROSE_SAFE_LABELS and not pat.search(strip_inert_text(cmd)):
                 continue
             return f"{label} — blocked by the CARR unattended guard"
 
