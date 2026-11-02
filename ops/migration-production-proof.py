@@ -278,15 +278,11 @@ def live_proof(ledger_only=True):
     repository = repository_ledger(ROOT, baseline)
     parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
     snapshot_ledger = parse_snapshot((ROOT / 'db/schema.sql').read_text())
-    problems = []
-    if snapshot_ledger is None:
-        problems.append('db/schema.sql has no complete schema_migrations ledger section')
-    else:
-        for name in sorted(repository.keys() | snapshot_ledger.keys()):
-            if repository.get(name) != snapshot_ledger.get(name):
-                problems.append(f'{name} differs between repository and snapshot ledger')
-    if problems:
-        raise RuntimeError('; '.join(problems))
+    if not snapshot_ledger:
+        raise RuntimeError('db/schema.sql has no nonempty schema_migrations ledger section')
+    snapshot_proof = ledger_proof(repository, snapshot_ledger, baseline)
+    if not snapshot_proof['ok']:
+        raise RuntimeError('db/schema.sql ledger differs from repository: ' + snapshot_proof['error'])
     bins = comparison.find_pg18(None) if not ledger_only else None
     if not ledger_only and bins is None:
         raise RuntimeError('PostgreSQL 18 binaries required for schema equivalence')
