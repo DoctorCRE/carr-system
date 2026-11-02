@@ -62,6 +62,8 @@ class CaptureOutcomesTests(unittest.TestCase):
                 "non_fact_spans": [],
             }
             ledger = coverage.build_call_ledger(transcript, context, lambda _: extraction)
+            ledger = coverage.reconcile_history(ledger, transcript, lambda request: {
+                'dispositions': [{'fact_id': f['fact_id'], 'disposition': f['disposition']} for f in request['facts']]})
             ledger = coverage.reconcile_coverage(ledger, report)
             bridge.post_call.write_private(self.session / coverage.FILE, ledger)
             report["coverage_sha256"] = coverage.digest(ledger)

@@ -725,15 +725,22 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
         return command_distiller(request, command=command)
     from lib.headless_tasks import API_ENV
 
+    stage = request.get("stage")
+    if stage == "coverage":
+        schema, instruction = coverage.extraction_schema(), coverage.extraction_instruction(DATA_SENTENCE)
+    elif stage == "coverage_history":
+        schema, instruction = coverage.history_schema(), coverage.history_instruction(DATA_SENTENCE)
+    else:
+        schema, instruction = distiller_json_schema(), _distiller_instruction()
     argv = [
         "claude", "-p", "--model", "sonnet", "--no-session-persistence",
         "--tools", "", "--setting-sources", "", "--strict-mcp-config",
         "--disable-slash-commands", "--exclude-dynamic-system-prompt-sections",
-        "--output-format", "json", "--json-schema", json.dumps(coverage.extraction_schema() if request.get("stage") == "coverage" else distiller_json_schema()),
-        "--system-prompt", coverage.extraction_instruction(DATA_SENTENCE) if request.get("stage") == "coverage" else _distiller_instruction(),
+        "--output-format", "json", "--json-schema", json.dumps(schema),
+        "--system-prompt", instruction,
     ]
     child_env = {k: v for k, v in os.environ.items() if k not in API_ENV and k != "CLAUDECODE"}
-    prompt = json.dumps(request if request.get("stage") == "coverage" else {"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"], "COVERAGE": request.get("coverage"),
+    prompt = json.dumps(request if request.get("stage") in {"coverage", "coverage_history"} else {"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"], "COVERAGE": request.get("coverage"),
                          "CALL_DATE": request.get("call_date"), "TIME_ZONE": CALL_TIME_ZONE}, ensure_ascii=False)
     try:
         with tempfile.TemporaryDirectory() as empty:
@@ -1037,6 +1044,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             transcript, context, distiller, previous=read_json(session_dir / coverage.FILE),
             persist=lambda value: write_private(session_dir / coverage.FILE, value),
             recording_started_at=metadata.get("started_at") or (read_json(session_dir / "meta.json") or {}).get("started"))
+        ledger = coverage.reconcile_history(ledger, transcript, distiller,
+            persist=lambda value: write_private(session_dir / coverage.FILE, value))
         raw = distiller({**request, "coverage": ledger})
         held = hold_transcript_repeat(session_dir, raw)
         if held is not None:

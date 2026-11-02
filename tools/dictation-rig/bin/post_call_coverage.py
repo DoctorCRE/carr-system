@@ -97,6 +97,7 @@ def _window_result(raw, receipt, ledger, transcript, context):
         _require(topic['topic_id'] not in topics, 'duplicate_topic')
         topics[topic['topic_id']] = topic
     facts = []
+    fact_ids = set()
     covered = []
     lo, hi = receipt['overlap_range']
     for fact in raw['facts']:
@@ -105,12 +106,14 @@ def _window_result(raw, receipt, ledger, transcript, context):
         _require(isinstance(fact['fact_id'], str) and bool(fact['fact_id']) and fact['topic_id'] in topics and
                  fact['kind'] in KINDS and isinstance(fact['statement'], str) and bool(fact['statement']) and
                  isinstance(fact['source_spans'], list) and bool(fact['source_spans']), 'invalid_fact')
+        _require(fact['fact_id'] not in fact_ids, 'duplicate_fact_id')
+        fact_ids.add(fact['fact_id'])
         for span in fact['source_spans']:
             a, b = _validate_span(span, sources)
             _require(lo <= a < b <= hi, 'foreign_window_span')
             covered.append((a, b))
         disposition = fact['disposition']
-        _require(disposition is None or (isinstance(disposition, dict) and len(disposition) == 1), 'invalid_disposition')
+        _require(disposition is None, 'premature_disposition')
         facts.append(deepcopy(fact))
     for non_fact in raw['non_fact_spans']:
         _require(isinstance(non_fact, dict) and set(non_fact) == {'span', 'reason'}, 'invalid_non_fact')
@@ -176,7 +179,7 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
             ledger.update(state='incomplete', failures=[{'code': code, 'ids': receipt['core_range']}])
             persist(ledger)
             raise CoverageError(code) from exc
-    topics, facts, aliases = {}, {}, {}
+    topics, facts = {}, {}
     accounting = {s['segment_index']: {'segment_index': s['segment_index'], 'fact_ids': [],
                                       'non_fact_spans': [], 'non_fact_reason': []} for s in sources}
     for receipt in ledger['windows']:
@@ -189,11 +192,12 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
             key = fact['fact_id']
             match = next((old for old in facts.values() if
                 old['topic_id'] == fact['topic_id'] and old['kind'] == fact['kind'] and
-                old['statement'] == fact['statement'] and old['asserted_value'] == fact['asserted_value']), None)
+                old['asserted_value'] == fact['asserted_value'] and
+                (old['statement'] == fact['statement'] or (old['fact_id'] == fact['fact_id'] and
+                 fact['asserted_value'] is not None and any(span in old['source_spans'] for span in fact['source_spans'])))), None)
             if match is not None:
-                aliases[key] = match['fact_id']
                 key = match['fact_id']
-                fact = {**fact, 'fact_id': key}
+                fact = {**fact, 'fact_id': key, 'statement': match['statement']}
             if key in facts:
                 old = facts[key]
                 _require(all(old[k] == fact[k] for k in fact if k != 'source_spans'), 'conflicting_fact')
@@ -209,14 +213,100 @@ def build_call_ledger(transcript, context, extractor, *, previous=None, persist=
             if entry['span'] not in row['non_fact_spans']:
                 row['non_fact_spans'].append(entry['span'])
                 row['non_fact_reason'].append(entry['reason'])
-    for fact in facts.values():
-        disposition = fact['disposition'] or {}
-        if 'superseded' in disposition:
-            detail = disposition['superseded']
-            detail['replacement_fact_id'] = aliases.get(detail['replacement_fact_id'], detail['replacement_fact_id'])
     ledger.update(topics=list(topics.values()), facts=list(facts.values()), segment_accounting=list(accounting.values()))
     persist(ledger)
     return ledger
+
+
+def _validate_dispositions(ledger, facts, questions, *, allow_pending=False, proposals=()):
+    topics = {t['topic_id']: t for t in ledger['topics']}
+    for fact in facts.values():
+        disposition = fact['disposition']
+        if disposition is None and allow_pending:
+            continue
+        _require(isinstance(disposition, dict) and len(disposition) == 1, 'undisposed_fact')
+        kind, detail = next(iter(disposition.items()))
+        _require(isinstance(detail, dict), 'invalid_disposition')
+        if kind == 'proposal':
+            _require(not allow_pending and set(detail) == {'proposal_id'} and
+                     detail['proposal_id'] in proposals, 'unverified_proposal')
+        elif kind == 'superseded':
+            _require(set(detail) == {'replacement_fact_id', 'correction_spans'}, 'invalid_supersession')
+            target = detail.get('replacement_fact_id')
+            _require(isinstance(target, str) and target in facts and target != fact['fact_id'] and facts[target]['topic_id'] == fact['topic_id'] and
+                     facts[target]['kind'] == fact['kind'], 'invalid_supersession')
+            spans = detail.get('correction_spans')
+            _require(isinstance(spans, list) and bool(spans), 'missing_correction')
+            for span in spans:
+                _validate_span(span, ledger['sources'])
+                _require(span in facts[target]['source_spans'], 'foreign_correction')
+                _require(_validate_span(span, ledger['sources'])[0] >=
+                         max(_validate_span(s, ledger['sources'])[1] for s in fact['source_spans']), 'nonlater_correction')
+        elif kind == 'no_change':
+            _require(set(detail) == {'decision_spans'}, 'invalid_no_change')
+            _require(fact['kind'] == 'no_change' and isinstance(detail.get('decision_spans'), list) and bool(detail['decision_spans']), 'unspoken_no_change')
+            for span in detail['decision_spans']:
+                _validate_span(span, ledger['sources'])
+                _require(span in fact['source_spans'], 'foreign_decision')
+        elif kind == 'unresolved_identity':
+            _require(set(detail) == {'review_question_id'}, 'invalid_unresolved_identity')
+            _require('deal_id' not in topics[fact['topic_id']]['identity'] and
+                     isinstance(detail.get('review_question_id'), str) and detail['review_question_id'] in questions, 'missing_identity_question')
+        else:
+            raise CoverageError('unverified_disposition')
+    for fact in facts.values():
+        seen = set()
+        while fact.get('disposition') and 'superseded' in fact['disposition']:
+            _require(fact['fact_id'] not in seen, 'supersession_cycle')
+            seen.add(fact['fact_id'])
+            fact = facts[fact['disposition']['superseded']['replacement_fact_id']]
+
+
+def reconcile_history(ledger, transcript, reconciler, *, persist=lambda _: None, max_attempts=3):
+    ledger = deepcopy(ledger)
+    receipts = ledger.setdefault('history_receipts', {})
+    for topic in ledger['topics']:
+        topic_id = topic['topic_id']
+        facts = [f for f in ledger['facts'] if f['topic_id'] == topic_id]
+        if not facts:
+            continue
+        input_sha256 = digest([topic, [{k: v for k, v in f.items() if k != 'disposition'} for f in facts]])
+        receipt = receipts.get(topic_id)
+        if receipt is None or receipt['input_sha256'] != input_sha256:
+            receipt = {'input_sha256': input_sha256, 'attempts': 0, 'validated_completion': False}
+            receipts[topic_id] = receipt
+        try:
+            if not receipt['validated_completion']:
+                _require(receipt['attempts'] < max_attempts, 'history_budget_exhausted')
+                receipt['attempts'] += 1
+                persist(ledger)
+                evidence = [{'fact_id': f['fact_id'], 'occurrences': [
+                    {'span': span, 'text': transcript['segments'][span['segment_index']]['text'][span['char_start']:span['char_end']]}
+                    for span in f['source_spans']]} for f in facts]
+                _require(len(json.dumps([facts, evidence], ensure_ascii=False)) <= 24000, 'topic_history_too_large')
+                response = reconciler({'stage': 'coverage_history', 'schema': SCHEMA,
+                    'topic': topic, 'facts': facts, 'evidence': evidence})
+                _require(isinstance(response, dict) and set(response) == {'dispositions'} and
+                         isinstance(response['dispositions'], list), 'invalid_history')
+                rows = response['dispositions']
+                _require(all(isinstance(r, dict) and set(r) == {'fact_id', 'disposition'} and
+                             isinstance(r['fact_id'], str) for r in rows), 'invalid_history')
+                by_id = {r['fact_id']: r['disposition'] for r in rows}
+                _require(len(rows) == len(by_id) and set(by_id) == {f['fact_id'] for f in facts}, 'incomplete_history')
+                resolved = {f['fact_id']: {**f, 'disposition': by_id[f['fact_id']]} for f in facts}
+                _validate_dispositions(ledger, resolved, set(), allow_pending=True)
+                receipt.update(validated_completion=True, dispositions=by_id)
+                persist(ledger)
+            for fact in facts:
+                fact['disposition'] = deepcopy(receipt['dispositions'][fact['fact_id']])
+        except (CoverageError, RuntimeError, OSError, ValueError, KeyError, TypeError) as exc:
+            code = str(exc) if isinstance(exc, CoverageError) else 'history_failed'
+            ledger = incomplete_ledger(ledger, code)
+            persist(ledger)
+            raise CoverageError(code) from exc
+    persist(ledger)
+    return ledger
+
 
 
 def proposal_items(report):
@@ -233,6 +323,11 @@ def reconcile_coverage(ledger, report):
     ledger = deepcopy(ledger)
     facts = {f['fact_id']: f for f in ledger['facts']}
     topics = {t['topic_id']: t for t in ledger['topics']}
+    for topic in ledger['topics']:
+        inventory = [{k: v for k, v in f.items() if k != 'disposition'} for f in ledger['facts'] if f['topic_id'] == topic['topic_id']]
+        if inventory:
+            receipt = ledger.get('history_receipts', {}).get(topic['topic_id'], {})
+            _require(receipt.get('validated_completion') and receipt.get('input_sha256') == digest([topic, inventory]), 'history_audit_required')
     linked, bindings = {}, {}
     for kind, item in proposal_items(report):
         ids = item.get('fact_ids')
@@ -261,45 +356,10 @@ def reconcile_coverage(ledger, report):
             if kind not in ('phase_move', 'next_step'):
                 _require(fact['kind'] not in ('phase_change', 'next_step'), 'proposal_kind_mismatch')
             linked[fact_id] = proposal_id
-    questions = {q['id'] for q in report.get('review_questions', [])}
-    for fact_id, fact in facts.items():
-        if fact_id in linked:
-            fact['disposition'] = {'proposal': {'proposal_id': linked[fact_id]}}
-            continue
-        disposition = fact['disposition']
-        _require(isinstance(disposition, dict) and len(disposition) == 1, 'undisposed_fact')
-        kind, detail = next(iter(disposition.items()))
-        _require(isinstance(detail, dict), 'invalid_disposition')
-        if kind == 'superseded':
-            _require(set(detail) == {'replacement_fact_id', 'correction_spans'}, 'invalid_supersession')
-            target = detail.get('replacement_fact_id')
-            _require(isinstance(target, str) and target in facts and target != fact_id and facts[target]['topic_id'] == fact['topic_id'] and
-                     facts[target]['kind'] == fact['kind'], 'invalid_supersession')
-            spans = detail.get('correction_spans')
-            _require(isinstance(spans, list) and bool(spans), 'missing_correction')
-            for span in spans:
-                _validate_span(span, ledger['sources'])
-                _require(span in facts[target]['source_spans'], 'foreign_correction')
-                _require(_validate_span(span, ledger['sources'])[0] >=
-                         max(_validate_span(s, ledger['sources'])[1] for s in fact['source_spans']), 'nonlater_correction')
-        elif kind == 'no_change':
-            _require(set(detail) == {'decision_spans'}, 'invalid_no_change')
-            _require(fact['kind'] == 'no_change' and isinstance(detail.get('decision_spans'), list) and bool(detail['decision_spans']), 'unspoken_no_change')
-            for span in detail['decision_spans']:
-                _validate_span(span, ledger['sources'])
-                _require(span in fact['source_spans'], 'foreign_decision')
-        elif kind == 'unresolved_identity':
-            _require(set(detail) == {'review_question_id'}, 'invalid_unresolved_identity')
-            _require('deal_id' not in topics[fact['topic_id']]['identity'] and
-                     isinstance(detail.get('review_question_id'), str) and detail['review_question_id'] in questions, 'missing_identity_question')
-        else:
-            raise CoverageError('unverified_disposition')
-    for fact in facts.values():
-        seen = set()
-        while fact.get('disposition') and 'superseded' in fact['disposition']:
-            _require(fact['fact_id'] not in seen, 'supersession_cycle')
-            seen.add(fact['fact_id'])
-            fact = facts[fact['disposition']['superseded']['replacement_fact_id']]
+    for fact_id, proposal_id in linked.items():
+        facts[fact_id]['disposition'] = {'proposal': {'proposal_id': proposal_id}}
+    _validate_dispositions(ledger, facts, {q['id'] for q in report.get('review_questions', [])},
+                           proposals=set(linked.values()))
     _require(all(w['validated_completion'] for w in ledger['windows']), 'incomplete_windows')
     ledger.update(state='complete', failures=[], proposal_bindings=bindings)
     return ledger
@@ -345,7 +405,7 @@ def extraction_schema():
                 'properties': {'fact_id': {'type': 'string'}, 'topic_id': {'type': 'string'},
                     'kind': {'enum': list(KINDS)}, 'statement': {'type': 'string'},
                     'asserted_value': {}, 'source_spans': {'type': 'array', 'items': span},
-                    'disposition': {'type': ['object', 'null']}}}},
+                    'disposition': {'type': 'null'}}}},
             'non_fact_spans': {'type': 'array', 'items': {'type': 'object', 'required': ['span', 'reason'],
                 'properties': {'span': span, 'reason': {'type': 'string'}}}}}}
 
@@ -357,14 +417,31 @@ def extraction_instruction(data_sentence):
         'never substring-relative coordinates. Copy source_id and sha256 from sources into each span. '
         'Account for every nonwhitespace character in the core range with a fact span or a non-fact span and reason. '
         'Overlap provides context. Include all facts intersecting the core and their supporting occurrences in this window. '
-        'Use stable topic_id names and fact_id names derived from topic, kind and asserted value, identical for repeats. '
+        'Use stable topic_id names. Anchor fact_id names to global segment index and atomic assertion number, not window-local numbering. '
         'Keep distinct commitments separate. Keep status and phase_change separate. Join split-turn facts with multiple spans. '
         'Never classify a status, commitment or instruction as non-fact. Non-facts are greetings, filler and questions with no assertion. '
         'Exact identity is {deal_id,participant_ids}, using context IDs. Otherwise identity is '
         '{mentioned_name,candidate_deal_ids,reason}. Use null disposition for proposal facts and unresolved identity. '
-        'For explicit correction use {superseded:{replacement_fact_id,correction_spans}} citing the later explicit correction. '
-        'For explicit no-change decisions use kind no_change and {no_change:{decision_spans}}. '
+        'Leave every disposition null. A separate complete-topic history pass resolves corrections and no-change decisions. '
+        'Classify explicit no-change decisions as kind no_change, preserving their source spans. '
         'Never use already_recorded without verified record evidence, which this extraction does not have. '
         'statement paraphrases one assertion. asserted_value stores its value. Never copy raw segments into statements. '
         'Return only the JSON object. A second_check requests an independent audit of an empty first extraction.'
     )
+
+
+def history_schema():
+    return {'type': 'object', 'additionalProperties': False, 'required': ['dispositions'],
+        'properties': {'dispositions': {'type': 'array', 'items': {
+            'type': 'object', 'additionalProperties': False, 'required': ['fact_id', 'disposition'],
+            'properties': {'fact_id': {'type': 'string'}, 'disposition': {'type': ['object', 'null']}}}}}}
+
+
+def history_instruction(data_sentence):
+    return ('Reconcile the complete ordered history of one call topic before generating proposals. ' + data_sentence +
+        ' Return exactly one disposition entry per supplied fact_id. Keep null for facts needing a proposal or unresolved identity. '
+        'Use {superseded:{replacement_fact_id,correction_spans}} only for an explicit later correction, citing the replacement fact source spans. '
+        'A correction must follow every occurrence of the earlier assertion. Reinstatement is a later distinct assertion, never an old repeat. '
+        'Use {no_change:{decision_spans}} only for a spoken no-change decision. Never use already_recorded or proposal. '
+        'Do not invent facts, change statements or omit facts. Status and phase_change remain separate. Evidence contains exact local spans. '
+        'Return only {dispositions:[{fact_id,disposition},...]}.')

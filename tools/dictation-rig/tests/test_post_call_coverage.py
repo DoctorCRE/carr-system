@@ -56,6 +56,7 @@ class LedgerTests(unittest.TestCase):
         self.transcript, self.context = self.case['transcript'], self.case['context']
         self.response = controlled_extraction(self.transcript)
         self.calls = []
+        self.history_calls = []
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.session = Path(self.tmp.name) / self.context['session']
@@ -63,12 +64,19 @@ class LedgerTests(unittest.TestCase):
         pc.store_context(self.session, self.context)
         pc.write_private(self.session / 'transcript.json', self.transcript)
 
+    def history(self, request):
+        self.history_calls.append(deepcopy(request))
+        dispositions = {f['fact_id']: f['disposition'] for f in self.response['facts']}
+        return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': deepcopy(dispositions[f['fact_id']])}
+                                 for f in request['facts']]}
+
     def extract(self, request):
         self.calls.append(deepcopy(request))
         lo, hi = request['window']['overlap_range']
         sources = request['sources']
         result = deepcopy(self.response)
         for fact in result['facts']:
+            fact['disposition'] = None
             fact['source_spans'] = [s for s in fact['source_spans'] if
                 lo <= sources[s['segment_index']]['offset'] + s['char_start'] and
                 sources[s['segment_index']]['offset'] + s['char_end'] <= hi]
@@ -95,10 +103,13 @@ class LedgerTests(unittest.TestCase):
             'draft_proposals': [], 'review_questions': []}
 
     def distill(self, request):
+        if request.get('stage') == 'coverage_history':
+            return self.history(request)
         return self.extract(request) if request.get('stage') == 'coverage' else self.raw_report()
 
     def build(self, **kwargs):
-        return cov.build_call_ledger(self.transcript, self.context, self.extract, **kwargs)
+        ledger = cov.build_call_ledger(self.transcript, self.context, self.extract, **kwargs)
+        return cov.reconcile_history(ledger, self.transcript, self.history)
 
     def test_scored_recall_dispositions_and_no_false_proposals(self):
         status = pc.process_session(self.session, self.distill, run_checks=False)
@@ -117,6 +128,11 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(proposed, expected_proposals)
         self.assertEqual(len(list(cov.proposal_items(report))), 4)
         self.assertGreaterEqual(len(ledger['windows']), 3)
+        friday_windows = [f for w in ledger['windows'] for f in w['result']['facts'] if f['fact_id'] == 'friday']
+        self.assertTrue(all(f['disposition'] is None for f in friday_windows))
+        harbor_history = next(r for r in self.history_calls if r['topic']['topic_id'] == 'harbor')
+        self.assertEqual({f['fact_id'] for f in harbor_history['facts']}, {'friday', 'monday'})
+        self.assertTrue(ledger['history_receipts']['harbor']['validated_completion'])
         self.assertEqual((self.session / cov.FILE).stat().st_mode & 0o777, 0o600)
         payload = json.dumps(pc.sanitized_candidates(self.session))
         for segment in self.transcript['segments']:
@@ -133,6 +149,8 @@ class LedgerTests(unittest.TestCase):
                 for name in (pc.STATUS_FILE, pc.REPORT_FILE, cov.FILE):
                     (self.session / name).unlink(missing_ok=True)
                 def incomplete(request):
+                    if request.get('stage') == 'coverage_history':
+                        return self.history(request)
                     if request.get('stage') == 'coverage':
                         result = self.extract(request)
                         if mode == 'extraction':
@@ -153,6 +171,8 @@ class LedgerTests(unittest.TestCase):
 
     def test_proposal_retry_reuses_extraction_and_published_ids(self):
         def incomplete(request):
+            if request.get('stage') == 'coverage_history':
+                return self.history(request)
             if request.get('stage') == 'coverage':
                 return self.extract(request)
             report = self.raw_report()
@@ -160,11 +180,13 @@ class LedgerTests(unittest.TestCase):
             return report
         self.assertEqual(pc.process_session(self.session, incomplete, run_checks=False)['state'], 'blocked')
         count = len(self.calls)
+        history_count = len(self.history_calls)
         status = pc.read_json(self.session / pc.STATUS_FILE)
         status['next_attempt_at'] = None
         pc.write_private(self.session / pc.STATUS_FILE, status)
         self.assertEqual(pc.process_session(self.session, self.distill, run_checks=False)['state'], 'ready_review')
         self.assertEqual(len(self.calls), count)
+        self.assertEqual(len(self.history_calls), history_count)
         shaped = pc.sanitized_candidates(self.session)
         pc.apply_candidate_ids(self.session, shaped['bindings'], ['remote-' + str(i) for i in range(4)])
         self.assertEqual(pc.sanitized_candidates(self.session)['post_call_items'], [])
@@ -197,6 +219,72 @@ class LedgerTests(unittest.TestCase):
         pc.write_private(self.session / pc.CONTEXT_FILE, {'call_context': {'changed': True}})
         with self.assertRaises(pc.ContractError):
             pc.sanitized_candidates(self.session)
+
+    def test_failed_history_retries_only_failed_topics(self):
+        def interrupted(request):
+            if request.get('stage') == 'coverage_history':
+                if request['topic']['topic_id'] == 'cedar':
+                    self.history_calls.append(deepcopy(request))
+                    raise RuntimeError('interrupted history')
+                return self.history(request)
+            return self.distill(request)
+        self.assertEqual(pc.process_session(self.session, interrupted, run_checks=False)['state'], 'blocked')
+        count = len(self.calls)
+        status = pc.read_json(self.session / pc.STATUS_FILE)
+        status['next_attempt_at'] = None
+        pc.write_private(self.session / pc.STATUS_FILE, status)
+        self.assertEqual(pc.process_session(self.session, self.distill, run_checks=False)['state'], 'ready_review')
+        self.assertEqual(len(self.calls), count)
+        topics = [r['topic']['topic_id'] for r in self.history_calls]
+        self.assertEqual(topics.count('harbor'), 1)
+        self.assertEqual(topics.count('cedar'), 2)
+        self.assertEqual(topics.count('oak'), 1)
+
+    def test_incomplete_history_never_generates_proposals(self):
+        proposal_calls = []
+        def incomplete(request):
+            if request.get('stage') == 'coverage':
+                return self.extract(request)
+            if request.get('stage') == 'coverage_history':
+                return {'dispositions': []}
+            proposal_calls.append(request)
+            return self.raw_report()
+        status = pc.process_session(self.session, incomplete, run_checks=False, max_attempts=1)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertEqual(status['reason'], 'incomplete_history')
+        self.assertEqual(proposal_calls, [])
+        self.assertFalse((self.session / pc.REPORT_FILE).exists())
+
+    def test_overlap_duplicates_merge_by_source_identity(self):
+        transcript = {'segments': [{'text': ' ' * 40 + 'Joe will call Pat.' + ' ' * 40}]}
+        span = cov.source_span(transcript, 0, 40, 58)
+        def extract(request):
+            lo, hi = request['window']['overlap_range']
+            facts = []
+            if lo <= 40 and 58 <= hi:
+                facts = [{'fact_id': 'segment-0-assertion-0',
+                    'topic_id': 'harbor', 'kind': 'commitment',
+                    'statement': 'Joe calls Pat' if lo == 0 else 'Joe will telephone Pat',
+                    'asserted_value': 'call Pat', 'source_spans': [span], 'disposition': None}]
+            return {'topics': [{'topic_id': 'harbor', 'identity': {'deal_id': 'harbor', 'participant_ids': []}}],
+                    'facts': facts, 'non_fact_spans': []}
+        ledger = cov.build_call_ledger(transcript, self.context, extract, core_chars=40, overlap_chars=20)
+        self.assertEqual(len(ledger['facts']), 1)
+        self.assertEqual(ledger['facts'][0]['source_spans'], [span])
+
+    def test_distinct_atomic_claims_can_share_a_segment(self):
+        transcript = {'segments': [{'text': 'Joe will call Pat and Sam.'}]}
+        facts = [{'fact_id': name, 'topic_id': 'harbor', 'kind': 'commitment',
+                  'statement': 'Call ' + name, 'asserted_value': 'call',
+                  'source_spans': [cov.source_span(transcript, 0)], 'disposition': None}
+                 for name in ('Pat', 'Sam')]
+        response = {'topics': [{'topic_id': 'harbor', 'identity': {'deal_id': 'harbor', 'participant_ids': []}}],
+                    'facts': facts, 'non_fact_spans': []}
+        ledger = cov.build_call_ledger(transcript, self.context, lambda _: response)
+        self.assertEqual({f['fact_id'] for f in ledger['facts']}, {'Pat', 'Sam'})
+        facts[1]['fact_id'] = 'Pat'
+        with self.assertRaisesRegex(cov.CoverageError, 'duplicate_fact_id'):
+            cov.build_call_ledger(transcript, self.context, lambda _: response)
 
     def test_invalid_foreign_and_stale_spans(self):
         for field, value in (('segment_index', 999), ('segment_sha256', 'stale'), ('char_end', 99999), ('source_id', 'foreign')):
@@ -244,12 +332,8 @@ class LedgerTests(unittest.TestCase):
         self.transcript['segments'].append({
             'speaker': 'Joe', 'text': 'For Harbor Clinic, I will call the landlord Friday.'})
         self.response['facts'][0]['source_spans'].append(cov.source_span(self.transcript, 12))
-        ledger = self.build()
-        report = pc.normalize_distillation(self.raw_report(), self.context, self.context['session'],
-                                          transcript=self.transcript)
-        cov.add_identity_questions(ledger, report, pc._review_id)
         with self.assertRaisesRegex(cov.CoverageError, 'nonlater_correction'):
-            cov.reconcile_coverage(ledger, report)
+            self.build()
 
     def test_supersession_requires_correction_and_has_no_cycles(self):
         for mode in ('missing', 'cycle', 'recorded', 'no_change'):

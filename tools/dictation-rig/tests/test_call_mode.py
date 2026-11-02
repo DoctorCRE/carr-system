@@ -61,6 +61,7 @@ _COVERAGE_ADAPTER = SimpleNamespace(
     digest=post_call.coverage.digest,
     build_call_ledger=lambda *args, **kwargs: {},
     add_identity_questions=lambda *args: None,
+    reconcile_history=lambda ledger, *args, **kwargs: ledger,
     reconcile_coverage=lambda ledger, report: ledger,
     require_coverage=lambda *args: None,
     CoverageError=post_call.coverage.CoverageError,

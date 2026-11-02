@@ -44,6 +44,8 @@ def coverage_response(transcript, context, report):
 def store_validated_coverage(session, transcript, context, report):
     response = coverage_response(transcript, context, report)
     ledger = coverage.build_call_ledger(transcript, context, lambda _: response)
+    ledger = coverage.reconcile_history(ledger, transcript, lambda request: {
+        'dispositions': [{'fact_id': f['fact_id'], 'disposition': f['disposition']} for f in request['facts']]})
     ledger = coverage.reconcile_coverage(ledger, report)
     post_call.write_private(session / coverage.FILE, ledger)
     report['coverage_sha256'] = coverage.digest(ledger)
@@ -775,6 +777,8 @@ class PhoneIntakeTests(unittest.TestCase):
         post_call.store_context(session, context)
 
         def distiller(request):
+            if request.get('stage') == 'coverage_history':
+                return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': f['disposition']} for f in request['facts']]}
             if request.get('stage') == 'coverage':
                 return coverage_response(post_call.read_json(session / 'transcript.json'), context, distiller({
                     'transcript': post_call.read_json(session / 'transcript.json')}))
