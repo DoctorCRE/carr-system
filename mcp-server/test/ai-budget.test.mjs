@@ -296,3 +296,31 @@ test('a reserved provider failure cannot refund credits for a retry', async () =
   assert.equal(f.providerCalls, 1);
   assert.equal(f.values.get('daily').spent, 1);
 });
+
+for (const stage of ['fetch', 'body']) test(`stalled reservation ${stage} times out without refund or late provider work`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture({ budget: '1' });
+  const original = f.env.AI_NEURON_BUDGET.get;
+  let resolve, requestSignal;
+  const stalled = new Promise(done => { resolve = done; });
+  f.env.AI_NEURON_BUDGET.get = name => ({ fetch: async request => {
+    requestSignal = request.signal;
+    const response = await original(name).fetch(request);
+    return stage === 'fetch' ? stalled : { ok: true, status: 200, json: () => stalled };
+  } });
+  const ai = budgetedAi(f.env);
+  const pending = ai.run(MODEL, input()).then(() => 'provider-ran', error => error.code);
+  const observed = Promise.race([pending, new Promise(done => setTimeout(() => done('hung'), 2100))]);
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  assert.equal(f.values.get('daily').spent, 1);
+  t.mock.timers.tick(2000);
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  t.mock.timers.tick(100);
+  assert.equal(await observed, 'ai_budget_unavailable');
+  assert.equal(requestSignal.aborted, true);
+  const receipt = { day: new Date().toISOString().slice(0, 10), spent: 1, limit: 1, remaining: 0 };
+  resolve(stage === 'fetch' ? Response.json(receipt) : receipt);
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  assert.equal(f.providerCalls, 0);
+  assert.equal(f.values.get('daily').spent, 1, 'uncertain reservation remains billed');
+});
