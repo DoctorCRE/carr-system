@@ -520,7 +520,8 @@ class MatchingTests(unittest.TestCase):
         for line in (ROOT / 'evals/email-followup-matching.jsonl').read_text().splitlines():
             case = json.loads(line)
             mail = self.mail(**{k: case[k] for k in ('sender','recipients','conversation_id','body')})
-            decision = email_matching.match(mail, [{'id': DEAL, 'client_id': 'synthetic-client'}], [],
+            decision = email_matching.match(mail, [{'id': DEAL, 'client_id': 'synthetic-client',
+                'participants': case.get('deal_participants', [])}], [],
                 client=FakeJev(case['existing'], case['different'], case['confidence']))
             old = 'propose_new' if case['different'] >= .7 or case['existing'] <= .3 else (
                 'review_existing' if case['existing'] >= .7 and case['different'] <= .3 and case['confidence'] >= .7 else 'no_suggestion')

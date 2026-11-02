@@ -740,7 +740,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             suspected_instruction: suspected(row.evidence_quote),
             source: { activity_id: row.activity_id, sender: named?.[1] ?? null, subject: named?.[2] ?? row.summary,
               evidence_quote: row.evidence_quote, occurred_at: new Date(row.occurred_at).toISOString() },
-            confirm_verb: pending && !previewError && !(row.kind === 'reply_draft' && !recipients) ? KINDS[row.kind].confirm : null, preview: shown, preview_error: previewError });
+            confirm_verb: pending && !(row.kind === 'reply_draft' && (!recipients || previewError)) ? KINDS[row.kind].confirm : null, preview: shown, preview_error: previewError });
         }
         return { schema_version: 'email-proposals.v1', proposals, send: false,
           ...(args.limit ? { more, next_cursor: more ? proposals.at(-1).id : null } : {}) };

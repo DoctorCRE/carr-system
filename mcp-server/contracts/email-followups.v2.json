@@ -8,7 +8,7 @@
     "outcome": "existing, new or uncertain. Proposal kind is a transport hint, never automatic filing authority.",
     "candidates": "Array of deal UUID, literal explanation in reason and confidence between zero and one. Model suggestions require human review.",
     "evidence": "Diagnostic object with model revision, existing and different scores, choice_confidence, missing metadata and body_truncated. Diagnostic text is untrusted data.",
-    "new": "A genuinely separate transaction requires positive different evidence and low existing evidence with structured sender, recipients and conversation metadata. Another property within an existing search is not a new transaction.",
+    "new": "A genuinely separate transaction requires positive different evidence and low existing evidence with structured sender, recipients and conversation metadata. Another property within an existing search is not a new transaction. An exact party on the board produces file_to_deal before possible_new_deal, even when scores favor a separate transaction. A human must review and choose a new deal instead when appropriate; Unit 3 adds that action.",
     "uncertain": "Contradictory scores, incomplete metadata or exact board-party relationships produce reviewed existing-deal filing cards. Identity alone never authorizes automatic filing."
   },
   "read": {
