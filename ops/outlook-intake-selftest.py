@@ -326,7 +326,9 @@ class IntakeTest(unittest.TestCase):
     def test_census_failures_do_not_fail_intake_or_leak_output(self):
         from contextlib import redirect_stderr
         from io import StringIO
-        failures = ['exit', 'timeout', 'launch', 'json', 'label', 'value', 'bool', 'oversized']
+        reasons = dict(exit='exit', timeout='timeout', launch='launch', json='json',
+                       label='totals', value='totals', bool='totals', oversized='oversize')
+        failures = list(reasons)
         for failure in failures:
             with self.subTest(failure=failure):
                 self.out().mkdir(parents=True, exist_ok=True)
@@ -350,7 +352,7 @@ class IntakeTest(unittest.TestCase):
                 log = StringIO()
                 with patch('subprocess.run', side_effect=execute), redirect_stderr(log):
                     self.assertEqual(self.run_intake().state, 'succeeded')
-                self.assertEqual(log.getvalue(), 'coverage_census_failed=1\n')
+                self.assertEqual(log.getvalue(), f'coverage_census_failed={reasons[failure]}\n')
                 self.assertFalse((self.out() / 'coverage-census.request').exists())
                 self.assertFalse(list(self.out().glob('work-*')))
                 for path in self.out().rglob('*'):
