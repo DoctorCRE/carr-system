@@ -1629,6 +1629,57 @@ for option in ('-f ref=main', '-F ref=main', '--input body.json',
         command = 'gh api ' + endpoint + ' ' + option
         case('J129 write ' + command, bash(command), DENY)
 
+
+# Intended additions to the frozen-main contract. These are shell input only.
+ZSH_GLOB_ADDITIONS = [
+    (f'J134 {program} {target}', f'{program} {target}{suffix}')
+    for program, suffix in (
+        ('rm -rf', ' /Users/booko/important'),
+        ('mv', ' /Users/booko/important'),
+        ('git clean -n', ''),
+    )
+    for target in ('/tmp/x/(a|b)', '/tmp/x/(a|(b|c))', '/tmp/x/(a|b)(N)',
+                   '/tmp/x/*(N)', '/tmp/x/*(.)', '/tmp/x/a#',
+                   '/tmp/x/(#i)a*', '/tmp/x/"prefix"(a|b)')
+]
+ZSH_GLOB_ADDITIONS += [
+    ('J134 safe-only ' + target, 'rm -rf ' + target)
+    for target in ('/tmp/x/*(N)', '/tmp/x/*(.)', '/tmp/x/a#')
+]
+ZSH_GLOB_ADDITIONS += [
+    ('J134 wrapper ' + prefix, prefix.format('rm -rf /tmp/x/(a|b) /Users/booko/important'))
+    for prefix in ('sudo {}', 'env {}', "zsh -c '{}'", "bash -c '{}'",
+                   'echo "$({})"', '({})')
+]
+ZSH_GLOB_EXISTING_DENIALS = [
+    (name, command) for name, command in ZSH_GLOB_ADDITIONS
+    if (command.startswith('rm -rf ') and '(a|' not in command
+        and not name.startswith('J134 safe-only'))
+    or command.startswith(('zsh -c', 'bash -c'))
+]
+ZSH_GLOB_ADDITIONS = [item for item in ZSH_GLOB_ADDITIONS if item not in ZSH_GLOB_EXISTING_DENIALS]
+for name, command in ZSH_GLOB_ADDITIONS + ZSH_GLOB_EXISTING_DENIALS:
+    case(name, bash(command, '/tmp'), DENY)
+for command in (
+    "rm -rf '/tmp/x/(a|b)'", 'rm -rf "/tmp/x/(a|b)"',
+    r'rm -rf /tmp/x/\(a\|b\)', "mv '/tmp/x/(a|b)' /tmp/y",
+    "git clean -n '/tmp/x/(a|b)'", 'ls | head', 'git status', 'git log -1',
+    'git diff', 'gh pr view 1', 'gh pr checks 1', './run.sh map',
+    "git commit -F - <<'EOF'\nliteral (a|b), (N), (.), a#\nEOF",
+):
+    case('J134 ordinary ' + command, bash(command, '/tmp'), ALLOW)
+
+
+def zsh_glob_addition_cases():
+    failures = []
+    for name, command in ZSH_GLOB_ADDITIONS:
+        baseline, error = run(bash(command, '/tmp'), MAIN_GUARD)
+        if baseline != ALLOW:
+            failures.append(name + ': expected frozen-main allowance: ' + error)
+    print(f'zsh intended additions: {len(ZSH_GLOB_ADDITIONS) - len(failures)}/{len(ZSH_GLOB_ADDITIONS)} main allowances')
+    return failures
+
+
 def decision_error_cases():
     failures = []
     script = (
@@ -1658,7 +1709,7 @@ def main():
     source_fails = fixture_identity_cases()
     if source_fails:
         return 1
-    source_fails += source_restore_cases()
+    source_fails += source_restore_cases() + zsh_glob_addition_cases()
     head_results = {}
     source_fails += monotonicity_cases(head_results) + decision_error_cases()
     fails = []
