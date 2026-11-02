@@ -1,4 +1,5 @@
 // Tests client portal authentication and deal access against PostgreSQL.
+import { readMigration } from './migration-source.testhelper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -15,7 +16,7 @@ test('a password opens only its client portal and the live deal roadmap', async 
   const db = await postgresDatabase('client-portal-');
   const c = db.client;
   try {
-    await c.query(await readFile(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8'));
+    await c.query(readMigration('0001_init.sql'));
     await c.query(await readFile(new URL('../../migrations/0008_client_merged_into.sql', import.meta.url), 'utf8'));
     await c.query('create schema ops; create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; grant usage on schema ops to dot_reader; alter default privileges in schema ops grant select on tables to dot_reader; create extension pgcrypto');
     await c.query(await readFile(new URL('../../migrations/0975_client_portal.sql', import.meta.url), 'utf8'));

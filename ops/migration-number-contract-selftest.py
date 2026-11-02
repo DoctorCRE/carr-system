@@ -171,7 +171,9 @@ def main() -> int:
         assert fields[0] not in snapshot_ledger, "snapshot ledger filenames must be unique"
         snapshot_ledger[fields[0]] = fields[1]
     assert snapshot_ledger, "committed snapshot must carry its applied ledger"
-    migration_runner.validate_applied_ledger(loaded, snapshot_ledger)
+    migration_runner.validate_applied_ledger(
+        loaded, snapshot_ledger, migration_runner.load_baseline()
+    )
     loaded_0169 = tuple(name for name, _sql, _digest in loaded if name.startswith("0169_"))
     assert loaded_0169 == FROZEN_0169, loaded_0169
     loaded_digests = {name: digest for name, _sql, digest in loaded}

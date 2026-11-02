@@ -61,10 +61,10 @@ Treat both as NULL. **Never import them into a client, lead or party record.** R
 occurrence as a discrepancy with the deal it appeared on. Any other CARR-owned contact detail found
 in a client field gets the same treatment, whether or not it is on this list.
 
-**8. Never auto-merge on a name.** Salesforce and the Deal Room drift on spelling ("Erik Peterson"
-against "Marcus Whitfield, DO, Bayview DPC"). The differ surfaces near-matches as confirm-this
-suggestions with the match basis shown. It never silently joins them, and neither do you. Same
-discipline as the standing lone-surname rule.
+**8. Never auto-merge on a name.** Salesforce and the Deal Room drift on spelling and
+professional suffixes. The differ surfaces near-matches as confirm-this suggestions with
+the match basis shown. It never silently joins them, and neither do you. Same discipline
+as the standing lone-surname rule.
 
 **9. New deals are never auto-added.** `--apply` updates existing deals only. A new deal needs a
 real record with an owner, a C-ID, a detail file and a lead source, created through the normal path

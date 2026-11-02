@@ -150,8 +150,8 @@ Every statement filters `kind = 'org'`. The guard block asserts, before and afte
 person row count, the person `merged_into` count, and the person duplicate-name group count
 are all *identical* — so if a future edit widened a `where` clause by accident, the migration
 rolls back instead of applying. Person merges remain the exclusive business of the humanOnly
-`confirm-merge` verb under the survivorship rule, and this system has already merged the
-wrong Beasley once.
+`confirm-merge` verb under the survivorship rule. A prior incorrect person merge shows why
+this restriction matters.
 
 Org survivorship is trivial *and that was verified rather than assumed*: within every one of
 the 46 groups there is exactly one distinct exact spelling, one distinct email, one phone,
