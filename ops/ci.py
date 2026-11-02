@@ -185,9 +185,13 @@ class Controller:
               f'and unredacted child output is never printed. The captured log is at {log}.', file=sys.stderr)
 
     def finish(self, rc):
+        def reset_cancel_signals():
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                signal.signal(sig, signal.SIG_DFL)
+
         if self.program_records and execute(
                 [self.python, ROOT / 'ops/ci-evidence.py', 'programs', '--rows', self.logdir / 'programs.tsv',
-                 '--output', self.program_records], stdout=subprocess.DEVNULL):
+                 '--output', self.program_records], stdout=subprocess.DEVNULL, preexec_fn=reset_cancel_signals):
             print(f'ci-program-records: NOT WRITTEN to {self.program_records}', file=sys.stderr)
         if rc in (0, 143):
             shutil.rmtree(self.logdir)
@@ -203,7 +207,8 @@ class Controller:
             for log in self.logdir.glob('*.log'):
                 redacted = Path(str(log) + '.redacted')
                 with log.open('rb') as source, redacted.open('wb') as target:
-                    status_code = execute([self.python, 'ops/ci-secret-scan.py', '--redact'], stdin=source, stdout=target)
+                    status_code = execute([self.python, 'ops/ci-secret-scan.py', '--redact'],
+                                          stdin=source, stdout=target, preexec_fn=reset_cancel_signals)
                 if status_code:
                     redacted.unlink(missing_ok=True)
         print(f'ci-retained-logs: {self.logdir}', file=sys.stderr)
@@ -439,7 +444,14 @@ def main(argv=None):
         return 0
     controller = Controller(options, python)
     rc = 1
-    previous_sigterm = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    def cancel(signum, _):
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, signal.SIG_IGN)
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
+        sys.exit(143)
+
+    previous = {sig: signal.signal(sig, cancel) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
         if options.gate_programs:
             execute([python, 'ops/ci-gates.py', '--gate-programs'])
@@ -457,7 +469,8 @@ def main(argv=None):
         try:
             controller.finish(rc)
         finally:
-            signal.signal(signal.SIGTERM, previous_sigterm)
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
 
 
 if __name__ == '__main__':
