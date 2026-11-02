@@ -31,6 +31,11 @@
 
 set -u
 
+# Quill's launchd job has no shell profile. Its entire post-call child tree
+# needs native Claude and Homebrew tools, including tools launched via env.
+PATH="${PATH:+$PATH:}$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH
+
 SESSION_DIR="${1:-}"
 
 # Resolve our own location from $0 (our real argv[0] when this process was
