@@ -1,5 +1,6 @@
 """Behavior tests for the conditional review gate."""
 import ast
+import fnmatch
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -94,6 +95,37 @@ class ReviewGate(unittest.TestCase):
                         self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 1)
                         self.assertEqual(api.call_args.args[1]['state'], 'failure')
                     self.assertTrue(gate.approved(self.pr, files, [self.approval], 'reviewer[bot]'))
+
+    def test_ci_executed_scripts_require_review(self):
+        root = Path(__file__).resolve().parents[1]
+        sources = ['ci.py', 'ci-gates.py', 'ci-migration.py']
+        trees = [ast.parse((root / 'ops' / name).read_text()) for name in sources]
+        assignments = {node.targets[0].id: ast.literal_eval(node.value)
+                       for node in trees[1].body if isinstance(node, ast.Assign)
+                       and isinstance(node.targets[0], ast.Name)
+                       and node.targets[0].id in ('INVARIANTS', 'PROGRAM_PATTERNS')}
+        paths = {node.value for tree in trees for node in ast.walk(tree)
+                 if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                 and node.value.startswith(('ops/', 'tools/', 'bin/'))
+                 and node.value.endswith(('.py', '.sh', '.mjs'))}
+        paths.update('ops/' + name + '.py' for name in assignments['INVARIANTS'])
+        paths = {path for path in paths if not any(fnmatch.fnmatchcase(path, pattern)
+                 for pattern in assignments['PROGRAM_PATTERNS'])}
+        self.assertIn('ops/rule-load-layer-check.py', paths)
+        self.assertIn('ops/trigger-grant-check.py', paths)
+        self.assertIn('tools/native_rules.py', paths)
+        for path in sorted(paths):
+            for status in ('modified', 'removed', 'renamed'):
+                for key in ('filename', 'previous_filename'):
+                    files = [{'filename': 'docs/moved.md', key: path, 'status': status}]
+                    with self.subTest(path=path, status=status, key=key), patch.dict(
+                            gate.os.environ, {'CARR_REVIEW_APP_LOGIN': 'reviewer[bot]'}):
+                        with patch.object(gate, 'api', side_effect=[
+                                self.pr, {}, files, [], self.pr, {}]) as api:
+                            self.assertEqual(gate.run({'number': 4}, 'owner/repo'), 1)
+                            self.assertEqual(api.call_args.args[1]['state'], 'failure')
+                        self.assertIsNone(gate.review_failure(
+                            self.pr, files, [self.approval], 'reviewer[bot]'))
 
     def test_refusals_explain_required_action(self):
         cases = [
