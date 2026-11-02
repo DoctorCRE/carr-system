@@ -57,6 +57,27 @@ class ReviewGate(unittest.TestCase):
                     self.assertFalse(gate.approved(self.pr, [{'filename': 'lib/code.py', key: path}], [], 'reviewer[bot]'))
         self.assertFalse(gate.approved(self.pr, [{'filename': 'ops/new.py', 'status': 'added'}], [], 'reviewer[bot]'))
 
+    def test_gate_and_merge_paths_always_require_review(self):
+        paths = ['ops/review-gate.py', 'ops/review-gate-selftest.py',
+                 'ops/review-submit.py', 'ops/migration-safety-gate.py',
+                 'ops/config/gate-baseline.json', 'ops/config/review-ruleset.json',
+                 'ops/ci.py', 'ops/ci.sh', 'ops/ci-gates.py', 'ops/ci-pushfloor.py',
+                 'ops/pr-hygiene-check.py', 'ops/pr-overlap.py',
+                 'hooks/gate-integrity.py', 'hooks/guard-unattended.py',
+                 'hooks/README.md', 'ops/githooks/pre-push', 'ops/githooks/pre-commit',
+                 '.github/workflows/ci.yml', '.github/workflows/review-gate.yml',
+                 '.github/actions/check/action.yml', 'security/pre-push',
+                 'lib/hook_runtime.py', 'lib/native_shell.py', 'run.sh', 'bin/review-pr']
+        for path in paths:
+            for status in ('added', 'modified', 'removed', 'renamed'):
+                for key in ('filename', 'previous_filename'):
+                    file = {'filename': 'docs/moved.md', 'status': status, key: path}
+                    with self.subTest(path=path, status=status, key=key):
+                        self.assertFalse(gate.approved(self.pr, [file], [], 'reviewer[bot]'))
+                        self.assertTrue(gate.approved(self.pr, [file], [self.approval], 'reviewer[bot]'))
+        self.assertFalse(gate.approved({**self.pr, 'additions': 1, 'deletions': 900},
+                                      [{'filename': 'ops/review-gate.py'}], [], 'reviewer[bot]'))
+
     def test_armed_safe_needs_no_review(self):
         armed = {**self.pr, 'auto_merge': {'enabled_by': {'login': 'author'}}}
         self.assertTrue(gate.approved(armed, self.files, [], "reviewer[bot]"))
