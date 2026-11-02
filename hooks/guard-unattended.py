@@ -2425,7 +2425,10 @@ def check(cmd, cwd=None):
                     'history rewrite': {'git'}, 'forced clean': {'git'}}.get(label)
         if programs and not any(program in programs for program, _ in invocations):
             continue
-        if pat.search(cmd):
+        rule_text = ('\n'.join(' '.join([program, *arguments])
+                               for program, arguments in invocations if program in programs)
+                     if programs else cmd)
+        if pat.search(rule_text):
             # Destructive-fs rules are waived inside the sanctioned scratch zones.
             if label in ("recursive/forced delete", "secure delete") and in_safe_zone(cmd):
                 continue
@@ -2444,7 +2447,7 @@ def check(cmd, cwd=None):
             # absent from the executable remainder — so anything outside a
             # quoted prose flag or a heredoc body is still scanned exactly as
             # before. See PROSE_SAFE_LABELS for what is deliberately excluded.
-            if label in PROSE_SAFE_LABELS and not pat.search(strip_inert_text(cmd)):
+            if not programs and label in PROSE_SAFE_LABELS and not pat.search(strip_inert_text(cmd)):
                 continue
             return f"{label} — blocked by the CARR unattended guard"
 
