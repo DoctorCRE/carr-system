@@ -630,7 +630,7 @@ def main() -> int:
         if sys.version_info < (3, 10) or importlib.util.find_spec("typesafe_sdk") is None:
             python = Path(__file__).resolve().parents[3] / ".venv" / "bin" / "python3"
             raise SystemExit(
-                f"release requires the repository virtual environment; run {python} {__file__} release {args.session}"
+                f"release requires the repository virtual environment; run {python} {Path(__file__).resolve()} release {args.session}"
             )
         path = session_path(args.session)
         lock = post_call.session_lock(path, blocking=False)

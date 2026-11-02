@@ -12,7 +12,7 @@ ENTRY_POINTS = ("call_budget.py", "capture-bridge.py", "call-mode.py", "phone_in
 SEARCH_PATH = (SCRIPTS, REPO, REPO / "tools")
 NEWER_PYTHON_MODULES = {
     "post_call_jev",  # post_call runs this worker with .venv/bin/python3.
-    "lib.headless_tasks",  # Only the .venv post_call_jev worker imports this module.
+    "lib.headless_tasks",  # The .venv post_call distiller imports this SDK helper.
 }
 
 
