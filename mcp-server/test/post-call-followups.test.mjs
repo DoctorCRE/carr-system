@@ -56,8 +56,13 @@ test('call outcomes preview current action matches and acceptance rechecks them'
         values($1,$2,$3,$4,$5,'2027-01-01',$6,$7,'synthetic',case when $5='done' then now() end) returning id`,
         [historicalCandidate, deal, owner, text, status, actor.id, structured ? 'Review survey' : null])).rows[0].id;
     };
-    const preview = async id => (await command('read-call-outcomes')).calls.find(call => call.session_id === session)
-      .open_cards.find(card => card.candidate_id === id).existing_action_comparison;
+    const preview = async id => {
+      const comparison = (await command('read-call-outcomes')).calls.find(call => call.session_id === session)
+        .open_cards.find(card => card.candidate_id === id).existing_action_comparison;
+      const followup = (await command('read-post-call-followups')).candidates.find(card => card.id === id);
+      assert.deepEqual(followup.existing_action_comparison, comparison, 'both review reads share the contract');
+      return comparison;
+    };
     for (const source of ['next_action', 'capture_post_call_action']) await t.test(`${source} exact preview matches accepted merge`, async () => {
       const text = `Review synthetic ${source} survey`;
       const id = await proposal(text);
