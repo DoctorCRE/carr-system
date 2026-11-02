@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 from git_env import fixture_env
@@ -279,6 +280,17 @@ class AgentCardGate(unittest.TestCase):
         result = self.run_hook(prompt='Card: WR557.S6.J1\nReview.')
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('TimeoutExpired', result.stderr)
+
+    def test_three_slow_cards_refused_before_hook_timeout(self):
+        self.register_fixture()
+        self.lookup.write_text('import time\ntime.sleep(3.5)\n' + self.lookup.read_text())
+        started = time.monotonic()
+        result = self.run_hook('mcp__t3-code__create_threads', threads=[
+            {'prompt': f'Card: WR557.S6.J{job}'} for job in (1, 2, 3)
+        ])
+        self.assertLess(time.monotonic() - started, 9)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('agent-card-gate: Card registration lookup deadline exceeded', result.stderr)
 
     def test_malformed_or_duplicate_card_denied(self):
         self.register_fixture()
