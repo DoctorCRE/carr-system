@@ -283,7 +283,7 @@ class OriginationTests(unittest.TestCase):
         minus_shift = line[:500] + line[501:] + ' '
         cases = [([line] * 150 + [short_name_shift], 'line 151.*Registered Agent State'),
                  ([skipped] * 150 + [short_name_shift], 'line 151.*Registered Agent State'),
-                 ([line] * 150 + [minus_shift], 'line 151.*Registered Agent State'),
+                 ([line] * 150 + [minus_shift], 'line 151.*Registered Agent Type'),
                  ([line] * 150 + [florida_fixture(registered_agent_state='F1')],
                   'line 151.*Registered Agent State'),
                  ([skipped] * 150 + [florida_fixture(registered_agent_postal_code='32501ABCD')],

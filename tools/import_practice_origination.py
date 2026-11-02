@@ -33,7 +33,10 @@ FLORIDA_LAYOUT = {
     "address": (220, 262),
     "city": (304, 332),
     "state": (332, 334),
+    "registered_agent_type": (586, 587),
     "registered_agent_address": (587, 629),
+    "registered_agent_state": (657, 659),
+    "registered_agent_postal_code": (659, 668),
     "postal_code": (334, 344),
 }
 FLORIDA_FILING_TYPES = frozenset({"DOMP", "DOMNP", "FORP", "FORNP", "DOMLP", "FORLP",
@@ -47,17 +50,22 @@ def florida_rows(line, *, published_on, line_number):
     error = f"Florida corporate line {line_number}: "
     if len(raw) != FLORIDA_RECORD_LENGTH:
         raise ValueError(error + "fixed-width schema drift")
-    row = {key: raw[start:end].strip() for key, (start, end) in FLORIDA_LAYOUT.items()}
+    fields = {key: raw[start:end] for key, (start, end) in FLORIDA_LAYOUT.items()}
+    row = {key: value.strip() for key, value in fields.items()}
     if not re.fullmatch(r"(?:[A-Z0-9]{12}|[A-Z0-9]{6} {6}| {6}[A-Z0-9]{6})", raw[:12]) or not row["name"]:
         raise ValueError(error + "missing or invalid document identity")
     if row["status"] not in {"A", "I"}:
         raise ValueError(error + "invalid Status field; fixed-width schema drift")
     if row["filing_type"] not in FLORIDA_FILING_TYPES:
         raise ValueError(error + "invalid Filing Type field; fixed-width schema drift")
-    if not re.fullmatch(r"[A-Z]{2}| {2}", raw[344:346]):
+    if not re.fullmatch(r"[A-Z]{2}| {2}", fields["country"]):
         raise ValueError(error + "invalid Country field; fixed-width schema drift")
-    if raw[586] not in {"P", "C", " "}:
+    if fields["registered_agent_type"] not in {"P", "C", " "}:
         raise ValueError(error + "invalid Registered Agent Type field; fixed-width schema drift")
+    if not re.fullmatch(r"[A-Z]{2}| {2}", fields["registered_agent_state"]):
+        raise ValueError(error + "invalid Registered Agent State field; fixed-width schema drift")
+    if not re.fullmatch(r"[0-9]{9}|[0-9]{5} {4}| {9}", fields["registered_agent_postal_code"]):
+        raise ValueError(error + "invalid Registered Agent ZIP field; fixed-width schema drift")
     dates = set()
     if re.fullmatch(r"[0-9]{8}", row["filing_on"]):
         for form in ("%Y%m%d", "%m%d%Y"):

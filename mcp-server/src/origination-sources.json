@@ -27,7 +27,7 @@
     "source": "formation-fl",
     "enabled": false,
     "coverage": "FL principal ZIP prefixes within the existing NPPES territory; healthcare-name research candidates only",
-    "reason": "Corporate-file adapter uses official cor.html offsets. Confirm date order, ZIP hyphen convention and document-number padding on a real row before enabling; confirm Filing Type and Status values on a real daily file and quarterly slice. Daily files are as-is and events omit some changes; never a complete change history.",
+    "reason": "Corporate-file adapter uses official cor.html offsets. Confirm date order, ZIP hyphen convention and document-number padding on a real row before enabling; confirm Filing Type, Status, Country, Registered Agent Type, Registered Agent State and Registered Agent Zip+4 values on a real daily file and quarterly slice. Daily files are as-is and events omit some changes; never a complete change history.",
     "terms_url": "https://dos.fl.gov/sunbiz/other-services/data-downloads/data-usage-guide/",
     "rate_control": "Local file only; no downloads. Atomic batches of at most 100 records.",
     "healthcare_name_pattern": "\\b(DENTAL|DENTIST|MEDICAL|CLINIC|HEALTHCARE|HEALTH CARE|PHYSICIAN|THERAPY|ORTHOPEDIC|PEDIATRIC|DERMATOLOGY|CARDIOLOGY|OPTOMETRY|CHIROPRACTIC)\\b",
