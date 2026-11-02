@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 import importlib.util
@@ -147,6 +148,60 @@ class LedgerTests(unittest.TestCase):
         pc.write_private(self.session / pc.STATUS_FILE, {'state': 'ready_review'})
         self.assertIsNone(pc.retention_ready(self.session, 'a' * 64))
         self.assertEqual(pc.read_json(self.session / pc.STATUS_FILE)['state'], 'needs_attention')
+
+    def test_poll_filed_legacy_report_reaches_purge_without_republication(self):
+        home = Path(self.tmp.name) / 'home'
+        session = home / 'Recordings' / '2026.01.01-1200'
+        session.mkdir(parents=True)
+        (home / 'Library/Logs').mkdir(parents=True)
+        report = self.raw_report()
+        report['review_questions'] = [{'id': 'q1', 'resolved': True}]
+        for index, item in enumerate(pc._report_candidates(report)):
+            item.update(candidate_id=f'legacy-{index}', candidate_status='pending')
+        pc.write_private(session / pc.REPORT_FILE, report)
+        pc.write_private(session / pc.STATUS_FILE, {'state': 'filed'})
+        pc.write_private(session / 'transcript.json', self.transcript)
+        pc.write_private(session / '.capture.json', {'session_token': 'synthetic'})
+        (session / 'mic.caf').write_bytes(b'synthetic audio')
+        spec = importlib.util.spec_from_file_location('legacy_poll_bridge', BIN / 'capture-bridge.py')
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)
+        response = {'state': 'done', 'post_call': True, 'meeting_record': None,
+                    'candidates': {'pending': 0},
+                    'candidate_statuses': [{'id': item['candidate_id'], 'status': 'confirmed'}
+                                           for item in pc._report_candidates(report)],
+                    'post_call_report': {'filed': True, 'sha256': 'a' * 64}}
+
+        def request(_cfg, path, method, endpoint, body=None):
+            self.assertEqual(path, session)
+            if (method, endpoint) == ('GET', '/capture/session'):
+                self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'filed')
+                return 200, deepcopy(response)
+            self.assertEqual((method, endpoint), ('POST', '/capture/status'))
+            self.assertEqual(body['state'], 'done')
+            return 200, {'ok': True}
+
+        with patch.object(bridge, 'LOG_PATH', home / 'Library/Logs/bridge.log'), patch.object(
+                bridge, 'session_request', side_effect=request) as remote:
+            self.assertEqual(bridge.poll_cmd({}, session), 0)
+            self.assertEqual(remote.call_count, 2)
+        receipt = pc.read_json(session / 'ingested.json')
+        self.assertEqual(receipt['backend_report_sha256'], 'a' * 64)
+        self.assertEqual(receipt['pending_items'], 0)
+        self.assertRegex(receipt['aggregate_report_hash'], r'^[0-9a-f]{64}$')
+        self.assertEqual(pc.read_json(session / pc.STATUS_FILE)['state'], 'filed')
+        self.assertFalse((session / '.capture.json').exists())
+        self.assertFalse((session / pc.PUSH_FILE).exists())
+        command = ['/bin/sh', str(BIN / 'purge-recordings.sh')]
+        isolated = {'HOME': str(home), 'PATH': '/usr/bin:/bin'}
+        subprocess.run(command, check=True, env=isolated)
+        self.assertTrue((session / 'mic.caf').exists())
+        receipt['ingested_at'] = '2000-01-01T00:00:00Z'
+        pc.write_private(session / 'ingested.json', receipt)
+        subprocess.run(command, check=True, env=isolated)
+        self.assertFalse((session / 'mic.caf').exists())
+        self.assertFalse((session / 'transcript.json').exists())
+        self.assertTrue((session / 'ingested.json').exists())
 
     def test_oversized_history_is_terminal_without_model_retry(self):
         self.transcript = {'segments': [{'text': 'x' * 25000}]}
