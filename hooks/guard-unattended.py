@@ -2525,11 +2525,27 @@ def zsh_glob_reason(cmd, invocations, depth=0):
         i += 1
     guarded = {'rm', 'mv', 'cp', 'rsync', 'srm', 'shred', 'find', 'git', 'gh',
                'curl', 'wget', 'dd', 'tee', 'diskutil', 'age', 'psql', 'sqlite3'}
-    # Fragment identifiers in PR reads cannot write or select local paths.
-    hash_sensitive = any(program in guarded and not (
-        program == 'gh' and _gh_command_words(arguments)[:2] == ['pr', 'view'])
-        for program, arguments in invocations)
-    if (groups and any(program in guarded for program, _ in invocations)) or (hashes and hash_sensitive):
+    sensitive = False
+    for program, arguments in invocations:
+        if program not in guarded:
+            continue
+        if program == 'git':
+            words = _git_command_words(arguments)
+            if (words and arguments[0] == words[0]
+                    and words[0] in {'status', 'log', 'diff', 'show', 'rev-parse', 'ls-files'}
+                    and not any(word.startswith('--output') for word in words[1:])):
+                continue
+        if program == 'gh':
+            words = _gh_command_words(arguments)
+            if (words[:2] == arguments[:2]
+                    and words[:2] in (['pr', 'view'], ['pr', 'checks'], ['pr', 'list'], ['pr', 'status'])):
+                continue
+            if (words == arguments and len(words) > 1
+                    and words[0] == 'api' and words[1] != 'graphql'
+                    and all(not word.startswith('-') for word in words[1:])):
+                continue
+        sensitive = True
+    if (groups or hashes) and sensitive:
         return 'cannot classify zsh word glob safely; quote literal operands or use explicit paths'
     for program, arguments in invocations:
         script = ' '.join(arguments) if program == 'eval' else (
