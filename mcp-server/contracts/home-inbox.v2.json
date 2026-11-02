@@ -1,6 +1,6 @@
 {
   "schema_version": "home-inbox.v2",
-  "read_verb": "read-home-inbox",
+  "read_verb": "read-home-inbox-v2",
   "item_fields": {
     "context_label": "string|null; deal or notification subject name",
     "due_on": "YYYY-MM-DD|null; canonical action due date",
@@ -24,7 +24,8 @@
     "deal",
     "loop",
     "call",
-    "email"
+    "email",
+    "doc_conversation_request"
   ],
   "limit": 1000,
   "truncated": "boolean; the item limit or 10000-notification scan bound was exceeded",

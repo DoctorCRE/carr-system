@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { setTimeout } from 'node:timers/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { HOME_INBOX_CONTRACT } from '../src/home-inbox.js';
 import { executeRegisteredTool } from '../src/tools.js';
@@ -11,7 +11,6 @@ import { executeRegisteredTool } from '../src/tools.js';
 const id = n => `ae000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const joe = { id: id(1), slug: 'joe', human: true };
 const dell = { id: id(2), slug: 'dell', human: true };
-
 
 async function initialize(c) {
   await c.query(`create schema ops;
@@ -273,7 +272,6 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
 
 });
 
-
 test('Home inbox v2 projects current partner work with context', async t => {
   const db=await postgresDatabase('home-inbox-v2-');
   const c=db.client;
@@ -296,13 +294,14 @@ test('Home inbox v2 projects current partner work with context', async t => {
     ('${id(80)}','${joe.id}','loop','${id(61)}','action_required','Action needed on an open loop',null,now()),
     ('${id(81)}','${joe.id}','engineering','build','failure','build_failed',null,now()),
     ('${id(82)}','${joe.id}','release','deploy','failure','deploy_failed',null,now());`);
-  const read=async()=> (await c.query('select ops.read_home_inbox() result')).rows[0].result;
-  const before=await read();
+  const read=async()=> (await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+  const before=(await c.query('select ops.read_home_inbox() result')).rows[0].result;
   console.log('Synthetic v1 seed items',before.items.length);
   if (!process.env.HOME_INBOX_TEST_V1) {
     await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
   }
-  const snapshot=await read();
+  const snapshot=await executeRegisteredTool(c,joe,'read-home-inbox-v2',{});
+  assert.deepEqual(snapshot,await read());
   console.log('Synthetic v2 seed items',snapshot.items.length);
   await t.test('done has a seven-day shelf and dropped is hidden',()=>{
     const done=snapshot.items.find(i=>i.source_id===id(72));
@@ -310,18 +309,18 @@ test('Home inbox v2 projects current partner work with context', async t => {
     assert.ok(!snapshot.items.some(i=>[id(73),id(74)].includes(i.source_id)));
   });
   await t.test('identical open tasks collapse by owner and deal with actionable context',()=>{
-    const task=snapshot.items.find(i=>i.source_id===id(70));
+    const task=snapshot.items.find(i=>i.source_id===id(71));
     assert.equal(snapshot.items.filter(i=>[id(70),id(71)].includes(i.source_id)).length,1);
-    assert.deepEqual(task.merged_source_ids,[id(70),id(71)]);
+    assert.deepEqual(task.merged_source_ids,[id(71),id(70)]);
     assert.equal(task.context_label,'Synthetic lease');
     assert.equal(task.kind_label,'Task');
     assert.ok(task.due_on);
     assert.equal(task.open_url,`/deals?deal=${id(60)}&focus=next-step`);
   });
   await t.test('task completion uses canonical action identity and integer version',()=>{
-    const task=snapshot.items.find(i=>i.source_id===id(70));
-    assert.equal(task.action_id,id(70));
-    assert.equal(task.action_version,1);
+    const task=snapshot.items.find(i=>i.source_id===id(71));
+    assert.equal(task.action_id,id(71));
+    assert.equal(task.action_version,2);
     assert.equal(task.deal_id,id(60));
   });
   await t.test('future hold belongs to Held',()=>{
@@ -351,17 +350,21 @@ test('Home inbox v2 projects current partner work with context', async t => {
     await c.query('delete from capture_post_call_action where id=$1',[id(91)]);
   });
   await t.test('v2 dispositions stay private and reject stale canonical edits',async()=>{
-    const task=(await read()).items.find(i=>i.source_id===id(70));
+    const task=(await read()).items.find(i=>i.source_id===id(71));
     await c.query('set role carr_reader');
-    await assert.rejects(c.query('select ops.read_home_inbox()'),e=>e.code==='42501');
+    await assert.rejects(c.query('select ops.read_home_inbox_v2()'),e=>e.code==='42501');
+    await c.query('reset role');
+    await c.query('set role carr_writer');
+    assert.equal((await read()).ok,true);
     await c.query('reset role');
     const change=async(key,item)=> (await c.query("select ops.change_home_inbox($1,'settle',$2,null) result",
       [key,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])])).rows[0].result;
     await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.equal((await read()).items.length,0);
     assert.equal((await change(id(93),task)).results[0].error,'inbox_item_not_found');
     await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
     assert.equal((await change(id(94),task)).results[0].item.disposition,'settled');
-    await c.query('update next_action set version=version+1 where id=$1',[id(70)]);
+    await c.query('update next_action set version=version+1 where id=$1',[id(71)]);
     assert.equal((await change(id(95),task)).results[0].error,'version_conflict');
   });
   await t.test('generated v2 contract matches the runtime declaration and projected fields',()=>{
@@ -372,6 +375,26 @@ test('Home inbox v2 projects current partner work with context', async t => {
       for(const field of Object.keys(contract.item_fields)) assert.ok(Object.hasOwn(item,field),field);
       assert.ok(contract.sections.includes(item.section));
     }
+  });
+  await t.test('newer duplicate edits and drops retain snooze and stable identity',async()=>{
+    const item=(await read()).items.find(i=>i.source_id===id(71));
+    const result=(await c.query("select ops.change_home_inbox($1,'snooze',$2,'2099-01-01') result",
+      [id(96),JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])])).rows[0].result;
+    assert.equal(result.results[0].ok,true);
+    await c.query("update next_action set updated_at=now(),version=version+1 where id=$1",[id(70)]);
+    let current=(await read()).items.find(i=>i.item_id===item.item_id);
+    assert.equal(current.disposition,'snoozed');
+    await c.query("update next_action set status='dropped',version=version+1 where id=$1",[id(70)]);
+    current=(await read()).items.find(i=>i.item_id===item.item_id);
+    assert.equal(current.disposition,'snoozed');
+  });
+  await t.test('document conversation requests remain partner work and loop numbers never resolve titles',async()=>{
+    await c.query(`insert into ops.notification values
+      ('${id(83)}','${joe.id}','doc_conversation_request','request','action_required','Review document',null,now()),
+      ('${id(84)}','${joe.id}','loop','250','action_required','Review loop',null,now())`);
+    const items=(await read()).items;
+    assert.ok(items.some(i=>i.source_type==='notification' && i.source_id.includes('doc_conversation_request')));
+    assert.equal(items.find(i=>i.source_type==='notification' && i.source_id.includes('250')).context_label,'loop 250');
   });
   await t.test('over-cap returns newest open work without refusing the snapshot',async()=>{
     await c.query(`insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at)
@@ -384,4 +407,95 @@ test('Home inbox v2 projects current partner work with context', async t => {
     assert.equal(result.truncated,true);
     assert.equal(result.schema_version,'home-inbox.v2');
   });
+});
+
+test('v1 snapshots and stored dispositions survive the projection expansion',async t=>{
+  const db=await postgresDatabase('inbox-upgrade-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into next_action(id,owner_id,description,status,version,created_at,updated_at) values
+      ('${id(70)}','${joe.id}','Snoozed task','open',1,now(),now()),
+      ('${id(71)}','${joe.id}','Settled task','open',1,now(),now()),
+      ('${id(72)}','${joe.id}','Done task','done',1,now(),now());`);
+  const read=async()=> (await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  let seq=500;
+  const change=async(command,item)=> (await c.query('select ops.change_home_inbox($1,$2,$3,$4) result',
+    [id(seq++),command,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}]),command==='snooze'?'2099-01-01':null])).rows[0].result;
+  const items=(await read()).items;
+  await change('snooze',items.find(i=>i.source_id===id(70)));
+  await change('settle',items.find(i=>i.source_id===id(71)));
+  const fixture=await read();
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  await t.test('v1 fixture shape and values are byte compatible',async()=>{
+    assert.equal(JSON.stringify(await read()),JSON.stringify(fixture));
+    for (const command of ['unsettle','snooze','settle']) {
+      const result=await change(command,(await read()).items.find(i=>i.source_id===id(72)));
+      assert.equal(result.schema_version,'home-inbox-command.v1');
+      assert.deepEqual(Object.keys(result.results[0].item).sort(),Object.keys(fixture.items[0]).sort());
+      assert.ok(['inbox','working','snoozed','settled'].includes(result.results[0].item.section));
+    }
+  });
+  await t.test('v2 retains dispositions written under migration 1114',async()=>{
+    const current=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    assert.equal(current.items.find(i=>i.source_id===id(70)).disposition,'snoozed');
+    assert.equal(current.items.find(i=>i.source_id===id(71)).disposition,'settled');
+  });
+});
+
+test('projection read at realistic synthetic volume',{skip:!process.env.HOME_INBOX_BENCHMARK},async t=>{
+  const db=await postgresDatabase('inbox-benchmark-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into deal select md5('deal'||n)::uuid,'Synthetic deal '||n from generate_series(1,300)n;
+    insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at)
+      select md5('task'||n)::uuid,'${joe.id}',md5('deal'||(1+n%300))::uuid,'Task '||n,
+        case when n%5=0 then 'done' else 'open' end,1,now()-n*interval '1 minute',now()-n*interval '1 minute'
+      from generate_series(1,20000)n;
+    insert into ops.notification select md5('notification'||n)::uuid,'${joe.id}','deal',
+      md5('deal'||(1+n%300))::uuid::text,'action_required','Synthetic request',null,now()-n*interval '1 second'
+      from generate_series(1,10000)n;
+    analyze next_action; analyze deal; analyze ops.notification;`);
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  const times=[];
+  for(let n=0;n<6;n++){
+    const start=performance.now();
+    const result=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    const elapsed=performance.now()-start;
+    assert.equal(result.ok,true); assert.equal(result.items.length,1000); assert.equal(result.truncated,true);
+    if(n) times.push(elapsed);
+  }
+  const explain=(await c.query('explain (analyze,buffers,verbose) select ops.read_home_inbox_v2()')).rows;
+  const migration=readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8');
+  const sourceSql=migration.match(/as \$\$([\s\S]*?)\$\$;/)[1].replaceAll(/\bp_actor\b/g,()=>'$1');
+  const sources=(await c.query('explain (analyze,buffers,verbose) '+sourceSql,[joe.id])).rows;
+  times.sort((a,b)=>a-b);
+  const report={tasks:20000,deals:300,notifications:10000,successful_reads:6,failures:0,median_ms:times[2],range_ms:[times[0],times[4]],times_ms:times,explain,sources};
+  writeFileSync('/tmp/WR39.S1.J33-benchmark.json',JSON.stringify(report,null,2)+'\n');
+  console.log('Synthetic projection benchmark',JSON.stringify({...report,explain:undefined,sources:undefined}));
+});
+
+test('a legacy snoozed duplicate carries to the oldest row through edits and drops',async t=>{
+  const db=await postgresDatabase('inbox-carry-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into next_action(id,owner_id,description,status,version,created_at,updated_at) values
+      ('${id(73)}','${joe.id}','Duplicate task','open',1,now()-interval '2 days',now()),
+      ('${id(74)}','${joe.id}','Duplicate task','open',1,now(),now())`);
+  const before=(await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  const item=before.items.find(i=>i.source_id===id(74));
+  await c.query("select ops.change_home_inbox($1,'snooze',$2,'2099-01-01')",[id(500),JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])]);
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  for(const status of ['open','dropped']) {
+    await c.query('update next_action set status=$1,version=version+1,updated_at=now() where id=$2',[status,id(74)]);
+    const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    assert.equal(after.items.length,1);
+    assert.equal(after.items[0].source_id,id(73));
+    assert.equal(after.items[0].disposition,'snoozed');
+  }
 });
