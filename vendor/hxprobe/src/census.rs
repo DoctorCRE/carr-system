@@ -43,7 +43,6 @@ pub fn run(path: &OsStr, files: &OsStr, account: u64) -> Result<String, ()> {
         ("unknown_folder_messages", 0), ("folder_uncatalogued", 0), ("folder_unset_or_conflict", 0),
         ("folder_account_mismatch", 0), ("folder_unnamed", 0),
     ]);
-    let mut rows = Vec::new();
     for (&key, m) in &messages {
         if m.account != Some(account) || !m.item_class.as_deref().is_some_and(|v| v.starts_with("IPM.Note")) {
             continue;
@@ -102,7 +101,6 @@ pub fn run(path: &OsStr, files: &OsStr, account: u64) -> Result<String, ()> {
             counts.insert(status, 1);
         }
         for (&name, n) in &counts { *totals.get_mut(name).unwrap() += n; }
-        rows.push(format!("\"{key}\":{{{}}}", json(&counts)));
     }
     totals.insert("blocks_verified", verified);
     totals.insert("message_layout_rejected_all_accounts", objects.rejected(&messages));
@@ -111,5 +109,5 @@ pub fn run(path: &OsStr, files: &OsStr, account: u64) -> Result<String, ()> {
     totals.insert("recipient_orphaned_all_accounts", orphaned_recipients);
     totals.insert("body_unlinked_all_accounts", objects.unlinked_bodies);
     totals.insert("recipient_unlinked_all_accounts", objects.unlinked_recipients);
-    Ok(format!("{{\"totals\":{{{}}},\"messages\":{{{}}}}}", json(&totals), rows.join(",")))
+    Ok(format!("{{\"totals\":{{{}}}}}", json(&totals)))
 }

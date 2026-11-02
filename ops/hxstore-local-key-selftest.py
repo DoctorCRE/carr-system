@@ -170,13 +170,10 @@ class LocalKeyExportTests(unittest.TestCase):
                           recipient(101, 201, TO, 'other@example.test'),
                           message(102, folder=999), bytes(bad_body), bad_recipient,
                           message(103, account=8))
-        rows = got['messages']
-        self.assertEqual(set(rows), {'100', '101', '102'})
-        self.assertEqual((rows['100']['body_objects'], rows['100']['recipient_objects']), (0, 0))
-        self.assertEqual((rows['101']['body_inline'], rows['101']['recipients_conflict'],
-                          rows['101']['recipient_children']), (1, 1, 1))
-        self.assertEqual((rows['102']['body_objects'], rows['102']['body_rejected'],
-                          rows['102']['recipient_rejected'], rows['102']['folder_uncatalogued']), (1, 1, 1, 1))
+        self.assertEqual(set(got), {'totals'})
+        self.assertEqual(got['totals']['body_rejected'], 1)
+        self.assertEqual(got['totals']['recipient_rejected'], 1)
+        self.assertEqual(got['totals']['recipients_conflict'], 1)
         self.assertEqual(got['totals']['messages'], 3)
         self.assertEqual(got['totals']['body_complete'], 1)
         self.assertEqual(got['totals']['body_absent'], 1)
@@ -184,7 +181,24 @@ class LocalKeyExportTests(unittest.TestCase):
         self.assertEqual(got['totals']['recipient_children'], 1)
         self.assertEqual(got['totals']['recipient_objects'], 2)
         self.assertEqual(got['totals']['unknown_folder_messages'], 1)
-        self.assertTrue(all(type(v) is int for row in rows.values() for v in row.values()))
+        self.assertTrue(all(type(v) is int for v in got['totals'].values()))
+
+    def test_large_census_emits_only_totals_below_intake_cap(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            source = out / 'copy.hxd'
+            with source.open('wb') as handle:
+                for start in range(0, 14000, 40):
+                    block = STORE(b''.join(message(1000 + k) for k in range(start, start + 40)))
+                    handle.write(block if start == 0 else block[64:])
+            (out / 'Files').mkdir()
+            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'census', '--immutable-copy',
+                                     str(source), str(out / 'Files'), '7'], capture_output=True, check=True)
+            self.assertEqual(result.stderr, b'')
+            self.assertLess(len(result.stdout), 8 * 1024 * 1024)
+            got = json.loads(result.stdout)
+            self.assertEqual(set(got), {'totals'})
+            self.assertEqual(got['totals']['messages'], 14000)
 
     def test_census_counts_children_whose_owner_was_never_observed(self):
         got = self.census(message(100), body(998, html='PRIVATE-BODY'),
@@ -241,7 +255,7 @@ class LocalKeyExportTests(unittest.TestCase):
                         fail_decode, 7, 'synthetic@example.test'):
                     self.fail('decoder must fail')
             self.assertLess(time.monotonic() - started, 2)
-            self.assertEqual(log.getvalue(), 'coverage_census_failed=1\n')
+            self.assertEqual(log.getvalue(), 'coverage_census_failed=timeout\n')
             self.assertFalse(list(out.glob('work-*')))
             self.assertFalse((out / 'coverage-census.request').exists())
 
