@@ -4,6 +4,10 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+import importlib.util
+import threading
+import time
 
 BIN = Path(__file__).resolve().parents[1] / 'bin'
 sys.path.insert(0, str(BIN))
@@ -110,6 +114,96 @@ class LedgerTests(unittest.TestCase):
     def build(self, **kwargs):
         ledger = cov.build_call_ledger(self.transcript, self.context, self.extract, **kwargs)
         return cov.reconcile_history(ledger, self.transcript, self.history)
+
+    def test_publish_coverage_failure_is_visible(self):
+        pc.process_session(self.session, self.distill, run_checks=False)
+        pc.write_private(self.session / '.capture.json', {'session_token': 'synthetic'})
+        report = pc.read_json(self.session / pc.REPORT_FILE)
+        report['coverage_sha256'] = '0' * 64
+        pc.write_private(self.session / pc.REPORT_FILE, report)
+        spec = importlib.util.spec_from_file_location('coverage_bridge', BIN / 'capture-bridge.py')
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)
+        with patch.object(bridge, 'LOG_PATH', self.session / 'bridge.log'), patch.object(bridge, 'session_request') as remote:
+            self.assertNotEqual(bridge.publish_cmd({}, self.session), 0)
+            remote.assert_not_called()
+        status = pc.read_json(self.session / pc.STATUS_FILE)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertEqual(status['reason'], 'coverage_binding_mismatch')
+        self.assertIsNone(status['next_attempt_at'])
+
+    def test_filed_legacy_report_can_purge(self):
+        pc.process_session(self.session, self.distill, run_checks=False)
+        report = pc.read_json(self.session / pc.REPORT_FILE)
+        report.pop('coverage_sha256')
+        for _, item in cov.proposal_items(report):
+            item['candidate_status'] = 'confirmed'
+        for question in report['review_questions']:
+            question['resolved'] = True
+        pc.write_private(self.session / pc.REPORT_FILE, report)
+        (self.session / cov.FILE).unlink()
+        pc.write_private(self.session / pc.STATUS_FILE, {'state': 'filed'})
+        self.assertIsNotNone(pc.retention_ready(self.session, 'a' * 64))
+        pc.write_private(self.session / pc.STATUS_FILE, {'state': 'ready_review'})
+        self.assertIsNone(pc.retention_ready(self.session, 'a' * 64))
+        self.assertEqual(pc.read_json(self.session / pc.STATUS_FILE)['state'], 'needs_attention')
+
+    def test_oversized_history_is_terminal_without_model_retry(self):
+        self.transcript = {'segments': [{'text': 'x' * 25000}]}
+        pc.write_private(self.session / 'transcript.json', self.transcript)
+        def extract(request):
+            spans = [cov.source_span(self.transcript, r['segment_index'], r['char_start'], r['char_end'])
+                     for r in request['segments']]
+            return {'topics': [self.response['topics'][0]], 'facts': [{
+                'fact_id': 'large', 'topic_id': 'harbor', 'kind': 'status',
+                'statement': 'Long topic', 'asserted_value': None, 'source_spans': spans,
+                'disposition': None}], 'non_fact_spans': []}
+        model = unittest.mock.Mock(side_effect=extract)
+        status = pc.process_session(self.session, model, run_checks=False)
+        self.assertEqual(status['state'], 'needs_attention')
+        self.assertEqual(status['reason'], 'topic_history_too_large')
+        self.assertIsNone(status['next_attempt_at'])
+        count = model.call_count
+        self.assertEqual(pc.process_session(self.session, model, run_checks=False)['state'], 'needs_attention')
+        self.assertEqual(model.call_count, count)
+
+    def test_long_call_latency_stays_inside_parent_budget(self):
+        transcript = {'segments': [{'text': str(i) + 'x' * 2498} for i in range(20)]}
+        context = {**self.context, 'deals': [{'id': str(i), 'participants': []} for i in range(20)]}
+        active = 0
+        peak = 0
+        lock = threading.Lock()
+        # One real second represents 300 model seconds. Each call takes 90 model seconds.
+        def model(request):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                time.sleep(0.3)
+                if request.get('stage') == 'coverage_history':
+                    return {'dispositions': [{'fact_id': f['fact_id'], 'disposition': None} for f in request['facts']]}
+                facts, topics = [], []
+                for row in request['segments']:
+                    i = row['segment_index']
+                    topics.append({'topic_id': str(i), 'identity': {'deal_id': str(i), 'participant_ids': []}})
+                    facts.append({'fact_id': str(i), 'topic_id': str(i), 'kind': 'status',
+                        'statement': 'Synthetic update', 'asserted_value': None, 'disposition': None,
+                        'source_spans': [cov.source_span(transcript, i, row['char_start'], row['char_end'])]})
+                return {'topics': topics, 'facts': facts, 'non_fact_spans': []}
+            finally:
+                with lock:
+                    active -= 1
+        start = time.monotonic()
+        ledger = cov.build_call_ledger(transcript, context, model)
+        ledger = cov.reconcile_history(ledger, transcript, model)
+        model({'stage': 'coverage_history', 'facts': []})
+        elapsed = (time.monotonic() - start) * 300
+        self.assertLess(elapsed, 1800)
+        self.assertGreater(peak, 1)
+        self.assertLessEqual(peak, 8)
+        self.assertEqual(len(ledger['facts']), 20)
+        self.assertEqual(len(ledger['history_receipts']), 20)
 
     def test_scored_recall_dispositions_and_no_false_proposals(self):
         status = pc.process_session(self.session, self.distill, run_checks=False)

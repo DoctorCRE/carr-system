@@ -56,6 +56,7 @@ _OFFLINE_CLIENT = Mock()
 _OFFLINE_CLIENT.system_one.side_effect = TypeSafeError("live SDK refused inside the offline suite")
 _OFFLINE_CLIENT.__enter__ = Mock(return_value=_OFFLINE_CLIENT)
 _OFFLINE_CLIENT.__exit__ = Mock(return_value=False)
+_REAL_COVERAGE = post_call.coverage
 _COVERAGE_ADAPTER = SimpleNamespace(
     FILE=post_call.coverage.FILE,
     digest=post_call.coverage.digest,
@@ -2685,6 +2686,11 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         )
         self.cfg = {"base_url": "https://worker.test", "device_id": "joe", "token": "device"}
 
+    def seed_coverage(self):
+        pass
+
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
     def test_release_requires_edit_then_publishes(self) -> None:
         words = "amber birch cedar dawn elm fern grove hazel iris jade kelp leaf moss oak pine"
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
@@ -2692,6 +2698,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
         post_call.write_private(self.session / "transcript.json", {"segments": [{"text": words}]})
         post_call.hold_transcript_repeat(self.session, report)
+        self.seed_coverage()
         output = io.StringIO()
         with (patch.object(call_mode, "RECORDINGS", self.session.parent),
               patch.object(sys, "argv", ["call-mode", "release", self.session.name]),
@@ -2706,6 +2713,8 @@ class CaptureBridgePostCallTests(unittest.TestCase):
             publish.assert_called_once_with(self.session.resolve())
             self.assertEqual(post_call.read_json(self.session / post_call.STATUS_FILE)["state"], "ready_review")
 
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
     def test_corrected_report_budget_hold_recovers_under_polling(self) -> None:
         for recovery in ("next_day", "budget_restored", "manual_release"):
             with self.subTest(recovery=recovery):
@@ -2719,6 +2728,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
                 post_call.write_private(self.session / post_call.REPORT_FILE, report)
                 post_call.write_private(self.session / post_call.STATUS_FILE,
                                         {"state": "held_review", "reason": "summary_repeats_transcript", "sync_attempts": 3})
+                self.seed_coverage()
                 ledger = self.session.parent / ".jev-budget.json"
                 post_call.write_private(ledger, {"2026-08-10": 490000})
                 client = PostCallJevChecksTests.fake_client()
@@ -2755,12 +2765,15 @@ class CaptureBridgePostCallTests(unittest.TestCase):
                 self.assertEqual(spending, 8259)
                 self.assertLess(spending, 500000)
 
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    @patch.object(call_mode.post_call, "coverage", _REAL_COVERAGE)
     def test_release_keeps_edited_report_when_poll_interleaves(self) -> None:
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         report["report"]["summary"] = "Partner edit"
         post_call.write_private(self.session / post_call.REPORT_FILE, report)
         post_call.write_private(self.session / "transcript.json", {"segments": [{"text": "Original call"}]})
         post_call.write_private(self.session / post_call.STATUS_FILE, {"state": "held_review", "reason": "summary_repeats_transcript"})
+        self.seed_coverage()
         write = post_call.write_private
         polled = []
 
