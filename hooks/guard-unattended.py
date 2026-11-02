@@ -2479,6 +2479,13 @@ def zsh_glob_reason(cmd, invocations, depth=0):
     """
     if depth >= 4:
         raise ValueError('shell glob inspection nesting exceeds limit')
+    modifiers = {'noglob', 'nocorrect', '-'}
+    for program, arguments in invocations[:]:
+        if program in modifiers:
+            words = list(arguments)
+            while words and words[0] in modifiers:
+                words.pop(0)
+            invocations = invocations + command_invocations(words)
     text = strip_inert_text(cmd).replace('\\\n', '')
     quote, word, groups, hashes, i = None, False, False, False, 0
     expansion_lead = False
