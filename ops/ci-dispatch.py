@@ -42,7 +42,7 @@ def dispatch(workflow, ref, dry_run, *, ledger, policy, api=github):
         raise MeteringRefusal(f'{prerequisite} must have succeeded for exact main commit {sha}')
     # Hosted CI executes the local check classes against this exact candidate.
     admission = authorize_metered_execution(policy, 'github-actions-remote-ci', {
-        'candidate_sha': sha, 'local_checks_green': True,
+        'candidate_sha': sha, 'local_checks_green': True, 'evidence_url': evidence['html_url'],
     })
     existing = api(f'{base}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=100')['workflow_runs']
     if any(run['head_sha'] == sha and run.get('conclusion') not in {'failure', 'cancelled', 'skipped', 'timed_out', 'action_required', 'stale'}
@@ -59,7 +59,7 @@ def dispatch(workflow, ref, dry_run, *, ledger, policy, api=github):
         spent = sum(row['reserved_remote_runs'] for line in handle
                     if (row := json.loads(line))['key'] == key and row['status'] == 'reserved')
         if spent >= cap:
-            raise MeteringRefusal(f'remote-CI budget exhausted for {workflow} at {sha}; inspect the existing run')
+            raise MeteringRefusal(f'remote-CI budget exhausted for {workflow} at {sha}; diagnose the failure or use a new commit before retrying')
         if dry_run:
             return {**receipt, 'status': 'dry_run', 'remaining_remote_runs': cap - spent}
 
@@ -76,14 +76,20 @@ def dispatch(workflow, ref, dry_run, *, ledger, policy, api=github):
             response = api(f'{base}/actions/workflows/{workflow}/dispatches',
                            '--method', 'POST', '-H', 'X-GitHub-Api-Version: 2026-03-10',
                            '-f', 'ref=main')
-            url = response['html_url']
-            if not url.startswith(f'https://github.com/{REPOSITORY}/actions/runs/'):
+            url = response.get('html_url') if isinstance(response, dict) else None
+            if not isinstance(url, str) or not url.startswith(f'https://github.com/{REPOSITORY}/actions/runs/'):
                 raise ValueError('dispatch response did not contain a repository run URL')
             record('dispatched', run_url=url)
             return {**receipt, 'status': 'dispatched', 'run_url': url}
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError, MeteringRefusal):
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError, MeteringRefusal) as exc:
             record('dispatch_unconfirmed')
-            raise
+            raise DispatchUnconfirmed(
+                f'dispatch outcome unknown; check {workflow} runs for {sha}; reservation retained: {exc}'
+            ) from exc
+
+
+class DispatchUnconfirmed(Exception):
+    pass
 
 
 def main():
@@ -97,6 +103,9 @@ def main():
     ledger = Path.home() / '.local/state/carr/ci-dispatch.jsonl'
     try:
         receipt = dispatch(args.workflow, args.ref, args.dry_run, ledger=ledger, policy=policy)
+    except DispatchUnconfirmed as exc:
+        print(str(exc), file=sys.stderr)
+        return 77
     except (MeteringRefusal, OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         print(f'workflow recovery refused: {exc}', file=sys.stderr)
         return 77

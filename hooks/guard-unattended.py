@@ -1834,6 +1834,30 @@ def executed_invocations(cmd):
         yield from executed_invocations(match[1] or match[2])
 
 
+def _raw_github_api_dispatch(arguments):
+    if not arguments or arguments[0] != 'api':
+        return False
+    method, has_body, endpoint = None, False, False
+    words = iter(arguments[1:])
+    for word in words:
+        if word in {'-X', '--method'}:
+            method = next(words, '').upper()
+        elif word.startswith('--method='):
+            method = word.split('=', 1)[1].upper()
+        elif word.startswith('-X'):
+            method = word[2:].upper()
+        elif word in _GH_API_BODY_FLAGS:
+            has_body = True
+            next(words, None)
+        elif any(word.startswith(flag + '=') for flag in _GH_API_BODY_FLAGS[2:]) or word.startswith(('-f', '-F')):
+            has_body = True
+        elif word in {'-H', '--header', '--hostname', '-p', '--preview', '-q', '--jq', '-t', '--template', '--cache'}:
+            next(words, None)
+        elif re.fullmatch(r'(?:https?://[^/]+/)?/?repos/[^/]+/[^/]+/(?:actions/workflows/[^/]+/)?dispatches/?(?:\?[^\s]*)?', word):
+            endpoint = True
+    return endpoint and (method == 'POST' if method is not None else has_body)
+
+
 def direct_metered_dispatch(cmd):
     """Refuse paid dispatches that bypass their reviewed budget wrapper.
 
@@ -1855,6 +1879,8 @@ def direct_metered_dispatch(cmd):
     # Match executable positions. Arguments to printf, grep, and a brief writer
     # are data even when they contain an entire CLI command.
     for program, arguments in executed_invocations(cmd):
+        if program == 'gh' and _raw_github_api_dispatch(arguments):
+            return 'direct GitHub API dispatch bypasses the remote-CI budget gate'
         command = ' '.join([program, *arguments])
         for pattern, reason in patterns:
             if pattern.match(command):
