@@ -1163,6 +1163,44 @@ def is_filed_legacy_report(session_dir: Path, report: dict[str, Any]) -> bool:
             and "coverage_sha256" not in report)
 
 
+def filing_sha256(session_dir: Path, report: dict[str, Any]) -> str:
+    return (report.get("backend_report_sha256") or report.get("filing_report_sha256")
+            or report_sha256(session_dir))
+
+
+def verify_prior_filing(session_dir: Path, response: dict[str, Any]) -> None:
+    with update_report(session_dir) as report:
+        remote = response.get("post_call_report") or {}
+        if remote.get("filed") is not True or remote.get("sha256") != filing_sha256(session_dir, report):
+            raise ContractError("prior filing hash mismatch")
+        verify_filing_dispositions(report, response)
+        report["filing_report_sha256"] = remote["sha256"]
+
+
+def verify_filing_dispositions(report: dict[str, Any], response: dict[str, Any]) -> None:
+    items = _report_candidates(report)
+    known = {item.get("candidate_id"): item for item in items}
+    rows = response.get("candidate_statuses")
+    if (None in known or "" in known or len(known) != len(items) or not isinstance(rows, list)
+            or len(rows) != len(known) or (response.get("candidates") or {}).get("pending") != 0):
+        raise ContractError("filing candidate identities incomplete")
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ContractError("filing disposition malformed")
+        candidate_id, status = row.get("id"), row.get("status")
+        if (candidate_id not in known or candidate_id in seen
+                or status not in {"confirmed", "skipped", "rejected"}):
+            raise ContractError("filing candidate disposition refused")
+        local = known[candidate_id].get("candidate_status")
+        if local in {"confirmed", "skipped", "rejected"} and local != status:
+            raise ContractError("filing candidate disposition conflict")
+        seen.add(candidate_id)
+    remote = response.get("post_call_report") or {}
+    if "candidate_count" in remote and remote["candidate_count"] != len(known):
+        raise ContractError("filing candidate count mismatch")
+
+
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     with session_lock(session_dir):
@@ -1171,7 +1209,13 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
                 return None
-            if not is_filed_legacy_report(session_dir, report):
+            saved_hash = report.get("backend_report_sha256") or report.get("filing_report_sha256")
+            if saved_hash is not None and saved_hash != report_sha256:
+                return None
+            if is_filed_legacy_report(session_dir, report):
+                if filing_sha256(session_dir, report) != report_sha256:
+                    return None
+            else:
                 try:
                     require_review_coverage(session_dir, report)
                 except coverage.CoverageError:
@@ -1181,7 +1225,7 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
             items = _report_candidates(report)
             if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
                 return None
-            digest = hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            digest = report.get("aggregate_report_hash") or report_sha256
             report.update({"backend_report_sha256": report_sha256, "aggregate_report_hash": digest, "filed_at": now()})
         status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
         status.update({"state": "filed", "updated_at": now(), "pending_items": 0, "aggregate_report_hash": digest})

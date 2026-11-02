@@ -144,6 +144,7 @@ class CaptureOutcomesTests(unittest.TestCase):
         self.assertIn("error=device_actor_not_provisioned", bridge.LOG_PATH.read_text())
 
     def test_rejections_log_only_valid_public_codes(self) -> None:
+        bridge.post_call.write_private(self.session / bridge.post_call.REPORT_FILE, {})
         calls = (
             lambda: bridge.status_cmd(self.cfg, self.session, "recording", None),
             lambda: bridge.post_batch(self.cfg, self.session, "/capture/items", [{}], [], "fixture"),

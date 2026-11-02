@@ -548,7 +548,7 @@ def sync_candidate_statuses(session_dir: Path, response: dict[str, Any]) -> None
             continue
         candidate_id = row.get("id")
         status = row.get("status")
-        if isinstance(candidate_id, str) and status in {"confirmed", "skipped"}:
+        if isinstance(candidate_id, str) and status in {"confirmed", "skipped", "rejected"}:
             statuses[candidate_id] = status
     if not statuses:
         return
@@ -561,7 +561,9 @@ def sync_candidate_statuses(session_dir: Path, response: dict[str, Any]) -> None
 def file_post_call_report(
     cfg: dict[str, str], session_dir: Path, token: str, candidate_count: int,
 ) -> tuple[bool, str]:
-    digest = post_call.report_sha256(session_dir)
+    with post_call.update_report(session_dir) as local_report:
+        digest = post_call.filing_sha256(session_dir, local_report)
+        local_report["filing_report_sha256"] = digest
     body = {
         "session_token": token,
         "idempotency_key": f"post-call-report:{session_dir.name}:{digest}",
@@ -731,10 +733,29 @@ def _poll_cmd(cfg: dict[str, str], session_dir: Path) -> int:
         if not (session_dir / post_call.REPORT_FILE).exists():
             log_line(f"POLL session={name} post_call local report unavailable — holding recordings")
             return verified(session_dir, "poll")
+        local_report = post_call.read_json(session_dir / post_call.REPORT_FILE)
+        remote_report = resp.get("post_call_report") or {}
+        prior_filed = local_report is not None and (
+            post_call.is_filed_legacy_report(session_dir, local_report)
+            or bool(local_report.get("backend_report_sha256")))
+        try:
+            if prior_filed or remote_report.get("filed") is True:
+                post_call.verify_prior_filing(session_dir, resp)
+        except post_call.ContractError as exc:
+            local_status = read_json(session_dir / post_call.STATUS_FILE) or {}
+            local_status.update(state="needs_attention", reason=str(exc), updated_at=iso_now_utc())
+            write_json_atomic(session_dir / post_call.STATUS_FILE, local_status, mode=0o600)
+            log_line(f"POLL session={name} {exc} — holding recordings")
+            return verified(session_dir, "poll")
         sync_candidate_statuses(session_dir, resp)
         local_report = post_call.read_json(session_dir / post_call.REPORT_FILE)
         if local_report is None or not post_call.review_complete(local_report):
             log_line(f"POLL session={name} unresolved review questions — holding recordings")
+            return verified(session_dir, "poll")
+        try:
+            post_call.verify_filing_dispositions(local_report, resp)
+        except post_call.ContractError as exc:
+            log_line(f"POLL session={name} {exc} — holding recordings")
             return verified(session_dir, "poll")
         raw_candidates = resp.get("candidates")
         post_call_candidates: dict[str, Any] = raw_candidates if isinstance(raw_candidates, dict) else {}
