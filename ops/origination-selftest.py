@@ -28,6 +28,8 @@ def florida_fixture(**changes):
         'registered_agent_name': (545, 42, 'SYNTHETIC_AGENT_NAME'),
         'registered_agent_type': (587, 1, 'P'),
         'registered_agent_address': (588, 42, 'SYNTHETIC_AGENT_LOCATION'),
+        'registered_agent_state': (658, 2, 'FL'),
+        'registered_agent_postal_code': (660, 9, '325011234'),
     }
     raw = [' '] * 1440
     for key, (start, width, default) in fields.items():
@@ -188,6 +190,24 @@ class OriginationTests(unittest.TestCase):
                                    published_on=date(2026, 10, 21), line_number=1)[0]
                 self.assertEqual(row['facts']['registered_agent_address'], 'SYNTHETIC_AGENT_LOCATION')
 
+    def test_florida_registered_agent_state_and_zip_slots(self):
+        from tools.import_practice_origination import florida_rows
+        for state in ['FL', 'NY', '']:
+            for postal in ['325011234', '32501', '']:
+                with self.subTest(state=state, postal=postal):
+                    row = florida_rows(florida_fixture(registered_agent_state=state,
+                                                       registered_agent_postal_code=postal),
+                                       published_on=date(2026, 10, 21), line_number=1)[0]
+                    self.assertEqual(row['facts']['registered_agent_address'], 'SYNTHETIC_AGENT_LOCATION')
+        for state in ['fl', 'F1', 'F', ' F']:
+            with self.subTest(state=state), self.assertRaisesRegex(ValueError, 'line 2.*Registered Agent State'):
+                florida_rows(florida_fixture(name='Synthetic Retail LLC', registered_agent_state=state),
+                             published_on=date(2026, 10, 21), line_number=2)
+        for postal in ['3250', '325011', '32501ABCD', ' 32501', '32501 123']:
+            with self.subTest(postal=postal), self.assertRaisesRegex(ValueError, 'line 2.*Registered Agent ZIP'):
+                florida_rows(florida_fixture(name='Synthetic Retail LLC', registered_agent_postal_code=postal),
+                             published_on=date(2026, 10, 21), line_number=2)
+
     def test_florida_unreadable_rows_still_fail_even_out_of_scope(self):
         from tools.import_practice_origination import florida_rows
         line = florida_fixture(name='Synthetic Retail LLC', city='', state='', postal_code='')
@@ -259,7 +279,16 @@ class OriginationTests(unittest.TestCase):
         same_width_shift = line[:304] + ' ' + line[304:399] + line[400:]
         full_agent_name = florida_fixture(registered_agent_name='S' * 42)
         late_shift = full_agent_name[:500] + ' ' + full_agent_name[500:-1]
-        cases = [([line] * 150 + [late_shift], 'line 151.*Registered Agent Type'),
+        short_name_shift = line[:500] + ' ' + line[500:-1]
+        minus_shift = line[:500] + line[501:] + ' '
+        cases = [([line] * 150 + [short_name_shift], 'line 151.*Registered Agent State'),
+                 ([skipped] * 150 + [short_name_shift], 'line 151.*Registered Agent State'),
+                 ([line] * 150 + [minus_shift], 'line 151.*Registered Agent State'),
+                 ([line] * 150 + [florida_fixture(registered_agent_state='F1')],
+                  'line 151.*Registered Agent State'),
+                 ([skipped] * 150 + [florida_fixture(registered_agent_postal_code='32501ABCD')],
+                  'line 151.*Registered Agent ZIP'),
+                 ([line] * 150 + [late_shift], 'line 151.*Registered Agent Type'),
                  ([skipped] * 150 + [florida_fixture(registered_agent_type='X')],
                   'line 151.*Registered Agent Type'),
                  ([line] * 150 + [line[:336]], 'line 151.*width'),
