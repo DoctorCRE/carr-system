@@ -64,8 +64,12 @@ from refused_content import REFUSAL, remember_refusal, was_refused  # noqa: E402
 
 
 def without_shell_comments(command):
-    return re.sub(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|(?<!\S)#[^\n]*",
-                  lambda match: '' if match[0].startswith('#') else match[0], command)
+    quoted_or_escaped = r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|`(?:\\[\s\S]|[^`\\])*`|\\[\s\S]"
+    command = re.sub(quoted_or_escaped,
+                     lambda match: match[0] if match[0].startswith("'") else match[0].replace('\\\n', ''),
+                     command)
+    return re.sub(quoted_or_escaped + r"|(?P<prefix>^|[ \t\n;&|()])#[^\n]*",
+                  lambda match: match['prefix'] if match['prefix'] is not None else match[0], command)
 
 
 def shell_tokens(command):
@@ -1857,10 +1861,16 @@ def shell_expansions(text):
         if quote == "'":
             if char == quote:
                 quote = None
+        elif char == '$' and i + 1 < len(text) and text[i + 1] in {"'", '"'}:
+            raise ValueError('dollar-quoted shell words are unsupported')
+        elif stack and quote is None and (char == '#' or re.match(r'case\b', text[i:])):
+            raise ValueError('comments and case patterns in command substitutions are unsupported')
         elif char == '`':
             end = re.match(r'`(?:\\[\s\S]|[^`\\])*`', text[i:])
             if end is None:
                 raise ValueError('unterminated command substitution')
+            if '#' in end[0] or re.search(r'\bcase\b', end[0]):
+                raise ValueError('comments and case patterns in backticks are unsupported')
             if not stack:
                 yield end[0][1:-1]
             i += len(end[0])
@@ -1904,11 +1914,11 @@ def _git_command_words(arguments):
     """Remove Git global options before classifying the subcommand."""
     words = list(arguments)
     while words:
-        if words[0] in {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'}:
+        if words[0] in {'-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix', '--attr-source'}:
             if len(words) < 2:
                 raise ValueError('missing git option value')
             words = words[2:]
-        elif words[0].startswith(('--git-dir=', '--work-tree=', '--namespace=', '--config-env=')) or words[0] in {'--no-pager', '--paginate', '--bare', '--no-optional-locks'}:
+        elif words[0].startswith('-'):
             words = words[1:]
         else:
             break
