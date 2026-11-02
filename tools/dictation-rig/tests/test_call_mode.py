@@ -271,7 +271,7 @@ class CallModeTests(unittest.TestCase):
         self.assertEqual(post_call.read_json(held / post_call.STATUS_FILE)["state"], "held_review")
 
     def test_all_written_folder_states_have_known_status_text(self) -> None:
-        states = set()
+        states: set[str] = set()
         for filename in ("post_call.py", "capture-bridge.py", "transcribe_session.py"):
             tree = ast.parse((BIN_DIR / filename).read_text())
             for function in tree.body:
