@@ -1238,29 +1238,36 @@ for name, command, *expected in REVIEW_FIXTURE['reviewer_probes']:
         case(name, bash(command, '/tmp'), ALLOW if expectation == 'ALLOW' else DENY)
 
 
-def monotonicity_cases():
+def monotonicity_cases(head_results):
     fixture = REVIEW_FIXTURE
-    frozen = [sys.executable, '-c',
-              "import json,sys; __file__=sys.argv[1]; sys.path.insert(0,sys.argv[2]); "
-              "__name__='frozen_guard'; exec(compile(open(__file__).read(),__file__,'exec')); "
-              "exec(compile(json.load(open(sys.argv[3]))['guard_source'],__file__,'exec')); main()",
-              GUARD, os.path.join(REPO, 'hooks'), os.path.join(REPO, 'ops/fixtures/guard-main.json')]
     probes = [(name, payload) for name, payload, _ in CASES]
     probes += [(name, bash(command, '/tmp')) for name, command, *_ in fixture['reviewer_probes']]
     failures = []
     blocked = 0
-    for name, payload in probes:
-        head_payload = payload
-        payload = dict(payload)
-        env = {**ENV, **payload.pop('__env', {})}
-        baseline = subprocess.run(frozen, input=json.dumps(payload), capture_output=True,
-                                  text=True, timeout=20, env=env)
-        if baseline.returncode not in (ALLOW, DENY):
-            failures.append(name + ': frozen guard failed ' + baseline.stderr[:100])
-        elif baseline.returncode == DENY:
-            blocked += 1
-            if run(head_payload)[0] != DENY:
-                failures.append(name + ': head allows, main blocks')
+    original_env = dict(os.environ)
+    try:
+        os.environ.clear()
+        os.environ.update(ENV)
+        namespace = {'__file__': GUARD, '__name__': 'frozen_guard'}
+        exec(compile(pathlib.Path(GUARD).read_text(), GUARD, 'exec'), namespace)
+        exec(compile(fixture['guard_source'], GUARD, 'exec'), namespace)
+        for name, head_payload in probes:
+            payload = dict(head_payload)
+            os.environ.clear()
+            os.environ.update({**ENV, **payload.pop('__env', {})})
+            baseline = namespace['decide'](payload)
+            if baseline.code not in (ALLOW, DENY):
+                failures.append(name + ': frozen guard failed ' + baseline.stderr[:100])
+            elif baseline.code == DENY:
+                blocked += 1
+                key = json.dumps(head_payload, sort_keys=True)
+                if key not in head_results:
+                    head_results[key] = run(head_payload)
+                if head_results[key][0] != DENY:
+                    failures.append(name + ': head allows, main blocks')
+    finally:
+        os.environ.clear()
+        os.environ.update(original_env)
     for failure in failures:
         print('FAIL monotonicity: ' + failure)
     print(f'monotonicity: {len(probes)} probes, {blocked} frozen-main denials, {len(failures)} regressions')
@@ -1599,10 +1606,14 @@ def decision_error_cases():
 def main():
     verbose = "-v" in sys.argv[1:]
     source_fails = source_restore_cases()
-    source_fails += monotonicity_cases() + decision_error_cases()
+    head_results = {}
+    source_fails += monotonicity_cases(head_results) + decision_error_cases()
     fails = []
     for name, payload, expect in CASES:
-        rc, err = run(payload)
+        key = json.dumps(payload, sort_keys=True)
+        if key not in head_results:
+            head_results[key] = run(payload)
+        rc, err = head_results[key]
         got = DENY if rc == 2 else ALLOW if rc == 0 else rc
         ok = got == expect
         if verbose or not ok:
