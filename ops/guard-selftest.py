@@ -1579,6 +1579,25 @@ case("unsupported dollar quoting $'g\\x69t' push origin main", bash("$'g\\x69t' 
 case("unsupported dollar quoting $'rm' -rf /important", bash("$'rm' -rf /important"), DENY)
 case('unsupported dollar quoting $"git" push --force origin x', bash('$"git" push --force origin x'), DENY)
 
+# J128/J129 dynamic API endpoints remain readable but cannot dispatch writes.
+for command in (
+    'gh api "repos/DoctorCRE/carr-system/pulls/$PR"',
+    'gh api repos/$REPO/pulls',
+    'gh api "repos/a/b/commits/$SHA/check-runs" --jq ".check_runs[].name"',
+    'sha=$(git rev-parse HEAD) && gh api "repos/a/b/commits/$sha/status"',
+    'gh api --paginate "repos/a/b/pulls/$N/comments"',
+    'gh api "$EP" -X GET',
+    'gh api "$EP" --method HEAD',
+):
+    case('J129 read ' + command, bash(command), ALLOW)
+for option in ('-f ref=main', '-F ref=main', '--input body.json',
+               '-X POST', '-X PATCH', '-X PUT', '-X DELETE', '-X "$M"',
+               '--method POST', '--method PATCH', '--method PUT',
+               '--method DELETE', '--method "$M"', '--method=POST'):
+    for endpoint in ('"$EP"', '--paginate "$EP"'):
+        command = 'gh api ' + endpoint + ' ' + option
+        case('J129 write ' + command, bash(command), DENY)
+
 def decision_error_cases():
     failures = []
     script = (
