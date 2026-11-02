@@ -123,7 +123,9 @@ class OriginationTests(unittest.TestCase):
     def test_florida_zero_matches_imports_empty_and_counted(self):
         from tools.import_practice_origination import import_file
         for lines in [[], [florida_fixture(name='Synthetic Retail LLC')],
-                      [florida_fixture(state='NY', postal_code='10001')] * 3]:
+                      [florida_fixture(state='NY', postal_code='10001')] * 3,
+                      [florida_fixture(filing_type='TRUST', address='', address_2='', city='',
+                                       state='', postal_code='', country='')]]:
             batches = []
 
             def call(verb, args):
@@ -165,10 +167,12 @@ class OriginationTests(unittest.TestCase):
                 self.assertEqual(florida_rows(florida_fixture(status=status, filing_type=filing_type,
                                                               state='NY', postal_code='10001'),
                                              published_on=date(2026, 10, 21), line_number=1), [])
+        self.assertEqual(len(florida_rows(florida_fixture(country=''),
+                                         published_on=date(2026, 10, 21), line_number=1)), 1)
         for changes, error in [({'status': ''}, 'Status'), ({'status': 'X'}, 'Status'),
                                ({'filing_type': ''}, 'Filing Type'),
                                ({'filing_type': 'flal'}, 'Filing Type'),
-                               ({'country': ''}, 'Country'), ({'country': 'U1'}, 'Country'),
+                               ({'country': 'U1'}, 'Country'),
                                ({'country': 'us'}, 'Country')]:
             with self.subTest(changes=changes), self.assertRaisesRegex(ValueError, 'line 2.*' + error):
                 florida_rows(florida_fixture(name='Synthetic Retail LLC', **changes),
