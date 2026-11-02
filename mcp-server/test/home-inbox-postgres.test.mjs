@@ -329,7 +329,7 @@ test('Home inbox v2 projects current partner work with context', async t => {
   });
   await t.test('notifications admit exactly the partner-facing subject allowlist',async()=>{
     const allowed=['deal','loop','call','email','doc_conversation_request'];
-    const subjects=[...allowed,'next_action','capture_session','email_proposal','unknown'];
+    const subjects=[...allowed,'engineering','release','next_action','capture_session','email_proposal','unknown'];
     const notificationIds=subjects.map((_,n)=>id(800+n));
     for (const [n,subject] of subjects.entries()) {
       await c.query(`insert into ops.notification values($1,$2,$3,$4,'action_required','Allowlist request',null,now())`,
@@ -485,7 +485,7 @@ test('projection read at realistic synthetic volume',{skip:!process.env.HOME_INB
   console.log('Synthetic projection benchmark',JSON.stringify({...report,explain:undefined,sources:undefined}));
 });
 
-test('a legacy snoozed duplicate carries to the oldest row through edits and drops',async t=>{
+test('legacy duplicate dispositions survive in v1 and carry to stable v2 cards',async t=>{
   const db=await postgresDatabase('inbox-carry-'); const c=db.client; t.after(()=>db.close());
   await initialize(c);
   await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
@@ -493,16 +493,33 @@ test('a legacy snoozed duplicate carries to the oldest row through edits and dro
     create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
     insert into next_action(id,owner_id,description,status,version,created_at,updated_at) values
       ('${id(73)}','${joe.id}','Duplicate task','open',1,now()-interval '2 days',now()),
-      ('${id(74)}','${joe.id}','Duplicate task','open',1,now(),now())`);
-  const before=(await c.query('select ops.read_home_inbox() result')).rows[0].result;
-  const item=before.items.find(i=>i.source_id===id(74));
-  await c.query("select ops.change_home_inbox($1,'snooze',$2,'2099-01-01')",[id(500),JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])]);
-  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
-  for(const status of ['open','dropped']) {
-    await c.query('update next_action set status=$1,version=version+1,updated_at=now() where id=$2',[status,id(74)]);
-    const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
-    assert.equal(after.items.length,1);
-    assert.equal(after.items[0].source_id,id(73));
-    assert.equal(after.items[0].disposition,'snoozed');
+      ('${id(74)}','${joe.id}','Duplicate task','open',1,now(),now()),
+      ('${id(75)}','${joe.id}','Settled duplicate','open',1,now()-interval '2 days',now()),
+      ('${id(76)}','${joe.id}','Settled duplicate','open',1,now(),now())`);
+  const readV1=async()=> (await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  const before=await readV1();
+  for(const [n,command] of [[74,'snooze'],[76,'settle']]) {
+    const item=before.items.find(i=>i.source_id===id(n));
+    const result=(await c.query('select ops.change_home_inbox($1,$2,$3,$4) result',
+      [id(500+n),command,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}]),command==='snooze'?'2099-01-01':null])).rows[0].result;
+    assert.equal(result.results[0].ok,true);
   }
+  const fixture=await readV1();
+  const stored=(await c.query('select * from ops.home_inbox_disposition order by actor_id,item_id')).rows;
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  assert.deepEqual(await readV1(),fixture,'both v1 duplicate pairs keep their original dispositions and versions');
+  assert.deepEqual((await c.query('select * from ops.home_inbox_disposition order by actor_id,item_id')).rows,stored);
+  for(const status of ['open','dropped']) {
+    await c.query('update next_action set status=$1,version=version+1,updated_at=now() where id=any($2::uuid[])',[status,[id(74),id(76)]]);
+    const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    assert.equal(after.items.length,2);
+    assert.equal(after.items.find(i=>i.source_id===id(73)).disposition,'snoozed');
+    assert.equal(after.items.find(i=>i.source_id===id(75)).disposition,'settled');
+  }
+  const representative=(await readV1()).items.find(i=>i.source_id===id(73));
+  const changed=(await c.query("select ops.change_home_inbox($1,'settle',$2,null) result",
+    [id(600),JSON.stringify([{item_id:representative.item_id,base_version:representative.base_version}])])).rows[0].result;
+  assert.equal(changed.results[0].ok,true);
+  const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+  assert.equal(after.items.find(i=>i.source_id===id(73)).disposition,'settled','a representative command overrides inherited disposition');
 });
