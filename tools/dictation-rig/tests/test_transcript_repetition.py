@@ -79,5 +79,44 @@ def test_empty_recovery_requires_attention(tmp_path, monkeypatch):
         run_decoder(tmp_path, monkeypatch, looping, [])
 
 
+def test_unrecovered_loop_stops_before_summary(tmp_path, monkeypatch):
+    track = tmp_path / 'synthetic.caf'
+    track.write_bytes(b'synthetic')
+    model = tmp_path / 'model.bin'
+    model.write_bytes(b'synthetic')
+    monkeypatch.setattr(transcription, 'read_meta', lambda _: {
+        'files': {'mic': track.name, 'system': track.name}, 'start_offset_ms': {}})
+    monkeypatch.setattr(transcription, 'read_consent', lambda _: {})
+    monkeypatch.setattr(transcription, 'read_speaker_labels', lambda _: {'mic': 'A', 'system': 'B'})
+    monkeypatch.setattr(transcription, 'resolve_model', lambda _: model)
+    monkeypatch.setattr(transcription, 'verify_model_pin', lambda *_: None)
+    monkeypatch.setattr(transcription, 'load_prompt', lambda: '')
+    monkeypatch.setattr(transcription, 'convert_caf_to_wav', lambda *_: track)
+
+    def fail(*_):
+        raise transcription.RepetitionError('Unresolved transcription repetition')
+
+    monkeypatch.setattr(transcription, 'run_whisper', fail)
+    summaries = []
+    monkeypatch.setattr(transcription.post_call, 'run_session', summaries.append)
+    with pytest.raises(transcription.TranscribeError, match='repetition'):
+        transcription.process_session(tmp_path, lambda _: None)
+    assert summaries == []
+    assert not (tmp_path / 'transcript.json').exists()
+
+
+def test_repetition_matching_ignores_case_and_punctuation():
+    rows = [segment(i * 1000, (i + 1) * 1000, text)
+            for i, text in enumerate(['Synthetic repeated phrase!', 'SYNTHETIC repeated phrase.'] * 15)]
+    assert transcription.repetition_spans(rows) == [(0, 30)]
+
+
+def test_recovery_cannot_return_loop_spread_across_chunks(tmp_path, monkeypatch):
+    looping = [segment(0, 90000, ' '.join(['Synthetic repeated phrase.'] * 150))]
+    repeated = [segment(0, 1000, ' '.join(['Another synthetic phrase.'] * 3))]
+    with pytest.raises(transcription.TranscribeError, match='repetition'):
+        run_decoder(tmp_path, monkeypatch, looping, repeated)
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))
