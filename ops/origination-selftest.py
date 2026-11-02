@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Verify public-source origination adapters using synthetic records only."""
 import csv
+import contextlib
+import io
+import json
+from unittest.mock import patch
 import tempfile
 import copy
 import importlib.util
@@ -28,6 +32,8 @@ def florida_fixture(**changes):
         'registered_agent_name': (545, 42, 'SYNTHETIC_AGENT_NAME'),
         'registered_agent_type': (587, 1, 'P'),
         'registered_agent_address': (588, 42, 'SYNTHETIC_AGENT_LOCATION'),
+        'registered_agent_state': (658, 2, 'FL'),
+        'registered_agent_postal_code': (660, 9, '325011234'),
     }
     raw = [' '] * 1440
     for key, (start, width, default) in fields.items():
@@ -38,6 +44,98 @@ def florida_fixture(**changes):
 
 
 class OriginationTests(unittest.TestCase):
+    def test_cli_preflight_reports_all_rows_without_external_calls(self):
+        from tools.import_practice_origination import main
+        variants = [florida_fixture(), florida_fixture(name='Synthetic Retail LLC'),
+                    florida_fixture(registered_agent_state='Fl'),
+                    florida_fixture(registered_agent_postal_code='    32501'),
+                    florida_fixture(registered_agent_postal_code='32501-123'), florida_fixture()]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.txt'
+            path.write_bytes(('\r\n'.join(variants) + '\r\n').encode('latin1'))
+            output = io.StringIO()
+            with patch.object(sys, 'argv', ['import', 'formation-fl', str(path),
+                                           '--published-on', '2026-10-21']), \
+                    patch('subprocess.run', side_effect=AssertionError('record call')) as record, \
+                    patch('socket.socket', side_effect=AssertionError('network call')) as network, \
+                    contextlib.redirect_stdout(output):
+                with self.assertRaises(SystemExit) as exit:
+                    main()
+            self.assertEqual(exit.exception.code, 1)
+            record.assert_not_called()
+            network.assert_not_called()
+        report = json.loads(output.getvalue())
+        self.assertEqual(report['rows_read'], 6)
+        self.assertEqual(report['accepted'], 2)
+        self.assertEqual(report['skipped'], 1)
+        self.assertEqual(report['refused'], 3)
+        self.assertTrue(report['blocked'])
+        self.assertEqual(sorted(report['refused_by_reason'].values()), [1, 2])
+        self.assertEqual([row['line'] for row in report['first_refusals']], [3, 4, 5])
+
+    def test_preflight_valid_empty_and_invalid_files(self):
+        from tools.import_practice_origination import preflight_file
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.txt'
+            for rows, accepted, skipped, refused in [([], 0, 0, 0),
+                    ([florida_fixture(), florida_fixture(name='Synthetic Retail')], 1, 1, 0),
+                    ([florida_fixture()] * 150 + ['bad'] * 12, 150, 0, 12)]:
+                with self.subTest(rows=len(rows)):
+                    path.write_text(''.join(row + '\n' for row in rows))
+                    result = preflight_file(path, source='formation-fl', published_on=date(2026, 10, 21))
+                    self.assertEqual(result['rows_read'], len(rows))
+                    self.assertEqual((result['accepted'], result['skipped'], result['refused']),
+                                     (accepted, skipped, refused))
+                    self.assertEqual(result['blocked'], bool(refused))
+                    self.assertEqual(len(result['first_refusals']), min(refused, 10))
+            path.unlink()
+            self.assertTrue(preflight_file(path, source='formation-fl',
+                                          published_on=date(2026, 10, 21))['blocked'])
+            for source in ['nppes', 'pecos']:
+                path.write_text('NPI,NPI\n1234567890,1234567890\n')
+                result = preflight_file(path, source=source, published_on=date(2026, 10, 21))
+                self.assertTrue(result['blocked'])
+                self.assertIn('schema drift', result['file_error'])
+
+    def test_csv_preflight_uses_import_validation_and_counts_refusals(self):
+        from tools.import_practice_origination import preflight_file
+        rows = {
+            'nppes': {'NPI': '1234567890', 'Entity Type Code': '2',
+                      'Provider Enumeration Date': '10/20/2026', 'Last Update Date': '10/20/2026',
+                      'Provider Organization Name (Legal Business Name)': 'Synthetic Dental',
+                      'Provider Business Practice Location Address City Name': 'Pensacola',
+                      'Provider Business Practice Location Address State Name': 'FL',
+                      'Provider Business Practice Location Address Postal Code': '32501'},
+            'pecos': {'MULTIPLE_NPI_FLAG': '', 'PECOS_ASCT_CNTL_ID': '', 'PROVIDER_TYPE_CD': '',
+                      'FIRST_NAME': '', 'MDL_NAME': '', 'LAST_NAME': '', 'NPI': '1234567890', 'ENRLMT_ID': 'I20200101000100', 'STATE_CD': 'AL',
+                      'ORG_NAME': 'Synthetic Dental', 'PROVIDER_TYPE_DESC': 'Dentist'}}
+        for source, row in rows.items():
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / 'synthetic.csv'
+                with path.open('w', newline='') as stream:
+                    writer = csv.DictWriter(stream, fieldnames=list(row))
+                    writer.writeheader()
+                    writer.writerow(row)
+                    stream.write('bad\n')
+                    writer.writerow(row)
+                result = preflight_file(path, source=source, published_on=date(2026, 10, 21))
+                self.assertEqual((result['rows_read'], result['accepted'], result['refused']), (3, 2, 1))
+                self.assertTrue(result['blocked'])
+                self.assertEqual(result['first_refusals'][0]['line'], 2)
+                self.assertIn('row shape drift', result['first_refusals'][0]['reason'])
+
+    def test_cli_apply_still_checks_disabled_source_through_record_layer(self):
+        from tools.import_practice_origination import main
+        from subprocess import CompletedProcess
+        coverage = {'coverage': [{'source': 'formation-fl', 'enabled': False}]}
+        with patch.object(sys, 'argv', ['import', 'formation-fl', 'synthetic.txt',
+                                       '--published-on', '2026-10-21', '--apply']), \
+                patch('subprocess.run', return_value=CompletedProcess([], 0, json.dumps(coverage))) as call:
+            with self.assertRaisesRegex(ValueError, 'source disabled'):
+                main()
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(call.call_args.args[0][2], 'list-practice-origination')
+
     def test_npi_delta_keeps_evidence_date_without_claiming_practice_opening(self):
         row = {'NPI': '1234567890', 'Entity Type Code': '2',
                'Provider Enumeration Date': '01/01/2020', 'Last Update Date': '10/20/2026',
@@ -188,6 +286,24 @@ class OriginationTests(unittest.TestCase):
                                    published_on=date(2026, 10, 21), line_number=1)[0]
                 self.assertEqual(row['facts']['registered_agent_address'], 'SYNTHETIC_AGENT_LOCATION')
 
+    def test_florida_registered_agent_state_and_zip_slots(self):
+        from tools.import_practice_origination import florida_rows
+        for state in ['FL', 'NY', '']:
+            for postal in ['325011234', '32501', '']:
+                with self.subTest(state=state, postal=postal):
+                    row = florida_rows(florida_fixture(registered_agent_state=state,
+                                                       registered_agent_postal_code=postal),
+                                       published_on=date(2026, 10, 21), line_number=1)[0]
+                    self.assertEqual(row['facts']['registered_agent_address'], 'SYNTHETIC_AGENT_LOCATION')
+        for state in ['fl', 'F1', 'F', ' F']:
+            with self.subTest(state=state), self.assertRaisesRegex(ValueError, 'line 2.*Registered Agent State'):
+                florida_rows(florida_fixture(name='Synthetic Retail LLC', registered_agent_state=state),
+                             published_on=date(2026, 10, 21), line_number=2)
+        for postal in ['3250', '325011', '32501ABCD', ' 32501', '32501 123']:
+            with self.subTest(postal=postal), self.assertRaisesRegex(ValueError, 'line 2.*Registered Agent ZIP'):
+                florida_rows(florida_fixture(name='Synthetic Retail LLC', registered_agent_postal_code=postal),
+                             published_on=date(2026, 10, 21), line_number=2)
+
     def test_florida_unreadable_rows_still_fail_even_out_of_scope(self):
         from tools.import_practice_origination import florida_rows
         line = florida_fixture(name='Synthetic Retail LLC', city='', state='', postal_code='')
@@ -259,7 +375,16 @@ class OriginationTests(unittest.TestCase):
         same_width_shift = line[:304] + ' ' + line[304:399] + line[400:]
         full_agent_name = florida_fixture(registered_agent_name='S' * 42)
         late_shift = full_agent_name[:500] + ' ' + full_agent_name[500:-1]
-        cases = [([line] * 150 + [late_shift], 'line 151.*Registered Agent Type'),
+        short_name_shift = line[:500] + ' ' + line[500:-1]
+        minus_shift = line[:500] + line[501:] + ' '
+        cases = [([line] * 150 + [short_name_shift], 'line 151.*Registered Agent State'),
+                 ([skipped] * 150 + [short_name_shift], 'line 151.*Registered Agent State'),
+                 ([line] * 150 + [minus_shift], 'line 151.*Registered Agent Type'),
+                 ([line] * 150 + [florida_fixture(registered_agent_state='F1')],
+                  'line 151.*Registered Agent State'),
+                 ([skipped] * 150 + [florida_fixture(registered_agent_postal_code='32501ABCD')],
+                  'line 151.*Registered Agent ZIP'),
+                 ([line] * 150 + [late_shift], 'line 151.*Registered Agent Type'),
                  ([skipped] * 150 + [florida_fixture(registered_agent_type='X')],
                   'line 151.*Registered Agent Type'),
                  ([line] * 150 + [line[:336]], 'line 151.*width'),
