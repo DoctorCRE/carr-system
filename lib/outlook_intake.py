@@ -86,6 +86,7 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -683,6 +684,50 @@ def _snapshot(home: Path, work: Path) -> None:
                                       'launch_failed')) from None
 
 
+CENSUS_TIMEOUT = 5
+CENSUS_METRICS = frozenset((
+    'messages body_complete body_absent body_objects '
+    'body_rejected body_inline body_sidecar sidecar_linked '
+    'sidecar_missing sidecar_unreadable sidecar_decode_failed recipients_none '
+    'recipients_listed recipients_conflict recipient_children recipient_objects '
+    'recipient_rejected recipient_to recipient_cc recipient_bcc '
+    'recipient_unmapped subject_missing subject_unset_or_conflict subject_empty '
+    'unknown_folder_messages folder_uncatalogued folder_unset_or_conflict folder_account_mismatch '
+    'folder_unnamed blocks_verified message_layout_rejected_all_accounts body_unlinked_all_accounts '
+    'recipient_unlinked_all_accounts body_orphaned_all_accounts recipient_orphaned_all_accounts'
+).split())
+
+
+def _coverage_census(home: Path, out: Path, copy: Path, files: Path, account_id: int) -> None:
+    request = out / 'coverage-census.request'
+    try:
+        info = request.lstat()
+    except FileNotFoundError:
+        return
+    except OSError:
+        print('coverage_census_failed=1', file=sys.stderr)
+        return
+    try:
+        request.unlink()
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.getuid() or info.st_size != 0):
+            raise ValueError
+        with tempfile.TemporaryFile(dir=copy.parent) as output:
+            done = subprocess.run([str(load_settings(home).decoder), 'census', '--immutable-copy',
+                                   str(copy), str(files), str(account_id)], stdout=output,
+                                  stderr=subprocess.DEVNULL, timeout=CENSUS_TIMEOUT)
+            if done.returncode or output.tell() > 8 * 1024 * 1024:
+                raise ValueError
+            output.seek(0)
+            totals = json.load(output)['totals']
+        if (not isinstance(totals, dict) or not totals or not totals.keys() <= CENSUS_METRICS
+                or any(type(n) is not int or not 0 <= n < 2**64 for n in totals.values())):
+            raise ValueError
+        _private_write(out / 'coverage-census.json', json.dumps({'totals': totals}, sort_keys=True) + '\n')
+    except Exception:
+        print('coverage_census_failed=1', file=sys.stderr)
+
+
 def _remove(work: Path) -> None:
     shutil.rmtree(work, onerror=lambda *_: None)
     if work.exists():
@@ -696,6 +741,7 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], a
         copy = work / 'store.hxd'
         _snapshot(home, work)
         files = work / 'Files'
+        _coverage_census(home, out, copy, files, account_id)
         db = work / 'store.db'
         decode(copy, files, db)
         yield (*_load(db, account_id=account_id, account_address=account_address), db, files)

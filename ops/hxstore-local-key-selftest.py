@@ -6,6 +6,12 @@ Every value is synthetic; the real decoder runs. The builders here lay objects o
 import atexit
 import gzip
 import json
+import stat
+import time
+from contextlib import redirect_stderr
+from io import StringIO
+from types import SimpleNamespace
+from unittest.mock import patch
 import runpy
 import shutil
 from pathlib import Path
@@ -179,6 +185,65 @@ class LocalKeyExportTests(unittest.TestCase):
         self.assertEqual(got['totals']['recipient_objects'], 2)
         self.assertEqual(got['totals']['unknown_folder_messages'], 1)
         self.assertTrue(all(type(v) is int for row in rows.values() for v in row.values()))
+
+    def test_census_counts_children_whose_owner_was_never_observed(self):
+        got = self.census(message(100), body(998, html='PRIVATE-BODY'),
+                          recipient(999, 201, TO, 'private@example.test'))
+        self.assertEqual(got['totals']['body_orphaned_all_accounts'], 1)
+        self.assertEqual(got['totals']['recipient_orphaned_all_accounts'], 1)
+        self.assertEqual(got['totals']['body_unlinked_all_accounts'], 0)
+        self.assertEqual(got['totals']['recipient_unlinked_all_accounts'], 0)
+
+    def test_intake_census_uses_real_binary_and_removes_copy_on_decoder_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            (out / 'coverage-census.request').touch(mode=0o600)
+            def snapshot(home, work):
+                (work / 'store.hxd').write_bytes(STORE(message(100, subject='PRIVATE-SUBJECT',
+                    sender='private@example.test', sender_name='PRIVATE-NAME') + body(100, html='PRIVATE-BODY')
+                    + body(998, html='PRIVATE-BODY') + recipient(999, 201, TO, 'private@example.test')))
+                (work / 'Files').mkdir()
+            def fail_decode(*args):
+                raise intake.DecodeError('synthetic')
+            with patch.object(intake, '_snapshot', snapshot), patch.object(intake, 'load_settings',
+                    return_value=SimpleNamespace(decoder=CRATE / 'target/debug/hxprobe')):
+                with self.assertRaises(intake.DecodeError), intake._decode(out, out, fail_decode, 7, 'synthetic@example.test'):
+                    self.fail('decoder must fail')
+            self.assertFalse(list(out.glob('work-*')))
+            receipt = out / 'coverage-census.json'
+            totals = json.loads(receipt.read_text())['totals']
+            self.assertEqual(totals['body_orphaned_all_accounts'], 1)
+            self.assertEqual(totals['recipient_orphaned_all_accounts'], 1)
+            self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
+            self.assertFalse((out / 'coverage-census.request').exists())
+            for path in out.rglob('*'):
+                if path.is_file():
+                    for token in (b'PRIVATE-SUBJECT', b'PRIVATE-BODY', b'PRIVATE-NAME', b'private@example.test'):
+                        self.assertNotIn(token, path.read_bytes())
+
+    def test_intake_census_kills_slow_process_and_cleans_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = Path(temp)
+            decoder = out / 'slow-decoder'
+            decoder.write_text('#!' + sys.executable + '\nimport time\ntime.sleep(30)\n')
+            decoder.chmod(0o700)
+            (out / 'coverage-census.request').touch(mode=0o600)
+            def snapshot(home, work):
+                (work / 'store.hxd').write_bytes(b'synthetic')
+                (work / 'Files').mkdir()
+            def fail_decode(*args):
+                raise intake.DecodeError('synthetic')
+            log = StringIO()
+            started = time.monotonic()
+            with patch.object(intake, '_snapshot', snapshot), patch.object(intake, 'load_settings',
+                    return_value=SimpleNamespace(decoder=decoder)), patch.object(intake, 'CENSUS_TIMEOUT', 0.05), redirect_stderr(log):
+                with self.assertRaises(intake.DecodeError), intake._decode(out, out,
+                        fail_decode, 7, 'synthetic@example.test'):
+                    self.fail('decoder must fail')
+            self.assertLess(time.monotonic() - started, 2)
+            self.assertEqual(log.getvalue(), 'coverage_census_failed=1\n')
+            self.assertFalse(list(out.glob('work-*')))
+            self.assertFalse((out / 'coverage-census.request').exists())
 
     def test_census_names_sidecar_failure_reasons_without_paths_or_content(self):
         with tempfile.TemporaryDirectory() as temp:

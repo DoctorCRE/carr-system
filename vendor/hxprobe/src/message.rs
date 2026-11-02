@@ -284,6 +284,14 @@ impl Index {
         self.observed.iter().filter(|k| messages.get(k).is_none_or(|m| m.item_class.is_none())).count()
     }
 
+    pub fn orphaned_children(&self) -> (usize, usize) {
+        let bodies = self.body_objects.iter().filter(|(k, _)| !self.observed.contains(k))
+            .map(|(_, n)| n).sum();
+        let recipients = self.recipient_objects.iter().filter(|(k, _)| !self.observed.contains(k))
+            .map(|(_, ids)| ids.len()).sum();
+        (bodies, recipients)
+    }
+
     pub fn messages(&self) -> BTreeMap<u64, Message> {
         self.revisions
             .iter()
