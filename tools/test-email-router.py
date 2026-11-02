@@ -522,9 +522,9 @@ class MatchingTests(unittest.TestCase):
             mail = self.mail(**{k: case[k] for k in ('sender','recipients','conversation_id','body')})
             decision = email_matching.match(mail, [{'id': DEAL, 'client_id': 'synthetic-client'}], [],
                 client=FakeJev(case['existing'], case['different'], case['confidence']))
-            old = 'new' if case['different'] >= .7 or case['existing'] <= .3 else (
-                'existing' if case['existing'] >= .7 and case['different'] <= .3 and case['confidence'] >= .7 else 'uncertain')
-            actual = 'existing' if decision.kind == 'file_to_deal' else decision.outcome
+            old = 'propose_new' if case['different'] >= .7 or case['existing'] <= .3 else (
+                'review_existing' if case['existing'] >= .7 and case['different'] <= .3 and case['confidence'] >= .7 else 'no_suggestion')
+            actual = {'file_to_deal': 'review_existing', 'possible_new_deal': 'propose_new', 'contact_only': 'no_suggestion'}[decision.kind]
             key = (case['expected'], old, actual)
             counts[key] = counts.get(key, 0) + 1
             self.assertEqual(actual, case['expected'], case['id'])
@@ -570,6 +570,14 @@ class MatchingTests(unittest.TestCase):
         decision = email_matching.match(mail, [{'id': DEAL}], [], client=fake)
         self.assertEqual(decision.kind, 'file_to_deal')
         self.assertEqual(len(fake.calls), 1)
+
+    def test_shared_vendor_ambiguity_produces_review_candidates(self):
+        deals = [{'id': DEAL, 'participants': [{'party_id': 'vendor'}]},
+                 {'id': '22222222-2222-4222-8222-222222222222', 'participants': [{'party_id': 'vendor'}]}]
+        result = email_matching.match(self.mail(), deals, [], client=FakeJev(.5, .5, .5))
+        self.assertEqual(result.kind, 'file_to_deal')
+        self.assertEqual(result.outcome, 'uncertain')
+        self.assertTrue(result.candidates)
 
     def test_existing_matters_survive_conflicting_scores_and_missing_identity(self):
         deals = [{'id': DEAL, 'name': 'Synthetic Dental search', 'client_id': 'client-a'}]
@@ -648,13 +656,13 @@ class MatchingTests(unittest.TestCase):
         fake = FakeJev(existing=0.5, different=0.5)
         decision = email_matching.match(self.mail(), [{'id': DEAL}, {'id': 'other'}],
                                         [self.prior(), self.prior(activity_id='other-prior', deal='other')], client=fake)
-        self.assertEqual(decision.kind, 'contact_only')
+        self.assertEqual(decision.kind, 'file_to_deal')
         self.assertEqual(len(fake.calls), 1)
 
     def test_confidence_gates_choices_without_a_none_option(self):
         for existing, different, confidence, expected in [
                 (0.9, 0.1, 0.8, 'file_to_deal'), (0.9, 0.1, 0.5, 'file_to_deal'),
-                (0.5, 0.1, 0.9, 'contact_only'), (0.9, 0.5, 0.9, 'file_to_deal'),
+                (0.5, 0.1, 0.9, 'file_to_deal'), (0.9, 0.5, 0.9, 'file_to_deal'),
                 (0.2, 0.1, 0.9, 'contact_only'), (0.9, 0.9, 0.99, 'file_to_deal')]:
             with self.subTest(existing=existing, different=different, confidence=confidence):
                 result = email_matching.match(self.mail(), [{'id': DEAL}], [],
@@ -769,7 +777,7 @@ class MatchingTests(unittest.TestCase):
         for moment in ('2026-10-26T14:00:00Z', '2026-10-27T14:00:00Z'):
             decision = email_matching.match(self.mail(), [{'id': DEAL}], [self.prior(occurred_at=moment)],
                                             client=FakeJev(existing=0.5, different=0.5))
-            self.assertEqual(decision.kind, 'contact_only')
+            self.assertEqual(decision.kind, 'file_to_deal')
 
     def test_invalid_model_probabilities_fail_for_retry(self):
         for value in (float('nan'), float('inf'), -0.1, 1.1, True):

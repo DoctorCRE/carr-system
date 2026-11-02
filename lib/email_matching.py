@@ -172,7 +172,7 @@ def match(email: dict, deals: list[dict], history: list[dict], *, client=None, s
     if chosen and existing >= HIGH and different <= LOW and confidence >= CHOICE_CONFIDENCE:
         return MatchDecision('file_to_deal', chosen.choice, role, min(existing, 1-different, confidence),
                              outcome='existing', candidates=candidates, evidence=evidence)
-    if chosen and (existing >= HIGH or missing):
+    if chosen and (existing > LOW or different > LOW or missing):
         return MatchDecision('file_to_deal', chosen.choice, role, min(existing, confidence),
                              candidates=candidates, evidence=evidence)
     return MatchDecision('contact_only', sender_role=role, candidates=candidates, evidence=evidence)

@@ -2553,3 +2553,22 @@ test('equal names suggest an identity candidate without creating a client associ
   assert.ok(item.suggested_deals.find(row => row.deal === deal).reasons.includes('Name resembles an existing matter; identity is unproven.'));
   assert.equal((await c.query('select merged_into from party where id=$1', [party])).rows[0].merged_into, null);
 });
+
+test('a shared vendor offers both existing transactions without choosing one automatically', async () => {
+  const address = `shared-${randomUUID()}@example.test`;
+  const party = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic shared lender',$1,$2,$2) returning id", [address,actor.id])).rows[0].id;
+  const other = await command('new-deal', { idempotency_key: randomUUID(), client: clientRef,
+    name: 'Synthetic separate transaction', deal_type: 'purchase', phase: 'research' });
+  for (const target of [deal,other.deal_id]) await c.query("insert into deal_participant(deal_id,party_id,role,set_by) values($1,$2,'lender',$3)", [target,party,actor.id]);
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef, kind: 'email_in',
+    summary: 'Email from Synthetic lender: Documents', detail: quote,
+    email_context: { subject: 'Documents', sender: { email: address }, recipients: [] } });
+  const stored = await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'lender' });
+  const item = (await listed()).find(row => row.id === stored.proposal_id);
+  for (const target of [deal,other.deal_id]) {
+    const suggestion = item.suggested_deals.find(row => row.deal === target);
+    assert.equal(suggestion.requires_confirmation, true);
+    assert.ok(suggestion.reasons.includes('Known participant; may work on multiple transactions.'));
+  }
+  assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, null);
+});
