@@ -8,7 +8,7 @@ import { executeRegisteredTool } from '../src/tools.js';
 
 const pairs = JSON.parse(readFileSync(new URL('./fixtures/post-call-action-pairs.json', import.meta.url), 'utf8'));
 
-test('labeled action pairs through read-call-outcomes', async t => {
+test('labeled action pairs return neutral deal context through read-call-outcomes', async t => {
   const fixture = await acquireDisposablePostgres({ prefix: 'call-action-pairs-', snapshot: true });
   const c = new pg.Client(fixture.connection);
   await c.connect();
@@ -20,28 +20,43 @@ test('labeled action pairs through read-call-outcomes', async t => {
     const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
       session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
       now()+interval '1 day','distilling',now(),true) returning id`, [randomUUID(), actor.id])).rows[0].id;
-    let falseFlags = 0, trueFlags = 0;
+    const actions = new Map();
     for (const [index, pair] of pairs.entries()) {
       const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values($1,$2,'lease','site_selection','joe',$3,$3) returning id", [`Synthetic ${pair.id}`, client, actor.id])).rows[0].id;
       await c.query(`insert into capture_post_call_candidate
         (session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,evidence_quote,confidence)
         values($1,$2,$2,$3,'assigned_action',$4,'joe',$5,'Synthetic pair evidence',1)`,
       [session, randomUUID(), index, deal, pair.proposed]);
-      await c.query(`insert into next_action(subject_type,subject_id,owner_id,description,status,created_by)
-        values('deal',$1,$2,$3,'done',$2)`, [deal, actor.id, pair.existing]);
+      actions.set(pair.id, (await c.query(`insert into next_action(subject_type,subject_id,owner_id,description,status,created_by)
+        values('deal',$1,$2,$3,'done',$2) returning id`, [deal, actor.id, pair.existing])).rows[0].id);
     }
-    const result = await executeRegisteredTool(c, actor, 'read-call-outcomes', {});
-    const cards = result.calls.find(call => call.session_id === session).open_cards;
-    assert.equal(cards.length, pairs.length);
-    for (const pair of pairs) {
-      const comparison = cards.find(card => card.payload.action === pair.proposed).existing_action_comparison;
-      const flagged = comparison.status === 'possible_match';
-      if (flagged) { if (pair.duplicate) trueFlags++; else falseFlags++; }
-      t.diagnostic(`${pair.id} gold=${pair.duplicate} observed=${comparison.status}`);
-      assert.equal(comparison.exact_match, null);
+    for (const status of ['done', 'open', 'dropped']) {
+      await c.query('update next_action set status=$1 where id=any($2::uuid[])', [status, [...actions.values()]]);
+      const before = (await c.query('select * from next_action where id=any($1::uuid[]) order by id', [[...actions.values()]])).rows;
+      const result = await executeRegisteredTool(c, actor, 'read-call-outcomes', {});
+      const cards = result.calls.find(call => call.session_id === session).open_cards;
+      assert.equal(cards.length, pairs.length);
+      for (const pair of pairs) {
+        const comparison = cards.find(card => card.payload.action === pair.proposed).existing_action_comparison;
+        assert.equal(comparison.schema_version, 'post-call-action-comparison.v2');
+        assert.equal(comparison.status, status === 'open' ? 'related_open_tasks' : 'no_match');
+        assert.equal(comparison.exact_match, null);
+        assert.equal(comparison.date_effect, null);
+        assert.equal('possible_matches' in comparison, false);
+        assert.deepEqual(comparison.related_open_tasks.map(action => action.id), status === 'open' ? [actions.get(pair.id)] : []);
+        t.diagnostic(`${pair.id} gold=${pair.duplicate} history=${status} observed=${comparison.status}`);
+      }
+      assert.deepEqual((await c.query('select * from next_action where id=any($1::uuid[]) order by id', [[...actions.values()]])).rows, before);
     }
-    t.diagnostic(`pairs=${pairs.length} falseFlags=${falseFlags} trueFlags=${trueFlags}`);
-    assert.equal(falseFlags, 0);
-    assert.ok(trueFlags >= 5);
+    await assert.rejects(() => executeRegisteredTool({ query(sql, args) {
+      if (sql.includes('capture:preview-related-open')) throw new Error('Synthetic comparison unavailable');
+      return c.query(sql, args);
+    } }, actor, 'read-call-outcomes', {}), /Synthetic comparison unavailable/);
+    const unavailable = await executeRegisteredTool({ query(sql, args) {
+      return sql.includes('capture:preview-assignee') ? { rows: [{ id: null }] } : c.query(sql, args);
+    } }, actor, 'read-call-outcomes', {});
+    const unavailableCards = unavailable.calls.find(call => call.session_id === session).open_cards;
+    assert.equal(unavailableCards.length, pairs.length);
+    assert.ok(unavailableCards.every(card => card.existing_action_comparison.status === 'assignee_unavailable'));
   } finally { await c.end(); await fixture.close(); }
 });

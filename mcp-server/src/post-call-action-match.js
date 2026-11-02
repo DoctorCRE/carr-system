@@ -14,18 +14,6 @@ export async function findExactPostCallAction(c, candidate, ownerId) {
         [candidate.deal_id, stepKey, ownerId])).rows[0] || null;
 }
 
-const stopWords = new Set(('the and for from with into onto about this that these those ' +
-  'they them their you your our its his her are was were been being ' +
-  'have has had does did can could should would will').split(' '));
-const normalized = text => text.trim().replace(/\s+/gu, ' ').toLowerCase();
-function similar(left, right) {
-  if (normalized(left) === normalized(right)) return true;
-  const words = text => new Set((text.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
-    .filter(word => word.length > 2 && !stopWords.has(word)));
-  const a = words(left), b = words(right);
-  const shared = [...a].filter(word => b.has(word)).length;
-  return shared >= 2 && 2 * shared / (a.size + b.size) >= 0.6;
-}
 const actionSnapshot = (row, owner = row.owner) => ({
   id: row.id, source: row.source, owner, description: row.description, status: row.status, due_on: row.due_on,
 });
@@ -39,8 +27,8 @@ export async function withPostCallActionComparisons(c, rows) {
     const ownerId = (await c.query('select retrieval_visibility_actor_id($1) as id /* capture:preview-assignee */',
       [candidate.assignee_slug])).rows[0]?.id;
     const exact = ownerId ? await findExactPostCallAction(c, candidate, ownerId) : null;
-    const comparison = { schema_version: 'post-call-action-comparison.v1',
-      status: ownerId ? 'no_match' : 'assignee_unavailable', exact_match: null, date_effect: null, possible_matches: [] };
+    const comparison = { schema_version: 'post-call-action-comparison.v2',
+      status: ownerId ? 'no_match' : 'assignee_unavailable', exact_match: null, date_effect: null, related_open_tasks: [] };
     if (exact) {
       const stated = due_defaulted === false && candidate.due_on != null;
       const resulting = stated ? candidate.due_on : exact.due_on;
@@ -52,15 +40,14 @@ export async function withPostCallActionComparisons(c, rows) {
     } else if (ownerId) {
       const actions = (await c.query(`select actions.*, a.slug as owner from (
         select id,owner_id,description,status,due_on::text as due_on,'next_action' as source,created_at as ordered_at
-          from next_action where subject_type='deal' and subject_id=$1
+          from next_action where subject_type='deal' and subject_id=$1 and status='open'
         union all
         select id,owner_id,description,status,due_on::text as due_on,'capture_post_call_action' as source,accepted_at as ordered_at
-          from capture_post_call_action where deal_id=$1
-        ) actions join actor a on a.id=actions.owner_id order by ordered_at,id /* capture:preview-possible */`,
+          from capture_post_call_action where deal_id=$1 and status='open'
+        ) actions join actor a on a.id=actions.owner_id order by ordered_at,id /* capture:preview-related-open */`,
       [candidate.deal_id])).rows;
-      comparison.possible_matches = actions.filter(action => similar(action.description, candidate.action_description))
-        .map(action => actionSnapshot(action));
-      if (comparison.possible_matches.length) comparison.status = 'possible_match';
+      comparison.related_open_tasks = actions.map(action => actionSnapshot(action));
+      if (comparison.related_open_tasks.length) comparison.status = 'related_open_tasks';
     }
     result.push({ ...row, existing_action_comparison: comparison });
   }

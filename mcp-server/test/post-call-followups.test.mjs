@@ -31,7 +31,7 @@ test('call outcomes preview current action matches and acceptance rechecks them'
     const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic preview physician',$1,$1) returning id", [actor.id])).rows[0].id;
     await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
     const client = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id", [party, actor.id])).rows[0].id;
-    const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic preview deal',$1,'lease','site_selection','joe',$2,$2) returning id", [client, actor.id])).rows[0].id;
+    let deal;
     const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
       session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
       now()+interval '1 day','distilling',now(),true) returning id`, [randomUUID(), actor.id])).rows[0].id;
@@ -40,6 +40,10 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       try { const result = await executeRegisteredTool(c, actor, name, args); await c.query('commit'); return result; }
       catch (error) { await c.query('rollback'); throw error; }
     };
+    const freshDeal = async () => {
+      deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic isolated preview',$1,'lease','site_selection','joe',$2,$2) returning id", [client, actor.id])).rows[0].id;
+    };
+    const caseTest = (name, run) => t.test(name, async () => { await freshDeal(); await run(); });
     let index = 0;
     const proposal = async (text, due = '2027-02-02', defaulted = false) => (await c.query(`insert into capture_post_call_candidate
       (session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,due_defaulted,evidence_quote,confidence)
@@ -58,7 +62,7 @@ test('call outcomes preview current action matches and acceptance rechecks them'
     };
     const preview = async id => (await command('read-call-outcomes')).calls.find(call => call.session_id === session)
       .open_cards.find(card => card.candidate_id === id).existing_action_comparison;
-    for (const source of ['next_action', 'capture_post_call_action']) await t.test(`${source} exact preview matches accepted merge`, async () => {
+    for (const source of ['next_action', 'capture_post_call_action']) await caseTest(`${source} exact preview matches accepted merge`, async () => {
       const text = `Review synthetic ${source} survey`;
       const id = await proposal(text);
       const action = await seed(source, id, `  ${text.toUpperCase()}  `);
@@ -77,14 +81,14 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       ['completed', 'capture_post_call_action', 'Review completed survey', actor.id, 'done', true],
       ['legacy', 'capture_post_call_action', 'Review legacy survey', actor.id, 'open', false],
       ['similar wording', 'next_action', 'Review the synthetic floor survey', actor.id, 'open', true],
-    ]) await t.test(`${label} is advisory and reads never mutate`, async () => {
+    ]) await caseTest(`${label} is advisory and reads never mutate`, async () => {
       const id = await proposal(label === 'similar wording' ? 'Review synthetic floor survey' : text);
       const action = await seed(source, id, text, owner, status, structured);
       const stored = (await c.query(`select * from ${source} where id=$1`, [action])).rows[0];
       const before = await preview(id);
-      assert.equal(before.status, 'possible_match');
+      assert.equal(before.status, status === 'open' ? 'related_open_tasks' : 'no_match');
       assert.equal(before.exact_match, null);
-      assert.ok(before.possible_matches.some(match => match.id === action));
+      assert.deepEqual(before.related_open_tasks.map(match => match.id), status === 'open' ? [action] : []);
       assert.deepEqual((await c.query(`select * from ${source} where id=$1`, [action])).rows[0], stored);
       assert.equal((await command('resolve-post-call-candidate', { candidate_id: id, accept: true, idempotency_key: randomUUID() })).ref === action, false);
       assert.deepEqual((await c.query(`select * from ${source} where id=$1`, [action])).rows[0], stored);
@@ -94,16 +98,16 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       ['different document', 'Send the LOI', 'Send the survey', 'no_match'],
       ['different follow-up recipient', 'Follow up with the tenant', 'Follow up with the lender', 'no_match'],
       ['only filler words shared', 'Meet at the property', 'Work at the office', 'no_match'],
-      ['reworded rent roll task', 'Get rent roll from landlord', 'Ask landlord for the rent roll', 'possible_match'],
-    ]) await t.test(`${label} compares meaningful words`, async () => {
+      ['reworded rent roll task', 'Get rent roll from landlord', 'Ask landlord for the rent roll', 'no_match'],
+    ]) await caseTest(`${label} does not infer similarity from closed history`, async () => {
       const id = await proposal(proposed);
-      const action = await seed('capture_post_call_action', id, existing, actor.id, 'done');
+      await seed('capture_post_call_action', id, existing, actor.id, 'done');
       const before = await preview(id);
       assert.equal(before.status, expected);
       assert.equal(before.exact_match, null);
-      assert.deepEqual(before.possible_matches.map(match => match.id), expected === 'possible_match' ? [action] : []);
+      assert.deepEqual(before.related_open_tasks, []);
     });
-    await t.test('identical text on another deal gives no match', async () => {
+    await caseTest('identical text on another deal gives no match', async () => {
       const text = 'Request synthetic zoning certificate';
       const id = await proposal(text);
       const otherDeal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic other deal',$1,'lease','site_selection','joe',$2,$2) returning id", [client, actor.id])).rows[0].id;
@@ -112,9 +116,10 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       const before = await preview(id);
       assert.equal(before.status, 'no_match');
       assert.equal(before.exact_match, null);
-      assert.deepEqual(before.possible_matches, []);
+      assert.deepEqual(before.related_open_tasks, []);
     });
     for (const [due, defaulted, reason] of [[null, false, 'unstated_date'], ['2027-03-03', true, 'defaulted_date'], ['2027-04-04', null, 'defaulted_date']]) {
+      await freshDeal();
       const id = await proposal(`Keep synthetic date ${reason} ${defaulted}`, due, defaulted);
       const action = await seed('next_action', id, `Keep synthetic date ${reason} ${defaulted}`);
       const before = await preview(id);
@@ -123,6 +128,7 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       await command('resolve-post-call-candidate', { candidate_id: id, accept: true, idempotency_key: randomUUID() });
       assert.equal((await c.query('select due_on::text from next_action where id=$1', [action])).rows[0].due_on, '2027-01-01');
     }
+    await freshDeal();
     const fresh = await proposal('Arrange completely unrelated inspection');
     assert.equal((await preview(fresh)).status, 'no_match');
     const later = await seed('next_action', fresh, 'Arrange completely unrelated inspection');

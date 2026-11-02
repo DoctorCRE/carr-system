@@ -197,10 +197,10 @@ response version stays unchanged. The comparison is a current read, not a
 reservation. A read failure fails the request; clients must show comparison
 unavailable rather than infer no match from a missing field.
 
-The comparison has `schema_version: "post-call-action-comparison.v1"` and
-`status` of `exact_match`, `possible_match`, `no_match`, or
+The comparison has `schema_version: "post-call-action-comparison.v2"` and
+`status` of `exact_match`, `related_open_tasks`, `no_match`, or
 `assignee_unavailable`. `exact_match` is an action snapshot or null.
-`possible_matches` is an array of advisory action snapshots. Each snapshot has
+`related_open_tasks` is an array of advisory open action snapshots. Each snapshot has
 `id`, `source` (`next_action` or `capture_post_call_action`), `owner` (actor slug),
 `description`, `status`, and `due_on` (ISO date or null).
 
@@ -212,17 +212,21 @@ uses `defaulted_date` and preserves the current date. Exact eligibility and
 oldest-action selection use the same matcher as acceptance. Legacy Call Mode
 actions without a structured title cannot be exact matches.
 
-Possible matches use equal normalized text or lexical overlap of at least two
-meaningful words and a Dice coefficient of at least 0.6. Lexical comparison
-ignores tokens of two characters or fewer and an explicit stoplist of common
-articles, conjunctions, prepositions, pronouns, and auxiliaries. For example,
-"Call the landlord" and "Call the broker" do not match, while "Get rent roll
-from landlord" and "Ask landlord for the rent roll" are possible matches.
-This is an advisory similarity signal, not semantic equivalence. It includes
-different owners, completed or dropped actions, and legacy unstructured actions. It never merges or reopens
-work. Acceptance still locks the deal and selected action and compares again,
-because actions may change after the preview. The app's Before panel consumes
-this additive field in a separate delivery.
+Without an exact match, the comparison returns all open actions on the same
+deal under `related_open_tasks`. The app labels this list "Other open tasks on
+this deal". It includes different owners and legacy unstructured actions,
+regardless of wording. It excludes completed and dropped history. No lexical
+similarity or possible-duplicate claim is made. For example, "Call the landlord
+about HVAC" can show an open "Call the broker about HVAC" as ordinary deal
+context. `no_match` means no exact eligible action and no other open tasks were
+found, not that a proposed task is absent from deal history. The array is empty
+for exact matches and unavailable assignees. Version 2 replaces the unshipped
+version 1 `possible_match` status and `possible_matches` array. Clients must
+render unsupported versions as comparison unavailable.
+
+Context never merges or reopens work. Acceptance still locks the deal and
+selected action and compares again, because actions may change after the
+preview. The app's Before panel consumes this field in a separate delivery.
 
 Extraction, context-fetch failures, and bridge synchronization each stop after
 three failed attempts, with five and fifteen minutes between attempts. The local
