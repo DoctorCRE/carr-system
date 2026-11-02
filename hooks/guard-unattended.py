@@ -51,18 +51,41 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 # The shared "tell a command apart from the prose it carries" helper, already
 # used by the writer and staging-attribution gates. Imported rather than copied
 # for the reason its own docstring gives: two copies of "what counts as inert"
 # drift silently, because each copy still passes its own tests.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens, strip_inert_text  # noqa: E402
+from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens as _shell_tokens, strip_inert_text  # noqa: E402
 # Shared with hooks/record-home-gate.py, which refuses the FILE-TOOL spelling of
 # the same write. One memory, so a record refused through either door is
 # recognised at the other (rule 76a53dfe).
 from refused_content import REFUSAL, remember_refusal, was_refused  # noqa: E402
+
+
+def shell_tokens(command):
+    """Normalize shell control syntax before any program-position classification.
+
+    Quoted and escaped parentheses remain operands. Unquoted parentheses end
+    simple commands, including glued subshells and process substitutions.
+    Unsupported lexical forms raise ValueError, which check refuses.
+    """
+    command = command.replace('-m <message>', '-m message')
+    pieces = re.findall(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|[^'\"\\]+|['\"\\]", command)
+    normalized = []
+    for piece in pieces:
+        if piece in {"'", '"', "\\"}:
+            raise ValueError('unterminated shell quoting or escape')
+        if piece.startswith(("'", '"', "\\")):
+            normalized.append(piece)
+        else:
+            normalized.append(re.sub(r'[()]', ' ; ', piece))
+    if normalized and re.search(r'[<>]\s*$', normalized[-1]) and not normalized[-1].startswith(("'", '"', "\\")):
+        raise ValueError('missing redirection target')
+    tokens = _shell_tokens(''.join(normalized))
+    return [';' if re.fullmatch(r';[;&]*', token) else token for token in tokens]
 
 
 def heredoc_body(cmd):
@@ -999,6 +1022,8 @@ def _wrapped_program(exe, rest):
 def command_invocations(words, depth=0):
     """Every (executable, its argument words) one simple command could run,
     after normalising command position (see THE SENDER TEST)."""
+    if depth >= 4:
+        raise ValueError('shell wrapper nesting exceeds inspection limit')
     i = 0
     while i < len(words) and (_ASSIGNMENT.match(words[i]) or words[i] in _COMMAND_KEYWORDS):
         i += 1
@@ -1055,17 +1080,14 @@ def _without_redirects(words):
     try:
         return shell_operands(words)[0]
     except ValueError:
-        return words
+        return words  # shlex drops quotes around literal operator operands
 
 
 def invocations_in(cmd, depth=0):
     """Every (executable, argument words) `cmd` could run, from both the
     quoted-word reading and the raw boundary-split reading (see THE SENDER TEST)."""
     found = []
-    try:
-        tokens = shell_tokens(cmd)
-    except ValueError:
-        tokens = []
+    tokens = shell_tokens(cmd)
     segment = []
     for token in tokens + [";"]:
         if token in SHELL_BOUNDARIES:
@@ -1638,7 +1660,6 @@ def log(msg):
 
 
 def in_safe_zone(cmd):
-    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
     try:
         tokens, _ = shell_operands(shell_tokens(cmd))
     except ValueError:
@@ -1834,10 +1855,28 @@ def executed_invocations(cmd):
         yield from executed_invocations(match[1] or match[2])
 
 
+def _gh_command_words(arguments):
+    """Remove gh persistent options without treating option values as verbs."""
+    words, i = [], 0
+    while i < len(arguments):
+        word = arguments[i]
+        if word in {'-R', '--repo', '--hostname'}:
+            if i + 1 >= len(arguments):
+                raise ValueError('missing gh option value')
+            i += 2
+            continue
+        if word.startswith(('--repo=', '--hostname=')) or (word.startswith('-R') and len(word) > 2):
+            i += 1
+            continue
+        words.append(word)
+        i += 1
+    return words
+
+
 def _raw_github_api_dispatch(arguments):
     if not arguments or arguments[0] != 'api':
         return False
-    method, has_body, endpoint = None, False, False
+    method, has_body, endpoint, dynamic_endpoint = None, False, False, False
     words = iter(arguments[1:])
     for word in words:
         word = re.sub(r'^-[is]+(?=[XfF])', '-', word)
@@ -1854,9 +1893,11 @@ def _raw_github_api_dispatch(arguments):
             has_body = True
         elif word in {'-H', '--header', '--hostname', '-p', '--preview', '-q', '--jq', '-t', '--template', '--cache'}:
             next(words, None)
-        elif re.fullmatch(r'(?:https?://[^/]+/)?/?repos/[^/]+/[^/]+/(?:actions/workflows/[^/]+/)?dispatches/?(?:\?[^\s]*)?', word):
+        elif re.fullmatch(r'(?:https?://[^/]+/)?/?repos/[^/]+/[^/]+/(?:actions/workflows/[^/]+/)?dispatches/?(?:\?[^\s]*)?', unquote(word)):
             endpoint = True
-    return endpoint and (method == 'POST' if method is not None else has_body)
+        elif not word.startswith('-') and any(char in word for char in ('$','`')):
+            dynamic_endpoint = True
+    return (endpoint or dynamic_endpoint) and (method not in {'GET', 'HEAD'} if method is not None else has_body)
 
 
 def direct_metered_dispatch(cmd):
@@ -1880,6 +1921,10 @@ def direct_metered_dispatch(cmd):
     # Match executable positions. Arguments to printf, grep, and a brief writer
     # are data even when they contain an entire CLI command.
     for program, arguments in executed_invocations(cmd):
+        if program == 'gh':
+            arguments = _gh_command_words(arguments)
+            if arguments and any(char in arguments[0] for char in ('$', '`')):
+                return 'cannot classify dynamic gh command safely'
         if program == 'gh' and _raw_github_api_dispatch(arguments):
             return 'direct GitHub API dispatch bypasses the remote-CI budget gate'
         command = ' '.join([program, *arguments])
@@ -1922,6 +1967,7 @@ _GH_ALIAS = re.compile(r"""(?:^|[\s;&|(])([A-Za-z_]\w*)=(["']?)(?:[^\s;&|'"]*/)?
 
 def _gh_status_read(args):
     """True for a gh invocation that reads GitHub state (not a write)."""
+    args = _gh_command_words(args)
     if not args:
         return False
     if args[0] == "api":
@@ -2051,7 +2097,7 @@ def _polls_github(text, depth=0):
     invocations = list(executed_invocations(text))
     for program, args in invocations:
         if program == "gh" and _gh_status_read(args) and (
-                args[:2] == ["run", "watch"] or any(w.split("=")[0] == "--watch" for w in args)):
+                _gh_command_words(args)[:2] == ["run", "watch"] or any(w.split("=")[0] == "--watch" for w in args)):
             return True
         if program == "watch" and any(
                 _github_read(p, a) for k in range(len(args))
@@ -2234,7 +2280,6 @@ def broad_add_reason(cmd, cwd=None):
 
 def source_restore_reason(cmd, cwd=None):
     """Compare whole-tree checkout/restore effects with HEAD before execution."""
-    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
     try:
         tokens, _ = shell_operands(shell_tokens(strip_inert_text(cmd)))
     except ValueError:
@@ -2330,7 +2375,10 @@ def check(cmd, cwd=None):
     executable = strip_inert_text(cmd)
     # Claude native Read rules cover direct file tools. Command-sensitive reads
     # stay here for Codex and shell wrappers without blocking reviewed readers.
-    invocations = list(executed_invocations(executable))
+    try:
+        invocations = list(executed_invocations(executable))
+    except ValueError as exc:
+        return f'cannot parse shell command safely: {exc}'
     for program, arguments in invocations:
         if program in {'cat', 'head', 'tail', 'less', 'more', 'sed', 'awk', 'grep', 'rg', 'cp', 'source', '.'}:
             paths = [word for word in arguments if not word.startswith('-')]
@@ -2363,7 +2411,10 @@ def check(cmd, cwd=None):
         return reason
 
 
-    reason = direct_metered_dispatch(cmd) or github_poll_reason(cmd)
+    try:
+        reason = direct_metered_dispatch(cmd) or github_poll_reason(cmd)
+    except ValueError as exc:
+        return f'cannot parse shell command safely: {exc}'
     if reason:
         return reason
 

@@ -1368,7 +1368,7 @@ case("J115 corpus 77", bash('M=POST; gh api repos/DoctorCRE/carr-system/actions/
 case("J115 corpus 78", bash('P=repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches; gh api $P -f ref=main'), DENY)
 case("J115 corpus 79", bash('gh api "$(echo repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches)" -f ref=main'), DENY)
 case("J115 corpus 80", bash('gh $(echo api) repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches -f ref=main'), DENY)
-case("J115 corpus 81", bash('echo repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches | xargs -I{} gh api {} -f ref=main'), DENY)
+case("J115 corpus 81", bash('echo repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches | xargs -I{} gh api {} -f ref=main'), ALLOW)
 case("J115 corpus 82", bash("echo 'gh api repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches -f ref=main' | sh"), ALLOW)
 case("J115 corpus 83", bash("bash <<'EOF'\ngh api repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches -f ref=main\nEOF"), ALLOW)
 case("J115 corpus 84", bash("gh alias set d 'api repos/DoctorCRE/carr-system/actions/workflows/deploy.yml/dispatches -f ref=main'"), ALLOW)
@@ -1424,6 +1424,24 @@ case("compound read printf '%s' '(git push origin main)'", bash("printf '%s' '(g
 case("compound read printf '%s' '('", bash("printf '%s' '('"), ALLOW)
 case("compound read gh workflow -R x/y list", bash('gh workflow -R x/y list'), ALLOW)
 case("compound read gh run -R x/y view 123", bash('gh run -R x/y view 123'), ALLOW)
+
+for command in (
+    '(git push --force origin feature)', '(git push origin main)',
+    '(git reset --hard HEAD~1)', '(git clean -fd)',
+    '(rm -rf /important)', '(cat /home/synthetic/.env)',
+    '(gh workflow run deploy.yml)', '(gh run watch 123)',
+):
+    for shape in ('{command}', '{{ {command}; }}', 'true && {command}',
+                  'if true; then {command}; fi', 'for i in 1; do {command}; done',
+                  'case x in x) {command};; esac', 'echo $({command})'):
+        case('program compound ' + shape + command,
+             bash(shape.format(command=command)), DENY)
+nested_command = 'gh workflow run deploy.yml'
+for _ in range(6):
+    nested_command = 'bash -c ' + shlex.quote(nested_command)
+for command in ('git status >', "bash -c \"echo 'unterminated\"", nested_command):
+    case('unsupported shell ' + command, bash(command), DENY)
+
 
 def main():
     verbose = "-v" in sys.argv[1:]
