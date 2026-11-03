@@ -165,7 +165,9 @@ def _parallel_model_work(items, work, model):
             return work(item, invoke)
 
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
-        list(pool.map(run, items))
+        futures = [pool.submit(run, item) for item in items]
+    for future in futures:
+        future.result()
 
 
 def _require_time_budget(ledger, topic_count=0, *, persist):
