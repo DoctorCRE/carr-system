@@ -56,7 +56,7 @@ from urllib.parse import unquote, urlsplit
 # for the reason its own docstring gives: two copies of "what counts as inert"
 # drift silently, because each copy still passes its own tests.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens as _shell_tokens, strip_inert_text  # noqa: E402
+from cmd_text import SHELL_BOUNDARIES, SHELL_REDIRECTS, shell_operands, shell_tokens as _shell_tokens, strip_inert_text  # noqa: E402
 # Shared with hooks/record-home-gate.py, which refuses the FILE-TOOL spelling of
 # the same write. One memory, so a record refused through either door is
 # recognised at the other (rule 76a53dfe).
@@ -2525,9 +2525,30 @@ def zsh_glob_reason(cmd, invocations, depth=0):
         i += 1
     guarded = {'rm', 'mv', 'cp', 'rsync', 'srm', 'shred', 'find', 'git', 'gh',
                'curl', 'wget', 'dd', 'tee', 'diskutil', 'age', 'psql', 'sqlite3'}
+    lexer = shlex.shlex(without_shell_comments(text), posix=True,
+                        punctuation_chars=';&|<>()')
+    lexer.whitespace_split = True
+    lexer.commenters = ''
+    incomplete_programs, segment = set(), []
+    for token in list(lexer) + [';']:
+        if re.fullmatch(r'[;&|<>()]+', token):
+            if '(' in token or ')' in token or token not in SHELL_BOUNDARIES | SHELL_REDIRECTS:
+                words = _without_redirects(segment)
+                while words and words[0] in modifiers:
+                    words.pop(0)
+                incomplete_programs.update(program for program, _ in command_invocations(words))
+            if token in SHELL_REDIRECTS:
+                segment.append(token)
+            else:
+                segment = []
+        else:
+            segment.append(token)
     sensitive = False
     for program, arguments in invocations:
         if program not in guarded:
+            continue
+        if program in incomplete_programs:
+            sensitive = True
             continue
         if program == 'git':
             words = _git_command_words(arguments)
