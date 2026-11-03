@@ -55,7 +55,7 @@ import time
 from typing import Callable
 import uuid
 
-from lib import email_matching, model_call
+from lib import email_matching, email_summary, model_call
 from lib.fence import DATA_SENTENCE, fence
 
 VERBS = frozenset({'email-router-queue', 'record-email-proposal', 'inherit-email-thread'})
@@ -327,7 +327,7 @@ def _save(out: Path, state: dict) -> None:
 
 def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, date], dict],
         refusal_code: Callable[[Exception], str | None], now: datetime,
-        clock: Callable[[], datetime] | None = None, account: str = '') -> tuple[str, dict]:
+        clock: Callable[[], datetime] | None = None, account: str = '', summary_model=None) -> tuple[str, dict]:
     """Route once under the router's own lock; a second concurrent run is skipped."""
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
     with open(os.open(out / 'run.lock', os.O_WRONLY | os.O_CREAT, 0o600), 'w') as lock:
@@ -345,6 +345,15 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
                 state['expiry_cursor'] = maintenance.get('next_cursor')
             except Exception:
                 counts['maintenance_failed'] = 1
+            if summary_model is not None:
+                try:
+                    summary = email_summary.backfill(carr, summary_model, now=now, clock=clock,
+                                                     after=state.get('summary_cursor'), pending_only=False)
+                    state['summary_cursor'] = summary['next_cursor']
+                    counts['summaries_generated'] = summary['generated']
+                    counts['summaries_unavailable'] = summary['unavailable']
+                except Exception:
+                    counts['summary_failed'] = 1
         finally:
             _save(out, state)
     failed = counts['model_failed'] or counts['write_failed'] or counts['queue_failed'] or counts.get('maintenance_failed')
@@ -372,7 +381,8 @@ def step(repo: Path, settings) -> int:
             code = error.tool_refusal if isinstance(error, CarrError) else None
             return code if isinstance(code, str) and REFUSAL.fullmatch(code) else None
         outcome, counts = run(repo / OUT, _carr(repo), lambda email, today: ask_model(email, today, settings.model),
-                              refusal_code, datetime.now(timezone.utc), account=settings.account)
+                              refusal_code, datetime.now(timezone.utc), account=settings.account,
+                              summary_model=lambda text: email_summary.ask_model(text, settings.model))
     except Exception:
         outcome, counts = 'failed', {'error': 1}
     print(receipt(outcome, counts))
