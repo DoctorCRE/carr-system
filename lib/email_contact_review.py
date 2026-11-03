@@ -46,3 +46,65 @@ def plan(mail, contact, *, owner, account, account_id):
                                          'message_id': mail.get('message_id')}},
             'proposes_correction': {'field': field, 'current': prior, 'proposed': item['value']}})
     return requests, None
+
+
+def resolve_sources(mailbox, mails, source_key, copy_window):
+    """Resolve representations without moving frozen observations or borrowing keys.
+
+    A Message-ID with competing sources is never proof by itself. Content proof
+    can extend one compatible source, but cannot collapse known distinct keys.
+    None means that the new representation must wait for unique evidence.
+    """
+    sources = mailbox.setdefault('sources', {})
+    competing = mailbox.setdefault('competing', {})
+    resolved = {}
+    groups = {}
+    for mail in mails:
+        mid = (mail.get('message_id') or '').strip().strip('<>').lower()
+        groups.setdefault(mid, []).append(mail)
+    def content_proof(mail):
+        return digest([mail['sender'].lower(), mail.get('subject'), mail['sent_unix'],
+                       mail.get('body', mail['text']), mail.get('copy_key')])
+
+    for mid, rows in groups.items():
+        known_mid = any(mid and r['message_id'] == mid for r in sources.values())
+        batch_keys = {tuple(m['local_keys']) for m in rows if m['local_keys']}
+        keyless = {m['ident'] for m in rows if not m['local_keys']}
+        batch_competes = len(batch_keys) > 1 or len(keyless) > 1
+        for mail in sorted(rows, key=lambda m: (bool(m['local_keys']), m['ident'])):
+            ident, keys = mail['ident'], set(mail['local_keys'])
+            proof = content_proof(mail)
+            same_content = [m for m in rows if content_proof(m) == proof]
+            proof_competes = (len({tuple(m['local_keys']) for m in same_content if m['local_keys']}) > 1
+                              or len({m['ident'] for m in same_content if not m['local_keys']}) > 1)
+            candidates = {s: r for s, r in sources.items() if mid and r['message_id'] == mid
+                          and (r.get('sent_unix') is None or abs(r['sent_unix'] - mail['sent_unix']) <= copy_window)}
+            exact = [s for s, r in sources.items() if ident in r['aliases']]
+            compatible = {s: r for s, r in candidates.items()
+                          if not keys or not r['keys'] or keys == set(r['keys'])}
+            proven = [s for s, r in compatible.items() if proof in r['proofs']]
+            selected = None
+            if len(exact) == 1:
+                selected = exact[0]
+            elif len(exact) > 1:
+                resolved[ident] = None
+                continue
+            elif not proof_competes and len(proven) == 1:
+                selected = proven[0]
+            elif candidates and compatible and (known_mid or not batch_competes):
+                resolved[ident] = None
+                continue
+            if selected is None:
+                selected = source_key(ident)
+                sources[selected] = {'aliases': [], 'keys': [], 'proofs': [], 'message_id': mid, 'sent_unix': mail['sent_unix']}
+            record = sources[selected]
+            record['aliases'] = sorted(set(record['aliases']) | {ident})
+            record['keys'] = sorted(set(record['keys']) | keys)
+            # Proofs freeze source content. A changed body must not become proof
+            # for another alias just because its store key was already known.
+            if not record['proofs']:
+                record['proofs'] = [proof]
+            if mid:
+                competing[mid] = sorted(set(competing.get(mid, [])) | {selected})
+            resolved[ident] = selected
+    return resolved

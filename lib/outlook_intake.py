@@ -827,6 +827,7 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
             m['local_keys'] = ['decoded-row-' + str(m['row_ids'][0])]
         m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'] or '', m['subject'] or '',
                                           m['sent_unix'], m['local_keys'])
+        m['signature_ident'] = m['ident']
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
@@ -956,7 +957,6 @@ class Run:
         self.unmatched: set[tuple[str, str, str]] = set()
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
-        self.signature_aliases: dict[str, str] = {}
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
         legacy = key(verb, ref, source)
@@ -1042,9 +1042,8 @@ class Run:
         its own message. When it reconciles, pending and
         unresolved entries keep their identity (their record-layer writes are keyed by it) and take
         the row's ck and time, and mail already done is done under the row's ck. Either direction of
-        decoder change gives the same result. Frozen signature observations move to the target
-        identity without changing their requests or journal acknowledgements. A mailbox-scoped
-        signature holder stays reachable independently of unresolved activity holders.
+        decoder change gives the same result. Signature sources reconcile independently
+        through their immutable canonical observation and mailbox-scoped alias sets.
         """
         account = _hash(self.settings.account.strip().lower())
         if self.state.get('mail_ids_account') != account:
@@ -1056,26 +1055,9 @@ class Run:
         for m in mails:
             if mid := (m.get('message_id') or '').strip().strip('<>').lower():
                 groups.setdefault(mid, []).append(m)
-        signature_ids = self.state.setdefault('signature_ids', {})
-        observations = self.state.get('signature_observations', {})
-        signature_candidates: dict[str, set[str]] = {}
-        for observation_key, observation in observations.items():
-            for request in observation['requests']:
-                locator = request['value']['source_locator']
-                ident = observation.get('ident', locator['item_id'])
-                mid = (locator.get('message_id') or '').strip().strip('<>').lower()
-                if mid and observation_key == self.signature_source(ident):
-                    signature_candidates.setdefault(self.signature_source(mid), set()).add(ident)
-        for signature_id, candidates in signature_candidates.items():
-            if len(candidates) == 1:
-                signature_ids.setdefault(signature_id, next(iter(candidates)))
         for mid, rows in groups.items():
             target = next((m for m in rows if _store_keys(m['local_keys'])), rows[0])
             priors = ({ids[mid]} if mid in ids else set()) | {m['ident'] for m in rows}
-            signature_id = self.signature_source(mid)
-            signature_prior = signature_ids.get(signature_id)
-            if signature_prior is not None and self.signature_source(signature_prior) in observations:
-                priors.add(signature_prior)
             priors.discard(target['ident'])
             store_keys = ({tuple(_store_keys(m['local_keys'])) for m in rows}
                           | {tuple(_store_keys(keys.get(p, []))) for p in priors | {target['ident']}}) - {()}
@@ -1084,14 +1066,7 @@ class Run:
                 self.counts['message_id_ambiguous'] += 1
                 continue
             holder = target['ident']
-            source = self.signature_source(target['ident'])
             for prior in priors:
-                self.signature_aliases[prior] = target['ident']
-                previous = self.signature_source(prior)
-                if previous in observations and source not in observations:
-                    observations[source] = observations.pop(previous)
-                    observations[source].setdefault('binding_keys', keys.get(prior, []))
-                    observations[source]['ident'] = target['ident']
                 ck, _, sent = prior.rpartition(':')
                 for table in held:
                     if prior in table:
@@ -1103,10 +1078,7 @@ class Run:
                         and any(abs(t - int(sent)) <= COPY_WINDOW for t in done.get(ck, []))):
                     done.setdefault(target['ck'], []).append(target['sent_unix'])
                     self.counts['mail_rekeyed'] += 1
-            if store_keys:
-                keys[target['ident']] = sorted(set(keys.get(target['ident'], [])) | set(next(iter(store_keys))))
             ids[mid] = holder
-            signature_ids[signature_id] = target['ident']
 
     def signature_source(self, ident: str) -> str:
         return email_contact_review.digest([self.settings.owner, self.settings.account.lower(),
@@ -1114,19 +1086,48 @@ class Run:
 
     def signature_findings(self, mails: list[dict], matcher: Matcher) -> None:
         observations = self.state.setdefault('signature_observations', {})
+        mailbox = self.state.setdefault('signature_sources', {}).setdefault(self.signature_source('mailbox'), {})
+        sources = mailbox.setdefault('sources', {})
+        for source, observation in observations.items():
+            if source in sources or not observation['requests']:
+                continue
+            locator = observation['requests'][0]['value']['source_locator']
+            if source != self.signature_source(observation.get('ident', locator['item_id'])):
+                continue
+            mid = (locator.get('message_id') or '').strip().strip('<>').lower()
+            sources[source] = {'aliases': sorted({observation.get('ident', locator['item_id']), locator['item_id']}),
+                               'keys': observation.get('binding_keys', locator['local_keys']),
+                               'proofs': [], 'message_id': mid}
+            competing = mailbox.setdefault('competing', {})
+            competing[mid] = sorted(set(competing.get(mid, [])) | {source})
+        # Activity retries may rename decoded rows. Signature evidence uses the
+        # decoder representation itself and never the activity holder's keys.
+        representations = []
         for mail in mails:
             if (mail['metadata_incomplete'] or not mail['full']
                     or _internal(mail['sender'], self.settings.internal_domain)
                     or mail['sent_unix'] > self.now.timestamp() + 300):
                 continue
+            ident = mail.get('signature_ident', mail['ident'])
+            representations.append({**mail, 'ident': ident})
+        resolved = email_contact_review.resolve_sources(mailbox, representations, self.signature_source, COPY_WINDOW)
+        mids = {(m.get('message_id') or '').strip().strip('<>').lower() for m in representations}
+        self.counts['message_id_ambiguous'] = max(self.counts['message_id_ambiguous'],
+            sum(len(mailbox.get('competing', {}).get(mid, [])) > 1 for mid in mids if mid))
+        self.state.pop('signature_ids', None)
+        _save(self.out, self.state)
+        for mail in representations:
             contact = matcher.signature_contact(mail['sender'])
             if contact is None:
                 self.counts['signature_held'] += 1
                 continue
             snapshot = contact.contact_snapshot
             assert snapshot is not None
-            ident = self.signature_aliases.get(mail['ident'], mail['ident'])
-            source = self.signature_source(ident)
+            ident = mail['ident']
+            source = resolved.get(ident)
+            if source is None:
+                self.counts['signature_held'] += 1
+                continue
             observation = observations.get(source)
             binding_keys = observation.get('binding_keys', mail['local_keys']) if observation else mail['local_keys']
             binding = email_contact_review.digest([mail['sender'].lower(), mail.get('body', mail['text']),
@@ -1827,8 +1828,6 @@ def _prune(state: dict, now: datetime) -> None:
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
     signature_sources = {o['ident'] for o in state.get('signature_observations', {}).values() if 'ident' in o}
     held = set(unresolved) | set(state.get('pending_full', {})) | signature_sources
-    state['signature_ids'] = {mid: ident for mid, ident in state.get('signature_ids', {}).items()
-                              if ident in signature_sources}
     state['mail_ids'] = {mid: ident for mid, ident in state.get('mail_ids', {}).items() if ident in held
                          or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()

@@ -1,45 +1,33 @@
 ---
 name: verify-email-contact-review
-description: Verify source identity when editing signature reconciliation, findings, pruning or their formal models.
+description: Verify canonical signature identity when editing reconciliation, findings, pruning or formal models.
 ---
 
-# Verify email signature review
+# Verify signature review
 
-Coverage is Run.reconcile, Run.signature_source, Run.signature_findings and _prune
-in lib/outlook_intake.py. The Sources model describes reviewed commit
-303e4051f68b6a374f3959942a43efb0efd0f9cb plus the WR442.S2.J26 independent holder
-diff. Check that correspondence before advancing this sync record. Review covers
-transport. Neither model proves server identity atomicity or extraction correctness.
+Coverage is email_contact_review.resolve_sources, Run.signature_findings,
+_best_copies and _prune. Correspondence was checked against WR442.S2.J28's
+Approach 2 diff on base 26ef1e966. Check the diff before advancing this sync record.
+Review separately models the existing Run.write journal.
 
-Use TLC 2.19 (5a47802), Java 21 or later and the installed pstack runner. Set
-TLA2TOOLS to tla2tools.jar and JAVA to the Java binary. Run from the repository root.
+Read docs/models/email-contact-review/README.md for the checksum, six exact runner
+commands, bounds, omissions and named tests. Execute every command. Canonical must
+pass all three invariants. Rekey, Holder and Ambiguity must break AtMostOne and
+ChangedPartySourceHold. UnsafeProof must break UniqueProof. Review must pass all
+configured invariants. Inspect summary.json, stories.md and PNGs. A parser or
+adapter error never counts as an expected invariant failure.
 
-```sh
-model="$PWD/docs/models/email-contact-review"
-runner=/Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/statechart/scripts/statechart.mjs
-node "$runner" from-spec "$model/Review.tla" --config "$model/Review.cfg" --map "$model/view.mjs" --out /tmp/verify-email-review
-node "$runner" from-spec "$model/Sources.tla" --config "$model/Sources.cfg" --map "$model/sources-view.mjs" --out /tmp/verify-email-sources
-node "$runner" from-spec "$model/Sources.tla" --config "$model/SourcesBroken.cfg" --map "$model/sources-view.mjs" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/verify-email-old-sources
-.venv/bin/python ops/outlook-intake-selftest.py
-.venv/bin/python ops/email-contact-review-selftest.py
-```
+Canonical starts with two frozen sources sharing a Message-ID and explores six
+scans over four aliases and one unknown representation, two parties and bodies,
+lost receipts, pending activity and restart. It omits arbitrary source counts,
+creation, legacy migration, extraction and server races. Run the synthetic SQLite
+intake suite for those source paths.
 
-AtMostOne forbids a second signature proposal for the same real source.
-ChangedPartySourceHold forbids submission after the original party/body changes.
-Sources explores two aliases, versions, parties and bodies, and activity either
-resolved or persistently unresolved. Its fixed config must pass both invariants.
-Its broken config must fail both. Review must pass all five configured invariants.
-Read summary.json for counts, stories.md and tlc output for traces. Exceptions and
-adapter failures are not passing or expected-broken results.
-
-For a real-code mutation check, save the intake file outside the checkout, replace
-`priors.add(signature_prior)` with `pass`, and run
-`IntakeTest.test_signature_unresolved_activity_alias_reversal_holds_party` through
-ops/outlook-intake-selftest.py. It must fail with two findings instead of one.
-Restore the file and rerun. Never commit the mutation. If it no longer fails,
-inspect the design and update model/test coverage before advancing the sync record.
-
-Every transition has a named test in the model README. Add a test for each new
-transition. If a trace cannot reproduce through persisted synthetic SQLite intake,
-treat it as a modeling error until evidence says otherwise. Use
-maintain-formal-verification-skill to update this coverage after later changes.
+Mutation check: save lib/email_contact_review.py outside the checkout. In the unique
+proof branch, replace selected = proven[0] with selected = source_key(ident),
+followed by initialization of an empty source record containing aliases, keys,
+proofs and message_id. Run
+IntakeTest.test_signature_competing_history_preserves_both_sources through
+ops/outlook-intake-selftest.py. It must fail with three findings. Restore the file
+and rerun. Never commit the mutation. If it survives, repair this verification.
+Also retain successful-upgrade tests; count-only assertions can miss permanent holds.

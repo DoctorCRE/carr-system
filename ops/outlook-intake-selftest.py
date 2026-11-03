@@ -592,7 +592,7 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([{**old, 'local_keys': '77'}])
         state_path = self.out() / intake.STATE
         state = json.loads(state_path.read_text())
-        state.pop('signature_ids')
+        state.pop('signature_sources')
         state_path.write_text(json.dumps(state))
         self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
         result = self.run_intake([old])
@@ -606,9 +606,10 @@ class IntakeTest(unittest.TestCase):
         one, two = ({**old, 'local_keys': k} for k in ('77', '78'))
         result = self.run_intake([one, two])
         self.assertEqual(result.counts['message_id_ambiguous'], 1)
-        self.assertEqual(len(self.fake.findings), 3)
+        self.assertEqual(result.counts['signature_held'], 2)
+        self.assertEqual(len(self.fake.findings), 1)
         self.run_intake([one, two])
-        self.assertEqual(len(self.fake.findings), 3)
+        self.assertEqual(len(self.fake.findings), 1)
 
     def test_signature_simultaneous_aliases_share_frozen_request(self):
         old = self.signature_alias_fixture()
@@ -711,6 +712,24 @@ class IntakeTest(unittest.TestCase):
 
     def test_signature_competing_history_lost_response_changed_party(self):
         self.signature_competing_history(lost=True, party=True)
+
+    def test_signature_competing_batch_holds_changed_new_alias(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        changed = {**b, 'local_keys': '88', 'body': b['body'] + '\nTitle: Director'}
+        result = self.run_intake([{**a, 'local_keys': '77'}, changed])
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_competing_sources_upgrade_together(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        self.run_intake([{**a, 'local_keys': '77'}, {**b, 'local_keys': '88'}])
+        self.assertEqual(len(self.fake.findings), 2)
 
     def test_signature_ambiguous_new_representation_waits_for_proof(self):
         a = self.signature_alias_fixture()
