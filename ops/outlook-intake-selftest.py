@@ -781,7 +781,7 @@ class IntakeTest(unittest.TestCase):
         notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
         self.assertEqual(len(notes), 1)
         self.assertEqual((notes[0]['ref'], notes[0]['detail']), ('confirmed-deal', 'listing: ' + listing))
-        self.assertEqual(self.fake.hydrated_bodies, {source: listing})
+        self.assertEqual(self.fake.hydrated_bodies, {source: '<' + listing + '>'})
         self.assertEqual(self.run_intake([full], touch=False).state, 'succeeded')
         self.assertEqual(len([a for _, a in self.fake.writes('log-activity')
                               if a['summary'] == 'Links from matched email']), 1)
