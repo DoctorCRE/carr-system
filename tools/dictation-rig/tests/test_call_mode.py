@@ -1361,6 +1361,16 @@ class PostCallTests(unittest.TestCase):
                     if expected != "resolved":
                         self.assertIsNone(task["due_on"])
 
+    def test_deal_step_keeps_unsupported_relative_offset(self) -> None:
+        quote = "I will call two weeks from Friday."
+        report = post_call.normalize_distillation(self.output(joe_tasks=[], draft_proposals=[],
+            deal_updates=[{"deal_id": "deal-a", "participant_ids": [], "summary": "Call vendor",
+                "evidence": quote, "next_step": {"text": "Call vendor",
+                    "next_date": "2026-11-13", "needs_review": None}}]),
+            self.context, self.session.name, call_date="2026-10-26",
+            transcript={"segments": [{"text": quote}]})
+        self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], "2026-11-13")
+
     def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
         excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
         context = {**self.context, "skipped_deals": excluded}

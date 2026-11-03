@@ -394,12 +394,17 @@ def _relative_phrases(evidence: str) -> list[str]:
     if CALENDAR_DAY.search(evidence):
         return []
     evidence = PAST_RELATIVE_DAY.sub("", evidence)
+    weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
+    relative_context = re.sub(r"\bday after tomorrow\b", "tomorrow", evidence, flags=re.IGNORECASE)
+    if re.search(r"\bfollowing\s+" + weekdays +
+                 r"\b|\b(?:days?|weeks?|months?)\s+(?:from|after|before)\b|\b" + weekdays +
+                 r"\s+after next\b|\bthis time next week\b", relative_context, re.IGNORECASE):
+        return []
     phrases = [match.group().lower() for match in RELATIVE_DAY.finditer(evidence)
                if not re.match(r"['’]s\b", evidence[match.end():])
                or re.match(r"['’]s\s+lunch call\b", evidence[match.end():], re.IGNORECASE)
                and re.search(r"\bbefore\s+$", evidence[:match.start()], re.IGNORECASE)]
     if "next week" in phrases and any(phrase.split()[-1] in WEEKDAYS for phrase in phrases):
-        weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
         if not re.search(r"\b(?:" + weekdays + r"\s+next week|next week\s+" + weekdays + r")\b",
                          evidence, re.IGNORECASE) or re.search(r"\b(?:or|this)\b", evidence, re.IGNORECASE):
             return []
