@@ -41,6 +41,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["email_proposal_deal_invalid", "Choose an eligible deal and review the proposal again."],
   ["email_proposal_not_pending", "Re-read the proposal before confirming."],
   ["email_proposal_repair_conflict", "A filing proposal already exists for this email and deal. Re-read the proposals before repairing."],
+  ["email_delivery_filing_changed", "Source filings changed. Retry delivery attribution with current evidence."],
   ["email_proposal_stale", "Re-read and review the current proposal before confirming."],
   ["email_sender_contact_required", "Create the sender contact before confirming the filing."],
   ["partner_confirmation_required", "A verified partner must confirm this action."],
