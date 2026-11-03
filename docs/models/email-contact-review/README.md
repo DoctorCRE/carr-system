@@ -92,6 +92,55 @@ With the statechart runner on PATH and TLA2TOOLS/JAVA configured, run from a scr
 ```sh
 review_source="$(git rev-parse --show-toplevel)/docs/models/email-contact-review"
 cd /tmp
-statechart "$review_source/Review.tla" --config "$review_source/Review.cfg" \
-  --view "$review_source/view.mjs" --out /tmp/email-contact-review-model
+node /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/statechart/scripts/statechart.mjs from-spec "$review_source/Review.tla" --config "$review_source/Review.cfg" \
+  --map "$review_source/view.mjs" --out /tmp/email-contact-review-model
 ```
+
+## Unresolved activity retries
+
+Card: WR442.S2.J26
+
+`mail_ids` owns activity retry identity. The independent `signature_ids` holder,
+keyed by mailbox digest and normalized Message-ID, keeps the signature observation
+reachable. Both participate in the existing ambiguity and store-key checks. Only
+a holder with a signature observation contributes an extra prior. Activity-only
+messages retain their existing mailbox-reset behavior. Pruning keeps signature
+holders with their observations. Frozen request locators seed the index for
+observations saved before this index existed, including the reviewed-head state.
+
+`Sources.tla` models separate activity/signature holders and the observation index.
+`SourcesBroken.cfg` selects lookup from reviewed commit
+303e4051f68b6a374f3959942a43efb0efd0f9cb. TLC breaks AtMostOne and
+ChangedPartySourceHold at depth 11. The trace freezes a keyless proposal, retains
+unresolved activity, scans its keyed alias, changes the snapshot or party/body,
+then returns to the keyless alias. The old lookup loses the observation. Both
+review scripts returned `1, 1, 2` before the fix and `1, 1, 1` afterward.
+
+`Sources.cfg` selects the independent holder. Both invariants hold across 194
+model states and 450 nonstuttering transitions. Bounds are two aliases, snapshot
+versions, parties and bodies, and resolved or unresolved activity. Restart
+preserves persisted state. The companion Review model and journal tests cover
+lost responses and refusal, rather than a cross-product of both models. Sources
+abstracts mailbox lookup, ambiguity, extraction and the server identity race.
+This finite check does not prove every possible Python execution.
+
+Every Sources transition maps to an `IntakeTest` method.
+
+| Transition | Named test |
+| --- | --- |
+| Review / initial proposal | `test_signature_keyless_keyed_repeat_preserves_observation` |
+| Activity / unresolved | `test_signature_unresolved_activity_alias_reversal_freezes_snapshot` |
+| Activity / resolved | `test_signature_keyed_keyless_repeat_preserves_observation` |
+| Scan and Reconcile / repeated reversals | `test_signature_unresolved_activity_alias_reversal_freezes_snapshot` |
+| ChangeSnapshot / version | `test_signature_unresolved_activity_alias_reversal_freezes_snapshot` |
+| ChangeSnapshot / party | `test_signature_unresolved_activity_alias_reversal_holds_party` |
+| ChangeSnapshot / body | `test_signature_unresolved_activity_alias_reversal_holds_source` |
+| Restart and pre-index migration | `test_signature_unresolved_activity_migrates_pre_index_observation` |
+| Review / lost response | `test_signature_unresolved_activity_alias_reversal_retries_lost_response` |
+| Review / uncertain response and party change | `test_signature_unresolved_activity_alias_reversal_holds_uncertain_party` |
+| Scan / reverse initial alias | `test_signature_unresolved_activity_reverse_alias_reversal` |
+
+Run the same installed runner with Sources.tla, Sources.cfg and sources-view.mjs.
+Use SourcesBroken.cfg and `--expect-broken AtMostOne,ChangedPartySourceHold` to
+reproduce the reviewed logic. The local verify-email-contact-review skill gives
+complete commands, tool versions and the real-code mutation check.

@@ -585,6 +585,21 @@ class IntakeTest(unittest.TestCase):
     def test_signature_unresolved_activity_alias_reversal_holds_uncertain_party(self):
         self.unresolved_signature_alias_scans(change='party', lost=True)
 
+    def test_signature_unresolved_activity_migrates_pre_index_observation(self):
+        old = self.signature_alias_fixture()
+        self.fake.fail_verbs.add('log-activity')
+        self.run_intake([old])
+        self.run_intake([{**old, 'local_keys': '77'}])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state.pop('signature_ids')
+        state_path.write_text(json.dumps(state))
+        self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
+        result = self.run_intake([old])
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+
     def test_signature_ambiguous_message_ids_stay_separate(self):
         old = self.signature_alias_fixture()
         self.run_intake([old])

@@ -6,17 +6,17 @@ VARIABLES alias, holder, signatureHolder, observationIndex, mode, version,
 vars == <<alias, holder, signatureHolder, observationIndex, mode, version,
           party, body, first, findings, changedAttempt, activityPending>>
 Init == /\ alias = 0 /\ holder = 0 /\ signatureHolder = 0
-        /\ observationIndex = [a \in {0,1} |-> "none"]
+        /\ observationIndex = [a \in {0,1} |-> <<>>]
         /\ mode = "Review" /\ version = 0 /\ party = 0 /\ body = 0
-        /\ first = "none" /\ findings = {} /\ changedAttempt = FALSE
+        /\ first = <<>> /\ findings = {} /\ changedAttempt = FALSE
         /\ activityPending \in BOOLEAN
 \* outlook_intake.py:1060-1095 reconcile. The old implementation consults only
 \* the activity holder; the fixed implementation also consults signature_ids.
 Reconcile == /\ mode = "Reconcile"
              /\ LET prior == IF BrokenAlias THEN holder ELSE signatureHolder
-                    move == prior # alias /\ observationIndex[prior] # "none"
+                    move == prior # alias /\ observationIndex[prior] # <<>>
                 IN observationIndex' = IF move
-                   THEN [observationIndex EXCEPT ![alias] = observationIndex[prior], ![prior] = "none"]
+                   THEN [observationIndex EXCEPT ![alias] = observationIndex[prior], ![prior] = <<>>]
                    ELSE observationIndex
              /\ signatureHolder' = alias /\ mode' = "Review"
              /\ UNCHANGED <<alias, holder, version, party, body, first, findings, changedAttempt, activityPending>>
@@ -24,14 +24,14 @@ Reconcile == /\ mode = "Reconcile"
 \* Token is the frozen request plus its original party/body binding. Version
 \* changes make newly prepared UUIDs distinct, but never invalidate old bindings.
 Review == /\ mode = "Review"
-          /\ LET token == IF observationIndex[alias] = "none"
+          /\ LET token == IF observationIndex[alias] = <<>>
                           THEN <<alias, version, party, body>> ELSE observationIndex[alias]
                  valid == token[3] = party /\ token[4] = body
              IN /\ observationIndex' = [observationIndex EXCEPT ![alias] = token]
                 /\ findings' = IF valid THEN findings \cup {token} ELSE findings
-                /\ first' = IF first = "none" THEN token ELSE first
-                /\ changedAttempt' = changedAttempt \/
-                     (valid /\ first # "none" /\ (first[3] # party \/ first[4] # body))
+                /\ first' = IF first = <<>> THEN token ELSE first
+                /\ changedAttempt' = (changedAttempt \/
+                     (valid /\ first # <<>> /\ (first[3] # party \/ first[4] # body)))
           /\ mode' = "Activity"
           /\ UNCHANGED <<alias, holder, signatureHolder, version, party, body, activityPending>>
 \* outlook_intake.py:1081-1095 retains unresolved activity identity.

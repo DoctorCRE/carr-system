@@ -1,57 +1,49 @@
 ---
-title: "Email signature findings across decoder aliases"
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
 ---
 stateDiagram-v2
-  state "keyless" as s0 {
-    s1: Unread
-    s2: Prepared
-    s3: Held
-    s4: Recorded
-    s5: Refused
-    s6: Retry
-    s7: Changed
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
   }
-  state "keyed" as s8 {
-    s9: Unread
-    s10: Prepared
-    s11: Held
-    s12: Recorded
-    s13: Refused
-    s14: Retry
-    s15: Changed
+  class legendWorks works
+  state "At the same time" as regions {
+    [*] --> r0s1
+    state "keyed" as r0s0
+    state "keyless" as r0s1
+    r0s1 --> r0s0 : prove decoder alias by<br/>unambiguous Message-ID
+    --
+    [*] --> r1s6
+    state "Changed" as r1s0
+    state "Held" as r1s1
+    state "Prepared" as r1s2
+    state "Recorded" as r1s3
+    state "Refused" as r1s4
+    state "Retry" as r1s5
+    state "Unread" as r1s6
+    r1s0 --> r1s5 : original source binding<br/>restored
+    r1s1 --> r1s6 : read full source with exact<br/>party
+    r1s2 --> r1s5 : submit frozen proposal
+    r1s2 --> r1s3 : submit frozen proposal
+    r1s2 --> r1s4 : submit frozen proposal
+    r1s5 --> r1s0 : retry or hold after validation
+    r1s6 --> r1s1 : resolve sender and inspect<br/>signature
+    r1s6 --> r1s2 : resolve sender and inspect<br/>signature
   }
-  [*] --> s1
-  s1 --> s2: resolve sender and inspect signature
-  s1 --> s9: prove decoder alias by unambiguous Message-ID
-  s1 --> s3: resolve sender and inspect signature
-  s2 --> s10: prove decoder alias by unambiguous Message-ID
-  s2 --> s4: submit frozen proposal
-  s2 --> s5: submit frozen proposal
-  s2 --> s6: submit frozen proposal
-  s9 --> s1: prove decoder alias by unambiguous Message-ID
-  s9 --> s10: resolve sender and inspect signature
-  s9 --> s11: resolve sender and inspect signature
-  s3 --> s1: read full source with exact party
-  s3 --> s11: prove decoder alias by unambiguous Message-ID
-  s10 --> s12: submit frozen proposal
-  s10 --> s13: submit frozen proposal
-  s10 --> s14: submit frozen proposal
-  s10 --> s2: prove decoder alias by unambiguous Message-ID
-  s4 --> s12: prove decoder alias by unambiguous Message-ID
-  s5 --> s13: prove decoder alias by unambiguous Message-ID
-  s6 --> s4: retry or hold after validation
-  s6 --> s5: retry or hold after validation
-  s6 --> s14: prove decoder alias by unambiguous Message-ID
-  s6 --> s7: retry or hold after validation
-  s11 --> s9: read full source with exact party
-  s11 --> s3: prove decoder alias by unambiguous Message-ID
-  s12 --> s4: prove decoder alias by unambiguous Message-ID
-  s13 --> s5: prove decoder alias by unambiguous Message-ID
-  s14 --> s12: retry or hold after validation
-  s14 --> s13: retry or hold after validation
-  s14 --> s15: retry or hold after validation
-  s14 --> s6: prove decoder alias by unambiguous Message-ID
-  s7 --> s6: original source binding restored
-  s7 --> s15: prove decoder alias by unambiguous Message-ID
-  s15 --> s14: original source binding restored
-  s15 --> s7: prove decoder alias by unambiguous Message-ID
+  class r0s0 works
+  class r0s1 works
+  class r1s0 works
+  class r1s1 works
+  class r1s2 works
+  class r1s3 works
+  class r1s4 works
+  class r1s5 works
+  class r1s6 works

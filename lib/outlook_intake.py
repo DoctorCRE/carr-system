@@ -1043,7 +1043,8 @@ class Run:
         unresolved entries keep their identity (their record-layer writes are keyed by it) and take
         the row's ck and time, and mail already done is done under the row's ck. Either direction of
         decoder change gives the same result. Frozen signature observations move to the target
-        identity without changing their requests or journal acknowledgements.
+        identity without changing their requests or journal acknowledgements. A mailbox-scoped
+        signature holder stays reachable independently of unresolved activity holders.
         """
         account = _hash(self.settings.account.strip().lower())
         if self.state.get('mail_ids_account') != account:
@@ -1055,9 +1056,26 @@ class Run:
         for m in mails:
             if mid := (m.get('message_id') or '').strip().strip('<>').lower():
                 groups.setdefault(mid, []).append(m)
+        signature_ids = self.state.setdefault('signature_ids', {})
+        observations = self.state.get('signature_observations', {})
+        signature_candidates: dict[str, set[str]] = {}
+        for observation_key, observation in observations.items():
+            for request in observation['requests']:
+                locator = request['value']['source_locator']
+                ident = observation.get('ident', locator['item_id'])
+                mid = (locator.get('message_id') or '').strip().strip('<>').lower()
+                if mid and observation_key == self.signature_source(ident):
+                    signature_candidates.setdefault(self.signature_source(mid), set()).add(ident)
+        for signature_id, candidates in signature_candidates.items():
+            if len(candidates) == 1:
+                signature_ids.setdefault(signature_id, next(iter(candidates)))
         for mid, rows in groups.items():
             target = next((m for m in rows if _store_keys(m['local_keys'])), rows[0])
             priors = ({ids[mid]} if mid in ids else set()) | {m['ident'] for m in rows}
+            signature_id = self.signature_source(mid)
+            signature_prior = signature_ids.get(signature_id)
+            if signature_prior is not None and self.signature_source(signature_prior) in observations:
+                priors.add(signature_prior)
             priors.discard(target['ident'])
             store_keys = ({tuple(_store_keys(m['local_keys'])) for m in rows}
                           | {tuple(_store_keys(keys.get(p, []))) for p in priors | {target['ident']}}) - {()}
@@ -1066,7 +1084,6 @@ class Run:
                 self.counts['message_id_ambiguous'] += 1
                 continue
             holder = target['ident']
-            observations = self.state.get('signature_observations', {})
             source = self.signature_source(target['ident'])
             for prior in priors:
                 self.signature_aliases[prior] = target['ident']
@@ -1089,6 +1106,7 @@ class Run:
             if store_keys:
                 keys[target['ident']] = sorted(set(keys.get(target['ident'], [])) | set(next(iter(store_keys))))
             ids[mid] = holder
+            signature_ids[signature_id] = target['ident']
 
     def signature_source(self, ident: str) -> str:
         return email_contact_review.digest([self.settings.owner, self.settings.account.lower(),
@@ -1809,6 +1827,8 @@ def _prune(state: dict, now: datetime) -> None:
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
     signature_sources = {o['ident'] for o in state.get('signature_observations', {}).values() if 'ident' in o}
     held = set(unresolved) | set(state.get('pending_full', {})) | signature_sources
+    state['signature_ids'] = {mid: ident for mid, ident in state.get('signature_ids', {}).items()
+                              if ident in signature_sources}
     state['mail_ids'] = {mid: ident for mid, ident in state.get('mail_ids', {}).items() if ident in held
                          or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
