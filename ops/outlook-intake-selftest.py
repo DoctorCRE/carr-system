@@ -738,7 +738,7 @@ class IntakeTest(unittest.TestCase):
         notes = [a for _, a in self.fake.writes('log-activity') if a['summary'] == 'Links from matched email']
         self.assertEqual(len(notes), 1)
         self.assertEqual((notes[0]['ref'], notes[0]['detail']), ('confirmed-deal', 'listing: ' + listing))
-        self.assertEqual(self.fake.hydrated_bodies, {source: full['body']})
+        self.assertEqual(self.fake.hydrated_bodies, {source: listing})
         self.assertEqual(self.run_intake([full], touch=False).state, 'succeeded')
         self.assertEqual(len([a for _, a in self.fake.writes('log-activity')
                               if a['summary'] == 'Links from matched email']), 1)
@@ -2084,6 +2084,18 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(argv, [str(self.repo / 'run.sh'), 'call', 'log-activity', '-'])
         self.assertEqual(json.loads(call.call_args.kwargs['input']), args)
         self.assertNotIn('PRIVATE-SENTINEL', str(argv))
+
+    def test_safe_link_body_is_read_and_filed_as_the_destination(self):
+        destination = 'https://www.loopnet.com/Listing/synthetic'
+        wrapper = 'https://nam12.safelinks.protection.outlook.com/?url=' + quote(destination, safe='')
+        m = mail('pat@example.test', -timedelta(hours=1), body='Listing ' + wrapper)
+        result = self.run_intake([m])
+        self.assertEqual(result.state, 'succeeded')
+        [(verb, args)] = self.fake.writes('log-activity')
+        self.assertEqual(args['detail'], 'Listing ' + destination)
+        _, messages, _ = intake._load(self.fake.fixture)
+        self.assertEqual(messages[0]['body'], 'Listing ' + destination)
+        self.assertEqual(messages[0]['preview'], 'Listing ' + destination)
 
     def test_inbound_mail_from_a_known_address_logs_email_in_with_a_uuid5_key(self):
         m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example')

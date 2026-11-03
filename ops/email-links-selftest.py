@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.email_links import extract_links
+from lib.email_links import extract_links, unwrap_safe_links
 
 
 def wrap(url):
@@ -38,6 +38,40 @@ class LinksTest(unittest.TestCase):
                'https://evil.example%2f.loopnet.com/listing',
                r'https://evil.example\.dropbox.com/folders/x', r'https://loopnet.com/path\bad']
         self.assertEqual(extract_links(' '.join(bad + [wrap(url) for url in bad])), [])
+
+    def test_normalizes_bodies(self):
+        destination = 'https://drive.google.com/drive/folders/a%20b?x=1&y=2'
+        for region in ('nam12', 'eur03'):
+            wrapper = wrap(destination).replace('example.', region + '.') + '&data=opaque%2520'
+            for body, expected in (
+                ('See ' + wrapper, 'See ' + destination),
+                ('<a href="' + wrap(destination) + '">Open</a>',
+                 '<a href="' + destination.replace('&', '&amp;') + '">Open</a>'),
+                ('<a href="' + wrapper.replace('&', '&amp;') + '">Open</a>',
+                 '<a href="' + destination.replace('&', '&amp;') + '">Open</a>'),
+                (wrap(wrapper), destination),
+                (wrap(quote(destination, safe='')), destination),
+            ):
+                with self.subTest(region=region, body=body):
+                    self.assertEqual(unwrap_safe_links(body), expected)
+                    self.assertEqual(unwrap_safe_links(expected), expected)
+
+    def test_preserves_non_wrappers_and_malformed_wrappers(self):
+        for body in (
+            'https://example.test/?url=https%3A%2F%2Fdrive.google.com',
+            wrap('https://loopnet.com/a').replace('outlook.com', 'outlook.com.evil.test'),
+            wrap('https://loopnet.com/a').replace('example.safelinks', 'evilsafelinks'),
+            'https://nam12.safelinks.protection.outlook.com/?data=opaque',
+            wrap('https://loopnet.com/a') + '&url=https%3A%2F%2Fevil.test',
+            wrap('not a URL'), wrap('javascript:alert(1)'),
+            wrap('https://example.test/<tag>'), wrap('https://example.test/' + chr(34)),
+            wrap(''), wrap('%FF'),
+            wrap('https://loopnet.com/%0aattack'), wrap('https://[broken'),
+            wrap('https://loopnet.com/a') + '%ZZ',
+            wrap(wrap('not a URL')),
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(unwrap_safe_links(body), body)
 
     def test_links_are_bounded(self):
         body = ' '.join(f'https://loopnet.com/Listing/{i}' for i in range(30))
