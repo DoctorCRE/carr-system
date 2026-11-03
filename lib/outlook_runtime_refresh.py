@@ -5,6 +5,7 @@ import argparse
 from contextlib import ExitStack
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -20,6 +21,8 @@ LABELS = tuple('com.carr.outlook-' + service for service in ('intake', 'triage',
 
 
 def refresh(host, *, apply=False, timeout=300):
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError('drain timeout must be finite and positive')
     if host.recovery_pending():
         if not apply:
             return 'recovery pending; rerun with --apply to restore previous state'
@@ -227,7 +230,7 @@ def main():
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--timeout', type=float, default=300, help='maximum drain wait in seconds (default 300)')
     args = parser.parse_args()
-    if args.timeout <= 0:
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error('--timeout must be positive')
     host = Host(Path(__file__).resolve().parents[1], args.sha, load_settings())
     try:

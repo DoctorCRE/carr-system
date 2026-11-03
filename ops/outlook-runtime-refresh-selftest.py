@@ -24,6 +24,13 @@ class RefreshTests(unittest.TestCase):
         adapter.recovery_pending.return_value = False
         return adapter
 
+    def test_nonfinite_or_nonpositive_timeout_is_rejected_before_effects(self):
+        for timeout in (float('inf'), float('nan'), 0, -1):
+            a = self.adapter()
+            with self.assertRaises(ValueError):
+                refresh(a, apply=True, timeout=timeout)
+            self.assertEqual(a.method_calls, [])
+
     def test_success_waits_then_swaps_verifies_restores(self):
         a = self.adapter()
         self.assertEqual(refresh(a, apply=True, timeout=10), 'refreshed')
