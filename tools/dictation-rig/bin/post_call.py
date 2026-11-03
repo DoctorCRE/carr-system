@@ -1059,10 +1059,10 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
             raise ContractError("post-call report is unreadable")
-        transcript = read_json(session_dir / "transcript.json") or {}
-        if transcript.get("unrecovered_speech"):
+        disclosure_transcript = read_json(session_dir / "transcript.json") or {}
+        if disclosure_transcript.get("unrecovered_speech"):
             with update_report(session_dir, initial=report, locked=True) as current:
-                disclose_unrecovered_speech(current, transcript)
+                disclose_unrecovered_speech(current, disclosure_transcript)
                 report = deepcopy(current)
         if existing.get("state") != "filed":
             try:
