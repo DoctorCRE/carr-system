@@ -2,6 +2,8 @@
 import json
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 import wave
 from pathlib import Path
 
@@ -10,6 +12,68 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import transcribe_session as transcription
 
+
+
+class FakeClock:
+    elapsed = 0.0
+
+    def __call__(self):
+        return self.elapsed
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(time, 'monotonic', clock)
+
+    class FixedDatetime:
+        @staticmethod
+        def now(tz):
+            return datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(transcription, 'datetime', FixedDatetime)
+    return clock
+
+
+@pytest.mark.parametrize('seconds_per_chunk', [100, 120])
+def test_call_recovery_budget_preserves_unrecovered_speech(tmp_path, monkeypatch, clock,
+                                                         seconds_per_chunk):
+    audio = tmp_path / 'synthetic.wav'
+    with wave.open(str(audio), 'wb') as output:
+        output.setparams((1, 2, 100, 0, 'NONE', 'not compressed'))
+        output.writeframes(b'\0\0' * 100 * 300)
+    original = ' '.join(['Synthetic repeated phrase.'] * 30)
+    calls = []
+
+    def decode(cmd, **kwargs):
+        recovery = '-mc' in cmd
+        if recovery:
+            elapsed = min(seconds_per_chunk, kwargs['timeout'])
+            clock.elapsed += elapsed
+            calls.append(kwargs['timeout'])
+            if elapsed < seconds_per_chunk:
+                raise subprocess.TimeoutExpired(cmd, kwargs['timeout'])
+        rows = ([segment(0, 1000, f'Recovered useful speech number {len(calls)}.')] if recovery else
+                [segment(0, 300000, original)])
+        target = Path(cmd[cmd.index('-of') + 1]).with_suffix('.json')
+        target.write_text(json.dumps({'transcription': [
+            {'offsets': {'from': row.start_ms, 'to': row.end_ms}, 'text': row.text}
+            for row in rows]}))
+        return subprocess.CompletedProcess(cmd, 0, '', '')
+
+    monkeypatch.setattr(transcription.subprocess, 'run', decode)
+    result = transcription.run_whisper(audio, tmp_path / 'model.bin', '', tmp_path,
+                                       lambda _: None)
+    assert clock.elapsed <= 240, f'recovery took {clock.elapsed} synthetic seconds'
+    assert len(calls) <= 3
+    assert result[-1].text == original
+    assert result[-1].unrecovered
+    assert result[-1].start_ms == 60000
+    assert result[-1].end_ms == 300000
+    tagged = transcription.shift_and_tag(result, 500, ['Speaker'] * len(result))
+    assert tagged[-1]['unrecovered'] is True
+    assert tagged[-1]['start_ms'] == 60500
+    assert tagged[-1]['text'] == original
 
 def segment(start, end, text):
     return transcription.RawSegment(start, end, text)
@@ -94,7 +158,7 @@ def test_unrecovered_loop_stops_before_summary(tmp_path, monkeypatch):
     monkeypatch.setattr(transcription, 'load_prompt', lambda: '')
     monkeypatch.setattr(transcription, 'convert_caf_to_wav', lambda *_: track)
 
-    def fail(*_):
+    def fail(*_, **__):
         raise transcription.RepetitionError('Unresolved transcription repetition')
 
     monkeypatch.setattr(transcription, 'run_whisper', fail)
