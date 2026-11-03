@@ -1,0 +1,12 @@
+stateDiagram-v2
+  [*] --> Projected
+  Projected --> DetailLoaded: Open the exact current card
+  Projected --> Refused: Card changed, disappeared, resolved or unsupported
+  Projected --> Refused: Another actor requests the card
+  DetailLoaded --> OwnerSubmitted: Submit the displayed domain operation
+  OwnerSubmitted --> Refreshed: Owner accepts, refresh Home
+  OwnerSubmitted --> Refused: Owner refuses changed version or authority
+  Refused --> Projected: Refresh Home and review again
+  Refreshed --> Projected: Review remaining work
+  %% never: Reading a card changes domain state.
+  %% never: A Home operation bypasses the domain owner.

@@ -10,7 +10,8 @@
     "action_id": "UUID|null; next_action or capture_post_call_action ID for complete-one-action",
     "action_version": "integer|null; canonical action version, sent as complete-one-action base_version",
     "deal_id": "UUID|null; owning deal for completion readback, null for non-deal work",
-    "auto_settled": "boolean; canonical resolution placed this item in Settled without a disposition write"
+    "auto_settled": "boolean; canonical resolution placed this item in Settled without a disposition write",
+    "review_reference": "home-review.v1 reference|null; exact item and source version with candidate domain operations; load read-home-review for current detail and available operations"
   },
   "sections": [
     "inbox",

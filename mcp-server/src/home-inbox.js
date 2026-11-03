@@ -1,4 +1,5 @@
 // Project canonical work without changing its domain state.
+import { homeReviewReference } from './home-review.js';
 export const HOME_INBOX_CONTRACT = Object.freeze({
   schema_version: 'home-inbox.v2',
   read_verb: 'read-home-inbox-v2',
@@ -24,7 +25,8 @@ export const HOME_INBOX_SETTLEMENT_CONTRACT = Object.freeze({
   ...HOME_INBOX_CONTRACT,
   schema_version: 'home-inbox.v3',
   read_verb: 'read-home-inbox-v3',
-  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, kind_label: 'Task|Call follow-up|Call|Reply draft|Update|Fact review|Tour feedback', auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write' },
+  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, kind_label: 'Task|Call follow-up|Call|Reply draft|Update|Fact review|Tour feedback', auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write',
+    review_reference: 'home-review.v1 reference|null; exact item and source version with candidate domain operations; load read-home-review for current detail and available operations' },
   auto_settle_source_types: ['next_action', 'capture_post_call_action', 'email_proposal', 'fact_review', 'tour_feedback'],
   settlement: 'Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
 });
@@ -35,7 +37,8 @@ function withAutomaticSettlement(snapshot) {
       const auto_settled = item.source_state === 'done' && item.disposition === 'inbox' &&
         !item.explicit_unsettle && HOME_INBOX_SETTLEMENT_CONTRACT.auto_settle_source_types.includes(item.source_type);
       const section = item.disposition !== 'inbox' ? item.disposition : item.explicit_unsettle ? 'inbox' : auto_settled ? 'settled' : item.section;
-      return { ...item, section, disposition: auto_settled ? 'settled' : item.disposition, auto_settled };
+      return { ...item, section, disposition: auto_settled ? 'settled' : item.disposition, auto_settled,
+        review_reference: homeReviewReference(item) };
     }),
   };
 }
