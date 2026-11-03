@@ -400,6 +400,8 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
+  if (verb === "record-finding" && args.kind === "email_signature_observation")
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (verb === "record-finding" && args.kind === "email_delivery_failure")
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
       [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
@@ -413,6 +415,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
     return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
+  if (verb === "record-finding" && result.disposition === "held") return result;
   if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
   await client.query(
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
@@ -6897,6 +6900,11 @@ export const TOOLS = {
       subject: { type: "string", description: "C-127 / L-204 / V-CPA-006 / P-0301, an exact deal name, or — when subject_kind is campaign/platform/pillar/format — a campaign name or a marketing_subject slug ('twitter', 'reel'). CODE (0101): 'commit:<sha>' files against the one repo at that commit, 'owner/name@<sha>' against another repo, 'repo:owner/name' against the codebase itself." },
       subject_kind: { type: "string", enum: ["auto","party","campaign","platform","pillar","format","repo","commit"], default: "auto",
         description: "'party' pins the flag to the person/org behind a ref instead of the client/lead/vendor record. THE FOUR MARKETING KINDS (0066) are how a finding about a THING rather than a PERSON gets recorded: 'X has returned no analytics for any of 42 placements' is a platform finding, 'reels outperform statics on reach' is a format finding. Before 0066 those had no subject at all and the marketing seat's core output went nowhere. A platform/pillar/format subject must already exist in marketing_subject — this verb registers nothing, because a typo'd slug minting a new pillar is how a taxonomy becomes noise. THE TWO CODE KINDS (0101) are 'commit' (subject is a sha, or 'owner/name@<sha>') and 'repo' (subject is 'owner/name'). Unlike the marketing kinds these ARE minted on demand: a sha is self-evidencing rather than a taxonomy, so there is no vocabulary a typo can pollute. You rarely need to pass these — a subject written as 'commit:<sha>' or 'owner/name@<sha>' is recognised under 'auto'." },
+      observed_binding: { type: "object", additionalProperties: false,
+        description: "Required for email_signature_observation. Frozen contact snapshot and message sender, validated in the finding transaction. A mismatch returns held without a finding or receipt.",
+        properties: { party_id: { type: "string", format: "uuid" }, party_version: { type: "integer", minimum: 1 },
+          sender: { type: "string" }, email: { type: "string" } },
+        required: ["party_id", "party_version", "sender", "email"] },
       kind: { type: "string", description: "what was looked for: verified, email, cell, social, npi, title, discrepancy..." },
       value: { type: "object", description: "the finding, structured. Omit when found:false." },
       found: { type: "boolean", default: true, description: "false records a searched-and-empty result" },
@@ -6944,6 +6952,33 @@ export const TOOLS = {
           correction_proposed: !!prior.value.proposes_correction };
       }
 
+      let signatureParty;
+      if (args.kind === "email_signature_observation") {
+        const binding = args.observed_binding;
+        const hold = () => ({ ok: false, disposition: "held", reason: "email_signature_binding_changed",
+          error: "email_signature_binding_changed" });
+        if (!binding || typeof binding.party_id !== "string" || !UUID_KEY.test(binding.party_id)
+            || !Number.isSafeInteger(binding.party_version) || binding.party_version < 1
+            || typeof binding.sender !== "string" || !binding.sender
+            || typeof binding.email !== "string"
+            || args.value?.party_id !== binding.party_id || args.value?.party_version !== binding.party_version
+            || ![undefined, "auto", "party"].includes(args.subject_kind)) return hold();
+        // Row locks cannot exclude a newly inserted party sharing this sender.
+        await c.query("lock table party, client, lead, vendor in share mode");
+        const contacts = (await TOOLS["email-match-contacts"].handler(c)).contacts;
+        const matches = contacts.filter(row => row.address === binding.sender.toLowerCase());
+        const partyRef = /^P-\d+$/i.test(args.subject || "")
+          && (await c.query("select id from party where ref ilike $1 and id=$2", [args.subject, binding.party_id])).rows.length === 1;
+        const contact = matches.find(row => row.ref.toLowerCase() === String(args.subject).toLowerCase()
+          || (partyRef && row.contact_snapshot?.party_id === binding.party_id));
+        const snapshot = contact?.contact_snapshot;
+        if (!snapshot || matches.some(row => !row.exact || !row.contact_snapshot
+              || row.contact_snapshot.party_id !== binding.party_id)
+            || snapshot.party_id !== binding.party_id || snapshot.party_version !== binding.party_version
+            || snapshot.values.email !== binding.email) return hold();
+        signatureParty = binding.party_id;
+      }
+
       let subjectType, subjectId;
       const MARKETING_KINDS = ["campaign", "platform", "pillar", "format"];
       const CODE_KINDS = ["repo", "commit"];
@@ -6964,7 +6999,10 @@ export const TOOLS = {
           hint: args.subject_kind === "commit"
             ? "with subject_kind:'commit', subject is a sha ('f7abde7') or 'owner/name@<sha>'"
             : "with subject_kind:'repo', subject is 'owner/name'" });
-      if (codeRef) {
+      if (signatureParty !== undefined) {
+        subjectType = "party";
+        subjectId = signatureParty;
+      } else if (codeRef) {
         const cs = await resolveCodeSubject(c, args.subject_kind === "repo"
           ? `repo:${codeRef.repo}`
           : (codeRef.sha ? `${codeRef.repo}@${codeRef.sha}` : `repo:${codeRef.repo}`), actor.id);

@@ -153,7 +153,8 @@ ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reus
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed',
-                         'agenda_version_conflict', 'version_conflict', 'email_delivery_filing_changed'})
+                         'agenda_version_conflict', 'version_conflict', 'email_delivery_filing_changed',
+                         'email_signature_binding_changed'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
@@ -161,7 +162,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'version_conflict', 'email_delivery_filing_changed', *CLOSED_ELSEWHERE):
+    if error in ('key_reuse', 'version_conflict', 'email_delivery_filing_changed', 'email_signature_binding_changed', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -1008,7 +1009,7 @@ class Run:
                     return True
                 blocked = error.code in BLOCKED_ERRORS or (
                     verb == 'record-finding' and args.get('kind') == email_contact_review.KIND
-                    and error.code in {'auth_refused', 'version_conflict'}) or (
+                    and error.code in {'auth_refused', 'version_conflict', 'email_signature_binding_changed'}) or (
                     verb in ('complete-deal-item', 'drop-action') and error.code == 'version_conflict')
                 request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
                                retry_at=None if blocked else int(self.now.timestamp()) +

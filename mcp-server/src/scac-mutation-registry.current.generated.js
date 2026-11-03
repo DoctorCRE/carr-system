@@ -2847,7 +2847,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-finding": {
     "ingress_key": "mcp-tool:record-finding",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "7b6f625577d6bc1094dbadb953d6ea644e9b3dde04ace4f8389144bc29e6e193",
+    "schema_digest": "076634eb76389de9d2a9671e8da9bc89de8c0270e768dec6b1b6dfb25e1c6fd9",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

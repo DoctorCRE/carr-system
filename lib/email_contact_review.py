@@ -35,6 +35,8 @@ def plan(mail, contact, *, owner, account, account_id):
         requests.append({
             'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, 'record-finding|' + digest(identity))), 'subject': contact.ref,
             'subject_kind': 'auto' if contact.ref.startswith('P-') else 'party',
+            'observed_binding': {'party_id': snapshot['party_id'], 'party_version': snapshot['party_version'],
+                                 'sender': mail['sender'].lower(), 'email': snapshot['values'].get('email')},
             'kind': KIND, 'epistemic_status': 'proposed', 'source': source,
             'value': {'verification': 'unverified_signature_observation', 'verified': False,
                       'party_id': snapshot['party_id'], 'party_version': snapshot['party_version'],

@@ -126,3 +126,11 @@ ReviewTest covers preparation, loss, retry, refusal, expiry and changed bindings
 The older ambiguity assertion expected three findings after one keyless source
 followed by two indistinguishable keyed candidates. Approach 2 deliberately retains
 one finding and holds both candidates, resolving its conflict with unique proof.
+
+## Atomic server binding
+
+[Binding](binding.md) extends the review models with the observed party and sender
+snapshot precondition at the server write. Binding.tla checks stale submissions,
+held requests, refreshed observations and replay. Its transition table links to
+the real PostgreSQL handler tests, including competing contact writes. The earlier
+models still omit server races; this companion covers that bounded transaction.

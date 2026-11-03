@@ -42,6 +42,8 @@ class ReviewTest(unittest.TestCase):
         self.calls.append((verb, copy.deepcopy(args)))
         self.assertEqual(verb, 'record-finding')
         self.assertEqual(str(uuid.UUID(args['idempotency_key'])), args['idempotency_key'])
+        if self.error == 'binding':
+            return {'ok': False, 'disposition': 'held', 'error': 'email_signature_binding_changed'}
         if self.error == 'refuse':
             return {'ok': False, 'error': 'forbidden'}
         if self.error == 'transient':
@@ -75,6 +77,21 @@ class ReviewTest(unittest.TestCase):
         self.assertIn('outlook-signature/', args['source'])
         self.assertEqual(self.snapshot, prior)
         self.assertFalse({'update-party-contact', 'correct-party-identity'} & {v for v, _ in self.calls})
+
+    def test_server_binding_hold_blocks_frozen_request_without_logging_identity(self):
+        self.error = 'binding'
+        work = self.run_review()
+        self.assertEqual(len(self.receipts), 0)
+        request = next(iter(self.state['requests'].values()))
+        self.assertEqual(request['disposition'], 'blocked')
+        self.assertFalse(request['acknowledged'])
+        self.assertEqual(request['error_code'], 'email_signature_binding_changed')
+        self.assertEqual(self.calls[0][1]['observed_binding'], {
+            'party_id': 101, 'party_version': 7, 'sender': 'pat@example.test', 'email': 'pat@example.test'})
+        self.now += timedelta(minutes=5)
+        self.run_review()
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(work.counts['writes_failed'], 1)
 
     def test_missing_fields_and_identity_observations_require_review(self):
         self.message['text'] += '\nTitle: Director\nName: Pat New\nCompany: New Org'

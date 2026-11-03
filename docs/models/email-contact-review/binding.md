@@ -34,4 +34,15 @@ arbitrary source counts, which remain in Review and Canonical.
 | Change commits before waiting Submit | waiting finding validates after a competing party change |
 
 Regenerate with Java 21 and TLA2TOOLS pointing at the pinned jar documented in README.
-node <statechart skill>/scripts/statechart.mjs from-spec docs/models/email-contact-review/Binding.tla --config docs/models/email-contact-review/Binding.cfg --map docs/models/email-contact-review/binding-view.mjs --out /tmp/j32-binding --png
+node /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/statechart/scripts/statechart.mjs from-spec docs/models/email-contact-review/Binding.tla --config docs/models/email-contact-review/Binding.cfg --map docs/models/email-contact-review/binding-view.mjs --out /tmp/j32-binding --png
+
+Executed TLC summary reports 10 model states, 16 model transitions, five chart
+states and eight chart transitions. All three invariants hold. The rendered
+PNG was inspected. The replay self-loop stutters and is tested at the handler.
+Generated stories.md and summary.json remain in /tmp/j32-binding.
+
+The Model the Domain principle keeps the observed binding in one object instead
+of adding independent checks to every caller. Codebase design retains one server
+validation seam and reuses the deployed exact-sender reader. The debt pass adds
+no parallel email parser or identity resolver. The additional code replaces the
+unconditional signature-finding write; no existing guard can be deleted safely.

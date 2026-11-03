@@ -13,6 +13,7 @@ before(async () => {
   await c.connect();
   actor = { ...(await c.query("insert into actor(slug,kind,display_name) values('joe','human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug")).rows[0], human: true };
   party = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic contact','sender@example.test',$1,$1) returning id", [actor.id])).rows[0].id;
+  await c.query("update party set ref='P-999443' where id=$1", [party]);
   await c.query("insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing");
   client = (await c.query("insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'fixture_active',$2,$2,'C-999443') returning id", [party, actor.id])).rows[0].id;
 });
@@ -50,6 +51,7 @@ test('stale snapshot holds without receipts and current retry records once', asy
   await empty(args);
   const fresh = await evidence();
   fresh.source = args.source;
+  fresh.idempotency_key = args.idempotency_key;
   const first = await finding(fresh);
   assert.equal(first.ok, true);
   assert.equal((await finding(fresh)).flag_id, first.flag_id);
@@ -63,12 +65,14 @@ test('changed sender and ambiguous sender hold', async () => {
   await empty(args);
   await c.query("update party set email='sender@example.test' where id=$1", [party]);
   const second = (await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic second','sender@example.test',$1,$1) returning id", [actor.id])).rows[0].id;
+  await c.query("update party set ref='P-999444' where id=$1", [second]);
   try { held(await finding(await evidence())); } finally { await c.query('delete from party where id=$1', [second]); }
 });
 
 test('changed role binding holds', async () => {
   const args = await evidence();
-  await c.query('update client set party_id=null where id=$1', [client]);
+  const replacement = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic replacement',$1,$1) returning id", [actor.id])).rows[0].id;
+  await c.query('update client set party_id=$2 where id=$1', [client, replacement]);
   try { held(await finding(args)); await empty(args); }
   finally { await c.query('update client set party_id=$2 where id=$1', [client, party]); }
 });
@@ -82,7 +86,7 @@ test('finding transaction excludes competing identity writes', async () => {
     assert.equal((await TOOLS['record-finding'].handler(c, actor, args)).ok, true);
     for (const [sql, params] of [
       ['update party set version=version+1 where id=$1', [party]],
-      ['update client set party_id=null where id=$1', [client]],
+      ['update client set version=version+1 where id=$1', [client]],
       ["insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic competing','sender@example.test',$1,$1)", [actor.id]],
     ]) {
       await other.query('begin');
@@ -114,6 +118,30 @@ test('missing binding and inconsistent evidence hold', async () => {
   const args = await evidence();
   held(await finding({ ...args, observed_binding: undefined }));
   await empty(args);
-  held(await finding({ ...args, value: { ...args.value, party_id: party + 1 } }));
+  held(await finding({ ...args, value: { ...args.value, party_id: randomUUID() } }));
   await empty(args);
+});
+
+test('concurrent current retries record once', async () => {
+  const other = new pg.Client(connection);
+  await other.connect();
+  try {
+    const args = await evidence();
+    const [a, b] = await Promise.all([finding(args), finding(args, other)]);
+    assert.equal(a.flag_id, b.flag_id);
+    assert.equal((await c.query('select count(*) from record_flag where source=$1', [args.source])).rows[0].count, '1');
+  } finally { await other.end(); }
+});
+
+test('deleted and merged parties hold and a bare party ref records', async () => {
+  const args = await evidence();
+  for (const column of ['deleted_at', 'merged_into']) {
+    await c.query(`update party set ${column}=$2 where id=$1`, [party, column === 'deleted_at' ? '2026-10-20T15:00:00Z' : party]);
+    try { held(await finding(args)); await empty(args); }
+    finally { await c.query(`update party set ${column}=null where id=$1`, [party]); }
+  }
+  const fresh = await evidence();
+  fresh.subject = (await c.query('select ref from party where id=$1', [party])).rows[0].ref;
+  fresh.subject_kind = 'auto';
+  assert.equal((await finding(fresh)).subject_id, party);
 });
