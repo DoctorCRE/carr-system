@@ -3154,6 +3154,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "reopen-one-action": {
+    "ingress_key": "mcp-tool:reopen-one-action",
+    "source_locator": "mcp-server/src/action-closure.ts",
+    "schema_digest": "d0c94e6bfee78f90b817863e0e9f238d9a42087507338f137afdf81a58da41ee",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "report-problem": {
     "ingress_key": "mcp-tool:report-problem",
     "source_locator": "mcp-server/src/work-request-intake.js",
