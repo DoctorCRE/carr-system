@@ -58,9 +58,13 @@ test('every live party address comes back with its record ref, in or out of mark
         ('aaaaaaaa-0000-4000-8000-000000000001', 'Bayside suite', ' Rep@Landlord.test '),
         ('aaaaaaaa-0000-4000-8000-000000000002', 'Office build', 'pm@build.test; office@build.test'),
         ('aaaaaaaa-0000-4000-8000-000000000003', 'Blank deal', 'no address here');`);
+    await db.query(`alter table party add column version integer default 1;
+      alter table party add column title text;
+      alter table party add column cell text;
+      update party set title='Director', cell='555-0102', version=7 where id=1;`);
     // The deployed reader has these column grants (0500, 0839, 0989), not table ownership.
     await db.query(`create role carr_reader;
-      grant select(id,name,ref,email,merged_into,deleted_at,org_id) on party to carr_reader;
+      grant select(id,name,ref,email,merged_into,deleted_at,org_id,phone,cell,title,version) on party to carr_reader;
       grant select(party_id,roster_ref,merged_into) on client to carr_reader;
       grant select(party_id,registry_ref) on lead to carr_reader;
       grant select(party_id,vendor_ref,merged_into) on vendor to carr_reader;
@@ -70,7 +74,7 @@ test('every live party address comes back with its record ref, in or out of mark
     assert.equal(tool.write, false);
     const reply = await tool.handler(db, {}, {});
     assert.equal(reply.schema_version, 'email-match-contacts.v1');
-    assert.deepEqual(reply.contacts, [
+    assert.deepEqual(reply.contacts.map(({contact_snapshot, ...contact}) => contact), [
       {address: 'pat@client.test', ref: 'C-0101', name: 'Pat Client', exact: true},
       {address: 'pat@client.test', ref: 'L-0201', name: 'Pat Client', exact: true},
       {address: 'dr@practice.test', ref: 'L-0206', name: 'Practice Org', exact: true},
@@ -84,6 +88,34 @@ test('every live party address comes back with its record ref, in or out of mark
       {address: 'pm@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: true},
       {address: 'office@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: false},
     ], 'out-of-market and role-less parties are read, plus open-deal contacts by deal ref; merged-away and deleted parties never are');
+    const pat = reply.contacts.filter(item => item.address === 'pat@client.test');
+    assert.deepEqual(pat[0].contact_snapshot, {
+      party_id: 1, party_version: 7,
+      values: {name: 'Pat Client', company: null, title: 'Director', phone: '555', cell: '555-0102', email: ' Pat <PAT@Client.Test> '},
+      provenance: {source: 'party', party_id: 1, party_version: 7, company: null},
+      unread_fields: [],
+    });
+    assert.deepEqual(pat[0].contact_snapshot, pat[1].contact_snapshot, 'multiple roles do not make a party ambiguous');
+    assert.equal(reply.contacts.find(item => item.address === 'frontdesk@practice.test').contact_snapshot, undefined);
+    const doctor = reply.contacts.find(item => item.address === 'dr@practice.test').contact_snapshot;
+    assert.equal(doctor.values.name, '', 'raw prior name is never replaced with display fallback');
+    assert.equal(doctor.values.company, 'Practice Org');
+    assert.deepEqual(doctor.provenance.company, {source: 'party.name', party_id: 7, party_version: 1});
+    assert.equal(reply.contacts.find(item => item.ref.startsWith('aaaaaaaa')).contact_snapshot, undefined, 'deal ref is not a party identity');
+    await db.query('reset role');
+    await db.query("update party set email='PAT@client.test' where id=2");
+    await db.query('set role carr_reader');
+    const ambiguous = await tool.handler(db, {}, {});
+    assert.ok(ambiguous.contacts.filter(item => item.address === 'pat@client.test').every(item => !item.contact_snapshot), 'shared address has no snapshot');
+    await db.query('reset role');
+    await db.query("update party set merged_into=1 where id=2");
+    await db.query("update party set org_id=99 where id=6");
+    await db.query('set role carr_reader');
+    const changed = await tool.handler(db, {}, {});
+    assert.equal(changed.contacts.find(item => item.address === 'pat@client.test').contact_snapshot.party_id, 1);
+    const unread = changed.contacts.find(item => item.address === 'dr@practice.test').contact_snapshot;
+    assert.deepEqual(unread.unread_fields, ['company']);
+    assert.equal(Object.hasOwn(unread.values, 'company'), false, 'unread company is not empty');
   } finally {
     try { if (db) await db.end(); }
     finally { try { await fixture?.close(); } finally { await release(); } }
