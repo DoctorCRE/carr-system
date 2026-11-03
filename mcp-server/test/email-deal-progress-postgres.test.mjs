@@ -2008,6 +2008,40 @@ test('filing list provides source email and recorded version for undo', async ()
   assert.equal(filing.deal, deal);
   assert.match(filing.event_id, /^[0-9a-f-]{36}$/);
 });
+test('filing current destination follows authoritative activity state independently per thread', async () => {
+  await c.query("insert into party(kind,name,email,created_by,updated_by) select 'person','Synthetic sender','sender@example.test',$1,$1 where not exists (select 1 from party where email='sender@example.test')", [actor.id]);
+  const first = await automaticThreadFiling();
+  const second = await automaticThreadFiling();
+  const never = await email();
+  const read = async () => (await command('list-email-thread-filings', {}, actor, 'carr_reader')).filings;
+  let rows = await read();
+  assert.equal(rows.find(row => row.event_id === first.filing.event_id).current_deal_id, deal);
+  assert.equal(rows.find(row => row.event_id === second.filing.event_id).current_deal_id, deal);
+  assert.equal(rows.some(row => row.activity_id === never.activity_id), false);
+
+  const otherDeal = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
+    select 'Synthetic refile destination',client_id,deal_type,phase,owner,created_by,updated_by
+    from deal where id=$1 returning id`, [deal])).rows[0].id;
+  const stored = await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'file_to_deal',
+    activity_id: first.reply.activity_id, deal, evidence_quote: quote, confidence: .9, sender_role: 'client' }, router());
+  const correction_reason = 'Move to the separate transaction.';
+  const preview = await command('preview-email-filing', { proposal_id: stored.proposal_id, deal: otherDeal, correction_reason });
+  await command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: stored.proposal_id,
+    base_version: 1, proposal_digest: preview.proposal_digest, deal: otherDeal, correction_reason });
+  rows = await read();
+  const moved = rows.find(row => row.event_id === first.filing.event_id);
+  assert.equal(moved.deal, deal);
+  assert.equal(moved.current_deal_id, otherDeal);
+  assert.equal(rows.find(row => row.event_id === second.filing.event_id).current_deal_id, deal);
+
+  await c.query('update activity set deal_id=null,version=version+1 where id=$1', [first.reply.activity_id]);
+  rows = await read();
+  assert.equal(rows.find(row => row.event_id === first.filing.event_id).current_deal_id, null);
+  await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: second.filing.event_id }, actor, 'carr_writer');
+  rows = await read();
+  assert.equal(rows.some(row => row.event_id === second.filing.event_id), false);
+  assert.equal(rows.find(row => row.event_id === first.filing.event_id).current_deal_id, null);
+});
 test('filing list preserves ownership and reports legacy version as null', async () => {
   const { filing } = await automaticThreadFiling();
   const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };

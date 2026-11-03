@@ -291,7 +291,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       handler: async (c, actor) => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
         const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
-          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,a.deal_id as current_deal_id,
           a.email_context->>'subject' as subject,a.email_context->'sender'->>'name' as sender_name,
           a.occurred_at,(e.new_value->>'activity_version')::integer as activity_version
           from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
