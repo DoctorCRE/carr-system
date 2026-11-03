@@ -294,3 +294,5 @@ begin
  exception when raise_exception then if sqlerrm<>'tour deal is unavailable' then raise; end if; end;
 end $denied_creation$;
 rollback;
+
+\ir tour-deal-access-postgres.sql
