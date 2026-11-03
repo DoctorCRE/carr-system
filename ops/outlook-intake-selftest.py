@@ -687,7 +687,8 @@ class IntakeTest(unittest.TestCase):
                                   [{**b, 'local_keys': '88'}], [a, b],
                                   [{**a, 'local_keys': '77'}, {**b, 'local_keys': '88'}])):
             if party and n == 3:
-                self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
+                snapshot = self.fake.contacts_rows[0].contact_snapshot
+                snapshot['party_id'] = snapshot['provenance']['party_id'] = 102
             self.fake.now += timedelta(minutes=2)
             result = self.run_intake(rows)
             self.assertEqual(len(self.fake.findings), 2, 'competing MID history duplicated a source')
