@@ -16,10 +16,12 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "ops"))
+sys.path.insert(0, str(SOURCE))
 from git_env import scrubbed_env
-import launchd_scope
-import machine_role
-import launchd_hold
+from lib import launchd_scope, machine_role, launchd_hold
+from lib.outlook_settings import load_settings, SettingsError
+
+OUTLOOK_LABELS = frozenset("com.carr.outlook-" + name for name in ("intake", "triage", "outbox"))
 
 CANONICAL_CHECKOUT = "~/carr-system"
 
@@ -309,13 +311,23 @@ def report(manifest, snapshot, now):
                 fields = (installed_arguments(plist) + (loaded or []) +
                           working_directories(plist, runtime) + environment)
                 if checkout_drift(fields, required, roots) or not all(
-                        is_checkout(v, required, roots) for v in environment):
+                        is_checkout(v, required, roots) for v in environment + working_directories(plist, runtime)):
                     emit(label, "wrong_checkout", "installed or loaded runtime does not use declared checkout",
                          f"restore declared program in {job['required_checkout']} and reload the agent", owner)
         if enabled and present and job.get("log_max_age_seconds") is not None:
             mtime = snapshot["log_mtimes"].get(activity_path(job))
             if mtime is None or now - mtime > job["log_max_age_seconds"]:
                 emit(label, "stale_log", "declared activity log is missing or older than its allowed cadence", "inspect the scheduler and job log; restore a run that writes the declared activity signal", owner)
+    for label, freshness in snapshot.get("runtime_freshness", {}).items():
+        if not freshness.get("main_ancestor"):
+            emit(label, "runtime_not_on_main", "pinned runtime is not an ancestor of main", "refresh from verified main")
+        elif freshness.get("commits_behind_main", 0):
+            emit(label, "runtime_behind_main", f"pinned runtime is {freshness['commits_behind_main']} commits behind main", "run python -m lib.outlook_runtime_refresh --help")
+            rows[-1]["freshness"] = freshness
+    for error in manifest.get("errors", []):
+        if error not in observed:
+            continue
+        emit(error, "evidence_unavailable", "Outlook settings or pinned definition could not be read", "restore the private Outlook settings and pinned definition")
     git = snapshot.get("git", {})
     if git.get("behind", 0):
         emit("canonical", "behind_main", f"canonical checkout is {git['behind']} commits behind origin/main",
@@ -430,6 +442,15 @@ def collect(manifest):
         snapshot["git"]["remote_matches"] = local == remote[0]
     else:
         snapshot["errors"].append("remote_main")
+    snapshot["runtime_freshness"] = {}
+    for job in manifest["jobs"]:
+        if job["label"] not in OUTLOOK_LABELS:
+            continue
+        sha = command(["git", "-C", job["required_checkout"], "rev-parse", "HEAD"], "outlook_runtime_sha").stdout.strip()
+        ancestor = command(prefix + ["merge-base", "--is-ancestor", sha, "origin/main"], "outlook_runtime_ancestry", absent_ok=True)
+        behind = command(prefix + ["rev-list", "--count", sha + "..origin/main"], "outlook_runtime_freshness").stdout.strip()
+        snapshot["runtime_freshness"][job["label"]] = {"sha": sha, "main_ancestor": ancestor.returncode == 0,
+                                                          "commits_behind_main": int(behind) if behind.isdigit() else None}
     return snapshot
 
 
@@ -464,7 +485,7 @@ def status_path(root):
     return root / 'out/watchdog/scheduled-jobs.json'
 
 
-def native_manifest(source=SOURCE):
+def native_manifest(source=SOURCE, outlook_settings=None):
     """Derive expectations from the same native definitions the installer uses."""
     source = Path(source)
     manifest = {"schema_version": 1, "canonical_checkout": CANONICAL_CHECKOUT, "jobs": []}
@@ -474,6 +495,15 @@ def native_manifest(source=SOURCE):
     for path in sorted(paths):
         text = path.read_text().replace("{{REPO}}", "~/carr-system").replace("{{HOME}}", "~")
         definition = plistlib.loads(text.encode())
+        required_checkout = "~/carr-system"
+        if definition["Label"] in OUTLOOK_LABELS:
+            try:
+                settings = outlook_settings or load_settings()
+                definition = plistlib.loads(settings.render_plist(settings.repo / "ops/launchd" / path.name))
+            except (SettingsError, OSError, ValueError):
+                manifest.setdefault("errors", []).append(definition["Label"])
+                continue
+            required_checkout = str(settings.repo)
         interval = schedule(definition)
         if "StartInterval" in interval:
             raise ValueError(path.name + " uses StartInterval; use the macOS calendar schedule")
@@ -482,7 +512,7 @@ def native_manifest(source=SOURCE):
         manifest["jobs"].append({
             "label": definition["Label"], "scheduler": "launchd",
             "program_arguments": installed_arguments(definition), "interval": interval,
-            "required_checkout": "~/carr-system", "expected_enabled": bool(enabled),
+            "required_checkout": required_checkout, "expected_enabled": bool(enabled),
             "expected_installed": bool(enabled) or definition["Label"] in {"local.ds4-flash-next"}, "owner": "orchestrator",
             "log_path": definition.get("StandardOutPath") or definition.get("StandardErrorPath"),
             "log_paths": [definition.get(k) for k in ("StandardOutPath", "StandardErrorPath")],
