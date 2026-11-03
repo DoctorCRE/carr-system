@@ -100,7 +100,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       return reasons.length ? [{ deal: deal.id, name: deal.name, reasons: [...new Set(reasons)], requires_confirmation: true }] : [];
     });
   }
-  async function matchingPreview(c, row, people = null) {
+  async function matchingPreview(c, row, people = null, selection = null) {
     const activity = (await c.query(`select a.id,a.kind,a.summary,a.detail,a.occurred_at,a.version,a.email_context,a.deal_id,a.client_id,
       (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,'address_unavailable',true,
         'unknown',false,'internal',false) from party p where p.id=coalesce(
@@ -110,19 +110,24 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     if (!activity || !['email_in','email_out'].includes(activity.kind) || !row.evidence_quote?.length ||
         !(activity.detail?.includes(row.evidence_quote) || activity.email_context?.subject?.includes(row.evidence_quote)))
       fail('email_proposal_evidence_invalid');
-    if (row.kind === 'file_to_deal') {
-      const deal = (await c.query(`select id,client_id from deal where id=$1 and phase<>'closed' and invoiced_on is null`,
-        [row.deal_id])).rows[0];
-      if (!deal || (activity.deal_id && activity.deal_id !== row.deal_id)) fail('email_proposal_deal_invalid');
-      if (activity.client_id && activity.client_id !== deal.client_id) fail('email_new_deal_client_mismatch');
+    let selectedDeal;
+    if (selection || row.kind === 'file_to_deal') {
+      const deal = (await c.query(`select id,client_id,version from deal where id=$1 and phase<>'closed' and invoiced_on is null`,
+        [selection?.deal ?? row.deal_id])).rows[0];
+      selectedDeal = deal;
+      if (!deal || (activity.deal_id && activity.deal_id !== deal.id && !selection?.correction_reason?.trim())) fail('email_proposal_deal_invalid');
+      if (activity.client_id && activity.client_id !== deal.client_id && !selection?.correction_reason?.trim()) fail('email_new_deal_client_mismatch');
     }
     people ??= await contacts(c, [activity.id]);
     const context = evidence(activity, people);
-    const shown = { contract: 'email-filing.v1', proposal_id: row.id ?? null,
-      kind: row.kind, deal: row.deal_id, activity_id: row.activity_id,
+    const shown = { contract: selection ? 'email-followups.v2' : 'email-filing.v1', proposal_id: row.id ?? null,
+      kind: row.kind, deal: selection?.deal ?? row.deal_id, activity_id: row.activity_id,
       evidence_quote: row.evidence_quote, sender_role: row.sender_role,
       sender: context.sender, new_people: context.recipients.filter(p => !p.internal),
-      text: row.task_text, requires_confirmation: true };
+      text: row.task_text, requires_confirmation: true,
+      ...(selection ? { correction_reason: selection.correction_reason?.trim() ?? null,
+        source_client: activity.client_id, source_deal: activity.deal_id, base_version: row.version,
+        target_client: selectedDeal.client_id, target_version: selectedDeal.version } : {}) };
     return { ...shown, proposal_digest: 'sha256:' + sha256(JSON.stringify({ ...shown,
       activity_version: activity.version, captured_body: activity.detail, context: activity.email_context })) };
   }
@@ -158,42 +163,126 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     proposal_id: { type: 'string', format: 'uuid' },
     base_version: { type: 'integer', minimum: 1 },
   };
+  const noteProperty = { type: 'string', maxLength: 2000 };
+  const correctionProperty = { type: 'string', minLength: 1, maxLength: 500 };
+  const partner = actor => {
+    if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+  };
+  const lockSource = (c, id) => c.query(`select id from activity where id=
+    (select activity_id from email_proposal where id=$1) for update`, [id]);
+  async function pending(c, actor, args) {
+    partner(actor);
+    await lockSource(c,args.proposal_id);
+    const row = (await c.query('select * from email_proposal where id=$1 for update', [args.proposal_id])).rows[0];
+    if (!row || row.status !== 'pending') fail('email_proposal_not_pending');
+    if (row.kind === 'reply_draft' && row.owner !== actor.slug) fail('email_draft_not_owner');
+    checkVersion(row,args.base_version);
+    return row;
+  }
   return {
+    'preview-email-filing': {
+      write: false,
+      description: 'Preview a pending matching card against the exact selected existing or newly created deal. A client or deal correction requires a reason bound into the source-version digest. Sends and writes nothing.',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['proposal_id','deal'], properties: {
+        proposal_id: draftProperties.proposal_id, deal: { type: 'string', format: 'uuid' }, correction_reason: correctionProperty } },
+      handler: async (c, actor, args) => {
+        partner(actor);
+        const row = (await c.query('select * from email_proposal where id=$1', [args.proposal_id])).rows[0];
+        if (!row || !MATCHING.has(row.kind) || row.status !== 'pending') fail('email_proposal_not_pending');
+        return matchingPreview(c,row,null,{ ...args, deal: args.deal.toLowerCase() });
+      },
+    },
+    'snooze-email-proposal': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'Defer a pending email card until the supplied future UTC instant, with an optional note. Reads hide it strictly before that instant. Versioned, durable and replayable; no scheduled wake or send.',
+      inputSchema: { type: 'object', additionalProperties: false,
+        required: [...Object.keys(draftProperties),'deferred_until'], properties: { ...draftProperties,
+          deferred_until: { type: 'string', format: 'date-time' }, note: noteProperty } },
+      handler: async (c, actor, args) => {
+        await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
+        return withEnvelope(c,actor,'snooze-email-proposal',args,async () => {
+        const row = await pending(c,actor,args);
+        const stored = (await c.query(`update email_proposal set deferred_until=$2::timestamptz,
+          disposition='deferred',resolution_note=$3,version=version+1 where id=$1
+          and $2::timestamptz>now() returning deferred_until,version`,
+          [row.id,args.deferred_until,args.note ?? null])).rows[0];
+        if (!stored) fail('email_proposal_fields_invalid');
+        const receipt = { ok: true, proposal_id: row.id, status: 'pending', disposition: 'deferred',
+          version: stored.version, deferred_until: new Date(stored.deferred_until).toISOString(), note: args.note ?? null };
+        await writeEvent(c,actor,'snooze-email-proposal','activity',row.activity_id,
+          { new: receipt, cause: 'human_stated', idempotency_key: args.idempotency_key });
+        return receipt;
+      });
+      },
+    },
+    'handle-email-proposal': {
+      write: true, humanOnly: true, humanCallerOnly: true,
+      description: 'Mark a contact-only next step or reply proposal already handled, optionally with a note. Filing cards must instead select a deal and confirm-email-filing with disposition handled. Sends nothing.',
+      inputSchema: { type: 'object', additionalProperties: false, required: Object.keys(draftProperties),
+        properties: { ...draftProperties, note: noteProperty } },
+      handler: async (c, actor, args) => {
+        await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
+        return withEnvelope(c,actor,'handle-email-proposal',args,async () => {
+        const row = await pending(c,actor,args);
+        if (!['next_step','reply_draft'].includes(row.kind)) fail('email_proposal_deal_invalid');
+        await c.query(`update email_proposal set status='confirmed',disposition='handled',resolution_note=$2,
+          deferred_until=null,version=version+1,resolved_by=$3,resolved_at=now() where id=$1`,
+          [row.id,args.note ?? null,actor.id]);
+        const receipt = { ok: true, proposal_id: row.id, status: 'confirmed', disposition: 'handled',
+          note: args.note ?? null, version: row.version+1 };
+        await writeEvent(c,actor,'handle-email-proposal','activity',row.activity_id,
+          { new: receipt, cause: 'human_stated', idempotency_key: args.idempotency_key });
+        return receipt;
+      });
+      },
+    },
     'confirm-email-filing': {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: 'A partner confirms a displayed filing proposal with its version and digest. For a possible new deal, supply the created deal ID. Files the email and records the sender as a participant hint. Sends nothing.',
+      description: 'Confirm a source-version and exact-target preview to file or mark handled, with an optional note. Corrections require the previewed reason. Classifier roles stay hints. Sends nothing.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key','proposal_id','base_version','proposal_digest'], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
           proposal_id: { type: 'string', format: 'uuid' }, base_version: { type: 'integer', minimum: 1 },
-          proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' }, deal: { type: 'string', format: 'uuid' } } },
+          proposal_digest: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' }, deal: { type: 'string', format: 'uuid' },
+          disposition: { enum: ['filed','handled'] }, note: noteProperty, correction_reason: correctionProperty } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'confirm-email-filing', args, async () => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
+        await lockSource(c,args.proposal_id);
         const row = (await c.query(`select * from email_proposal where id=$1 for update`, [args.proposal_id])).rows[0];
         if (!row || !MATCHING.has(row.kind) || row.status !== 'pending') fail('email_proposal_not_pending');
         if (row.version !== args.base_version) fail('version_conflict');
         const activity = (await c.query('select id,client_id,deal_id,email_context from activity where id=$1 for update', [row.activity_id])).rows[0];
-        const targetId = row.kind === 'possible_new_deal' ? args.deal : row.deal_id;
-        if (row.kind === 'file_to_deal' && args.deal && args.deal.toLowerCase() !== row.deal_id) fail('email_proposal_deal_invalid');
-        const target = targetId && (await c.query('select id,client_id from deal where id=$1 for update', [targetId])).rows[0];
+        if (args.disposition === 'handled' && !args.deal) fail('email_proposal_deal_invalid');
+        const targetId = args.deal?.toLowerCase() ?? row.deal_id;
+        const target = targetId && (await c.query("select id,client_id from deal where id=$1 and phase<>'closed' and invoiced_on is null for update", [targetId])).rows[0];
         if (!target) fail('email_new_deal_not_found');
-        if (activity.client_id && activity.client_id !== target.client_id) fail('email_new_deal_client_mismatch');
-        if (activity.deal_id && activity.deal_id !== target.id) fail('email_proposal_deal_invalid');
-        const current = await matchingPreview(c, row);
-        if (current.proposal_digest !== args.proposal_digest) fail('email_proposal_stale');
+        const corrected = (activity.client_id && activity.client_id !== target.client_id) ||
+          (activity.deal_id && activity.deal_id !== target.id);
+        if (corrected && !args.correction_reason?.trim()) fail('email_new_deal_client_mismatch');
+        const current = await matchingPreview(c, row, null, args.deal ? { deal: target.id, correction_reason: args.correction_reason } : null);
+        if (current.proposal_digest !== args.proposal_digest) {
+          const legacyTarget = row.kind === 'file_to_deal' ? target.id === row.deal_id
+            : Boolean(args.deal) && !corrected && args.disposition !== 'handled';
+          const legacy = legacyTarget && !args.correction_reason ? await matchingPreview(c,row) : null;
+          if (legacy?.proposal_digest !== args.proposal_digest) fail('email_proposal_stale');
+        }
         if (!current.sender.party_id) fail('email_sender_contact_required', { message: 'Create the sender contact before confirming this filing.' });
-        await c.query(`update activity set deal_id=$2,client_id=coalesce(client_id,$4),version=version+1,updated_by=$3,updated_at=now() where id=$1`,
+        const provenance = { source_client: activity.client_id, source_deal: activity.deal_id,
+          proposed_deal: row.deal_id, target_deal: target.id, reason: args.correction_reason?.trim() ?? null,
+          sender_party_id: current.sender.party_id, proposed_sender_role: row.sender_role,
+          scope: activity.email_context?.conversation_id ? 'conversation' : 'message',
+          conversation_id: activity.email_context?.conversation_id ?? null, source_activity_id: row.activity_id };
+        await c.query(`update activity set deal_id=$2,client_id=$4,version=version+1,updated_by=$3,updated_at=now() where id=$1`,
           [row.activity_id,target.id,actor.id,target.client_id]);
-        await c.query(`insert into deal_participant(deal_id,party_id,role,set_by)
-            select $1,$2,$3,$4 where not exists(select 1 from deal_participant
-              where deal_id=$1 and party_id=$2 and role=$3 and to_at is null)`,
-            [target.id,current.sender.party_id,row.sender_role,actor.id]);
-        await c.query(`update email_proposal set status='confirmed',version=version+1,resolved_by=$2,resolved_at=now()
-          where id=$1`, [row.id,actor.id]);
+        await c.query(`update email_proposal set status='confirmed',disposition=$3,resolution_note=$4,
+          correction_provenance=$5::jsonb,deferred_until=null,version=version+1,resolved_by=$2,resolved_at=now()
+          where id=$1`, [row.id,actor.id,args.disposition ?? 'filed',args.note ?? null,JSON.stringify(provenance)]);
         await writeEvent(c, actor, 'confirm-email-filing', 'deal', target.id,
-          { new: { activity_id: row.activity_id, sender_party_id: current.sender.party_id, role: row.sender_role },
+          { new: { proposal_id: row.id, activity_id: row.activity_id, disposition: args.disposition ?? 'filed',
+              note: args.note ?? null, proposal_digest: args.proposal_digest, ...provenance },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
-        return { ok: true, status: 'confirmed', deal: target.id, activity_id: row.activity_id };
+        return { ok: true, status: 'confirmed', proposal_id: row.id, version: row.version+1,
+          disposition: args.disposition ?? 'filed', note: args.note ?? null, deal: target.id, activity_id: row.activity_id };
       }),
     },
     'list-email-thread-filings': {
@@ -203,7 +292,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       handler: async (c, actor) => {
         if (actor.human !== true || !['joe','dell'].includes(actor.slug)) fail('partner_confirmation_required');
         const { rows } = await c.query(`select e.id as event_id,e.subject_id as deal,
-          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,
+          e.new_value->>'activity_id' as activity_id,e.recorded_at,a.summary,a.deal_id as current_deal_id,
           a.email_context->>'subject' as subject,a.email_context->'sender'->>'name' as sender_name,
           a.occurred_at,(e.new_value->>'activity_version')::integer as activity_version
           from v_email_thread_filing_event e join activity a on a.id::text=e.new_value->>'activity_id'
@@ -258,6 +347,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       handler: (c, actor, args) => withEnvelope(c, actor, 'inherit-email-thread', args, async () => {
         const rows = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at,kind,client_id
           from activity where id=any($1::uuid[]) order by id for update`, [[args.activity_id,args.thread_activity_id]])).rows;
+        if ((await c.query(`select 1 from email_proposal where activity_id=$1
+          and (status='dismissed' or deferred_until>now()) limit 1`, [args.activity_id])).rows.length)
+          fail('email_thread_filing_suppressed');
         const people = await contacts(c, rows.map(row => row.activity_id));
         if ((await c.query("select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing' and new_value->>'activity_id'=$1 limit 1", [args.activity_id.toLowerCase()])).rows.length) fail('email_thread_filing_suppressed');
         const current = rows.find(r => r.activity_id === args.activity_id.toLowerCase());
@@ -358,7 +450,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const submitted = { subject: args.subject, body: args.body,
             sha256: sha256(JSON.stringify({ subject: args.subject, body: args.body })), ...recipients,
             attachments: args.attachments ?? [] };
-          await c.query(`update email_proposal set status='approved_to_send',version=version+1,
+          await c.query(`update email_proposal set status='approved_to_send',disposition=null,deferred_until=null,version=version+1,
             submitted_email=$2::jsonb,submitted_at=now(),resolved_by=$3,resolved_at=now(),
             send_result=null,result_recorded_at=null where id=$1`,
           [row.id, JSON.stringify(submitted), actor.id]);
@@ -517,7 +609,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (Object.keys(args).some(key => !['mode','cursor','idempotency_key'].includes(key))) fail('email_proposal_fields_invalid');
           const owner = senderOwner(actor);
           const rows = (await c.query(`select p.*,p.next_date::text as next_date from email_proposal p join activity a on a.id=p.activity_id
-            where p.status='pending' and p.created_at<=now()-interval '30 days'
+            where p.status='pending' and (p.deferred_until is null or p.deferred_until<=now()) and p.created_at<=now()-interval '30 days'
               and (a.email_source->>'mailbox_owner'=$1 or (a.email_source is null and a.actor_id=$2))
               and ($3::uuid is null or (p.created_at,p.id)>(select created_at,id from email_proposal where id=$3))
             order by p.created_at,p.id limit 201 for update of p skip locked`, [owner,actor.id,args.cursor ?? null])).rows;
@@ -566,12 +658,17 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           evidence_quote: args.evidence_quote, task_text: step || args.kind === 'possible_new_deal' ? args.text?.trim() ?? null : null,
           sender_role: matching ? args.sender_role : null, next_date: step ? args.next_date : null,
           owner: draft ? source.email_source.mailbox_owner : step ? args.owner || 'joe' : null };
+        await c.query('select id from activity where id=$1 for update', [row.activity_id]);
         if (row.kind === 'file_to_deal') {
-          await c.query('select id from activity where id=$1 for update', [row.activity_id]);
           if ((await c.query(`select 1 from v_email_thread_filing_event where verb='undo-email-thread-filing'
             and subject_id=$1 and new_value->>'activity_id'=$2 limit 1`, [row.deal_id,row.activity_id])).rows.length)
             fail('email_thread_filing_suppressed');
         }
+        if ((await c.query(`select 1 from email_proposal where activity_id=$1
+          and (deferred_until>now() or (status='dismissed' and kind in ('file_to_deal','possible_new_deal')))
+          and (kind<>$2 or deal_id is distinct from $3::uuid or $4) limit 1`,
+          [row.activity_id,row.kind,row.deal_id,args.mode === 'repair_match'])).rows.length)
+          fail('email_proposal_not_pending');
         if (args.match_evidence && !matching) fail('email_proposal_fields_invalid');
         const matchingPeople = matching ? await contacts(c, [row.activity_id]) : null;
         if (args.mode === 'repair_match') {
@@ -684,16 +781,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         }
         if (args.cursor && !args.limit) fail('email_proposals_cursor_requires_limit');
         if (args.cursor && !(await c.query(`select 1 from email_proposal
-          where id=$1 and ($2::uuid is null or deal_id=$2)`, [args.cursor, args.deal ?? null])).rows.length)
+          where id=$1 and ($2::uuid is null or coalesce((correction_provenance->>'target_deal')::uuid,deal_id)=$2)`, [args.cursor, args.deal ?? null])).rows.length)
           fail('email_proposals_cursor_invalid');
         const limit = args.limit ?? LIMIT;
         const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
-            p.resolution_reason,p.match_evidence,p.deal_id,d.name as deal_name,
+            p.resolution_reason,p.match_evidence,p.disposition,p.resolution_note,p.deferred_until,p.correction_provenance,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.sender_role,p.next_date::text as next_date,p.owner,
             p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.occurred_at
-          from email_proposal p left join deal d on d.id=p.deal_id join activity a on a.id=p.activity_id
-          where p.status=$4 and ($5 or p.kind<>'next_step' or p.deal_id is not null)
-            and ($3::uuid is null or p.deal_id=$3) and ($1::uuid is null or (p.created_at,p.id) >
+          from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
+          where p.status=$4 and (p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
+            and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
           order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false]);
         if (!args.limit && rows.length > LIMIT) fail('email_proposals_limit_exceeded', { limit: LIMIT });
@@ -728,7 +825,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             }
           }
           const named = sender(row.summary);
-          proposals.push({ id: row.id, version: row.version, kind: row.kind, status: row.status, deal: row.deal_id,
+          proposals.push({ id: row.id, version: row.version, kind: row.kind, status: row.status, deal: row.correction_provenance?.target_deal ?? row.deal_id,
+            email_summary: null, disposition: row.disposition, note: row.resolution_note,
+            deferred_until: row.deferred_until ? new Date(row.deferred_until).toISOString() : null, correction_provenance: row.correction_provenance,
             match_evidence: row.match_evidence, suggested_deals: suggested, deal_name: row.deal_name, confidence: row.confidence, sender_role: row.sender_role,
             subject_type: shown?.subject_type ?? null, subject_id: shown?.subject_id ?? null, subject_name: shown?.subject_name ?? null,
             proposed_matter: row.kind === 'possible_new_deal' ? row.task_text : null,
@@ -846,12 +945,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
           proposal_id: { type: 'string', format: 'uuid' },
           base_version: { type: 'integer', minimum: 1 },
-          reason: { type: 'string', minLength: 1, maxLength: 500 },
+          reason: { type: 'string', minLength: 1, maxLength: 500 }, note: noteProperty,
         } },
       handler: (c, actor, args) => {
         if (actor.human !== true || !['joe', 'dell'].includes(actor.slug)) fail('partner_dismissal_required');
         return withEnvelope(c, actor, 'dismiss-email-proposal', args, async () => {
           if (!args.reason?.trim()) fail('email_proposal_reason_required');
+          await lockSource(c,args.proposal_id);
           const row = (await c.query(`select id,kind,deal_id,activity_id,status,version,owner from email_proposal
             where id=$1 for update`, [args.proposal_id])).rows[0];
           if (!row) fail('email_proposal_not_found');
@@ -860,9 +960,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (row.version !== args.base_version)
             fail('version_conflict', { current_version: row.version, hint: 'surface this to the human and re-read; NEVER auto-retry' });
           await c.query(`update email_proposal set status='dismissed',version=version+1,resolved_by=$2,
-            resolved_at=now(),resolution_reason=$3 where id=$1`, [row.id, actor.id, args.reason.trim()]);
+            resolved_at=now(),resolution_reason=$3,resolution_note=$4,deferred_until=null where id=$1`, [row.id, actor.id, args.reason.trim(),args.note ?? null]);
           await writeEvent(c, actor, 'dismiss-email-proposal', row.deal_id ? 'deal' : 'activity', row.deal_id ?? row.activity_id, {
-            new: { proposal_id: row.id, kind: row.kind, activity_id: row.activity_id, reason: args.reason.trim() },
+            new: { proposal_id: row.id, kind: row.kind, activity_id: row.activity_id, reason: args.reason.trim(), note: args.note ?? null },
             cause: 'human_stated', idempotency_key: args.idempotency_key });
           return { ok: true, proposal_id: row.id, status: 'dismissed', version: row.version + 1 };
         });
@@ -872,7 +972,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
 }
 
 export async function resolveEmailProposal(c, actor, kind, deal, activityId) {
-  const row = (await c.query(`update email_proposal set status='confirmed',version=version+1,
+  const row = (await c.query(`update email_proposal set status='confirmed',disposition=null,deferred_until=null,version=version+1,
       resolved_by=$4,resolved_at=now(),resolution_reason=case when status='dismissed'
         then left('Confirmed by Joe after dismissal: '||resolution_reason,500) end
     where kind=$1 and deal_id is not distinct from $2::uuid and activity_id=$3 and status in ('pending','dismissed') returning id`,

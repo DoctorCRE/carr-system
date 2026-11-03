@@ -4,10 +4,12 @@
   "card": "WR441.S10.J2",
   "transport": "Authenticated MCP list-email-thread-filings and undo-email-thread-filing",
   "read": {
+    "membership": "Automatic filing receipts only. Explicitly undone receipts and never-filed emails remain omitted. Manual unfiling can leave a historical receipt with current_deal_id null.",
     "access": "Verified human partners see only filings owned by their captured mailbox, or by the deal owner when mailbox ownership is absent.",
     "fields": {
       "event_id": "Filing event UUID, supplied to undo",
-      "deal": "Filed deal UUID",
+      "deal": "Historical filing event deal UUID",
+      "current_deal_id": "UUID | null. Current source activity deal_id read in the same SELECT as its filing event. Null means currently unfiled. Independent of historical deal and event order or timestamps; does not establish Undo eligibility.",
       "activity_id": "Source activity UUID",
       "recorded_at": "Filing event timestamp",
       "summary": "Source activity summary",
