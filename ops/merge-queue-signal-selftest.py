@@ -25,6 +25,13 @@ class QueueSignal(unittest.TestCase):
         self.assertEqual(calls[-1][1]['state'], 'failure')
         self.assertEqual(calls[-1][1]['context'], 'merge-queue/CI')
 
+    def test_workflow_always_exposes_queue_result_with_status_permission(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/ci.yml').read_text()
+        checks = workflow.split('  checks:\n', 1)[1]
+        self.assertIn('statuses: write', checks)
+        self.assertIn("if: ${{ always() && github.event_name == 'merge_group' }}", checks)
+        self.assertIn('run: python3 ops/merge-queue-signal.py', checks)
+
     def test_changed_pr_head_is_not_marked(self):
         calls = []
         def api(path, payload=None):
