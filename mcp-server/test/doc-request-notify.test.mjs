@@ -8,6 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { docConversationTools } from "../src/doc-conversation.js";
 import { TOOLS } from "../src/tools.js";
@@ -177,4 +178,30 @@ test("the same request in another letter case is the same request", async () => 
   assert.equal(upper.notification_id, first.notification_id);
   assert.equal(s.notifications[0].subjectRef, JOE_ASK);
   assert.equal(s.notifications[0].dedupe_key, `doc-request:${JOE_ASK}`);
+});
+
+
+test("completion mints the producer-owned Doc request link contract", async () => {
+  const contract = JSON.parse(readFileSync(new URL("../contracts/doc-request-links.v1.json", import.meta.url), "utf8"));
+  assert.equal(contract.schema, "carr-doc-request-links.v1");
+  assert.equal(contract.path_template, "/doc/conversations/{conversation_id}/turns/{msg_id}");
+  assert.deepEqual(contract.examples.map(example => example.name), [
+    "answered", "failed", "refused", "failed-with-answer", "refused-with-answer", "uppercase-input",
+  ]);
+  for (const example of contract.examples) {
+    const s = store();
+    const result = await s.complete(example.input);
+    assert.equal(s.notifications.length, 1, example.name);
+    const target = (example.input.answer_msg_id ?? example.input.request_msg_id).toLowerCase();
+    const path = contract.path_template
+      .replace("{conversation_id}", example.input.conversation_id.toLowerCase())
+      .replace("{msg_id}", target);
+    assert.equal(example.deep_link, path, example.name);
+    assert.equal(s.notifications[0].deep_link, path, example.name);
+    assert.equal(result.deep_link, path, example.name);
+    const retry = await s.complete(example.input);
+    assert.equal(retry.deep_link, path, example.name);
+    assert.equal(retry.deduplicated, true, example.name);
+    assert.equal(s.notifications.length, 1, example.name);
+  }
 });
