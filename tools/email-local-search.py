@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.email_local_search import build_index, IndexError as PublicationError
+from lib.email_local_search import build_index, query_index, IndexError as PublicationError
 
 
 def main():
@@ -20,20 +20,31 @@ def main():
     build.add_argument('--source-revision', required=True, help='Explicit source capture or decoder revision')
     build.add_argument('--allow-empty', action='store_true',
                        help='Allow zero supplied messages to replace an existing index')
+    query = commands.add_parser('query', help='Look up a literal phrase in one private local index')
+    query.add_argument('--index', type=Path, required=True)
+    query.add_argument('--account-id', type=int, required=True)
+    query.add_argument('--query', required=True, help='Literal person, email address or property phrase; no FTS operators')
+    query.add_argument('--limit', type=int, default=20, help='Page size, 1 to 100')
+    query.add_argument('--cursor', help='Next cursor from the same query and index generation')
+    query.add_argument('--local-excerpts', action='store_true', help='Include bounded subject and body excerpts locally')
     args = parser.parse_args()
     try:
-        result = build_index(args.source, args.index, mailbox=args.mailbox,
-                             account_id=args.account_id, source_revision=args.source_revision,
-                             allow_empty=args.allow_empty)
+        if args.command == 'query':
+            result = query_index(args.index, account_id=args.account_id, query=args.query,
+                                 limit=args.limit, cursor=args.cursor, excerpts=args.local_excerpts)
+        else:
+            result = build_index(args.source, args.index, mailbox=args.mailbox,
+                                 account_id=args.account_id, source_revision=args.source_revision,
+                                 allow_empty=args.allow_empty)
     except PublicationError as error:
         if str(error) == 'empty_source_would_replace_index':
             print('Empty source refused. Use --allow-empty to replace an existing index with zero messages.',
                   file=sys.stderr)
         else:
-            print('Private index publication refused or failed.', file=sys.stderr)
+            print('Private index operation refused or failed.', file=sys.stderr)
         return 2
     except OSError:
-        print('Private index publication refused or failed.', file=sys.stderr)
+        print('Private index operation refused or failed.', file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0

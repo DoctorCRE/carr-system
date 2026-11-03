@@ -1,11 +1,13 @@
 """Publish a private, account-bound FTS index from an explicit decoded research copy."""
 from contextlib import closing
 from datetime import datetime, timezone
+import base64
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import stat
@@ -217,3 +219,115 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
             return result
     finally:
         os.close(lock_fd)
+
+
+def _literal_phrase(query):
+    if (not isinstance(query, str) or not query.strip() or len(query) > 512
+            or any(ord(c) < 32 for c in query)
+            or any(c in query for c in '*:(){}[]^')
+            or re.search(r'\b(?:AND|OR|NOT|NEAR)\b', query)
+            or not any(c.isalnum() for c in query)):
+        raise IndexError('invalid_literal_query')
+    return '"' + query.strip().replace('"', '""') + '"'
+
+
+def _index_metadata(db, account_id):
+    with closing(sqlite3.connect(':memory:')) as expected:
+        expected.executescript(SCHEMA)
+        schema = 'SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name'
+        if (db.execute('PRAGMA user_version').fetchone() != (SCHEMA_VERSION,)
+                or db.execute(schema).fetchall() != expected.execute(schema).fetchall()):
+            raise IndexError('invalid_index_schema')
+    row = db.execute('SELECT document FROM index_metadata WHERE id=1').fetchone()
+    if row is None or len(row[0]) > 8192:
+        raise IndexError('invalid_index_metadata')
+    metadata = json.loads(row[0])
+    if (not isinstance(metadata, dict) or metadata.get('schema_version') != SCHEMA_VERSION
+            or metadata.get('build_state') != 'complete'
+            or metadata.get('account_id') != account_id
+            or metadata.get('coverage') != 'unknown'):
+        raise IndexError('incomplete_or_unbound_index')
+    observed = db.execute('''SELECT count(*),min(sent_unix),max(sent_unix),
+        sum(sent_unix IS NULL) FROM messages''').fetchone()
+    if (any(value is not None and type(value) is not int for value in observed)
+            or observed[:3] != (metadata.get('message_count'), metadata.get('observed_min_unix'),
+                         metadata.get('observed_max_unix'))
+            or (observed[3] or 0) != metadata.get('undated_count')
+            or db.execute('SELECT 1 FROM messages WHERE account_id IS NOT ? LIMIT 1',
+                          (account_id,)).fetchone()):
+        raise IndexError('invalid_index_binding_or_coverage')
+    return dict(message_count=observed[0], observed_min_unix=observed[1],
+                observed_max_unix=observed[2], undated_count=observed[3] or 0,
+                completeness='unknown')
+
+
+def query_index(index, *, account_id, query, limit=20, cursor=None, excerpts=False):
+    """Read one completed private index using a literal FTS phrase.
+
+    All words form one phrase, including quoted names and email addresses. FTS
+    operators, column selectors and wildcards are unsupported. Results sort by
+    descending timestamp then id, with undated rows last. Cursors bind the query
+    and account to the database bytes; rebuilding invalidates prior pages.
+    Excerpts expose up to 240 subject and 500 body characters locally.
+    """
+    phrase = _literal_phrase(query)
+    if (type(account_id) is not int or not 0 <= account_id <= 2**63 - 1
+            or type(limit) is not int or not 1 <= limit <= 100
+            or type(excerpts) is not bool):
+        raise IndexError('invalid_query_options')
+    try:
+        path = Path(index)
+        _parent(path)
+        _check_file(path)
+        with path.open('rb') as reader:
+            before = os.fstat(reader.fileno())
+            generation = hashlib.file_digest(reader, 'sha256').hexdigest()
+        binding = hashlib.sha256(f'{generation}\n{account_id}\n{phrase}'.encode()).hexdigest()
+        offset = 0
+        if cursor is not None:
+            if not isinstance(cursor, str) or len(cursor) > 256:
+                raise IndexError('invalid_cursor')
+            page = json.loads(base64.b64decode(cursor, altchars=b'-_', validate=True))
+            if (not isinstance(page, list) or len(page) != 2 or page[0] != binding
+                    or type(page[1]) is not int or not 0 < page[1] <= 1_000_000):
+                raise IndexError('stale_or_invalid_cursor')
+            offset = page[1]
+        with closing(_readonly(path)) as db:
+            db.execute('PRAGMA query_only=ON')
+            db.execute('BEGIN')
+            db.execute('SELECT count(*) FROM sqlite_master').fetchone()
+            after = path.lstat()
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise IndexError('index_changed_during_open')
+            _check_file(path)
+            coverage = _index_metadata(db, account_id)
+            where = ''' FROM messages m JOIN messages_fts f ON f.rowid=m.id
+                WHERE messages_fts MATCH ? AND m.account_id=?'''
+            count = db.execute('SELECT count(*)' + where, (phrase, account_id)).fetchone()[0]
+            columns = 'm.id,m.sent_unix,m.source_ref'
+            if excerpts:
+                columns += ',substr(m.subject,1,240),substr(m.body,1,500)'
+            rows = db.execute('SELECT ' + columns + where +
+                              ' ORDER BY m.sent_unix DESC,m.id DESC LIMIT ? OFFSET ?',
+                              (phrase, account_id, limit, offset)).fetchall()
+            results = []
+            for row in rows:
+                if (type(row[0]) is not int or (row[1] is not None and type(row[1]) is not int)
+                        or not isinstance(row[2], str)
+                        or not re.fullmatch(r'[0-9a-f]{64}:[0-9]{1,19}', row[2])):
+                    raise IndexError('invalid_index_row')
+                item = dict(sent_unix=row[1], source_ref=row[2])
+                if excerpts:
+                    item['excerpt'] = dict(subject=row[3], body=row[4])
+                results.append(item)
+        next_offset = offset + len(rows)
+        next_cursor = None
+        if next_offset < count:
+            if next_offset > 1_000_000:
+                raise IndexError('pagination_limit_reached')
+            next_cursor = base64.urlsafe_b64encode(json.dumps([binding, next_offset]).encode()).decode()
+        return dict(match_count=count, results=results, next_cursor=next_cursor, coverage=coverage,
+                    meaning='No indexed match is not proof of no prior relationship.')
+    except (sqlite3.Error, OSError, ValueError, TypeError, KeyError, OverflowError, RecursionError):
+        raise IndexError('private_index_query_refused') from None
