@@ -1,6 +1,8 @@
 """Synthetic transition coverage for the drained Outlook runtime refresh."""
 import fcntl
 import json
+import os
+import shutil
 import plistlib
 import subprocess
 import tempfile
@@ -321,6 +323,143 @@ class HostTests(unittest.TestCase):
         self.assert_symlink_restored(fixture)
         self.host.previous = self.host.sha
         self.assertEqual(refresh(self.host, apply=True), 'already current')
+
+    def test_path_type_failure_matrix(self):
+        for kind in ('file', 'directory', 'symlink', 'dangling', 'absent'):
+            for failure in ('intake', 'triage', 'verify', 'restore'):
+                for crash in (False, True):
+                    with self.subTest(kind=kind, failure=failure, crash=crash):
+                        self.path_type_failure(kind, failure, crash)
+
+    def path_type_failure(self, kind, failure, crash):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / 'runtime'
+            runtime.mkdir()
+            (runtime / 'revision').write_text('old')
+            runtime_link = root / 'runtime-link'
+            runtime_link.symlink_to('runtime', target_is_directory=True)
+            settings = SimpleNamespace(repo=runtime_link, vendor=root / 'vendor',
+                                       copy_helper=root / 'helper', send_state=root / 'send',
+                                       render_plist=lambda path: b'new plist', verify_helper=lambda: None)
+            host = Host(root / 'main', 'a' * 40, settings)
+            host.previous = 'b' * 40
+            host.validate = Mock()
+            host.plan = Mock()
+            host.plist_path = lambda label: root / (label + '.plist')
+            paths = [settings.vendor, settings.copy_helper, settings.copy_helper.with_suffix('.pin')]
+            paths += [host.plist_path(label) for label in LABELS]
+            targets = []
+            for i, path in enumerate(paths):
+                target = root / ('target-' + str(i))
+                if kind in ('file', 'symlink'):
+                    target.write_text('old')
+                    target.chmod(0o700)
+                elif kind == 'directory':
+                    target.mkdir()
+                    (target / 'payload').write_text('old')
+                    (target / 'relative').symlink_to('payload')
+                if kind in ('symlink', 'dangling'):
+                    middle = root / ('middle-' + str(i))
+                    middle.symlink_to(target.name)
+                    path.symlink_to(middle.name)
+                elif kind != 'absent':
+                    target.rename(path)
+                targets.append(target)
+            registered = {LABELS[0], LABELS[1]}
+            overrides = {LABELS[1]}
+            sha = [host.previous]
+            fired = [False]
+            def remove(path):
+                if path.is_symlink() or path.is_file():
+                    path.unlink()
+                elif path.exists():
+                    shutil.rmtree(path)
+            def fail(step):
+                if failure == step and not fired[0]:
+                    fired[0] = True
+                    raise OSError('injected ' + step)
+            def command(*args, **kwargs):
+                out = ''
+                if args[:2] == ('launchctl', 'list'):
+                    out = '\n'.join('- 0 ' + label for label in registered)
+                elif args[:2] == ('launchctl', 'print-disabled'):
+                    out = '\n'.join('"' + label + '" => true' for label in overrides)
+                elif args[:2] == ('launchctl', 'disable'):
+                    overrides.add(args[2].split('/')[-1])
+                elif args[:2] == ('launchctl', 'enable'):
+                    overrides.discard(args[2].split('/')[-1])
+                elif args[:2] == ('launchctl', 'bootout'):
+                    registered.discard(args[2].split('/')[-1])
+                elif args[:2] == ('launchctl', 'bootstrap'):
+                    fail('restore')
+                    registered.add(Path(args[3]).stem)
+                elif args[0] == 'git':
+                    if args[3] == 'checkout':
+                        sha[0] = args[-1]
+                        (Path(args[2]) / 'revision').write_text('old')
+                    elif args[3] == 'rev-parse':
+                        out = sha[0]
+                    else:
+                        fail('verify')
+                elif args[0] == '/bin/zsh':
+                    if 'intake' in str(args[1]):
+                        sha[0] = host.sha
+                        (runtime / 'revision').write_text('new')
+                        for path, target in zip(paths, targets):
+                            if kind in ('symlink', 'dangling'):
+                                target.write_text('new through link')
+                            remove(path)
+                            built = root / 'built'
+                            built.write_text('new atomic replacement')
+                            os.replace(built, path)
+                        fail('intake')
+                    else:
+                        fail('triage')
+                return subprocess.CompletedProcess(args, 0, out, '')
+            host.command = command
+            try:
+                if crash:
+                    host.snapshot()
+                    host.quiesce()
+                    self.assertTrue(host.drained())
+                    host.swap()
+                    host.verify()
+                    host.restore(rollback=False)
+                else:
+                    refresh(host, apply=True)
+            except OSError:
+                pass
+            finally:
+                host.locks.close()
+                host.locked = False
+            if host.recovery_pending():
+                host.recover()
+            self.assertTrue(fired[0])
+            self.assertTrue(runtime_link.is_symlink())
+            self.assertEqual(os.readlink(runtime_link), 'runtime')
+            self.assertEqual((runtime / 'revision').read_text(), 'old')
+            self.assertEqual(sha[0], host.previous)
+            for i, (path, target) in enumerate(zip(paths, targets)):
+                if kind in ('symlink', 'dangling'):
+                    self.assertTrue(path.is_symlink())
+                    self.assertEqual(os.readlink(path), 'middle-' + str(i))
+                    self.assertEqual(os.readlink(root / ('middle-' + str(i))), target.name)
+                    self.assertEqual(target.exists(), kind == 'symlink')
+                elif kind == 'absent':
+                    self.assertFalse(path.exists())
+                    continue
+                if kind == 'directory':
+                    self.assertTrue(path.is_dir())
+                    self.assertEqual((path / 'payload').read_text(), 'old')
+                    self.assertEqual(os.readlink(path / 'relative'), 'payload')
+                elif kind != 'dangling':
+                    self.assertEqual(path.read_text(), 'old')
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(registered, {LABELS[0], LABELS[1]})
+            self.assertEqual(overrides, {LABELS[1]})
+            self.assertFalse(host.recovery_pending())
+            self.assertFalse(host.locked)
 
     def test_restore_failure_keeps_journal(self):
         self.host.snapshot()
