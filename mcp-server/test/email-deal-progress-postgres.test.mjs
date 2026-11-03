@@ -2884,11 +2884,11 @@ test('v2 new-deal digests remain target-bound and reject changed target versions
 });
 
 
-async function summaryQueue() {
+async function summaryQueue(pending_only = true) {
   const emails = [];
   let after;
   do {
-    const page = await command('email-router-queue', { purpose: 'summaries', limit: 200, ...(after ? { after } : {}) });
+    const page = await command('email-router-queue', { purpose: 'summaries', pending_only, limit: 200, ...(after ? { after } : {}) });
     emails.push(...page.emails);
     after = page.next_cursor;
   } while (after);
@@ -3091,7 +3091,7 @@ test('summary provenance can cite captured headers but cannot invent them', asyn
   const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
     kind: 'email_in', summary: 'Synthetic decision', detail: 'Yes.',
     email_context: { subject: 'Re: Approve the purchase?', sender: { name: 'Synthetic sender', email: 'sender@example.test' }, recipients: [] } });
-  const queued = (await command('email-router-queue', { purpose: 'summaries', pending_only: false, limit: 200 })).emails
+  const queued = (await summaryQueue(false)).emails
     .find(row => row.activity_id === source.activity_id);
   const claim = await claimSummary(queued);
   const result = evidence => command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_result',
