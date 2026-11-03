@@ -212,6 +212,11 @@ class PublicationTests(unittest.TestCase):
         self.assertNotIn('secret', result.stdout + result.stderr)
         self.assertNotIn('Traceback', result.stderr)
 
+    def test_out_of_range_account_is_a_bounded_refusal(self):
+        with self.assertRaises(PublicationError):
+            build_index(self.source, self.target, mailbox='synthetic',
+                        account_id=2**64, source_revision='r')
+
 
 if __name__ == '__main__':
     unittest.main()

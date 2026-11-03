@@ -143,7 +143,8 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
     account_id in the decoder tables. This does not attest source completeness.
     A killed build may leave an owner-only generation for manual removal.
     """
-    if (not isinstance(account_id, int) or isinstance(account_id, bool) or account_id < 0
+    if (not isinstance(account_id, int) or isinstance(account_id, bool)
+            or not 0 <= account_id <= 2**63 - 1
             or not isinstance(mailbox, str) or not mailbox.strip() or len(mailbox) > 256
             or not isinstance(source_revision, str) or not source_revision.strip()
             or len(source_revision) > 256):
