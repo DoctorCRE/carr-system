@@ -547,8 +547,10 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
   await c.query(`alter table ops.fact_observation add normalized_schedule jsonb,add region_id text;
     alter table ops.canonical_fact add normalized_schedule jsonb;
     alter table ops.fact_review_decision add extraction_job_ids uuid[] default '{}';
-    create table ops.deal_extraction_job(id uuid,organization_tenant_id text,entity_ref text,recorded_at timestamptz,receipt jsonb);`);
-  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','resolve_fact_review']]) {
+    create table ops.deal_extraction_job(id uuid,organization_tenant_id text,entity_ref text,recorded_at timestamptz,receipt jsonb);
+    create table ops.fact_key_contract(fact_key text,canonical_unit text);
+    insert into ops.fact_key_contract values('base_rent_per_sf','USD/SF/year');`);
+  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','resolve_fact_review'],['1109_deal_schedules.sql','promote_fact']]) {
     const sql=readFileSync(new URL(`../../migrations/${file}`,import.meta.url),'utf8');
     await c.query(sql.match(new RegExp(`create or replace function ops\\.${name}\\([\\s\\S]*?\\$\\$;`))[0]);
   }
@@ -754,6 +756,14 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     assert.equal(reopened.source_state,'needs_attention'); assert.equal(reopened.section,'inbox');
     assert.equal(reopened.explicit_unsettle,false);
     assert.equal((await change('settle',before)).results[0].error,'version_conflict');
+    const pending=(await c.query("select ops.fact_review_field('carr-internal',$1,'base_rent_per_sf') result",[id(2000)])).rows[0].result;
+    assert.equal((await executeRegisteredTool(c,joe,'resolve-fact-review',{
+      idempotency_key:id(2006),entity_ref:id(2000),fact_key:'base_rent_per_sf',decision:'approve',
+      observation_id:id(2005),base_version:pending.canonical_version,review_version:pending.review_version,
+      reason:'Synthetic approval of new evidence',
+    })).ok,true);
+    assert.equal((await find('fact_review')).auto_settled,true,'approved new evidence settles the reopened review');
+
     const v2=await executeRegisteredTool(c,joe,'read-home-inbox-v2',{});
     assert.ok(v2.items.every(i=>!['fact_review','tour_feedback'].includes(i.source_type)));
     await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
