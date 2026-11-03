@@ -87,9 +87,9 @@ the source call's age removes provenance from an otherwise eligible candidate.
 Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
 Due dates come only from what was said on the call. When no usable deadline is
 stated, `due_on` stays null, the task and stored candidate carry
-`due_defaulted: true`, and a visible review question asks the partner for a
-date. No date is invented. An ambiguous spoken deadline still retains its review
-question. Undated tasks remain proposals, just like explicitly dated tasks.
+`due_defaulted: true`. The local report keeps an optional date reminder in
+`optional_reminders`; it does not require resolution or block retention. No date
+is invented. An ambiguous spoken deadline still retains its review question. Undated tasks remain proposals, just like explicitly dated tasks.
 One extraction writes each owner's task once: tasks on the same deal whose
 titles match after case and whitespace normalization merge, a stated date
 winning over none; two different stated dates stay separate proposals.
@@ -246,9 +246,11 @@ synchronization before exhaustion clears its temporary failure state. Pending
 human proposals do not consume synchronization attempts.
 
 Deals excluded from active context, including IDs refused after the board read,
-produce review questions naming the skipped deal and the reason. Other deals
-continue. Jev failures retain proposals with item-level flags and a review
-question. Exception classes and safe cause categories are visible; raw provider
+remain inspectable in the local report at `diagnostics.skipped_deals`, with
+each distinct ID and reason counted once. Routine exclusions do not create human
+questions. A discussed reference that cannot be placed still creates a blocking
+review question. Other deals continue. Jev failures retain proposals with
+item-level flags and a review question. Exception classes and safe cause categories are visible; raw provider
 errors are not copied into the pack.
 
 
@@ -298,6 +300,10 @@ It remains unresolved until a partner answers `Performed: <outcome>` or
 `Declined: <reason>` with a nonempty outcome or reason. Identity and routing
 answers are saved as intermediate information and keep retention on hold.
 Ordinary review questions still resolve on any nonempty answer.
+Existing stored reports retain every explicit unresolved hold, including older
+exclusion and date questions, until manually resolved. Reading a report never
+reclassifies or rewrites those holds. Missing audio, uncertain identity, ambiguous
+spoken deadlines, and failed required checks retain their filing holds.
 U5 can consume these same question rows without a second intent resolver.
 
 Coverage derives `source_spans` from the cited ledger facts, verifies the desired

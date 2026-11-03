@@ -523,8 +523,6 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                             f"{list_name} item {number} ({subject}): {resolved.review_reason}"
                         )
             if is_action:
-                # Only a date said on the call is kept; an undated task stays
-                # undated and normalize_distillation asks the partner for one.
                 item["due_defaulted"] = item["due_on"] is None
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
@@ -574,9 +572,6 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
-    review.extend({"id": _review_id(session, "skipped_deal", n),
-                   "question": f"Skipped deal {row['id']}: {row['reason']}", "resolved": False}
-                  for n, row in enumerate(context.get("skipped_deals", []), 1))
     for number, intent in enumerate(raw.get("review_intents", []), 1):
         intent = deepcopy(intent)
         if intent["deal_id"] is not None and intent["deal_id"] not in deal_ids:
@@ -651,11 +646,15 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
         "dell_tasks": merge_repeats(clean(raw["dell_tasks"], "dell_task")),
         "deal_updates": clean(raw["deal_updates"], "deal_update"), "draft_proposals": clean(raw["draft_proposals"], "draft_proposal"),
         "review_questions": review, "missing_tracks": missing_tracks,
+        "diagnostics": {"skipped_deals": [
+            {"id": deal_id, "reason": reason} for deal_id, reason in dict.fromkeys(
+                (row["id"], row["reason"]) for row in context.get("skipped_deals", []))]},
+        "optional_reminders": [],
     }
     for list_name in ("joe_tasks", "dell_tasks"):
         for number, task in enumerate(result[list_name], 1):
             if task["due_on"] is None:
-                review.append({"id": _review_id(session, f"undated_{list_name}", number), "resolved": False,
+                result["optional_reminders"].append({"id": _review_id(session, f"undated_{list_name}", number),
                                "question": f"{list_name} item {number} ({task['title']}): "
                                            "No due date was said on the call; set one if it has a deadline."})
     for index, draft in enumerate(result["draft_proposals"], 1):
@@ -721,7 +720,9 @@ def _distiller_instruction() -> str:
         "Today, tomorrow and day after tomorrow are offsets of zero, one and two calendar days. "
         "Before the lunch call means CALL_DATE unless the transcript dates that lunch call differently. "
         "Preserve an explicitly stated calendar date and year. Include the spoken timing in the evidence quote. "
-        "Use null when no time was stated or the deadline is ambiguous. If multiple days conflict, "
+        "Use null when no time was stated or the deadline is ambiguous. Unstated dates need no review question. "
+        "Routine skipped_deals in CONTEXT are diagnostics, not review questions unless discussed work needs a decision. "
+        "If multiple days conflict, "
         "a stated deadline cannot be resolved or CALL_DATE is missing, keep the item with a null date and "
         "add a review question rather than invent a date. "
         "A deal status statement creates a deal_updates item with next_step and phase_move null. "

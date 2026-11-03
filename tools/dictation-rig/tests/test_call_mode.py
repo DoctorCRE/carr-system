@@ -1253,12 +1253,15 @@ class PostCallTests(unittest.TestCase):
 
     def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
         excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
-        context = {**self.context, "skipped_deals": excluded + excluded}
+        context = {**self.context, "skipped_deals": excluded}
         result = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[]),
                                                   context, self.session.name, call_date="2026-10-30")
         self.assertEqual(result["review_questions"], [])
         self.assertTrue(post_call.review_complete(result))
         self.assertEqual(result["diagnostics"]["skipped_deals"], excluded)
+        duplicate = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[]),
+            {**context, "skipped_deals": excluded + excluded}, self.session.name, call_date="2026-10-30")
+        self.assertEqual(duplicate["diagnostics"], result["diagnostics"])
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
         self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["diagnostics"]["skipped_deals"], excluded)
 
@@ -1508,7 +1511,8 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertEqual(report["deal_updates"][0]["deal_id"], "deal-b")
-        self.assertTrue(any("deal-a" in q["question"] and "skip" in q["question"].lower() for q in report["review_questions"]))
+        self.assertEqual(report["review_questions"], [])
+        self.assertEqual(report["diagnostics"]["skipped_deals"][0]["id"], "deal-a")
 
     def test_stored_terminal_deal_is_skipped_before_context_validation(self) -> None:
         context = json.loads(json.dumps(self.context))
@@ -2245,7 +2249,7 @@ class PostCallTests(unittest.TestCase):
 
     def test_retention_requires_final_candidate_dispositions(self) -> None:
         post_call.store_context(self.session, self.context)
-        post_call.process_session(self.session, distiller=lambda _request: self.output())
+        post_call.process_session(self.session, distiller=lambda _request: self.output(review_questions=["Which clinic was discussed?"]))
         self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         assert report is not None
