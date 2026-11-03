@@ -146,6 +146,71 @@ class AgreementTest(unittest.TestCase):
         self.write(HEADER.replace('<Topic>', '<Topic>Another</Topic><Topic>'))
         self.assertEqual(self.report()['input_failures'], {'duplicate_field': 1})
 
+    def cli(self):
+        done = subprocess.run(
+            [sys.executable, str(ROOT / 'tools/outlook-sync-truth.py'),
+             '--decoded', str(self.db), '--logs', str(self.log)],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(done.stderr, '')
+        return done.returncode, json.loads(done.stdout)
+
+    def directory_bytes(self):
+        return {p.relative_to(self.root).as_posix(): p.read_bytes()
+                for p in self.root.rglob('*') if p.is_file()}
+
+    def test_cli_rejects_partial_or_ambiguous_xml(self):
+        cases = [HEADER.replace('Synthetic subject',
+                                'Synthetic subject<part>pii:hidden</part>'),
+                 HEADER.replace('</Name>', '</Name></From><From>')]
+        for tag in ('InternetMessageId', 'Topic', 'Preview', 'Name', 'Address', 'SentTime'):
+            cases.append(HEADER.replace('</' + tag + '>',
+                                        '<part/>hidden-tail</' + tag + '>'))
+        for header in cases:
+            with self.subTest(header=header):
+                self.write(header)
+                code, report = self.cli()
+                self.assertEqual(code, 1)
+                self.assertEqual(report['status'], 'failed')
+                self.assertTrue(report['input_failures'])
+                self.assertTrue(all(c['agreed'] == 0 for c in report['fields'].values()))
+
+    def test_cli_preserves_exact_text_whitespace(self):
+        for field, value in (('subject', 'Synthetic subject'), ('preview', 'Preview text'),
+                             ('sender', 'sender@example.test'), ('sender_name', 'Sender')):
+            for padding in (' ', '  ', '\t', '\n'):
+                with self.subTest(field=field, padding=padding):
+                    self.write(HEADER.replace(value, padding + value + padding))
+                    code, report = self.cli()
+                    self.assertEqual(code, 1)
+                    self.assertEqual(report['status'], 'disagreement')
+                    self.assertEqual(report['fields'][field]['disagreed'], 1)
+                    self.assertEqual(report['fields'][field]['agreed'], 0)
+
+    def test_cli_closed_wal_snapshot_creates_no_files(self):
+        with closing(sqlite3.connect(self.db)) as db:
+            self.assertEqual(db.execute('PRAGMA journal_mode=WAL').fetchone()[0], 'wal')
+        self.assertFalse(Path(str(self.db) + '-wal').exists())
+        before = self.directory_bytes()
+        code, report = self.cli()
+        self.assertEqual(code, 0)
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(before, self.directory_bytes())
+
+    def test_cli_rejects_uncheckpointed_wal_without_writes(self):
+        with closing(sqlite3.connect(self.db)) as db, db:
+            db.execute('PRAGMA journal_mode=WAL')
+            db.execute("UPDATE messages SET subject='Uncheckpointed subject' WHERE message_id=?",
+                       ('<one@example.test>',))
+            db.commit()
+            self.assertGreater(Path(str(self.db) + '-wal').stat().st_size, 0)
+            before = self.directory_bytes()
+            code, report = self.cli()
+            self.assertEqual(code, 1)
+            self.assertEqual(report['status'], 'failed')
+            self.assertEqual(report['input_failures'], {'decoded_wal_present': 1})
+            self.assertTrue(all(c['agreed'] == 0 for c in report['fields'].values()))
+            self.assertEqual(before, self.directory_bytes())
+
     def test_cli_has_only_aggregate_output_and_read_only_inputs(self):
         before = self.db.read_bytes(), self.log.read_bytes()
         command = [sys.executable, str(ROOT / 'tools/outlook-sync-truth.py'),
