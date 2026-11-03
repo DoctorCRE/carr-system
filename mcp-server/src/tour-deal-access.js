@@ -13,8 +13,7 @@ export async function installTourDealAccess(client, actor) {
     const result = await client.query(`select d.id, d.owner, d.version
       from public.deal d join public.client c on c.id=d.client_id
       join public.party p on p.id=c.party_id
-      where c.merged_into is null and p.merged_into is null and p.deleted_at is null
-        and exists(select 1 from public.actor a where a.slug=$1 and a.active)`, [actor.slug]);
+      where c.merged_into is null and p.merged_into is null and p.deleted_at is null`);
     for (const deal of result.rows) {
       if (!deal.owner) continue;
       const decision = evaluateActorAuthority({actor:policyActor, action:'business.read_deal', tenant,

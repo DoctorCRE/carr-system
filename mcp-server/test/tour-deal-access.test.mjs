@@ -10,7 +10,7 @@ for (const slug of ['joe','dell']) test(`Tour decisions reuse ordinary deal acce
   let context;
   const client = {query:async (sql,params) => {
     if (sql.startsWith('select set_config')) {context=JSON.parse(params[0]); return {rows:[]};}
-    assert.deepEqual(params,[slug]);
+    assert.equal(params,undefined);
     return {rows};
   }};
   await installTourDealAccess(client,actor);
@@ -120,6 +120,14 @@ test('installed HTTP create, detail, cart and cross-deal library enforce canonic
     const tours=(await library.json()).data.tours.filter(t=>t.tour_name.startsWith('HTTP '));
     assert(tours.length>=1);
     assert(tours.every(t=>t.deal_id===cases[0].d));
+    await c.query('reset session authorization');
+    await c.query("update public.actor set active=false where slug='joe'");
+    await c.query('set local session authorization carr_writer');
+    await installTourDealAccess(c,actor);
+    assert.equal(await read('select ops.read_tour_internal_detail($1,$2,$3) data',
+      ['carr-internal',cases[0].t]),null,'an inactive actor cannot consume newly installed decisions');
+    const inactiveLibrary=await read('select ops.list_tour_library($1,$2) data',['carr-internal']);
+    assert.equal(inactiveLibrary.tours.some(t=>t.deal_id===cases[0].d),false);
   } finally {await c.query('rollback');await c.end();}
 });
 
