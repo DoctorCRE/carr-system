@@ -201,6 +201,12 @@ class Report:
     moved: list[tuple[str, str]] = field(default_factory=list)
     left: Counter = field(default_factory=Counter)
     unread_changed: list[str] = field(default_factory=list)
+    coverage: dict = field(default_factory=lambda: {
+        'selected_inbox_rows': 0, 'badge_status': 'unverified',
+        'viewport_rows': 0, 'viewport_unread': 0,
+        'full_scan_rows': 0, 'full_scan_unread': 0, 'scan_count': 0,
+        'coverage': 'unverified',
+    })
 
     def text(self, outcome: Outcome) -> str:
         lines = [f'outcome: {outcome.state} {outcome.reason}']
@@ -247,6 +253,8 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
         for row in rows:
             if row.selected and row.read_state is not ReadState.READ:
                 raise UiError('unread_row_selected')
+            if row.read_state is ReadState.UNCERTAIN:
+                raise UiError('coverage_read_state_unverified')
             if not row.sender or row.subject is None or row.key in seen:
                 raise UiError('coverage_identity_ambiguous')
             seen.add(row.key)
@@ -258,19 +266,21 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
 
 
 def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
-              closed: Callable[[], bool]) -> dict[str | None, list[Row]]:
+              closed: Callable[[], bool], report: Report) -> dict[str | None, list[Row]]:
     deadline = time.monotonic() + 120
     allowed = lambda: time.monotonic() < deadline and not closed()
 
     def scan() -> dict[str | None, list[Row]]:
         result = {}
+        report.coverage['scan_count'] += 1
         for tab in tabs:
             if not allowed():
                 raise UiError('coverage_deadline')
             if tab is not None:
                 window.switch_tab(tab)
             result[tab] = window.scan_rows(allowed)
-        _unread(result)
+        report.coverage['full_scan_rows'] = sum(len(rows) for rows in result.values())
+        report.coverage['full_scan_unread'] = sum(_unread(result).values())
         window.show_folder_pane(True)
         try:
             if window.inbox_badge() != badge:
@@ -308,53 +318,63 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
 def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome],
                     closed: Callable[[], bool]) -> Outcome:
     """Verify the unread set before and after any read-mail operation."""
-    badge, tabs = _inbox(window)
+    def finish(state: str, reason: str, code: str, detail: str = '') -> Outcome:
+        report.coverage['coverage'] = code
+        return Outcome(state, reason, (detail + ' ' if detail else '')
+                       + ' '.join(f'{k}={v}' for k, v in report.coverage.items()))
+
+    def badge_provenance() -> None:
+        report.coverage.update(getattr(window, 'badge_diagnostics', {}))
+
     try:
+        badge, tabs = _inbox(window)
+        badge_provenance()
+        report.coverage['viewport_rows'] = sum(len(rows) for rows in tabs.values())
         unread = _unread(tabs)
-    except UiError as exc:
-        if str(exc) == 'unread_row_selected':
-            return Outcome('failed', 'unread_row_selected')
-        return Outcome('skipped', 'unread_set_unverified', f'coverage={exc}')
-    scanned = sum(unread.values()) != badge
-    if scanned:
-        try:
-            tabs = _coverage(window, badge, tabs, closed)
+        report.coverage['viewport_unread'] = sum(unread.values())
+        scanned = sum(unread.values()) != badge
+        if scanned:
+            tabs = _coverage(window, badge, tabs, closed, report)
             unread = _unread(tabs)
-        except UiError as exc:
-            if str(exc) == 'unread_row_selected':
-                return Outcome('failed', 'unread_row_selected')
-            report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
-            return Outcome('skipped', 'unread_set_unverified',
-                           f'badge={badge} visible_unread={sum(unread.values())} '
-                           f'visible_rows={sum(len(rows) for rows in tabs.values())} coverage={exc}')
-    window.show_folder_pane(True)
-    try:
-        if window.inbox_badge() != badge:
-            return Outcome('skipped', 'unread_set_unverified', 'coverage=coverage_changed')
-    finally:
-        window.show_folder_pane(False)
-    if closed():
-        return Outcome('skipped', 'unread_set_unverified', 'coverage=coverage_deadline')
+        window.show_folder_pane(True)
+        try:
+            if window.inbox_badge() != badge:
+                raise UiError('coverage_changed')
+        finally:
+            window.show_folder_pane(False)
+        if closed():
+            raise UiError('coverage_deadline')
+    except UiError as exc:
+        badge_provenance()
+        if not str(exc).startswith(('coverage_', 'inbox_badge_', 'unread_')) and str(exc) not in {
+                'inbox_not_selected', 'inbox_row_not_found'}:
+            raise
+        if str(exc) == 'unread_row_selected':
+            return finish('failed', 'unread_row_selected', str(exc))
+        code = exc.step if str(exc) == 'inbox_badge_unverified' else str(exc)
+        # UI exceptions outside coverage may carry tab names; emit fixed codes only.
+        code = code if code and re.fullmatch(r'[a-z_]+', code) else 'coverage_ui_unverified'
+        return finish('skipped', 'unread_set_unverified', code)
     try:
         outcome = action(tabs)
     except UiError as exc:
-        outcome = Outcome('failed', str(exc),
-                          f'at {exc.step}: {exc}' if exc.step else '')
+        outcome = Outcome('failed', str(exc))
     except CuaError as exc:
         outcome = Outcome('failed', 'cua_driver_failed', str(exc))
-    end_badge, end_tabs = _inbox(window)
     try:
+        end_badge, end_tabs = _inbox(window)
         end_unread = _unread(end_tabs)
         if scanned:
-            end_tabs = _coverage(window, end_badge, end_tabs, closed)
+            end_tabs = _coverage(window, end_badge, end_tabs, closed, report)
             end_unread = _unread(end_tabs)
     except UiError:
-        return Outcome('failed', 'unread_set_changed')
+        badge_provenance()
+        return finish('failed', 'unread_set_changed', 'post_action_unverified')
     changed = (unread - end_unread) + (end_unread - unread)
     report.unread_changed = sorted({short_hash(label) for label in changed})
-    if changed or end_badge != sum(end_unread.values()):
-        return Outcome('failed', 'unread_set_changed')
-    return outcome
+    if changed or end_badge != badge or end_badge != sum(end_unread.values()):
+        return finish('failed', 'unread_set_changed', 'coverage_changed')
+    return finish(outcome.state, outcome.reason, 'verified', outcome.detail)
 
 
 def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGuide, find,

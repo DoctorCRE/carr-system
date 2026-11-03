@@ -239,8 +239,8 @@ elif tool == 'get_window_state':
                 unread = state.get('badge')
                 if unread is None:
                     unread = sum(r['unread'] for rows in lists().values() for r in rows)
-                if unread:
-                    add('AXStaticText', str(unread), 6, row, value=str(unread))
+                for text in state.get('badge_texts', [str(unread)] if unread else []):
+                    add('AXStaticText', text, 6, row, value=text)
     if state['tab'] and state['folder'] == 'Inbox':
         # Live Outlook names the selected tab first (read 2026-10-28).
         label = ('Focused Inbox Selected;  Other Inbox Unselected' if state['tab'] == 'focused'
@@ -896,7 +896,8 @@ class OutlookTriageTest(FakeOutlookCase):
                 self.given([FILE_A])
                 with patch(target, side_effect=CuaError('click: exit 7')):
                     outcome, _ = self.run_triage()
-                self.assertEqual((outcome.reason, outcome.detail), ('cua_driver_failed', 'click: exit 7'))
+                self.assertEqual(outcome.reason, 'cua_driver_failed')
+                self.assertTrue(outcome.detail.startswith('click: exit 7'))
                 self.assertIn('click: exit 7', self.report())
 
     def test_undecodable_driver_output_raises_cua_error(self):
@@ -1006,7 +1007,8 @@ class OutlookTriageTest(FakeOutlookCase):
     def test_inbox_that_will_not_open_blocks_every_move(self):
         self.given([FILE_A, NEWS], folder='Sent Items', elsewhere=[ELSEWHERE, VENDOR], inbox_click_ignored=True)
         outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('failed', 'inbox_not_selected'))
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=inbox_not_selected', outcome.detail)
         self.assertEqual((state['moved'], state['selections']), ([], []))
 
     def test_leaving_the_inbox_mid_run_stops_before_the_next_move(self):
@@ -1194,7 +1196,7 @@ class OutlookTriageTest(FakeOutlookCase):
         with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()) as out:
             triage.run(self.repo, self.home, EVENING, Waits(2, 0, 0, 0, 0, 0, 0), triage.Limits(),
                        lambda: EVENING)
-        self.assertRegex(out.getvalue(), r'^outlook-triage succeeded filed moved=2 left=2\s*$')
+        self.assertRegex(out.getvalue(), r'^outlook-triage succeeded filed moved=2 left=2 selected_inbox_rows=1 .*coverage=verified\s*$')
 
     def test_fire_runs_only_inside_the_window_and_only_until_the_day_is_settled(self):
         folder = self.repo / triage.OUT
@@ -1353,6 +1355,26 @@ class RefreshTest(FakeOutlookCase):
 
 
 
+
+
+class BadgeDriverTest(FakeOutlookCase):
+    def test_read_content_unread_reaches_filing_with_zero_badge(self):
+        mail = msg('sender-firm', 'unread')
+        self.given([mail])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(state['moved'], [[mail['label'], 'folder-C']])
+        self.assertFalse(state['lists']['only'])
+        self.assertIn('badge_status=complete_zero', outcome.detail)
+
+    def test_unknown_badge_shape_skips_without_selecting_mail(self):
+        for texts in ([''], ['3 unread messages'], ['3', '3']):
+            with self.subTest(texts=texts):
+                self.given([FILE_A], badge_texts=texts)
+                outcome, state = self.run_triage()
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
+                self.assertEqual((state['selections'], state['moved']), ([], []))
+                self.assertIn('badge_status=unverified', outcome.detail)
 
 
 class UnreadAgreementTest(unittest.TestCase):
@@ -1551,7 +1573,10 @@ class InstallTest(unittest.TestCase):
 
 
 
-class UnreadVerificationTest(UnreadAgreementTest):
+class UnreadVerificationTest(unittest.TestCase):
+    Window = UnreadAgreementTest.Window
+    row = UnreadAgreementTest.row
+
     def test_content_and_prefix_contract(self):
         from lib.outlook_ui import ReadState
         for field in ('sender', 'subject', 'preview'):
@@ -1613,7 +1638,7 @@ class UnreadVerificationTest(UnreadAgreementTest):
         from lib.outlook_ui import UiError
         x, y = self.row('x', True), self.row('y', True)
         for mode in ('stable', 'initial_unknown', 'preaction_unknown', 'first_scan_change',
-                     'second_scan_change', 'deadline', 'arrival', 'read', 'post_unknown', 'post_scan'):
+                     'second_scan_change', 'deadline', 'arrival', 'read', 'checking_arrival', 'post_unknown', 'post_scan'):
             with self.subTest(mode=mode):
                 window = self.Window({None: [x]}, 2 if 'scan' in mode else 1,
                                      {None: [x, y]})
@@ -1621,6 +1646,9 @@ class UnreadVerificationTest(UnreadAgreementTest):
                 def badge():
                     badges.append(True)
                     n = len(badges)
+                    if mode == 'checking_arrival' and calls:
+                        window.tabs = {None: [x, y]}
+                        window.badge = 2
                     if ((mode == 'initial_unknown' and n == 1) or
                         (mode == 'preaction_unknown' and n == 2) or
                         (mode == 'post_unknown' and calls)):
@@ -1642,7 +1670,7 @@ class UnreadVerificationTest(UnreadAgreementTest):
                 report = triage.Report()
                 result = triage.preserve_unread(window, report, action, lambda: mode == 'deadline')
                 expected = ('succeeded' if mode == 'stable' else
-                            'failed' if mode in ('arrival', 'read', 'post_unknown', 'post_scan') else 'skipped')
+                            'failed' if mode in ('arrival', 'read', 'checking_arrival', 'post_unknown', 'post_scan') else 'skipped')
                 self.assertEqual(result.state, expected)
                 self.assertEqual(len(calls), int(expected != 'skipped'))
                 fields = dict(part.split('=', 1) for part in result.detail.split())

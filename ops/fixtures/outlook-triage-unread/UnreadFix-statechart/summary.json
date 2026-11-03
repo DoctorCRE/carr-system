@@ -1,0 +1,14 @@
+{
+  "view": "customer",
+  "modelStates": 7,
+  "modelTransitions": 7,
+  "chartStates": 7,
+  "chartTransitions": 7,
+  "chartStatus": {
+    "works": 7,
+    "wrong": 0,
+    "fixed": 0
+  },
+  "classes": [],
+  "codeLike": []
+}

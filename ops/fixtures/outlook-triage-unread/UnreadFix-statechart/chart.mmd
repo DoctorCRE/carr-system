@@ -1,0 +1,39 @@
+---
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
+---
+stateDiagram-v2
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
+  }
+  class legendWorks works
+  state "Changed | Failed" as s0
+  state "Finished | Succeeded" as s1
+  state "Unverified | Skipped" as s2
+  state "Unverified | Waiting" as s3
+  state "Verified | Checking" as s4
+  state "Verified | Failed" as s5
+  state "Verified | Sorting" as s6
+  [*] --> s3
+  s3 --> s6 : Unread coverage matches the<br/>selected Inbox badge
+  s3 --> s2 : Coverage cannot be verified
+  s6 --> s0 : Mail arrives or unread status<br/>changes
+  s6 --> s4 : Read mail has been filed
+  s4 --> s1 : Unread mail is unchanged
+  s4 --> s0 : Mail arrives or unread status<br/>changes
+  s4 --> s5 : Unread mail changed during<br/>filing
+  class s0 works
+  class s1 works
+  class s2 works
+  class s3 works
+  class s4 works
+  class s5 works
+  class s6 works
