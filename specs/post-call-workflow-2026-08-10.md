@@ -75,6 +75,15 @@ The pack has these top-level sections:
 `read-post-call-followups` accepts `{}` and returns `post-call-followups.v1`
 with `candidates` and `send: false`. Each candidate has `id`, `session_id`,
 `deal_id`, `deal_name`, `kind`, `payload`, `evidence_quote`, and `created_at`.
+Each candidate also has `source_call_started_at`, the exact source session's
+start timestamp as an ISO 8601 string with an offset, and `source_call_label_key`,
+the source session UUID as a string. The label key equals `session_id` and stays
+stable as other calls arrive or leave the queue. Different sessions have distinct
+keys even when their start timestamps match. The app can format the source time
+for a call label and use the key to disambiguate collisions. It is metadata, not
+a human-facing call title. `created_at` remains the proposal creation timestamp.
+These fields are additive to `post-call-followups.v1`. Neither outcome review nor
+the source call's age removes provenance from an otherwise eligible candidate.
 Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
 Due dates come only from what was said on the call. When no usable deadline is
 stated, `due_on` stays null, the task and stored candidate carry
