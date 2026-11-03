@@ -190,7 +190,7 @@
         "occurrences": [
           7
         ],
-        "disposition": "unresolved_identity"
+        "disposition": "review_intent"
       },
       {
         "id": "unchanged",
@@ -209,6 +209,89 @@
           11
         ],
         "disposition": "proposal"
+      }
+    ]
+  },
+  "intent_case": {
+    "transcript": {
+      "segments": [
+        {
+          "speaker": "Joe",
+          "text": "Park Synthetic Clinic."
+        },
+        {
+          "speaker": "Joe",
+          "text": "Rename Synthetic Clinic to Synthetic North Clinic."
+        },
+        {
+          "speaker": "Joe",
+          "text": "Move Synthetic Clinic to the national group."
+        },
+        {
+          "speaker": "Joe",
+          "text": "Route that prospect to Dell."
+        },
+        {
+          "speaker": "Joe",
+          "text": "Joe will prepare the partnership agenda."
+        }
+      ]
+    },
+    "intents": [
+      {
+        "operation": "operating_state",
+        "desired_value": "parked",
+        "deal_id": "deal-a",
+        "owner": null,
+        "identity_question": null,
+        "review_reason": "Confirm the deal is parked through its operating state.",
+        "fact_ids": [
+          "intent-0"
+        ]
+      },
+      {
+        "operation": "rename",
+        "desired_value": "Synthetic North Clinic",
+        "deal_id": "deal-a",
+        "owner": null,
+        "identity_question": null,
+        "review_reason": "Apply this exact card name through the deal editor.",
+        "fact_ids": [
+          "intent-1"
+        ]
+      },
+      {
+        "operation": "national_account_reassignment",
+        "desired_value": "the national group",
+        "deal_id": "deal-a",
+        "owner": null,
+        "identity_question": "Which exact national account should own this deal?",
+        "review_reason": "The spoken account name is ambiguous.",
+        "fact_ids": [
+          "intent-2"
+        ]
+      },
+      {
+        "operation": "prospect_routing",
+        "desired_value": "Dell",
+        "deal_id": null,
+        "owner": null,
+        "identity_question": "Which exact prospect should be routed to Dell?",
+        "review_reason": "The prospect has no exact identity in the call index.",
+        "fact_ids": [
+          "intent-3"
+        ]
+      },
+      {
+        "operation": "business_task",
+        "desired_value": "Prepare the partnership agenda",
+        "deal_id": null,
+        "owner": "Joe",
+        "identity_question": "Where should Joe’s partnership task be recorded?",
+        "review_reason": "Business work needs routing without a fabricated deal.",
+        "fact_ids": [
+          "intent-4"
+        ]
       }
     ]
   }
