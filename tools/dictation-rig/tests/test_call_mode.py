@@ -1251,13 +1251,50 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report)["state"], "complete")
         self.assertNotIn("kind", report["review_questions"][0])
 
-    def test_undated_actions_stay_undated_and_ask_the_partner_for_a_date(self) -> None:
+    def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
+        excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
+        context = {**self.context, "skipped_deals": excluded + excluded}
+        result = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[]),
+                                                  context, self.session.name, call_date="2026-10-30")
+        self.assertEqual(result["review_questions"], [])
+        self.assertTrue(post_call.review_complete(result))
+        self.assertEqual(result["diagnostics"]["skipped_deals"], excluded)
+        post_call.write_private(self.session / post_call.REPORT_FILE, result)
+        self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["diagnostics"]["skipped_deals"], excluded)
+
+    def test_mentioned_unknown_deal_and_missing_audio_remain_decisions(self) -> None:
+        for overrides, transcript in (
+            ({"deal_updates": [{"deal_id": "uncertain", "summary": "Follow up", "participant_ids": [],
+                                "evidence": "Follow up on that clinic"}]}, {}),
+            ({}, {"missing_tracks": ["remote"]}),
+        ):
+            with self.subTest(overrides=overrides, transcript=transcript):
+                raw = self.output(joe_tasks=[], deal_updates=[], draft_proposals=[])
+                raw.update(overrides)
+                result = post_call.normalize_distillation(raw, self.context, self.session.name,
+                                                          call_date="2026-10-30", transcript=transcript)
+                self.assertEqual(len(result["review_questions"]), 1)
+                self.assertFalse(post_call.review_complete(result))
+
+    def test_existing_explicit_holds_remain_unresolved_without_rewriting(self) -> None:
+        legacy = {"schema_version": 1, "review_questions": [
+            {"id": "old-skip", "question": "Skipped deal inactive: parked", "resolved": False},
+            {"id": "old-date", "question": "No due date was said on the call", "resolved": False},
+        ]}
+        post_call.write_private(self.session / post_call.REPORT_FILE, legacy)
+        original = (self.session / post_call.REPORT_FILE).read_bytes()
+        self.assertFalse(post_call.review_complete(post_call.read_json(self.session / post_call.REPORT_FILE)))
+        self.assertEqual((self.session / post_call.REPORT_FILE).read_bytes(), original)
+
+    def test_undated_actions_stay_undated_with_optional_reminders(self) -> None:
         result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
                                                   call_date="2026-10-30")
         task = result["joe_tasks"][0]
         self.assertIsNone(task["due_on"])
         self.assertTrue(task["due_defaulted"])
-        self.assertEqual([q["question"] for q in result["review_questions"]],
+        self.assertEqual(result["review_questions"], [])
+        self.assertTrue(post_call.review_complete(result))
+        self.assertEqual([q["question"] for q in result["optional_reminders"]],
                          ["joe_tasks item 1 (Call vendor): No due date was said on the call; set one if it has a deadline."])
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
         self.assertIsNone(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"])
@@ -1278,7 +1315,7 @@ class PostCallTests(unittest.TestCase):
                          [("deal-a", "2026-11-06", ["p-1"]), ("deal-b", None, [])])
         self.assertFalse(result["joe_tasks"][0]["due_defaulted"])
         self.assertEqual(len(result["dell_tasks"]), 1)
-        self.assertEqual([q["question"].split(":")[0] for q in result["review_questions"]],
+        self.assertEqual([q["question"].split(":")[0] for q in result["optional_reminders"]],
                          ["joe_tasks item 2 (Call vendor)", "dell_tasks item 1 (Call vendor)"])
 
     def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
