@@ -5,7 +5,10 @@
   "tenant": "server-derived carr-internal",
   "authorization": "current business.read_deal policy and active partner actor; browser session rechecked before effects and downloads",
   "verbs": {
-    "list-deal-deliverables": { "write": false, "required": ["deal_id"] },
+    "list-deal-deliverables": {
+      "write": false,
+      "required": ["deal_id"]
+    },
     "start-deal-deliverable": {
       "write": true,
       "required": [
@@ -35,12 +38,12 @@
   "browser": {
     "base_path": "/api/v1/deal-deliverables/{deal_id}",
     "routes": {
-      "GET /": "list-deal-deliverables",
-      "POST /": "start-deal-deliverable",
-      "PUT /{deliverable_id}/bytes": "bounded verified upload",
-      "POST /{deliverable_id}/finalize": "finalize-deal-deliverable",
-      "POST /{deliverable_id}/visibility": "set-deal-deliverable-visibility",
-      "GET /{deliverable_id}/download": "authorized attachment response"
+      "GET {base_path}": "list-deal-deliverables",
+      "POST {base_path}": "start-deal-deliverable",
+      "PUT {base_path}/{deliverable_id}/bytes": "bounded verified upload",
+      "POST {base_path}/{deliverable_id}/finalize": "finalize-deal-deliverable",
+      "POST {base_path}/{deliverable_id}/visibility": "set-deal-deliverable-visibility",
+      "GET {base_path}/{deliverable_id}/download": "authorized attachment response"
     },
     "json_body": "verb arguments except path-bound deal_id and deliverable_id",
     "upload_content_type": "application/octet-stream",

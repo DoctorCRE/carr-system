@@ -253,6 +253,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
           (await visibility(id, 1)).deliverable.visibility,
           "shared",
         );
+        assert.equal((await download(id)).status, 200);
         await reject(visibility(id, 1), "version_conflict");
         assert.equal(
           (await visibility(id, 2, "private")).deliverable.version,
