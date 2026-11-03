@@ -1,0 +1,7 @@
+{
+  "description": "Synthetic signature extraction cases.",
+  "cases": [
+    {"body": "Hello\n-- \nEmail: a@example.test\nPhone: 212 555 0101", "sender": "a@example.test", "count": 2},
+    {"body": "Hello\n-- \nEmail: b@example.test\nPhone: 212 555 0101", "sender": "a@example.test", "count": 0}
+  ]
+}
