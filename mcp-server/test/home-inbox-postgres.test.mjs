@@ -605,6 +605,13 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     const notification=(await read()).items.find(i=>i.source_type==='notification');
     assert.equal(notification.section,'done'); assert.equal(notification.auto_settled,false);
   });
+  await t.test('completed call follow-ups settle but processing completion stays Done',async()=>{
+    await c.query(`insert into capture_post_call_action(id,owner_id,description,status,updated_at,completed_at,version)
+      values($1,$2,'Synthetic completed follow-up','done',now(),now(),4)`,[id(705),joe.id]);
+    await c.query("insert into capture_session values($1,$2,'done',now(),now())",[id(706),joe.id]);
+    assert.equal((await item(705)).auto_settled,true); assert.equal((await item(705)).section,'settled');
+    assert.equal((await item(706)).auto_settled,false); assert.equal((await item(706)).section,'done');
+  });
   await t.test('newer canonical failure evidence prevents automatic settlement',async()=>{
     await c.query("update email_proposal set status='sent',result_recorded_at=now()-interval '1 minute',version=version+1 where id=$1",[id(701)]);
     await c.query(`insert into ops.notification values('${id(704)}','${joe.id}','email_proposal','${id(701)}','failure','Synthetic failure',null,now())`);
