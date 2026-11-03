@@ -390,7 +390,7 @@ def run_whisper(
         log(f"WHISPER {audio.name} model={model_path.name} recovery={recovery}")
         json_path = out_stem.with_suffix(".json")
         json_path.unlink(missing_ok=True)
-        decode_timeout = timeout
+        decode_timeout: float | None = timeout
         if recovery:
             decode_timeout = (RECOVERY_TIMEOUT_SECONDS if timeout is None
                               else min(timeout, RECOVERY_TIMEOUT_SECONDS))
@@ -460,16 +460,18 @@ def run_whisper(
 def shift_and_tag(
     raw_segments: list[RawSegment], offset_ms: int, speakers: list[str]
 ) -> list[Segment]:
-    return [
-        {
+    segments: list[Segment] = []
+    for raw, speaker in zip(raw_segments, speakers):
+        segment: Segment = {
             "start_ms": raw.start_ms + offset_ms,
             "end_ms": raw.end_ms + offset_ms,
             "speaker": speaker,
             "text": raw.text,
-            **({"unrecovered": True} if raw.unrecovered else {}),
         }
-        for raw, speaker in zip(raw_segments, speakers)
-    ]
+        if raw.unrecovered:
+            segment["unrecovered"] = True
+        segments.append(segment)
+    return segments
 
 
 # --- rendering -------------------------------------------------------------
