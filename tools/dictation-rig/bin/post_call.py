@@ -682,6 +682,7 @@ def _distiller_instruction() -> str:
         "add a review question rather than invent a date. "
         "A deal status statement creates a deal_updates item with next_step and phase_move null. "
         "Only an explicitly agreed phase change sets phase_move to an object with value and started_on. "
+        "Use the final explicit phase disposition for each deal; later spoken corrections replace earlier instructions. "
         "started_on is the YYYY-MM-DD the partners say the new phase began, only when they state that calendar date "
         "with its year; otherwise null. "
         "Use exactly one of pending, research, site_selection, negotiation, legal, due_diligence, closing. "
@@ -1394,7 +1395,7 @@ def mark_automatic(result: dict[str, Any], transcript: dict[str, Any], context: 
     return result
 
 
-def automatic_evidence(session_dir: Path) -> list[dict[str, str] | None]:
+def automatic_evidence(session_dir: Path) -> list[dict[str, Any] | None]:
     """Attest candidate quotes against the private recorded transcript, never model attribution."""
     items = sanitized_candidates(session_dir)["legacy_items"]
     try:
@@ -1402,15 +1403,48 @@ def automatic_evidence(session_dir: Path) -> list[dict[str, str] | None]:
         transcript = json.loads(raw)
     except (OSError, UnicodeError, json.JSONDecodeError):
         return [None] * len(items)
+    if not isinstance(transcript, dict) or not isinstance(transcript.get("segments"), list):
+        return [None] * len(items)
     stored = read_json(session_dir / CONTEXT_FILE) or {}
     context = {"speaker_labels": stored.get("speaker_labels"), "local_partner": stored.get("recorder")}
     source_sha256 = hashlib.sha256(raw).hexdigest()
     sources = []
+    started = (read_json(session_dir / "meta.json") or {}).get("started")
+    calibration = read_json(session_dir / ".capture.json") or {}
+    words = []
+    origins = []
+    segments = transcript.get("segments", [])
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, dict) or not isinstance(segment.get("text"), str):
+            words.append("")
+            origins.append(index)
+            continue
+        for word in _words(segment["text"]).split():
+            words.append(word)
+            origins.append(index)
     for item in items:
         quote = str(item.get("evidence_quote") or "")
         speaker = _partner_evidence(quote, transcript, context)
-        sources.append({"speaker": speaker, "quote_sha256": hashlib.sha256(quote.encode("utf-8")).hexdigest(),
-                        "source_sha256": source_sha256} if speaker else None)
+        source: dict[str, Any] | None = {"speaker": speaker, "quote_sha256": hashlib.sha256(quote.encode("utf-8")).hexdigest(),
+                  "source_sha256": source_sha256} if speaker else None
+        if source is not None:
+            wanted = _words(quote).split()
+            matches = []
+            for offset in range(len(words) - len(wanted) + 1):
+                if words[offset:offset + len(wanted)] != wanted:
+                    continue
+                first, last = origins[offset], origins[offset + len(wanted) - 1]
+                span = segments[first:last + 1]
+                if all(row.get("speaker") == span[0].get("speaker") for row in span):
+                    matches.append((span[0].get("start_ms"), span[-1].get("end_ms")))
+            if len(matches) == 1 and isinstance(started, str):
+                start, end = matches[0]
+                if type(start) is int and type(end) is int and 0 <= start < end <= 86400000:
+                    source.update(recording_started_at=started, occurrence_start_ms=start, occurrence_end_ms=end)
+                    for key in ("claim_elapsed_ms", "claim_round_trip_ms"):
+                        if key in calibration:
+                            source[key] = calibration[key]
+        sources.append(source)
     return sources
 
 

@@ -14,7 +14,7 @@
 import test, { before, after } from 'node:test';
 import { NOW } from './helpers/fixed-clock.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -27,7 +27,7 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
-import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook } from './helpers/call-rehearsal.mjs';
+import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './helpers/call-rehearsal.mjs';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');
@@ -150,6 +150,8 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   const started = new Date(NOW).toISOString().replace(/\.\d+Z$/u, 'Z');
   call = await openCallSession({ root, started, captureUrl: baseUrl, deviceToken: 'synthetic-device-token',
     distiller: SONNET ? 'live' : 'stand-in',
+    clock: rehearsalClock(started),
+    observeClaim: (token, clock) => observeRehearsalClaim((sql, params) => c.query(sql, params), token, clock),
     env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
 
   // The Deal Room hands the companion the exact deal index.
@@ -171,6 +173,9 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     await call.request('/api/call-context', context);
   }
   await call.waitFor(r => r.report?.automatic?.finished_at, { attempts: SONNET ? 600 : 240 });
+  const marker = JSON.parse(readFileSync(path.join(call.session, '.capture.json'), 'utf8'));
+  assert.equal(marker.claim_elapsed_ms, 5000);
+  assert.equal(marker.claim_round_trip_ms, 1000);
   const logs = call.logs;
 
   // 4. One durable call outcome lists every applied change with its evidence
@@ -284,4 +289,35 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   // 7. Once a partner has looked it over, the outcome leaves Home.
   await verb(joe, 'review-call-outcome', { session_id: outcome.session_id });
   assert.equal((await verb(joe, 'read-call-outcomes')).calls.length, 0);
+});
+
+test('a call with an out-of-bound recording clock keeps its phase pending with a review reason', { skip: SONNET, timeout: 180_000 }, async () => {
+  call.stop();
+  rmSync(root, { recursive: true, force: true });
+  root = mkdtempSync(path.join(tmpdir(), 'carr-call-skew-'));
+  const started = '2026-10-28T15:00:00Z';
+  call = await openCallSession({ root, started, captureUrl: baseUrl, deviceToken: 'synthetic-device-token',
+    clock: rehearsalClock(started, 120000),
+    observeClaim: (token, clock) => observeRehearsalClaim((sql, params) => c.query(sql, params), token, clock),
+    env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
+  const { deals: index } = await verb(joe, 'get-call-context', { deal_ids: Object.values(deals) });
+  call.writeTranscript();
+  await call.request('/api/call-context', callContext(call.session, started, index));
+  const review = await call.waitFor(r => r.report?.automatic?.finished_at);
+  const bayside = await deal('Synthetic Bayside Dental Relocation');
+  assert.equal(bayside.phase, 'research');
+  const { calls } = await verb(joe, 'read-call-outcomes');
+  assert.equal(calls.length, 1);
+  const outcome = calls[0];
+  assert.ok(!outcome.applied.some(change => change.kind === 'phase_move'));
+  assert.ok(outcome.applied.some(change => change.kind === 'next_step'));
+  const phase = outcome.open_cards.find(card => card.kind === 'phase_move' && card.deal_id === bayside.id);
+  assert.ok(phase);
+  assert.equal(phase.payload.phase_chronology_verified, false);
+  const candidate = (await c.query('select status from capture_candidate where id=$1', [phase.candidate_id])).rows[0];
+  assert.equal(candidate.status, 'pending');
+  const held = review.report.deal_updates.map(update => update.phase_move)
+    .find(change => change?.candidate_id === phase.candidate_id);
+  assert.equal(held.apply, 'review');
+  assert.match(held.review_reason, /The call timing or current phase could not be confirmed/);
 });

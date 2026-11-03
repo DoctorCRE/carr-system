@@ -377,6 +377,200 @@ runpy.run_path(suite, run_name='__main__')
         self.assertNotIn('permissionDecision', hook.process(event, runner=unavailable, cache=False)['hookSpecificOutput'])
 
 
+class NativeAgentMessageTests(HookTestCase):
+    invoke = DeliveryTests.invoke
+    AGENT = '00000000-0000-0000-0000-000000000795'
+    CHILD = '/root/review'
+    RULE = dict(id='11111111', statement='Inspect the current diff.',
+                scope={'tools': ['Bash']}, personal_to=None)
+
+    def setUp(self):
+        super().setUp()
+        raw = tempfile.TemporaryDirectory()
+        self.addCleanup(raw.cleanup)
+        self.path = Path(raw.name) / f'rollout-fixture-{self.AGENT}.jsonl'
+        self.payload = {'prompt': None, 'transcript_path': str(self.path),
+                        'agent_id': self.AGENT, 'turn_id': 'native-turn'}
+
+    def metadata(self):
+        return {'type': 'session_meta', 'payload': {'id': self.AGENT, 'source': {
+            'subagent': {'thread_spawn': {'agent_path': self.CHILD}}}}}
+
+    def message(self, text='Review the diff.', recipient=None):
+        recipient = recipient or self.CHILD
+        return {'type': 'response_item', 'payload': {'type': 'agent_message',
+            'author': '/root', 'recipient': recipient, 'content': [{'type': 'input_text',
+            'text': f'Message Type: NEW_TASK\nTask name: {recipient}\nSender: /root\nPayload:\n' + text}]}}
+
+    def write(self, *records):
+        self.path.write_text(''.join(json.dumps(r) + '\n' for r in records))
+
+    def test_native_child_agent_message_delivers_matched_rule(self):
+        self.write(self.metadata(), self.message())
+        output = self.invoke([self.RULE], payload=self.payload)
+        specific = output['hookSpecificOutput']
+        self.assertNotIn('permissionDecision', specific)
+        self.assertNotIn('RULE LOOKUP INCOMPLETE', json.dumps(output))
+        self.assertEqual(json.loads(specific['additionalContext'])['rules'], [self.RULE])
+        with patch.object(hook, 'process', return_value=output):
+            verdict = hook.decide(self.payload)
+        self.assertEqual(json.loads(verdict.stdout), output)
+
+    def test_native_child_agent_message_uses_stdin_transport(self):
+        self.write(self.metadata(), self.message())
+        bootstrap = """
+import importlib.util
+import json
+from pathlib import Path
+import sys
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('hook', sys.argv[1])
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+source = json.loads(sys.argv[2])
+with patch.object(hook, 'session_catalog', return_value=source), patch.object(hook.rule_routes.time, 'time', return_value=1700000000):
+    raise SystemExit(hook.main())
+"""
+        source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a' * 64,
+                  'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                               'sponsoring_human_id': 'joe'}, 'rules': [self.RULE]}
+        event = dict(self.payload, hook_event_name='PreToolUse', session_id='stdin-family',
+                     tool_use_id='call', tool_name='Bash', tool_input={'command': 'git diff'})
+        child_env = dict(os.environ, CARR_RULE_ROUTE_DEDUPE_DIR=str(self.path.parent / 'routes'),
+                         CARR_RULE_BOOT_STATE_DIR=str(self.path.parent / 'boot'))
+        for records, allowed in (((self.metadata(), self.message()), True), ((self.metadata(),), False)):
+            with self.subTest(allowed=allowed):
+                self.write(*records)
+                result = subprocess.run([sys.executable, '-c', bootstrap,
+                    str(REPO / 'hooks/rule-pack-preuse-reselection.py'), json.dumps(source)],
+                    input=json.dumps(event), text=True, capture_output=True, env=child_env, check=True)
+                output = json.loads(result.stdout)['hookSpecificOutput']
+                if allowed:
+                    self.assertEqual(json.loads(output['additionalContext'])['rules'], [self.RULE])
+                else:
+                    self.assertEqual(output['permissionDecision'], 'deny')
+                    self.assertIn('TASK CONTEXT UNAVAILABLE', output['permissionDecisionReason'])
+
+    def test_native_child_empty_task_body_still_denies(self):
+        self.write(self.metadata(), self.message(''))
+        out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+        self.assertEqual(out.get('permissionDecision'), 'deny', out)
+        self.assertIn('TASK CONTEXT UNAVAILABLE', out['permissionDecisionReason'])
+
+    def test_native_child_whitespace_task_body_still_denies(self):
+        self.write(self.metadata(), self.message('  \n\t '))
+        out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+        self.assertEqual(out.get('permissionDecision'), 'deny', out)
+        self.assertIn('TASK CONTEXT UNAVAILABLE', out['permissionDecisionReason'])
+
+    def test_native_child_unusable_encrypted_body_still_denies(self):
+        for encrypted in (None, '', ' \n\t', 123, {}, []):
+            with self.subTest(encrypted=encrypted):
+                msg = self.message('')
+                msg['payload']['content'].append({'type': 'encrypted_content',
+                                                 'encrypted_content': encrypted})
+                self.write(self.metadata(), msg)
+                out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+                self.assertEqual(out.get('permissionDecision'), 'deny', out)
+
+    def test_native_child_blank_new_task_does_not_reuse_older_task(self):
+        self.write(self.metadata(), self.message(), self.message(' \n '))
+        out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+        self.assertEqual(out.get('permissionDecision'), 'deny', out)
+
+    def test_native_child_encrypted_body_structural_delivery_uses_available_envelope(self):
+        msg = self.message('')
+        envelope = msg['payload']['content'][0]['text']
+        msg['payload']['content'].append({'type': 'encrypted_content',
+                                         'encrypted_content': 'synthetic-ciphertext'})
+        self.write(self.metadata(), msg)
+        output = self.invoke([self.RULE], payload=self.payload)
+        self.assertEqual(json.loads(output['hookSpecificOutput']['additionalContext'])['rules'], [self.RULE])
+        self.assertEqual(rendered_receipt()['task_sha256'], digest(envelope))
+
+    def test_native_child_new_task_wins_over_inherited_parent_user(self):
+        inherited = {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user',
+                     'content': [{'type': 'input_text', 'text': 'Parent task'}]}}
+        newest = self.message('Newest child task')
+        self.write(self.metadata(), inherited, self.message('Older child task'), newest)
+        self.assertEqual(hook.task_text(self.payload), newest['payload']['content'][0]['text'])
+
+    def test_native_child_wrong_recipient_or_rollout_still_denies(self):
+        for metadata, msg, payload in (
+            (self.metadata(), self.message(recipient='/root/sibling'), self.payload),
+            (self.metadata(), self.message(), dict(self.payload, agent_id='sibling')),
+            ({'type': 'session_meta', 'payload': {'id': 'sibling'}}, self.message(), self.payload),
+        ):
+            with self.subTest(payload=payload, msg=msg):
+                sibling = self.path.with_suffix('') / 'subagents' / 'agent-sibling.jsonl'
+                sibling.parent.mkdir(parents=True, exist_ok=True)
+                sibling.write_text(json.dumps(self.message()) + '\n')
+                self.write(metadata, msg)
+                self.assertEqual(self.invoke([self.RULE], payload=payload)[
+                    'hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_native_child_unusable_task_still_denies(self):
+        for content in ([], [{'type': 'encrypted_content', 'encrypted_content': 'cipher'}],
+                        [{'type': 'input_text', 'text': 123}],
+                        [{'type': 'input_text', 'text': 'Message Type: MESSAGE\nPayload:\nhello'}]):
+            with self.subTest(content=content):
+                msg = self.message()
+                msg['payload']['content'] = content
+                self.write(self.metadata(), msg)
+                out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+                self.assertEqual(out['permissionDecision'], 'deny')
+                self.assertIn('TASK CONTEXT UNAVAILABLE', out['permissionDecisionReason'])
+        self.path.write_text('{corrupt json\n')
+        self.assertEqual(self.invoke([self.RULE], payload=self.payload)[
+            'hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_child_delivery_does_not_satisfy_parent_or_sibling(self):
+        self.write(self.metadata(), self.message())
+        source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a' * 64,
+                  'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                               'sponsoring_human_id': 'joe'}, 'rules': [self.RULE]}
+        runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
+        event = dict(self.payload, hook_event_name='PreToolUse', session_id='family',
+                     tool_use_id='call', tool_name='Bash', tool_input={'command': 'git diff'})
+        root = self.path.parent
+        with patch.dict(os.environ, {'CARR_RULE_ROUTE_DEDUPE_DIR': str(root / 'routes'),
+                                     'CARR_RULE_BOOT_STATE_DIR': str(root / 'boot')}), \
+                patch.object(hook.rule_routes.time, 'time', return_value=1700000000), \
+                patch.object(hook.rule_routes, '_context_epoch', return_value='epoch-1') as epoch:
+            def deliver(payload):
+                out = hook.process(payload, runner=runner, cache=False)
+                if out is not None:
+                    self.assertEqual(json.loads(out['hookSpecificOutput']['additionalContext'])['rules'], [self.RULE])
+                return out
+            self.assertIsNotNone(deliver(event))
+            self.assertIsNone(deliver(event))
+            self.assertIsNotNone(deliver(dict(event, agent_id=None, prompt='Parent task')))
+            self.assertIsNotNone(deliver(dict(event, agent_id='sibling', prompt='Sibling task')))
+            self.assertIsNone(deliver(event))
+            source['corpus_digest'] = 'b' * 64
+            self.assertIsNotNone(deliver(event))
+            epoch.return_value = 'epoch-2'
+            self.assertIsNotNone(deliver(event))
+
+    def test_claude_sidechain_task_remains_supported(self):
+        path = self.path.with_suffix('') / 'subagents' / 'agent-claude-child.jsonl'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({'type': 'user', 'message': {
+            'role': 'user', 'content': 'Claude child task'}}) + '\n')
+        payload = dict(self.payload, agent_id='claude-child', turn_id=None)
+        self.assertEqual(hook.task_text(payload), 'Claude child task')
+        self.assertEqual(json.loads(self.invoke([self.RULE], payload=payload)[
+            'hookSpecificOutput']['additionalContext'])['rules'], [self.RULE])
+
+    def test_standing_context_cannot_bypass_bad_child_transcript(self):
+        self.write(self.metadata(), self.message())
+        self.assertIn('additionalContext', self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput'])
+        self.write(self.metadata())
+        out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+        self.assertEqual(out['permissionDecision'], 'deny')
+        self.assertIn('TASK CONTEXT UNAVAILABLE', out['permissionDecisionReason'])
+
+
 class CardDeliveryTests(HookTestCase):
     """PLANNING/TOOL cards ride PreToolUse, PROMPT cards ride UserPromptSubmit."""
     UNCOVERED = dict(id='11111111', statement='Inspect the current diff.',

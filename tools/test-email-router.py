@@ -741,6 +741,27 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(writes[1][0], 'inherit-email-thread')
         self.assertEqual(writes[1][1]['thread_activity_id'], 'prior')
 
+    def test_handled_source_teaches_only_the_confirmed_thread(self):
+        prior = self.prior(disposition='handled', correction_provenance={'scope': 'conversation', 'target_deal': DEAL})
+        decision = email_matching.match(self.mail(), [{'id': DEAL}], [prior])
+        self.assertEqual((decision.kind, decision.deal, decision.thread_activity_id), ('inherit_thread', DEAL, 'prior'))
+        changed = self.mail(conversation_id='a-separate-transaction')
+        self.assertIsNone(email_matching.thread_match(changed, [{'id': DEAL}], [prior]))
+
+    def test_deferral_and_dismissal_refusals_do_not_trigger_a_different_write_path(self):
+        for code in ['email_proposal_not_pending', 'email_thread_filing_suppressed']:
+            writes = []
+            def carr(verb, args):
+                if verb == 'email-router-queue':
+                    return {'open_deals': [{'id': DEAL}], 'emails': [self.mail(thread_history=[self.prior()])]}
+                writes.append((verb, args))
+                raise Refused(code)
+            result = email_router.route(carr, lambda e, d: {'proposals': []}, refusal_code, {}, NOW)
+            self.assertEqual(result['inherited'], 0)
+            self.assertEqual(result['recorded'], 0)
+            self.assertTrue(writes)
+            self.assertTrue(all(verb in email_router.VERBS for verb, _ in writes))
+
     def test_undone_filing_is_not_proposed_again_to_the_same_deal(self):
         pending = []
         def carr(verb, args):
@@ -807,10 +828,11 @@ class MatchingTests(unittest.TestCase):
                 patch.object(email_matching, 'load_carr_tokens', create=True,
                              return_value={'TYPESAFE_API_KEY': 'synthetic-key'}) as load, \
                 patch('typesafe_sdk.TypeSafeClient', side_effect=construct):
+            expected_path = Path.home() / '.config/carr/typesafe.env'
             decision = email_matching.match(self.mail(), [{'id': DEAL}], [])
         self.assertEqual(decision.kind, 'file_to_deal')
         self.assertEqual(constructor_calls, [{'api_key': 'synthetic-key', 'model': 'jev-1.13.0'}])
-        load.assert_called_once_with(['TYPESAFE_API_KEY'], path=Path.home() / '.config/carr/typesafe.env')
+        load.assert_called_once_with(['TYPESAFE_API_KEY'], path=expected_path)
 
     def test_supplied_jev_environment_key_needs_no_credential_file(self):
         fake = FakeJev()

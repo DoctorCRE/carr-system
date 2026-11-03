@@ -68,3 +68,12 @@ test("Joe and Dell evidence receipts allow automatic changes", async () => {
 test("a quote absent from the stored transcript receipt is refused", async () => {
   assert.match(await automaticApplyHold(withSource(phase, "joe", "A different phrase from the stored transcript")) || "", /evidence|match/);
 });
+
+test("timed source receipts retain the partner and exact quote checks", async () => {
+  const timed = withSource(phase);
+  Object.assign(timed.payload.evidence_source, { recording_started_at: "2026-11-02T15:00:00Z",
+    occurrence_start_ms: 60000, occurrence_end_ms: 65000 });
+  assert.equal(await automaticApplyHold(timed), null);
+  timed.payload.evidence_source.quote_sha256 = digest("An earlier instruction");
+  assert.match(await automaticApplyHold(timed), /match/);
+});

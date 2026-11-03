@@ -1,0 +1,67 @@
+{
+  "schema": "carr-action-reopen/v1",
+  "completion": {
+    "verb": "complete-one-action",
+    "request": {
+      "idempotency_key": "UUID per intended completion",
+      "action_id": "UUID",
+      "base_version": "Current positive integer action version"
+    },
+    "receipt": {
+      "ok": true,
+      "action_id": "UUID",
+      "status": "done",
+      "version": "New integer action version",
+      "completion_event_id": "UUID of the exact complete-one-action event"
+    }
+  },
+  "inverse": {
+    "verb": "reopen-one-action",
+    "request": {
+      "idempotency_key": "New UUID per intended Undo; retain on lost response",
+      "action_id": "Copy from completion receipt",
+      "base_version": "Copy version from completion receipt",
+      "completion_event_id": "Copy from completion receipt"
+    },
+    "receipt": {
+      "ok": true,
+      "action_id": "UUID",
+      "status": "open",
+      "version": "New integer action version",
+      "completion_event_id": "UUID of the reversed completion event"
+    }
+  },
+  "authority": "Both operations require verified partner authority. Another verified partner may undo the completion; event identity selects the change, not its author.",
+  "guards": [
+    "Exactly one tenant-scoped next_action or capture_post_call_action must match action_id.",
+    "The current numeric version must equal both base_version and the selected completion event version.",
+    "The selected event must be a tenant-scoped complete-one-action status change from open to done for the same action table, subject and owner.",
+    "The current action must still be done. Later edits, moves, owner changes, dropping, reopening and recompletion cannot be overwritten."
+  ],
+  "effects": [
+    "Only the selected task status changes from done to open.",
+    "A call task completed_at becomes null. A next_action records updated_by.",
+    "The normal row trigger increments version. One reopen-one-action event records completion_event_id.",
+    "Sibling tasks, deal plan and Inbox dispositions are unchanged. No migration is required."
+  ],
+  "retry": {
+    "same_key": "Same canonical request and authenticated principal replay the original receipt with replayed=true within the shared envelope replay window. Concurrent identical retries serialize before receipt lookup.",
+    "key_reuse": "Changed arguments, verb or principal refuse key_reuse.",
+    "expired_receipt": "After the shared replay window, current-version protection still prevents repeating the mutation; callers must re-read rather than infer success.",
+    "uncertainty": "Retain the exact request after transport failure. Do not assume either success or refusal without a receipt.",
+    "window": "30 days, defined by replay-receipt.ts and enforced by the tool_call ledger"
+  },
+  "refusals": [
+    "partner_required",
+    "human_only_verb_requires_verified_partner",
+    "unattended_runner_authority_not_admitted",
+    "invalid_action_id",
+    "invalid_completion",
+    "invalid_base_version",
+    "action_not_found",
+    "version_conflict",
+    "key_reuse"
+  ],
+  "legacy_completion_receipts": "Receipts created before this contract may lack completion_event_id. They do not authorize guessed event lookup or Undo.",
+  "invalid_completion": "The completion event ID is invalid, does not match the exact unchanged task, or the task is not currently completed."
+}

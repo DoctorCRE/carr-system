@@ -16,7 +16,7 @@ before(async () => {
   fixture = await postgresDatabase('record-closure-');
   c = fixture.client;
   const schema = readFileSync(new URL('../../db/schema.sql', import.meta.url), 'utf8');
-  for (const name of ['actor', 'next_action', 'critical_date', 'event', 'tool_call']) {
+  for (const name of ['actor', 'next_action', 'critical_date', 'capture_post_call_action', 'event', 'tool_call']) {
     const definition = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
     assert.ok(definition, name);
     await c.query(definition);
@@ -26,6 +26,7 @@ before(async () => {
   await c.query('commit');
   await restoreEventIdentity(c, schema);
   await c.query(schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)[0]);
+  await c.query(readFileSync(new URL('../../migrations/1079_single_action_completion.sql', import.meta.url), 'utf8'));
   await c.query('create trigger next_action_touch before update on next_action for each row execute function trg_touch_row()');
   await c.query('create trigger critical_date_touch before update on critical_date for each row execute function trg_touch_row()');
   await c.query('alter table tool_call add primary key(idempotency_key)');
@@ -144,7 +145,7 @@ test('drop retry replays its receipt and a changed reason cannot reuse its key',
 
 test('unverified and unattended callers cannot reach either closure handler', async () => {
   const database = { query: () => { throw new Error('unauthorized database access'); } };
-  for (const name of ['drop-action', 'resolve-critical-date']) {
+  for (const name of ['drop-action', 'resolve-critical-date', 'reopen-one-action']) {
     assert.ok(TOOLS[name]?.humanOnly);
     for (const actor of [retired, { ...retired, slug: 'claude', sponsoring_human_slug: 'joe' }, { ...joe, slug: 'outsider' }]) {
       await assert.rejects(executeRegisteredTool(database, actor, name, {}), refuses('human_only_verb_requires_verified_partner'));
@@ -266,4 +267,117 @@ test('an event failure rolls back date resolution and permits retry with the sam
   assert.deepEqual((await c.query('select status,version from critical_date where id=$1', [row.id])).rows[0], { status: 'open', version: 1 });
   assert.equal((await c.query('select count(*)::int as count from tool_call where idempotency_key=$1', [args.idempotency_key])).rows[0].count, 0);
   assert.equal((await command('resolve-critical-date', args)).ok, true);
+});
+
+
+test('completion receipt selects the exact inverse and concurrent retries replay once', async () => {
+  const row = await action();
+  const sibling = await action();
+  const completion = await command('complete-one-action', { action_id: row.id, base_version: 1 });
+  assert.match(completion.completion_event_id, /^[0-9a-f-]{36}$/);
+  const args = { idempotency_key: randomUUID(), action_id: row.id, base_version: completion.version,
+    completion_event_id: completion.completion_event_id };
+  const other = new pg.Client(c.connectionParameters);
+  await other.connect();
+  try {
+    const results = await Promise.all([command('reopen-one-action', args), command('reopen-one-action', args, joe, other)]);
+    const first = results.find(result => !result.replayed);
+    assert.equal(results.filter(result => result.replayed).length, 1);
+    assert.equal(first.status, 'open');
+    assert.equal(first.version, 3);
+    assert.equal(first.completion_event_id, completion.completion_event_id);
+    assert.deepEqual(await command('reopen-one-action', args), { replayed: true, ...first });
+    assert.deepEqual((await c.query('select status,version from next_action where id=$1', [sibling.id])).rows[0], { status: 'open', version: 1 });
+    assert.equal((await c.query("select count(*)::int count from event where verb='reopen-one-action' and idempotency_key=$1", [args.idempotency_key])).rows[0].count, 1);
+  } finally { await other.end(); }
+});
+
+
+async function postCallAction(id = randomUUID()) {
+  return (await c.query(`insert into capture_post_call_action(id,candidate_id,deal_id,owner_id,description,accepted_by)
+    values($1,$2,$3,$4,'Synthetic call task',$4) returning *`, [id, randomUUID(), randomUUID(), retired.id])).rows[0];
+}
+async function completed(row) {
+  const receipt = await command('complete-one-action', { action_id: row.id, base_version: row.version });
+  return { action_id: row.id, base_version: receipt.version, completion_event_id: receipt.completion_event_id };
+}
+
+test('a call task reopens with completed_at cleared, sibling and plan untouched', async () => {
+  const row = await postCallAction();
+  const sibling = await postCallAction();
+  const args = await completed(row);
+  assert.ok((await c.query('select completed_at from capture_post_call_action where id=$1', [row.id])).rows[0].completed_at);
+  const receipt = await command('reopen-one-action', args, dell);
+  assert.equal(receipt.version, 3);
+  assert.deepEqual((await c.query('select status,completed_at,version from capture_post_call_action where id=$1', [row.id])).rows[0],
+    { status: 'open', completed_at: null, version: 3 });
+  assert.deepEqual((await c.query('select status,version from capture_post_call_action where id=$1', [sibling.id])).rows[0], { status: 'open', version: 1 });
+});
+
+test('reopen refuses newer edits, owner changes, dropped tasks and recompletion in both tables', async () => {
+  for (const [table, make] of [['next_action', action], ['capture_post_call_action', postCallAction]]) {
+    for (const edit of ["description='Changed task'", `owner_id='${dell.id}'`,
+      `status='dropped'${table === 'capture_post_call_action' ? ',completed_at=null' : ''}`]) {
+      const row = await make();
+      const args = await completed(row);
+      await c.query(`update ${table} set ${edit} where id=$1`, [row.id]);
+      await assert.rejects(command('reopen-one-action', args), refuses('version_conflict'));
+      await assert.rejects(command('reopen-one-action', { ...args, base_version: 3 }),
+        refuses(edit.startsWith('status=') ? 'invalid_completion' : 'invalid_completion'));
+    }
+    const row = await make();
+    const args = await completed(row);
+    const reopened = await command('reopen-one-action', args);
+    await command('complete-one-action', { action_id: row.id, base_version: reopened.version });
+    await assert.rejects(command('reopen-one-action', args), refuses('version_conflict'));
+    await assert.rejects(command('reopen-one-action', { ...args, base_version: 4 }), refuses('invalid_completion'));
+  }
+});
+
+test('reopen requires the exact completion identity and rejects never completed or already open tasks', async () => {
+  const row = await action();
+  const other = await completed(await action());
+  await assert.rejects(command('reopen-one-action', { ...other, completion_event_id: randomUUID() }), error => publicError(error).error === 'invalid_completion');
+  await assert.rejects(command('reopen-one-action', { ...other, action_id: row.id, base_version: 1 }), refuses('invalid_completion'));
+  const args = await completed(row);
+  await assert.rejects(command('reopen-one-action', { ...args, completion_event_id: other.completion_event_id }), refuses('invalid_completion'));
+  await assert.rejects(command('reopen-one-action', { ...args, completion_event_id: randomUUID() }), refuses('invalid_completion'));
+  await command('reopen-one-action', args);
+  await assert.rejects(command('reopen-one-action', { ...args, base_version: 3 }), refuses('invalid_completion'));
+  await assert.rejects(command('reopen-one-action', { ...args, action_id: randomUUID() }), refuses('action_not_found'));
+});
+
+test('task and event tenant isolation and ambiguous identity refuse without mutation', async () => {
+  for (const [table, make] of [['next_action', action], ['capture_post_call_action', postCallAction]]) {
+    const row = await make();
+    const args = await completed(row);
+    await c.query(`update ${table} set organization_tenant_id='synthetic-other' where id=$1`, [row.id]);
+    await assert.rejects(command('reopen-one-action', args), refuses('action_not_found'));
+    const own = await make();
+    const ownArgs = await completed(own);
+    await c.query("update event set organization_tenant_id='synthetic-other' where id=$1", [ownArgs.completion_event_id]);
+    await assert.rejects(command('reopen-one-action', ownArgs), refuses('invalid_completion'));
+  }
+  const row = await action();
+  const args = await completed(row);
+  await postCallAction(row.id);
+  await assert.rejects(command('reopen-one-action', args), refuses('action_not_found'));
+});
+
+test('reopen rollback, replay identity, changed payload and invalid arguments hold', async () => {
+  const row = await action();
+  const args = { ...await completed(row), idempotency_key: randomUUID() };
+  await c.query("alter table event add constraint synthetic_inverse_failure check (verb <> 'reopen-one-action') not valid");
+  try { await assert.rejects(command('reopen-one-action', args)); }
+  finally { await c.query('alter table event drop constraint synthetic_inverse_failure'); }
+  assert.deepEqual((await c.query('select status,version from next_action where id=$1', [row.id])).rows[0], { status: 'done', version: 2 });
+  const receipt = await command('reopen-one-action', args);
+  await assert.rejects(command('reopen-one-action', args, dell), refuses('key_reuse'));
+  await assert.rejects(command('reopen-one-action', { ...args, completion_event_id: randomUUID() }), refuses('key_reuse'));
+  for (const [field, value, error] of [['action_id', 'bad', 'invalid_action_id'],
+    ['completion_event_id', 'bad', 'invalid_completion'], ['base_version', 0, 'invalid_base_version']]) {
+    await assert.rejects(command('reopen-one-action', { ...args, idempotency_key: randomUUID(), [field]: value }), refuses(error));
+  }
+  await command('complete-one-action', { action_id: row.id, base_version: receipt.version });
+  assert.deepEqual(await command('reopen-one-action', args), { replayed: true, ...receipt });
 });
