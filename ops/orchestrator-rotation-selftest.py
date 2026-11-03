@@ -51,6 +51,20 @@ class Rotation(unittest.TestCase):
         self.blocked(self.run_hook())
         self.allowed(self.run_hook())
 
+    def test_successor_pins_self_and_unpins_retiring_thread(self):
+        for event, overrides in [('Stop', {}), ('PreCompact', {'trigger': 'auto'})]:
+            with self.subTest(event=event):
+                result = self.run_hook(event, **overrides)
+                self.blocked(result)
+                reason = json.loads(result.stdout)['reason']
+                self.assertIn('Include your retiring T3 thread id in both the handoff and successor prompt.', reason)
+                self.assertIn('As part of your opening act, call t3_thread_organize with action "pin"', reason)
+                self.assertIn('and omit threadId to pin your own thread.', reason)
+                self.assertIn('Then call t3_thread_organize with action "unpin" and threadId set to the', reason)
+                self.assertIn('retiring T3 thread id named in this launch prompt and handoff.', reason)
+                self.assertLess(reason.index('action "pin"'), reason.index('action "unpin"'))
+                self.assertIn('Do not use the Claude session id as the T3 thread id.', reason)
+
     def test_above(self):
         self.write(600000)
         self.blocked(self.run_hook())

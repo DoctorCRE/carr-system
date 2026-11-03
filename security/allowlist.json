@@ -792,6 +792,18 @@
       "sha256": "006ebd49392c5291e0b82519f21ade3a79f97246ac6f7f51871812b7f8140d58",
       "rule": "opaque-binary",
       "reason": "WR442.S8.J1 hand-constructed synthetic HxStore. Exact bytes reproduce from ops/fixtures/outlook-builds/write-inputs.py without Outlook, mailbox data, or decoder imports; checked by outlook-build-fixtures-selftest.py. Only example.test addresses and invented text. Qualification binds this exact path and digest."
+    },
+    {
+      "path": "lib/outlook_runtime_refresh.py",
+      "sha256": "8c19ded0d94ef3950220188757eb6acabb50c7929b717542d01b54e16a351445",
+      "rule": "pii-email",
+      "reason": "Public GitHub SSH origin syntax in the historical validator, not a personal email or credential. The current validator uses an escaped hostname regex; this exact historical blob is retained under the no-rewrite policy."
+    },
+    {
+      "path": "lib/outlook_runtime_refresh.py",
+      "sha256": "d5860ef6b7b4b1b04ecf8ae320976b9bac2082c3d95e8d8bc7fbfdac7d7bafd8",
+      "rule": "pii-email",
+      "reason": "Public GitHub SSH origin syntax in the historical validator, not a personal email or credential. The current validator uses an escaped hostname regex; this exact historical blob is retained under the no-rewrite policy."
     }
   ]
 }
