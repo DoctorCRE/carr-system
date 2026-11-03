@@ -10,6 +10,7 @@ import { createCaptureHandler } from '../src/capture.js';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
 let fixture, c, actor, clientId;
+const recordingStartedAt = "2099-01-01T15:00:00Z";
 before(async () => {
   fixture = await postgresDatabase('call-phase-evidence-');
   c = fixture.client;
@@ -50,14 +51,15 @@ async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, ki
   });
   const token = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
-    session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
-    now()+interval '1 day','distilling',now(),$3) returning id`, [createHash('sha256').update(token).digest('hex'), actor.id, kind !== 'meeting_record'])).rows[0].id;
+    session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',$4::timestamptz,$4::timestamptz,$1,
+    now()+interval '1 day','distilling',now(),$3) returning id`, [createHash('sha256').update(token).digest('hex'), actor.id, kind !== 'meeting_record', recordingStartedAt])).rows[0].id;
   const handler = createCaptureHandler({ withWriter: fn => transaction(fn, 'carr_writer') });
   const response = await handler.fetch(new Request('http://127.0.0.1/capture/candidates', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
       session_token: token, idempotency_key: randomUUID(), ...(kind === 'meeting_record' ? {} : { evidence_sources: [speaker === "client" ? null : {
         speaker, source_sha256: createHash('sha256').update(JSON.stringify({ speaker, text: storedQuote })).digest('hex'),
         quote_sha256: createHash('sha256').update(storedQuote).digest('hex'),
+        recording_started_at: recordingStartedAt, occurrence_start_ms: 60000, occurrence_end_ms: 65000,
       }] }), items: [{ kind,
         payload: kind === 'next_step' ? { deal, text: stepText, next_date: '2030-01-01' }
           : ['activity', 'meeting_record'].includes(kind) ? { ref: deal, kind: 'note', summary: evidence }
@@ -173,7 +175,17 @@ for (const [name, options] of [
   assert.deepEqual(after.events, before.events);
   const outcome = (await command('read-call-outcomes')).calls.find(call => call.session_id === session);
   assert.ok(outcome.open_cards.some(card => card.candidate_id === id));
-  await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true });
+  if (options.speaker === 'client') {
+    await assert.rejects(command('resolve-candidate', {
+      idempotency_key: randomUUID(), candidate_id: id, accept: true,
+    }), error => error.payload?.error === 'missing_phase_chronology');
+    assert.equal((await command('get-deal-room', { deal })).phase, before.phase);
+    await command('patch-deal-field', { idempotency_key: randomUUID(), deal, field: 'phase',
+      value: 'legal', base_event_id: null, human_quote: 'Move this deal to legal now.',
+      change_reason: 'Fresh explicit partner decision after reviewing the live deal' });
+  } else {
+    await command('resolve-candidate', { idempotency_key: randomUUID(), candidate_id: id, accept: true });
+  }
   assert.equal((await command('get-deal-room', { deal })).phase, 'legal');
 });
 
