@@ -115,3 +115,13 @@ test("stop, appointment, and complete transition state rules reject invalid mapp
   await h.tools["append-tour-route-stop-transition"].handler(h.c,actor,{idempotency_key:key,old_route_version_id:ids.base,new_route_version_id:ids.route,old_route_stop_id:ids.oldStop,new_route_stop_id:ids.stop,disposition:"held"});
   assert.deepEqual(h.calls.at(-1).params,["carr-internal",ids.base,ids.route,ids.oldStop,ids.stop,"held"]);
 });
+
+
+test("deal creation preserves the canonical UUID in the registered subject interface", async () => {
+  const h = harness();
+  await h.tools["create-tour-domain"].handler(h.c, actor, {
+    idempotency_key:key, tour_name:"Synthetic deal tour", subject_type:"deal", subject_id:ids.property,
+    canonical_dataset_version:"v1", start_point:point("start"), end_point:point("end"),
+  });
+  assert.deepEqual(h.calls.at(-1).params.slice(2,4), ["deal", ids.property]);
+});

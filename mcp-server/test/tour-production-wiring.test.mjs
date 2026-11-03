@@ -136,3 +136,17 @@ test("a PDF from an older projection is never presented as the current packet", 
   assert.equal(detail.pdf_render_job_id, null);
   assert.equal(detail.pdf_status, "missing");
 });
+
+
+test("runtime projections preserve deal bindings across deals and legacy tours", () => {
+  const first = {id:"one", tour_name:"One", tour_status:"draft", deal_id:"58600000-0000-4000-8000-000000000001", deal_name:"Synthetic One"};
+  const second = {...first, id:"two", deal_id:"58600000-0000-4000-8000-000000000002", deal_name:"Synthetic Two"};
+  const legacy = {...first, id:"legacy", deal_id:null, deal_name:null};
+  const library = projectTourLibrary({tours:[first,second,legacy]});
+  assert.deepEqual(library.tours.map(t => t.deal_id), [first.deal_id,second.deal_id,null]);
+  for (const raw of [first,second,legacy]) {
+    const detail = projectTourDetail(raw);
+    assert.equal(detail.deal_id,raw.deal_id);
+    assert.equal(detail.deal_name,raw.deal_name);
+  }
+});
