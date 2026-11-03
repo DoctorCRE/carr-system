@@ -89,6 +89,62 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
     const fresh = (await read()).items.find(i => i.source_id === proposal);
     assert.equal((await load(fresh)).detail.reply_draft.body, 'Edited synthetic body');
   });
+  const replyStates = [
+    { name: 'pending', status: 'pending', section: 'inbox', review: true, listed: true },
+    { name: 'future deferred via owner snooze', status: 'pending', defer: true, section: 'inbox', review: true, listed: false },
+    { name: 'deferred deadline reached', status: 'pending', defer: true, due: true, section: 'inbox', review: true, listed: true },
+    { name: 'Home snoozed', status: 'pending', command: 'snooze-home-inbox', section: 'snoozed', review: true, listed: true },
+    { name: 'Home settled', status: 'pending', command: 'settle-home-inbox', section: 'settled', review: true, listed: true },
+    { name: 'approved to send', status: 'approved_to_send', section: 'working', error: 'home_review_unsupported' },
+    { name: 'sent resolved', status: 'sent', section: 'settled', error: 'home_review_resolved' },
+    { name: 'failed', status: 'failed', section: 'inbox', error: 'home_review_unsupported' },
+    { name: 'dismissed resolved', status: 'dismissed', error: 'home_review_not_found' },
+    { name: 'confirmed handled', status: 'confirmed', error: 'home_review_unsupported' },
+  ];
+  for (const state of replyStates) await t.test(`reply state agreement: ${state.name}`, async () => {
+    const id = randomUUID(), source = randomUUID();
+    await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source)
+      select $1,occurred_at,actor_id,kind,summary,detail,email_source from activity where id=$2`, [source,activity]);
+    await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,draft_subject,draft_body)
+      values($1::uuid,'reply_draft',$2,'Synthetic source evidence','joe',0.95,$3,'State agreement '||$1::text,'Synthetic body')`,
+    [id, source, actors.joe.id]);
+    const find = async () => (await read()).items.find(i => i.source_id === id);
+    const original = await find();
+    if (state.defer) {
+      await call('snooze-email-proposal', { proposal_id: id, base_version: 1,
+        deferred_until: new Date(Date.now() + 86400000).toISOString(), idempotency_key: randomUUID() });
+      await refuses(load(original), 'home_review_stale');
+      if (state.due) await c.query("update email_proposal set deferred_until=now()-interval '1 second' where id=$1", [id]);
+    }
+    if (state.command) await call(state.command, { items: [{ item_id: original.item_id, base_version: original.base_version }],
+      ...(state.command === 'snooze-home-inbox' ? { until: new Date(Date.now() + 86400000).toISOString() } : {}),
+      idempotency_key: randomUUID() });
+    if (state.status !== 'pending') await c.query(`update email_proposal set status=$2,version=version+1,
+      resolved_by=$3,resolved_at=now(),resolution_reason=case when $2='dismissed' then 'Synthetic dismissal' end,
+      disposition=case when $2='confirmed' then 'handled' end,
+      submitted_at=case when $2 in ('approved_to_send','sent','failed') then now() end,
+      submitted_email=case when $2 in ('approved_to_send','sent','failed') then '{"subject":"Synthetic","body":"Synthetic","sha256":"synthetic","to":["sender@example.test"],"cc":[]}'::jsonb end,
+      send_result=case when $2 in ('sent','failed') then jsonb_build_object('status',$2::text) end,
+      result_recorded_at=case when $2 in ('sent','failed') then now() end where id=$1`, [id,state.status,actors.joe.id]);
+    const current = await find();
+    if (state.section) assert.equal(current.section, state.section);
+    if (state.review) {
+      assert.deepEqual(current.review_reference.operations, HOME_REVIEW_CONTRACT.kinds.reply_draft);
+      const before = (await c.query('select * from email_proposal where id=$1', [id])).rows;
+      const loaded = await load(current);
+      assert.deepEqual(loaded.operations.map(o => o.verb), current.review_reference.operations);
+      assert.deepEqual((await c.query('select * from email_proposal where id=$1', [id])).rows, before);
+      assert.equal((await call('list-email-proposals')).proposals.some(p => p.id === id), state.listed);
+      assert.deepEqual((await call('list-email-proposals', { proposal_id: id }, actors.dell)).proposals, []);
+      await call('edit-email-draft', { ...loaded.operations[0].args, subject: 'Refreshed synthetic subject',
+        body: 'Refreshed synthetic body', idempotency_key: randomUUID() });
+      await refuses(load(current), 'home_review_stale');
+      assert.equal((await load(await find())).detail.reply_draft.body, 'Refreshed synthetic body');
+    } else {
+      assert.equal(current?.review_reference ?? null, null);
+      await refuses(load(current ?? original), state.error);
+    }
+  });
   await t.test('unsupported notification card refuses safely', async () => {
     const notification = randomUUID();
     await c.query(`insert into ops.notification(id,recipient_actor,subject_type,subject_ref,severity,reason,event_ref,event_source,deep_link,dedupe_key)
