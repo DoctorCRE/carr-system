@@ -1258,6 +1258,8 @@ class PostCallTests(unittest.TestCase):
             ("end of next week.", False, None, False),
             ("on November 6, 2026.", False, None, False),
             ("sometime next month.", False, None, False),
+            ("sometime next month.", False, "2026-11-02", False),
+            ("November 6 or November 9.", False, "2026-11-06", False),
             ("Tuesday.", False, None, True),
             ("tomorrow or Friday.", False, None, False),
             ("end of next week.", True, None, False),
@@ -1273,7 +1275,8 @@ class PostCallTests(unittest.TestCase):
                 post_call.write_private(session / "meta.json", {"started": "2026-10-26T12:00:00Z"})
                 action = "I will call Harbor vendor"
                 spoken = action + (" " if timing != "." else "") + timing
-                transcript = {"segments": [{"speaker": "Joe", "text": spoken}]}
+                texts = [spoken] if full_quote else [action, timing]
+                transcript = {"segments": [{"speaker": "Joe", "text": text} for text in texts]}
                 post_call.write_private(session / "transcript.json", transcript)
                 raw = self.output(joe_tasks=[{
                     "title": "Call Harbor vendor", "deal_id": "deal-a", "participant_ids": [],
@@ -1283,7 +1286,8 @@ class PostCallTests(unittest.TestCase):
                     "deal_id": "deal-a", "participant_ids": []}}], "facts": [{
                     "fact_id": "task", "topic_id": "harbor", "kind": "commitment",
                     "statement": spoken, "asserted_value": None,
-                    "source_spans": [_REAL_COVERAGE.source_span(transcript, 0)], "disposition": None,
+                    "source_spans": [_REAL_COVERAGE.source_span(transcript, i) for i in range(len(texts))],
+                    "disposition": None,
                 }], "non_fact_spans": []}
 
                 def distill(request):
@@ -1298,8 +1302,10 @@ class PostCallTests(unittest.TestCase):
                     status = post_call.process_session(session, distiller=distill)
                 self.assertEqual(status["state"], "ready_review", status)
                 report = post_call.read_json(session / post_call.REPORT_FILE)
-                if timing == ".":
+                if timing == "." or not can_file:
                     self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                if timing == "Tuesday.":
+                    self.assertEqual(report["joe_tasks"][0]["due_on"], "2026-10-27")
                 report["joe_tasks"][0].update(candidate_id="task", candidate_status="confirmed")
                 post_call.write_private(session / post_call.REPORT_FILE, report)
                 _REAL_COVERAGE.require_coverage(session, report, post_call.read_json)

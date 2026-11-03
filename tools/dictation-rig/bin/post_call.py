@@ -25,7 +25,7 @@ import fcntl
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo
 
 import call_budget
@@ -378,6 +378,7 @@ def _relative_phrases(evidence: str) -> list[str]:
 
 @dataclass(frozen=True)
 class DeadlineResolution:
+    state: Literal["unstated", "resolved", "ambiguous", "contradictory"]
     due_on: str | None
     review_reason: str | None = None
 
@@ -393,7 +394,7 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
     if CALENDAR_DAY.search(evidence):
         return None
     if QUALIFIED_RELATIVE_DAY.search(PAST_RELATIVE_DAY.sub("", evidence)):
-        return DeadlineResolution(None, "The quoted deadline is qualified; clarify the exact date.")
+        return DeadlineResolution("ambiguous", None, "The quoted deadline is qualified; clarify the exact date.")
     phrases = _relative_phrases(evidence)
     if not phrases and re.search(r"\bbefore (?:the )?lunch call\b", evidence, re.IGNORECASE):
         lunch_anchors = [sentence for sentence in re.split(r"[.!?]", spoken)
@@ -402,7 +403,7 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
                          and (RELATIVE_DAY.search(sentence) or CALENDAR_DAY.search(sentence))]
         if lunch_anchors:
             if any(QUALIFIED_RELATIVE_DAY.search(sentence) for sentence in lunch_anchors):
-                return DeadlineResolution(None, "The lunch call deadline is qualified; clarify the exact date.")
+                return DeadlineResolution("ambiguous", None, "The lunch call deadline is qualified; clarify the exact date.")
             anchored = [_relative_phrases(sentence) for sentence in lunch_anchors]
             if not all(anchored):
                 return None
@@ -411,10 +412,10 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
             phrases = ["today"]
     if not phrases:
         if PAST_RELATIVE_DAY.search(evidence):
-            return DeadlineResolution(None, "The quoted day refers to the past; clarify the deadline.")
+            return DeadlineResolution("ambiguous", None, "The quoted day refers to the past; clarify the deadline.")
         return None
     if call_date is None:
-        return DeadlineResolution(None, "A relative deadline requires the recorded call start date in America/Chicago.")
+        return DeadlineResolution("ambiguous", None, "A relative deadline requires the recorded call start date in America/Chicago.")
     anchor = date.fromisoformat(call_date)
     resolved: set[date] = set()
     for phrase in phrases:
@@ -426,11 +427,43 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
             weekday = WEEKDAYS.index(phrase.split()[-1])
             offset = 7 - anchor.weekday() + weekday if phrase.startswith("next ") else (weekday - anchor.weekday()) % 7
             if offset == 0 and "today" not in phrases:
-                return DeadlineResolution(None, "A weekday matching the call day is ambiguous unless today was stated.")
+                return DeadlineResolution("ambiguous", None, "A weekday matching the call day is ambiguous unless today was stated.")
         resolved.add(anchor + timedelta(days=offset))
     if len(resolved) != 1:
-        return DeadlineResolution(None, "The evidence gives conflicting relative deadlines; clarify the deadline.")
-    return DeadlineResolution(resolved.pop().isoformat())
+        return DeadlineResolution("contradictory", None, "The evidence gives conflicting relative deadlines; clarify the deadline.")
+    return DeadlineResolution("resolved", resolved.pop().isoformat())
+
+
+def _task_deadline(item: dict[str, Any], transcript: dict[str, Any] | None,
+                   call_date: str | None, ledger: dict[str, Any] | None) -> DeadlineResolution:
+    evidence = item["evidence"]
+    if ledger and transcript:
+        facts = {fact["fact_id"]: fact for fact in ledger["facts"]}
+        spans = [span for fact_id in item.get("fact_ids", []) if fact_id in facts
+                 for span in facts[fact_id]["source_spans"]]
+        spans = list({(s["segment_index"], s["char_start"], s["char_end"]): s for s in spans}.values())
+        if spans:
+            evidence = " ".join(transcript["segments"][s["segment_index"]]["text"][s["char_start"]:s["char_end"]]
+                                for s in sorted(spans, key=lambda s: (s["segment_index"], s["char_start"])))
+    calendar_days = {m.group().lower() for m in CALENDAR_DAY.finditer(evidence)}
+    if len(calendar_days) > 1:
+        return DeadlineResolution("contradictory", None, "The cited source gives conflicting calendar deadlines; clarify the deadline.")
+    if calendar_days:
+        if item["due_on"] is None:
+            return DeadlineResolution("ambiguous", None, "The cited source states a calendar deadline that was not resolved; clarify the exact date.")
+        return DeadlineResolution("resolved", item["due_on"])
+    relative = _relative_due_date(evidence, transcript, call_date)
+    if relative is not None:
+        return relative
+    timing = PAST_RELATIVE_DAY.sub("", evidence)
+    timing = re.sub(r"\b(?:" + "|".join(WEEKDAYS) + r")[’']s\b", "", timing, flags=re.IGNORECASE)
+    if (RELATIVE_DAY.search(timing) or re.search(
+            r"\b(?:(?:next|this|following)\s+(?:day|week|month|year)|"
+            r"(?:days?|weeks?|months?)\s+(?:from|after|before))\b", timing, re.IGNORECASE)):
+        if item["due_on"] is not None and not re.search(DEADLINE_QUALIFIER, timing, re.IGNORECASE):
+            return DeadlineResolution("resolved", item["due_on"])
+        return DeadlineResolution("ambiguous", None, "The cited source states timing that was not resolved; clarify the exact date.")
+    return DeadlineResolution("resolved" if item["due_on"] else "unstated", item["due_on"])
 
 
 UNSAID_REVIEW = "The model did not say whether this was settled."
@@ -446,7 +479,8 @@ def _review_note(change: dict[str, Any], field: str) -> None:
 
 
 def _validate_distillation(value: Any, *, call_date: str | None = None,
-                           transcript: dict[str, Any] | None = None) -> dict[str, Any]:
+                           transcript: dict[str, Any] | None = None,
+                           ledger: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError("distiller output must be an object")
     _strict_keys(value, {"schema_version", "report", "joe_tasks", "dell_tasks", "deal_updates", "draft_proposals", "review_questions"}, {"review_intents"})
@@ -509,7 +543,10 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                 raise ContractError(f"{list_name}.participant_ids must be string IDs")
             resolved = None
             if is_action or step is not None:
-                resolved = _relative_due_date(item["evidence"], transcript, call_date)
+                resolved = (_task_deadline(item, transcript, call_date, ledger) if is_action
+                            else _relative_due_date(item["evidence"], transcript, call_date))
+                if is_action:
+                    item["deadline_state"] = resolved.state
                 if resolved is not None:
                     if is_action:
                         item["due_on"] = resolved.due_on
@@ -567,8 +604,9 @@ def _review_id(session: str, kind: str, number: int) -> str:
 
 
 def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
-                           call_date: str | None = None, transcript: dict[str, Any] | None = None) -> dict[str, Any]:
-    raw = _validate_distillation(value, call_date=call_date, transcript=transcript)
+                           call_date: str | None = None, transcript: dict[str, Any] | None = None,
+                           ledger: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = _validate_distillation(value, call_date=call_date, transcript=transcript, ledger=ledger)
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
@@ -633,8 +671,11 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
             if first is None:
                 kept.append(task)
                 continue
+            if first["deadline_state"] == "unstated" and task["deadline_state"] != "unstated":
+                first["deadline_state"] = task["deadline_state"]
             if first["due_on"] is None and task["due_on"] is not None:
-                first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"], evidence=task["evidence"])
+                first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"],
+                             deadline_state=task["deadline_state"], evidence=task["evidence"])
             first["fact_ids"] = list(dict.fromkeys(first.get("fact_ids", []) + task.get("fact_ids", [])))
             first["participant_ids"] = list(dict.fromkeys(first["participant_ids"] + task["participant_ids"]))
         return kept
@@ -653,7 +694,7 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
     }
     for list_name in ("joe_tasks", "dell_tasks"):
         for number, task in enumerate(result[list_name], 1):
-            if task["due_on"] is None:
+            if task["deadline_state"] == "unstated":
                 result["optional_reminders"].append({"id": _review_id(session, f"undated_{list_name}", number),
                                "question": f"{list_name} item {number} ({task['title']}): "
                                            "No due date was said on the call; set one if it has a deadline."})
@@ -1118,7 +1159,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             write_private(session_dir / "post-call-held-draft.json", raw)
             return held
         result = normalize_distillation(raw, context, session_dir.name,
-                                       call_date=call_date, transcript=transcript)
+                                       call_date=call_date, transcript=transcript, ledger=ledger)
         coverage.add_identity_questions(ledger, result, _review_id)
         ledger = coverage.reconcile_coverage(ledger, result)
         write_private(session_dir / coverage.FILE, ledger)

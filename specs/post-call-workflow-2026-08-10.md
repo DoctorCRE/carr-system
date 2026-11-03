@@ -85,11 +85,37 @@ a human-facing call title. `created_at` remains the proposal creation timestamp.
 These fields are additive to `post-call-followups.v1`. Neither outcome review nor
 the source call's age removes provenance from an otherwise eligible candidate.
 Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
-Due dates come only from what was said on the call. When no usable deadline is
-stated, `due_on` stays null, the task and stored candidate carry
-`due_defaulted: true`. The local report keeps an optional date reminder in
-`optional_reminders`; it does not require resolution or block retention. No date
-is invented. An ambiguous spoken deadline still retains its review question. Undated tasks remain proposals, just like explicitly dated tasks.
+Due dates come only from what was said on the call. Task timing is classified
+from all complete source spans of the cited ledger facts, before the short
+remote evidence quote is trimmed. The states are `unstated`, `resolved`,
+`ambiguous`, and `contradictory`.
+
+- `unstated` keeps `due_on` null and `due_defaulted: true`. Only this state adds
+  an optional date reminder in `optional_reminders`, which does not block retention.
+- `resolved` keeps the stated calendar date or the deterministic relative date.
+  An unqualified weekday uses the upcoming occurrence under the existing call-date rule.
+- `ambiguous` keeps `due_on` null and creates a blocking review question. This
+  includes qualified timing such as "end of next week" or "sometime next month",
+  and a calendar deadline present in the source but missing from `due_on`.
+- `contradictory` keeps `due_on` null and creates a blocking review question for
+  conflicting calendar or relative deadlines.
+
+No date is invented. Undated tasks remain proposals, just like explicitly dated tasks.
+The filing and retention predicates stay unchanged. Existing report holds are preserved.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Classify: Read cited source spans
+    Classify --> Unstated: No timing
+    Classify --> Resolved: Exact deadline
+    Classify --> Ambiguous: Timing unresolved
+    Classify --> Contradictory: Deadlines conflict
+    Unstated --> FilingEligible: Optional reminder
+    Resolved --> FilingEligible
+    Ambiguous --> ReviewHold
+    Contradictory --> ReviewHold
+```
+
 One extraction writes each owner's task once: tasks on the same deal whose
 titles match after case and whitespace normalization merge, a stated date
 winning over none; two different stated dates stay separate proposals.
