@@ -87,3 +87,64 @@ begin
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
     'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
 end $grants$;
+
+create or replace function ops.append_doc_conversation_turn(
+  p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid, p_answer_blocks jsonb default '[]'::jsonb)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,ops,public,pg_temp
+as $$
+declare v_actor uuid; v_slug text; v_id bigint; v_sequence integer; v_prior ops.doc_conversation_turn%rowtype;
+begin
+  if p_answer_blocks is null or jsonb_typeof(p_answer_blocks) <> 'array'
+     or octet_length(p_answer_blocks::text) > 131072 then
+    return jsonb_build_object('ok', false, 'reason_id', 'answer_blocks_invalid');
+  end if;
+  if jsonb_array_length(p_answer_blocks) > 8
+     or (p_role <> 'assistant' and p_answer_blocks <> '[]'::jsonb) then
+    return jsonb_build_object('ok', false, 'reason_id', 'answer_blocks_invalid');
+  end if;
+  -- Both turn writers hold this lock before reading the next sequence.
+  perform 1 from ops.doc_conversation where id = p_conversation for update;
+  if not found then
+    return jsonb_build_object('ok', false, 'reason_id', 'doc_conversation_not_found');
+  end if;
+  -- The acting actor, resolved from the server-installed transaction context.
+  -- A caller cannot name one: there is no parameter for it.
+  v_actor := ops.portfolio_writer_actor_id();
+  select slug into v_slug from public.actor where id = v_actor;
+  if v_slug is null then
+    raise exception 'doc conversation append could not resolve the acting actor';
+  end if;
+
+  insert into ops.doc_conversation_turn(
+    conversation_id, sequence, role, body, msg_id, origin_channel, origin_actor, answer_blocks)
+  select p_conversation,
+         coalesce((select max(sequence) + 1 from ops.doc_conversation_turn
+                    where conversation_id = p_conversation), 0),
+         p_role, p_body, p_msg_id, 'mcp', v_slug, p_answer_blocks
+  on conflict (msg_id) do nothing
+  returning id, sequence into v_id, v_sequence;
+
+  if v_id is null then
+    select * into v_prior from ops.doc_conversation_turn where msg_id = p_msg_id;
+    if v_prior.id is null then
+      return jsonb_build_object('ok', false, 'reason_id', 'dedup_row_vanished');
+    end if;
+    -- The record-signal full-field replay comparison: the same msg_id offered
+    -- with different content is a REUSE, not a duplicate.
+    if v_prior.conversation_id is distinct from p_conversation
+       or v_prior.role is distinct from p_role
+       or v_prior.body is distinct from p_body
+       or v_prior.answer_blocks is distinct from p_answer_blocks then
+      return jsonb_build_object('ok', false, 'reason_id', 'doc_conversation_msg_id_reuse',
+        'msg_id', p_msg_id);
+    end if;
+    return jsonb_build_object('ok', true, 'deduplicated', true, 'id', v_prior.id,
+      'sequence', v_prior.sequence, 'msg_id', p_msg_id, 'origin_actor', v_prior.origin_actor,
+      'idempotency_key', p_idempotency_key);
+  end if;
+
+  update ops.doc_conversation set updated_at = now() where id = p_conversation;
+  return jsonb_build_object('ok', true, 'deduplicated', false, 'id', v_id,
+    'sequence', v_sequence, 'msg_id', p_msg_id, 'origin_actor', v_slug,
+    'origin_channel', 'mcp', 'idempotency_key', p_idempotency_key);
+end $$;

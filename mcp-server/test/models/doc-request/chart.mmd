@@ -1,15 +1,70 @@
 ---
-title: "Queued ask submission"
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
 ---
 stateDiagram-v2
-  s0: No stored ask
-  s1: Access revoked, no stored ask
-  s2: Ask inserted, transaction uncommitted
-  s3: Ask and receipt committed
-  s4: Ask retained, access revoked
-  [*] --> s0
-  s0 --> s1: Partner access revoked
-  s0 --> s2: Partner submits
-  s2 --> s0: Receipt write fails
-  s2 --> s3: Receipt commits
-  s3 --> s4: Partner access revoked
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
+  }
+  class legendWorks works
+  state "Ask accepted, access<br/>active, answer not yet<br/>saved" as s0
+  state "Ask accepted, access<br/>active, answer saved" as s1
+  state "Ask accepted, access<br/>active, answer saving" as s2
+  state "Ask accepted, access<br/>revoked, answer not yet<br/>saved" as s3
+  state "Ask accepted, access<br/>revoked, answer saved" as s4
+  state "Ask accepted, access<br/>revoked, answer saving" as s5
+  state "Ask saving, access active,<br/>answer not yet saved" as s6
+  state "Ask saving, access active,<br/>answer saved" as s7
+  state "No new ask, access active,<br/>answer not yet saved" as s8
+  state "No new ask, access active,<br/>answer saved" as s9
+  state "No new ask, access active,<br/>answer saving" as s10
+  state "No new ask, access<br/>revoked, answer not yet<br/>saved" as s11
+  state "No new ask, access<br/>revoked, answer saved" as s12
+  state "No new ask, access<br/>revoked, answer saving" as s13
+  [*] --> s8
+  s8 --> s6 : Partner submits
+  s8 --> s10 : Assistant saves answer
+  s8 --> s11 : Partner access revoked
+  s6 --> s0 : Ask and receipt commit
+  s6 --> s8 : Receipt write fails
+  s10 --> s9 : Answer commits
+  s10 --> s8 : Answer transaction fails
+  s10 --> s13 : Partner access revoked
+  s11 --> s13 : Assistant saves answer
+  s0 --> s2 : Assistant saves answer
+  s0 --> s3 : Partner access revoked
+  s9 --> s7 : Partner submits
+  s9 --> s12 : Partner access revoked
+  s13 --> s12 : Answer commits
+  s13 --> s11 : Answer transaction fails
+  s2 --> s1 : Answer commits
+  s2 --> s0 : Answer transaction fails
+  s2 --> s5 : Partner access revoked
+  s3 --> s5 : Assistant saves answer
+  s7 --> s1 : Ask and receipt commit
+  s7 --> s9 : Receipt write fails
+  s1 --> s4 : Partner access revoked
+  s5 --> s4 : Answer commits
+  s5 --> s3 : Answer transaction fails
+  class s0 works
+  class s1 works
+  class s2 works
+  class s3 works
+  class s4 works
+  class s5 works
+  class s6 works
+  class s7 works
+  class s8 works
+  class s9 works
+  class s10 works
+  class s11 works
+  class s12 works
+  class s13 works

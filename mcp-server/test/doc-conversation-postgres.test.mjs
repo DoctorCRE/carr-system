@@ -212,3 +212,22 @@ for (const firstWriter of ['ask', 'answer']) {
     }
   });
 }
+
+test('assistant rollback releases allocation for the queued ask', async () => {
+  const args = await setup();
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    await c.query('set local role carr_authority');
+    await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+    const result = await executeRegisteredTool(c, joe, 'add-doc-conversation-turn', {
+      conversation_id: args.conversation_id, idempotency_key: randomUUID(), msg_id: randomUUID(),
+      role: 'assistant', body: 'Synthetic rolled back answer',
+    });
+    assert.equal(result.ok, true);
+    await c.query('rollback');
+    assert.deepEqual(await submit(args), accepted(args));
+    assert.deepEqual((await pool.query('select sequence,role from ops.doc_conversation_turn where conversation_id=$1',
+      [args.conversation_id])).rows, [{ sequence: 0, role: 'human' }]);
+  } finally { await c.query('rollback'); c.release(); }
+});
