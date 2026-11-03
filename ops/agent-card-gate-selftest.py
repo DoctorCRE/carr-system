@@ -483,6 +483,77 @@ class AgentCardGate(unittest.TestCase):
             with self.subTest(prompt=prompt):
                 self.assertEqual(self.run_hook(prompt=prompt).returncode, 2)
 
+    def test_real_process_interleaving(self):
+        self.now = 1000000
+        self.assertEqual(self.mint_fixture().returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        config = dict(fixture_env(), HOME=str(self.home))
+        writer_code = f'''
+import sys
+sys.path.insert(0, {str(REPO)!r})
+from lib.agent_card_cache import RegistrationCache
+from pathlib import Path
+original = Path.replace
+def replace(path, target):
+    print('READY', flush=True)
+    sys.stdin.readline()
+    return original(path, target)
+Path.replace = replace
+print('WRITER contains', RegistrationCache(clock=lambda:1000000).contains('WR557.S6.J1'), flush=True)
+'''
+        writer = subprocess.Popen([sys.executable, '-c', writer_code], env=config, cwd=self.root,
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: writer.poll() is None and writer.kill())
+        self.assertEqual(writer.stdout.readline().strip(), 'READY')
+        self.reply_fixture(False)
+        negative_code = f'''
+import sys, runpy, time, errno
+sys.path.insert(0, {str(self.root)!r})
+from lib.agent_card_cache import RegistrationCache
+from pathlib import Path
+original = RegistrationCache._open
+def open_file(path, flags):
+    if Path(path).name.startswith('revoked-'):
+        raise OSError(errno.ENOSPC, 'synthetic marker disk full')
+    return original(path, flags)
+RegistrationCache._open = staticmethod(open_file)
+time.time = lambda:1000000
+runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__')
+'''
+        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Agent',
+                 'cwd': str(self.root), 'tool_input': {'prompt': 'Card: WR557.S6.J1'}}
+        negative = subprocess.run([sys.executable, '-c', negative_code], input=json.dumps(event),
+                                  text=True, capture_output=True, env=config, timeout=10)
+        self.assertEqual(negative.returncode, 2, negative.stderr)
+        out, err = writer.communicate(input='resume\n', timeout=10)
+        self.assertEqual(writer.returncode, 0, err)
+        self.lookup.write_text('raise SystemExit(1)')
+        later = self.run_hook(prompt='Card: WR557.S6.J1')
+        print('TWO_PROCESSES negative rc=', negative.returncode, 'writer=', out.strip(),
+              'later outage rc=', later.returncode)
+        self.assertEqual(later.returncode, 2, later.stderr)
+
+    def test_repository_reuse(self):
+        self.now = 1000000
+        args = {'work_request': 'WR-000557', 'slice': 6, 'executor': 'codex',
+                'model': 'synthetic', 'repository': 'DoctorCRE/carr-system'}
+        self.assertEqual(self.mint_fixture(args=args).returncode, 0)
+        other = self.root / 'doctorcre-app'
+        for directory in ('hooks', 'lib', 'tools'):
+            shutil.copytree(self.root / directory, other / directory)
+        (other / 'tools/call-verb.py').write_text('raise SystemExit(1)')
+        subprocess.run(['git', 'init', '-q', str(other)], check=True)
+        subprocess.run(['git', 'remote', 'add', 'origin',
+                        'https://github.com/jbookout/doctorcre-app.git'], cwd=other, check=True)
+        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Agent', 'cwd': str(other),
+                 'tool_input': {'prompt': 'Card: WR557.S6.J1'}}
+        command = [sys.executable, '-c', f'import time,runpy;time.time=lambda:1000000;'
+                   f'runpy.run_path({str(other/"hooks/agent-card-gate.py")!r},run_name="__main__")']
+        result = subprocess.run(command, input=json.dumps(event), text=True, capture_output=True,
+                                cwd=other, env=dict(fixture_env(), HOME=str(self.home)))
+        print('CROSS_REPOSITORY gate rc=', result.returncode)
+        self.assertEqual(result.returncode, 2, result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()
