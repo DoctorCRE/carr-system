@@ -6,15 +6,16 @@ description: Verify canonical signature identity when editing reconciliation, fi
 # Verify signature review
 
 Coverage is email_contact_review.resolve_sources, Run.signature_findings,
-_best_copies and _prune. Correspondence was checked against WR442.S2.J28's
-Approach 2 diff on base 26ef1e966. Check the diff before advancing this sync record.
+_best_copies and _prune. Correspondence was checked against WR442.S2.J30's
+Approach 2 fix from reviewed d3bf982e8. Check the diff before advancing this sync record.
 Review separately models the existing Run.write journal.
 
-Read docs/models/email-contact-review/README.md for the checksum, six exact runner
+Read docs/models/email-contact-review/README.md for the checksum, eight exact runner
 commands, bounds, omissions and named tests. Execute every command. Canonical must
 pass all three invariants. Rekey, Holder and Ambiguity must break AtMostOne and
 ChangedPartySourceHold. UnsafeProof must break UniqueProof. Review must pass all
-configured invariants. Inspect summary.json, stories.md and PNGs. A parser or
+configured invariants. Competition must pass CompetingEvidenceMonotone, UniqueProof,
+AtMostOne and ChangedPartySourceHold. CompetitionForget must break all four. Inspect summary.json, stories.md and PNGs. A parser or
 adapter error never counts as an expected invariant failure.
 
 Canonical starts with two frozen sources sharing a Message-ID and explores six
@@ -31,3 +32,10 @@ IntakeTest.test_signature_competing_history_preserves_both_sources through
 ops/outlook-intake-selftest.py. It must fail with three findings. Restore the file
 and rerun. Never commit the mutation. If it survives, repair this verification.
 Also retain successful-upgrade tests; count-only assertions can miss permanent holds.
+
+Competition additionally covers unassigned equal-proof keys, absence and restart,
+changed binding and later distinguishing proof. Evidence is retained even after
+resolution. To mutate this path, replace the evidence setdefault with
+`mailbox['evidence'] = {}; evidence = mailbox['evidence']` before groups are read.
+The three test_signature_competing_evidence history regressions must fail; restore
+and rerun. The distinguishing-proof test must also pass, to reject permanent holds.

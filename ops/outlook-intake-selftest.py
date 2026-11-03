@@ -651,6 +651,19 @@ class IntakeTest(unittest.TestCase):
     def test_signature_competing_evidence_holds_changed_body(self):
         self.unresolved_competing_signatures('body')
 
+    def test_signature_competing_evidence_resolves_with_distinguishing_proof(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        one, two = ({**a, 'local_keys': k} for k in ('77', '88'))
+        self.assertEqual(self.run_intake([one, two]).counts['signature_held'], 2)
+        # Key 88 now supplies B's distinct frozen proof, excluding it from A.
+        self.assertEqual(self.run_intake([{**b, 'local_keys': '88'}]).counts['signature_held'], 0)
+        self.assertEqual(self.run_intake([one]).counts['signature_held'], 0)
+        self.assertEqual(len(self.fake.findings), 2)
+        self.assertEqual(len(self.fake.writes('record-finding')), 2)
+
     def test_signature_simultaneous_aliases_share_frozen_request(self):
         old = self.signature_alias_fixture()
         self.run_intake([old])

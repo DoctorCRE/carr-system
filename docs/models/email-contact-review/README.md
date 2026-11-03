@@ -9,7 +9,12 @@ Neither contact updater is called.
 Run.signature_findings keeps the raw decoder identity before activity renames rows.
 email_contact_review.resolve_sources retains mailbox-scoped canonical records with
 alias sets, actual keys, frozen content proofs and Message-ID. The competing index
-retains every canonical source sharing a Message-ID across absent scans.
+retains every canonical source sharing a Message-ID across absent scans. The evidence
+index also retains unassigned decoder aliases and actual key sets for each content
+proof. It is populated for the entire batch before selection and saved by intake
+before any binding check or submission. Absent rows never erase earlier competition.
+A uniquely assigned alias excludes that representation from other sources without
+deleting its evidence. Otherwise competing equal-proof keys remain held across restarts.
 Observations never move. Activity holders cannot lend keys to signature sources.
 
 An existing alias selects its record. A new alias needs a unique compatible content
@@ -52,6 +57,18 @@ represents the first two-row batch; an optional Scan represents A alone. The rea
 regression executes all five scans explicitly. UnsafeProof breaks UniqueProof.
 These variants project the old mechanisms; they do not copy the full old intake.
 
+Competition covers the J29 gap before a canonical source can be assigned. One
+keyless observation is followed by keys 77 and 88 with equal content proof, then
+three arbitrary returning scans with changed/restored party or body and restart.
+A later row may supply a second frozen source's distinct proof, uniquely assigning
+key 88 and excluding it from the first source's possibilities. Evidence remains
+stored after resolution. CompetingEvidenceMonotone requires every competing row to
+remain in the journal; the other three invariants retain their canonical meanings.
+The fixed check covers 197 states and 902 nonstuttering transitions.
+The Forget variant projects d3bf982e's batch-only proof competition and breaks all
+four rules. Real SQLite tests replay the exact three/four-scan histories. This
+bounded companion does not model arbitrary proof changes or joint source creation.
+
 Review separately covers preparation, refusal, failure, committed lost response,
 replay and restoring held evidence. Its alias action assumes an already-proven alias.
 Canonical checks proof selection. These models are not a joint proof of all storage
@@ -72,13 +89,15 @@ node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalRekey.
 node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalHolder.cfg" --map "$model/canonical-view.mjs" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-holder --png
 node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalAmbiguity.cfg" --map "$model/canonical-view.mjs" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-ambiguity --png
 node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalUnsafeProof.cfg" --map "$model/canonical-view.mjs" --expect-broken UniqueProof --out /tmp/email-unsafe-proof --png
+node "$runner" from-spec "$model/Competition.tla" --config "$model/Competition.cfg" --map "$model/competition-view.mjs" --out /tmp/email-competition --png
+node "$runner" from-spec "$model/Competition.tla" --config "$model/CompetitionForget.cfg" --map "$model/competition-view.mjs" --expect-broken CompetingEvidenceMonotone,UniqueProof,AtMostOne,ChangedPartySourceHold --out /tmp/email-forget --png
 node "$runner" from-spec "$model/Review.tla" --config "$model/Review.cfg" --map "$model/view.mjs" --out /tmp/email-review --png
 .venv/bin/python ops/outlook-intake-selftest.py
 .venv/bin/python ops/email-contact-review-selftest.py
 ```
 
 Read summary.json and stories.md and inspect PNGs. Exceptions are failures.
-canonical-chart.mmd is the fixed chart. Generated traces remain outside Git.
+canonical-chart.mmd and competition-chart.mmd are the fixed charts. Generated traces remain outside Git.
 
 ## Transition coverage
 
@@ -92,6 +111,10 @@ canonical-chart.mmd is the fixed chart. Generated traces remain outside Git.
 | Simultaneous upgrades | test_signature_competing_sources_upgrade_together |
 | Unknown proof | test_signature_ambiguous_new_representation_waits_for_proof |
 | Changed source, competing batch | test_signature_competing_batch_holds_changed_new_alias |
+| Compete, Scan, Resolve, Restart with equal proof | test_signature_competing_evidence_survives_lone_candidate_and_restart |
+| Competing history with changed party | test_signature_competing_evidence_holds_changed_party |
+| Competing history with changed body | test_signature_competing_evidence_holds_changed_body |
+| Prove, uniquely exclude the other source | test_signature_competing_evidence_resolves_with_distinguishing_proof |
 | Rekey | test_signature_keyless_keyed_repeat_preserves_observation |
 | Rekey, lost receipt | test_signature_lost_response_keyless_keyed_repeat_preserves_request |
 | Repeated reversal | test_signature_unresolved_activity_alias_reversal_freezes_snapshot |
