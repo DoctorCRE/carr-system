@@ -1,6 +1,7 @@
 """Plan unverified signature findings without changing contact records."""
 import hashlib
 import json
+import uuid
 
 from lib.email_contact_candidates import extract_candidates
 
@@ -32,7 +33,7 @@ def plan(mail, contact, *, owner, account, account_id):
         identity = [source, snapshot['party_id'], field, snapshot['party_version'],
                     provenance, item['extraction_version']]
         requests.append({
-            'idempotency_key': digest(identity), 'subject': contact.ref,
+            'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, 'record-finding|' + digest(identity))), 'subject': contact.ref,
             'subject_kind': 'auto' if contact.ref.startswith('P-') else 'party',
             'kind': KIND, 'epistemic_status': 'proposed', 'source': source,
             'value': {'verification': 'unverified_signature_observation', 'verified': False,

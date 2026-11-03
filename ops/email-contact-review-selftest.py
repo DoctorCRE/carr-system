@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import outlook_intake as intake
@@ -40,6 +41,7 @@ class ReviewTest(unittest.TestCase):
     def carr(self, verb, args):
         self.calls.append((verb, copy.deepcopy(args)))
         self.assertEqual(verb, 'record-finding')
+        self.assertEqual(str(uuid.UUID(args['idempotency_key'])), args['idempotency_key'])
         if self.error == 'refuse':
             return {'ok': False, 'error': 'forbidden'}
         if self.error == 'transient':
@@ -236,6 +238,12 @@ class ReviewTest(unittest.TestCase):
         self.message['full'] = True
         self.run_review()
         self.assertEqual(len(self.receipts), 1)
+
+
+    def test_request_identity_satisfies_record_finding_envelope(self):
+        self.run_review()
+        key = self.calls[0][1]['idempotency_key']
+        self.assertEqual(str(uuid.UUID(key)), key)
 
 
 
