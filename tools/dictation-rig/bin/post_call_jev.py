@@ -28,6 +28,8 @@ import call_budget
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 import re
+import hashlib
+import json
 from typing import Any
 
 from typesafe_sdk import Choice, Noul, RetryPolicy, TypeSafeClient
@@ -41,9 +43,13 @@ CHECKS_SCHEMA = "post-call-jev-checks/v1"
 MAX_CANDIDATE_DEALS = 5
 # The evidence quote is at most 15 words; this caps what a malformed one sends.
 MAX_QUOTE_CHARS = 300
+MAX_SOURCE_CHARS = 4096
+MAX_REQUEST_CHARS = 8192
+MAX_CLAIM_CHARS = 1000
+MAX_CLAIMS_PER_ITEM = 16
 # A Choice answer below this confidence is not trusted to confirm the deal.
 DEAL_CONFIDENCE_GATE = 0.55
-# Items are judged one call each, at most this many in flight at once.
+# Claims are judged one call each, at most this many in flight at once.
 MAX_CONCURRENT_CALLS = 6
 
 _LIST_PARTNER = {"joe_tasks": "Joe", "dell_tasks": "Dell"}
@@ -90,23 +96,82 @@ def _resolve_partner(speaker: Any, context: dict[str, Any]) -> str | None:
     return None
 
 
+def _normalized(text: Any) -> str:
+    return " ".join(re.findall(r"\w+", str(text or "").casefold()))
+
+
 def _evidence_segments(evidence: str, segments: list[Any]) -> list[dict[str, Any]]:
-    """The one transcript segment where the evidence text actually appears,
-    found by simple token overlap -- never the whole transcript."""
-    ev_tokens = _tokens(evidence)
-    if not ev_tokens or not segments:
+    quote = _normalized(evidence)
+    if not quote:
         return []
-    scored: list[tuple[int, int]] = []
-    for index, segment in enumerate(segments):
-        if not isinstance(segment, dict):
-            continue
-        overlap = len(ev_tokens & _tokens(segment.get("text")))
-        if overlap:
-            scored.append((overlap, index))
-    if not scored:
+    valid = [s for s in segments if isinstance(s, dict)]
+    exact = [s for s in valid if " " + quote + " " in " " + _normalized(s.get("text")) + " "]
+    if exact:
+        return exact[:1]
+    scored = sorted(valid, key=lambda s: -len(_tokens(evidence) & _tokens(s.get("text"))))
+    return scored[:1] if scored and _tokens(evidence) & _tokens(scored[0].get("text")) else []
+
+
+def _source_spans(item, segments, ledger):
+    if ledger is None and not item.get("fact_ids"):
+        return None
+    facts = {f["fact_id"]: f for f in (ledger or {}).get("facts", [])}
+    spans = []
+    ids = item.get("fact_ids") or []
+    if not ids or any(i not in facts for i in ids):
         return []
-    scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    return [segments[scored[0][1]]]
+    try:
+        for fact_id in ids:
+            for span in facts[fact_id]["source_spans"]:
+                index = span["segment_index"]
+                if type(index) is not int or not 0 <= index < len(segments):
+                    return []
+                segment = segments[index]
+                text = segment["text"]
+                start, end = span["char_start"], span["char_end"]
+                if (span["source_id"] != f"segment-{index}" or
+                        hashlib.sha256(text.encode()).hexdigest() != span["segment_sha256"] or
+                        type(start) is not int or type(end) is not int or not 0 <= start < end <= len(text)):
+                    return []
+                spans.append({**segment, "text": text[start:end]})
+    except (KeyError, TypeError, AttributeError):
+        return []
+    return spans
+
+
+def _claim_items(kind, item):
+    fields = _text_fields(kind, item)
+    if kind in ("phase_move", "next_step"):
+        return [item]
+    key, text = next(iter(fields.items()))
+    return [{**item, key: sentence} for sentence in re.split(r"(?<=[.!?])\s+", str(text)) if sentence.strip()]
+
+
+def _insufficient():
+    return {"advisory_only": True, "flagged": True, "evidence_status": "insufficient",
+            "evidence_chars": 0, "reasons": ["Insufficient bounded source evidence; review this claim manually."]}
+
+
+def _aggregate(checks):
+    result = dict(checks[0])
+    result["claims"] = checks
+    result["flagged"] = any(c.get("flagged") or c.get("unavailable") for c in checks)
+    result["reasons"] = list(dict.fromkeys(r for c in checks for r in c.get("reasons", [])))
+    result["evidence_chars"] = sum(c.get("evidence_chars", 0) for c in checks)
+    result["request_chars"] = sum(c.get("request_chars", 0) for c in checks)
+    for key in ("deal", "speaker", "details"):
+        if key in result:
+            result[key] = {**result[key], "pass": all(c.get(key, {}).get("pass", False) for c in checks)}
+    holds = sorted({c["reason"] for c in checks if c.get("reason")})
+    if holds:
+        result.update(unavailable=True, reason=" ".join(holds))
+    if any(c.get("unavailable") for c in checks):
+        result["unavailable"] = True
+    statuses = {c.get("evidence_status") for c in checks}
+    result["evidence_status"] = ("contradicted" if "contradicted" in statuses else
+                                 "insufficient" if "insufficient" in statuses else
+                                 "supported" if statuses == {"supported"} else "unavailable")
+    return result
 
 
 def _candidate_deals(item_deal_id: Any, deals: list[Any],
@@ -140,6 +205,10 @@ def _candidate_deals(item_deal_id: Any, deals: list[Any],
 def _text_fields(kind: str, item: dict[str, Any]) -> dict[str, str]:
     if kind in ("joe_task", "dell_task"):
         return {"title": item.get("title", "")}
+    if kind == "phase_move":
+        return {"value": item.get("value", ""), "started_on": item.get("started_on", "")}
+    if kind == "next_step":
+        return {"text": item.get("text", ""), "next_date": item.get("next_date", "")}
     if kind == "deal_update":
         return {"summary": item.get("summary", "")}
     return {"subject": item.get("subject", "")}
@@ -175,6 +244,13 @@ def _questions(deal_options: dict[str, str], attributed: str | None) -> dict[str
             criteria={"true": "The transcript excerpt supports that attribution.",
             "false": "The transcript excerpt contradicts it or does not support it."},
         ),
+        "evidence_sufficient": Noul(
+            instructions="Does the targeted source contain enough information to decide every specific in item.fields? "
+            "Answer false for omitted context, incomplete multi-turn facts, or an unlocatable claim. "
+            "An explicit conflicting value is sufficient information to decide that a claim is wrong.",
+            criteria={"true": "Enough evidence to confirm or contradict the claim.",
+                      "false": "Insufficient evidence to decide the whole claim."},
+        ),
         "details_supported": Noul(
             instructions="Read `item.evidence_excerpt` against `transcript_excerpt`. Does it "
             "actually support the specifics recorded in `item.fields`?",
@@ -186,9 +262,12 @@ def _questions(deal_options: dict[str, str], attributed: str | None) -> dict[str
 
 def _item_request(kind: str, list_partner: str | None,
                  item: dict[str, Any], deals: list[Any], segments: list[Any],
-                 context: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+                 context: dict[str, Any], source_spans=None) -> tuple[dict[str, Any], dict[str, Any]]:
     evidence = item.get("evidence", "")
-    matched = _evidence_segments(evidence, segments)
+    matched = _evidence_segments(evidence, segments) if source_spans is None else _evidence_segments(
+        " ".join(str(v) for v in _text_fields(kind, item).values()), source_spans)
+    if source_spans and not matched:
+        matched = _evidence_segments(evidence, source_spans) or source_spans[:1]
     candidates = _candidate_deals(item.get("deal_id"), deals, matched)
 
     deal_options: dict[str, str] = {}
@@ -201,13 +280,15 @@ def _item_request(kind: str, list_partner: str | None,
     state = {
         "item": {
             "kind": kind, "attributed_partner": attributed,
-            "fields": _text_fields(kind, item), "evidence_excerpt": str(evidence)[:MAX_QUOTE_CHARS],
+            "fields": {k: v for k, v in _text_fields(kind, item).items() if v is not None},
+            "evidence_excerpt": (" ".join(matched[0]["text"].split()[:15])
+                                 if source_spans and matched else str(evidence))[:MAX_QUOTE_CHARS],
         },
         "transcript_excerpt": [
             {
                 "speaker": segment.get("speaker", ""),
                 "partner": _resolve_partner(segment.get("speaker"), context),
-                "text": str(segment.get("text", ""))[:600],
+                "text": str(segment.get("text", "")),
             }
             for segment in matched
         ],
@@ -229,7 +310,8 @@ def _item_checks(item, answers):
                  and in_candidates.noul > 0.5)
     # Noul is a yes/no probability: take the more likely answer.
     speaker_pass = speaker.noul > 0.5
-    details_pass = details.noul > 0.5
+    sufficient = answers["evidence_sufficient"].noul > 0.5
+    details_pass = details.noul > 0.5 and sufficient
     reasons = []
     if not deal_pass:
         if in_candidates.noul <= 0.5:
@@ -240,10 +322,13 @@ def _item_checks(item, answers):
             reasons.append(f"Right deal: Jev matched a different deal ({deal.choice!r}).")
     if not speaker_pass:
         reasons.append("Right speaker: the excerpt does not support the attribution.")
-    if not details_pass:
-        reasons.append("Right details: the excerpt does not support the item's specifics.")
+    if not sufficient:
+        reasons.append("Right details: insufficient source evidence to decide this claim.")
+    elif not details_pass:
+        reasons.append("Right details: the source contradicts the item's specifics.")
     return {
         "advisory_only": True,
+        "evidence_status": "supported" if details_pass else "contradicted" if sufficient else "insufficient",
         "deal": {"value": deal.choice, "confidence": deal.confidence, "pass": deal_pass},
         "speaker": {"value": speaker.noul, "pass": speaker_pass},
         "details": {"value": details.noul, "pass": details_pass},
@@ -261,7 +346,8 @@ def _unavailable(exc: Exception) -> dict[str, Any]:
 
 def check_distillation(result: dict[str, Any], context: dict[str, Any],
                         transcript: dict[str, Any], *,
-                        client: Any = None, budget_ledger: Path | None = None) -> dict[str, Any]:
+                        client: Any = None, budget_ledger: Path | None = None,
+                        coverage_ledger: dict[str, Any] | None = None) -> dict[str, Any]:
     """Attach Jev's RIGHT DEAL / RIGHT SPEAKER / RIGHT DETAILS checks in place.
 
     `result` is normalize_distillation's already-normalized return value.
@@ -291,39 +377,77 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
 
     resuming = bool(result.get("checks_hold"))
     clear_checks_hold(result)
-    pending: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    pending = []
+    targets = []
+    parents = []
     for list_name, kind in lists:
-        for item in result.get(list_name, []):
-            if resuming and not (item.get("checks") or {}).get("reason"):
-                continue
-            if not item.get("evidence"):
-                item["checks"] = {"advisory_only": True, "flagged": True,
-                                  "reasons": ["No bounded evidence available; independent review required."]}
-                continue
-            local_state, local_questions = _item_request(kind, _LIST_PARTNER.get(list_name),
-                                                       item, deals, segments, context)
-            pending.append((item, local_state, local_questions))
+        for parent in result.get(list_name, []):
+            children = [(kind, parent)]
+            if kind == "deal_update":
+                parents.append(parent)
+                children.extend((field, parent[field]) for field in ("phase_move", "next_step") if parent.get(field))
+            for claim_kind, item in children:
+                if resuming and item.get("checks") and not item["checks"].get("reason"):
+                    continue
+                outcomes: list[dict[str, Any]] = []
+                targets.append((item, outcomes))
+                claims = _claim_items(claim_kind, item)
+                if not claims or len(claims) > MAX_CLAIMS_PER_ITEM:
+                    outcomes.append(_insufficient())
+                    continue
+                source_spans = _source_spans(item, segments, coverage_ledger)
+                for claim in claims:
+                    request_item = {**claim, "deal_id": parent.get("deal_id"),
+                                    "evidence": claim.get("evidence", parent.get("evidence", ""))}
+                    local_state, local_questions = _item_request(claim_kind, _LIST_PARTNER.get(list_name),
+                        request_item, deals, segments, context, source_spans)
+                    excerpt = local_state["transcript_excerpt"]
+                    fields = local_state["item"]["fields"]
+                    if (not request_item.get("evidence") or not excerpt or
+                            sum(len(s["text"]) for s in excerpt) > MAX_SOURCE_CHARS or
+                            sum(len(str(v)) for v in fields.values()) > MAX_CLAIM_CHARS or
+                            len(json.dumps(local_state, ensure_ascii=False)) > MAX_REQUEST_CHARS):
+                        outcomes.append(_insufficient())
+                        continue
+                    pending.append((request_item, local_state, local_questions, outcomes))
     if pending:
-        def judge(entry: tuple[dict[str, Any], dict[str, Any], dict[str, Any]]) -> None:
-            item, local_state, local_questions = entry
+        def judge(entry) -> None:
+            item, local_state, local_questions, outcomes = entry
             try:
                 call_budget.reserve(budget_ledger if budget_ledger is not None else BUDGET_LEDGER)
                 with nullcontext(client) if client is not None else TypeSafeClient(model=call_budget.MODEL) as sdk:
                     response = sdk.system_one(state=local_state, questions=local_questions,
                                               model=call_budget.MODEL, retry=RetryPolicy(max_retries=0))
-                item["checks"] = _item_checks(item, {name: response.answers[name]
-                                                    for name in local_questions})
+                checks = _item_checks(item, {name: response.answers[name] for name in local_questions})
+                excerpt = local_state["transcript_excerpt"]
+                checks["evidence_chars"] = sum(len(s["text"]) for s in excerpt)
+                checks["request_chars"] = len(json.dumps(local_state, ensure_ascii=False))
+                if local_state["item"]["attributed_partner"] and any(s["partner"] is None for s in excerpt):
+                    checks["speaker"]["pass"] = False
+                    checks["flagged"] = True
+                    checks["reasons"].append("Right speaker: the source speaker is unresolved.")
+                outcomes.append(checks)
             except call_budget.BudgetHold as exc:
-                item["checks"] = {"unavailable": True, "reason": str(exc)}
+                outcomes.append({"unavailable": True, "reason": str(exc)})
             except Exception as exc:
                 if resuming:
                     raise
-                item["checks"] = _unavailable(exc)
+                outcomes.append(_unavailable(exc))
 
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CALLS) as pool:
             list(pool.map(judge, pending))
 
-    holds = sorted({item['checks']['reason'] for item, _, _ in pending if item['checks'].get('reason')})
+    for item, outcomes in targets:
+        item["checks"] = _aggregate(outcomes)
+    for parent in parents:
+        if not any(item is parent or any(item is parent.get(f) for f in ("phase_move", "next_step"))
+                   for item, _ in targets):
+            continue
+        children = [parent[field]["checks"] for field in ("phase_move", "next_step")
+                    if parent.get(field) and parent[field].get("checks")]
+        if children:
+            parent["checks"] = _aggregate([parent["checks"], *children])
+    holds = sorted({item['checks']['reason'] for item, _ in targets if item['checks'].get('reason')})
     if holds:
         result['checks_hold'] = ' '.join(holds)
         result['checks_hold_day'] = call_budget.budget_day()
@@ -337,7 +461,7 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
         replacement = {
             "id": question_id,
             "question": "Automatic Jev checks did not run for one or more items in this pack. " +
-                " ".join(holds + sorted({reason for item, _, _ in pending
+                " ".join(holds + sorted({reason for item, _ in targets
                                          if item["checks"].get("unavailable")
                                          for reason in item["checks"].get("reasons", [])})),
             "resolved": False,

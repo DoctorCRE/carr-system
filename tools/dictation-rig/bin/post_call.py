@@ -981,7 +981,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
                 if transcript is None:
                     raise ContractError("transcript.json is required to resume Jev checks")
                 resumed = deepcopy(report)
-                post_call_jev.check_distillation(resumed, resume_context, transcript, client=_jev_fixture_client(),
+                post_call_jev.check_distillation(resumed, resume_context, transcript,
+                                                coverage_ledger=read_json(session_dir / coverage.FILE), client=_jev_fixture_client(),
                                                 budget_ledger=session_dir.parent / ".jev-budget.json")
                 report = resumed
             except Exception as exc:
@@ -1102,7 +1103,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         import post_call_jev
 
         result = post_call_jev.check_distillation(
-            result, speaker_context, transcript, client=_jev_fixture_client(),
+            result, speaker_context, transcript, coverage_ledger=ledger, client=_jev_fixture_client(),
             budget_ledger=session_dir.parent / ".jev-budget.json")
     except Exception as exc:
         _deal_check_unavailable(result, session_dir, exc)
