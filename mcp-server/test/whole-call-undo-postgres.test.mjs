@@ -46,8 +46,8 @@ const occurrenceOffsets = new Map();
 async function filedCall() {
   const token = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
-    session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',$3::timestamptz,$3::timestamptz,$1,
-    now()+interval '1 day','distilling',now(),true) returning id`, [createHash('sha256').update(token).digest('hex'),actor.id,recordingStartedAt])).rows[0].id;
+    session_token_hash,expires_at,state,state_at,post_call,created_at) values($1,'fixture',$2,'meeting',$3::timestamptz,$3::timestamptz,$1,
+    now()+interval '1 day','distilling',now(),true,$3::timestamptz) returning id`, [createHash('sha256').update(token).digest('hex'),actor.id,recordingStartedAt])).rows[0].id;
   sessionTokens.set(session, token);
   return session;
 }
@@ -65,7 +65,7 @@ async function fileCandidate(session, item, key = randomUUID()) {
       session_token:sessionTokens.get(session), idempotency_key:key, items:[item],
       evidence_sources:[{speaker:'joe', source_sha256:createHash('sha256').update('Synthetic stored partner transcript').digest('hex'),
         quote_sha256:createHash('sha256').update(item.evidence_quote).digest('hex'),
-        recording_started_at:recordingStartedAt,occurrence_start_ms:occurrenceStart,occurrence_end_ms:occurrenceStart+5000}],
+        recording_started_at:recordingStartedAt,claim_elapsed_ms:0,claim_round_trip_ms:0,occurrence_start_ms:occurrenceStart,occurrence_end_ms:occurrenceStart+5000}],
     })
   }), {});
   const body = await response.json();

@@ -14,6 +14,7 @@ const STATES = ["recording", "transcribing", "distilling", "done"];
 const KINDS = new Set(["phase_move", "next_step", "new_deal", "activity", "meeting_record"]);
 const POST_CALL_KINDS = new Set(["assigned_action", "email_draft"]);
 const POST_CALL_PHASES = new Set(["pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing"]);
+const RECORDING_CLOCK_UNCERTAINTY_MS = 1000;
 
 async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -231,7 +232,7 @@ function validateCandidates(body) {
       body.evidence_sources.length !== body.items.length || body.evidence_sources.some(source =>
         source !== null && (!source || typeof source !== "object" || Array.isArray(source) ||
           Object.keys(source).length < 3 ||
-          !Object.keys(source).every(key => ["quote_sha256", "source_sha256", "speaker", "recording_started_at", "occurrence_start_ms", "occurrence_end_ms"].includes(key)) ||
+          !Object.keys(source).every(key => ["quote_sha256", "source_sha256", "speaker", "recording_started_at", "occurrence_start_ms", "occurrence_end_ms", "claim_elapsed_ms", "claim_round_trip_ms"].includes(key)) ||
           !isSha256(source.quote_sha256) || !isSha256(source.source_sha256) ||
           !["joe", "dell"].includes(source.speaker) ||
           (Object.keys(source).length !== 3 && (!validTime(source.recording_started_at) ||
@@ -388,17 +389,24 @@ async function candidates(request, dependencies) {
         for (const item of items.filter(item => item.kind === "phase_move")) {
           item.payload.base_event_id = null;
           const source = item.payload.evidence_source;
-          if (source?.recording_started_at) {
+          item.payload.phase_chronology_verified = false;
+          if (source?.recording_started_at && Number.isSafeInteger(source.claim_elapsed_ms) &&
+              source.claim_elapsed_ms >= 0 && source.claim_elapsed_ms <= 86400000 &&
+              Number.isSafeInteger(source.claim_round_trip_ms) &&
+              source.claim_round_trip_ms >= 0 && source.claim_round_trip_ms <= 5000) {
             const historical = await client.query(
               `select (select e.id from event e
                 where e.subject_type='deal' and e.subject_id=$1 and e.field='phase'
-                  and e.recorded_at < s.started_at + ($3 * interval '1 millisecond')
+                  and e.recorded_at < s.created_at + (($3::bigint - $5::bigint - $6::bigint - $7::bigint) * interval '1 millisecond')
                 order by e.recorded_at desc,e.id desc limit 1) as event_id
                from capture_session s where s.id=$2 and s.started_at=$4::timestamptz
                /* capture:phase-chronology-base */`,
-              [item.payload.deal, session.id, source.occurrence_start_ms, source.recording_started_at]);
-            if (!historical.rows.length) refuse(400, { error: "recording_start_mismatch" });
-            item.payload.base_event_id = historical.rows[0].event_id;
+              [item.payload.deal, session.id, source.occurrence_start_ms, source.recording_started_at,
+                source.claim_elapsed_ms, source.claim_round_trip_ms, RECORDING_CLOCK_UNCERTAINTY_MS]);
+            if (historical.rows.length) {
+              item.payload.base_event_id = historical.rows[0].event_id;
+              item.payload.phase_chronology_verified = true;
+            }
           }
         }
       }

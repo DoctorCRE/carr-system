@@ -654,7 +654,7 @@ test("post-call phase proposals pin the historical phase base and preserve it on
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, evidence_source: chronologySource, base_event_id: db.phaseBase,
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, evidence_source: chronologySource, base_event_id: db.phaseBase, phase_chronology_verified: true,
     plan_base: { next_step: null, next_date: null } });
   db.phaseBase = "50000000-0000-0000-0000-000000000002";
   const replay = await post(r.handler, "/capture/candidates", batch);
@@ -937,7 +937,7 @@ test("log-outreach completes only the caller's post-call action on the deal", as
 });
 
 const chronologySource = { speaker: "joe", quote_sha256: createHash("sha256").update("Move Deal Alpha to diligence").digest("hex"), source_sha256: "b".repeat(64),
-  recording_started_at: "2026-08-08T15:00:00Z", occurrence_start_ms: 60000, occurrence_end_ms: 65000 };
+  recording_started_at: "2026-08-08T15:00:00Z", claim_elapsed_ms: 0, claim_round_trip_ms: 0, occurrence_start_ms: 60000, occurrence_end_ms: 65000 };
 
 async function chronologyProposal(db, value = "due_diligence", source = chronologySource) {
   const r = rig(db);
@@ -1011,7 +1011,7 @@ test("a later explicit instruction may intentionally move backward and still det
 
 test("untimed call instructions cannot move a different live phase", async () => {
   const db = new CaptureFake();
-  const { recording_started_at, occurrence_start_ms, occurrence_end_ms, ...source } = chronologySource;
+  const source = { speaker: chronologySource.speaker, quote_sha256: chronologySource.quote_sha256, source_sha256: chronologySource.source_sha256 };
   const id = await chronologyProposal(db, "due_diligence", source);
   assert.equal(db.candidates[0].payload.base_event_id, null);
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
@@ -1045,7 +1045,6 @@ test("phase chronology rejects partial spans and a different recording start", a
     { ...chronologySource, occurrence_end_ms: 86400001 },
     { ...chronologySource, occurrence_start_ms: 1.5 },
     { ...chronologySource, recording_started_at: "invalid" },
-    { ...chronologySource, recording_started_at: "2026-08-08T16:00:00Z" },
   ]) {
     const response = await post(r.handler, "/capture/candidates", { ...batch, evidence_sources: [source] });
     assert.equal(response.status, 400);
@@ -1061,5 +1060,16 @@ test("contradictory untimed phase evidence prevents guessing the final dispositi
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
     candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000091",
   }), error => error.payload?.error === "superseded_call_instruction");
+  assert.equal(db.events.length, 0);
+});
+
+test("a different recording start stays pending rather than rejecting the batch", async () => {
+  const db = new CaptureFake();
+  const id = await chronologyProposal(db, "due_diligence", {
+    ...chronologySource, recording_started_at: "2026-08-08T16:00:00Z",
+  });
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000092",
+  }), error => error.payload?.error === "missing_phase_chronology");
   assert.equal(db.events.length, 0);
 });

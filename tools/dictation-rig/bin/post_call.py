@@ -1409,7 +1409,8 @@ def automatic_evidence(session_dir: Path) -> list[dict[str, Any] | None]:
     context = {"speaker_labels": stored.get("speaker_labels"), "local_partner": stored.get("recorder")}
     source_sha256 = hashlib.sha256(raw).hexdigest()
     sources = []
-    started = stored.get("started_at") or (read_json(session_dir / "meta.json") or {}).get("started")
+    started = (read_json(session_dir / "meta.json") or {}).get("started")
+    calibration = read_json(session_dir / ".capture.json") or {}
     words = []
     origins = []
     segments = transcript.get("segments", [])
@@ -1440,6 +1441,9 @@ def automatic_evidence(session_dir: Path) -> list[dict[str, Any] | None]:
                 start, end = matches[0]
                 if type(start) is int and type(end) is int and 0 <= start < end <= 86400000:
                     source.update(recording_started_at=started, occurrence_start_ms=start, occurrence_end_ms=end)
+                    for key in ("claim_elapsed_ms", "claim_round_trip_ms"):
+                        if key in calibration:
+                            source[key] = calibration[key]
         sources.append(source)
     return sources
 

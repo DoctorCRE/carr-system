@@ -3,6 +3,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
@@ -28,8 +29,10 @@ before(async () => {
 after(async () => { await fixture?.close(); });
 
 for (const [name, recorderStart, mapping, editTime, applies] of [
+  ['real Call Mode receipt with later observation', '2026-11-02T15:00:00Z', 'python', '2026-11-02T15:01:30Z', false],
   ['aligned control', '2026-11-02T15:00:00Z', true, '2026-11-02T15:01:30Z', false],
   ['fast recorder without calibration', '2026-11-02T15:02:00Z', false, '2026-11-02T15:01:30Z', false],
+  ['excessive request uncertainty', '2026-11-02T15:02:00Z', 'slow', '2026-11-02T15:01:30Z', false],
   ['fast recorder calibrated', '2026-11-02T15:02:00Z', true, '2026-11-02T15:01:30Z', false],
   ['equal timestamp', '2026-11-02T15:00:00Z', true, '2026-11-02T15:01:00Z', false],
   ['uncertainty overlaps edit', '2026-11-02T15:00:00Z', true, '2026-11-02T15:00:59Z', false],
@@ -49,12 +52,42 @@ for (const [name, recorderStart, mapping, editTime, applies] of [
   const token = (await claim.json()).session_token;
   const session = (await c.query("update capture_session set created_at='2026-11-02T15:00:06Z' where session_token_hash=$1 returning id", [createHash('sha256').update(token).digest('hex')])).rows[0].id;
   const quote='Move the synthetic deal to legal';
+  let source = {speaker:'joe',source_sha256:'b'.repeat(64),quote_sha256:createHash('sha256').update(quote).digest('hex'),
+    recording_started_at:recorderStart,occurrence_start_ms:60000,occurrence_end_ms:65000,
+    ...(mapping ? {claim_elapsed_ms:5000,claim_round_trip_ms:mapping === 'slow' ? 6000 : 1000} : {})};
+  if (mapping === 'python') {
+    const localPython = new URL('../../.venv/bin/python', import.meta.url);
+    const {stdout} = await promisify(execFile)(existsSync(localPython) ? localPython.pathname : 'python3', ['-c', `
+import importlib.util, json
+from pathlib import Path
+from unittest.mock import patch
+root = Path(${JSON.stringify(new URL('../../', import.meta.url).pathname)})
+spec = importlib.util.spec_from_file_location('calltests', root / 'tools/dictation-rig/tests/test_call_mode.py')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+t = m.AutomaticApplyTests()
+t.setUp()
+try:
+    p = m.post_call
+    p.coverage = m._COVERAGE_ADAPTER
+    quote = 'Move the synthetic deal to legal'
+    p.write_private(t.session / p.REPORT_FILE, {'deal_updates':[t.update(evidence=quote, phase_move={'value':'legal'})]})
+    p.write_private(t.session / 'meta.json', {'started':'2026-11-02T15:00:00Z'})
+    with patch.object(m.call_mode, 'iso_utc', return_value='2026-11-02T15:00:01Z'):
+        m.call_mode.write_call_context(t.session, 'weekly_deal_call', 'Joe')
+    p.write_private(t.session / '.capture.json', {'claim_elapsed_ms':5000,'claim_round_trip_ms':1000})
+    p.write_private(t.session / 'transcript.json', {'segments':[{'speaker':'Joe','text':quote,'start_ms':60000,'end_ms':65000}]})
+    print(json.dumps(p.automatic_evidence(t.session)[1]))
+finally:
+    t.tearDown()
+`]);
+    source = JSON.parse(stdout);
+    assert.equal(source.recording_started_at, recorderStart);
+  }
   const filed = await post('candidates', {session_token:token,idempotency_key:randomUUID(),items:[
     {kind:'phase_move',payload:{deal,field:'phase',value:'legal'},evidence_quote:quote,confidence:1},
     {kind:'activity',payload:{ref:deal,kind:'note',summary:'Discussed synthetic deal'},evidence_quote:'Discussed synthetic deal',confidence:1}],
-    evidence_sources:[{speaker:'joe',source_sha256:'b'.repeat(64),quote_sha256:createHash('sha256').update(quote).digest('hex'),
-      recording_started_at:recorderStart,occurrence_start_ms:60000,occurrence_end_ms:65000,
-      ...(mapping ? {claim_elapsed_ms:5000,claim_round_trip_ms:1000} : {})},null]});
+    evidence_sources:[source,null]});
   assert.equal(filed.status,200,JSON.stringify(await filed.clone().json()));
   const [id,note] = (await filed.json()).candidate_ids;
   const accept = () => command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true});
@@ -93,15 +126,15 @@ async function filePhase(evidence, { speaker = "joe", storedQuote = evidence, ki
   });
   const token = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
-    session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',$4::timestamptz,$4::timestamptz,$1,
-    now()+interval '1 day','distilling',now(),$3) returning id`, [createHash('sha256').update(token).digest('hex'), actor.id, kind !== 'meeting_record', recordingStartedAt])).rows[0].id;
+    session_token_hash,expires_at,state,state_at,post_call,created_at) values($1,'fixture',$2,'meeting',$4::timestamptz,$4::timestamptz,$1,
+    now()+interval '1 day','distilling',now(),$3,$4::timestamptz) returning id`, [createHash('sha256').update(token).digest('hex'), actor.id, kind !== 'meeting_record', recordingStartedAt])).rows[0].id;
   const handler = createCaptureHandler({ withWriter: fn => transaction(fn, 'carr_writer') });
   const response = await handler.fetch(new Request('http://127.0.0.1/capture/candidates', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
       session_token: token, idempotency_key: randomUUID(), ...(kind === 'meeting_record' ? {} : { evidence_sources: [speaker === "client" ? null : {
         speaker, source_sha256: createHash('sha256').update(JSON.stringify({ speaker, text: storedQuote })).digest('hex'),
         quote_sha256: createHash('sha256').update(storedQuote).digest('hex'),
-        recording_started_at: recordingStartedAt, occurrence_start_ms: 60000, occurrence_end_ms: 65000,
+        recording_started_at: recordingStartedAt, claim_elapsed_ms: 0, claim_round_trip_ms: 0, occurrence_start_ms: 60000, occurrence_end_ms: 65000,
       }] }), items: [{ kind,
         payload: kind === 'next_step' ? { deal, text: stepText, next_date: '2030-01-01' }
           : ['activity', 'meeting_record'].includes(kind) ? { ref: deal, kind: 'note', summary: evidence }

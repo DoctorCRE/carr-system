@@ -10042,6 +10042,7 @@ registerTools({
       }
       delete innerArgs.plan_base;
       delete innerArgs.evidence_source;
+      delete innerArgs.phase_chronology_verified;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
         // The partners' own words on the call are the evidence for the move,
@@ -10071,9 +10072,9 @@ registerTools({
           [subject.id])).rows[0];
         if (live?.phase === candidate.payload.value) {
           satisfiedPhase = { ok: true, deal_id: subject.id, field: "phase", already_satisfied: true };
-        } else if (!source?.recording_started_at || !Number.isSafeInteger(source.occurrence_start_ms)) {
+        } else if (!candidate.payload.phase_chronology_verified) {
           throw new ToolError({ error: "missing_phase_chronology",
-            hint: "This call proposal has no unique timed source. Review the live deal and make a fresh explicit phase decision." });
+            hint: "The call timing could not be bounded against the server clock. Review the live deal and make a fresh explicit phase decision." });
         }
       }
       if (!satisfiedPhase && ["next_step", "phase_move"].includes(candidate.kind)) {
