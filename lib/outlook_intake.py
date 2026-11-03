@@ -533,6 +533,9 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
             if fields.get('sender') and fields['sender'].lower() != (m['sender'] or '').lower():
                 m['sender_name'] = None
             m.update(fields)
+            for field in ('body', 'preview'):
+                if m[field]:
+                    m[field] = email_links.unwrap_safe_links(m[field])
         meta['health_store_mails'] = list(mails)
         ownership: dict[int, set[int | None]] = {}
         folder_classes: dict[int, set[str]] = {}
