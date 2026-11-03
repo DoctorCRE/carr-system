@@ -1172,8 +1172,9 @@ class PostCallTests(unittest.TestCase):
 
     def test_intents_require_a_typed_operation_and_identity_question(self) -> None:
         case = json.loads((Path(__file__).parent / "fixtures/synthetic-call.json").read_text())["intent_case"]
-        for change in ({"operation": "execute_verb"}, {"deal_id": None, "identity_question": None},
-                       {"fact_ids": []}, {"review_reason": ""}, {"owner": "Unknown"}):
+        changes: list[dict[str, Any]] = [{"operation": "execute_verb"}, {"deal_id": None, "identity_question": None},
+                                         {"fact_ids": []}, {"review_reason": ""}, {"owner": "Unknown"}]
+        for change in changes:
             with self.subTest(change=change), self.assertRaises(post_call.ContractError):
                 post_call.normalize_distillation(self.output(review_intents=[{**case["intents"][0], **change}]),
                                                   self.context, self.session.name)
