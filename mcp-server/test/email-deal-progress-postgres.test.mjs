@@ -2901,7 +2901,7 @@ async function summarySource() {
   return (await summaryQueue()).emails.find(row => row.activity_id === source.activity_id);
 }
 const claimSummary = (source, client = c) => command('record-email-proposal', { idempotency_key: randomUUID(),
-  mode: 'summary_claim', activity_id: source.activity_id, source_hash: source.source_hash }, actor, null, client);
+  mode: 'summary_claim', activity_id: source.activity_id, source_hash: source.source_hash }, actor, 'carr_writer', client);
 function finishSummary(source, claim, extra = {}) {
   const generated = JSON.parse(execFileSync('python3', ['-c',
     'import json,sys; from lib.email_summary import generate; email=json.load(sys.stdin); print(json.dumps(generate(email, lambda text: {"text":"The sender reports receiving the LOI.","evidence":"We received the LOI from the landlord."})))'],
@@ -2909,9 +2909,9 @@ function finishSummary(source, claim, extra = {}) {
   return command('record-email-proposal', {
     idempotency_key: randomUUID(), mode: 'summary_result', activity_id: source.activity_id,
     source_hash: source.source_hash, claim_id: claim.claim_id, summary_status: generated.status,
-    summary_text: generated.text, summary_provenance: generated.provenance, ...extra });
+    summary_text: generated.text, summary_provenance: generated.provenance, ...extra }, actor, 'carr_writer');
 }
-const listedSummary = async id => (await command('list-email-proposals', { deal, status: 'pending' }))
+const listedSummary = async id => (await command('list-email-proposals', { deal, status: 'pending' }, actor, 'carr_reader'))
   .proposals.find(row => row.source.activity_id === id)?.email_summary;
 
 test('message summaries persist once per hash and reads reuse them without generation', async () => {

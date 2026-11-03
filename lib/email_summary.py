@@ -86,7 +86,7 @@ def backfill(carr, model, *, now: datetime, clock=None, after=None, limit=25, dr
     rows = queue['emails']
     if activity_ids is not None:
         rows = [row for row in rows if row['activity_id'] in activity_ids]
-    counts = {'checked': 0, 'generated': 0, 'unavailable': 0, 'reused': 0,
+    counts = {'candidates': len(rows), 'checked': 0, 'generated': 0, 'unavailable': 0, 'reused': 0,
               'activity_ids': [row['activity_id'] for row in rows],
               'next_cursor': queue.get('next_cursor'), 'more': queue.get('more', False)}
     if dry_run:

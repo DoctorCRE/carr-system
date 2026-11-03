@@ -85,6 +85,7 @@ class SummaryTests(unittest.TestCase):
         now = datetime(2026, 1, 1, tzinfo=timezone.utc)
         dry = email_summary.backfill(carr, lambda _: self.fail('model called'), now=now, dry_run=True)
         self.assertEqual(dry['activity_ids'], ['source'])
+        self.assertEqual(dry['candidates'], 1)
         self.assertEqual(len(calls), 1)
         done = email_summary.backfill(carr, lambda _: self.fail('model called'), now=now)
         self.assertEqual(done['reused'], 1)

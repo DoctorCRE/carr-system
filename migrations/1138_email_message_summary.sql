@@ -18,3 +18,20 @@ create table public.email_message_summary (
 );
 grant select on public.email_message_summary to carr_reader;
 grant select,insert,update on public.email_message_summary to carr_writer;
+do $summary_grants$
+declare
+  contract jsonb := ops.scac_current_grant_contract();
+  privilege text;
+begin
+  foreach privilege in array array['insert','update'] loop
+    contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
+      'ingress_key','db-relation-acl:public.email_message_summary:carr_writer:' || privilege,
+      'ingress_kind','db_relation_acl','relation','public.email_message_summary',
+      'relation_kind','r','grantee','carr_writer','privilege',privilege,'grantable',false)));
+  end loop;
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+  if ops.scac_mutation_catalog_v118_current() is not true then
+    raise exception 'Email summary grant catalog is invalid';
+  end if;
+end $summary_grants$;
