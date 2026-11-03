@@ -230,6 +230,36 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(PublicationError):
                 self.query()
 
+    def test_query_refuses_stale_source_and_recovers_after_rebuild(self):
+        self.build()
+        page = self.query(limit=1)
+        with closing(sqlite3.connect(self.source)) as db:
+            db.execute("UPDATE messages SET body='freshproperty' WHERE id=1")
+            db.commit()
+        for options in (('--query', 'freshproperty'),
+                        ('--query', 'orchard', '--cursor', page['next_cursor'])):
+            result = self.query_cli(*options)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertEqual(result.stdout, '')
+            self.assertIn('stale', result.stderr.lower())
+        self.build()
+        result = self.query_cli('--query', 'freshproperty')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['match_count'], 1)
+
+    def test_query_refuses_missing_freshness_provenance(self):
+        for field in ('built_at', 'source_revision', 'source_sha256'):
+            self.build()
+            with closing(sqlite3.connect(self.target)) as db:
+                meta = json.loads(db.execute('SELECT document FROM index_metadata').fetchone()[0])
+                del meta[field]
+                db.execute('UPDATE index_metadata SET document=? WHERE id=1', (json.dumps(meta),))
+                db.commit()
+            result = self.query_cli('--query', 'absent')
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertEqual(result.stdout, '')
+            self.assertIn('freshness', result.stderr.lower())
+
     def test_atomic_index_rebuild_preserves_private_old_index_on_failure(self):
         self.build()
         old = self.digest()
