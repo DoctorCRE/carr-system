@@ -29,8 +29,17 @@ export const HOME_INBOX_SETTLEMENT_CONTRACT = Object.freeze({
   settlement: 'Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
 });
 
+export const HOME_INBOX_COMPLETION_CONTRACT = Object.freeze({
+  ...HOME_INBOX_SETTLEMENT_CONTRACT,
+  schema_version: 'home-inbox.v4',
+  read_verb: 'read-home-inbox-v4',
+  item_fields: { ...HOME_INBOX_SETTLEMENT_CONTRACT.item_fields,
+    completed_at: 'UTC ISO-8601 instant|null; proven canonical completion, never activity or ingestion time' },
+  completion_time: 'Done ordinary tasks use the exact complete-one-action, complete-action or complete-deal-item event, superseded by reopen-one-action. Done call actions use completed_at. Sent replies use send_result.sent_at. Open work, unsupported sources and unproven legacy completions return null. Later notifications never move completion. Clients group by America/Chicago.',
+});
+
 function withAutomaticSettlement(snapshot) {
-  return { ...snapshot, schema_version: 'home-inbox.v3', auto_settle_enabled: true,
+  return { ...snapshot, auto_settle_enabled: true,
     items: snapshot.items.map(item => {
       const auto_settled = item.source_state === 'done' && item.disposition === 'inbox' &&
         !item.explicit_unsettle && HOME_INBOX_SETTLEMENT_CONTRACT.auto_settle_source_types.includes(item.source_type);
@@ -52,6 +61,12 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
       description: 'Read the stable home-inbox.v1 snapshot. Refuses above 1000 items or 10000 notifications.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async c => unwrap((await c.query('select ops.read_home_inbox() as result')).rows[0]?.result),
+    },
+    'read-home-inbox-v4': {
+      writerConnection: true,
+      description: 'Read Home inbox with v3 automatic settlement and nullable source-backed completed_at UTC instants for Done today. Unknown completion times remain null. Clients group by America/Chicago. Uses home-inbox.v4; v1 through v3 remain unchanged.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async c => withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v4() as result')).rows[0]?.result)),
     },
     'read-home-inbox-v3': {
       writerConnection: true,
