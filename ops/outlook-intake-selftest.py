@@ -480,6 +480,85 @@ class IntakeTest(unittest.TestCase):
         self.assertFalse(self.fake.writes('update-party-contact'))
         self.assertFalse(self.fake.writes('correct-party-identity'))
 
+    def signature_alias_fixture(self):
+        snapshot = {'party_id': 101, 'party_version': 7,
+                    'values': {'phone': '555-0100', 'email': CLIENT.email},
+                    'provenance': {'source': 'party', 'party_id': 101, 'party_version': 7},
+                    'unread_fields': []}
+        self.fake.contacts_rows = [intake.Contact(CLIENT.email, CLIENT.ref, CLIENT.name,
+                                                 contact_snapshot=snapshot)]
+        return mail(CLIENT.email, -timedelta(hours=1), message_id='<alias@example.test>',
+                    body='-- \nEmail: pat@example.test\nPhone: 555-0199')
+
+    def signature_alias_scans(self, *, reverse=False, lost=False, restart=False):
+        old = self.signature_alias_fixture()
+        new = {**old, 'local_keys': '77'}
+        if reverse:
+            old, new = new, old
+        carr = self.fake.carr
+        def lose_receipt(verb, args):
+            reply = carr(verb, args)
+            if verb == 'record-finding':
+                raise intake.CarrError(code='unavailable')
+            return reply
+        with patch.object(self.fake, 'carr', lose_receipt if lost else carr):
+            first = self.run_intake([old])
+        frozen = self.fake.writes('record-finding')[0][1]
+        if restart:
+            state_path = self.out() / intake.STATE
+            state_path.write_text(json.dumps(json.loads(state_path.read_text())))
+        self.fake.now += timedelta(minutes=2)
+        second = self.run_intake([new])
+        third = self.run_intake([new])
+        self.assertEqual(len(self.fake.findings), 1,
+                         'same Message-ID acquired store key and duplicated signature finding')
+        self.assertEqual([a for _, a in self.fake.writes('record-finding')],
+                         [frozen, frozen] if lost else [frozen])
+        self.assertEqual([r.counts['logged'] for r in (first, second, third)], [1, 0, 0])
+
+    def test_signature_keyless_keyed_repeat_preserves_observation(self):
+        self.signature_alias_scans()
+
+    def test_signature_lost_response_keyless_keyed_repeat_preserves_request(self):
+        self.signature_alias_scans(lost=True)
+
+    def test_signature_keyed_keyless_repeat_preserves_observation(self):
+        self.signature_alias_scans(reverse=True)
+
+    def test_signature_alias_restart_preserves_receipt(self):
+        self.signature_alias_scans(restart=True)
+
+    def test_signature_alias_restart_preserves_uncertain_request(self):
+        self.signature_alias_scans(lost=True, restart=True)
+
+    def test_signature_ambiguous_message_ids_stay_separate(self):
+        old = self.signature_alias_fixture()
+        self.run_intake([old])
+        one, two = ({**old, 'local_keys': k} for k in ('77', '78'))
+        result = self.run_intake([one, two])
+        self.assertEqual(result.counts['message_id_ambiguous'], 1)
+        self.assertEqual(len(self.fake.findings), 3)
+        self.run_intake([one, two])
+        self.assertEqual(len(self.fake.findings), 3)
+
+    def test_signature_alias_changed_source_or_party_stays_held(self):
+        for change in ('body', 'party'):
+            with self.subTest(change=change):
+                self.setUp()
+                old = self.signature_alias_fixture()
+                self.fake.fail_verbs.add('record-finding')
+                self.run_intake([old])
+                self.fake.fail_verbs.clear()
+                self.fake.now += timedelta(minutes=2)
+                new = {**old, 'local_keys': '77'}
+                if change == 'body':
+                    new['body'] += '\nTitle: Director'
+                else:
+                    self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
+                result = self.run_intake([new])
+                self.assertEqual(len(self.fake.writes('record-finding')), 1)
+                self.assertEqual(result.counts['signature_held'], 1)
+
     def test_contact_adapter_preserves_snapshot_without_changing_mail_matching(self):
         snapshot = {'party_id': 101, 'party_version': 7, 'values': {}, 'provenance': {}}
         rows = intake._contacts(lambda *_: {'contacts': [
