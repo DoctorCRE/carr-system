@@ -34,15 +34,15 @@ All tests call the real Row, Window or preserve_unread interfaces.
 
 | Model edge | Guard in lib/outlook_triage.py | Test mode |
 | --- | --- | --- |
-| Waiting to Sorting | preserve_unread lines 331-348 | stable; post_scan before action |
-| Waiting to Skipped | preserve_unread lines 349-359 | initial_unknown, preaction_unknown, first_scan_change, second_scan_change, deadline; UnreadRoundFixTest.test_deadline_at_final_badge_skips_before_callback |
-| Sorting to Checking | action returns at line 361 | stable |
-| Sorting to Changed/Failed | comparison at lines 369-394 | arrival, read mutate during callback |
-| Sorting to Skipped | file_inbox lines 306-313, preserve_unread lines 363-364 | UnreadRoundFixTest.test_deadline_at_each_selection_point_skips |
-| Checking to Changed/Failed | comparisons at lines 369-394 | checking_arrival; UnreadRoundFixTest.test_checking_offscreen_arrival_fails_without_settling; UnreadVerificationTest.test_checking_never_discards_an_observed_change |
-| Checking to Failed | post-action handler at lines 388-390 | post_unknown, post_scan; UnreadVerificationTest.test_unknown_closing_badge_fails_after_rows |
-| Checking to Skipped | preserve_unread lines 390-391,397-398 | UnreadVerificationTest.test_deadline_during_checking_skips_on_both_scan_paths |
-| Checking to Succeeded | return at line 399 | stable |
+| Waiting to Sorting | preserve_unread lines 336-353 | stable; post_scan before action |
+| Waiting to Skipped | preserve_unread lines 354-364 | initial_unknown, preaction_unknown, first_scan_change, second_scan_change, deadline; UnreadRoundFixTest.test_deadline_at_final_badge_skips_before_callback |
+| Sorting to Checking | action returns at line 378 | stable |
+| Sorting to Changed/Failed | comparison at lines 385-410 | arrival, read mutate during callback |
+| Sorting to Skipped | file_inbox lines 311-318, preserve_unread lines 380-381 | UnreadRoundFixTest.test_deadline_at_each_selection_point_skips |
+| Checking to Changed/Failed | comparisons at lines 385-410 | checking_arrival; UnreadRoundFixTest.test_checking_offscreen_arrival_fails_without_settling; UnreadVerificationTest.test_checking_never_discards_an_observed_change |
+| Checking to Failed | post-action handler at lines 400-404 | post_unknown, post_scan; UnreadVerificationTest.test_unknown_closing_badge_fails_after_rows |
+| Checking to Skipped | preserve_unread lines 402-403,409-410 | UnreadVerificationTest.test_deadline_during_checking_skips_on_both_scan_paths |
+| Checking to Succeeded | return at line 411 | stable |
 
 The change is detected in the post-action check. The model's Sorting-to-Failed
 edge abstracts mutation during the callback plus this later detection into one
@@ -51,7 +51,10 @@ to Failed edge covers unavailable evidence as well as a known change. Budget
 expiry on either post-action scan path skips with coverage_deadline.
 Post-action observations are bracketed by badge reads even without full scans.
 Any observed badge or unread identity/read-state change fails immediately, before
-later scans can replace that evidence. The closing badge is the observation
+later scans or deadline checks can replace that evidence. Each post-action
+scan checks exposed rows immediately and compares a completed scan against the
+original unread set. UnreadVerificationTest.test_scan_change_wins_over_deadline_expiry
+proves changed observations fail even when the scan exhausts the budget. The closing badge is the observation
 boundary; an unobserved arrival after it is outside this guarantee. The same
 120-second budget covers initial coverage, final authorization and each row and
 folder selection. Expiry stops filing with a coded skip. Window.move retains its

@@ -260,7 +260,8 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
 
 
 def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
-              allowed: Callable[[], bool], report: Report) -> dict[str | None, list[Row]]:
+              allowed: Callable[[], bool], report: Report,
+              observe: Callable[[dict, bool], None] | None = None) -> dict[str | None, list[Row]]:
 
     def scan() -> dict[str | None, list[Row]]:
         result = {}
@@ -271,6 +272,10 @@ def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
             if tab is not None:
                 window.switch_tab(tab)
             result[tab] = window.scan_rows(allowed)
+            if observe is not None:
+                observe({tab: result[tab]}, False)
+        if observe is not None:
+            observe(result, True)
         report.coverage['full_scan_rows'] = sum(len(rows) for rows in result.values())
         report.coverage['full_scan_unread'] = sum(_unread(result).values())
         window.show_folder_pane(True)
@@ -357,6 +362,18 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
         # UI exceptions outside coverage may carry tab names; emit fixed codes only.
         code = code if code and re.fullmatch(r'[a-z_]+', code) else 'coverage_ui_unverified'
         return finish('skipped', 'unread_set_unverified', code)
+    def check_unread(observed: dict, complete: bool) -> None:
+        current = _unread(observed)
+        changed = (current - unread) + ((unread - current) if complete else Counter())
+        unread_keys = {r.key for rows in tabs.values() for r in rows
+                       if r.read_state is ReadState.UNREAD}
+        read = 0 if complete else sum(
+            row.key in unread_keys and row.read_state is ReadState.READ
+            for rows in observed.values() for row in rows)
+        if changed or read:
+            report.unread_changed = sum(changed.values()) + read
+            raise UiError('coverage_changed')
+
     try:
         outcome = action(tabs)
     except UiError as exc:
@@ -368,16 +385,11 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
     try:
         end_badge, end_tabs = _inbox(window)
         end_unread = _unread(end_tabs)
-        observed_change = end_unread - unread
-        unread_keys = {r.key for rows in tabs.values() for r in rows
-                       if r.read_state is ReadState.UNREAD}
-        observed_read = sum(row.key in unread_keys and row.read_state is ReadState.READ
-                            for rows in end_tabs.values() for row in rows)
-        if end_badge != badge or observed_change or observed_read:
-            report.unread_changed = sum(observed_change.values()) + observed_read
+        check_unread(end_tabs, False)
+        if end_badge != badge:
             return finish('failed', 'unread_set_changed', 'coverage_changed')
         if scanned:
-            end_tabs = _coverage(window, end_badge, end_tabs, allowed, report)
+            end_tabs = _coverage(window, end_badge, end_tabs, allowed, report, check_unread)
             end_unread = _unread(end_tabs)
         window.show_folder_pane(True)
         try:
