@@ -20,6 +20,26 @@ export const HOME_INBOX_CONTRACT = Object.freeze({
   ordering: 'Unfinished first, newest activity first, item ID as tie breaker',
   completion: 'Only task items have action_id and action_version. Complete the representative action only; merged_source_ids are display provenance, never a bulk completion instruction. No task reopening verb is added.',
 });
+export const HOME_INBOX_SETTLEMENT_CONTRACT = Object.freeze({
+  ...HOME_INBOX_CONTRACT,
+  schema_version: 'home-inbox.v3',
+  read_verb: 'read-home-inbox-v3',
+  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write' },
+  auto_settle_source_types: ['next_action', 'capture_post_call_action', 'email_proposal'],
+  settlement: 'Canonical done tasks and sent replies settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Fact-review and tour-feedback sources are not included. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
+});
+
+function withAutomaticSettlement(snapshot) {
+  return { ...snapshot, schema_version: 'home-inbox.v3', auto_settle_enabled: true,
+    items: snapshot.items.map(item => {
+      const auto_settled = item.source_state === 'done' && item.disposition === 'inbox' &&
+        !item.explicit_unsettle && HOME_INBOX_SETTLEMENT_CONTRACT.auto_settle_source_types.includes(item.source_type);
+      const section = item.disposition !== 'inbox' ? item.disposition : item.explicit_unsettle ? 'inbox' : auto_settled ? 'settled' : item.section;
+      return { ...item, section, disposition: auto_settled ? 'settled' : item.disposition, auto_settled };
+    }),
+  };
+}
+
 export const HOME_INBOX_WRITES = new Set(['snooze-home-inbox', 'settle-home-inbox', 'unsettle-home-inbox']);
 export function homeInboxTools({ withEnvelope, ToolError }) {
   const unwrap = result => {
@@ -32,6 +52,12 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
       description: 'Read the stable home-inbox.v1 snapshot. Refuses above 1000 items or 10000 notifications.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async c => unwrap((await c.query('select ops.read_home_inbox() as result')).rows[0]?.result),
+    },
+    'read-home-inbox-v3': {
+      writerConnection: true,
+      description: 'Read the Home inbox with automatic settlement of canonical done tasks and sent replies. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged. Fact-review and tour-feedback adapters remain outside this projection.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: async c => withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v2() as result')).rows[0]?.result)),
     },
     'read-home-inbox-v2': {
       writerConnection: true,

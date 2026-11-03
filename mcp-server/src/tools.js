@@ -400,6 +400,9 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
+  if (verb === "record-finding" && args.kind === "email_delivery_failure")
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
   const prior = await client.query(`select request_hash, response from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
@@ -410,6 +413,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
     return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
+  if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
   await client.query(
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
        organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class, correlation_id)
@@ -4044,14 +4048,18 @@ export const TOOLS = {
 
   "email-match-contacts": {
     write: false,
-    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people.",
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people. An exact address belonging to one live party also carries contact_snapshot with raw prior values, party_id, party_version and record provenance. Multiple roles for the same party are not ambiguous. Shared addresses and deal-only rows have no snapshot. company comes from the linked live org's name with its own version; unread_fields distinguishes an unread company from a read null. This is stored-value evidence, not verification of a signature observation.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
       const rows = (await c.query(`
-        select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email
+        select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email,
+               p.id as party_id, p.version as party_version, p.name as party_name,
+               p.phone, p.cell, p.title, p.org_id, live_org.id as company_id,
+               live_org.version as company_version, live_org.name as company_name
           from party p
           left join party org on org.id = p.org_id
+          left join party live_org on live_org.id = p.org_id and live_org.merged_into is null and live_org.deleted_at is null
           left join lateral (
             select roster_ref as ref from client where party_id = p.id and merged_into is null
             union all select registry_ref from lead where party_id = p.id
@@ -4059,13 +4067,36 @@ export const TOOLS = {
          where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
            and coalesce(r.ref, p.ref) is not null
         union all
-        select "Deal ID"::text, coalesce("Name", ''), "Email" from v_email_deal_contact where "Email" like '%@%'
+        select "Deal ID"::text, coalesce("Name", ''), "Email",
+               null, null, null, null, null, null, null, null, null, null from v_email_deal_contact where "Email" like '%@%'
          order by 1`)).rows;
-      const contacts = rows.flatMap(({ ref, name, email }) => {
+      const matches = rows.flatMap(row => {
+        const { ref, name, email } = row;
         const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
           .map(address => address.toLowerCase()))];
-        return found.map(address => ({ address, ref, name,
-          exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) }));
+        return found.map(address => ({ row, contact: { address, ref, name,
+          exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) } }));
+      });
+      const partiesByAddress = new Map();
+      for (const { row, contact } of matches) {
+        if (row.party_id == null) continue;
+        const parties = partiesByAddress.get(contact.address) || new Set();
+        parties.add(row.party_id);
+        partiesByAddress.set(contact.address, parties);
+      }
+      const contacts = matches.map(({ row, contact }) => {
+        if (!contact.exact || row.party_id == null || partiesByAddress.get(contact.address)?.size !== 1)
+          return contact;
+        const companyUnread = row.org_id != null && row.company_id == null;
+        return { ...contact, contact_snapshot: {
+          party_id: row.party_id, party_version: row.party_version,
+          values: { name: row.party_name, title: row.title, phone: row.phone, cell: row.cell,
+            email: row.email, ...(!companyUnread && { company: row.company_name }) },
+          provenance: { source: "party", party_id: row.party_id, party_version: row.party_version,
+            company: row.company_id == null ? null : { source: "party.name",
+              party_id: row.company_id, party_version: row.company_version } },
+          unread_fields: companyUnread ? ["company"] : [],
+        } };
       });
       return { schema_version: "email-match-contacts.v1", contacts };
     },
@@ -6903,6 +6934,16 @@ export const TOOLS = {
         throw new ToolError({ error: "value_required",
           hint: "pass the finding as value{}, or pass found:false to record a searched-and-empty result" });
 
+      if (args.kind === "email_delivery_failure") {
+        const prior = (await c.query(`select id, subject_type, subject_id, observed_at, value
+          from record_flag where kind='email_delivery_failure' and created_by=$1 and source=$2
+          order by observed_at, id limit 1`, [actor.id, src])).rows[0];
+        if (prior) return { ok: true, replayed: true, flag_id: prior.id,
+          subject_type: prior.subject_type, subject_id: prior.subject_id, kind: args.kind,
+          found: prior.value.found, observed_at: prior.observed_at,
+          correction_proposed: !!prior.value.proposes_correction };
+      }
+
       let subjectType, subjectId;
       const MARKETING_KINDS = ["campaign", "platform", "pillar", "format"];
       const CODE_KINDS = ["repo", "commit"];
@@ -6969,6 +7010,21 @@ export const TOOLS = {
       } else {
         const s = await resolveSubject(c, args.subject);
         subjectType = s.type; subjectId = s.id;
+      }
+
+      if (args.kind === "email_delivery_failure") {
+        const ids = args.value?.source_activity_ids;
+        const versions = args.value?.source_activity_versions;
+        if (subjectType !== "deal" || !Array.isArray(ids) || !ids.length || ids.length > 200
+            || new Set(ids).size !== ids.length
+            || ids.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+              || !Number.isSafeInteger(versions?.[id]) || versions[id] < 1))
+          throw new ToolError({ error: "email_delivery_filing_changed" });
+        const sources = (await c.query(`select id,deal_id,version,kind,actor_id from activity
+          where id=any($1::uuid[]) order by id for share`, [ids])).rows;
+        if (sources.length !== ids.length || sources.some(row => row.kind !== "email_out"
+            || row.actor_id !== actor.id || row.deal_id !== subjectId || row.version !== versions[row.id]))
+          throw new ToolError({ error: "email_delivery_filing_changed" });
       }
 
       // The correction is DATA, not an instruction. It rides inside value so it is
