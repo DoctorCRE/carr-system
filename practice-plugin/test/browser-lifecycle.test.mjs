@@ -36,6 +36,7 @@ test("a failed test closes its browser without caller cleanup", { timeout: 30000
   try { await run(process.execPath, ["--input-type=module", "--eval", source], { timeout: 20000 }); }
   catch (error) { result = error; }
   assert.equal(result?.code, 1, result?.stdout);
+  assert.match(result.stdout, /not ok 1 - intentional failure/);
   assert.match(result.stdout, /intentional teardown probe/);
   const pid = Number(result.stdout.match(/browser-pid=(\d+)/)?.[1]);
   assert.ok(pid > 0, result.stdout);
