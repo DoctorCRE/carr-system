@@ -680,6 +680,23 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(notes[0]['detail'], 'listing: ' + target)
         self.assertEqual(filings[0]['detail'], 'See (<' + target + '>).')
 
+    def test_incomplete_angle_prefix_survives_stored_body_queue(self):
+        target = 'https://loopnet.com/a?x=1&copy=2'
+        wrapper = ('https://nam12.safelinks.protection.outlook.com/?url='
+                   + quote(target, safe='') + '&data=opaque')
+        message = mail(CLIENT.email, -timedelta(hours=1), body='<note ' + wrapper)
+        self.assertEqual(self.run_intake([message]).state, 'succeeded')
+        filings = [args for _, args in self.fake.writes('log-activity') if args['kind'] == 'email_in']
+        self.assertEqual(len(filings), 1)
+        self.fake.email_queue = [{'activity_id': 'email-1', 'deal': 'synthetic-deal',
+                                 'body': filings[0]['detail'], 'occurred_at': NOW.isoformat()}]
+        self.assertEqual(self.run_intake([message], touch=False).state, 'succeeded')
+        notes = [args for _, args in self.fake.writes('log-activity')
+                 if args['summary'] == 'Links from matched email']
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]['detail'], 'listing: ' + target)
+        self.assertEqual(filings[0]['detail'], '<note <' + target + '>')
+
     def test_unfiled_email_links_remain_unattached_until_confirmed(self):
         self.fake.email_queue = [{'activity_id': 'email-2', 'deal': None,
                                  'body': 'https://loopnet.com/Listing/789',

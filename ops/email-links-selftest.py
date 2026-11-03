@@ -98,9 +98,10 @@ class LinksTest(unittest.TestCase):
                     self.assertEqual(unwrap_safe_links(normalized), normalized)
 
     def test_generated_destination_boundaries_and_prose(self):
-        fragments = ('x', '(', ')', '[', ']', '%22', '%27', '.', ',', ';', '!', '?')
+        fragments = ('x', '(', ')', '[', ']', '%22', '%27', '.', ',', ';', '!', '?', '&copy=2')
         templates = ('{}', 'See ({}).', 'See [{}]!', '"{}"', "'{}'", '<{}>',
-                     '<p>See ({}).</p>', 'Link={}', '"({})"')
+                     '<p>See ({}).</p>', 'Link={}', '"({})"', '<note {}',
+                     '<a {}', '<not a link {}', '<text {} rest')
         for pieces in product(fragments, repeat=2):
             destination = 'https://loopnet.com/a?filter=' + ''.join(pieces)
             for template in templates:
