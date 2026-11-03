@@ -9,6 +9,7 @@ from datetime import datetime
 import gzip
 from pathlib import Path
 import sqlite3
+from typing import TypedDict
 import xml.etree.ElementTree as ET
 import zlib
 
@@ -17,6 +18,19 @@ FIELDS = {'subject': 'Topic', 'preview': 'Preview', 'sender': 'From/Address',
 OUTCOMES = ('agreed', 'disagreed', 'redacted', 'missing_log', 'missing_decoded',
             'invalid_log', 'unjoined', 'ambiguous')
 MAX_LOG_BYTES = 16 * 1024 * 1024
+
+
+class AgreementReport(TypedDict):
+    schema: str
+    status: str
+    files_read: int
+    headers_read: int
+    duplicate_headers: int
+    headers_unjoined: int
+    headers_ambiguous: int
+    decoded_uncompared: int
+    input_failures: dict[str, int]
+    fields: dict[str, dict[str, int]]
 
 
 class LogError(ValueError):
@@ -71,14 +85,14 @@ def _time(value):
     return stamp.timestamp()
 
 
-def agreement_report(decoded: Path, logs: list[Path]) -> dict:
+def agreement_report(decoded: Path, logs: list[Path]) -> AgreementReport:
     """Return counts for unique supplied headers, never message content or paths."""
-    report = {'schema': 'outlook-sync-truth/v1', 'status': 'incomplete',
+    report: AgreementReport = {'schema': 'outlook-sync-truth/v1', 'status': 'incomplete',
               'files_read': 0, 'headers_read': 0, 'duplicate_headers': 0,
               'headers_unjoined': 0, 'headers_ambiguous': 0, 'decoded_uncompared': 0,
               'input_failures': {},
               'fields': {field: dict.fromkeys(OUTCOMES, 0) for field in FIELDS}}
-    failures = Counter()
+    failures: Counter[str] = Counter()
     decoded_rows = defaultdict(list)
     try:
         with closing(sqlite3.connect(Path(decoded).resolve().as_uri() + '?mode=ro', uri=True)) as db:
@@ -111,8 +125,10 @@ def agreement_report(decoded: Path, logs: list[Path]) -> dict:
         rows = decoded_rows.get(identity, []) if identity and not _redacted(identity) else []
         join = ('ambiguous' if len(rows) > 1 or log_ids[identity] > 1 else
                 'unjoined' if not rows else None)
-        if join:
-            report['headers_' + join] += 1
+        if join == 'ambiguous':
+            report['headers_ambiguous'] += 1
+        elif join == 'unjoined':
+            report['headers_unjoined'] += 1
         else:
             compared_ids.add(identity)
         for field in FIELDS:
@@ -135,7 +151,7 @@ def agreement_report(decoded: Path, logs: list[Path]) -> dict:
     report['decoded_uncompared'] = sum(len(rows) for key, rows in decoded_rows.items()
                                        if key not in compared_ids)
     report['input_failures'] = dict(failures)
-    totals = Counter()
+    totals: Counter[str] = Counter()
     for counts in report['fields'].values():
         totals.update(counts)
     if failures:
