@@ -753,7 +753,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "confirm-email-filing": {
     "ingress_key": "mcp-tool:confirm-email-filing",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "401140a64483ed45129e8c2856a8e47db3732fb6a07abb08a043daa7b5e385d6",
+    "schema_digest": "4d0c8fb13b3a860aa17e5b2ad72f1591d01e6e1ff79ee98468ae838938bac725",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -983,7 +983,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dismiss-email-proposal": {
     "ingress_key": "mcp-tool:dismiss-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "374acfe499aada092f73ae6412b0efc1b05faf0dca6160f29e95c25daf2f6f62",
+    "schema_digest": "31ab5be87558fe51fefefe0d4482cf370aad4916834f1d2965dfe7e90130f4e8",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -1240,6 +1240,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": false,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "handle-email-proposal": {
+    "ingress_key": "mcp-tool:handle-email-proposal",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "b6b503af1e291d5523b2462bd396f47259826652424bb9bce15913c43e82b1b9",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -1968,6 +1978,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:preview-email-deal-progress",
     "source_locator": "mcp-server/src/email-deal-progress.ts",
     "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "preview-email-filing": {
+    "ingress_key": "mcp-tool:preview-email-filing",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "426cb8275f898333077e2112710eafea4920dfff799ec48feffc4c78c3866bb1",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -3576,6 +3596,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "snooze-email-proposal": {
+    "ingress_key": "mcp-tool:snooze-email-proposal",
+    "source_locator": "mcp-server/src/email-proposals.js",
+    "schema_digest": "f4aeb37d67db30f69eb27c52f24a28f17c9e4529a547a7ef4421b96e5bf3ef54",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },

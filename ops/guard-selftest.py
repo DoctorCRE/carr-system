@@ -1629,6 +1629,135 @@ for option in ('-f ref=main', '-F ref=main', '--input body.json',
         command = 'gh api ' + endpoint + ' ' + option
         case('J129 write ' + command, bash(command), DENY)
 
+
+# Intended additions to the frozen-main contract. These are shell input only.
+ZSH_GLOB_ADDITIONS = [
+    (f'J134 {program} {target}', f'{program} {target}{suffix}')
+    for program, suffix in (
+        ('rm -rf', ' /Users/booko/important'),
+        ('mv', ' /Users/booko/important'),
+        ('git clean -n', ''),
+    )
+    for target in ('/tmp/x/(a|b)', '/tmp/x/(a|(b|c))', '/tmp/x/(a|b)(N)',
+                   '/tmp/x/*(N)', '/tmp/x/*(.)', '/tmp/x/a#',
+                   '/tmp/x/(#i)a*', '/tmp/x/"prefix"(a|b)')
+]
+ZSH_GLOB_ADDITIONS += [
+    ('J134 escaped expansion lead ' + target, 'rm -rf ' + target + ' /Users/booko/important')
+    for target in (r'/tmp/x/\$(a|b)', r'/tmp/x/\>(a|b)')
+]
+ZSH_GLOB_ADDITIONS += [
+    ('J134 safe-only ' + target, 'rm -rf ' + target)
+    for target in ('/tmp/x/*(N)', '/tmp/x/*(.)', '/tmp/x/a#')
+]
+ZSH_GLOB_ADDITIONS += [
+    ('J134 wrapper ' + prefix, prefix.format('rm -rf /tmp/x/(a|b) /Users/booko/important'))
+    for prefix in ('sudo {}', 'env {}', "zsh -c '{}'", "bash -c '{}'",
+                   'echo "$({})"', '({})')
+]
+ZSH_GLOB_EXISTING_DENIALS = [
+    (name, command) for name, command in ZSH_GLOB_ADDITIONS
+    if (command.startswith('rm -rf ') and '(a|' not in command
+        and not name.startswith('J134 safe-only'))
+    or command.startswith(('zsh -c', 'bash -c', 'echo '))
+    or r'\$' in command
+]
+ZSH_GLOB_ADDITIONS = [item for item in ZSH_GLOB_ADDITIONS if item not in ZSH_GLOB_EXISTING_DENIALS]
+for name, command in ZSH_GLOB_ADDITIONS + ZSH_GLOB_EXISTING_DENIALS:
+    case(name, bash(command, '/tmp'), DENY)
+for modifier in ('noglob', 'nocorrect', '-', 'nocorrect noglob -'):
+    case('J134 zsh modifier ' + modifier,
+         bash(modifier + ' rm -rf /tmp/x/(a|b) /Users/booko/important', '/tmp'), DENY)
+for adapter in (direct_exec, codex_exec):
+    case('J134 native ' + adapter.__name__,
+         adapter('rm -rf /tmp/x/(a|b) /Users/booko/important'), DENY)
+payload = direct_exec('rm -rf /tmp/x/(a|b) /Users/booko/important')
+payload['tool_input']['shell'] = '/bin/bash'
+case('J134 declared bash cannot establish glob option state', payload, DENY)
+for command in (
+    "rm -rf '/tmp/x/(a|b)'", 'rm -rf "/tmp/x/(a|b)"',
+    r'rm -rf /tmp/x/\(a\|b\)', "mv '/tmp/x/(a|b)' /tmp/y",
+    "git clean -n '/tmp/x/(a|b)'", 'ls | head', 'git status', 'git log -1',
+    'git diff', 'gh pr view 1', 'gh pr checks 1', './run.sh map',
+    "git commit -F - <<'EOF'\nliteral (a|b), (N), (.), a#\nEOF",
+):
+    case('J134 ordinary ' + command, bash(command, '/tmp'), ALLOW)
+
+
+
+for read in ('git status', 'git log -1', 'git diff --stat', 'gh pr view 1', 'gh pr checks 1'):
+    for literal in ('issue#123', 'ticket#456', '/tmp/name#part', 'prefix##suffix'):
+        for command in (read + ' && echo ' + literal, 'echo ' + literal + ' && ' + read):
+            case('J141 read hash ' + command, bash(command, '/tmp'), ALLOW)
+    for command in (read + ' && ls /tmp/x/(a|b)', 'ls /tmp/x/(a|b) && ' + read):
+        case('J141 read alternation ' + command, bash(command, '/tmp'), ALLOW)
+for command in ('gh api repos/a/b/pulls/1#fragment',
+                'git show HEAD:path#foo', 'git diff -- src/foo#bar',
+                'git log --grep=foo#bar'):
+    case('J141 read operand ' + command, bash(command, '/tmp'), ALLOW)
+for command in ('git status && rm -rf /tmp/x/(a|b) /tmp/second',
+                'gh pr view 1 && mv /tmp/x/(a|b) /tmp/second',
+                'git status && git clean -n /tmp/x/(a|b)',
+                'git -C /tmp/x/*# status',
+                'gh -R /tmp/x/*# pr view 1',
+                'git diff --output=/tmp/x/(a|b)',
+                'git log --output=/tmp/x/(a|b)',
+                'gh api repos/a/b/pulls/1#fragment -fstate=closed',
+                'gh api repos/a/b/pulls/1#fragment -XPOST'):
+    case('J141 mutation stays sensitive ' + command, bash(command, '/tmp'), DENY)
+
+
+
+ZSH_GLOB_TRUNCATED_READS = [
+    'git diff --no-index /tmp/p/(one|two) --output=/tmp/j146-write',
+    'gh api repos/a/b/pulls/(1|2) -X PATCH -f state=closed',
+    'gh api repos/a/b/pulls/(1|2) --method DELETE',
+    'git log /tmp/p/(a|(b|c)) --output=/tmp/j147-write',
+    'git show HEAD /tmp/p/(a|b)(N) --output=/tmp/j147-write',
+    'gh api repos/a/b/(pulls|issues) -F state=closed',
+    'gh api (repos/a/b/pulls/1|repos/a/b/pulls/2) -f state=closed',
+    'git diff /tmp/p/(a|b|c) --output /tmp/j147-write',
+    'git diff && git diff /tmp/p/(a|b) --output=/tmp/j147-write',
+    'gh pr view 1 /tmp/p/(a|b) && echo issue#123',
+    'gh pr checks 1 /tmp/p/(a|b) && echo issue#123',
+    'git status /tmp/p/(a|b) && echo issue#123',
+]
+ZSH_GLOB_TRUNCATED_READS += [
+    prefix + ' git diff --no-index /tmp/p/(one|two) --output=/tmp/j147-write'
+    for prefix in ('noglob', 'nocorrect', '-', 'nocorrect noglob -', 'command', 'env',
+                   'X=1 nocorrect', 'X=1 noglob')
+]
+for command in ZSH_GLOB_TRUNCATED_READS:
+    case('J147 incomplete read ' + command, bash(command, '/tmp'), DENY)
+
+
+
+for read in ('git status', 'gh pr view 1'):
+    for literal in ('"("', '")"', r'\(', r'\)'):
+        command = read + ' ' + literal + ' && echo issue#123'
+        case('J147 quoted punctuation ' + command, bash(command, '/tmp'), ALLOW)
+
+
+
+for read in ('git status', 'gh pr view 1'):
+    for command in (read + '\nls /tmp/p/(a|b)',
+                    'ls /tmp/p/(a|b)\n' + read,
+                    read + ';(ls /tmp/p/(a|b))',
+                    read + '&&(ls /tmp/p/(a|b))',
+                    '(' + read + ') && echo issue#123'):
+        case('J147 complete read boundary ' + command, bash(command, '/tmp'), ALLOW)
+
+
+def zsh_glob_addition_cases():
+    failures = []
+    for name, command in ZSH_GLOB_ADDITIONS:
+        baseline, error = run(bash(command, '/tmp'), MAIN_GUARD)
+        if baseline != ALLOW:
+            failures.append(name + ': expected frozen-main allowance: ' + error)
+    print(f'zsh intended additions: {len(ZSH_GLOB_ADDITIONS) - len(failures)}/{len(ZSH_GLOB_ADDITIONS)} main allowances')
+    return failures
+
+
 def decision_error_cases():
     failures = []
     script = (
@@ -1658,7 +1787,7 @@ def main():
     source_fails = fixture_identity_cases()
     if source_fails:
         return 1
-    source_fails += source_restore_cases()
+    source_fails += source_restore_cases() + zsh_glob_addition_cases()
     head_results = {}
     source_fails += monotonicity_cases(head_results) + decision_error_cases()
     fails = []
