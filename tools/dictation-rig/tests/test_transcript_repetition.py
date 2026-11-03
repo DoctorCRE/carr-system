@@ -119,6 +119,85 @@ def test_recovery_cannot_return_loop_spread_across_chunks(tmp_path, monkeypatch)
         run_decoder(tmp_path, monkeypatch, looping, repeated)
 
 
+def test_hung_recovery_on_default_session_path_requires_attention(tmp_path, monkeypatch):
+    import math
+    import lib.call_settings
+
+    track = tmp_path / 'synthetic.wav'
+    with wave.open(str(track), 'wb') as output:
+        output.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
+        output.writeframes(b'\0\0' * 16000 * 2)
+    model = tmp_path / 'model.bin'
+    model.write_bytes(b'synthetic')
+    monkeypatch.setattr(transcription, 'read_meta', lambda _: {
+        'files': {'mic': track.name, 'system': track.name}, 'start_offset_ms': {}})
+    monkeypatch.setattr(transcription, 'read_consent', lambda _: {})
+    monkeypatch.setattr(transcription, 'read_speaker_labels', lambda _: {'mic': 'A', 'system': 'B'})
+    monkeypatch.setattr(transcription, 'resolve_model', lambda _: model)
+    monkeypatch.setattr(transcription, 'verify_model_pin', lambda *_: None)
+    monkeypatch.setattr(transcription, 'load_prompt', lambda: '')
+    monkeypatch.setattr(transcription, 'convert_caf_to_wav', lambda *_: track)
+    monkeypatch.setattr(lib.call_settings, 'configure_environment', lambda: None)
+    monkeypatch.setattr(transcription.post_call, 'now', lambda: '2026-01-01T00:00:00Z')
+    summaries = []
+    monkeypatch.setattr(transcription.post_call, 'run_session', summaries.append)
+    processes = []
+
+    class Decoder:
+        def __init__(self, cmd, **kwargs):
+            self.args = cmd
+            self.returncode = None
+            self.killed = False
+            self.reaped = False
+            self.timeout = None
+            self.recovery = '-mc' in cmd
+            processes.append(self)
+            if not self.recovery:
+                target = Path(cmd[cmd.index('-of') + 1]).with_suffix('.json')
+                target.write_text(json.dumps({'transcription': [{
+                    'offsets': {'from': 0, 'to': 1000},
+                    'text': ' '.join(['Synthetic repeated phrase.'] * 150)}]}))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            self.wait()
+
+        def communicate(self, input=None, timeout=None):
+            if self.recovery and not self.killed:
+                self.timeout = timeout
+                assert timeout is not None and math.isfinite(timeout) and timeout > 0, (
+                    'recovery would wait forever without a finite subprocess timeout')
+                raise subprocess.TimeoutExpired(self.args, timeout)
+            self.returncode = -9 if self.killed else 0
+            return '', ''
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self):
+            self.reaped = True
+            self.returncode = -9 if self.killed else 0
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(transcription.subprocess, 'Popen', Decoder)
+    assert transcription.main(['transcribe_session.py', str(tmp_path)]) == 1
+    assert len(processes) == 2
+    recovery = processes[1]
+    assert recovery.timeout is not None, 'default session path leaves recovery unbounded'
+    assert recovery.killed and recovery.reaped
+    assert 'RepetitionError' in (tmp_path / 'transcribe.log').read_text()
+    status = json.loads((tmp_path / transcription.STATUS_FILE).read_text())
+    assert status['state'] == 'needs_attention'
+    assert summaries == []
+    assert not (tmp_path / 'transcript.json').exists()
+    assert track.exists()
+
+
 if __name__ == '__main__':
     import tempfile
 
