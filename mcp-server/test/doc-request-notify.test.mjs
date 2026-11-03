@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 
 import { docConversationTools } from "../src/doc-conversation.js";
 import { TOOLS } from "../src/tools.js";
+import docRequestLinks from "../contracts/doc-request-links.v1.json" with { type: "json" };
 
 class ToolError extends Error {
   constructor(fields) { super(fields.error); Object.assign(this, fields); }
@@ -204,4 +205,16 @@ test("completion mints the producer-owned Doc request link contract", async () =
     assert.equal(retry.deduplicated, true, example.name);
     assert.equal(s.notifications.length, 1, example.name);
   }
+});
+
+
+test("completion derives the emitted link from the contract template", async t => {
+  const originalTemplate = docRequestLinks.path_template;
+  t.after(() => { docRequestLinks.path_template = originalTemplate; });
+  docRequestLinks.path_template = "/fixture/conversations/{conversation_id}/answers/{msg_id}";
+  const s = store();
+  const result = await s.complete({ request_msg_id: JOE_ASK, outcome: "answered", answer_msg_id: ANSWER });
+  const expected = `/fixture/conversations/${CONVERSATION}/answers/${ANSWER}`;
+  assert.equal(s.notifications[0].deep_link, expected);
+  assert.equal(result.deep_link, expected);
 });
