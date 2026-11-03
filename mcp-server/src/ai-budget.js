@@ -11,6 +11,25 @@ export class AiBudgetError extends Error {
   }
 }
 
+// Only external AI work belongs here. SQL must be awaited outside this deadline.
+export async function withAiTimeout(operation, signal) {
+  const controller = signal ? undefined : new AbortController();
+  signal ??= controller.signal;
+  let timeout, onAbort;
+  try {
+    signal.throwIfAborted();
+    const expired = new Promise((_, reject) => {
+      onAbort = () => reject(new Error('embedding_timeout'));
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    if (controller) timeout = setTimeout(() => controller.abort(), 2000);
+    return await Promise.race([operation(signal), expired]);
+  } finally {
+    clearTimeout(timeout);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
 function dailyLimit(env) {
   if (!['production', 'staging'].includes(env.CARR_ENV))
     throw new AiBudgetError('ai_budget_invalid_config');
@@ -44,7 +63,7 @@ function estimatedNeurons(textCount) {
 }
 
 export function budgetedAi(env) {
-  async function reserve(neurons) {
+  async function reserve(neurons, signal) {
     const limit = dailyLimit(env);
     if (neurons > limit) throw exhausted(utcDay());
     if (!env.AI?.run || !env.AI_NEURON_BUDGET?.get || !env.AI_NEURON_BUDGET?.idFromName)
@@ -54,11 +73,15 @@ export function budgetedAi(env) {
     if (cached?.day === utcDay() && cached.limit === limit) throw exhausted(cached.day);
     let response, receipt;
     try {
-      const stub = namespace.get(namespace.idFromName(env.CARR_ENV));
-      response = await stub.fetch(new Request('https://ai-budget.internal/reserve', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ neurons }),
-      }));
-      receipt = await response.json();
+      [response, receipt] = await withAiTimeout(async deadline => {
+        const stub = namespace.get(namespace.idFromName(env.CARR_ENV));
+        const response = await stub.fetch(new Request('https://ai-budget.internal/reserve', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ neurons }),
+          signal: deadline,
+        }));
+        deadline.throwIfAborted();
+        return [response, await response.json()];
+      }, signal);
     } catch {
       throw new AiBudgetError('ai_budget_unavailable');
     }
@@ -74,13 +97,14 @@ export function budgetedAi(env) {
     if (receipt.remaining === 0) exhaustedNamespaces.set(namespace, { day: receipt.day, limit });
   }
   return {
-    async reserveOperation(textCount) {
+    async reserveOperation(textCount, signal) {
       if (!Number.isSafeInteger(textCount) || textCount < 1)
         throw new AiBudgetError('ai_budget_unsupported_input');
       let remaining = Math.floor(textCount / 16) * estimatedNeurons(16) + estimatedNeurons(textCount % 16);
-      await reserve(remaining);
+      await reserve(remaining, signal);
       return {
         async run(model, input, ...options) {
+          signal?.throwIfAborted();
           const snapshot = embeddingInput(model, input, options);
           const neurons = estimatedNeurons(snapshot.text.length);
           if (neurons > remaining) throw exhausted(utcDay());

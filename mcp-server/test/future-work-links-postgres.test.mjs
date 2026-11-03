@@ -133,8 +133,10 @@ for (const explicit of [false,true]) {
   });
   test(`deal next steps, notes, items and instructions store ${explicit ? 'explicit' : 'minted'} WR`,async()=>{
     await businessRecords();
+    await c.query("update next_action set status='done' where subject_type='deal' and subject_id=$1 and status='open'",[syntheticDeal]);
     const version=Number((await c.query('select version from deal where id=$1',[syntheticDeal])).rows[0].version);
     await verify('set-next-step',{deal:syntheticDeal,text:'Request synthetic title commitment',next_date:'2026-11-02',base_version:version},explicit);
+    await c.query("update next_action set status='done' where subject_type='deal' and subject_id=$1 and status='open'",[syntheticDeal]);
     await verify('add-deal-note',{deal:syntheticDeal,text:'Synthetic update with remaining work',next_step:'Review synthetic title commitment',next_date:'2026-11-03'},explicit);
     const item=await verify('record-deal-item',{deal:syntheticDeal,title:'Synthetic checklist '+randomUUID(),source_ref:'synthetic:'+randomUUID(),due_on:'2026-11-04',bullets:[{kind:'promised',text:'Deliver the synthetic document'}]},explicit);
     await verify('instruct-deal-item',{deal:syntheticDeal,item_id:item.item.id,text:'Verify the synthetic document',work_request:item.work_request});
