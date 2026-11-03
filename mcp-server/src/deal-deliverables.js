@@ -154,7 +154,7 @@ export async function deliverableRow(
     )
   ).rows[0];
   if (!row) fail("deliverable_denied");
-  if (row.object_key !== `deliverables/${tenant}/${deal}/${row.id}`)
+  if (row.object_key !== `deliverables/${tenant}/${row.deal_id}/${row.id}`)
     fail("deliverable_denied");
   return row;
 }
@@ -238,7 +238,8 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
       },
       ["deal_id", "filename", "mime", "bytes", "sha256"],
       async (c, actor, a) => {
-        const tenant = await authorizeDeliverable(c, actor, a.deal_id);
+        const dealId = a.deal_id.toLowerCase();
+        const tenant = await authorizeDeliverable(c, actor, dealId);
         if (
           !Number.isSafeInteger(a.bytes) ||
           a.bytes < 1 ||
@@ -269,16 +270,16 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
         )
           fail("unsupported_mime");
         await c.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [
-          `deliverables/${tenant}/${a.deal_id}`,
+          `deliverables/${tenant}/${dealId}`,
         ]);
         await c.query(
           `update ops.deal_deliverable set state='expired' where organization_tenant_id=$1 and deal_id=$2 and state='started' and expires_at<=now()`,
-          [tenant, a.deal_id],
+          [tenant, dealId],
         );
         const q = (
           await c.query(
             `select count(*)::int n,coalesce(sum(bytes),0)::bigint bytes from ops.deal_deliverable where organization_tenant_id=$1 and deal_id=$2 and state<>'expired'`,
-            [tenant, a.deal_id],
+            [tenant, dealId],
           )
         ).rows[0];
         if (
@@ -294,19 +295,19 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
             [
               id,
               tenant,
-              a.deal_id,
+              dealId,
               a.filename.trim(),
               a.mime,
               a.bytes,
               a.sha256,
-              `deliverables/${tenant}/${a.deal_id}/${id}`,
+              `deliverables/${tenant}/${dealId}/${id}`,
               actor.slug,
             ],
           )
         ).rows[0];
         return {
           deliverable: row,
-          upload_path: `${DELIVERABLE_PREFIX}/${a.deal_id}/${id}/bytes`,
+          upload_path: `${DELIVERABLE_PREFIX}/${dealId}/${id}/bytes`,
         };
       },
     ),

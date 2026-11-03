@@ -151,9 +151,17 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
             deal_id: isolatedDeal,
             idempotency_key: randomUUID(),
           });
-          const waiting = start({ deal_id: isolatedDeal });
+          await c.query("set lock_timeout='100ms'");
+          await assert.rejects(
+            start({ deal_id: isolatedDeal.toUpperCase() }),
+            (error) => error.code === "55P03",
+          );
+          await c.query("set lock_timeout=0");
           await peer.query("commit");
-          await reject(waiting, "deliverable_quota_exceeded");
+          await reject(
+            start({ deal_id: isolatedDeal }),
+            "deliverable_quota_exceeded",
+          );
           assert.equal(
             (
               await c.query(
@@ -196,6 +204,17 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
         } finally {
           await peer.end();
         }
+      },
+    );
+    await t.test(
+      "UUID spelling cannot change the quota lock or stored object namespace",
+      async () => {
+        const started = await start({ deal_id: deal.toUpperCase() });
+        assert.equal(
+          started.upload_path,
+          `${DELIVERABLE_PREFIX}/${deal}/${started.deliverable.id}/bytes`,
+        );
+        assert.equal((await put(started.deliverable.id)).status, 201);
       },
     );
     let id;
