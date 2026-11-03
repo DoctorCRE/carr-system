@@ -1113,6 +1113,9 @@ class Run:
                 request = self.state.get('requests', {}).get(args['idempotency_key'], {})
                 if request.get('acknowledged'):
                     continue
+                if request and request['created_at'] < (self.now - timedelta(days=29)).timestamp():
+                    request.update(disposition='blocked', retry_at=None)
+                    _save(self.out, self.state)
                 if self.write('record-finding', args, 'signature observation'):
                     self.counts['signature_recorded'] += 1
                 else:

@@ -246,6 +246,17 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(str(uuid.UUID(key)), key)
 
 
+    def test_lost_response_after_replay_window_is_held_without_resubmission(self):
+        self.error = 'lost'
+        self.run_review()
+        self.now += timedelta(days=31)
+        self.error = None
+        work = self.run_review()
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(work.counts['requests_blocked'], 1)
+        self.assertEqual(len(self.receipts), 1)
+
+
 
 if __name__ == '__main__':
     unittest.main()

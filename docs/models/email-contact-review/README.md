@@ -42,3 +42,10 @@ The sender snapshot has no atomic server-side identity precondition for findings
 The intake checks the current snapshot before each attempt; this does not provide
 an atomic guard against a concurrent server-side merge during transport. Findings
 carry the observed party ID and versions and never mutate identity or contact facts.
+
+Ordinary record-finding replay receipts expire after 30 days in replay-receipt.ts.
+Unacknowledged signature requests block after 29 days from their first attempt,
+so a long outage cannot turn an expired receipt into a second finding. The one-day
+margin is conservative. Acknowledged local receipts remain retained.
+`test_lost_response_after_replay_window_is_held_without_resubmission` checks this
+Retry/Refused transition. A blocked request needs review rather than a new key.
