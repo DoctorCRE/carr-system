@@ -1,6 +1,7 @@
 // Tests capture claims, transitions, and candidate handling.
 import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { createCaptureHandler } from "../src/capture.js";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
@@ -46,14 +47,28 @@ class CaptureFake {
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
     if (sql.includes("call-outcome:resolve-session-lock") || sql.includes("call-outcome:resolve-undo-check")) return { rows: [] };
-    if (sql.includes("dealroom:field-lock")) { this.lockedFields ||= []; this.lockedFields.push(params[1]); return { rows: [] }; }
+    if (sql.includes("dealroom:field-lock")) {
+      this.lockedFields ||= []; this.lockedFields.push(params[1]);
+      if (params[1] === "phase" && this.racePhaseBase) this.phaseBase = this.racePhaseBase;
+      return { rows: [] };
+    }
+    if (sql.includes("capture:automatic-plan-siblings") || sql.includes("capture:automatic-plan-conflict")) return { rows: [] };
     if (sql.includes("capture:phase-current")) {
       assert.ok(this.lockedFields.includes("phase"));
       return { rows: [{ phase: this.phaseValue || "closing" }] };
     }
-    if (sql.includes("capture:phase-superseded")) return { rows: this.superseded ? [{ id: "later" }] : [] };
+    if (sql.includes("capture:phase-superseded")) return { rows: this.candidates.filter(row =>
+      row.session_id === params[0] && row.id !== params[1] && row.kind === "phase_move" && row.payload.deal === params[2]
+      && (row.payload.evidence_source?.occurrence_start_ms > params[3] ||
+        (row.payload.evidence_source?.occurrence_start_ms === params[3] && row.payload.value !== params[4]) ||
+        (row.payload.evidence_source?.occurrence_start_ms == null && row.payload.value !== params[4]))) };
     if (sql.includes("capture:phase-chronology-base"))
-      return { rows: [{ event_id: this.historicalBase || null }] };
+      return { rows: params[3] === chronologySource.recording_started_at ? [{ event_id: this.historicalBase || null }] : [] };
+    if (sql === "select phase as value from deal where id=$1") return { rows: [{ value: this.phaseValue || "closing" }] };
+    if (sql.includes("dealroom:apply-field")) { this.phaseValue = params[1]; return { rows: [] }; }
+    if (sql.includes("dealroom:written-event")) return { rows: [{ id: "phase-event", recorded_at: "2026-08-08T16:00:00Z" }] };
+    if (sql.includes("dealroom:status-plan")) return { rows: [{ action_id: null, overdue: false }] };
+    if (sql.includes("dealroom:supersede-overdue")) return { rows: [] };
     if (sql.startsWith("select b.next_step,b.next_date::text as next_date"))
       return { rows: [{ next_step: null, next_date: this.nextDate ?? null, action_id: null }] };
     if (sql.includes("'next_action' as source") && sql.includes("from capture_post_call_action")
@@ -123,8 +138,6 @@ class CaptureFake {
       return { rows: [{ total: rows.length, pending: rows.filter(row => row.status === "pending").length,
         report_filed: !!report, report_candidate_count: report?.candidate_count ?? null }] };
     }
-    if (sql.includes("capture:post-call-phase-base"))
-      return { rows: this.phaseBase ? [{ event_id: this.phaseBase }] : [] };
     if (sql.includes("capture:post-call-next-step-base")) return { rows: [] };
     if (sql.includes("dealroom:base-event")) return { rows: [{ id: params[0] }] };
     if (sql.includes("dealroom:latest-field-event"))
@@ -199,7 +212,7 @@ class CaptureFake {
     }
     if (sql.includes("capture:resolve-read")) {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
-      return { rows: row ? [{ id: row.id, kind: row.kind, payload: row.payload,
+      return { rows: row ? [{ id: row.id, session_id: row.session_id, kind: row.kind, payload: row.payload,
         status: row.status, resulting_ref: row.resulting_ref,
         evidence_quote: row.evidence_quote, post_call: row.post_call ?? this.sessions.find(s => s.id === row.session_id)?.post_call ?? false }] : [] };
     }
@@ -503,7 +516,7 @@ test("post-call evidence receipts persist independently of model payload and bin
   const claimedResponse = await r.handler.fetch(claimRequest(validPostCallClaim),
     { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
   const token = (await claimedResponse.json()).session_token;
-  const source = { quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64), speaker: "joe" };
+  const source = { quote_sha256: createHash("sha256").update("Move Deal Alpha to diligence").digest("hex"), source_sha256: "b".repeat(64), speaker: "joe" };
   const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
     evidence_quote: "Move Deal Alpha into legal", confidence: 1 };
   const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000101",
@@ -531,7 +544,7 @@ test("capture refuses malformed evidence receipts and ordinary-session attestati
   const { db, r, token } = await claimed();
   const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
     evidence_quote: "Move Deal Alpha into legal", confidence: 1 };
-  const source = { quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64), speaker: "joe" };
+  const source = { quote_sha256: createHash("sha256").update("Move Deal Alpha to diligence").digest("hex"), source_sha256: "b".repeat(64), speaker: "joe" };
   const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000103", items: [item] };
   for (const evidence_sources of [{}, [], [source, source], [false],
     [{ ...source, speaker: "client" }], [{ ...source, quote_sha256: "invalid" }],
@@ -627,20 +640,21 @@ test("post-call next-step proposals stay pending, validate exact deals, and repl
   assert.equal(db.candidates.length, 2);
 });
 
-test("post-call phase proposals pin the server phase base and preserve it on replay", async () => {
+test("post-call phase proposals pin the historical phase base and preserve it on replay", async () => {
   const db = new CaptureFake();
+  db.historicalBase = db.phaseBase;
   const r = rig(db);
   const response = await r.handler.fetch(claimRequest(validPostCallClaim),
     { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
   const token = (await response.json()).session_token;
   const item = { kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
     evidence_quote: "Move the deal to legal", confidence: 0.5 };
-  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000044", items: [item] };
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000044", items: [item], evidence_sources: [chronologySource] };
   const submitted = await post(r.handler, "/capture/candidates", batch);
   assert.equal(submitted.status, 200);
   const receipt = await submitted.json();
   const queue = await TOOLS["capture-queue"].handler(db, joe, {});
-  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, base_event_id: db.phaseBase,
+  assert.deepEqual(queue.candidates[0].payload, { ...item.payload, evidence_source: chronologySource, base_event_id: db.phaseBase,
     plan_base: { next_step: null, next_date: null } });
   db.phaseBase = "50000000-0000-0000-0000-000000000002";
   const replay = await post(r.handler, "/capture/candidates", batch);
@@ -678,6 +692,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
     assert.equal(denied.status, 400, JSON.stringify(payload));
   }
   db.phaseBase = null;
+  db.historicalBase = null;
   const noHistory = await post(r.handler, "/capture/candidates", {
     ...batch, idempotency_key: "00000571-0000-4000-8000-000000000046", items: [item],
   });
@@ -689,7 +704,7 @@ test("post-call phase proposals pin the server phase base and preserve it on rep
   });
   assert.equal(dated.status, 200);
   assert.equal(db.candidates[2].payload.started_on, "2026-10-20");
-  // Only a partner's own post-call session may apply a change automatically.
+  db.candidates[2].post_call = false;
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
     idempotency_key: "00000571-0000-4000-8000-000000000048", candidate_id: db.candidates[2].id, accept: true, automatic: true,
   }), error => error instanceof ToolError && error.payload.error === "automatic_apply_not_allowed");
@@ -921,10 +936,10 @@ test("log-outreach completes only the caller's post-call action on the deal", as
   assert.equal(db.events.at(-1).verb, "log-outreach");
 });
 
-const chronologySource = { speaker: "joe", quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64),
+const chronologySource = { speaker: "joe", quote_sha256: createHash("sha256").update("Move Deal Alpha to diligence").digest("hex"), source_sha256: "b".repeat(64),
   recording_started_at: "2026-08-08T15:00:00Z", occurrence_start_ms: 60000, occurrence_end_ms: 65000 };
 
-async function chronologyProposal(db, value = "diligence", source = chronologySource) {
+async function chronologyProposal(db, value = "due_diligence", source = chronologySource) {
   const r = rig(db);
   const claim = await r.handler.fetch(claimRequest(validPostCallClaim),
     { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
@@ -949,7 +964,7 @@ test("an in-call edit before filing cannot become the spoken instruction's base"
 
 test("a matching live phase is satisfied under the field lock without a move", async () => {
   const db = new CaptureFake();
-  db.phaseValue = "diligence";
+  db.phaseValue = "due_diligence";
   const id = await chronologyProposal(db);
   const result = await TOOLS["resolve-candidate"].handler(db, joe, {
     candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000083",
@@ -961,9 +976,90 @@ test("a matching live phase is satisfied under the field lock without a move", a
 test("a later spoken disposition blocks an older phase instruction", async () => {
   const db = new CaptureFake();
   const id = await chronologyProposal(db);
-  db.superseded = true;
+  db.candidates.push({ ...structuredClone(db.candidates[0]), id: "later",
+    payload: { ...db.candidates[0].payload, value: "closing", evidence_source: {
+      ...chronologySource, occurrence_start_ms: 120000, occurrence_end_ms: 125000 } } });
   await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
     candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000084",
+  }), error => error.payload?.error === "superseded_call_instruction");
+  const final = await TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: "later", accept: true, idempotency_key: "00000571-0000-4000-8000-000000000090",
+  });
+  assert.equal(final.result.already_satisfied, true);
+  assert.equal(db.events.length, 0);
+});
+
+test("a later explicit instruction may intentionally move backward and still detects a racing edit", async () => {
+  const db = new CaptureFake();
+  db.historicalBase = db.phaseBase;
+  const id = await chronologyProposal(db);
+  const moved = await TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000085",
+  });
+  assert.equal(moved.result.new_value, "due_diligence");
+  assert.equal(db.phaseValue, "due_diligence");
+  assert.equal(db.events.filter(event => event.verb === "patch-deal-field").length, 1);
+  const racing = new CaptureFake();
+  racing.historicalBase = racing.phaseBase;
+  const pending = await chronologyProposal(racing);
+  racing.racePhaseBase = "50000000-0000-0000-0000-000000000099";
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(racing, joe, {
+    candidate_id: pending, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000086",
+  }), error => error.payload?.conflict?.value_a === "closing");
+  assert.equal(racing.events.length, 0);
+});
+
+test("untimed call instructions cannot move a different live phase", async () => {
+  const db = new CaptureFake();
+  const { recording_started_at, occurrence_start_ms, occurrence_end_ms, ...source } = chronologySource;
+  const id = await chronologyProposal(db, "due_diligence", source);
+  assert.equal(db.candidates[0].payload.base_event_id, null);
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000087",
+  }), error => error.payload?.error === "missing_phase_chronology");
+  assert.equal(db.events.length, 0);
+});
+
+test("automatic acceptance also preserves an edit made during the call", async () => {
+  const db = new CaptureFake();
+  const id = await chronologyProposal(db);
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, automatic: true,
+    idempotency_key: "00000571-0000-4000-8000-000000000088",
+  }), error => error.payload?.conflict?.value_a === "closing");
+  assert.equal(db.events.length, 0);
+});
+
+test("phase chronology rejects partial spans and a different recording start", async () => {
+  const db = new CaptureFake();
+  const r = rig(db);
+  const claim = await r.handler.fetch(claimRequest(validPostCallClaim),
+    { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
+  const token = (await claim.json()).session_token;
+  const batch = { session_token: token, idempotency_key: "00000571-0000-4000-8000-000000000089",
+    items: [{ kind: "phase_move", payload: { deal: ids.deal, field: "phase", value: "legal" },
+      evidence_quote: "Move Deal Alpha to legal", confidence: 0.5 }] };
+  for (const source of [
+    { ...chronologySource, occurrence_start_ms: -1 },
+    { ...chronologySource, occurrence_end_ms: 60000 },
+    { ...chronologySource, occurrence_end_ms: 86400001 },
+    { ...chronologySource, occurrence_start_ms: 1.5 },
+    { ...chronologySource, recording_started_at: "invalid" },
+    { ...chronologySource, recording_started_at: "2026-08-08T16:00:00Z" },
+  ]) {
+    const response = await post(r.handler, "/capture/candidates", { ...batch, evidence_sources: [source] });
+    assert.equal(response.status, 400);
+  }
+  assert.equal(db.candidates.length, 0);
+});
+
+test("contradictory untimed phase evidence prevents guessing the final disposition", async () => {
+  const db = new CaptureFake();
+  const id = await chronologyProposal(db);
+  db.candidates.push({ ...structuredClone(db.candidates[0]), id: "untimed",
+    payload: { deal: ids.deal, field: "phase", value: "closing" } });
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000091",
   }), error => error.payload?.error === "superseded_call_instruction");
   assert.equal(db.events.length, 0);
 });

@@ -2382,6 +2382,22 @@ class AutomaticApplyTests(unittest.TestCase):
                 post_call.write_private(self.session / "transcript.json", self.transcript)
                 self.assertEqual(post_call.automatic_evidence(self.session), [None, None, None])
 
+    def test_timed_source_receipt_uses_unique_occurrence_without_uploading_text(self) -> None:
+        quote = str(self.update()["evidence"])
+        post_call.write_private(self.session / post_call.REPORT_FILE, {"deal_updates": [
+            self.update(phase_move={"value": "due_diligence"})]})
+        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-11-02T15:00:00Z"})
+        self.transcript["segments"][0].update(start_ms=60000, end_ms=65000)
+        post_call.write_private(self.session / "transcript.json", self.transcript)
+        source = post_call.automatic_evidence(self.session)[1]
+        self.assertEqual(source["occurrence_start_ms"], 60000)
+        self.assertEqual(source["occurrence_end_ms"], 65000)
+        self.assertEqual(source["recording_started_at"], "2026-11-02T15:00:00Z")
+        self.assertNotIn(quote, json.dumps(source))
+        self.transcript["segments"].append({**self.transcript["segments"][0], "start_ms": 120000, "end_ms": 125000})
+        post_call.write_private(self.session / "transcript.json", self.transcript)
+        self.assertNotIn("occurrence_start_ms", post_call.automatic_evidence(self.session)[1])
+
     def test_unknown_and_numbered_speakers_do_not_inherit_partner_authority(self) -> None:
         for speaker in ("Other participant", "In-room speaker 1", "Joe 1", "Dell 1", ""):
             with self.subTest(speaker=speaker):
