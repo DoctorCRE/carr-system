@@ -1270,6 +1270,30 @@ class PostCallTests(unittest.TestCase):
             with self.subTest(case=case["id"]):
                 self.assertEqual(score.run_case(suite, case), case["expected"])
 
+    def test_event_anchor_binding_requires_cited_date(self) -> None:
+        from copy import deepcopy
+        transcript = {"segments": [
+            {"speaker": "Joe", "text": "I will call before the lunch call."},
+            {"speaker": "Dell", "text": "Our lunch call is Tuesday."},
+        ]}
+        timing = timing_fixture(transcript, [["before the lunch call"], ["Tuesday"]])
+        timing["sources"][1]["anchor_for"] = ["before the lunch call"]
+        ledger = {"facts": [{"fact_id": "task", "source_spans": [
+            _REAL_COVERAGE.source_span(transcript, i) for i in range(2)]}]}
+        item = {"evidence": transcript["segments"][0]["text"], "fact_ids": ["task"], "timing": timing}
+        result = post_call.task_deadline(item, transcript, "2026-10-26", ledger)
+        self.assertEqual((result.state, result.due_on), ("resolved", "2026-10-27"))
+        for value in ("before the lunch call", ["before the unrelated call"], [None]):
+            changed = deepcopy(item)
+            changed["timing"]["sources"][1]["anchor_for"] = value
+            self.assertEqual(post_call.task_deadline(changed, transcript, "2026-10-26", ledger).state, "ambiguous")
+        uncited = deepcopy(ledger)
+        uncited["facts"][0]["source_spans"] = uncited["facts"][0]["source_spans"][:1]
+        self.assertEqual(post_call.task_deadline(item, transcript, "2026-10-26", uncited).state, "ambiguous")
+        missing = deepcopy(item)
+        del missing["timing"]["sources"][1]["anchor_for"]
+        self.assertEqual(post_call.task_deadline(missing, transcript, "2026-10-26", ledger).state, "ambiguous")
+
     def test_timing_quotes_do_not_bypass_narrative_copy_hold(self) -> None:
         quote = "I will call the Harbor vendor about the requested proposal and revised terms before Friday morning."
         transcript = {"segments": [{"speaker": "Joe", "text": quote}]}

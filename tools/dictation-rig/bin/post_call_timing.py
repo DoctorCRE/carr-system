@@ -37,11 +37,12 @@ def timing_schema() -> dict[str, Any]:
                     'quote': {'type': 'string', 'minLength': 1},
                     'status': {'enum': ['stated', 'unstated', 'uncertain']},
                     'expressions': {'type': 'array', 'items': {'type': 'string', 'minLength': 1}},
+                    'anchor_for': {'type': 'array', 'minItems': 1, 'items': {'type': 'string', 'minLength': 1}},
                 }, 'required': ['segment_index', 'segment_sha256', 'char_start', 'char_end', 'speaker', 'quote', 'status', 'expressions']}}},
             'required': ['sources']}
 
 
-def _exact_date(expression: str, call_date: str | None, transcript: dict[str, Any] | None = None) -> str | None:
+def _exact_date(expression: str, call_date: str | None) -> str | None:
     text = expression.strip().lower()
     try:
         if ISO_DAY.fullmatch(text):
@@ -59,13 +60,6 @@ def _exact_date(expression: str, call_date: str | None, transcript: dict[str, An
         if call_date is None:
             return None
         anchor = date.fromisoformat(call_date)
-        if text == 'before the lunch call':
-            anchors = [row['text'] for row in (transcript or {}).get('segments', [])
-                       if row.get('text', '').lower().startswith('the lunch call is ')]
-            if not anchors:
-                return call_date
-            values = {_exact_date(row[len('The lunch call is '):].rstrip('.'), call_date) for row in anchors}
-            return values.pop() if len(values) == 1 and None not in values else None
         event = re.fullmatch(r"before (" + '|'.join(WEEKDAYS) + r")[’']s lunch call", text)
         if event:
             return _exact_date(event[1], call_date)
@@ -114,18 +108,20 @@ def task_deadline(item: dict[str, Any], transcript: dict[str, Any] | None,
         expected = {span['segment_index'] for key in ids for span in facts[key]['source_spans']}
     else:
         # Normalization without a ledger still requires a full, exact source turn.
-        expected = {i for i, segment in enumerate(segments) if segment.get('text') == item['evidence']
-                    or 'lunch call' in item['evidence'] and segment.get('text', '').startswith('The lunch call is ')}
+        expected = {i for i, segment in enumerate(segments) if segment.get('text') == item['evidence']}
+        expected.update(source['segment_index'] for source in sources
+                        if isinstance(source, dict) and source.get('anchor_for')
+                        and type(source.get('segment_index')) is int)
     if not expected or len(sources) != len(expected):
         return hold
-    uncited_anchor = any(i not in expected and row.get('text', '').lower().startswith('the lunch call is ')
-                         for i, row in enumerate(segments))
     seen: set[int] = set()
     dates: set[str] = set()
     unsupported = False
     stated = False
+    bindings: dict[str, list[str]] = {}
+    expressions_to_resolve: list[str] = []
     for source in sources:
-        if not isinstance(source, dict) or set(source) != {
+        if not isinstance(source, dict) or set(source) - {'anchor_for'} != {
                 'segment_index', 'segment_sha256', 'char_start', 'char_end', 'speaker', 'quote', 'status', 'expressions'}:
             return hold
         index = source['segment_index']
@@ -144,22 +140,39 @@ def task_deadline(item: dict[str, Any], transcript: dict[str, Any] | None,
         expressions = source['expressions']
         if not isinstance(expressions, list) or any(not isinstance(e, str) or not e or e not in quote for e in expressions):
             return hold
+        references = source.get('anchor_for', [])
+        if (not isinstance(references, list)
+                or any(not isinstance(ref, str) or not ref for ref in references)
+                or references and (source['status'] != 'stated' or len(expressions) != 1)):
+            return hold
+        for reference in references:
+            bindings.setdefault(reference, []).extend(expressions)
         status = source['status']
         if status == 'unstated' and not expressions:
             continue
         if status != 'stated' or not expressions:
             return hold
         stated = True
-        for expression in expressions:
-            if expression.lower() == 'before the lunch call' and uncited_anchor:
-                return hold
-            result = _exact_date(expression, call_date, transcript)
-            if result is None:
-                unsupported = True
-            else:
-                dates.add(result)
+        expressions_to_resolve.extend(expressions)
     if seen != expected:
         return hold
+    if any(reference not in expressions_to_resolve or reference != 'before the lunch call'
+           for reference in bindings):
+        return hold
+    for expression in expressions_to_resolve:
+        if expression == 'before the lunch call':
+            anchors = bindings.get(expression)
+            if anchors:
+                values = {_exact_date(anchor, call_date) for anchor in anchors}
+                result = next(iter(values)) if len(values) == 1 and None not in values else None
+            else:
+                result = call_date if len(expressions_to_resolve) == 1 else None
+        else:
+            result = _exact_date(expression, call_date)
+        if result is None:
+            unsupported = True
+        else:
+            dates.add(result)
     if unsupported:
         return hold
     if len(dates) > 1:

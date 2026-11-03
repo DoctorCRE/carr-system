@@ -50,3 +50,13 @@ The [statechart](../../specs/post-call-deadline-states.md) names transition test
 Unit tests separately mutate source quotes, hashes, speakers, offsets, omitted
 turns and uncertain judgments. Full quotes are evidence, so the summary-copy
 check excludes task timing fields; copied narrative summaries still hold.
+
+## J90 event-binding regression
+
+Seven additional cases compare canonical, possessive and reordered event anchors,
+unbound and unsupported anchors, competing dates and repeated same-date anchors.
+On the expanded 62-case corpus, the reviewed implementation passed 58/62 with
+four unnecessary holds. Explicit source-bound `anchor_for` links pass 62/62 with
+zero unsafe eligibility and zero unnecessary holds. The original 55 cases remain
+unchanged. The scorer uses authored semantic bindings, so these counts measure
+validation policy and do not measure live extraction quality.
