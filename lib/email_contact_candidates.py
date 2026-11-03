@@ -5,7 +5,7 @@ VERSION = 'email-contact-candidates/v1'
 LABEL = re.compile(r'^(name|company|title|phone|mobile|email):\s*(\S.*?)\s*$', re.I)
 EMAIL = re.compile(r'^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$')
 PHONE = re.compile(r'^\+?[\d () .-]{7,30}$')
-STOP = re.compile(r'^(?:>|on .+ wrote:|from:|sent:|subject:|-----|forwarded message|confidential|disclaimer)', re.I)
+STOP = re.compile(r'^(?:>|on .+ wrote:|from:|sent:|subject:|-----|(?:begin )?forwarded message|confidential|disclaimer)', re.I)
 
 
 def extract_candidates(body, sender, source_ref, *, complete):
@@ -33,7 +33,7 @@ def extract_candidates(body, sender, source_ref, *, complete):
             break
         match = LABEL.fullmatch(line.strip())
         if not match:
-            continue
+            break
         field, value = match.group(1).lower(), match.group(2)
         if field in fields:
             return reject('conflicting_fields')
