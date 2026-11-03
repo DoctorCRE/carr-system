@@ -2794,6 +2794,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-email-lifecycle": {
+    "ingress_key": "mcp-tool:record-email-lifecycle",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "b70dd722142a27939f3526a8f763134bc58a49ef0ea20f017ed3ced5bf5ec9a1",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",

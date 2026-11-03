@@ -14,9 +14,21 @@ export async function lockEmailIdentity(c, mailbox_owner, mailbox_account, item)
 }
 
 export async function capturedEmail(c, identity, subject = null) {
-  return (await c.query(`select id,kind,email_context from activity
+  const rows = (await c.query(`select id,kind,email_context from activity
     where email_identity->>'mailbox_owner'=$1 and email_identity->>'mailbox_account'=$2
       and email_identity->>'item_id'=$3
       and ($4::text is null or email_identity->>'subject'=$4 or email_context->>'send_id' is not null)
-    order by occurred_at,id limit 1`, [identity.mailbox_owner, identity.mailbox_account, identity.item_id, subject])).rows[0];
+    order by (email_context->'lifecycle' is not null) desc,occurred_at,id limit 1`, [identity.mailbox_owner, identity.mailbox_account, identity.item_id, subject])).rows;
+  return rows[0];
+}
+
+export async function guardEmailAction(c, args, ToolError, lock = true) {
+  const ids = [args.activity_id, args.thread_activity_id, args.email_context?.source_activity_id].filter(Boolean);
+  if (!ids.length && !args.proposal_id && !args.event_id) return;
+  const rows = (await c.query(`select email_context from activity where id=any($1::uuid[])
+    or id=(select activity_id from email_proposal where id=$2)
+    or id::text=(select new_value->>'activity_id' from event where id=$3) order by id ${lock ? 'for update' : ''}`,
+    [ids,args.proposal_id ?? null,args.event_id ?? null])).rows;
+  if (rows.some(row => row.email_context?.lifecycle?.state && row.email_context.lifecycle.state !== 'live'))
+    throw new ToolError({ error: 'email_not_live' });
 }

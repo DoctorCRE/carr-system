@@ -1,0 +1,15 @@
+{
+  "schema_version": "email-lifecycle.v1",
+  "mutation": "record-email-lifecycle",
+  "identity": ["mailbox_owner", "mailbox_account", "item_id"],
+  "states": ["live", "deleted", "recalled", "superseded"],
+  "initial_version": 0,
+  "terminal_version": 1,
+  "observation": ["observation_id", "observed_at", "method"],
+  "provenance": ["recorded_at", "actor_id", "organization_tenant_id"],
+  "replay": "Same stable identity, observation and base_version replay without another lifecycle event. Changed observation payload refuses.",
+  "terminal_policy": "Refuse new source actions and recapture. Exclude from routing, summaries, active proposals, sender outbox and Home email cards. Retain historical records with lifecycle metadata.",
+  "prior_actions": "Record proposal IDs, prior statuses and source event IDs as permanent action_notes in captured context and lifecycle audit events. Preserve subsequent human changes.",
+  "restoration": "Unsupported. Movement retains stable identity and does not tombstone a message.",
+  "tenant": "Server-derived carr-internal. Caller tenant selection is forbidden; mailbox owner and account must match authenticated partner authority."
+}
