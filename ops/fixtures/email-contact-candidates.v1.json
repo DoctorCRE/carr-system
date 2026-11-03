@@ -1,0 +1,54 @@
+{
+  "description": "Synthetic signature extraction cases.",
+  "cases": [
+    {
+      "body": "Hello\n-- \nEmail: a@example.test\nPhone: 555 0101",
+      "sender": "a@example.test",
+      "count": 2
+    },
+    {
+      "body": "Hello\n-- \nEmail: b@example.test\nPhone: 555 0101",
+      "sender": "a@example.test",
+      "count": 0
+    },
+    {
+      "body": "-- \nEmail: alice@example.test\nName: Bob Synthetic\nPhone: 555-0199\nbob@example.test",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "body": "Thanks\nOn Monday,\nAlice Synthetic <alice@example.test> wrote:\n-- \nName: Alice Synthetic\nEmail: alice@example.test\nPhone: 555-0199",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "quoted_or_forwarded"
+    },
+    {
+      "name": "round_three_labeled_foreign_identity",
+      "body": "-- \nEmail: alice@example.test\nName: Bob Synthetic <bob@example.test>\nPhone: 555-0199",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "name": "foreign_identity_after_blank",
+      "body": "-- \nEmail: alice@example.test\n\nPhone: 555-0199\nEmail: bob@example.test",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "name": "round_five_labeled_conflicting_display_name",
+      "body": "-- \nName: Alice Synthetic\nEmail: alice@example.test\nPhone: 555-0101\nTitle: Bob Synthetic <alice@example.test>",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "name": "round_five_clean_apostrophe_sender",
+      "body": "-- \nName: Anne O'Brien\nEmail: anne.o'brien@example.test\nPhone: 555-0101",
+      "sender": "anne.o'brien@example.test",
+      "count": 2
+    }
+  ]
+}
