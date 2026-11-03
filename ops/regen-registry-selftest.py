@@ -22,6 +22,7 @@ class RegistryMergeTests(unittest.TestCase):
         for directory in ('ops', 'tools', 'lib', 'mcp-server/test'):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
+        shutil.copytree(ROOT / 'mcp-server/contracts', self.repo / 'mcp-server/contracts')
         for path in ('lib/deal_schedule.schema.json', 'mcp-server/package.json',
                      'mcp-server/run-tests.mjs', 'mcp-server/suite-discovery.mjs',
                      'ops/scac-mutation-inventory.mjs',
@@ -39,7 +40,7 @@ class RegistryMergeTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'jbookout')
         self.git('config', 'user.email', 'jbookout@users.noreply.github.com')
-        self.git('add', 'mcp-server/src', 'mcp-server/package.json', 'mcp-server/run-tests.mjs',
+        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/run-tests.mjs',
                  'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json',
                  'ops', 'tools', 'lib/deal_schedule.schema.json', '.gitignore')
         self.commit('main plus WR622 implementation')
@@ -170,6 +171,7 @@ class RegistryConflictTests(unittest.TestCase):
         (self.repo / 'lib').mkdir()
         shutil.copy(ROOT / 'lib/deal_schedule.schema.json', self.repo / 'lib')
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
+        shutil.copytree(ROOT / 'mcp-server/contracts', self.repo / 'mcp-server/contracts')
         shutil.copy(ROOT / 'mcp-server/package.json', self.repo / 'mcp-server/package.json')
         (self.repo / 'mcp-server/node_modules').symlink_to(ROOT / 'mcp-server/node_modules')
         shutil.copy(ROOT / 'ops/scac-mutation-inventory.mjs', self.repo / 'ops')
@@ -186,7 +188,7 @@ class RegistryConflictTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'Synthetic fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
-        self.git('add', 'mcp-server/src', 'mcp-server/package.json', 'ops', 'tools', 'run.sh')
+        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'ops', 'tools', 'run.sh')
         self.commit('base')
         for name in ('a', 'b'):
             self.git('checkout', '-b', name, 'main')

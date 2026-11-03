@@ -35,6 +35,7 @@
 // optional fields, none of which names an actor, an offset or a sort.
 
 import { validateAnswerBlocks, recordedCompsTable } from './answer-blocks.js';
+import docRequestLinks from '../contracts/doc-request-links.v1.json' with { type: 'json' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -276,7 +277,9 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
               });
             stored = (await c.query(eventQuery, eventArgs)).rows[0];
           }
-          const deepLink = `/doc/conversations/${conversationId}/turns/${targetMsgId}`;
+          const deepLink = docRequestLinks.path_template
+            .replace("{conversation_id}", conversationId)
+            .replace("{msg_id}", targetMsgId);
           const minted = (await c.query(
             "select ops.mint_notification($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11) as result",
             ["event", stored?.id, "doc_conversation_request", requestMsgId, outcome.reason,

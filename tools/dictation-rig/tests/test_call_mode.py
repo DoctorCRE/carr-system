@@ -2382,6 +2382,29 @@ class AutomaticApplyTests(unittest.TestCase):
                 post_call.write_private(self.session / "transcript.json", self.transcript)
                 self.assertEqual(post_call.automatic_evidence(self.session), [None, None, None])
 
+    def test_timed_source_receipt_uses_unique_occurrence_without_uploading_text(self) -> None:
+        quote = str(self.update()["evidence"])
+        post_call.write_private(self.session / post_call.REPORT_FILE, {"deal_updates": [
+            self.update(phase_move={"value": "due_diligence"})]})
+        post_call.write_private(self.session / "meta.json", {"started": "2026-11-02T15:00:00Z"})
+        with patch.object(call_mode, "iso_utc", return_value="2026-11-02T15:00:01Z"):
+            call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        post_call.write_private(self.session / ".capture.json", {
+            "claim_elapsed_ms": 1000, "claim_round_trip_ms": 100})
+        self.transcript["segments"][0].update(start_ms=60000, end_ms=65000)
+        post_call.write_private(self.session / "transcript.json", self.transcript)
+        source = post_call.automatic_evidence(self.session)[1]
+        self.assertEqual(source["recording_started_at"], "2026-11-02T15:00:00Z")
+        self.assertEqual(source["claim_elapsed_ms"], 1000)
+        self.assertEqual(source["claim_round_trip_ms"], 100)
+        self.assertEqual(source["occurrence_start_ms"], 60000)
+        self.assertEqual(source["occurrence_end_ms"], 65000)
+        self.assertEqual(source["recording_started_at"], "2026-11-02T15:00:00Z")
+        self.assertNotIn(quote, json.dumps(source))
+        self.transcript["segments"].append({**self.transcript["segments"][0], "start_ms": 120000, "end_ms": 125000})
+        post_call.write_private(self.session / "transcript.json", self.transcript)
+        self.assertNotIn("occurrence_start_ms", post_call.automatic_evidence(self.session)[1])
+
     def test_unknown_and_numbered_speakers_do_not_inherit_partner_authority(self) -> None:
         for speaker in ("Other participant", "In-room speaker 1", "Joe 1", "Dell 1", ""):
             with self.subTest(speaker=speaker):
@@ -2643,6 +2666,21 @@ class AutomaticApplyTests(unittest.TestCase):
             keys.append([json.loads(call.args[0][-1])["idempotency_key"] for call in run.call_args_list])
         self.assertEqual(keys[0], keys[1])
 
+    def test_uncalibrated_phase_remains_visible_while_next_step_applies(self) -> None:
+        self.write_report()
+        def command(_verb, args):
+            return (False, {"error": "unhandled_verb_failure"}) if args["candidate_id"] == "c-phase" else (True, {"status": "confirmed"})
+        with (patch.object(capture_bridge, "call_record_command", side_effect=command),
+              patch.object(capture_bridge, "log_line"),
+              patch.object(post_call, "now", return_value="2026-11-02T16:00:00Z")):
+            self.assertTrue(capture_bridge.apply_automatic(self.session))
+        report = post_call.read_json(self.session / post_call.REPORT_FILE)
+        phase = report["deal_updates"][0]["phase_move"]
+        self.assertEqual(phase["candidate_status"], "pending")
+        self.assertIn("call timing", phase["review_reason"])
+        self.assertTrue(report["deal_updates"][0]["next_step"]["applied_automatically"])
+        self.assertIn("call timing", json.dumps(post_call.report_for_deal_room(self.session)))
+
     def test_ready_report_is_filed_and_applied_without_waiting_for_the_sweep(self) -> None:
         worker = SimpleNamespace(returncode=0, stdout='{"state": "ready_review"}', stderr="")
         with patch.object(post_call.subprocess, "run", return_value=worker) as run:
@@ -2655,6 +2693,35 @@ class AutomaticApplyTests(unittest.TestCase):
 
 
 class CaptureBridgePostCallTests(unittest.TestCase):
+    def test_claim_calibration_bounds_round_trip_and_rejects_clock_jumps(self) -> None:
+        from datetime import datetime, timezone, timedelta
+        sent = datetime(2026, 11, 2, 15, 2, 5, tzinfo=timezone.utc)
+        for duration, wall_duration, expected in [(0.1, 0.1, True), (6, 6, False), (0.1, 2, False)]:
+            with self.subTest(duration=duration, wall_duration=wall_duration):
+                (self.session / ".capture.json").unlink()
+                request_marker = self.session / ".capture-request.json"
+                request_marker.unlink(missing_ok=True)
+                post_call.write_private(self.session / "announcement.json", {
+                    "announcement_fired_at": "2026-11-02T15:02:00Z"})
+                post_call.write_private(self.session / "meta.json", {"started": "2026-11-02T15:02:00Z"})
+                clock = Mock(wraps=datetime)
+                received = sent + timedelta(seconds=wall_duration)
+                times = iter([sent, received])
+                clock.now.side_effect = lambda *_: next(times, received)
+                ticks = iter([100, 100 + duration])
+                def request(_method, url, body, _headers):
+                    return (200, {"session_token": "synthetic", "ttl_seconds": 60}) if url.endswith("/claim") else (200, {})
+                with (patch.object(capture_bridge, "datetime", clock),
+                      patch.object(capture_bridge.time, "monotonic", side_effect=lambda: next(ticks)),
+                      patch.object(capture_bridge, "wait_for_call_mode", return_value="weekly_deal_call"),
+                      patch.object(capture_bridge, "http_request", side_effect=request)):
+                    self.assertEqual(capture_bridge.claim_cmd(self.cfg, self.session), 0)
+                marker = post_call.read_json(self.session / ".capture.json")
+                self.assertEqual("claim_elapsed_ms" in marker, expected)
+                if expected:
+                    self.assertEqual(marker["claim_elapsed_ms"], 5000)
+                    self.assertEqual(marker["claim_round_trip_ms"], 100)
+
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-bridge"

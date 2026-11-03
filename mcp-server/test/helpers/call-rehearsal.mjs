@@ -12,6 +12,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');
@@ -74,6 +75,17 @@ export function callContext(session, started, index) {
   return { session: path.basename(session), workspace_kind: 'team', generated_at: started, deals };
 }
 
+export function rehearsalClock(started, skewMs = 0) {
+  return { sentAt: new Date(Date.parse(started) + 5000).toISOString(),
+    receivedAt: new Date(Date.parse(started) + 6000).toISOString(),
+    observedAt: new Date(Date.parse(started) + 6000 + skewMs).toISOString() };
+}
+
+export async function observeRehearsalClaim(query, token, clock) {
+  await query('update capture_session set created_at=$2 where session_token_hash=$1',
+    [createHash('sha256').update(token).digest('hex'), clock.observedAt]);
+}
+
 const freePort = () => new Promise(resolve => { const probe = createServer().listen(0, '127.0.0.1', () => {
   const { port } = probe.address(); probe.close(() => resolve(port)); }); });
 
@@ -82,7 +94,7 @@ const freePort = () => new Promise(resolve => { const probe = createServer().lis
  * bridge, with the companion serving it. The distiller is the deterministic
  * stand-in, live headless Sonnet, or one that exits non-zero as an outage would.
  */
-export async function openCallSession({ root, started, captureUrl, deviceToken, env: extra = {}, distiller = 'stand-in' }) {
+export async function openCallSession({ root, started, captureUrl, deviceToken, env: extra = {}, distiller = 'stand-in', clock, observeClaim }) {
   const recordings = path.join(root, 'Recordings');
   const stamp = started.slice(0, 16).replace(/-/g, '.').replace('T', '-').replace(':', '');
   const session = path.join(recordings, stamp);
@@ -105,7 +117,31 @@ export async function openCallSession({ root, started, captureUrl, deviceToken, 
     ? readFileSync(path.join(root, f), 'utf8') : '').join('\n');
 
   // Recording start: the capture rig claims the session with consent proof.
-  await run(PYTHON, [path.join(BIN, 'capture-bridge.py'), 'claim', session], { env });
+  if (clock) {
+    const claim = `
+import importlib.util, sys
+from datetime import datetime
+from unittest.mock import patch
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[1])
+spec = importlib.util.spec_from_file_location('rehearsal_capture', sys.argv[1] + '/capture-bridge.py')
+bridge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bridge)
+class Clock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return next(instants, received)
+sent, received = (datetime.fromisoformat(value) for value in sys.argv[3:5])
+instants = iter([sent, received])
+with patch.object(bridge, 'datetime', Clock), patch.object(bridge, 'time', SimpleNamespace(monotonic=iter([0, 0, 1]).__next__)):
+    raise SystemExit(bridge.main(['capture-bridge.py', 'claim', sys.argv[2]]))
+`;
+    await run(PYTHON, ['-c', claim, BIN, session, clock.sentAt, clock.receivedAt], { env });
+    const marker = JSON.parse(readFileSync(path.join(session, '.capture.json'), 'utf8'));
+    await observeClaim(marker.session_token, clock);
+  } else {
+    await run(PYTHON, [path.join(BIN, 'capture-bridge.py'), 'claim', session], { env });
+  }
   if (!existsSync(path.join(session, '.capture.json'))) throw new Error(`capture claim failed:\n${logs()}`);
 
   const port = await freePort();
