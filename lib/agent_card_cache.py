@@ -1,4 +1,5 @@
 """User-local, authenticated registration evidence shared by mint and admission."""
+from enum import Enum
 import fcntl
 import hashlib
 import hmac
@@ -51,6 +52,12 @@ def launch_repository(cwd=None):
         return None
 
 
+class MintClaim(Enum):
+    FRESH = 'fresh'
+    ONLINE_REQUIRED = 'online_required'
+    INCOMPLETE = 'incomplete'
+
+
 class RegistrationCache:
     def __init__(self, clock=None, repository=''):
         self.clock = clock or time.time
@@ -58,6 +65,7 @@ class RegistrationCache:
         self.scope = [os.getuid(), os.environ.get('CARR_MCP_URL') or 'https://api.doctorcre.com/mcp',
                       os.environ.get('CARR_MCP_CLIENT_PROFILE') or 'local',
                       os.environ.get('CARR_MCP_ENV') or str(Path.home() / '.config/carr/mcp-tokens.env')]
+        self.scope.append('consume-before-lookup-v2')
         self.scope.append(launch_repository() if repository == '' else repository_name(repository))
         self.scope.append(self._credential_digest())
 
@@ -84,15 +92,6 @@ class RegistrationCache:
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o777 != 0o700:
             raise ValueError('cache directory is not private or has been disabled')
 
-    def _revoked(self, card):
-        try:
-            (self.directory / ('revoked-' + card)).lstat()
-            return True
-        except FileNotFoundError:
-            return False
-        except OSError:
-            return True
-
     @staticmethod
     def _open(path, flags):
         fd = os.open(path, flags | os.O_NOFOLLOW, 0o600)
@@ -106,7 +105,7 @@ class RegistrationCache:
         temporary = None
         try:
             if self.scope[-2] is None or self.scope[-1] is None or self._credential_digest() != self.scope[-1]:
-                return False
+                return None
             self._prepare_directory()
             with os.fdopen(self._open(self.directory / 'lock', os.O_RDWR | os.O_CREAT), 'r+') as lock:
                 deadline = time.monotonic() + lock_timeout
@@ -116,7 +115,7 @@ class RegistrationCache:
                         break
                     except BlockingIOError:
                         if time.monotonic() >= deadline:
-                            return False
+                            return None
                         time.sleep(0.005)
                 key_path = self.directory / 'integrity'
                 try:
@@ -129,7 +128,7 @@ class RegistrationCache:
                 with os.fdopen(self._open(key_path, os.O_RDONLY), 'rb') as source:
                     key = source.read()
                 if len(key) != 32:
-                    return False
+                    return None
                 path = self.directory / 'entries.json'
                 try:
                     with os.fdopen(self._open(path, os.O_RDONLY)) as source:
@@ -148,10 +147,9 @@ class RegistrationCache:
                         continue
                     signature = hmac.new(key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()
                     seen = body.get('seen')
-                    if (CARD.fullmatch(card) and not self._revoked(card) and body.get('card_id') == card
+                    if (CARD.fullmatch(card) and body.get('card_id') == card
                             and body.get('scope') == self.scope
                             and type(seen) in (int, float) and 0 <= now - seen < TTL
-                            and type(body.get('minted')) is bool
                             and isinstance(entry.get('signature'), str)
                             and hmac.compare_digest(signature, entry['signature'])):
                         valid[card] = body
@@ -162,12 +160,19 @@ class RegistrationCache:
                 with tempfile.NamedTemporaryFile(mode='w', dir=self.directory, delete=False) as output:
                     temporary = Path(output.name)
                     json.dump(signed, output)
+                    output.flush()
+                    os.fsync(output.fileno())
                 temporary.replace(path)
+                directory_fd = os.open(self.directory, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
                 if self.directory.stat().st_mode & 0o777 != 0o700:
-                    return False
+                    return None
                 return result
         except (OSError, ValueError, TypeError):
-            return False
+            return None
         finally:
             if temporary is not None:
                 try:
@@ -175,39 +180,17 @@ class RegistrationCache:
                 except OSError:
                     pass
 
-    def contains(self, card):
-        return self._transaction(lambda entries, now: card in entries) and not self._revoked(card)
-
-    def consume_mint(self, card):
+    def claim_mint(self, card):
         def consume(entries, now):
-            if card not in entries or not entries[card]['minted']:
-                return False
-            entries[card]['minted'] = False
-            return True
-        return self._transaction(consume) and not self._revoked(card)
+            entry = entries.pop(card, None)
+            return MintClaim.FRESH if entry else MintClaim.ONLINE_REQUIRED
 
-    def record(self, card, *, minted=False):
+        return self._transaction(consume) or MintClaim.INCOMPLETE
+
+    def record_mint(self, card):
         def record(entries, now):
-            if not CARD.fullmatch(card) or self._revoked(card):
+            if not CARD.fullmatch(card):
                 return False
-            entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now, 'minted': minted}
+            entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now}
             return True
-        return self._transaction(record, lock_timeout=2 if minted else 0.1)
-
-    def remove(self, card):
-        if not CARD.fullmatch(card):
-            return False
-        try:
-            self._prepare_directory()
-            with os.fdopen(self._open(self.directory / ('revoked-' + card), os.O_WRONLY | os.O_CREAT), 'wb') as output:
-                output.flush()
-                os.fsync(output.fileno())
-            self._transaction(lambda entries, now: entries.pop(card, None))
-            return True
-        except (OSError, ValueError):
-            try:
-                # Positive writers never restore directory permissions, even if they already hold the lock.
-                os.chmod(self.directory, 0o500, follow_symlinks=False)
-            except OSError:
-                pass
-            return False
+        return bool(self._transaction(record, lock_timeout=2))

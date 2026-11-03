@@ -151,13 +151,16 @@ def check_prompts(prompts, cwd=None):
         cards.extend(found)
     if not cards:
         return
-    from lib.agent_card_cache import RegistrationCache, launch_repository, repository_name
+    from lib.agent_card_cache import MintClaim, RegistrationCache, launch_repository, repository_name
 
     deadline = time.monotonic() + 8
     repository = launch_repository(cwd)
     cache = RegistrationCache(repository=repository)
     for card in dict.fromkeys(cards):
-        if cache.consume_mint(card) and time.monotonic() < deadline:
+        claim = cache.claim_mint(card)
+        if claim is MintClaim.INCOMPLETE:
+            return refuse('Local mint evidence could not be retired for ' + card + '. Retry the launch.')
+        if claim is MintClaim.FRESH and time.monotonic() < deadline:
             continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -189,19 +192,15 @@ def check_prompts(prompts, cwd=None):
         except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
             if time.monotonic() >= deadline:
                 return refuse('Card registration lookup deadline exceeded. Retry the launch.')
-            if cache.contains(card):
-                continue
             reason = str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else type(exc).__name__
             return refuse('Card registration lookup unreachable or invalid (' + reason + '). '
-                          'No registration cached within 24 hours for ' + card + '.')
+                          'Successful online verification is required for ' + card + '.')
         if not registration['registered']:
-            cache.remove(card)
             return refuse(card + ' is not registered in the work queue.')
         registered_repository = registration['repository']
         if registered_repository is not None:
             if repository is None or repository_name(registered_repository) != repository:
                 return refuse(card + ' is registered for a different repository.')
-            cache.record(card)
 
 
 if __name__ == '__main__':

@@ -182,7 +182,7 @@ def main() -> None:
             if result.returncode == 0:
                 try:
                     card = mint_card(json.loads(payload), json.loads(result.stdout))
-                    if card and cache is not None and not cache.record(card, minted=True):
+                    if card and cache is not None and not cache.record_mint(card):
                         print('Mint succeeded; registration cache unavailable.', file=sys.stderr)
                 except (ValueError, TypeError):
                     pass

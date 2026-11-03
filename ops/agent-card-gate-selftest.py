@@ -2,6 +2,7 @@
 """Exercise launch admission through the hook's JSON stdin boundary."""
 import fcntl
 import json
+from itertools import product
 import os
 from pathlib import Path
 import shutil
@@ -47,7 +48,6 @@ class AgentCardGate(unittest.TestCase):
                                '("WR557.S6.J1", "WR557.S6.J2"), '
                                '"executor": "codex", "model": "synthetic", '
                                '"repository": "DoctorCRE/carr-system", "work_request_state": "captured"}))\n')
-
 
     def run_hook(self, tool='Agent', **inputs):
         if tool == 'Agent':
@@ -329,12 +329,12 @@ class AgentCardGate(unittest.TestCase):
                     result = self.run_hook(prompt='Read.', subagent_type=kind, run_in_background=background)
                     self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_registered_card_survives_outage(self):
+    def test_online_registration_does_not_authorize_outage(self):
         self.register_fixture()
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
         self.lookup.write_text('raise SystemExit(1)')
         result = self.run_hook(prompt='Card: WR557.S6.J1')
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 2, result.stderr)
         unseen = self.run_hook(prompt='Card: WR557.S6.J2')
         self.assertEqual(unseen.returncode, 2, unseen.stderr)
         self.assertIn('lookup unreachable or invalid', unseen.stderr)
@@ -345,7 +345,7 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
         self.lookup.write_text('raise SystemExit(1)')
         self.now += 24 * 60 * 60 - 1
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
         self.now += 1
         expired = self.run_hook(prompt='Card: WR557.S6.J1')
         self.assertEqual(expired.returncode, 2, expired.stderr)
@@ -370,7 +370,7 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('lookup unreachable or invalid', result.stderr)
 
-    def test_invalid_queue_uses_cached_registration(self):
+    def test_invalid_queue_requires_online_registration(self):
         self.register_fixture()
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
         for source in ('print("invalid JSON")', 'print("[]")',
@@ -378,7 +378,7 @@ class AgentCardGate(unittest.TestCase):
             with self.subTest(source=source):
                 self.lookup.write_text(source)
                 result = self.run_hook(prompt='Card: WR557.S6.J1')
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_lookup_failure_denies(self):
         for source in ('raise SystemExit(1)', 'print("invalid JSON")',
@@ -427,10 +427,10 @@ class AgentCardGate(unittest.TestCase):
         self.now += 100
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 0)
         self.lookup.write_text('raise SystemExit(1)')
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
         self.now = 1000000 + 24 * 60 * 60
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 2)
 
     def test_successful_registration_repairs_corrupt_cache(self):
         cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
@@ -441,7 +441,7 @@ class AgentCardGate(unittest.TestCase):
         self.register_fixture()
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
         self.lookup.write_text('raise SystemExit(1)')
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
     def test_project_settings_guard_both_launch_tools(self):
         groups = json.loads((REPO / '.claude/settings.json').read_text())['hooks']['PreToolUse']
@@ -478,7 +478,7 @@ class AgentCardGate(unittest.TestCase):
         ])
         self.assertLess(time.monotonic() - started, 9)
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn('Card registration lookup deadline exceeded', result.stderr)
+        self.assertIn('TimeoutExpired', result.stderr)
 
     def test_malformed_or_duplicate_card_denied(self):
         self.register_fixture()
@@ -504,7 +504,7 @@ def replace(path, target):
     sys.stdin.readline()
     return original(path, target)
 Path.replace = replace
-print('WRITER contains', RegistrationCache(clock=lambda:1000000).contains('WR557.S6.J1'), flush=True)
+print('WRITER claim', RegistrationCache(clock=lambda:1000000).claim_mint('WR557.S6.J1'), flush=True)
 '''
         writer = subprocess.Popen([sys.executable, '-c', writer_code], env=config, cwd=self.root,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -559,7 +559,6 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
         print('CROSS_REPOSITORY gate rc=', result.returncode)
         self.assertEqual(result.returncode, 2, result.stderr)
 
-
     def test_same_repository_other_worktree_accepts(self):
         self.now = 1000000
         self.assertEqual(self.mint_fixture().returncode, 0)
@@ -598,35 +597,81 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
         self.lookup.write_text('raise SystemExit(1)')
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
-    def test_marker_and_chmod_failure(self):
-        self.now=1000000
-        self.assertEqual(self.mint_fixture().returncode,0)
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode,0)
-        self.reply_fixture(False)
-        import subprocess
-        code=f"""
-import sys,runpy,time,errno,os
-sys.path.insert(0,{str(self.root)!r})
-from lib.agent_card_cache import RegistrationCache
+    def run_storage_fault_hook(self, failures):
+        hook = self.root / 'hooks/agent-card-gate.py'
+        code = f"""
+import errno, os, runpy, sys, time
 from pathlib import Path
-original=RegistrationCache._open
-def open_file(path,flags):
- if Path(path).name.startswith('revoked-'):raise OSError(errno.ENOSPC,'synthetic marker full')
- return original(path,flags)
-def chmod(*args,**kwargs):raise OSError(errno.EIO,'synthetic metadata I/O error')
-RegistrationCache._open=staticmethod(open_file)
-os.chmod=chmod
-time.time=lambda:1000000
-runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r},run_name='__main__')
+sys.path.insert(0, {str(self.root)!r})
+from lib.agent_card_cache import RegistrationCache
+failures = {failures!r}
+original_open = RegistrationCache._open
+def open_file(path, flags):
+    if 'marker' in failures and Path(path).name.startswith('revoked-'):
+        raise OSError(errno.ENOSPC, 'synthetic marker full')
+    return original_open(path, flags)
+def fail(*args, **kwargs):
+    raise OSError(errno.EIO, 'synthetic storage failure')
+RegistrationCache._open = staticmethod(open_file)
+if 'chmod' in failures:
+    os.chmod = fail
+if 'fsync' in failures:
+    os.fsync = fail
+if 'replace' in failures:
+    Path.replace = fail
+time.time = lambda: 1000000
+runpy.run_path({str(hook)!r}, run_name='__main__')
 """
-        event={'hook_event_name':'PreToolUse','tool_name':'Agent','cwd':str(self.root),'tool_input':{'prompt':'Card: WR557.S6.J1'}}
-        negative=subprocess.run([sys.executable,'-c',code],input=json.dumps(event),text=True,capture_output=True,env=dict(fixture_env(),HOME=str(self.home)),timeout=10)
-        self.assertEqual(negative.returncode,2,negative.stderr)
-        print('DOUBLE_STORAGE_FAILURE negative hook rc=',negative.returncode)
+        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Agent', 'cwd': str(self.root),
+                 'tool_input': {'prompt': 'Card: WR557.S6.J1'}}
+        return subprocess.run([sys.executable, '-c', code], input=json.dumps(event), text=True,
+                              capture_output=True, env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
+
+    def test_marker_and_chmod_failure(self):
+        self.now = 1000000
+        self.assertEqual(self.mint_fixture().returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.reply_fixture(False)
+        negative = self.run_storage_fault_hook(('marker', 'chmod'))
+        self.assertEqual(negative.returncode, 2, negative.stderr)
+        self.assertIn('not registered', negative.stderr)
+        print('DOUBLE_STORAGE_FAILURE negative hook rc=', negative.returncode)
         self.lookup.write_text('raise SystemExit(1)')
-        later=self.run_hook(prompt='Card: WR557.S6.J1')
-        print('DOUBLE_STORAGE_FAILURE outage rc=',later.returncode)
-        self.assertEqual(later.returncode,2,later.stderr)
+        later = self.run_hook(prompt='Card: WR557.S6.J1')
+        print('DOUBLE_STORAGE_FAILURE outage rc=', later.returncode)
+        self.assertEqual(later.returncode, 2, later.stderr)
+
+    def test_persist_failure_and_outage_matrix(self):
+        self.now = 1000000
+        for bits in product((False, True), repeat=4):
+            failures = tuple(name for name, enabled in zip(('marker', 'chmod', 'fsync', 'replace'), bits) if enabled)
+            for minted in (False, True):
+                with self.subTest(failures=failures, minted=minted):
+                    if minted:
+                        self.assertEqual(self.mint_fixture().returncode, 0)
+                        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+                    self.reply_fixture(False)
+                    self.assertEqual(self.run_storage_fault_hook(failures).returncode, 2)
+                    self.lookup.write_text('raise SystemExit(1)')
+                    self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+
+    def test_failed_consume_cannot_start_negative_lookup(self):
+        self.now = 1000000
+        for failure in ('fsync', 'replace'):
+            with self.subTest(failure=failure):
+                self.assertEqual(self.mint_fixture().returncode, 0)
+                marker = self.root / 'negative-attempted'
+                self.reply_fixture(False)
+                self.lookup.write_text('from pathlib import Path\nPath(' + repr(str(marker))
+                                       + ').touch()\n' + self.lookup.read_text())
+                result = self.run_storage_fault_hook((failure,))
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('could not be retired', result.stderr)
+                self.assertFalse(marker.exists())
+                self.lookup.write_text('raise SystemExit(1)')
+                self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+                self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+
 
 if __name__ == '__main__':
     unittest.main()
