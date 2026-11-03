@@ -49,6 +49,26 @@ print('fixture-dsn')
         self.tap = load('test_neon_db_tap', 'tools/db-tap.py')
         self.tap.NEONCTL = str(self.fake)
 
+    def test_staging_selftest_never_reads_ambient_credentials(self):
+        config = self.home / '.config/carr/db.env'
+        config.parent.mkdir(parents=True)
+        config.write_text('NEON_API_KEY=synthetic-review-canary\n')
+        code = '''
+import os, runpy, sys
+reads = []
+def audit(event, args):
+    if event == 'open' and isinstance(args[0], str) and args[0].endswith('/.config/carr/db.env'):
+        reads.append(args[0])
+sys.addaudithook(audit)
+result = runpy.run_path(sys.argv[1])['main']()
+print(f'REPRO test exit={result}; ambient db.env reads={len(reads)}')
+assert result == 0 and not reads, 'selftest read a credential file'
+'''
+        result = subprocess.run([sys.executable, '-c', code,
+                                 str(ROOT / 'ops/staging-jobs-dsn-selftest.py')],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_missing_key_never_starts_provider(self):
         for invoke in (lambda: self.tap.dsn(),
                        lambda: self.tap._project_id_by_name('fixture', dict(os.environ)),
