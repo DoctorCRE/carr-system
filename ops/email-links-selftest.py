@@ -77,6 +77,12 @@ class LinksTest(unittest.TestCase):
         body = ' '.join(f'https://loopnet.com/Listing/{i}' for i in range(30))
         self.assertEqual(len(extract_links(body)), 20)
 
+    def test_plain_query_names_are_not_html_entities(self):
+        destination = 'https://loopnet.com/Listing/a?x=1&copy=2'
+        self.assertEqual(extract_links(destination), [('listing', destination)])
+        self.assertEqual(extract_links('<a href="' + wrap(destination) + '">Open</a>'),
+                         [('listing', destination)])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -49,8 +49,11 @@ def unwrap_safe_links(text: str) -> str:
 def extract_links(text: str) -> list[tuple[str, str]]:
     found = []
     seen = set()
-    for match in URL.finditer(unwrap_safe_links(text)):
-        url = html.unescape(match.group().rstrip('.,;!?)]'))
+    text = unwrap_safe_links(text)
+    for match in URL.finditer(text):
+        url = match.group().rstrip('.,;!?)]')
+        if re.search(r'''=\s*["']?$''', text[:match.start()]):
+            url = html.unescape(url)
         if CONTROL.search(unquote(url)) or '\\' in unquote(url):
             continue
         try:
