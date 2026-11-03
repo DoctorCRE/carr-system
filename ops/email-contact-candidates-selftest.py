@@ -1,6 +1,7 @@
 """Exercise conservative signature contact extraction."""
 import json
 import sys
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -110,7 +111,7 @@ class CandidatesTest(unittest.TestCase):
 
     def test_sender_block_ends_at_any_unlabeled_transition(self):
         sender_block = '-- \nEmail: alice@example.test\nPhone: 555-0101'
-        for transition in ('', 'Bob Synthetic', 'bob@example.test', 'Assistant contact:',
+        for transition in ('', 'Bob Synthetic', 'Assistant contact:',
                            'Other details follow', 'This message is private.',
                            'Begin forwarded message:', 'On Monday Bob wrote:', '> quoted',
                            'Earlier conversation:\nBob Synthetic\nbob@example.test'):
@@ -119,6 +120,57 @@ class CandidatesTest(unittest.TestCase):
                                             'alice@example.test', 'synthetic-source', complete=True)
                 self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
                                  [('email', 'alice@example.test'), ('phone', '555-0101')])
+
+    def test_reviewer_foreign_fields_before_bare_address_are_ambiguous(self):
+        for address in ('bob@example.test', 'Bob Synthetic <bob@example.test>'):
+            body = ('-- \nEmail: alice@example.test\nName: Bob Synthetic\n'
+                    'Phone: 555-0199\n' + address)
+            with self.subTest(address=address):
+                result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+                self.assertTrue(result['ambiguity'])
+                self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_reviewer_wrapped_reply_header_excludes_old_signature(self):
+        body = ('Thanks\nOn Monday,\nAlice Synthetic <alice@example.test> wrote:\n'
+                '-- \nName: Alice Synthetic\nEmail: alice@example.test\nPhone: 555-0199')
+        result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+        self.assertTrue(result['ambiguity'])
+        self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_wrapped_history_styles_and_current_signature(self):
+        history = '-- \nName: Alice Synthetic\nEmail: alice@example.test\nPhone: 555-0199'
+        current = '-- \nEmail: alice@example.test\nPhone: 555-0101'
+        headers = (
+            'On Monday, November 2, Alice Synthetic <alice@example.test> wrote:',
+            'From: Alice Synthetic <alice@example.test>\nSent: Monday, November 2\nSubject: Synthetic',
+            'Begin forwarded message:\nFrom: Alice Synthetic <alice@example.test>',
+            '---------- Forwarded message ---------\nFrom: Alice Synthetic <alice@example.test>',
+        )
+        for header in headers:
+            for width in (10, 20, 35, 60, 80):
+                wrapped = '\n'.join(textwrap.fill(line, width=width) for line in header.splitlines())
+                for prefix in ('Thanks', current):
+                    with self.subTest(header=header, width=width, signed=prefix == current):
+                        result = extract_candidates(prefix + '\n' + wrapped + '\n' + history,
+                                                    'alice@example.test', 'ref', complete=True)
+                        if prefix == current:
+                            self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
+                                             [('email', 'alice@example.test'), ('phone', '555-0101')])
+                        else:
+                            self.assertTrue(result['ambiguity'])
+                            self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_bare_address_identity_validation_before_emission(self):
+        for address in ('bob@example.test', 'Bob Synthetic <bob@example.test>',
+                        'alice@example.test', 'Alice Synthetic <alice@example.test>'):
+            result = extract_candidates('-- \nEmail: alice@example.test\nPhone: 555-0101\n' + address,
+                                        'alice@example.test', 'ref', complete=True)
+            with self.subTest(address=address):
+                if 'bob@' in address:
+                    self.assertTrue(result['ambiguity'])
+                    self.assertFalse(result['contact_facts'] + result['identity_observations'])
+                else:
+                    self.assertEqual(len(result['contact_facts']), 2)
 
     def test_thread_without_sender_signature_does_not_bind_history(self):
         history = '-- \nName: Bob Synthetic\nEmail: alice@example.test\nPhone: 555-0199'
