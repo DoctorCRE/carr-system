@@ -151,3 +151,7 @@ def test_insufficient_model_evidence_is_distinct_from_contradiction(tmp_path):
                            client=judge, budget_ledger=tmp_path / 'budget.json')
     assert item['checks']['evidence_status'] == 'insufficient'
     assert not item['checks']['details']['pass']
+
+
+if __name__ == '__main__':
+    raise SystemExit(pytest.main([__file__, '-q']))

@@ -105,7 +105,7 @@ def _evidence_segments(evidence: str, segments: list[Any]) -> list[dict[str, Any
     if not quote:
         return []
     valid = [s for s in segments if isinstance(s, dict)]
-    exact = [s for s in valid if f" {quote} " in f" {_normalized(s.get("text"))} "]
+    exact = [s for s in valid if " " + quote + " " in " " + _normalized(s.get("text")) + " "]
     if exact:
         return exact[:1]
     scored = sorted(valid, key=lambda s: -len(_tokens(evidence) & _tokens(s.get("text"))))
