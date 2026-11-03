@@ -91,7 +91,6 @@ set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$REPO/db/schema.sql"
-NEONCTL="$REPO/mcp-server/node_modules/.bin/neonctl"
 
 # PIN THE CLIENT MAJOR, because pg_dump's OUTPUT is version-dependent and this
 # file is a tracked artifact a human reviews as a diff. pg_dump 18 emits every
@@ -202,9 +201,10 @@ if [ -n "$URL" ]; then
   printf '%s\n' "$URL" | grep -Eq '^postgres://carr_ci@127\.0\.0\.1:[0-9]{4,5}/carr_ci$' \
     || { echo "schema-snapshot: disposable source must be passwordless carr_ci on 127.0.0.1/carr_ci" >&2; exit 64; }
 else
-  [ -x "$NEONCTL" ] || { echo "schema-snapshot: neonctl not found at $NEONCTL" >&2; exit 69; }
-  URL="$("$NEONCTL" connection-string production \
-          --project-id steep-field-48688294 --role-name neondb_owner 2>/dev/null)"
+  SNAPSHOT_PY="$REPO/.venv/bin/python"
+  [ -x "$SNAPSHOT_PY" ] || SNAPSHOT_PY=python3
+  URL="$("$SNAPSHOT_PY" "$REPO/tools/neon-cli.py" connection-string production \
+          --project-id steep-field-48688294 --role-name neondb_owner)" || exit $?
   [ -n "$URL" ] || { echo "schema-snapshot: could not obtain the production connection string" >&2; exit 1; }
 fi
 

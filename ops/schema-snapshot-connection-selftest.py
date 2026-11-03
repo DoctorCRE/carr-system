@@ -62,6 +62,11 @@ with tempfile.TemporaryDirectory() as directory:
     fixture = Path(directory) / "fixture"
     (fixture / "bin").mkdir(parents=True)
     (fixture / "ops").mkdir()
+    (fixture / "tools").mkdir()
+    (fixture / "lib").mkdir()
+    for name in ("neon_cli.py", "credential_file.py"):
+        shutil.copyfile(ROOT / "lib" / name, fixture / "lib" / name)
+    shutil.copyfile(ROOT / "tools/neon-cli.py", fixture / "tools/neon-cli.py")
     copied_snapshot = fixture / "bin" / "schema-snapshot.sh"
     snapshot_text = SNAPSHOT.read_text(encoding="utf-8")
     psql_lookup = 'PSQL=""\nfor c in /opt/homebrew/opt/libpq/bin/psql /usr/local/opt/libpq/bin/psql psql; do'
@@ -89,7 +94,7 @@ with tempfile.TemporaryDirectory() as directory:
         text=True,
         capture_output=True,
         check=False,
-        env={**os.environ, "PATH": f"{fake_bin}:/usr/bin:/bin", "CARR_TEST_TMP": str(private_tmp), "CARR_TEST_TMP_COUNT": str(fixture / "mktemp-count"), "CARR_TEST_PSQL": str(fake_bin / "psql"), "CARR_TEST_PSQL_MARKER": str(psql_marker)},
+        env={**os.environ, "HOME": str(fixture), "NEON_API_KEY": "synthetic-key", "PATH": f"{fake_bin}:/usr/bin:/bin", "CARR_TEST_TMP": str(private_tmp), "CARR_TEST_TMP_COUNT": str(fixture / "mktemp-count"), "CARR_TEST_PSQL": str(fake_bin / "psql"), "CARR_TEST_PSQL_MARKER": str(psql_marker)},
     )
     assert early_failure.returncode != 0 and psql_marker.exists()
     assert list(private_tmp.iterdir()) == []

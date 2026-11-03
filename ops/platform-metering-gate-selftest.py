@@ -206,7 +206,7 @@ def main() -> int:
     api_branch_create = re.compile(r'["\x27]POST["\x27]\s*,\s*f?["\x27]/projects/\{[^}]+\}/branches["\x27]')
     branch_patterns = (
         re.compile(r'["\x27]branches["\x27]\s*,\s*["\x27]create["\x27]'),
-        re.compile(r'\$NEONCTL[^\n]*\bbranches\s+create\b'),
+        re.compile(r'(?:\$NEONCTL|\bneon\b)[^\n]*\bbranches\s+create\b'),
         api_branch_create,
     )
     discovered_branch_sources = {

@@ -77,18 +77,12 @@ def checked(command, env, label, timeout=1200):
 
 
 def production_dsn():
-    # This is the production deployment workflow's existing status credential route. Capture the
-    # helper's output in memory; never invoke migrate.py's writeful dry run.
-    script = '''set -eu
-if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
-  . "$1/bin/routine-credential-env.sh"
-  carr_require_sourceable_db_env migration-production-proof >/dev/null 2>&1
-  set -a; . "$HOME/.config/carr/db.env"; set +a
-fi
-exec "$2" "$1/tools/migrate-prod-support.py" neon-dsn --project-id steep-field-48688294
-'''
-    return checked(['zsh', '-c', script, 'production-proof', ROOT, sys.executable],
-                   os.environ, 'production status credential resolution', timeout=100).strip()
+    from lib.neon_cli import run
+    result = run(['connection-string', 'production', '--project-id',
+                  'steep-field-48688294', '--role-name', 'neondb_owner'], timeout=90)
+    if result.returncode or not result.stdout.strip():
+        raise RuntimeError('production status credential resolution failed; provider output suppressed')
+    return result.stdout.strip()
 
 
 def schema_dump(dsn, bins, env, snapshot=None, include_acl=False):
