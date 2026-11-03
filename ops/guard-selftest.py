@@ -1707,6 +1707,25 @@ for command in ('git status && rm -rf /tmp/x/(a|b) /tmp/second',
     case('J141 mutation stays sensitive ' + command, bash(command, '/tmp'), DENY)
 
 
+
+ZSH_GLOB_TRUNCATED_READS = [
+    'git diff --no-index /tmp/p/(one|two) --output=/tmp/j146-write',
+    'gh api repos/a/b/pulls/(1|2) -X PATCH -f state=closed',
+    'gh api repos/a/b/pulls/(1|2) --method DELETE',
+    'git log /tmp/p/(a|(b|c)) --output=/tmp/j147-write',
+    'git show HEAD /tmp/p/(a|b)(N) --output=/tmp/j147-write',
+    'gh api repos/a/b/(pulls|issues) -F state=closed',
+    'gh api (repos/a/b/pulls/1|repos/a/b/pulls/2) -f state=closed',
+    'git diff /tmp/p/(a|b|c) --output /tmp/j147-write',
+    'git diff && git diff /tmp/p/(a|b) --output=/tmp/j147-write',
+    'gh pr view 1 /tmp/p/(a|b) && echo issue#123',
+    'gh pr checks 1 /tmp/p/(a|b) && echo issue#123',
+    'git status /tmp/p/(a|b) && echo issue#123',
+]
+for command in ZSH_GLOB_TRUNCATED_READS:
+    case('J147 incomplete read ' + command, bash(command, '/tmp'), DENY)
+
+
 def zsh_glob_addition_cases():
     failures = []
     for name, command in ZSH_GLOB_ADDITIONS:
