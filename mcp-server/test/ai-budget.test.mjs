@@ -296,3 +296,59 @@ test('a reserved provider failure cannot refund credits for a retry', async () =
   assert.equal(f.providerCalls, 1);
   assert.equal(f.values.get('daily').spent, 1);
 });
+
+for (const stage of ['fetch', 'body']) test(`stalled reservation ${stage} times out without refund or late provider work`, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 27) });
+  const f = fixture({ budget: '1' });
+  const original = f.env.AI_NEURON_BUDGET.get;
+  let resolve, requestSignal;
+  const stalled = new Promise(done => { resolve = done; });
+  f.env.AI_NEURON_BUDGET.get = name => ({ fetch: async request => {
+    requestSignal = request.signal;
+    const response = await original(name).fetch(request);
+    return stage === 'fetch' ? stalled : { ok: true, status: 200, json: () => stalled };
+  } });
+  const ai = budgetedAi(f.env);
+  const pending = ai.run(MODEL, input()).then(() => 'provider-ran', error => error.code);
+  const observed = Promise.race([pending, new Promise(done => setTimeout(() => done('hung'), 2100))]);
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  assert.equal(f.values.get('daily').spent, 1);
+  t.mock.timers.tick(2000);
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  t.mock.timers.tick(100);
+  assert.equal(await observed, 'ai_budget_unavailable');
+  assert.equal(requestSignal.aborted, true);
+  const receipt = { day: '2026-10-27', spent: 1, limit: 1, remaining: 0 };
+  resolve(stage === 'fetch' ? Response.json(receipt) : receipt);
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  assert.equal(f.providerCalls, 0);
+  assert.equal(f.values.get('daily').spent, 1, 'uncertain reservation remains billed');
+});
+
+for (const stage of ['body', 'provider']) test(`semantic timeout during ${stage} retains the whole multi-batch reservation`, async t => {
+  const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 27) });
+  let finish, calls = 0;
+  const stalled = new Promise(done => { finish = done; });
+  const f = fixture({ budget: '33', run: () => { calls++; return stalled; } });
+  if (stage === 'body') {
+    const original = f.env.AI_NEURON_BUDGET.get;
+    f.env.AI_NEURON_BUDGET.get = name => ({ fetch: async request => {
+      await original(name).fetch(request);
+      return { ok: true, status: 200, json: () => stalled };
+    } });
+  }
+  const pending = embedDoctrineRevisions({ ai: budgetedAi(f.env),
+    query: async () => assert.fail('timed-out paid work reached SQL') },
+    Array.from({ length: 33 }, () => ({ revision_id: 'synthetic', plain_text: 'synthetic' })));
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  assert.equal(f.values.get('daily').spent, 33);
+  t.mock.timers.tick(2000);
+  assert.equal((await pending).status, 'unavailable');
+  finish(stage === 'body'
+    ? { day: '2026-10-27', spent: 33, limit: 33, remaining: 0 }
+    : { data: Array.from({ length: 16 }, () => [1, ...Array(383).fill(0)]) });
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+  assert.equal(f.values.get('daily').spent, 33);
+  assert.equal(calls, stage === 'body' ? 0 : 1);
+});
