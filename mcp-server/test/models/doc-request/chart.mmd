@@ -1,12 +1,15 @@
+---
+title: "Queued ask submission"
+---
 stateDiagram-v2
-  s0: asks=0 authorized=TRUE receipts=0 phase="absent"
-  s1: asks=0 authorized=FALSE receipts=0 phase="absent"
-  s2: asks=1 authorized=TRUE receipts=0 phase="pending"
-  s3: asks=1 authorized=TRUE receipts=1 phase="accepted"
-  s4: asks=1 authorized=FALSE receipts=1 phase="accepted"
+  s0: No stored ask
+  s1: Access revoked, no stored ask
+  s2: Ask inserted, transaction uncommitted
+  s3: Ask and receipt committed
+  s4: Ask retained, access revoked
   [*] --> s0
-  s0 --> s1: Revoke
-  s0 --> s2: Submit
-  s2 --> s0: Rollback
-  s2 --> s3: Commit
-  s3 --> s4: Revoke
+  s0 --> s1: Partner access revoked
+  s0 --> s2: Partner submits
+  s2 --> s0: Receipt write fails
+  s2 --> s3: Receipt commits
+  s3 --> s4: Partner access revoked

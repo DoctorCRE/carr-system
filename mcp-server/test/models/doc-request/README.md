@@ -40,5 +40,5 @@ AtomicCommitted, AtMostOnce and NoDeadlock holding. Replay, duplicate and refusa
 self-transitions are hidden in the generated chart. The model abstracts one actor/key
 and database transactions; multi-actor collisions and exact request comparisons are
 proved by PostgreSQL tests. Reproduce with the installed statechart runner on
-`DocRequest.tla --config DocRequest.cfg --out /tmp/doc-request-model`. Set TLA2TOOLS
+`DocRequest.tla --config DocRequest.cfg --view view.mjs --out /tmp/doc-request-model`. Set TLA2TOOLS
 and JAVA to installed tools if mise is unavailable.

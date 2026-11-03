@@ -140,7 +140,7 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(args.idempotency_key)) return refuse("doc_request_key_invalid");
         if (!UUID.test(args.conversation_id)) return refuse("doc_conversation_id_invalid");
         if (typeof args.body !== "string" || !args.body.trim() || args.body.length > 20000) return refuse("doc_conversation_body_invalid");
-        const result = (await c.query("select ops.submit_doc_request($1::uuid,$2::uuid,$3::text) as result",
+        const result = (await c.query("select ops.submit_doc_request($1::text,$2::text,$3::text) as result",
           [args.idempotency_key, args.conversation_id, args.body])).rows[0]?.result;
         if (!result || result.contract !== "doc-request.v1" || result.ok !== true
           || !["accepted", "refused"].includes(result.status)) throw new ToolError({ error: "doc_request_result_unknown" });

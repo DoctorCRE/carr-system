@@ -26,14 +26,15 @@ async function setup() {
   await pool.query('insert into ops.doc_conversation(id,title,created_by_actor) values($1,$2,$3)', [args.conversation_id, 'Queued ask test', joe.id]);
   return args;
 }
-async function submit(args, actor = joe, { verified = actor.slug, direct = false } = {}) {
+async function submit(args, actor = joe, { verified = actor.slug, direct = false, registered = false } = {}) {
   const c = await pool.connect();
   try {
     await c.query('begin');
     await c.query('set local role carr_writer');
     await c.query("select set_config('carr.acting_actor_slug',$1,true), set_config('carr.verified_human_actor_slug',$2,true)", [actor.slug, verified]);
     const result = direct
-      ? (await c.query('select ops.submit_doc_request($1::uuid,$2::uuid,$3::text) as result', [args.idempotency_key, args.conversation_id, args.body])).rows[0].result
+      ? (await c.query('select ops.submit_doc_request($1::text,$2::text,$3::text) as result', [args.idempotency_key, args.conversation_id, args.body])).rows[0].result
+      : registered ? await executeRegisteredTool(c, actor, 'submit-doc-request', args)
       : await TOOLS['submit-doc-request'].handler(c, actor, args);
     await c.query('commit');
     return result;
@@ -54,7 +55,7 @@ function refused(result, reason) {
 }
 test('partner submission stores one ask and contract receipt', async () => {
   const args = await setup();
-  const result = await submit(args);
+  const result = await submit(args, joe, { registered: true });
   assert.deepEqual(result, accepted(args));
   const contract = JSON.parse(readFileSync(new URL('../contracts/doc-request.v1.json', import.meta.url)));
   assert.equal(new Validator(contract.$defs.response).validate(result).valid, true);
@@ -144,6 +145,16 @@ test('cross-actor key collision refuses instead of replaying another actor recei
   await counts(args, 1);
 });
 test('writer cannot edit receipts or call the authority append; reader cannot submit', async () => {
-  const privileges = (await pool.query("select has_table_privilege('carr_writer','ops.doc_request_receipt','insert') i, has_table_privilege('carr_writer','ops.doc_request_receipt','update') u, has_function_privilege('carr_writer','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb)','execute') a, has_function_privilege('carr_reader','ops.submit_doc_request(uuid,uuid,text)','execute') r")).rows[0];
+  const privileges = (await pool.query("select has_table_privilege('carr_writer','ops.doc_request_receipt','insert') i, has_table_privilege('carr_writer','ops.doc_request_receipt','update') u, has_function_privilege('carr_writer','ops.append_doc_conversation_turn(uuid,text,text,uuid,uuid,jsonb)','execute') a, has_function_privilege('carr_reader','ops.submit_doc_request(text,text,text)','execute') r")).rows[0];
   assert.deepEqual(privileges, { i: false, u: false, a: false, r: false });
+});
+
+test('frozen uppercase identifiers echo exactly for the app consumer and replay unchanged', async () => {
+  const args = await setup();
+  args.conversation_id = args.conversation_id.toUpperCase();
+  args.idempotency_key = args.idempotency_key.toUpperCase();
+  assert.deepEqual(await submit(args), accepted(args));
+  assert.deepEqual(await submit(args), accepted(args));
+  refused(await submit({ ...args, idempotency_key: args.idempotency_key.toLowerCase() }), 'doc_request_key_reuse');
+  await counts(args, 1);
 });
