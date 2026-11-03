@@ -714,6 +714,69 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
       values('${id(2021)}','carr-internal','${id(2011)}','${id(2020)}','${id(2013)}','${id(2022)}',
         'shortlist',false,'sha256:'||repeat('b',64));`);
     assert.equal((await find('tour_feedback')).section,'inbox','another grant feedback cannot settle this grant');
+    const adapterTransitions=[
+      ['open','inbox','resolve','settled'], ['open','inbox','snooze','snoozed'],
+      ['open','inbox','settle','settled'], ['open','snoozed','resolve','snoozed'],
+      ['open','snoozed','expire','inbox'], ['open','snoozed','settle','settled'],
+      ['open','snoozed','unsettle','inbox'], ['open','settled','resolve','settled'],
+      ['open','settled','unsettle','inbox'], ['open','override','resolve','inbox'],
+      ['open','override','snooze','snoozed'], ['open','override','settle','settled'],
+      ['done','inbox','snooze','snoozed'], ['done','inbox','settle','settled'],
+      ['done','inbox','unsettle','inbox'], ['done','snoozed','expire','settled'],
+      ['done','snoozed','settle','settled'], ['done','snoozed','unsettle','inbox'],
+      ['done','settled','unsettle','inbox'], ['done','override','snooze','snoozed'],
+      ['done','override','settle','settled'],
+    ];
+    for(const type of ['fact_review','tour_feedback']) {
+      const resolution=type==='fact_review'?'ResolveFactReview':'ReceiveTourFeedback';
+      const resolve=async()=>{
+        if(type==='fact_review') {
+          const field=(await c.query("select ops.fact_review_field('carr-internal',$1,'base_rent_per_sf') result",[id(2000)])).rows[0].result;
+          assert.equal((await executeRegisteredTool(c,joe,'resolve-fact-review',{
+            idempotency_key:id(seq++),entity_ref:id(2000),fact_key:'base_rent_per_sf',decision:'reject',
+            base_version:field.canonical_version,review_version:field.review_version,reason:'Synthetic transition',
+          })).ok,true);
+        } else {
+          await c.query(`insert into ops.tour_share_feedback_event(id,organization_tenant_id,projection_id,share_grant_id,
+            property_id,idempotency_key,action,comment,payload_digest)
+            values($1,'carr-internal',$2,$3,$4,$5,'comment','Synthetic transition','sha256:'||repeat('a',64))`,
+          [id(seq++),id(2011),id(2010),id(2013),id(seq++)]);
+        }
+      };
+      const cases=type==='fact_review'
+        ? [...adapterTransitions,['done','inbox','reopen','inbox'],['done','override','reopen','inbox']]
+        : adapterTransitions;
+      for(const [source,disposition,event,expected] of cases) {
+        await adapters.test(`${type} statechart: ${source} with ${disposition}, ${event==='resolve'?resolution:event} reaches ${expected}`,async()=>{
+          await c.query('begin');
+          try {
+            if(source==='done') await resolve();
+            if(disposition!=='inbox') assert.equal((await change(
+              disposition==='override'?'unsettle':disposition==='settled'?'settle':'snooze',
+              await find(type),disposition==='snoozed'?'2099-01-01T00:00:00Z':null)).results[0].ok,true);
+            const before=await find(type);
+            assert.equal(before.source_state,source==='done'?'done':'needs_attention');
+            assert.equal(before.section,disposition==='override'?'inbox':disposition==='inbox'&&source==='done'?'settled':disposition);
+            assert.deepEqual(await find(type),before);
+            if(event==='resolve') await resolve();
+            else if(event==='reopen') {
+              await c.query(`insert into ops.fact_observation select $1::uuid,organization_tenant_id,batch_id,2,
+                'new-evidence',entity_ref,fact_key,value,unit,expense_basis,normalized_value,document_ref,content_hash,
+                document_family_id,derivation_chain,page_start,page_end,cited_text,cited_text_sha256,cited_text_expires_at,
+                method,extractor_version,extraction_pass,extraction_model,confidence_tier,now(),normalized_schedule,region_id
+                from ops.fact_observation where id=$2`,[id(seq++),id(2003)]);
+            } else if(event==='expire') {
+              await c.query("update ops.home_inbox_disposition set snoozed_until=now()-interval '1 second' where item_id=$1",[before.item_id]);
+            } else assert.equal((await change(event,await find(type),event==='snooze'?'2099-01-01T00:00:00Z':null)).results[0].ok,true);
+            const after=await find(type);
+            assert.equal(after.section,expected);
+            assert.equal(after.explicit_unsettle,event==='unsettle'||(disposition==='override'&&event==='resolve'));
+            assert.equal(after.auto_settled,expected==='settled'&&event!=='settle'&&disposition!=='settled');
+            assert.deepEqual(await find(type),after);
+          } finally { await c.query('rollback'); }
+        });
+      }
+    }
     const dispositionsBefore=(await c.query('select count(*) n from ops.home_inbox_disposition')).rows[0].n;
     const field=(await c.query("select ops.fact_review_field('carr-internal',$1,'base_rent_per_sf') result",[id(2000)])).rows[0].result;
     assert.equal((await executeRegisteredTool(c,joe,'resolve-fact-review',{

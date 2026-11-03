@@ -5,7 +5,7 @@ vars == <<source, disposition, override, kind>>
 Init == kind \in {"work", "fact_review", "tour_feedback"} /\ source = "open" /\ disposition = "inbox" /\ override = FALSE
 Start == kind = "work" /\ source = "open" /\ source' = "working" /\ UNCHANGED <<disposition, override, kind>>
 ResolveWork == kind = "work" /\ source \in {"open", "working"} /\ source' = "done" /\ UNCHANGED <<disposition, override, kind>>
-Reopen == source = "done" /\ disposition = "inbox" /\ source' = "open" /\ disposition' = "inbox" /\ override' = FALSE /\ UNCHANGED kind
+Reopen == kind # "tour_feedback" /\ source = "done" /\ disposition = "inbox" /\ source' = "open" /\ disposition' = "inbox" /\ override' = FALSE /\ UNCHANGED kind
 Snooze == disposition = "inbox" /\ disposition' = "snoozed" /\ override' = FALSE /\ UNCHANGED <<source, kind>>
 Expire == disposition = "snoozed" /\ disposition' = "inbox" /\ UNCHANGED <<source, override, kind>>
 Settle == disposition # "settled" /\ disposition' = "settled" /\ override' = FALSE /\ UNCHANGED <<source, kind>>
