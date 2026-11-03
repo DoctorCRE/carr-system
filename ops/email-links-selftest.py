@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic tests for links recovered from mail."""
 import sys
+from itertools import product
 import unittest
 from pathlib import Path
 from urllib.parse import quote
@@ -94,6 +95,23 @@ class LinksTest(unittest.TestCase):
                 with self.subTest(body=body):
                     normalized = unwrap_safe_links(body)
                     self.assertEqual(extract_links(normalized), [('listing', destination)])
+                    self.assertEqual(unwrap_safe_links(normalized), normalized)
+
+    def test_generated_destination_boundaries_and_prose(self):
+        fragments = ('x', '(', ')', '[', ']', '%22', '%27', '.', ',', ';', '!', '?')
+        templates = ('{}', 'See ({}).', 'See [{}]!', '"{}"', "'{}'", '<{}>',
+                     '<p>See ({}).</p>', 'Link={}', '"({})"')
+        for pieces in product(fragments, repeat=2):
+            destination = 'https://loopnet.com/a?filter=' + ''.join(pieces)
+            for template in templates:
+                with self.subTest(destination=destination, template=template):
+                    body = template.format(wrap(destination) + '&data=opaque')
+                    normalized = unwrap_safe_links(body)
+                    delimited = template in ('"{}"', "'{}'", '<{}>')
+                    expected = template.format(destination if delimited else '<' + destination + '>')
+                    self.assertEqual(extract_links(body), [('listing', destination)])
+                    self.assertEqual(extract_links(normalized), [('listing', destination)])
+                    self.assertEqual(normalized, expected)
                     self.assertEqual(unwrap_safe_links(normalized), normalized)
 
     def test_plain_assignments_preserve_query_bytes(self):
