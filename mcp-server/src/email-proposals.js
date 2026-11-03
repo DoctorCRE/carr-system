@@ -4,6 +4,13 @@ import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
 import { suspected } from './untrusted-text.js';
 const LIMIT = 200;
+const SUMMARY_VERSION = 'email-summary.v1';
+const summaryHash = row => 'sha256:' + sha256(JSON.stringify([row.summary, row.detail ?? row.body, row.email_context]));
+const summaryMetadata = (row, saved) => saved?.source_hash === summaryHash(row) && saved.generator_version === SUMMARY_VERSION
+  ? { text: saved.text, source_hash: saved.source_hash, generator_version: saved.generator_version,
+      status: saved.status, provenance: saved.provenance }
+  : { text: null, source_hash: summaryHash(row), generator_version: SUMMARY_VERSION,
+      status: 'unavailable', provenance: { reason: 'not_generated_for_source' } };
 const RESUBMITTABLE_FAILURES = new Set([
   'aborted_before_dispatch', // The sender recorded that dispatch was aborted before pressing Send.
 ]);
@@ -577,13 +584,20 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-proposal': {
       write: true,
-      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance, and need no deal. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. mode=repair_match revalidates and reclassifies exactly one pending matching proposal at base_version, retaining its source quote and recording classification history. match_evidence stores diagnostic scores and candidates. This operation never files or sends email.',
+      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance, and need no deal. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. mode=repair_match revalidates and reclassifies exactly one pending matching proposal at base_version, retaining its source quote and recording classification history. match_evidence stores diagnostic scores and candidates. mode=summary_claim reserves one incoming source hash for at most three generation attempts with a five minute lease. mode=summary_result stores grounded text or honest unavailability for that claim. This operation never files or sends email.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key'], anyOf: [
           { required: ['kind','activity_id','evidence_quote','confidence'] }, { required: ['mode'] },
         ], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
-          mode: { enum: ['expire_blocked', 'repair_match'] },
+          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result'] },
+          source_hash: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
+          claim_id: { type: 'string', format: 'uuid' },
+          summary_status: { enum: ['available', 'unavailable'] },
+          summary_text: { type: 'string', minLength: 1, maxLength: 300 },
+          summary_provenance: { type: 'object', additionalProperties: false, properties: {
+            evidence: { type: 'string', maxLength: 12000 }, model: { type: 'string', maxLength: 200 },
+            reason: { type: 'string', maxLength: 200 } } },
           proposal_id: { type: 'string', format: 'uuid' }, base_version: { type: 'integer', minimum: 1 },
           match_evidence: { type: 'object', additionalProperties: false, required: ['version','outcome','candidates','evidence'],
             properties: { version: { const: 2 }, outcome: { enum: ['existing','new','uncertain'] },
@@ -605,6 +619,44 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           body: { type: 'string', minLength: 1, maxLength: 20000 },
         } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'record-email-proposal', args, async () => {
+        if (['summary_claim', 'summary_result'].includes(args.mode)) {
+          const allowed = ['mode','activity_id','source_hash','idempotency_key',
+            ...(args.mode === 'summary_result' ? ['claim_id','summary_status','summary_text','summary_provenance'] : [])];
+          if (!args.activity_id || !args.source_hash || Object.keys(args).some(key => !allowed.includes(key)))
+            fail('email_proposal_fields_invalid');
+          const row = (await c.query(`select summary,detail,email_context from activity where id=$1
+            and kind='email_in' for update`, [args.activity_id])).rows[0];
+          if (!row || summaryHash(row) !== args.source_hash) fail('email_summary_source_stale');
+          await c.query(`insert into email_message_summary(activity_id,source_hash,generator_version)
+            values($1,$2,$3) on conflict do nothing`, [args.activity_id,args.source_hash,SUMMARY_VERSION]);
+          const saved = (await c.query(`select *,claim_until>now() as claim_active from email_message_summary where activity_id=$1
+            and source_hash=$2 and generator_version=$3 for update`, [args.activity_id,args.source_hash,SUMMARY_VERSION])).rows[0];
+          if (args.mode === 'summary_claim') {
+            if (saved.status === 'available' || saved.attempts >= 3 || saved.claim_active)
+              return { ok: true, generate: false, attempts: saved.attempts };
+            const claimed = (await c.query(`update email_message_summary set attempts=attempts+1,
+              claim_id=gen_random_uuid(),claim_until=now()+interval '5 minutes' where activity_id=$1
+              and source_hash=$2 and generator_version=$3 returning claim_id,attempts`,
+            [args.activity_id,args.source_hash,SUMMARY_VERSION])).rows[0];
+            return { ok: true, generate: true, ...claimed, generator_version: SUMMARY_VERSION };
+          }
+          if (!args.claim_id || saved.claim_id !== args.claim_id || !saved.claim_active)
+            fail('email_summary_claim_stale');
+          const available = args.summary_status === 'available';
+          if (!['available','unavailable'].includes(args.summary_status) || !args.summary_provenance ||
+              (available ? !args.summary_text?.trim() || /[\r\n<>]/.test(args.summary_text)
+                : args.summary_text !== undefined)) fail('email_proposal_fields_invalid');
+          const evidence = args.summary_provenance.evidence;
+          if (available && (!evidence?.trim() || !row.detail?.includes(evidence))) fail('email_summary_evidence_invalid');
+          await c.query(`update email_message_summary set text=$4,status=$5,provenance=$6::jsonb,
+            claim_until=null,claim_id=null,updated_at=now() where activity_id=$1 and source_hash=$2 and generator_version=$3`,
+          [args.activity_id,args.source_hash,SUMMARY_VERSION,available ? args.summary_text.trim() : null,
+            args.summary_status,JSON.stringify(args.summary_provenance)]);
+          await writeEvent(c,actor,'record-email-proposal','activity',args.activity_id,
+            { new: { summary_status: args.summary_status, source_hash: args.source_hash, generator_version: SUMMARY_VERSION },
+              cause: 'observed', idempotency_key: args.idempotency_key });
+          return { ok: true, status: args.summary_status };
+        }
         if (args.mode === 'expire_blocked') {
           if (Object.keys(args).some(key => !['mode','cursor','idempotency_key'].includes(key))) fail('email_proposal_fields_invalid');
           const owner = senderOwner(actor);
@@ -787,7 +839,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
             p.resolution_reason,p.match_evidence,p.disposition,p.resolution_note,p.deferred_until,p.correction_provenance,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.sender_role,p.next_date::text as next_date,p.owner,
-            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.occurred_at
+            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.detail,a.email_context,a.occurred_at
           from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
           where p.status=$4 and (p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
             and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
@@ -826,7 +878,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           }
           const named = sender(row.summary);
           proposals.push({ id: row.id, version: row.version, kind: row.kind, status: row.status, deal: row.correction_provenance?.target_deal ?? row.deal_id,
-            email_summary: null, disposition: row.disposition, note: row.resolution_note,
+            email_summary: summaryMetadata(row, (await c.query(`select * from email_message_summary where activity_id=$1
+              and source_hash=$2 and generator_version=$3`, [row.activity_id,summaryHash(row),SUMMARY_VERSION])).rows[0]), disposition: row.disposition, note: row.resolution_note,
             deferred_until: row.deferred_until ? new Date(row.deferred_until).toISOString() : null, correction_provenance: row.correction_provenance,
             match_evidence: row.match_evidence, suggested_deals: suggested, deal_name: row.deal_name, confidence: row.confidence, sender_role: row.sender_role,
             subject_type: shown?.subject_type ?? null, subject_id: shown?.subject_id ?? null, subject_name: shown?.subject_name ?? null,
@@ -847,16 +900,27 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=summaries pages pending-card incoming sources by UUID without the proposal age limit; pending_only=false pages all incoming sources recorded within three days independently of proposals. It returns source_hash for summary_claim and performs no generation. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
-          purpose: { enum: ['links', 'outcomes'] }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
+          purpose: { enum: ['links', 'outcomes', 'summaries'] },
+          pending_only: { type: 'boolean' }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
       handler: async (c, _actor, args) => {
         const limit = args.limit ?? 25;
         // The age window's start follows the server clock, so tests on a fixed clock stay in range.
         const clock = new Date().toISOString();
+        if (args.purpose === 'summaries') {
+          if (Object.keys(args).some(key => !['purpose','limit','after','pending_only'].includes(key))) fail('email_proposal_fields_invalid');
+          const rows = (await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.email_context
+            from activity a where a.kind='email_in' and ($1::uuid is null or a.id>$1)
+              and (case when $3 then exists(select 1 from email_proposal p where p.activity_id=a.id and p.status='pending')
+                else a.recorded_at>now()-interval '3 days' end) order by a.id limit $2`, [args.after ?? null,limit+1,args.pending_only ?? true])).rows;
+          return { schema_version: 'email-summary-queue.v1', more: rows.length>limit,
+            next_cursor: rows.length>limit ? rows[limit-1].activity_id : null,
+            emails: rows.slice(0,limit).map(row => ({ ...row, source_hash: summaryHash(row) })) };
+        }
         if (args.purpose === 'outcomes') {
           if (!args.account || Object.keys(args).some(key => !['purpose', 'account'].includes(key)))
             fail('email_outcomes_arguments_invalid');

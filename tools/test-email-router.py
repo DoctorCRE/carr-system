@@ -486,7 +486,7 @@ class RouterTests(unittest.TestCase):
     def test_step_classifies_with_the_configured_model(self):
         seen = {}
 
-        def fake_run(out, carr, classify, refusal, now, clock=None, account=None):
+        def fake_run(out, carr, classify, refusal, now, clock=None, account=None, summary_model=None):
             classify(email('e1', LOI), NOW.date())
             return 'succeeded', {}
 
@@ -904,6 +904,24 @@ class FakeJev:
             nouls={'existing': NoulAnswer(noul=self.existing), 'different': NoulAnswer(noul=self.different)},
             choices={'deal': ChoiceAnswer(choice=self.choice, confidence=self.confidence, probabilities={self.choice: 1.0}),
                      'role': ChoiceAnswer(choice='lender', confidence=0.9, probabilities={'lender': 1.0})})
+
+
+class SummaryIntegration(unittest.TestCase):
+    def test_summary_runs_without_action_proposals_and_failure_does_not_block_router(self):
+        server = Server([email("summary-source", LOI)])
+        with tempfile.TemporaryDirectory() as out:
+            with patch.object(email_router.email_summary, 'backfill', return_value={
+                    'next_cursor': 'next', 'generated': 1, 'unavailable': 0}) as summary:
+                outcome, counts = email_router.run(Path(out), server, lambda *_: {'proposals': []},
+                    refusal_code, NOW, clock=lambda: NOW, summary_model=lambda _: {})
+                self.assertEqual(outcome, 'succeeded')
+                self.assertEqual(counts['summaries_generated'], 1)
+                summary.assert_called_once()
+            with patch.object(email_router.email_summary, 'backfill', side_effect=RuntimeError('synthetic')):
+                outcome, counts = email_router.run(Path(out), server, lambda *_: {'proposals': []},
+                    refusal_code, NOW, clock=lambda: NOW, summary_model=lambda _: {})
+                self.assertEqual(outcome, 'succeeded')
+                self.assertEqual(counts['summary_failed'], 1)
 
 
 if __name__ == '__main__':

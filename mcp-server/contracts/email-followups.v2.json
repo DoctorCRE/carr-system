@@ -1,6 +1,6 @@
 {
   "schema": "carr-email-followups.v2",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "card": "WR634.S1.J26",
   "transport": "Authenticated MCP email-router-queue, record-email-proposal, list-email-proposals, confirm-email-filing and inherit-email-thread, preview-email-filing, snooze-email-proposal and handle-email-proposal",
   "matching": {
@@ -19,13 +19,13 @@
     "email_summary": {
       "type": "object|null",
       "default": null,
-      "presentation": "Nullable producer metadata. Null means summary unavailable. Evidence quote remains separate and unchanged.",
+      "presentation": "Null is permitted for old producers. This producer returns available metadata only for the current captured source hash and generator version; otherwise text=null and status=unavailable. Reads never generate. Evidence quote remains separate and unchanged.",
       "properties": {
-        "text": "Plain short email summary",
-        "source_hash": "Captured source digest",
-        "generator_version": "Producer revision",
+        "text": "One or two plain sentences, at most 300 characters, or null when unavailable.",
+        "source_hash": "sha256 of the JSON tuple [captured activity summary, detail, email_context]; excludes filing, proposal, action and version state.",
+        "generator_version": "email-summary.v1",
         "status": "available or unavailable",
-        "provenance": "Producer evidence"
+        "provenance": "Literal evidence and configured model when available; explicit reason when unavailable. Evidence supports generation, never authorizes actions."
       }
     },
     "disposition": "Nullable filed, handled or deferred. Independent of pending/confirmed/dismissed transport status.",
@@ -53,5 +53,12 @@
     "replay": "All writes use the existing envelope. Same key and request replays without duplicate notes, activity filing or association history. Version conflicts require human reread. Automation cannot confirm, handle or snooze. Reply submission, send grace and undo paths are unchanged.",
     "legacy": "The existing file_to_deal list preview remains valid only for its original exact target. For the deployed app, a possible_new_deal email-filing.v1 list digest also permits ordinary filing to the supplied created deal when source client and existing activity-deal guards agree, without a correction reason or handled disposition. Proposal and source versions must still match. V2 digests always require the exact selected target and target version. Use preview-email-filing for new callers.",
     "notes": "New deal filing, existing deal filing, handled and snooze all accept note atomically with their result. Cancel sends no command and saves nothing. Existing dismissal also accepts note; it is not used for handled or snooze."
+  },
+  "summary_producer": {
+    "reservation": "record-email-proposal mode=summary_claim with activity_id and source_hash atomically grants at most three attempts per source hash and generator version. A five minute lease excludes concurrent generation. Successful summaries are immutable for that key.",
+    "result": "mode=summary_result requires the live claim_id, unchanged source_hash, summary_status, and summary_provenance. Available results require summary_text and literal source evidence; unavailable results have no text. Failures, refusals and stale results never manufacture text or block filing.",
+    "routing": "Recent incoming messages are summarized independently of action proposals. Summaries are stored once per activity/source/version, shared by every proposal. No reply draft is used as input.",
+    "backfill": "python -m lib.email_summary defaults to a dry-run page of pending sources and reports activity_ids, counts and next_cursor. Resume with --after. --execute requires explicit --activity-id values from that dry run. --limit is bounded to 200. No historical backfill executes during deployment.",
+    "quality": "Generator strips signatures, boilerplate and quoted history, preserves forwarded attribution and treats instructions as data. Known incomplete or over-limit captures return unavailable. Legacy body-only capture completeness is unknown; evidence is confined to captured text. Fixed-output evals prove validation and boilerplate handling, not semantic model quality. Independent semantic review and deployed consumer checks are required before claiming quality improvement."
   }
 }
