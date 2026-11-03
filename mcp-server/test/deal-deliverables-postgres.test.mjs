@@ -116,6 +116,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
     assert.rejects(p, (e) => e.payload?.error === code);
   try {
     await c.query(`create schema ops; create role carr_writer; create role carr_reader;
+      create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"relation_dml":[]}'::jsonb$$;
       create table actor(slug text,active boolean); insert into actor values('joe',true),('dell',true);
       create table party(id uuid primary key,merged_into uuid,deleted_at timestamptz);
       create table client(id uuid primary key,party_id uuid,merged_into uuid);
@@ -127,6 +128,21 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
         new URL("../../migrations/1145_deal_deliverables.sql", import.meta.url),
         "utf8",
       ),
+    );
+    await t.test(
+      "migration registers its exact writer grants in the current capability contract",
+      async () => {
+        const contract = (
+          await c.query("select ops.scac_current_grant_contract() contract")
+        ).rows[0].contract;
+        assert.deepEqual(
+          contract.relation_dml
+            .filter((row) => row.relation === "ops.deal_deliverable")
+            .map((row) => row.privilege)
+            .sort(),
+          ["insert", "update"],
+        );
+      },
     );
     await t.test(
       "concurrent reservations cannot exceed the file quota",

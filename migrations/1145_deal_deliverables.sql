@@ -23,3 +23,15 @@ create index deal_deliverable_deal on ops.deal_deliverable(organization_tenant_i
 revoke all on ops.deal_deliverable from public;
 grant select,insert,update on ops.deal_deliverable to carr_writer;
 grant select on ops.deal_deliverable to carr_reader;
+do $deliverable_grants$
+declare contract jsonb := ops.scac_current_grant_contract();
+begin
+  contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml'||(
+    select jsonb_agg(jsonb_build_object(
+      'ingress_key','db-relation-acl:ops.deal_deliverable:carr_writer:'||privilege,
+      'ingress_kind','db_relation_acl','relation','ops.deal_deliverable','relation_kind','r',
+      'grantee','carr_writer','privilege',privilege,'grantable',false) order by privilege)
+    from unnest(array['insert','update']) as grants(privilege)));
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+end $deliverable_grants$;
