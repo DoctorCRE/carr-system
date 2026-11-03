@@ -146,18 +146,45 @@ class CacheTests(unittest.TestCase):
         self.assertFalse(self.cache.record_mint(self.card))
         self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
 
-    def test_lost_or_corrupt_ledger_cannot_be_reinitialized(self):
+    def test_unknown_claim_flood_has_bounded_state(self):
+        for job in range(1, 513):
+            self.assertIs(self.cache.claim_mint(f'WR557.S6.J{job}'), MintClaim.ONLINE_REQUIRED)
+        path = self.cache.directory / 'entries.json'
+        self.assertLess(path.stat().st_size, 1024)
+        self.assertFalse(self.cache.record_mint('WR557.S6.J1'))
+        self.assertIs(self.cache.claim_mint('WR557.S6.J1'), MintClaim.ONLINE_REQUIRED)
+
+    def test_compaction_never_reenables_replayed_receipts(self):
+        for job in range(1, 513):
+            self.cache.record_mint(f'WR557.S6.J{job}')
+        path = self.cache.directory / 'entries.json'
+        self.assertLess(path.stat().st_size, 200000)
+        self.assertFalse(self.cache.record_mint(self.card))
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+        self.now += 3650 * 24 * 60 * 60
+        rotated = RegistrationCache(clock=lambda: self.now, repository='jbookout/doctorcre-app')
+        self.assertFalse(rotated.record_mint(self.card))
+        self.assertIs(rotated.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+
+    def test_lost_or_corrupt_ledger_rebuilds_online_only(self):
         self.assertTrue(self.cache.record_mint(self.card))
         path = self.cache.directory / 'entries.json'
-        for damage in ('missing', 'invalid'):
+        for damage in ('missing', 'invalid', 'signature'):
             with self.subTest(damage=damage):
                 if damage == 'missing':
                     path.unlink()
-                else:
+                elif damage == 'invalid':
                     path.write_text('invalid')
-                    path.chmod(0o600)
-                self.assertFalse(self.cache.record_mint(self.card))
-                self.assertIs(self.cache.claim_mint(self.card), MintClaim.INCOMPLETE)
+                else:
+                    ledger = json.loads(path.read_text())
+                    ledger['signature'] = 'invalid'
+                    path.write_text(json.dumps(ledger))
+                self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+                json.loads(path.read_text())
+                restarted = RegistrationCache(clock=lambda: self.now)
+                self.assertFalse(restarted.record_mint(self.card))
+                self.assertFalse(restarted.record_mint('WR999.S9.J999'))
+                self.assertIs(restarted.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
 
     def test_legacy_negative_marker_blocks_mint_replay(self):
         self.cache.directory.mkdir(parents=True, mode=0o700)

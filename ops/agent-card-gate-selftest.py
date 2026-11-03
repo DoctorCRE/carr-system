@@ -440,14 +440,14 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 2)
 
-    def test_corrupt_retirement_ledger_refuses_online_and_offline(self):
+    def test_corrupt_retirement_ledger_recovers_online_only(self):
         cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
         self.now = 1000000
         self.assertEqual(self.mint_fixture().returncode, 0)
         cache.write_text('invalid')
         cache.chmod(0o600)
         self.register_fixture()
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
         self.lookup.write_text('raise SystemExit(1)')
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
