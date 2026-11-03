@@ -124,6 +124,7 @@ class Host:
         self.journal.mkdir(mode=0o700, exist_ok=False)
         artifacts = []
         for index, path in enumerate(paths):
+            path = path.resolve()
             backup = self.journal / str(index)
             exists = path.exists()
             if exists:
@@ -201,7 +202,7 @@ class Host:
                         self.command('launchctl', 'bootout', self.domain + '/' + label)
                 self.git(self.runtime, 'checkout', '--detach', state['previous'])
                 for artifact in state['artifacts']:
-                    path, backup = Path(artifact['path']), Path(artifact['backup'])
+                    path, backup = Path(artifact['path']).resolve(), Path(artifact['backup'])
                     if path.is_dir():
                         shutil.rmtree(path)
                     elif path.exists():

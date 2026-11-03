@@ -30,3 +30,20 @@ omits artifact copying, installer internals and recovery failures; the transitio
 and filesystem tests cover those separately. Regenerate with pstack's
 `statechart/scripts/statechart Refresh.tla --out /tmp/outlook-refresh-model` from
 this fixture directory, with Java 11+ and `TLA2TOOLS` pointing at tla2tools.jar.
+
+Round 1 regression coverage (WR634.S1.J60). Transaction transitions are unchanged.
+Snapshot and rollback resolve artifact targets consistently, preserving configured
+symlinks. The real Host tests in `ops/outlook-runtime-refresh-selftest.py` cover:
+
+| Transition | Test |
+| --- | --- |
+| Swapping to Restoring after installer failure | `test_symlink_vendor_installer_failure_rolls_back` |
+| RecoveryRequired to Restoring after a persisted swapped journal | `test_symlink_crash_journal_recovers_with_real_host` |
+| Restoring to RecoveryRequired, then retry to Done | `test_interrupted_symlink_restoration_retries_from_journal` |
+
+These fixtures assert old target bytes, preserved vendor symlink, prior SHA,
+mixed registrations and disabled states, and journal cleanup. Process effects
+are synthetic; filesystem copies and drain locks use the real Host methods.
+The crash-journal test also exercises a journal written with the configured
+symlink path, as older versions did. TLC was rerun with `Refresh.cfg`; both
+configured invariants hold (26 generated states, 18 distinct states).

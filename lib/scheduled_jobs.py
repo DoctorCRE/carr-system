@@ -327,7 +327,7 @@ def report(manifest, snapshot, now):
     for error in manifest.get("errors", []):
         if error not in observed:
             continue
-        emit(error, "evidence_unavailable", "Outlook settings could not be read", "restore the private Outlook settings")
+        emit(error, "evidence_unavailable", "Outlook settings or pinned definition could not be read", "restore the private Outlook settings and pinned definition")
     git = snapshot.get("git", {})
     if git.get("behind", 0):
         emit("canonical", "behind_main", f"canonical checkout is {git['behind']} commits behind origin/main",
@@ -499,10 +499,10 @@ def native_manifest(source=SOURCE, outlook_settings=None):
         if definition["Label"] in OUTLOOK_LABELS:
             try:
                 settings = outlook_settings or load_settings()
-            except (SettingsError, OSError):
+                definition = plistlib.loads(settings.render_plist(settings.repo / "ops/launchd" / path.name))
+            except (SettingsError, OSError, ValueError):
                 manifest.setdefault("errors", []).append(definition["Label"])
                 continue
-            definition = plistlib.loads(settings.render_plist(path))
             required_checkout = str(settings.repo)
         interval = schedule(definition)
         if "StartInterval" in interval:

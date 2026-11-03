@@ -279,7 +279,7 @@ class HostTests(unittest.TestCase):
     def assert_symlink_restored(self, fixture):
         target, decoder, registered, overrides, sha, _ = fixture
         self.assertTrue(self.settings.vendor.is_symlink())
-        self.assertEqual(self.settings.vendor.resolve(), target)
+        self.assertEqual(self.settings.vendor.resolve(), target.resolve())
         self.assertEqual(decoder.read_text(), 'old')
         self.assertEqual(self.settings.copy_helper.read_text(), 'old helper')
         self.assertEqual(sha[0], self.host.previous)
@@ -297,6 +297,9 @@ class HostTests(unittest.TestCase):
     def test_symlink_crash_journal_recovers_with_real_host(self):
         fixture = self.failed_symlink_install()
         self.host.snapshot()
+        state = json.loads((self.host.journal / 'state.json').read_text())
+        state['artifacts'][0]['path'] = str(self.settings.vendor)
+        self.host.write_state(state)
         self.host.quiesce()
         self.assertTrue(self.host.drained())
         with self.assertRaisesRegex(ValueError, 'synthetic installer failure'):
@@ -370,7 +373,7 @@ class HealthTests(unittest.TestCase):
                         'launchctl_print': {}, 'log_mtimes': {}, 'git': {'branch': 'main'},
                         'runtime_freshness': {label: {'commits_behind_main': 77, 'main_ancestor': True} for label in LABELS}}
             rows = jobs.report(manifest, snapshot, 0)
-            self.assertFalse({r['code'] for r in rows} & {'wrong_checkout', 'program_drift', 'log_path_drift', 'schedule_drift'})
+            self.assertFalse({r['code'] for r in rows} & {'wrong_checkout', 'program_drift', 'log_path_drift', 'interval_drift', 'loaded_interval_drift'})
             self.assertEqual(len([r for r in rows if r.get('freshness', {}).get('commits_behind_main') == 77]), 3)
             snapshot['plists'][LABELS[0]]['WorkingDirectory'] = str(root / 'outside')
             self.assertIn('wrong_checkout', {r['code'] for r in jobs.report(manifest, snapshot, 0)})
@@ -390,6 +393,11 @@ class HealthTests(unittest.TestCase):
                 manifest = jobs.native_manifest(root, outlook_settings=settings)
             self.assertEqual(manifest['jobs'], [])
             self.assertEqual(manifest['errors'], [label])
+            rows = jobs.report(manifest, {'launchctl_list': '- 0 ' + label,
+                               'launchctl_disabled': '', 'cron': '', 'machine_role': 'primary',
+                               'plists': {}, 'launchctl_print': {}, 'log_mtimes': {},
+                               'git': {'branch': 'main'}}, 0)
+            self.assertIn((label, 'evidence_unavailable'), {(r['label'], r['code']) for r in rows})
 
 
 if __name__ == '__main__':
