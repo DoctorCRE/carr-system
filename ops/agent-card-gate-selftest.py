@@ -22,7 +22,8 @@ class AgentCardGate(unittest.TestCase):
         for directory in ('hooks', 'lib', 'tools'):
             (self.root / directory).mkdir()
         for relative in ('hooks/agent-card-gate.py', 'hooks/cmd_text.py', 'hooks/guard-unattended.py',
-                         'hooks/gate_paths.py', 'hooks/refused_content.py', 'lib/hook_runtime.py'):
+                         'hooks/gate_paths.py', 'hooks/refused_content.py', 'lib/hook_runtime.py',
+                         'lib/agent_card_cache.py', 'tools/call-verb.py'):
             if (REPO / relative).exists():
                 shutil.copyfile(REPO / relative, self.root / relative)
         self.now = None
@@ -57,6 +58,30 @@ class AgentCardGate(unittest.TestCase):
                               input=json.dumps({'hook_event_name': 'PreToolUse',
                                                 'tool_name': tool, 'tool_input': inputs}),
                               text=True, capture_output=True, env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
+
+    def mint_fixture(self, reply=None, rc=0, args=None):
+        wrapper = self.root / 'tools/mint-wrapper.py'
+        shutil.copyfile(REPO / 'tools/call-verb.py', wrapper)
+        (self.root / 'mcp-server').mkdir(exist_ok=True)
+        fake = self.root / 'mcp-server/local-verb.mjs'
+        reply = reply if reply is not None else {'ok': True, 'card_id': 'WR557.S6.J1', 'priority': 1}
+        fake.write_text('import sys\nprint(' + repr(json.dumps(reply)) + ')\nraise SystemExit(' + str(rc) + ')')
+        args = args if args is not None else {'work_request': 'WR-000557', 'slice': 6,
+                                             'executor': 'codex', 'model': 'synthetic'}
+        code = (f'import runpy, sys, time; time.time = lambda: {self.now or 1000000}; '
+                f'm = runpy.run_path({str(wrapper)!r}); '
+                'm["main"].__globals__["NODE_CANDIDATES"] = [sys.executable]; '
+                f'sys.argv = ["call-verb.py", "dispatch-job", {json.dumps(args)!r}]; m["main"]()')
+        return subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                              env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
+
+    def test_fresh_mint_first_launch_does_not_lookup(self):
+        self.now = 1000000
+        minted = self.mint_fixture()
+        self.assertEqual(minted.returncode, 0, minted.stderr)
+        self.lookup.write_text('import time\ntime.sleep(30)\n')
+        result = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_agent_without_card_denied_with_mint_command(self):
         result = self.run_hook(prompt='Review the plan.')
