@@ -6,6 +6,7 @@ from urllib.parse import unquote, unquote_plus, urlsplit, urlunsplit
 
 URL = re.compile(r'https?://[^\s<>"\']+', re.I)
 CONTROL = re.compile(r'[\x00-\x1f\x7f]')
+PROSE_PUNCTUATION = '.,;!?)]'
 MAX_LINKS = 20
 
 
@@ -24,16 +25,33 @@ class _HTMLTags(HTMLParser):
         self.spans.append((start, start + len(self.get_starttag_text())))
 
 
+def _trim_prose(token: str) -> str:
+    excess = {closing: token.count(closing) - token.count(opening)
+              for closing, opening in ((')', '('), (']', '['))}
+    end = len(token)
+    while end and token[end - 1] in PROSE_PUNCTUATION:
+        char = token[end - 1]
+        if char in excess:
+            if excess[char] <= 0:
+                break
+            excess[char] -= 1
+        end -= 1
+    return token[:end]
+
+
 def _url_matches(text: str):
     spans = _HTMLTags(text).spans
     for match in URL.finditer(text):
         attribute = any(start <= match.start() < end for start, end in spans)
-        yield match, attribute
+        quoted = (match.start() > 0 and match.end() < len(text)
+                  and text[match.start() - 1] in ('"', "'")
+                  and text[match.end()] == text[match.start() - 1])
+        token = match.group() if attribute or quoted else _trim_prose(match.group())
+        yield match, attribute, quoted, token
 
 
 def _unwrap_url(original: str, attribute: bool) -> str:
-    token = original if attribute else original.rstrip('.,;!?)]')
-    initial = html.unescape(token) if attribute else token
+    initial = html.unescape(original) if attribute else original
     url = initial
     for _ in range(8):
         try:
@@ -49,7 +67,7 @@ def _unwrap_url(original: str, attribute: bool) -> str:
                 if url == initial:
                     return original
                 destination = html.escape(url, quote=True) if attribute else url
-                return destination + original[len(token):]
+                return destination
             values = [value for field in parts.query.split('&')
                       for name, _, value in [field.partition('=')] if name == 'url']
             if len(values) != 1:
@@ -68,8 +86,12 @@ def unwrap_safe_links(text: str) -> str:
     """Recover HTTP destinations without changing unrelated text or malformed wrappers."""
     chunks: list[str] = []
     end = 0
-    for match, attribute in _url_matches(text):
-        chunks.extend((text[end:match.start()], _unwrap_url(match.group(), attribute)))
+    for match, attribute, quoted, token in _url_matches(text):
+        destination = _unwrap_url(token, attribute)
+        if (destination != token and _trim_prose(destination) != destination
+                and not attribute and not quoted):
+            destination = '"' + destination + '"'
+        chunks.extend((text[end:match.start()], destination, match.group()[len(token):]))
         end = match.end()
     chunks.append(text[end:])
     return ''.join(chunks)
@@ -78,8 +100,7 @@ def unwrap_safe_links(text: str) -> str:
 def extract_links(text: str) -> list[tuple[str, str]]:
     found = []
     seen = set()
-    for match, attribute in _url_matches(text):
-        token = match.group() if attribute else match.group().rstrip('.,;!?)]')
+    for _, attribute, _, token in _url_matches(text):
         url = _unwrap_url(token, attribute)
         if attribute:
             url = html.unescape(url)
