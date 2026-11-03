@@ -29,9 +29,9 @@ class PublicationTests(unittest.TestCase):
             db.executescript((ROOT / 'ops/fixtures/email-local-search-schema.sql').read_text())
         self.source.chmod(0o600)
 
-    def build(self):
+    def build(self, **options):
         return build_index(self.source, self.target, mailbox='synthetic-mailbox', account_id=42,
-                           source_revision='synthetic-r1', clock=lambda: '2026-11-03T12:00:00Z')
+                           source_revision='synthetic-r1', clock=lambda: '2026-11-03T12:00:00Z', **options)
 
     def digest(self):
         return hashlib.sha256(self.target.read_bytes()).hexdigest()
@@ -140,7 +140,7 @@ class PublicationTests(unittest.TestCase):
         with closing(sqlite3.connect(self.source)) as db:
             db.execute('DELETE FROM messages')
             db.commit()
-        self.assertEqual(self.build()['message_count'], 0)
+        self.assertEqual(self.build(allow_empty=True)['message_count'], 0)
         with closing(sqlite3.connect(self.target)) as db:
             metadata = json.loads(db.execute('SELECT document FROM index_metadata').fetchone()[0])
         self.assertEqual(metadata['coverage'], 'unknown')
@@ -171,7 +171,7 @@ class PublicationTests(unittest.TestCase):
         lock = self.home / '.search.db.lock'
         lock.unlink()
         lock.symlink_to(self.source)
-        with self.assertRaises(OSError):
+        with self.assertRaises((PublicationError, OSError)):
             self.build()
         self.assertEqual(old, self.digest())
 
@@ -261,6 +261,18 @@ class PublicationTests(unittest.TestCase):
         result = self.cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['message_count'], 0)
+
+    def test_source_cannot_be_destination_lock(self):
+        before = self.source.read_bytes()
+        source = self.home / '.search.db.lock'
+        self.source.rename(source)
+        with patch('lib.email_local_search.os.open', wraps=os.open) as opened:
+            with self.assertRaisesRegex(PublicationError, 'source_is_destination'):
+                build_index(source, self.target, mailbox='synthetic', account_id=42,
+                            source_revision='r')
+        opened.assert_not_called()
+        self.assertEqual(source.read_bytes(), before)
+        self.assertFalse(self.target.exists())
 
     def test_cli_bounded_output_and_sanitized_failure(self):
         result = self.cli()

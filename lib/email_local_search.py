@@ -76,6 +76,15 @@ def _readonly(path):
     return connection
 
 
+def _reject_source_alias(source, destination):
+    try:
+        destination_info = destination.resolve().stat()
+    except FileNotFoundError:
+        return
+    if os.path.samestat(source.resolve().stat(), destination_info):
+        raise IndexError('source_is_destination')
+
+
 def _validate_source(db, account_id):
     expected = {'messages': set(FIELDS), 'message_keys': {'message_id', 'local_key'},
                 'message_objects': {'local_key', 'account_id'}}
@@ -134,7 +143,7 @@ def _populate(source, target, mailbox, account_id, revision, digest, built_at):
     return dict(schema_version=SCHEMA_VERSION, build_state='complete', message_count=count)
 
 
-def build_index(source, index, *, mailbox, account_id, source_revision, clock=None):
+def build_index(source, index, *, mailbox, account_id, source_revision, clock=None, allow_empty=False):
     """Replace one private index; source must be a closed, sidecar-free decoded copy.
 
     Paths must be absolute without symlink components. Root-owned sticky temporary
@@ -142,6 +151,7 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
     The caller supplies the mailbox label; every message must independently bind to
     account_id in the decoder tables. This does not attest source completeness.
     A killed build may leave an owner-only generation for manual removal.
+    Replacing an existing index with zero messages requires allow_empty=True.
     """
     if (not isinstance(account_id, int) or isinstance(account_id, bool)
             or not 0 <= account_id <= 2**63 - 1
@@ -150,14 +160,14 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
             or len(source_revision) > 256):
         raise IndexError('invalid_binding')
     source, index = Path(source), Path(index)
+    lock = index.with_name('.' + index.name + '.lock')
+    _reject_source_alias(source, index)
+    _reject_source_alias(source, lock)
     _parent(source)
     _parent(index)
     _check_file(source)
     _check_file(index, optional=True)
-    if source == index:
-        raise IndexError('source_is_destination')
     built_at = clock() if clock else datetime.now(timezone.utc).isoformat()
-    lock = index.with_name('.' + index.name + '.lock')
     lock_fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     try:
         _private_file(os.fstat(lock_fd))
@@ -166,6 +176,7 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
         except BlockingIOError as error:
             raise IndexError('writer_busy') from error
         _check_file(index, optional=True)
+        _reject_source_alias(source, index)
         with tempfile.TemporaryDirectory(prefix='.email-search-', dir=index.parent) as generation:
             snapshot = Path(generation) / 'source.db'
             target = Path(generation) / 'index.db'
@@ -194,6 +205,9 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
             snapshot.unlink()
             _parent(index)
             _check_file(index, optional=True)
+            _reject_source_alias(source, index)
+            if result['message_count'] == 0 and index.exists() and not allow_empty:
+                raise IndexError('empty_source_would_replace_index')
             os.replace(target, index)
             directory_fd = os.open(index.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
