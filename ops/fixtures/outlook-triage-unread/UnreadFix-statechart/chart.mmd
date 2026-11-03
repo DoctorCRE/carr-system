@@ -26,9 +26,10 @@ stateDiagram-v2
   [*] --> s3
   s3 --> s7 : Unread coverage matches the<br/>selected Inbox badge
   s3 --> s2 : Coverage cannot be verified
-  s7 --> s6 : Coverage budget expires before<br/>the next selection
+  s7 --> s6 : Coverage budget expires
   s7 --> s0 : Mail arrives or unread status<br/>changes
   s7 --> s4 : Read mail has been filed
+  s4 --> s6 : Coverage budget expires
   s4 --> s1 : Unread mail is unchanged
   s4 --> s0 : Mail arrives or unread status<br/>changes
   s4 --> s5 : Unread mail changed during<br/>filing

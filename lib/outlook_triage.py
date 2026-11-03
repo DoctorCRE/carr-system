@@ -385,13 +385,17 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
                 return finish('failed', 'unread_set_changed', 'coverage_changed')
         finally:
             window.show_folder_pane(False)
-    except UiError:
+    except UiError as exc:
         badge_provenance()
+        if str(exc) == 'coverage_deadline':
+            return finish('skipped', 'unread_set_unverified', 'coverage_deadline')
         return finish('failed', 'unread_set_changed', 'post_action_unverified')
     changed = (unread - end_unread) + (end_unread - unread)
     report.unread_changed = sum(changed.values())
     if changed or end_badge != badge or end_badge != sum(end_unread.values()):
         return finish('failed', 'unread_set_changed', 'coverage_changed')
+    if time.monotonic() >= deadline:
+        return finish('skipped', 'unread_set_unverified', 'coverage_deadline')
     return finish(outcome.state, outcome.reason, 'verified', outcome.detail)
 
 

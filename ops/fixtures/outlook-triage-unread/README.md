@@ -3,7 +3,7 @@
 This is the supplied WR634.S1.J59 abstract lifecycle, bound to the implementation.
 It models one attempt. A retry is a new instance. TLC checks TypeOK,
 NoUnverifiedSorting and NoChangedSuccess. The generated summary records eight
-states and eight transitions. The model does not prove Outlook's rendering,
+states and nine transitions. The model does not prove Outlook's rendering,
 parser grammar, account identity, scroll completeness, moves, crashes or continuous timing. Budget expiry is an abstract event,
 not a model of elapsed seconds.
 
@@ -41,12 +41,14 @@ All tests call the real Row, Window or preserve_unread interfaces.
 | Sorting to Skipped | file_inbox lines 306-313, preserve_unread lines 363-364 | UnreadRoundFixTest.test_deadline_at_each_selection_point_skips |
 | Checking to Changed/Failed | comparisons at lines 369-394 | checking_arrival; UnreadRoundFixTest.test_checking_offscreen_arrival_fails_without_settling; UnreadVerificationTest.test_checking_never_discards_an_observed_change |
 | Checking to Failed | post-action handler at lines 388-390 | post_unknown, post_scan; UnreadVerificationTest.test_unknown_closing_badge_fails_after_rows |
-| Checking to Succeeded | return at line 395 | stable |
+| Checking to Skipped | preserve_unread lines 390-391,397-398 | UnreadVerificationTest.test_deadline_during_checking_skips_on_both_scan_paths |
+| Checking to Succeeded | return at line 399 | stable |
 
 The change is detected in the post-action check. The model's Sorting-to-Failed
 edge abstracts mutation during the callback plus this later detection into one
 step. It is not a claim of continuous observation during filing. The Checking
-to Failed edge covers unavailable evidence as well as a known change.
+to Failed edge covers unavailable evidence as well as a known change. Budget
+expiry on either post-action scan path skips with coverage_deadline.
 Post-action observations are bracketed by badge reads even without full scans.
 Any observed badge or unread identity/read-state change fails immediately, before
 later scans can replace that evidence. The closing badge is the observation

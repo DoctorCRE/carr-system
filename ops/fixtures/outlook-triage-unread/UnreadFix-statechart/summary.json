@@ -1,9 +1,9 @@
 {
   "view": "customer",
   "modelStates": 8,
-  "modelTransitions": 8,
+  "modelTransitions": 9,
   "chartStates": 8,
-  "chartTransitions": 8,
+  "chartTransitions": 9,
   "chartStatus": {
     "works": 8,
     "wrong": 0,
