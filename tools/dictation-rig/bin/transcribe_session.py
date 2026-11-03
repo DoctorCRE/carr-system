@@ -67,6 +67,7 @@ import speaker_split
 
 STATUS_FILE = ".transcription-status.json"
 MAX_ATTEMPTS = 3
+RECOVERY_TIMEOUT_SECONDS = 120
 
 AFCONVERT_BIN = "/usr/bin/afconvert"
 WHISPER_CLI_BIN = "/opt/homebrew/bin/whisper-cli"
@@ -370,7 +371,11 @@ def run_whisper(
         log(f"WHISPER {audio.name} model={model_path.name} recovery={recovery}")
         json_path = out_stem.with_suffix(".json")
         json_path.unlink(missing_ok=True)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+        decode_timeout = timeout
+        if recovery:
+            decode_timeout = (RECOVERY_TIMEOUT_SECONDS if timeout is None
+                              else min(timeout, RECOVERY_TIMEOUT_SECONDS))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=decode_timeout, env=env)
         if result.returncode != 0 or not json_path.exists():
             raise TranscribeError(f"whisper-cli failed for {audio.name} (rc={result.returncode})")
         return parse_whisper_json(json_path)
