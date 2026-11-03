@@ -629,6 +629,16 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     ['working','inbox','snooze','snoozed'], ['done','snoozed','expire','settled'],
     ['working','snoozed','expire','working'], ['done','override','reopen','inbox'],
     ['open','override','settle','settled'], ['open','override','snooze','snoozed'],
+    ['open','settled','start','settled'], ['open','snoozed','start','snoozed'],
+    ['open','override','start','inbox'], ['open','settled','resolve','settled'],
+    ['open','snoozed','resolve','snoozed'], ['open','override','resolve','inbox'],
+    ['working','settled','resolve','settled'], ['working','snoozed','resolve','snoozed'],
+    ['working','override','resolve','inbox'], ['done','override','snooze','snoozed'],
+    ['working','override','snooze','snoozed'], ['done','override','settle','settled'],
+    ['working','override','settle','settled'], ['done','settled','unsettle','inbox'],
+    ['working','settled','unsettle','inbox'], ['done','snoozed','unsettle','inbox'],
+    ['working','snoozed','unsettle','inbox'], ['done','snoozed','settle','settled'],
+    ['working','snoozed','settle','settled'],
   ];
   for(const [index,[source,disposition,event,expected]] of transitions.entries()) {
     await t.test(`statechart ${index+1}: ${source} with ${disposition}, ${event} reaches ${expected}`,async()=>{
@@ -637,6 +647,8 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
       await c.query(`insert into email_proposal values($1,'reply_draft','joe',$2,1,$3,'Synthetic transition',now(),null,now())`,[sourceId,id(700),status[source]]);
       const current=async()=>(await read()).items.find(i=>i.source_id===sourceId);
       if(disposition!=='inbox') await change(disposition==='override'?'unsettle':disposition==='settled'?'settle':'snooze',await current(),disposition==='snoozed'?'2099-01-01T00:00:00Z':null);
+      const before=await current();
+      assert.deepEqual(await current(),before);
       if(['start','resolve','reopen'].includes(event)) {
         await c.query('update email_proposal set status=$1,version=version+1,result_recorded_at=now() where id=$2',
           [{start:'approved_to_send',resolve:'sent',reopen:'pending'}[event],sourceId]);
