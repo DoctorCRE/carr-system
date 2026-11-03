@@ -21,12 +21,14 @@ stateDiagram-v2
   state "Unverified | Waiting" as s3
   state "Verified | Checking" as s4
   state "Verified | Failed" as s5
-  state "Verified | Sorting" as s6
+  state "Verified | Skipped" as s6
+  state "Verified | Sorting" as s7
   [*] --> s3
-  s3 --> s6 : Unread coverage matches the<br/>selected Inbox badge
+  s3 --> s7 : Unread coverage matches the<br/>selected Inbox badge
   s3 --> s2 : Coverage cannot be verified
-  s6 --> s0 : Mail arrives or unread status<br/>changes
-  s6 --> s4 : Read mail has been filed
+  s7 --> s6 : Coverage budget expires before<br/>the next selection
+  s7 --> s0 : Mail arrives or unread status<br/>changes
+  s7 --> s4 : Read mail has been filed
   s4 --> s1 : Unread mail is unchanged
   s4 --> s0 : Mail arrives or unread status<br/>changes
   s4 --> s5 : Unread mail changed during<br/>filing
@@ -37,3 +39,4 @@ stateDiagram-v2
   class s4 works
   class s5 works
   class s6 works
+  class s7 works

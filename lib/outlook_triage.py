@@ -18,8 +18,8 @@ the moves the unread set must be exactly the same, new arrivals included (a
 difference fails the run and a later fire retries). Any failed move fails the
 run; two in a row stop it at once. The folder tree and the sender table come
 from the configured private folder guide, which must be 0600; the report in
-out/outlook-triage/ (0700/0600) carries counts and a 12-character sha256 of each
-moved row's label, never a sender, subject or folder.
+out/outlook-triage/ (0700/0600) carries counts and fixed reason codes, never
+label hashes, senders, subjects or folders.
 
 """
 from __future__ import annotations
@@ -27,7 +27,6 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, time as clock, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -191,16 +190,11 @@ def decide(row: Row, guide: FolderGuide, find) -> Move | Leave:
     return Leave('no_rule_matched')
 
 
-def short_hash(label: str) -> str:
-    """Names one row in the report without naming its sender, subject or folder."""
-    return hashlib.sha256(label.encode('utf-8')).hexdigest()[:12]
-
-
 @dataclass
 class Report:
-    moved: list[tuple[str, str]] = field(default_factory=list)
+    moved: list[str] = field(default_factory=list)
     left: Counter = field(default_factory=Counter)
-    unread_changed: list[str] = field(default_factory=list)
+    unread_changed: int = 0
     coverage: dict = field(default_factory=lambda: {
         'selected_inbox_rows': 0, 'badge_status': 'unverified',
         'viewport_rows': 0, 'viewport_unread': 0,
@@ -212,11 +206,11 @@ class Report:
         lines = [f'outcome: {outcome.state} {outcome.reason}']
         if outcome.detail:
             lines.append(outcome.detail)
-        lines += [f'moved: {len(self.moved)}'] + [f'  {digest} {rule}' for digest, rule in self.moved]
+        lines += [f'moved: {len(self.moved)}']
+        lines += [f'  {rule}: {n}' for rule, n in sorted(Counter(self.moved).items())]
         lines += ['left in Inbox:'] + [f'  {reason}: {n}' for reason, n in sorted(self.left.items())]
         if self.unread_changed:
-            lines += ['unread set changed (rows gone, read, or arrived):']
-            lines += [f'  {digest}' for digest in self.unread_changed]
+            lines += [f'unread_changed: {self.unread_changed}']
         return '\n'.join(lines) + '\n'
 
 
@@ -266,9 +260,7 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
 
 
 def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
-              closed: Callable[[], bool], report: Report) -> dict[str | None, list[Row]]:
-    deadline = time.monotonic() + 120
-    allowed = lambda: time.monotonic() < deadline and not closed()
+              allowed: Callable[[], bool], report: Report) -> dict[str | None, list[Row]]:
 
     def scan() -> dict[str | None, list[Row]]:
         result = {}
@@ -311,13 +303,23 @@ def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
 
 def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
                closed: Callable[[], bool]) -> Outcome:
-    return preserve_unread(window, report, lambda tabs: (
-        _move_all(window, tabs, guide, find, limits, report, closed)), closed)
+    deadline = time.monotonic() + 120
+    def file_verified(tabs: dict) -> Outcome:
+        result = _move_all(window, tabs, guide, find, limits, report,
+                           lambda: time.monotonic() >= deadline or closed())
+        if time.monotonic() >= deadline:
+            raise UiError('coverage_deadline')
+        return result
+    return preserve_unread(window, report, file_verified, closed, deadline=deadline)
 
 
 def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome],
-                    closed: Callable[[], bool]) -> Outcome:
+                    closed: Callable[[], bool], *, deadline: float | None = None) -> Outcome:
     """Verify the unread set before and after any read-mail operation."""
+    if deadline is None:
+        deadline = time.monotonic() + 120
+    allowed = lambda: time.monotonic() < deadline and not closed()
+
     def finish(state: str, reason: str, code: str, detail: str = '') -> Outcome:
         report.coverage['coverage'] = code
         return Outcome(state, reason, (detail + ' ' if detail else '')
@@ -334,7 +336,7 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
         report.coverage['viewport_unread'] = sum(unread.values())
         scanned = sum(unread.values()) != badge
         if scanned:
-            tabs = _coverage(window, badge, tabs, closed, report)
+            tabs = _coverage(window, badge, tabs, allowed, report)
             unread = _unread(tabs)
         window.show_folder_pane(True)
         try:
@@ -342,7 +344,7 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
                 raise UiError('coverage_changed')
         finally:
             window.show_folder_pane(False)
-        if closed():
+        if not allowed():
             raise UiError('coverage_deadline')
     except UiError as exc:
         badge_provenance()
@@ -358,20 +360,36 @@ def preserve_unread(window: Window, report: Report, action: Callable[[dict], Out
     try:
         outcome = action(tabs)
     except UiError as exc:
+        if str(exc) == 'coverage_deadline':
+            return finish('skipped', 'unread_set_unverified', 'coverage_deadline')
         outcome = Outcome('failed', str(exc))
     except CuaError as exc:
         outcome = Outcome('failed', 'cua_driver_failed', str(exc))
     try:
         end_badge, end_tabs = _inbox(window)
         end_unread = _unread(end_tabs)
+        observed_change = end_unread - unread
+        unread_keys = {r.key for rows in tabs.values() for r in rows
+                       if r.read_state is ReadState.UNREAD}
+        observed_read = sum(row.key in unread_keys and row.read_state is ReadState.READ
+                            for rows in end_tabs.values() for row in rows)
+        if end_badge != badge or observed_change or observed_read:
+            report.unread_changed = sum(observed_change.values()) + observed_read
+            return finish('failed', 'unread_set_changed', 'coverage_changed')
         if scanned:
-            end_tabs = _coverage(window, end_badge, end_tabs, closed, report)
+            end_tabs = _coverage(window, end_badge, end_tabs, allowed, report)
             end_unread = _unread(end_tabs)
+        window.show_folder_pane(True)
+        try:
+            if window.inbox_badge() != badge:
+                return finish('failed', 'unread_set_changed', 'coverage_changed')
+        finally:
+            window.show_folder_pane(False)
     except UiError:
         badge_provenance()
         return finish('failed', 'unread_set_changed', 'post_action_unverified')
     changed = (unread - end_unread) + (end_unread - unread)
-    report.unread_changed = sorted({short_hash(label) for label in changed})
+    report.unread_changed = sum(changed.values())
     if changed or end_badge != badge or end_badge != sum(end_unread.values()):
         return finish('failed', 'unread_set_changed', 'coverage_changed')
     return finish(outcome.state, outcome.reason, 'verified', outcome.detail)
@@ -399,7 +417,7 @@ def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGu
                 return Outcome('timed_out', 'window_closed')
             if result is Moved.MOVED:
                 in_a_row = 0
-                report.moved.append((short_hash(row.label), decision.rule))
+                report.moved.append(decision.rule)
                 continue
             report.left[result.value] += 1
             if result is Moved.FAILED:

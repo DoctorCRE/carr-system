@@ -13,7 +13,6 @@ shows an unread row's label starting with "Unread". Fixtures use neutral IDs
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import hashlib
 import inspect
 import io
 import json
@@ -88,9 +87,6 @@ def msg(sender, subject, when='10:02 AM', unread=False, email=None):
     return {'label': f'Sender: {sender}, Subject: {subject},      {when},        '
                      f'Message preview: preview-text', 'unread': unread, 'email': email}
 
-
-def short(label):
-    return hashlib.sha256(label.encode()).hexdigest()[:12]
 
 
 FILE_A = msg('folder-A, client-001', 'subject-001')
@@ -961,19 +957,20 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
         self.assertEqual({p for p in state['presses'] if not p.startswith('folder:')}, {'Move'})
         report = self.report()
-        for row, rule in ((FILE_A, 'deal'), (VENDOR, 'vendor'), (FIRM, 'map')):
-            self.assertIn(f'  {short(row["label"])} {rule}', report)
+        for rule in ('deal', 'vendor', 'map'):
+            self.assertIn(f'  {rule}: 1', report)
         self.assertIn('no_rule_matched: 1', report)
         self.assertIn('unread: 1', report)
         self.assertEqual(stat.S_IMODE(self.report_path().stat().st_mode), 0o600)
         self.assertEqual(self.settled().read_text(), 'succeeded filed\n')
         self.assertTrue(state['sidebar'], 'folder pane restored')
 
-    def test_report_carries_counts_and_hashes_but_no_names(self):
+    def test_report_carries_counts_but_no_hashes_or_names(self):
         self.given([FILE_A, VENDOR, FIRM, NEWS, UNREAD], read_elsewhere_after_move=[UNREAD['label']])
         self.run_triage()
         report = self.report()
-        self.assertIn(short('Unread, ' + UNREAD['label']), report)
+        self.assertIn('unread_changed: 1', report)
+        self.assertNotRegex(report, r'(?i)\b[0-9a-f]{12,64}\b')
         self.assertNotRegex(report, NAMES)
         self.assertNotIn('Sender:', report)
 
@@ -1062,13 +1059,13 @@ class OutlookTriageTest(FakeOutlookCase):
         self.given([FILE_A, NEWS, UNREAD], read_elsewhere_after_move=[UNREAD['label']])
         outcome, _ = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
-        self.assertIn(short('Unread, ' + UNREAD['label']), self.report())
+        self.assertIn('unread_changed: 1', self.report())
 
     def test_new_unread_mail_arriving_during_the_run_fails_it_for_a_later_retry(self):
         self.given([FILE_A, NEWS, VENDOR], arrive_after_move=[ARRIVAL])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
-        self.assertIn(short('Unread, ' + ARRIVAL['label']), self.report())
+        self.assertIn('unread_changed: 1', self.report())
         self.assertFalse(self.settled().exists())
 
     def test_unread_rows_that_do_not_add_up_to_the_badge_block_every_move(self):
@@ -1426,7 +1423,7 @@ class UnreadRoundFixTest(FakeOutlookCase):
                 def rows(window, *args, **kwargs):
                     result = original(window, *args, **kwargs)
                     state = json.loads(self.state.read_text())
-                    if ((point == 'first_row' and not state['sidebar']) or
+                    if ((point == 'first_row' and inspect.stack()[1].function == 'move') or
                         (point == 'next_row' and state['moved']) or
                         (point == 'folder' and state.get('selected'))):
                         clock[0] = 121
@@ -1443,8 +1440,9 @@ class UnreadRoundFixTest(FakeOutlookCase):
         for change in (False, True):
             with self.subTest(change=change):
                 self.given([FILE_A, NEWS, VENDOR], arrive_after_move=[ARRIVAL] if change else [])
-                with redirect_stdout(io.StringIO()) as output:
-                    outcome, state = self.run_triage()
+                with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()) as output:
+                    outcome = triage.run(self.repo, self.home, EVENING, Waits(2, 0, 0, 0, 0, 0, 0),
+                                         triage.Limits(), lambda: EVENING)
                 diagnostics = output.getvalue() + outcome.detail + self.report()
                 self.assertNotRegex(diagnostics, r'(?i)\b[0-9a-f]{12,64}\b')
                 self.assertNotIn(FILE_A['label'], diagnostics)
@@ -1721,6 +1719,38 @@ class UnreadVerificationTest(unittest.TestCase):
         with patch('lib.outlook_ui.cua', return_value={'elements': elements}):
             with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
                 window.inbox_badge()
+
+    def test_checking_never_discards_an_observed_change(self):
+        x, y, z = self.row('x', True), self.row('y', True), self.row('z', True)
+        for mode in ('badge', 'read', 'arrival'):
+            with self.subTest(mode=mode):
+                window = self.Window({None: [x]}, 2, {None: [x, y]})
+                def action(tabs):
+                    window.tabs = {None: [self.row('x')] if mode == 'read' else
+                                   [z] if mode == 'arrival' else [x]}
+                    if mode == 'badge':
+                        window.badge = 3
+                    return triage.Outcome('succeeded', 'filed')
+                report = triage.Report()
+                outcome = triage.preserve_unread(window, report, action, lambda: False)
+                self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
+                self.assertEqual(report.coverage['scan_count'], 2)
+
+    def test_unknown_closing_badge_fails_after_rows(self):
+        from lib.outlook_ui import UiError
+        x = self.row('x', True)
+        window = self.Window({None: [x]}, 1)
+        original = window.rows
+        checking = []
+        def rows():
+            result = original()
+            if checking:
+                window.inbox_badge = lambda: (_ for _ in ()).throw(UiError('inbox_badge_unverified'))
+            return result
+        window.rows = rows
+        outcome = triage.preserve_unread(window, triage.Report(),
+            lambda tabs: checking.append(True) or triage.Outcome('succeeded', 'filed'), lambda: False)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
 
     def test_lifecycle_edges_and_count_only_diagnostics(self):
         from lib.outlook_ui import UiError

@@ -22,15 +22,15 @@ Init ==
 
 \* Stable complete scans match the selected Inbox badge
 StableCompleteScansMatchTheSelectedInboxBadge ==
-    /\ (coverage \in {"Unverified"} /\ mail \in {"Waiting"}) \* lib/outlook_triage.py:331-349
+    /\ (coverage \in {"Unverified"} /\ mail \in {"Waiting"}) \* lib/outlook_triage.py:331-348
     /\ \/ (coverage = "Unverified" /\ coverage' = "Verified")
        \/ (coverage \notin {"Unverified"} /\ UNCHANGED coverage)
     /\ \/ (mail = "Waiting" /\ mail' = "Sorting")
        \/ (mail \notin {"Waiting"} /\ UNCHANGED mail)
 
-\* Unread mail is unchanged
+\* Unread mail is unchanged through the closing badge observation.
 UnreadMailIsUnchanged ==
-    /\ (coverage \in {"Verified"} /\ mail \in {"Checking"}) \* lib/outlook_triage.py:364-378
+    /\ (coverage \in {"Verified"} /\ mail \in {"Checking"}) \* lib/outlook_triage.py:369-395
     /\ \/ (coverage = "Verified" /\ coverage' = "Finished")
        \/ (coverage \notin {"Verified"} /\ UNCHANGED coverage)
     /\ \/ (mail = "Checking" /\ mail' = "Succeeded")
@@ -38,7 +38,7 @@ UnreadMailIsUnchanged ==
 
 \* Mail arrives or unread status changes
 MailArrivesOrUnreadStatusChanges ==
-    /\ (coverage \in {"Verified"} /\ mail \in {"Sorting", "Checking"}) \* lib/outlook_triage.py:359-377
+    /\ (coverage \in {"Verified"} /\ mail \in {"Sorting", "Checking"}) \* lib/outlook_triage.py:360-394
     /\ \/ (coverage = "Verified" /\ coverage' = "Changed")
        \/ (coverage \notin {"Verified"} /\ UNCHANGED coverage)
     /\ \/ (mail = "Sorting" /\ mail' = "Failed")
@@ -46,24 +46,31 @@ MailArrivesOrUnreadStatusChanges ==
        \/ (mail \notin {"Sorting", "Checking"} /\ UNCHANGED mail)
 
 \* Coverage cannot be verified
-\* lib/outlook_triage.py:350-357, pre-action refusal.
+\* lib/outlook_triage.py:349-359, pre-action refusal.
 CoverageCannotBeVerified ==
     /\ \/ (mail = "Waiting" /\ mail' = "Skipped")
     /\ UNCHANGED <<coverage>>
 
 \* Read mail has been filed
-\* lib/outlook_triage.py:359-364, callback returns before checking.
+\* lib/outlook_triage.py:360-367, callback returns before checking.
 ReadMailHasBeenFiled ==
     /\ \/ (mail = "Sorting" /\ mail' = "Checking")
     /\ UNCHANGED <<coverage>>
 
 \* Unread mail changed during filing
-\* lib/outlook_triage.py:365-377, post-action coverage failure.
+\* lib/outlook_triage.py:369-394, post-action coverage failure.
 UnreadMailChangedDuringFiling ==
     /\ \/ (mail = "Checking" /\ mail' = "Failed")
     /\ UNCHANGED <<coverage>>
 
-Next == StableCompleteScansMatchTheSelectedInboxBadge \/ UnreadMailIsUnchanged \/ MailArrivesOrUnreadStatusChanges \/ CoverageCannotBeVerified \/ ReadMailHasBeenFiled \/ UnreadMailChangedDuringFiling
+\* The shared coverage budget expires before a row or folder selection.
+\* lib/outlook_triage.py:306-313,363-364; lib/outlook_ui.py:662-665,695-696.
+CoverageDeadlineExpires ==
+    /\ mail = "Sorting"
+    /\ mail' = "Skipped"
+    /\ UNCHANGED coverage
+
+Next == CoverageDeadlineExpires \/ StableCompleteScansMatchTheSelectedInboxBadge \/ UnreadMailIsUnchanged \/ MailArrivesOrUnreadStatusChanges \/ CoverageCannotBeVerified \/ ReadMailHasBeenFiled \/ UnreadMailChangedDuringFiling
 
 Spec == Init /\ [][Next]_vars
 
