@@ -1,0 +1,40 @@
+{
+  "schema": "email-delivery-failures.v1",
+  "cases": [
+    {
+      "name": "explicit_550",
+      "body": "Reporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\nFinal-Recipient: rfc822; pat@example.com\nAction: failed\nStatus: 5.7.520\nDiagnostic-Code: smtp; 550 5.7.520 Message rejected",
+      "accepted": true
+    },
+    {
+      "name": "bounce_word",
+      "body": "bounce original@example.com",
+      "accepted": false
+    },
+    {
+      "name": "quoted",
+      "body": "> Reporting-MTA: dns; mx.example.com\n> Original-Message-ID: <original@example.com>\n> Final-Recipient: rfc822; pat@example.com\n> Action: failed\n> Status: 5.7.520\n> Diagnostic-Code: smtp; 550 5.7.520 Message rejected",
+      "accepted": false
+    },
+    {
+      "name": "forwarded",
+      "body": "Forwarded message\nReporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\nFinal-Recipient: rfc822; pat@example.com\nAction: failed\nStatus: 5.7.520\nDiagnostic-Code: smtp; 550 5.7.520 Message rejected",
+      "accepted": false
+    },
+    {
+      "name": "success",
+      "body": "Reporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\nFinal-Recipient: rfc822; pat@example.com\nAction: delivered\nStatus: 5.7.520\nDiagnostic-Code: smtp; 550 5.7.520 Message rejected",
+      "accepted": false
+    },
+    {
+      "name": "conflicting_ids",
+      "body": "Reporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\nFinal-Recipient: rfc822; pat@example.com\nAction: failed\nStatus: 5.7.520\nDiagnostic-Code: smtp; 550 5.7.520 Message rejected\nOriginal-Message-ID: <other@example.com>",
+      "accepted": false
+    },
+    {
+      "name": "two_recipients",
+      "body": "Reporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\nFinal-Recipient: rfc822; pat@example.com\nAction: failed\nStatus: 5.7.520\nDiagnostic-Code: smtp; 550 5.7.520 Message rejected\nFinal-Recipient: rfc822; other@example.com",
+      "accepted": false
+    }
+  ]
+}

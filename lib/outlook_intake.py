@@ -38,6 +38,12 @@ deal, a known contact at a new address, a new matter, or not business. Business 
 the address once on the claim card through propose-email-lead with that reasoning, where
 a partner confirms or declines it. The email stays unresolved and logs on the record
 once the address is on one.
+Complete structured delivery-status reports are intercepted before the machine-sender skip.
+An exact original Message-ID in the selected mailbox and a complete filing sweep with
+one confirmed deal for every source activity permit an
+unverified delivery-failure finding. Sent receipts remain unchanged. Unmatched reports
+retry at most 32 times within 30 days, then remain unresolved until retention expires.
+Sender labels alone establish no failure.
 Every write carries uuid5(NAMESPACE_URL, "<verb>|<ref>|<source id>"), so an
 action stays pending in the state file until the verb acknowledges it and the
 retry replays the same key. A run with any write, model or cleanup failure
@@ -93,7 +99,7 @@ import tempfile
 from typing import Callable
 import uuid
 
-from lib import email_links, unresolved_email
+from lib import email_delivery_failure, email_links, unresolved_email
 from lib.email_outcomes import business_day_deadline
 from lib.outlook_settings import load_settings, OutlookSettings
 from lib.outlook_runtime import stamp
@@ -104,7 +110,7 @@ WINDOW = (time(7, 0), time(19, 30))
 COVERAGE_HELD_RECIPIENTS_LIMIT = 20  # More held Sent items require human attention.
 COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
 WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
-                         'record-deal-item', 'complete-deal-item', 'drop-action'})
+                         'record-deal-item', 'complete-deal-item', 'drop-action', 'record-finding'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
 DEAL_REF = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
@@ -115,6 +121,7 @@ LOOKBACK = timedelta(hours=6)
 UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
 UNRESOLVED_DAYS = timedelta(days=30)
+DELIVERY_RETRY_LIMIT = 32
 REFRESH_INTERVAL = timedelta(minutes=30)
 COPY_WINDOW = 86_400
 # Fractions and percentage-point drops for decoder health.
@@ -145,7 +152,7 @@ ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reus
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed',
-                         'agenda_version_conflict', 'version_conflict'})
+                         'agenda_version_conflict', 'version_conflict', 'email_delivery_filing_changed'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
@@ -153,7 +160,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'version_conflict', *CLOSED_ELSEWHERE):
+    if error in ('key_reuse', 'version_conflict', 'email_delivery_filing_changed', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -464,16 +471,17 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
             recipients.setdefault(key, {}).setdefault(kind, []).append(address)
     object_columns = {r['name'] for r in con.execute('PRAGMA table_info(message_objects)')}
     sender = 'o.sender' if 'sender' in object_columns else 'NULL AS sender'
+    reply_field = 'o.in_reply_to' if 'in_reply_to' in object_columns else 'NULL AS in_reply_to'
     ownership_fields = ', '.join(f'o.{name}' if name in object_columns else f'NULL AS {name}'
                                  for name in ('account_id', 'folder_id'))
     found = {}
     for row in con.execute(
             'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
             'GROUP BY message_id HAVING COUNT(DISTINCT local_key) = 1) '
-            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender}, {ownership_fields} '
+            f'SELECT k.message_id, o.local_key, o.subject, o.conversation_id, o.recipients_status, {sender}, {ownership_fields}, {reply_field} '
             'FROM k '
             'JOIN message_objects o ON o.local_key = k.local_key'):
-        fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender')
+        fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender', 'in_reply_to')
                   if row[name] is not None and str(row[name]).strip()}
         fields.update(account_id=row['account_id'], folder_id=row['folder_id'])
         lists = recipients.get(row['local_key'])
@@ -916,7 +924,8 @@ class Run:
                                       'reads_abandoned', 'read_context_failed', 'flags_unfiled', 'flags_unmatched',
                                       'flags_unknown', 'flags_untracked', 'flags_reflagged', 'flags_filed',
                                       'flags_completed', 'flags_cleared', 'flags_closed_elsewhere',
-                                      'mail_rekeyed', 'mail_inherited', 'message_id_ambiguous', 'mail_ids_reset')}
+                                      'mail_rekeyed', 'mail_inherited', 'message_id_ambiguous', 'mail_ids_reset',
+                                      'delivery_failures_recorded', 'delivery_failures_pending')}
         self.deals: dict[str, str] = {}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -1039,8 +1048,100 @@ class Run:
                     self.counts['mail_rekeyed'] += 1
             ids[mid] = holder
 
+    def delivery_mailbox(self) -> dict:
+        account = _hash(f'{self.settings.owner}|{self.settings.account.lower()}|{self.settings.folder_account_id}')
+        return self.state.setdefault('delivery_mailboxes', {}).setdefault(account, {'sources': {}, 'reports': {}})
+
+    def observe_delivery_failures(self, mails: list[dict]) -> set[str]:
+        mailbox = self.delivery_mailbox()
+        handled = set()
+        for m in mails:
+            if m['metadata_incomplete'] or m['sent_unix'] < (self.now - UNRESOLVED_DAYS).timestamp():
+                continue
+            mid = email_delivery_failure.message_id(m.get('message_id'))
+            if mid and m['sender'].lower() == self.settings.account.lower():
+                sources = mailbox['sources'].setdefault(mid, {})
+                sources.setdefault(m['ident'], {'recipient_addresses': sorted(set(_addresses(m['recipients']) +
+                                                                               _addresses(m.get('cc'))))})
+            if (m['sender'].lower().split('@')[0] not in ('postmaster', 'mailer-daemon')
+                    or self.settings.account.lower() not in _addresses(m['recipients'])
+                    or m['sent_unix'] > self.now.timestamp() + 300):
+                continue
+            report = email_delivery_failure.parse_report(m['text'], full=m['full'], in_reply_to=m.get('in_reply_to'))
+            if report is None:
+                continue
+            handled.add(m['ident'])
+            report_key = mid or m['ident']
+            mailbox['reports'].setdefault(report_key, {
+                'original_id': report.original_id, 'recipient': report.recipient,
+                'status': report.status, 'diagnostic': report.diagnostic,
+                'report_id': report_key, 'observed_at': _iso(m['sent_unix']), 'disposition': 'retryable'})
+        return handled
+
+    def file_delivery_failures(self) -> bool:
+        mailbox = self.delivery_mailbox()
+        for report in mailbox['reports'].values():
+            if report['disposition'] in ('recorded', 'unresolved'):
+                continue
+            args = report.get('request')
+            if args is None:
+                if (report.get('attempts', 0) >= DELIVERY_RETRY_LIMIT
+                        or datetime.fromisoformat(report['observed_at']) < self.now - UNRESOLVED_DAYS):
+                    report['disposition'] = 'unresolved'
+                    continue
+                report['attempts'] = report.get('attempts', 0) + 1
+                if self.state.get('links_cursor') or not mailbox.get('filing_complete'):
+                    continue
+                sources = mailbox['sources'].get(report['original_id'], {})
+                if len(sources) != 1:
+                    continue
+                ident, source = next(iter(sources.items()))
+                if (ident in self.state.get('mail_unresolved', {}) or ident in self.state.get('pending_full', {})
+                        or report['recipient'] not in source['recipient_addresses']):
+                    continue
+                activities = set()
+                for request_id, request in self.state.get('requests', {}).items():
+                    if request['verb'] != 'log-activity' or not request.get('acknowledged') or not request.get('activity_id'):
+                        continue
+                    payload = json.loads(request['payload'])
+                    identity = payload.get('email_identity', {})
+                    if (payload.get('kind') == 'email_out'
+                            and identity.get('mailbox_account') == self.settings.account
+                            and identity.get('mailbox_owner') == self.settings.owner
+                            and request_id == self.activity_key(payload['ref'], ident)):
+                        activities.add(request['activity_id'])
+                deals = {mailbox.get('deals', {}).get(activity) for activity in activities}
+                if None in deals or len(deals) != 1:
+                    continue
+                deal = next(iter(deals))
+                args = {'idempotency_key': self.owner_key('record-finding', deal,
+                        f'delivery-failure|{self.settings.account}|{self.settings.folder_account_id}|' + report['report_id']),
+                        'subject': deal, 'kind': 'email_delivery_failure', 'epistemic_status': 'observed',
+                        'source': 'outlook-delivery-report/' + _hash(self.settings.account.lower()) + '/' + _hash(report['report_id']),
+                        'observed_at': report['observed_at'],
+                        'value': {'verification': 'unverified_report', 'mailbox_account': self.settings.account,
+                                  'mailbox_owner': self.settings.owner, 'original_message_id': report['original_id'],
+                                  'source_activity_ids': sorted(activities),
+                                  'source_activity_versions': {a: mailbox.get('versions', {}).get(a) for a in sorted(activities)},
+                                  'report_id': report['report_id'],
+                                  'recipient': report['recipient'], 'status': report['status'],
+                                  'diagnostic': report['diagnostic'], 'parser_version': 1}}
+                report['request'] = args
+                _save(self.out, self.state)
+            if self.write('record-finding', args, 'delivery report'):
+                report['disposition'] = 'recorded'
+                self.counts['delivery_failures_recorded'] += 1
+            elif self.state['requests'][args['idempotency_key']].get('error_code') == 'email_delivery_filing_changed':
+                del self.state['requests'][args['idempotency_key']]
+                report.pop('request', None)
+                mailbox['filing_complete'] = False
+                _save(self.out, self.state)
+        self.counts['delivery_failures_pending'] = sum(r['disposition'] == 'retryable' for r in mailbox['reports'].values())
+        return not any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked'))
+
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         self.reconcile([m for m in mails if not m['metadata_incomplete']])
+        delivery_reports = self.observe_delivery_failures(mails)
         done = self.state.setdefault('mail_done', {})
         unresolved = self.state.setdefault('mail_unresolved', {})
         pending = self.state.setdefault('pending_full', {})
@@ -1049,6 +1150,9 @@ class Run:
         for ident, item in unresolved.items():
             retries.setdefault(item['ck'], []).append((ident, item['sent']))
         for m in mails:
+            if m['ident'] in delivery_reports:
+                unresolved.pop(m['ident'], None)
+                continue
             if m['metadata_incomplete']:
                 self.counts['emails'] += int(m['ident'] not in unresolved)
                 unresolved[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix'],
@@ -1232,12 +1336,23 @@ class Run:
             'purpose': 'links', 'limit': 200,
             **({'after': self.state['links_cursor']} if self.state.get('links_cursor') else {})})
         self.counts['links_filed'] = 0
+        mailbox = self.delivery_mailbox()
+        if not self.state.get('links_cursor'):
+            mailbox['deals'] = {}
+            mailbox['versions'] = {}
+        mailbox['filing_complete'] = False
+        source_activities = {r['activity_id'] for r in self.state.get('requests', {}).values()
+                             if r.get('activity_id') and r['verb'] == 'log-activity'
+                             and json.loads(r['payload']).get('kind') == 'email_out'}
         pending_sources = {self.state.get('requests', {}).get(self.activity_key(ref, ident), {}).get('activity_id')
                            for ident, pending in self.state.get('pending_full', {}).items()
                            for ref in pending['refs']}
         for mail in queue.get('emails', []):
             if mail.get('deal'):
                 self.deals[mail['activity_id']] = mail['deal']
+                if mail['activity_id'] in source_activities:
+                    mailbox.setdefault('deals', {})[mail['activity_id']] = mail['deal']
+                    mailbox.setdefault('versions', {})[mail['activity_id']] = mail.get('version')
             if not mail.get('deal') or mail['activity_id'] in pending_sources:
                 continue
             links = sorted(email_links.extract_links(mail.get('body') or ''))
@@ -1254,6 +1369,7 @@ class Run:
         if any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked')):
             return False
         self.state['links_cursor'] = queue.get('next_cursor')
+        mailbox['filing_complete'] = not self.state['links_cursor']
         return True
 
     def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
@@ -1602,7 +1718,24 @@ def _prune(state: dict, now: datetime) -> None:
                           if ident in unresolved or ident in state.get('pending_full', {}) or ident in state.get('flags', {})
                           or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
-                         if not r['acknowledged'] or r['created_at'] >= horizon}
+                         if not r['acknowledged'] or r['created_at'] >= horizon
+                         or (r['created_at'] >= oldest and r['verb'] == 'log-activity'
+                             and json.loads(r['payload']).get('kind') == 'email_out')}
+    activity_ids = {r['activity_id'] for r in state['requests'].values() if r.get('activity_id')}
+    for mailbox in state.get('delivery_mailboxes', {}).values():
+        for report in mailbox['reports'].values():
+            if (not report.get('request') and report['disposition'] == 'retryable'
+                    and (datetime.fromisoformat(report['observed_at']).timestamp() < oldest
+                         or report.get('attempts', 0) >= DELIVERY_RETRY_LIMIT)):
+                report['disposition'] = 'unresolved'
+        mailbox['reports'] = {k: r for k, r in mailbox['reports'].items()
+                              if (r.get('request') and r['disposition'] != 'recorded')
+                              or datetime.fromisoformat(r['observed_at']).timestamp() >= oldest - BACKFILL.total_seconds()}
+        mailbox['sources'] = {mid: kept for mid, sources in mailbox['sources'].items()
+                              if (kept := {ident: source for ident, source in sources.items()
+                                           if int(ident.rsplit(':', 1)[1]) >= oldest})}
+        mailbox['deals'] = {a: d for a, d in mailbox.get('deals', {}).items() if a in activity_ids}
+        mailbox['versions'] = {a: v for a, v in mailbox.get('versions', {}).items() if a in activity_ids}
     for name in ('events_logged', 'events_balled'):
         state[name] = {k: t for k, t in state.get(name, {}).items() if t >= horizon}
 
@@ -1829,6 +1962,7 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 linked = work.file_links()
             except CarrError:
                 return Outcome('failed', 'email_links_read_failed', outcome.counts)
+            delivery = work.file_delivery_failures()
             flagged = work.apply_flags()
             for name, count in work.counts.items():
                 outcome.counts[name] = outcome.counts.get(name, 0) + count
@@ -1838,6 +1972,8 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             _save(out, state)
             if not linked:
                 return Outcome('failed', 'email_links_pending', outcome.counts)
+            if not delivery:
+                return Outcome('failed', 'delivery_failures_pending', outcome.counts)
             if not flagged:
                 return Outcome('failed', 'flags_pending', outcome.counts)
             if work.counts['links_filed']:
