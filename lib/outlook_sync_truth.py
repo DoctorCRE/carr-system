@@ -60,11 +60,15 @@ def _headers(path):
     headers = []
     for header in root.iter('MessageHeader'):
         values = {}
+        if len(header.findall('From')) > 1:
+            raise LogError('invalid_field_structure')
         for field, selector in {'message_id': 'InternetMessageId', **FIELDS}.items():
             nodes = header.findall(selector)
             if len(nodes) > 1:
                 raise LogError('duplicate_field')
-            values[field] = nodes[0].text.strip() if nodes and nodes[0].text else None
+            if nodes and len(nodes[0]):
+                raise LogError('invalid_field_structure')
+            values[field] = nodes[0].text if nodes else None
         headers.append(values)
     if not headers:
         raise LogError('no_message_headers')
@@ -76,6 +80,7 @@ def _redacted(value):
 
 
 def _time(value):
+    value = value.strip()
     if value.isdecimal():
         ticks = int(value) - 621355968000000000
         return ticks / 10_000_000
@@ -95,7 +100,12 @@ def agreement_report(decoded: Path, logs: list[Path]) -> AgreementReport:
     failures: Counter[str] = Counter()
     decoded_rows = defaultdict(list)
     try:
-        with closing(sqlite3.connect(Path(decoded).resolve().as_uri() + '?mode=ro', uri=True)) as db:
+        snapshot = Path(decoded).resolve()
+        if Path(str(snapshot) + '-wal').exists():
+            report['status'] = 'failed'
+            report['input_failures'] = {'decoded_wal_present': 1}
+            return report
+        with closing(sqlite3.connect(snapshot.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
             db.row_factory = sqlite3.Row
             for row in db.execute('SELECT message_id, subject, preview, sender, sender_name, sent_unix FROM messages'):
                 decoded_rows[row['message_id']].append(dict(row))

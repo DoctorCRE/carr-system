@@ -23,8 +23,13 @@ coverage on either partner's Outlook build remain unverified.
 
 `agreement_report(decoded, logs)` returns `outlook-sync-truth/v1` aggregate JSON.
 The CLI is `tools/outlook-sync-truth.py`, with required `--decoded` and explicit
-`--logs` paths. No files are written. SQLite uses `mode=ro`. The report contains
-no message values, identifiers, file paths or exception text.
+`--logs` paths. No files are written. Supply a stable, offline SQLite snapshot
+that will not change during the report. SQLite uses `mode=ro&immutable=1` to
+avoid creating WAL or SHM sidecars even for a cleanly closed WAL-mode database.
+A snapshot with an adjacent `-wal` file is rejected as `decoded_wal_present`
+before opening it, so uncheckpointed content is never silently ignored. Prepare
+a checkpointed copy outside this tool; the report never checkpoints inputs.
+The report contains no message values, identifiers, file paths or exception text.
 
 The organising structure is a field selector table and an outcome histogram.
 Each unique supplied header contributes exactly one outcome per field.
@@ -36,6 +41,16 @@ Each unique supplied header contributes exactly one outcome per field.
 | sender | From/Address | Exact text |
 | sender_name | From/Name | Exact text |
 | sent_unix | SentTime | UTC instant from an offset-bearing ISO timestamp or .NET ticks |
+
+Exact text and InternetMessageId retain leading, trailing and internal whitespace.
+XML parsing decodes character references and normalizes XML line endings; no
+additional text trimming, case folding or Unicode normalization is performed.
+Only SentTime strips surrounding whitespace before typed timestamp conversion.
+Each selected scalar, including InternetMessageId, must have no child elements.
+At most one From parent may supply Name and Address. Duplicate scalar selectors
+fail as `duplicate_field`; nested scalars or multiple From parents fail as
+`invalid_field_structure`. A structurally invalid file contributes no agreements
+and exits nonzero. Absent fields remain explicit missing evidence.
 
 The join requires an unredacted InternetMessageId present exactly once in both
 input datasets. Repeated identical selected headers collapse. Conflicting selected
@@ -71,6 +86,9 @@ SQLite rows and gzip XML independently of hxprobe and exercises the real CLI.
 The acceptance suite first failed against origin/main because the comparison
 module did not exist. Coverage includes field counts, redaction, ambiguity,
 missing input, XML/gzip failures, timestamp conversion and output privacy.
+CLI regressions cover nested scalar content, split From parents, exact-text
+whitespace differences, and closed and uncheckpointed WAL inputs. Both WAL
+cases assert the entire input directory's file names and bytes remain unchanged.
 CI's gates class discovers the selftest automatically.
 
 No statechart is required for this stateless report. No AI output changes or
