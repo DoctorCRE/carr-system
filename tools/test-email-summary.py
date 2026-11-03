@@ -35,6 +35,30 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(result['status'], 'available')
         self.assertEqual(result['provenance']['evidence'], body)
 
+    def test_captured_subject_and_sender_reach_model_as_fenced_data(self):
+        seen = []
+        for subject in ['Re: Approve the purchase?', 'Re: Cancel the purchase?']:
+            result = email_summary.generate({'body': 'Yes.', 'email_context': {
+                'subject': subject, 'sender': {'name': 'Synthetic sender', 'email': 'sender@example.test'}}},
+                lambda text: seen.append(text) or {'text': 'The sender agrees.', 'evidence': subject})
+            self.assertEqual(result['status'], 'available')
+            self.assertEqual(result['provenance']['evidence'], subject)
+        self.assertNotEqual(seen[0], seen[1])
+        self.assertIn('Synthetic sender', seen[0])
+        self.assertIn('sender@example.test', seen[0])
+        self.assertIn('<incoming_email>', seen[0])
+
+    def test_sentence_limit_is_enforced(self):
+        for text, status in [('Please review. Please review. Please review.', 'unavailable'),
+                             ('Please review! Confirm? Wait.', 'unavailable'),
+                             ('Please review. Please confirm.', 'available'),
+                             ('Dr. Smith requests review of the $3.50 charge.', 'available'),
+                             ('Please review', 'available')]:
+            with self.subTest(text=text):
+                result = email_summary.generate({'body': 'Please review.'}, lambda _: {
+                    'text': text, 'evidence': 'Please review.'})
+                self.assertEqual(result['status'], status)
+
     def test_exception_is_honest(self):
         def fails(_):
             raise RuntimeError('synthetic failure')

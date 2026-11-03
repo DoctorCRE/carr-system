@@ -3021,3 +3021,68 @@ test('expired summary leases retry without accepting a late result and legacy pe
   const next = await command('email-router-queue', { purpose: 'summaries', limit: 1, after: first.next_cursor });
   assert.notEqual(first.emails[0].activity_id, next.emails[0].activity_id);
 });
+
+
+for (const operation of ['queue', 'claim', 'result', 'read']) {
+for (const legacy of [false, true]) {
+  for (const owner of ['joe', 'dell']) {
+    test(`summary ${operation} access stays with ${owner} for ${legacy ? 'ownerless legacy' : 'captured mailbox'} sources`, async () => {
+      const humans = {};
+      for (const slug of ['joe', 'dell']) humans[slug] = {
+        ...(await c.query("insert into actor(slug,kind,display_name) values($1,'human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug", [slug])).rows[0], human: true };
+      const local = slug => ({ ...humans[slug], human: false, slug: `${slug}-local`,
+        native_agent_verified: true, sponsoring_human_slug: slug });
+      const creator = legacy ? humans[owner] : local(owner);
+      const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+        kind: 'email_in', summary: 'Synthetic mailbox summary', detail: quote,
+        ...(!legacy ? { email_source: { mailbox_owner: owner, sender_email: 'sender@example.test' } } : {}) }, creator);
+      await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
+        activity_id: source.activity_id, deal, evidence_quote: quote, confidence: 0.9 }, creator);
+      const queue = async (identity, pending_only) => {
+        const emails = [];
+        let after;
+        do {
+          const page = await command('email-router-queue', { purpose: 'summaries', pending_only, limit: 200,
+            ...(after ? { after } : {}) }, identity, 'carr_reader');
+          emails.push(...page.emails);
+          after = page.next_cursor;
+        } while (after);
+        return emails.find(row => row.activity_id === source.activity_id);
+      };
+      const owned = await queue(creator, false);
+      assert.ok(owned);
+      const claim = identity => command('record-email-proposal', { idempotency_key: randomUUID(),
+        mode: 'summary_claim', activity_id: source.activity_id, source_hash: owned.source_hash }, identity, 'carr_writer');
+      const other = owner === 'joe' ? 'dell' : 'joe';
+      const snapshot = async () => (await c.query('select * from email_message_summary where activity_id=$1', [source.activity_id])).rows;
+      for (const identity of [humans[other], local(other)]) {
+        if (operation === 'queue') for (const pending of [true, false]) assert.equal(await queue(identity, pending), undefined);
+        if (operation === 'claim') await refuses(claim(identity), 'email_summary_source_not_owned');
+        assert.deepEqual(await snapshot(), []);
+      }
+      const claimed = await claim(creator);
+      const result = identity => command('record-email-proposal', { idempotency_key: randomUUID(),
+        mode: 'summary_result', activity_id: source.activity_id, source_hash: owned.source_hash,
+        claim_id: claimed.claim_id, summary_status: 'available', summary_text: 'The sender reports receiving the LOI.',
+        summary_provenance: { evidence: quote } }, identity, 'carr_writer');
+      const before = await snapshot();
+      for (const identity of [humans[other], local(other)]) {
+        if (operation === 'result') await refuses(result(identity), 'email_summary_source_not_owned');
+        assert.deepEqual(await snapshot(), before);
+      }
+      await result(creator);
+      for (const identity of [humans[other], local(other)]) {
+        const list = await command('list-email-proposals', { deal, limit: 200 }, identity, 'carr_reader');
+        if (operation === 'read') assert.equal(list.proposals.some(row => row.source.activity_id === source.activity_id), false);
+      }
+      for (const identity of [humans[owner], local(owner)]) {
+        if (legacy && identity.id !== creator.id) continue;
+        assert.ok(await queue(identity, true));
+        assert.equal((await claim(identity)).generate, false);
+      }
+      await refuses(command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_claim',
+        activity_id: source.activity_id, source_hash: 'sha256:' + '0'.repeat(64) }, creator), 'email_summary_source_stale');
+    });
+  }
+}
+}
