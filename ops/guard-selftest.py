@@ -1731,6 +1731,13 @@ for command in ZSH_GLOB_TRUNCATED_READS:
     case('J147 incomplete read ' + command, bash(command, '/tmp'), DENY)
 
 
+
+for read in ('git status', 'gh pr view 1'):
+    for literal in ('"("', '")"', r'\(', r'\)'):
+        command = read + ' ' + literal + ' && echo issue#123'
+        case('J147 quoted punctuation ' + command, bash(command, '/tmp'), ALLOW)
+
+
 def zsh_glob_addition_cases():
     failures = []
     for name, command in ZSH_GLOB_ADDITIONS:

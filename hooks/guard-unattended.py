@@ -2525,7 +2525,10 @@ def zsh_glob_reason(cmd, invocations, depth=0):
         i += 1
     guarded = {'rm', 'mv', 'cp', 'rsync', 'srm', 'shred', 'find', 'git', 'gh',
                'curl', 'wget', 'dd', 'tee', 'diskutil', 'age', 'psql', 'sqlite3'}
-    lexer = shlex.shlex(without_shell_comments(text), posix=True,
+    complete_text = re.sub(
+        r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]",
+        lambda match: re.sub(r'[;&|<>()]', '_', match[0]), without_shell_comments(text))
+    lexer = shlex.shlex(complete_text, posix=True,
                         punctuation_chars=';&|<>()')
     lexer.whitespace_split = True
     lexer.commenters = ''
