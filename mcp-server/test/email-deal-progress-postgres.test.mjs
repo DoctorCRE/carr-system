@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
+import { execFileSync } from 'node:child_process';
 import { acceptsConfirmVerb } from './fixtures/email-followups-app-confirm-verb.mjs';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
@@ -2880,4 +2881,222 @@ test('v2 new-deal digests remain target-bound and reject changed target versions
     base_version: selected.target_version, fields: { city: 'Synthetic updated target' } });
   await assert.rejects(command('confirm-email-filing', { ...args, idempotency_key: randomUUID(),
     proposal_digest: selected.proposal_digest, deal: created.deal_id }), e => e.payload?.error === 'email_proposal_stale');
+});
+
+
+async function summaryQueue(pending_only = true) {
+  const emails = [];
+  let after;
+  do {
+    const page = await command('email-router-queue', { purpose: 'summaries', pending_only, limit: 200, ...(after ? { after } : {}) });
+    emails.push(...page.emails);
+    after = page.next_cursor;
+  } while (after);
+  return { emails };
+}
+async function summarySource() {
+  const source = await email();
+  await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
+    activity_id: source.activity_id, deal, evidence_quote: quote, confidence: 0.9 });
+  return (await summaryQueue()).emails.find(row => row.activity_id === source.activity_id);
+}
+const claimSummary = (source, client = c) => command('record-email-proposal', { idempotency_key: randomUUID(),
+  mode: 'summary_claim', activity_id: source.activity_id, source_hash: source.source_hash }, actor, 'carr_writer', client);
+function finishSummary(source, claim, extra = {}) {
+  const generated = JSON.parse(execFileSync('python3', ['-c',
+    'import json,sys; from lib.email_summary import generate; email=json.load(sys.stdin); print(json.dumps(generate(email, lambda text: {"text":"The sender reports receiving the LOI.","evidence":"We received the LOI from the landlord."})))'],
+  { cwd: new URL('../..', import.meta.url), input: JSON.stringify(source), encoding: 'utf8' }));
+  return command('record-email-proposal', {
+    idempotency_key: randomUUID(), mode: 'summary_result', activity_id: source.activity_id,
+    source_hash: source.source_hash, claim_id: claim.claim_id, summary_status: generated.status,
+    summary_text: generated.text, summary_provenance: generated.provenance, ...extra }, actor, 'carr_writer');
+}
+const listedSummary = async id => (await command('list-email-proposals', { deal, status: 'pending' }, actor, 'carr_reader'))
+  .proposals.find(row => row.source.activity_id === id)?.email_summary;
+
+test('message summaries persist once per hash and reads reuse them without generation', async () => {
+  const source = await summarySource();
+  const claim = await claimSummary(source);
+  assert.equal(claim.generate, true);
+  await finishSummary(source, claim);
+  const saved = await listedSummary(source.activity_id);
+  assert.equal(saved.status, 'available');
+  assert.equal(saved.text, 'The sender reports receiving the LOI.');
+  assert.equal(saved.source_hash, source.source_hash);
+  assert.equal((await claimSummary(source)).generate, false);
+  assert.deepEqual(await listedSummary(source.activity_id), saved);
+});
+
+test('a changed captured source invalidates summaries and permits regeneration', async () => {
+  const source = await summarySource();
+  await finishSummary(source, await claimSummary(source));
+  await c.query('update activity set detail=detail || $2 where id=$1', [source.activity_id, ' New request: please wait.']);
+  assert.equal((await listedSummary(source.activity_id)).status, 'unavailable');
+  await assert.rejects(claimSummary(source), error => error.payload?.error === 'email_summary_source_stale');
+  const changed = (await summaryQueue()).emails.find(row => row.activity_id === source.activity_id);
+  assert.notEqual(changed.source_hash, source.source_hash);
+  const claim = await claimSummary(changed);
+  assert.equal(claim.generate, true);
+  await finishSummary(changed, claim, { summary_text: 'The sender asks the broker to wait.' });
+  assert.equal((await listedSummary(source.activity_id)).text, 'The sender asks the broker to wait.');
+});
+
+test('failed or refused generation persists honest unavailability with three bounded attempts', async () => {
+  const source = await summarySource();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const claim = await claimSummary(source);
+    assert.equal(claim.attempts, attempt);
+    await finishSummary(source, claim, { summary_status: 'unavailable', summary_text: undefined,
+      summary_provenance: { reason: attempt === 1 ? 'refused' : 'generation_failed' } });
+    assert.equal((await listedSummary(source.activity_id)).text, null);
+    assert.equal((await listedSummary(source.activity_id)).status, 'unavailable');
+  }
+  assert.equal((await claimSummary(source)).generate, false);
+});
+
+test('concurrent claims cannot generate twice and provenance must be literal captured evidence', async () => {
+  const source = await summarySource();
+  const concurrent = new pg.Client(connection);
+  await concurrent.connect();
+  let claim;
+  try {
+    const claims = await Promise.all([claimSummary(source), claimSummary(source, concurrent)]);
+    assert.equal(claims.filter(row => row.generate).length, 1);
+    claim = claims.find(row => row.generate);
+  } finally { await concurrent.end(); }
+  await assert.rejects(finishSummary(source, claim, { summary_provenance: { evidence: 'Invented request.' } }),
+    error => error.payload?.error === 'email_summary_evidence_invalid');
+  await finishSummary(source, claim);
+  assert.equal((await claimSummary(source)).generate, false);
+});
+
+
+test('incoming summary and filing digest remain unchanged through filing Undo and refiling', async () => {
+  const address = `summary-${randomUUID()}@example.test`;
+  await c.query("insert into party(kind,name,email,created_by,updated_by) values('person','Synthetic summary sender',$1,$2,$2)", [address,actor.id]);
+  const context = { subject: 'Specific summary transaction', conversation_id: randomUUID(),
+    sender: { email: address, internal: false }, recipients: [{ email: 'broker@example.test', internal: true }] };
+  const make = () => command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Email from Synthetic consultant: Summary transaction', detail: quote, email_context: context });
+  const prior = await make();
+  await c.query("update activity set deal_id=$2,occurred_at=now()-interval '1 day' where id=$1",  [prior.activity_id,deal]);
+  const source = await make();
+  const stored = await record({ kind: 'file_to_deal', activity_id: source.activity_id, evidence_quote: quote, sender_role: 'other_vendor' });
+  const initial = (await listed()).find(row => row.id === stored.proposal_id);
+  const queued = (await summaryQueue()).emails.find(row => row.activity_id === source.activity_id);
+  await finishSummary(queued, await claimSummary(queued));
+  const summary = await listedSummary(source.activity_id);
+  assert.equal((await listed()).find(row => row.id === stored.proposal_id).preview.proposal_digest, initial.preview.proposal_digest);
+  await command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: source.activity_id,
+    thread_activity_id: prior.activity_id }, router(), 'carr_writer');
+  const receipt = (await command('list-email-thread-filings', {})).filings.find(row => row.activity_id === source.activity_id);
+  assert.deepEqual(await listedSummary(source.activity_id), summary);
+  await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: receipt.event_id });
+  assert.deepEqual(await listedSummary(source.activity_id), summary);
+  const current = (await listed()).find(row => row.id === stored.proposal_id);
+  const preview = await command('preview-email-filing', { proposal_id: current.id, deal });
+  await command('confirm-email-filing', { idempotency_key: randomUUID(), proposal_id: current.id,
+    base_version: current.version, deal, proposal_digest: preview.proposal_digest });
+  const confirmed = (await command('list-email-proposals', { deal, status: 'confirmed' })).proposals.find(row => row.id === current.id);
+  assert.deepEqual(confirmed.email_summary, summary);
+  assert.equal(confirmed.source.evidence_quote, quote);
+});
+
+
+test('expired summary leases retry without accepting a late result and legacy pending sources page', async () => {
+  const source = await summarySource();
+  const old = await claimSummary(source);
+  await c.query("update email_message_summary set claim_until=now()-interval '1 second' where activity_id=$1", [source.activity_id]);
+  const current = await claimSummary(source);
+  assert.equal(current.generate, true);
+  assert.equal(current.attempts, 2);
+  await assert.rejects(finishSummary(source, old), error => error.payload?.error === 'email_summary_claim_stale');
+  await finishSummary(source, current);
+  await c.query("update activity set recorded_at=now()-interval '100 days' where id=$1", [source.activity_id]);
+  assert.ok((await summaryQueue()).emails.some(row => row.activity_id === source.activity_id));
+  const recent = await command('email-router-queue', { purpose: 'summaries', pending_only: false, limit: 200 });
+  assert.ok(!recent.emails.some(row => row.activity_id === source.activity_id));
+  await summarySource();
+  const first = await command('email-router-queue', { purpose: 'summaries', limit: 1 });
+  const next = await command('email-router-queue', { purpose: 'summaries', limit: 1, after: first.next_cursor });
+  assert.notEqual(first.emails[0].activity_id, next.emails[0].activity_id);
+});
+
+
+for (const operation of ['queue', 'claim', 'result', 'read']) {
+for (const legacy of [false, true]) {
+  for (const owner of ['joe', 'dell']) {
+    test(`summary ${operation} access stays with ${owner} for ${legacy ? 'ownerless legacy' : 'captured mailbox'} sources`, async () => {
+      const humans = {};
+      for (const slug of ['joe', 'dell']) humans[slug] = {
+        ...(await c.query("insert into actor(slug,kind,display_name) values($1,'human','Synthetic partner') on conflict(slug) do update set active=true returning id,slug", [slug])).rows[0], human: true };
+      const local = slug => ({ ...humans[slug], human: false, slug: `${slug}-local`,
+        native_agent_verified: true, sponsoring_human_slug: slug });
+      const creator = legacy ? humans[owner] : local(owner);
+      const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+        kind: 'email_in', summary: 'Synthetic mailbox summary', detail: quote,
+        ...(!legacy ? { email_source: { mailbox_owner: owner, sender_email: 'sender@example.test' } } : {}) }, creator);
+      await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
+        activity_id: source.activity_id, deal, evidence_quote: quote, confidence: 0.9 }, creator);
+      const queue = async (identity, pending_only) => {
+        const emails = [];
+        let after;
+        do {
+          const page = await command('email-router-queue', { purpose: 'summaries', pending_only, limit: 200,
+            ...(after ? { after } : {}) }, identity, 'carr_reader');
+          emails.push(...page.emails);
+          after = page.next_cursor;
+        } while (after);
+        return emails.find(row => row.activity_id === source.activity_id);
+      };
+      const owned = await queue(creator, false);
+      assert.ok(owned);
+      const claim = identity => command('record-email-proposal', { idempotency_key: randomUUID(),
+        mode: 'summary_claim', activity_id: source.activity_id, source_hash: owned.source_hash }, identity, 'carr_writer');
+      const other = owner === 'joe' ? 'dell' : 'joe';
+      const snapshot = async () => (await c.query('select * from email_message_summary where activity_id=$1', [source.activity_id])).rows;
+      for (const identity of [humans[other], local(other)]) {
+        if (operation === 'queue') for (const pending of [true, false]) assert.equal(await queue(identity, pending), undefined);
+        if (operation === 'claim') await refuses(claim(identity), 'email_summary_source_not_owned');
+        assert.deepEqual(await snapshot(), []);
+      }
+      const claimed = await claim(creator);
+      const result = identity => command('record-email-proposal', { idempotency_key: randomUUID(),
+        mode: 'summary_result', activity_id: source.activity_id, source_hash: owned.source_hash,
+        claim_id: claimed.claim_id, summary_status: 'available', summary_text: 'The sender reports receiving the LOI.',
+        summary_provenance: { evidence: quote } }, identity, 'carr_writer');
+      const before = await snapshot();
+      for (const identity of [humans[other], local(other)]) {
+        if (operation === 'result') await refuses(result(identity), 'email_summary_source_not_owned');
+        assert.deepEqual(await snapshot(), before);
+      }
+      await result(creator);
+      for (const identity of [humans[other], local(other)]) {
+        const list = await command('list-email-proposals', { deal, limit: 200 }, identity, 'carr_reader');
+        if (operation === 'read') assert.equal(list.proposals.find(row => row.source.activity_id === source.activity_id)?.email_summary, null);
+      }
+      for (const identity of [humans[owner], local(owner)]) {
+        if (legacy && identity.id !== creator.id) continue;
+        assert.ok(await queue(identity, true));
+        assert.equal((await claim(identity)).generate, false);
+      }
+      await refuses(command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_claim',
+        activity_id: source.activity_id, source_hash: 'sha256:' + '0'.repeat(64) }, creator), 'email_summary_source_stale');
+    });
+  }
+}
+}
+
+test('summary provenance can cite captured headers but cannot invent them', async () => {
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Synthetic decision', detail: 'Yes.',
+    email_context: { subject: 'Re: Approve the purchase?', sender: { name: 'Synthetic sender', email: 'sender@example.test' }, recipients: [] } });
+  const queued = (await summaryQueue(false)).emails
+    .find(row => row.activity_id === source.activity_id);
+  const claim = await claimSummary(queued);
+  const result = evidence => command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_result',
+    activity_id: source.activity_id, source_hash: queued.source_hash, claim_id: claim.claim_id,
+    summary_status: 'available', summary_text: 'The sender agrees to approve the purchase.', summary_provenance: { evidence } });
+  await refuses(result('Re: Cancel the purchase?'), 'email_summary_evidence_invalid');
+  assert.equal((await result('Re: Approve the purchase?')).status, 'available');
 });

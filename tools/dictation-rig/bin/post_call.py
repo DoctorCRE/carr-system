@@ -46,6 +46,7 @@ LOCK_FILE = ".post-call.lock"
 OUTLOOK_URL_LIMIT = 1900
 EXTRACTION_RETRY_DELAYS = (300, 900)
 LOG_PATH = Path(os.environ.get("CARR_CALL_MODE_LOG") or Path.home() / "Library" / "Logs" / "carr-call-mode.log")
+REVIEW_OPERATIONS = tuple(coverage.REVIEW_OPERATIONS)
 CALL_PHASES = ("pending", "research", "site_selection", "negotiation", "legal", "due_diligence", "closing")
 
 
@@ -99,10 +100,19 @@ def distiller_json_schema() -> dict[str, Any]:
                 **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "recipient_party_id": {"type": "string"},
                 "subject": {"type": "string"}, "body": {"type": "string"},
             }, ["recipient_party_id", "deal_id", "subject", "body", "participant_ids", "evidence"])},
+            "review_intents": {"type": "array", "items": item({
+                "operation": {"type": "string", "enum": list(REVIEW_OPERATIONS)},
+                "desired_value": {"type": "string", "minLength": 1},
+                "deal_id": {"type": ["string", "null"]},
+                "owner": {"enum": ["Joe", "Dell", None]},
+                "identity_question": {"type": ["string", "null"]},
+                "review_reason": {"type": "string", "minLength": 1},
+                "fact_ids": string_array,
+            }, ["operation", "desired_value", "deal_id", "owner", "identity_question", "review_reason"])},
             "review_questions": string_array,
         },
         "required": ["schema_version", "report", "joe_tasks", "dell_tasks",
-                     "deal_updates", "draft_proposals", "review_questions"],
+                     "deal_updates", "draft_proposals", "review_questions", "review_intents"],
     }
 
 
@@ -439,7 +449,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                            transcript: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError("distiller output must be an object")
-    _strict_keys(value, {"schema_version", "report", "joe_tasks", "dell_tasks", "deal_updates", "draft_proposals", "review_questions"})
+    _strict_keys(value, {"schema_version", "report", "joe_tasks", "dell_tasks", "deal_updates", "draft_proposals", "review_questions"}, {"review_intents"})
     if value["schema_version"] != SCHEMA_VERSION:
         raise ContractError("unsupported distiller schema_version")
     report = value["report"]
@@ -531,6 +541,26 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                             end += day_part.end()
                         start = max(0, len(item["evidence"][:end].split()) - 15)
                 item["evidence"] = " ".join(words[start:start + 15])
+    intents = value.get("review_intents", [])
+    if not isinstance(intents, list):
+        raise ContractError("review_intents must be an array")
+    for intent in intents:
+        if not isinstance(intent, dict):
+            raise ContractError("review_intent must be an object")
+        _strict_keys(intent, {"operation", "desired_value", "deal_id", "owner",
+                              "identity_question", "review_reason", "fact_ids"})
+        if intent["operation"] not in REVIEW_OPERATIONS or intent["owner"] not in ("Joe", "Dell", None):
+            raise ContractError("review_intent operation or owner is unsupported")
+        for key in ("desired_value", "review_reason"):
+            _string(intent[key], f"review_intent.{key}")
+        for key in ("deal_id", "identity_question"):
+            if intent[key] is not None:
+                _string(intent[key], f"review_intent.{key}")
+        if intent["deal_id"] is None and intent["identity_question"] is None:
+            raise ContractError("review_intent without an exact deal needs a routing or identity question")
+        ids = intent["fact_ids"]
+        if not isinstance(ids, list) or not ids or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
+            raise ContractError("review_intent needs distinct source fact_ids")
     return value
 
 
@@ -547,6 +577,20 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
     review.extend({"id": _review_id(session, "skipped_deal", n),
                    "question": f"Skipped deal {row['id']}: {row['reason']}", "resolved": False}
                   for n, row in enumerate(context.get("skipped_deals", []), 1))
+    for number, intent in enumerate(raw.get("review_intents", []), 1):
+        intent = deepcopy(intent)
+        if intent["deal_id"] is not None and intent["deal_id"] not in deal_ids:
+            unknown = intent["deal_id"]
+            intent["deal_id"] = None
+            intent["identity_question"] = f"Which exact deal was meant by {unknown!r}?"
+        subject = intent["deal_id"] or "business or prospect work"
+        question = (f"{intent['operation']} for {subject}: {intent['desired_value']}. "
+                    f"Owner {intent['owner'] or 'unassigned'}. "
+                    f"{intent['review_reason']} {intent['identity_question'] or ''} "
+                    "After performing or declining the operation, answer Performed: <outcome> or Declined: <reason>. "
+                    "Identity and routing answers alone keep this operation open.")
+        review.append({**intent, "kind": "review_intent", "id": _review_id(session, "intent", number),
+                       "question": question, "resolved": False})
     missing_tracks = (transcript or {}).get("missing_tracks", [])
     labels = (transcript or {}).get("speaker_labels", {})
     for number, track in enumerate(missing_tracks, 1):
@@ -686,6 +730,12 @@ def _distiller_instruction() -> str:
         "started_on is the YYYY-MM-DD the partners say the new phase began, only when they state that calendar date "
         "with its year; otherwise null. "
         "Use exactly one of pending, research, site_selection, negotiation, legal, due_diligence, closing. "
+        "Preserve every unsupported explicit request as a review_intent, never only narrative decisions. "
+        "Use operation operating_state for parking, rename for card names, national_account_reassignment for account membership, "
+        "prospect_routing for prospects, client_lifecycle for client status, and business_task for owner work without a deal. "
+        "Each intent requires desired_value as spoken, exact deal_id or null, owner Joe/Dell or null, source fact_ids, "
+        "a concrete review_reason, and identity_question when identity or routing is unresolved. Never guess an account ID "
+        "or fabricate a deal for partnership work. Parking is an operating state, never a phase. "
         "Do not infer a phase from a general status update. Closure, loss and invoicing become review_questions. "
         "Only an explicitly agreed replacement for the deal card's next step sets next_step to an object with text and next_date. "
         "Use the exact agreed step text. Apply the task date rules to next_date, using null for missing or ambiguous dates. "
@@ -709,11 +759,14 @@ def _distiller_instruction() -> str:
         '"dell_tasks": [{"title": "<string>", "due_on": null, "deal_id": "<exact deal id>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"deal_updates": [{"deal_id": "<exact deal id>", "summary": "<string>", "next_step": null or {"text": "<string>", "next_date": null, "needs_review": null}, "phase_move": null or {"value": "<phase>", "started_on": null, "needs_review": null}, "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"draft_proposals": [{"recipient_party_id": "<exact party id>", "deal_id": "<exact deal id>", "subject": "<string>", "body": "<string>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
+        '"review_intents": [{"operation": "<supported operation>", "desired_value": "<as spoken>", '
+        '"deal_id": null, "owner": null, "identity_question": "<exact identity or routing question>", '
+        '"review_reason": "<why review is needed>", "fact_ids": ["<source fact id>"]}], '
         '"review_questions": ["<string>", ...]}\n'
         "If there is nothing for a section, use an empty array. Never omit schema_version or report. "
         "Use COVERAGE as the complete fact inventory. Each item and nested phase_move or next_step must have "
         "fact_ids naming its supporting coverage facts. A status note and a phase move have separate fact_ids. "
-        "Do not propose superseded facts, no_change decisions or unresolved identities. Unresolved identity questions "
+        "Do not propose superseded facts or no_change decisions. Unresolved identities may appear only as typed review_intents. Unresolved identity questions "
         "are generated locally. Do not add duplicate identity questions. Unsupported operations remain visible review proposals. "
         "Return only that JSON object and no transcript field."
     )
@@ -1157,7 +1210,9 @@ def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dic
 
 def review_complete(report: dict[str, Any]) -> bool:
     """Unresolved review questions keep the source recording recoverable."""
-    return all(question.get("resolved") is True for question in report.get("review_questions", []))
+    return all(question.get("resolved") is True and
+               (question.get("kind") != "review_intent" or intent_outcome(question.get("resolution")) is not None)
+               for question in report.get("review_questions", []))
 
 
 def is_filed_legacy_report(session_dir: Path, report: dict[str, Any]) -> bool:
@@ -1519,6 +1574,14 @@ def clear_checks_hold(report: dict[str, Any]) -> None:
         narrative["open_questions"] = [q for q in narrative.get("open_questions", []) if q != hold]
 
 
+def intent_outcome(resolution: Any) -> str | None:
+    if isinstance(resolution, str):
+        match = re.fullmatch(r"(performed|declined):\s*\S.*", resolution.strip(), re.IGNORECASE | re.DOTALL)
+        if match:
+            return match[1].lower()
+    return None
+
+
 def resolve_question(session_dir: Path, question_id: str, resolution: str) -> dict[str, Any]:
     with update_report(session_dir) as report:
         _string(resolution, "resolution")
@@ -1526,11 +1589,11 @@ def resolve_question(session_dir: Path, question_id: str, resolution: str) -> di
             if question.get("id") == question_id:
                 if question.get("resolved") is True:
                     raise ContractError("already_resolved")
-                question["resolved"] = True
+                question["resolved"] = question.get("kind") != "review_intent" or intent_outcome(resolution) is not None
                 question["resolution"] = resolution
                 if question_id == jev_question_id(session_dir.name):
                     clear_checks_hold(report)
-                return {"question_id": question_id, "resolved": True}
+                return {"question_id": question_id, "resolved": question["resolved"]}
         raise ContractError("unknown question id")
 
 

@@ -57,7 +57,7 @@ class CaptureOutcomesTests(unittest.TestCase):
                            "statement": statement, "asserted_value": value,
                            "source_spans": [coverage.source_span(transcript, 0)], "disposition": None}
                           for fact_id, kind, statement, value in (
-                              ("phase-discussion", "other", "Phase proposal discussed", "discussed"),
+                              ("phase-discussion", "status", "Phase proposal discussed", "discussed"),
                               ("phase-instruction", "phase_change", "Move to legal", "legal"))],
                 "non_fact_spans": [],
             }
