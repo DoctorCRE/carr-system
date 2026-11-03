@@ -55,6 +55,11 @@ def _transcript_lines(path):
 
 
 def task_text(payload):
+    """Read available task text, including validated native child envelopes.
+
+    An encrypted body stays unread. The envelope suffices only while selection
+    uses tool structure. A task-dependent selector must reject encrypted-only bodies.
+    """
     for key in ('prompt', 'task'):
         if isinstance(payload.get(key), str):
             return payload[key]
@@ -73,6 +78,24 @@ def task_text(payload):
         elif path.name != child_name:
             path = path.with_suffix('') / 'subagents' / child_name
     session_id = payload.get('session_id') or payload.get('sessionId')
+    child_path = None
+    if path.name.startswith('rollout-'):
+        for line in _transcript_lines(path):
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if record.get('type') != 'session_meta':
+                continue
+            meta = record.get('payload', {})
+            source = meta.get('source')
+            if not isinstance(source, dict):
+                continue
+            spawn = source.get('subagent', {}).get('thread_spawn', {})
+            native_id = meta.get('id')
+            if (isinstance(native_id, str) and path.name.endswith(f'-{native_id}.jsonl')
+                    and (not agent or agent == native_id)):
+                child_path = spawn.get('agent_path')
+                break
     grok_index = None
     grok_chunks = []
     for line in _transcript_lines(path):
@@ -97,6 +120,18 @@ def task_text(payload):
             # Codex 0.159+ rollouts record user turns only in this shape.
             text = '\n'.join(c.get('text', '') for c in part.get('content') or []
                              if isinstance(c, dict) and c.get('type') == 'input_text')
+        if record.get('type') == 'response_item' and part.get('type') == 'agent_message':
+            chunks = part.get('content')
+            if not isinstance(chunks, list):
+                raise ValueError('task_context_unavailable')
+            text = '\n'.join(c['text'] for c in chunks if isinstance(c, dict)
+                             and c.get('type') == 'input_text' and isinstance(c.get('text'), str))
+            author = part.get('author')
+            if (not isinstance(child_path, str) or not child_path
+                    or part.get('recipient') != child_path or not isinstance(author, str) or not author
+                    or not text.startswith(f'Message Type: NEW_TASK\nTask name: {child_path}\n'
+                                           f'Sender: {author}\nPayload:\n')):
+                continue
         if isinstance(text, str) and text:
             return _bounded(text)
     if grok_index is not None:
@@ -287,6 +322,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
             'session_id': session, 'turn_id': payload.get('turn_id') or None,
             'event_name': event, 'tool_use_id': payload.get('tool_use_id'),
             'tool_name': tool, 'tool_input_sha256': digest(payload.get('tool_input', {})),
+            # Hash available text only, never an unread encrypted task body.
             'task_sha256': digest(task), 'corpus_digest': selection['corpus_digest'],
             'source_digest': source_sha256(REPO), 'identity': selection['identity'],
             'rule_ids': sorted(ids), 'data_defects': selection['data_defects'],
@@ -370,6 +406,12 @@ def process(payload, *, runner=subprocess.run, dedupe=True, cache=True):
             return refused(event)
         return None if event == 'Stop' else context(canonical({
             'complete': False, 'reason': 'scope_catalog_unavailable', 'instruction': UNAVAILABLE}).decode(), event)
+    except ValueError as error:
+        if str(error) == 'task_context_unavailable':
+            return None if event == 'Stop' else refused(event,
+                'TASK CONTEXT UNAVAILABLE. The task transcript format was unavailable. '
+                'Ordinary actions must wait for readable task context.')
+        return refused(event)
     except Exception:
         return refused(event)
 
