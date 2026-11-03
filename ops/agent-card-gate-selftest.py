@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Exercise launch admission through the hook's JSON stdin boundary."""
+import fcntl
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -8,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 from git_env import fixture_env
 
@@ -144,6 +147,43 @@ class AgentCardGate(unittest.TestCase):
                        'Card: WR557.S6.J1\nCard: malformed', 'Card: WR557.S6.J0'):
             self.assertEqual(self.run_hook(prompt=prompt).returncode, 2)
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+
+    def test_negative_eviction_survives_lock_contention_and_outage(self):
+        self.now = 1000000
+        self.register_fixture()
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        lock_path = self.home / '.cache/carr/agent-card-cache-v1/lock'
+        with lock_path.open() as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.reply_fixture(False)
+            self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.lookup.write_text('raise SystemExit(1)')
+        result = self.run_hook(prompt='Card: WR557.S6.J1')
+        self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_changed_credential_refuses_mint_and_outage_evidence(self):
+        self.now = 1000000
+        token_file = self.home / 'fixture-tokens'
+        for source in ('environment', 'file'):
+            for minted in (True, False):
+                with self.subTest(source=source, minted=minted):
+                    token_file.write_text('CARR_MCP_LOCAL_TOKEN=fixture-first')
+                    token_file.chmod(0o600)
+                    settings = {'CARR_MCP_ENV': str(token_file),
+                                'CARR_MCP_LOCAL_TOKEN': 'fixture-first' if source == 'environment' else ''}
+                    with unittest.mock.patch.dict(os.environ, settings):
+                        if minted:
+                            self.assertEqual(self.mint_fixture().returncode, 0)
+                        else:
+                            self.register_fixture()
+                            self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+                        if source == 'environment':
+                            os.environ['CARR_MCP_LOCAL_TOKEN'] = 'fixture-second'
+                        else:
+                            token_file.write_text('CARR_MCP_LOCAL_TOKEN=fixture-second')
+                        self.lookup.write_text('raise SystemExit(1)')
+                        result = self.run_hook(prompt='Card: WR557.S6.J1')
+                        self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_agent_without_card_denied_with_mint_command(self):
         result = self.run_hook(prompt='Review the plan.')
