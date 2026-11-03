@@ -32,8 +32,11 @@ and filesystem tests cover those separately. Regenerate with pstack's
 this fixture directory, with Java 11+ and `TLA2TOOLS` pointing at tla2tools.jar.
 
 Round 1 regression coverage (WR634.S1.J60). Transaction transitions are unchanged.
-Snapshot and rollback resolve artifact targets consistently, preserving configured
-symlinks. The real Host tests in `ops/outlook-runtime-refresh-selftest.py` cover:
+Round 2 replaces target-only snapshots with typed path snapshots. Each symlink
+stores its original link text and a recursive target snapshot. Rollback restores
+target contents before restoring links, handling both write-through and atomic
+replacement. Runtime directories use their previous Git revision through the
+same restore interface, preserving the directory and held drain-lock inodes. The real Host tests in `ops/outlook-runtime-refresh-selftest.py` cover:
 
 | Transition | Test |
 | --- | --- |
@@ -47,3 +50,26 @@ are synthetic; filesystem copies and drain locks use the real Host methods.
 The crash-journal test also exercises a journal written with the configured
 symlink path, as older versions did. TLC was rerun with `Refresh.cfg`; both
 configured invariants hold (26 generated states, 18 distinct states).
+
+
+Round 2 regression coverage (WR634.S1.J63). Transaction transitions are unchanged.
+`test_path_type_failure_matrix` crosses regular files, directories, two-hop
+relative symlinks, dangling links and absent paths with failures after disable,
+bootout, runtime checkout, each of six artifact replacements, each installer,
+verification and registration restoration. Each case runs immediate rollback
+and persisted-journal recovery. All six artifact slots use the same mechanism,
+including vendor, helper, pin and each registration plist. The runtime uses a
+relative symlink and a simulated Git checkout, never a directory replacement
+that would unlink active drain locks.
+
+`test_path_type_restore_interruption_matrix` interrupts restoration before and
+after each artifact, across the same five path types and both recovery entry
+points. Retried restoration converges to the prior type, link text, target bytes,
+mode and registration state. `test_symlink_crash_journal_recovers_with_real_host`
+now explicitly removes the new fields to exercise a legacy content-only journal.
+Legacy journals cannot reconstruct link text that their writer did not record;
+they retain the previous target-only restoration semantics.
+
+The abstract TLC model still proves drain ordering only. No filesystem type or
+crash-recovery claim is inferred from its two invariants. The synthetic tests
+exercise real copies, atomic replacement and locks, with process effects mocked.

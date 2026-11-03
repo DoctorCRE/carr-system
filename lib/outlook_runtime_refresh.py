@@ -122,19 +122,56 @@ class Host:
         if self.journal.exists() and not self.recovery_pending():
             shutil.rmtree(self.journal)
         self.journal.mkdir(mode=0o700, exist_ok=False)
-        artifacts = []
-        for index, path in enumerate(paths):
-            path = path.resolve()
-            backup = self.journal / str(index)
-            exists = path.exists()
-            if exists:
-                if path.is_dir():
-                    shutil.copytree(path, backup, symlinks=True)
-                else:
-                    shutil.copy2(path, backup)
-            artifacts.append({'path': str(path), 'backup': str(backup), 'exists': exists})
-        state = {'previous': self.previous, 'states': states, 'artifacts': artifacts, 'swapped': False}
+        artifacts = [self.snapshot_path(path, self.journal / str(index))
+                     for index, path in enumerate(paths)]
+        runtime = self.snapshot_path(self.runtime, self.journal / 'runtime', runtime=True)
+        state = {'previous': self.previous, 'states': states, 'artifacts': artifacts, 'runtime': runtime, 'swapped': False}
         self.write_state(state)
+
+    def snapshot_path(self, path, backup, *, runtime=False, seen=()):
+        path = Path(path).parent.resolve() / Path(path).name
+        if path in seen:
+            raise ValueError('cyclic artifact symlink: ' + str(path))
+        artifact = {'path': str(path), 'backup': str(backup), 'exists': path.exists()}
+        if path.is_symlink():
+            link = os.readlink(path)
+            artifact.update(kind='symlink', link=link,
+                            target=self.snapshot_path(path.parent / link, backup,
+                                                      runtime=runtime, seen=(*seen, path)))
+        elif runtime:
+            artifact.update(kind='runtime', previous=self.previous)
+        elif path.is_dir():
+            artifact['kind'] = 'directory'
+            shutil.copytree(path, backup, symlinks=True)
+        elif path.exists():
+            artifact['kind'] = 'file'
+            shutil.copy2(path, backup)
+        else:
+            artifact['kind'] = 'absent'
+        return artifact
+
+    def restore_path(self, artifact):
+        path, backup = Path(artifact['path']), Path(artifact['backup'])
+        kind = artifact.get('kind')
+        if kind is None:
+            # Journals predating path-type snapshots stored only resolved content.
+            path = path.resolve()
+            kind = ('directory' if backup.is_dir() else 'file') if artifact['exists'] else 'absent'
+        if kind == 'runtime':
+            self.git(path, 'checkout', '--detach', artifact['previous'])
+            return
+        if kind == 'symlink':
+            self.restore_path(artifact['target'])
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.exists():
+            shutil.rmtree(path)
+        if kind == 'symlink':
+            path.symlink_to(artifact['link'])
+        elif kind == 'directory':
+            shutil.copytree(backup, path, symlinks=True)
+        elif kind == 'file':
+            shutil.copy2(backup, path)
 
     def write_state(self, state):
         path = self.journal / 'state.tmp'
@@ -200,18 +237,13 @@ class Host:
                 for label in LABELS:
                     if label in live:
                         self.command('launchctl', 'bootout', self.domain + '/' + label)
-                self.git(self.runtime, 'checkout', '--detach', state['previous'])
-                for artifact in state['artifacts']:
-                    path, backup = Path(artifact['path']).resolve(), Path(artifact['backup'])
-                    if path.is_dir():
-                        shutil.rmtree(path)
-                    elif path.exists():
-                        path.unlink()
-                    if artifact['exists']:
-                        if backup.is_dir():
-                            shutil.copytree(backup, path, symlinks=True)
-                        else:
-                            shutil.copy2(backup, path)
+                artifacts = state['artifacts']
+                if 'runtime' in state:
+                    self.restore_path(state['runtime'])
+                else:
+                    self.git(self.runtime, 'checkout', '--detach', state['previous'])
+                for artifact in reversed(artifacts):
+                    self.restore_path(artifact)
             live = listed(self.command('launchctl', 'list').stdout)
             for label, prior in state['states'].items():
                 if prior['registered'] and label not in live:

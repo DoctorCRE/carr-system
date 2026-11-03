@@ -300,6 +300,11 @@ class HostTests(unittest.TestCase):
         fixture = self.failed_symlink_install()
         self.host.snapshot()
         state = json.loads((self.host.journal / 'state.json').read_text())
+        state.pop('runtime')
+        for index, artifact in enumerate(state['artifacts']):
+            while artifact.get('kind') == 'symlink':
+                artifact = artifact['target']
+            state['artifacts'][index] = {key: artifact[key] for key in ('path', 'backup', 'exists')}
         state['artifacts'][0]['path'] = str(self.settings.vendor)
         self.host.write_state(state)
         self.host.quiesce()
@@ -324,12 +329,56 @@ class HostTests(unittest.TestCase):
         self.host.previous = self.host.sha
         self.assertEqual(refresh(self.host, apply=True), 'already current')
 
+    def test_runtime_git_restore_preserves_directory_and_lock_inode(self):
+        def git(repo, *args):
+            return subprocess.run(['git', '-C', str(repo), *args], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        git(self.runtime, 'init', '--quiet')
+        git(self.runtime, 'config', 'user.name', 'Synthetic Fixture')
+        git(self.runtime, 'config', 'user.email', 'fixture@example.test')
+        revision = self.runtime / 'revision'
+        revision.write_text('old')
+        git(self.runtime, 'add', 'revision')
+        git(self.runtime, 'commit', '--quiet', '-m', 'old')
+        self.host.previous = git(self.runtime, 'rev-parse', 'HEAD')
+        self.host.git = git
+        link = self.root / 'runtime-link'
+        link.symlink_to('runtime', target_is_directory=True)
+        self.host.runtime = link
+        self.host.snapshot()
+        directory_inode = self.runtime.stat().st_ino
+        self.assertTrue(self.host.drained())
+        lock = self.runtime / 'out/outlook-intake/lock'
+        lock_inode = lock.stat().st_ino
+        revision.write_text('new')
+        git(self.runtime, 'add', 'revision')
+        git(self.runtime, 'commit', '--quiet', '-m', 'new')
+        state = json.loads((self.host.journal / 'state.json').read_text())
+        state['swapped'] = True
+        self.host.write_state(state)
+        self.host.restore(rollback=True)
+        self.assertEqual(revision.read_text(), 'old')
+        self.assertEqual(git(self.runtime, 'rev-parse', 'HEAD'), self.host.previous)
+        self.assertEqual(os.readlink(link), 'runtime')
+        self.assertEqual(self.runtime.stat().st_ino, directory_inode)
+        self.assertEqual(lock.stat().st_ino, lock_inode)
+
     def test_path_type_failure_matrix(self):
         for kind in ('file', 'directory', 'symlink', 'dangling', 'absent'):
-            for failure in ('intake', 'triage', 'verify', 'restore'):
+            for failure in ('disable', 'bootout', 'runtime', 'intake', 'triage', 'verify', 'restore',
+                            *(f'artifact-{i}' for i in range(6))):
                 for crash in (False, True):
                     with self.subTest(kind=kind, failure=failure, crash=crash):
                         self.path_type_failure(kind, failure, crash)
+
+    def test_path_type_restore_interruption_matrix(self):
+        for kind in ('file', 'directory', 'symlink', 'dangling', 'absent'):
+            for index in range(6):
+                for step in ('before', 'after'):
+                    for crash in (False, True):
+                        failure = f'restore-path-{index}-{step}'
+                        with self.subTest(kind=kind, failure=failure, crash=crash):
+                            self.path_type_failure(kind, failure, crash)
 
     def path_type_failure(self, kind, failure, crash):
         with tempfile.TemporaryDirectory() as directory:
@@ -387,10 +436,12 @@ class HostTests(unittest.TestCase):
                     out = '\n'.join('"' + label + '" => true' for label in overrides)
                 elif args[:2] == ('launchctl', 'disable'):
                     overrides.add(args[2].split('/')[-1])
+                    fail('disable')
                 elif args[:2] == ('launchctl', 'enable'):
                     overrides.discard(args[2].split('/')[-1])
                 elif args[:2] == ('launchctl', 'bootout'):
                     registered.discard(args[2].split('/')[-1])
+                    fail('bootout')
                 elif args[:2] == ('launchctl', 'bootstrap'):
                     fail('restore')
                     registered.add(Path(args[3]).stem)
@@ -406,6 +457,7 @@ class HostTests(unittest.TestCase):
                     if 'intake' in str(args[1]):
                         sha[0] = host.sha
                         (runtime / 'revision').write_text('new')
+                        fail('runtime')
                         for path, target in zip(paths, targets):
                             if kind in ('symlink', 'dangling'):
                                 target.write_text('new through link')
@@ -413,11 +465,26 @@ class HostTests(unittest.TestCase):
                             built = root / 'built'
                             built.write_text('new atomic replacement')
                             os.replace(built, path)
+                            fail('artifact-' + str(paths.index(path)))
+                        if failure.startswith('restore-path-'):
+                            raise OSError('installer failed before interrupted rollback')
                         fail('intake')
                     else:
                         fail('triage')
                 return subprocess.CompletedProcess(args, 0, out, '')
             host.command = command
+            if failure.startswith('restore-path-'):
+                restore_path = host.restore_path
+                def interrupted_restore(artifact):
+                    names = [path.name for path in paths]
+                    if Path(artifact['path']).name in names:
+                        index = names.index(Path(artifact['path']).name)
+                        fail(f'restore-path-{index}-before')
+                        restore_path(artifact)
+                        fail(f'restore-path-{index}-after')
+                    else:
+                        restore_path(artifact)
+                host.restore_path = interrupted_restore
             try:
                 if crash:
                     host.snapshot()
@@ -434,7 +501,11 @@ class HostTests(unittest.TestCase):
                 host.locks.close()
                 host.locked = False
             if host.recovery_pending():
-                host.recover()
+                try:
+                    host.recover()
+                except OSError:
+                    self.assertTrue(host.recovery_pending())
+                    host.recover()
             self.assertTrue(fired[0])
             self.assertTrue(runtime_link.is_symlink())
             self.assertEqual(os.readlink(runtime_link), 'runtime')
