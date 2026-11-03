@@ -46,7 +46,14 @@ class CaptureFake {
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
     if (sql.includes("call-outcome:resolve-session-lock") || sql.includes("call-outcome:resolve-undo-check")) return { rows: [] };
-    if (sql.includes("dealroom:field-lock")) return { rows: [] };
+    if (sql.includes("dealroom:field-lock")) { this.lockedFields ||= []; this.lockedFields.push(params[1]); return { rows: [] }; }
+    if (sql.includes("capture:phase-current")) {
+      assert.ok(this.lockedFields.includes("phase"));
+      return { rows: [{ phase: this.phaseValue || "closing" }] };
+    }
+    if (sql.includes("capture:phase-superseded")) return { rows: this.superseded ? [{ id: "later" }] : [] };
+    if (sql.includes("capture:phase-chronology-base"))
+      return { rows: [{ event_id: this.historicalBase || null }] };
     if (sql.startsWith("select b.next_step,b.next_date::text as next_date"))
       return { rows: [{ next_step: null, next_date: this.nextDate ?? null, action_id: null }] };
     if (sql.includes("'next_action' as source") && sql.includes("from capture_post_call_action")
@@ -194,7 +201,7 @@ class CaptureFake {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
       return { rows: row ? [{ id: row.id, kind: row.kind, payload: row.payload,
         status: row.status, resulting_ref: row.resulting_ref,
-        evidence_quote: row.evidence_quote, post_call: row.post_call ?? false }] : [] };
+        evidence_quote: row.evidence_quote, post_call: row.post_call ?? this.sessions.find(s => s.id === row.session_id)?.post_call ?? false }] : [] };
     }
     if (sql.includes("capture:resolve-skip")) {
       const row = this.candidates.find(candidate => candidate.id === params[0]);
@@ -912,4 +919,51 @@ test("log-outreach completes only the caller's post-call action on the deal", as
   assert.equal(db.nextActions.at(-1).description, "Call client with final terms");
   assert.equal(db.events.at(-1).actor_id, ids.joe);
   assert.equal(db.events.at(-1).verb, "log-outreach");
+});
+
+const chronologySource = { speaker: "joe", quote_sha256: "a".repeat(64), source_sha256: "b".repeat(64),
+  recording_started_at: "2026-08-08T15:00:00Z", occurrence_start_ms: 60000, occurrence_end_ms: 65000 };
+
+async function chronologyProposal(db, value = "diligence", source = chronologySource) {
+  const r = rig(db);
+  const claim = await r.handler.fetch(claimRequest(validPostCallClaim),
+    { CAPTURE_TOKENS: '{"mac-studio":"device-secret"}' });
+  const token = (await claim.json()).session_token;
+  const response = await post(r.handler, "/capture/candidates", { session_token: token,
+    idempotency_key: "00000571-0000-4000-8000-000000000081",
+    items: [{ kind: "phase_move", payload: { deal: ids.deal, field: "phase", value },
+      evidence_quote: "Move Deal Alpha to diligence", confidence: 0.5 }], evidence_sources: [source] });
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+  return (await response.json()).candidate_ids[0];
+}
+
+test("an in-call edit before filing cannot become the spoken instruction's base", async () => {
+  const db = new CaptureFake();
+  const id = await chronologyProposal(db);
+  assert.equal(db.candidates[0].payload.base_event_id, null);
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000082",
+  }), error => error.payload?.conflict?.value_a === "closing");
+  assert.equal(db.events.length, 0);
+});
+
+test("a matching live phase is satisfied under the field lock without a move", async () => {
+  const db = new CaptureFake();
+  db.phaseValue = "diligence";
+  const id = await chronologyProposal(db);
+  const result = await TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000083",
+  });
+  assert.equal(result.result.already_satisfied, true);
+  assert.equal(db.events.length, 0);
+});
+
+test("a later spoken disposition blocks an older phase instruction", async () => {
+  const db = new CaptureFake();
+  const id = await chronologyProposal(db);
+  db.superseded = true;
+  await assert.rejects(() => TOOLS["resolve-candidate"].handler(db, joe, {
+    candidate_id: id, accept: true, idempotency_key: "00000571-0000-4000-8000-000000000084",
+  }), error => error.payload?.error === "superseded_call_instruction");
+  assert.equal(db.events.length, 0);
 });
