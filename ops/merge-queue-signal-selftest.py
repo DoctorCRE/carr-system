@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 
 spec = importlib.util.spec_from_file_location('signal_tool', Path(__file__).with_name('merge-queue-signal.py'))
+assert spec is not None and spec.loader is not None
 signal_tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(signal_tool)
 
