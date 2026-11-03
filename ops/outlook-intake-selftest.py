@@ -503,6 +503,18 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([source, report])
         self.assertEqual(self.delivery_findings(), [])
 
+    def test_delivery_failure_rejects_correction_between_filing_pages(self):
+        source, report, activities, template = self.paginated_delivery_pair()
+        self.fake.email_queue.append({**template, 'activity_id': activities[-1]})
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.fake.email_queue[0]['deal'] = '22222222-2222-4222-8222-222222222222'
+        self.fake.email_queue[0]['version'] = 2
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        box = next(iter(json.loads((self.out() / intake.STATE).read_text())['delivery_mailboxes'].values()))
+        self.assertEqual(next(iter(box['reports'].values()))['disposition'], 'retryable')
+
     def test_delivery_failure_resolves_source_on_last_filing_page(self):
         source, report, activities, template = self.paginated_delivery_pair()
         self.fake.email_queue.append({**template, 'activity_id': activities[-1]})
