@@ -29,6 +29,11 @@ smaller interface and no parallel identity store. A trigger guards proposal and
 summary writes. Tests derive from each terminal transition, replay, stale and
 terminal refusals, actor/account scope, action notes and downstream suppression.
 
+Account scope comes from the immutable captured identity, so a later change to
+the partner's current email address does not invalidate earlier captures. A
+narrow audit view exposes only mail-action IDs, verbs and source activity IDs
+for earlier-action notes. The mutation needs no raw event-table access.
+
 Throughput checkpoint: resolve overlap and acceptance before modeling and red
 tests. One worker owns this coupled contract, with no subagents permitted.
 Identity and ordered activity locks serialize shared state. The smallest safe

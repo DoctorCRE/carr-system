@@ -2,7 +2,9 @@
 
 The invariant is that no new action can commit from terminal mail. Registered
 mutations lock the source before their handler runs. Lifecycle changes lock the
-same source rows. Database triggers also refuse proposal and summary writes.
+same source rows. Database triggers also refuse proposal and summary writes. The lifecycle mutation
+is exercised under carr_writer and reads only a narrow audit view, not raw
+event history or current account addresses.
 Terminal observations annotate all captures of the mailbox identity atomically.
 
 The PostgreSQL suite executes each live-to-terminal transition, same-key replay,

@@ -17,9 +17,9 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
   const client=(await c.query("insert into client(party_id,status,created_by,updated_by,roster_ref) values($1,'active',$2,$2,'C-999442') returning id", [party,actor.id])).rows[0].id;
   const deal=(await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Lifecycle deal',$1,'purchase','site_selection','joe',$2,$2) returning id",[client,actor.id])).rows[0].id;
   await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
-  const call = async (verb,args,who=actor) => {
+  const call = async (verb,args,who=actor,role=null) => {
     await c.query('begin');
-    try { const result=await executeRegisteredTool(c,who,verb,args); await c.query('commit'); return result; }
+    try { if(role) await c.query(`set local role ${role}`); const result=await executeRegisteredTool(c,who,verb,args); await c.query('commit'); return result; }
     catch(e) { await c.query('rollback'); throw e; }
   };
   for (const state of ['deleted','recalled','superseded']) await t.test(state,async () => {
@@ -39,7 +39,7 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     const proposal=(await c.query("insert into email_proposal(kind,activity_id,owner,task_text,next_date,status,evidence_quote,confidence,created_by,resolved_by,resolved_at) values('next_step',$1,'joe','Call','2026-01-01','confirmed','Please call me.',1,$2,$2,now()) returning id",[source.activity_id,actor.id])).rows[0].id;
     const args={idempotency_key:randomUUID(),email_identity:identity,base_version:0,state,
       observation_id:randomUUID(),observed_at:'2026-01-01T12:00:00Z',method:'outlook_tombstone'};
-    const result=await call('record-email-lifecycle',args);
+    const result=await call('record-email-lifecycle',args,actor,'carr_writer');
     assert.equal(result.state,state);
     assert.equal(result.version,1);
     assert.ok(result.action_notes.some(n=>n.proposal_id===proposal));

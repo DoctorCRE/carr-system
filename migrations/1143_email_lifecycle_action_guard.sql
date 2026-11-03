@@ -1,6 +1,14 @@
 -- rollback: forward-only; retain lifecycle observations and prior-action notes.
 -- expand-contract: expand; guard new proposal and summary writes without changing stored history.
 -- lock-review: trigger metadata only on email_proposal and email_message_summary; no row rewrite.
+create view public.v_email_lifecycle_action_event as
+select id,verb,coalesce(new_value->>'activity_id',new_value->>'activity') as activity_id
+from public.event where verb in ('log-activity','confirm-email-deal-progress','confirm-email-next-step',
+  'confirm-email-filing','inherit-email-thread','submit-email-draft','record-email-sent',
+  'handle-email-proposal','confirm-email-lead-proposal')
+  and coalesce(new_value->>'activity_id',new_value->>'activity') is not null;
+grant select on public.v_email_lifecycle_action_event to carr_reader,carr_writer;
+
 create function public.guard_email_lifecycle_action() returns trigger
 language plpgsql set search_path=pg_catalog,pg_temp as $$
 declare context jsonb;

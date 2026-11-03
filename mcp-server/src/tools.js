@@ -4451,15 +4451,19 @@ export const TOOLS = {
       const input = args.email_identity;
       if (input.mailbox_owner !== partnerAuthoritySlugForActor(actor))
         throw new ToolError({ error: 'email_identity_owner_mismatch' });
-      const account = (await c.query('select email from actor where slug=$1', [input.mailbox_owner])).rows[0]?.email;
-      if (input.mailbox_account !== account) throw new ToolError({ error: 'email_identity_account_mismatch' });
+      const account = input.mailbox_account;
       if (Date.parse(args.observed_at) > Date.now() + 300000)
         throw new ToolError({ error: 'email_observation_in_future' });
       const identity = await lockEmailIdentity(c,input.mailbox_owner,account,input.item_id);
       const rows = (await c.query(`select id,email_context from activity where email_identity->>'mailbox_owner'=$1
         and email_identity->>'mailbox_account'=$2 and email_identity->>'item_id'=$3 order by id for update`,
         [identity.mailbox_owner,account,identity.item_id])).rows;
-      if (!rows.length) throw new ToolError({ error: 'email_identity_not_found' });
+      if (!rows.length) {
+        const known = (await c.query(`select 1 from activity where email_identity->>'mailbox_owner'=$1
+          and email_identity->>'item_id'=$2 limit 1`, [identity.mailbox_owner,identity.item_id])).rows.length;
+        if (known) throw new ToolError({ error: 'email_identity_account_mismatch' });
+        throw new ToolError({ error: 'email_identity_not_found' });
+      }
       const prior = rows.find(row => row.email_context?.lifecycle)?.email_context.lifecycle;
       const observation = { observation_id: args.observation_id, state: args.state,
         observed_at: new Date(args.observed_at).toISOString(), method: args.method };
@@ -4475,8 +4479,8 @@ export const TOOLS = {
       const proposals = (await c.query('select id,status,kind from email_proposal where activity_id=any($1::uuid[]) order by id for update', [ids])).rows;
       const action_notes = proposals.map(row => ({ proposal_id: row.id, kind: row.kind, prior_status: row.status,
         note: `Source email ${args.state}; earlier action retained for review, further source actions refused.` }));
-      const events = (await c.query(`select id,verb from event where new_value->>'activity_id'=any($1::text[])
-        or new_value->>'activity'=any($1::text[]) order by recorded_at,id`, [ids])).rows;
+      const events = (await c.query(`select id,verb from v_email_lifecycle_action_event
+        where activity_id=any($1::text[]) order by id`, [ids])).rows;
       action_notes.push(...events.map(row => ({ event_id: row.id, verb: row.verb,
         note: `Source email ${args.state}; earlier action retained for review.` })));
       const lifecycle = { ...observation, version: 1, base_version: args.base_version, actor_id: actor.id,

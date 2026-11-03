@@ -11,5 +11,5 @@
   "terminal_policy": "Refuse new source actions and recapture. Exclude from routing, summaries, active proposals, sender outbox and Home email cards. Retain historical records with lifecycle metadata.",
   "prior_actions": "Record proposal IDs, prior statuses and source event IDs as permanent action_notes in captured context and lifecycle audit events. Preserve subsequent human changes.",
   "restoration": "Unsupported. Movement retains stable identity and does not tombstone a message.",
-  "tenant": "Server-derived carr-internal. Caller tenant selection is forbidden; mailbox owner and account must match authenticated partner authority."
+  "tenant": "Server-derived carr-internal. Caller tenant selection is forbidden; mailbox owner must match authenticated partner authority and account must match the immutable captured identity."
 }

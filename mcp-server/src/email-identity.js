@@ -27,8 +27,9 @@ export async function guardEmailAction(c, args, ToolError, lock = true) {
   if (!ids.length && !args.proposal_id && !args.event_id) return;
   const rows = (await c.query(`select email_context from activity where id=any($1::uuid[])
     or id=(select activity_id from email_proposal where id=$2)
-    or id::text=(select new_value->>'activity_id' from event where id=$3) order by id ${lock ? 'for update' : ''}`,
-    [ids,args.proposal_id ?? null,args.event_id ?? null])).rows;
+    ${args.event_id ? "or id::text=(select new_value->>'activity_id' from v_email_thread_filing_event where id=$3)" : ''}
+    order by id ${lock ? 'for update' : ''}`,
+    args.event_id ? [ids,args.proposal_id ?? null,args.event_id] : [ids,args.proposal_id ?? null])).rows;
   if (rows.some(row => row.email_context?.lifecycle?.state && row.email_context.lifecycle.state !== 'live'))
     throw new ToolError({ error: 'email_not_live' });
 }
