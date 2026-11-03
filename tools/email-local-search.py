@@ -21,6 +21,8 @@ def main():
     build.add_argument('--allow-empty', action='store_true',
                        help='Allow zero supplied messages to replace an existing index')
     query = commands.add_parser('query', help='Look up a literal phrase in one private local index')
+    query.add_argument('--source', type=Path, required=True, help='Current closed private decoded copy')
+    query.add_argument('--source-revision', required=True, help='Current capture or decoder revision; must match the index')
     query.add_argument('--index', type=Path, required=True)
     query.add_argument('--account-id', type=int, required=True)
     query.add_argument('--query', required=True, help='Literal person, email address or property phrase; no FTS operators')
@@ -30,7 +32,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == 'query':
-            result = query_index(args.index, account_id=args.account_id, query=args.query,
+            result = query_index(args.index, source=args.source, source_revision=args.source_revision,
+                                 account_id=args.account_id, query=args.query,
                                  limit=args.limit, cursor=args.cursor, excerpts=args.local_excerpts)
         else:
             result = build_index(args.source, args.index, mailbox=args.mailbox,
@@ -40,6 +43,8 @@ def main():
         if str(error) == 'empty_source_would_replace_index':
             print('Empty source refused. Use --allow-empty to replace an existing index with zero messages.',
                   file=sys.stderr)
+        elif str(error) in ('stale_index', 'index_freshness_unavailable'):
+            print('Private index stale or freshness unavailable. Rebuild from the current decoded copy.', file=sys.stderr)
         else:
             print('Private index operation refused or failed.', file=sys.stderr)
         return 2

@@ -231,7 +231,7 @@ def _literal_phrase(query):
     return '"' + query.strip().replace('"', '""') + '"'
 
 
-def _index_metadata(db, account_id):
+def _index_metadata(db, account_id, source_revision, source_digest):
     with closing(sqlite3.connect(':memory:')) as expected:
         expected.executescript(SCHEMA)
         schema = 'SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name'
@@ -247,6 +247,20 @@ def _index_metadata(db, account_id):
             or metadata.get('account_id') != account_id
             or metadata.get('coverage') != 'unknown'):
         raise IndexError('incomplete_or_unbound_index')
+    try:
+        built_at = datetime.fromisoformat(metadata['built_at'])
+        if (built_at.tzinfo is None or built_at.utcoffset() is None
+                or not isinstance(metadata['source_revision'], str)
+                or not metadata['source_revision'].strip()
+                or len(metadata['source_revision']) > 256
+                or not isinstance(metadata['source_sha256'], str)
+                or not re.fullmatch(r'[0-9a-f]{64}', metadata['source_sha256'])):
+            raise ValueError
+    except (ValueError, TypeError, KeyError):
+        raise IndexError('index_freshness_unavailable') from None
+    if (metadata['source_revision'] != source_revision
+            or metadata['source_sha256'] != source_digest):
+        raise IndexError('stale_index')
     observed = db.execute('''SELECT count(*),min(sent_unix),max(sent_unix),
         sum(sent_unix IS NULL) FROM messages''').fetchone()
     if (any(value is not None and type(value) is not int for value in observed)
@@ -258,24 +272,44 @@ def _index_metadata(db, account_id):
         raise IndexError('invalid_index_binding_or_coverage')
     return dict(message_count=observed[0], observed_min_unix=observed[1],
                 observed_max_unix=observed[2], undated_count=observed[3] or 0,
-                completeness='unknown')
+                completeness='unknown', built_at=metadata['built_at'],
+                freshness='matches_current_decoded_source')
 
 
-def query_index(index, *, account_id, query, limit=20, cursor=None, excerpts=False):
+def query_index(index, *, source, source_revision, account_id, query, limit=20, cursor=None, excerpts=False):
     """Read one completed private index using a literal FTS phrase.
 
     All words form one phrase, including quoted names and email addresses. FTS
     operators, column selectors and wildcards are unsupported. Results sort by
     descending timestamp then id, with undated rows last. Cursors bind the query
     and account to the database bytes; rebuilding invalidates prior pages.
+    The caller must supply the current closed decoded copy and its revision.
+    Freshness is exact source byte identity, not a maximum age. Missing or invalid
+    provenance and changed sources refuse every page before MATCH. A timestamp
+    describes publication age only; it does not prove mailbox capture recency.
     Excerpts expose up to 240 subject and 500 body characters locally.
     """
     phrase = _literal_phrase(query)
     if (type(account_id) is not int or not 0 <= account_id <= 2**63 - 1
             or type(limit) is not int or not 1 <= limit <= 100
-            or type(excerpts) is not bool):
+            or type(excerpts) is not bool
+            or not isinstance(source_revision, str) or not source_revision.strip()
+            or len(source_revision) > 256):
         raise IndexError('invalid_query_options')
     try:
+        source = Path(source)
+        _parent(source)
+        _check_file(source)
+        with source.open('rb') as reader:
+            before_source = os.fstat(reader.fileno())
+            _private_file(before_source)
+            source_digest = hashlib.file_digest(reader, 'sha256').hexdigest()
+            after_source = os.fstat(reader.fileno())
+        _check_file(source)
+        if ((before_source.st_size, before_source.st_mtime_ns, before_source.st_ctime_ns) !=
+                (after_source.st_size, after_source.st_mtime_ns, after_source.st_ctime_ns)
+                or not os.path.samestat(after_source, source.stat())):
+            raise IndexError('stale_index')
         path = Path(index)
         _parent(path)
         _check_file(path)
@@ -301,7 +335,7 @@ def query_index(index, *, account_id, query, limit=20, cursor=None, excerpts=Fal
                     after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
                 raise IndexError('index_changed_during_open')
             _check_file(path)
-            coverage = _index_metadata(db, account_id)
+            coverage = _index_metadata(db, account_id, source_revision, source_digest)
             where = ''' FROM messages m JOIN messages_fts f ON f.rowid=m.id
                 WHERE messages_fts MATCH ? AND m.account_id=?'''
             count = db.execute('SELECT count(*)' + where, (phrase, account_id)).fetchone()[0]
@@ -321,6 +355,13 @@ def query_index(index, *, account_id, query, limit=20, cursor=None, excerpts=Fal
                 if excerpts:
                     item['excerpt'] = dict(subject=row[3], body=row[4])
                 results.append(item)
+        _check_file(source)
+        current_source = source.stat()
+        if (after_source.st_dev, after_source.st_ino, after_source.st_size,
+                after_source.st_mtime_ns, after_source.st_ctime_ns) != (
+                current_source.st_dev, current_source.st_ino, current_source.st_size,
+                current_source.st_mtime_ns, current_source.st_ctime_ns):
+            raise IndexError('stale_index')
         next_offset = offset + len(rows)
         next_cursor = None
         if next_offset < count:
@@ -329,5 +370,7 @@ def query_index(index, *, account_id, query, limit=20, cursor=None, excerpts=Fal
             next_cursor = base64.urlsafe_b64encode(json.dumps([binding, next_offset]).encode()).decode()
         return dict(match_count=count, results=results, next_cursor=next_cursor, coverage=coverage,
                     meaning='No indexed match is not proof of no prior relationship.')
+    except IndexError:
+        raise
     except (sqlite3.Error, OSError, ValueError, TypeError, KeyError, OverflowError, RecursionError):
         raise IndexError('private_index_query_refused') from None

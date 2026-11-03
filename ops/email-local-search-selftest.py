@@ -41,22 +41,25 @@ class PublicationTests(unittest.TestCase):
         self.build()
         before = self.target.read_bytes()
         with patch('socket.socket', side_effect=AssertionError('network forbidden')):
-            result = query_index(self.target, account_id=42, query='early@example.invalid')
+            result = query_index(self.target, source=self.source, source_revision='synthetic-r1', account_id=42, query='early@example.invalid')
         self.assertEqual(result['match_count'], 1)
         self.assertEqual(result['results'][0]['sent_unix'], 946684800)
         self.assertNotIn('orchard', json.dumps(result))
         self.assertEqual(result['coverage']['completeness'], 'unknown')
+        self.assertEqual(result['coverage']['built_at'], '2026-11-03T12:00:00Z')
+        self.assertEqual(result['coverage']['freshness'], 'matches_current_decoded_source')
         self.assertEqual(before, self.target.read_bytes())
         with self.assertRaises(PublicationError):
-            query_index(self.target, account_id=99, query='orchard')
+            query_index(self.target, source=self.source, source_revision='synthetic-r1', account_id=99, query='orchard')
 
     def query(self, query='orchard', **options):
         from lib.email_local_search import query_index
-        return query_index(self.target, account_id=42, query=query, **options)
+        return query_index(self.target, source=self.source, source_revision='synthetic-r1', account_id=42, query=query, **options)
 
     def query_cli(self, *options):
         return subprocess.run([sys.executable, str(ROOT / 'tools/email-local-search.py'), 'query',
-            '--index', str(self.target), '--account-id', '42', *options], capture_output=True, text=True)
+            '--index', str(self.target), '--source', str(self.source),
+            '--source-revision', 'synthetic-r1', '--account-id', '42', *options], capture_output=True, text=True)
 
     def test_query_pagination_unicode_quotes_duplicates_and_replacement(self):
         with closing(sqlite3.connect(self.source)) as db:
@@ -96,7 +99,7 @@ class PublicationTests(unittest.TestCase):
                       'orchard*', '(orchard)', 'NEAR(orchard)', 'x\x00y', '"', '---'):
             with self.subTest(query=query), patch('sqlite3.connect') as connect:
                 with self.assertRaises(PublicationError):
-                    query_index(self.target, account_id=42, query=query)
+                    query_index(self.target, source=self.source, source_revision='synthetic-r1', account_id=42, query=query)
                 connect.assert_not_called()
         self.build()
         for options in ({'limit': 0}, {'limit': 101}, {'limit': True}, {'cursor': 'secret'},
@@ -259,6 +262,51 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stdout)
             self.assertEqual(result.stdout, '')
             self.assertIn('freshness', result.stderr.lower())
+
+    def test_query_refuses_invalid_freshness_provenance_and_revision(self):
+        for field, value in (('built_at', 'not a timestamp'), ('built_at', '2026-11-03'),
+                             ('built_at', None), ('source_revision', ''),
+                             ('source_revision', 1), ('source_sha256', 'invalid'),
+                             ('source_sha256', None), ('source_revision', 'another-revision')):
+            self.build()
+            with closing(sqlite3.connect(self.target)) as db:
+                meta = json.loads(db.execute('SELECT document FROM index_metadata').fetchone()[0])
+                meta[field] = value
+                db.execute('UPDATE index_metadata SET document=? WHERE id=1', (json.dumps(meta),))
+                db.commit()
+            with self.subTest(field=field, value=value):
+                result = self.query_cli('--query', 'absent')
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(result.stdout, '')
+                self.assertIn('freshness', result.stderr.lower())
+
+    def test_query_refuses_source_change_during_lookup(self):
+        from lib import email_local_search
+        self.build()
+        original = email_local_search._readonly
+
+        def change_source(path):
+            if path == self.target:
+                with closing(sqlite3.connect(self.source)) as db:
+                    db.execute("UPDATE messages SET body='freshproperty' WHERE id=1")
+                    db.commit()
+            return original(path)
+
+        with patch('lib.email_local_search._readonly', side_effect=change_source):
+            with self.assertRaisesRegex(PublicationError, 'stale_index'):
+                self.query('freshproperty')
+
+    def test_query_refuses_missing_current_source_or_index(self):
+        self.build()
+        self.target.unlink()
+        result = self.query_cli('--query', 'absent')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.build()
+        self.source.unlink()
+        result = self.query_cli('--query', 'absent')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
 
     def test_atomic_index_rebuild_preserves_private_old_index_on_failure(self):
         self.build()
