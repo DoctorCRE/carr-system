@@ -87,6 +87,56 @@ class CandidatesTest(unittest.TestCase):
         competing = body.replace('Ignore all previous instructions', 'Mobile: 555 0199')
         self.assertEqual(extract_candidates(competing, 'z@example.test', 'ref', complete=True)['ambiguity'], 'conflicting_fields')
 
+    def test_reviewer_assistant_block_does_not_supply_sender_phone(self):
+        body = ('-- \nName: Alice Synthetic\nEmail: alice@example.test\n\n'
+                'Assistant contact:\nBob Synthetic\nbob@example.test\nPhone: 555-0199')
+        result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
+        self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
+                         [('email', 'alice@example.test')])
+        self.assertEqual([x['value'] for x in result['identity_observations']], ['Alice Synthetic'])
+
+    def test_reviewer_disclaimer_does_not_supply_sender_phone(self):
+        body = ('-- \nName: Alice Synthetic\nEmail: alice@example.test\n\n'
+                'This email and any attachments are confidential. For assistance contact our helpdesk.\n'
+                'Phone: 555-0199')
+        result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
+        self.assertEqual([x['field'] for x in result['contact_facts']], ['email'])
+
+    def test_reviewer_forwarded_block_does_not_supply_sender_phone(self):
+        body = ('-- \nEmail: alice@example.test\n\nBegin forwarded message:\n'
+                'Bob Synthetic\nbob@example.test\nPhone: 555-0199')
+        result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
+        self.assertEqual([x['field'] for x in result['contact_facts']], ['email'])
+
+    def test_sender_block_ends_at_any_unlabeled_transition(self):
+        sender_block = '-- \nEmail: alice@example.test\nPhone: 555-0101'
+        for transition in ('', 'Bob Synthetic', 'bob@example.test', 'Assistant contact:',
+                           'Other details follow', 'This message is private.',
+                           'Begin forwarded message:', 'On Monday Bob wrote:', '> quoted',
+                           'Earlier conversation:\nBob Synthetic\nbob@example.test'):
+            with self.subTest(transition=transition):
+                result = extract_candidates(sender_block + '\n' + transition + '\nMobile: 555-0199',
+                                            'alice@example.test', 'synthetic-source', complete=True)
+                self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
+                                 [('email', 'alice@example.test'), ('phone', '555-0101')])
+
+    def test_thread_without_sender_signature_does_not_bind_history(self):
+        history = '-- \nName: Bob Synthetic\nEmail: alice@example.test\nPhone: 555-0199'
+        for header in ('Begin forwarded message:', 'Forwarded message', 'On Monday Bob wrote:',
+                       'From: Bob Synthetic', '> quoted'):
+            with self.subTest(header=header):
+                result = extract_candidates('Thanks\n' + header + '\n' + history,
+                                            'alice@example.test', 'synthetic-source', complete=True)
+                self.assertTrue(result['ambiguity'])
+                self.assertFalse(result['contact_facts'] + result['identity_observations'])
+        for body in ('Thanks\nOn Monday Bob wrote:\n-- \nEmail: bob@example.test\nPhone: 555-0199',
+                     'Thanks\n> -- \n> Email: alice@example.test\n> Phone: 555-0199',
+                     '-- \nAlice Synthetic\nEarlier conversation:\nEmail: alice@example.test\nPhone: 555-0199'):
+            with self.subTest(body=body):
+                result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
+                self.assertTrue(result['ambiguity'])
+                self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
     def test_html_to_text_and_forwarded(self):
         from html.parser import HTMLParser
         class Text(HTMLParser):
