@@ -54,6 +54,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +67,7 @@ import speaker_split
 
 STATUS_FILE = ".transcription-status.json"
 MAX_ATTEMPTS = 3
+RECOVERY_TIMEOUT_SECONDS = 120
 
 AFCONVERT_BIN = "/usr/bin/afconvert"
 WHISPER_CLI_BIN = "/opt/homebrew/bin/whisper-cli"
@@ -139,6 +141,10 @@ class RawSegment:
 
 class TranscribeError(Exception):
     """A recoverable per-track failure (bad audio, whisper-cli error, ...)."""
+
+
+class RepetitionError(TranscribeError):
+    """A looping span could not be recovered; do not summarize a partial call."""
 
 
 # --- logging ---------------------------------------------------------------
@@ -320,32 +326,98 @@ def parse_whisper_json(json_path: Path) -> list[RawSegment]:
     return raw_segments
 
 
+def repetition_spans(segments: list[RawSegment]) -> list[tuple[int, int]]:
+    tokens = []
+    owners = []
+    for index, segment in enumerate(segments):
+        words = re.findall(r"\w+", segment.text.casefold())
+        tokens.extend(words)
+        owners.extend([index] * len(words))
+    ranges: list[tuple[int, int]] = []
+    position = 0
+    while position < len(tokens):
+        end = position
+        for width in range(1, 13):
+            phrase = tokens[position:position + width]
+            cursor = position + width
+            while tokens[cursor:cursor + width] == phrase and cursor < len(tokens):
+                cursor += width
+            if cursor - position >= max(24, width * 6):
+                end = max(end, cursor)
+        if end > position:
+            first, last = owners[position], owners[end - 1] + 1
+            if ranges and first <= ranges[-1][1]:
+                ranges[-1] = (ranges[-1][0], last)
+            else:
+                ranges.append((first, last))
+            position = end
+        else:
+            position += 1
+    return ranges
+
+
 def run_whisper(
     wav_path: Path, model_path: Path, prompt: str, out_dir: Path, log: LogFunc,
     *, timeout: int | None = None, env: dict[str, str] | None = None,
 ) -> list[RawSegment]:
-    out_stem = out_dir / wav_path.stem
-    cmd = [
-        WHISPER_CLI_BIN,
-        "-m",
-        str(model_path),
-        "--prompt",
-        prompt,
-        "-oj",
-        "-of",
-        str(out_stem),
-        "-f",
-        str(wav_path),
-    ]
-    log(f"WHISPER {wav_path.name} model={model_path.name}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
-    json_path = out_stem.with_suffix(".json")
-    if result.returncode != 0 or not json_path.exists():
-        raise TranscribeError(
-            f"whisper-cli failed for {wav_path.name} (rc={result.returncode}): "
-            f"{result.stderr.strip()[-500:]}"
-        )
-    return parse_whisper_json(json_path)
+    def decode(audio: Path, *, recovery: bool = False) -> list[RawSegment]:
+        out_stem = out_dir / audio.stem
+        cmd = [WHISPER_CLI_BIN, "-m", str(model_path), "-oj", "-of", str(out_stem),
+               "-f", str(audio)]
+        if recovery:
+            cmd.extend(["-mc", "0", "-tp", "0.4"])
+        else:
+            cmd.extend(["--prompt", prompt])
+        log(f"WHISPER {audio.name} model={model_path.name} recovery={recovery}")
+        json_path = out_stem.with_suffix(".json")
+        json_path.unlink(missing_ok=True)
+        decode_timeout = timeout
+        if recovery:
+            decode_timeout = (RECOVERY_TIMEOUT_SECONDS if timeout is None
+                              else min(timeout, RECOVERY_TIMEOUT_SECONDS))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=decode_timeout, env=env)
+        if result.returncode != 0 or not json_path.exists():
+            raise TranscribeError(f"whisper-cli failed for {audio.name} (rc={result.returncode})")
+        return parse_whisper_json(json_path)
+
+    segments = decode(wav_path)
+    spans = repetition_spans(segments)
+    if not spans:
+        return segments
+    recovered = []
+    previous = 0
+    try:
+        with wave.open(str(wav_path), "rb") as source:
+            rate = source.getframerate()
+            for first, last in spans:
+                recovered.extend(segments[previous:first])
+                start_ms = segments[first].start_ms
+                end_ms = segments[last - 1].end_ms
+                if start_ms < 0 or end_ms <= start_ms or end_ms * rate > source.getnframes() * 1000:
+                    raise RepetitionError("Invalid audio bounds for repetition recovery")
+                log(f"REPETITION start_ms={start_ms} end_ms={end_ms}")
+                for offset in range(start_ms, end_ms, 30000):
+                    duration = min(30000, end_ms - offset)
+                    chunk = out_dir / f"{wav_path.stem}-recovery-{offset}.wav"
+                    source.setpos(offset * rate // 1000)
+                    with wave.open(str(chunk), "wb") as output:
+                        output.setparams(source.getparams())
+                        output.writeframes(source.readframes(duration * rate // 1000))
+                    rows = decode(chunk, recovery=True)
+                    if not rows or repetition_spans(rows):
+                        raise RepetitionError("Unresolved transcription repetition")
+                    if any(row.start_ms < 0 or row.end_ms <= row.start_ms or row.end_ms > duration
+                           for row in rows):
+                        raise RepetitionError("Invalid timestamps in repetition recovery")
+                    recovered.extend(RawSegment(row.start_ms + offset, row.end_ms + offset, row.text)
+                                     for row in rows)
+                previous = last
+    except (OSError, ValueError, wave.Error, subprocess.SubprocessError, TranscribeError) as exc:
+        raise RepetitionError("Transcription repetition recovery failed") from exc
+    recovered.extend(segments[previous:])
+    if repetition_spans(recovered):
+        raise RepetitionError("Unresolved transcription repetition across recovery chunks")
+    return recovered
 
 
 def shift_and_tag(
@@ -413,6 +485,8 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
             try:
                 wav_path = convert_caf_to_wav(caf_path, tmp_dir, log)
                 raw_segments = run_whisper(wav_path, model_path, prompt, tmp_dir, log)
+            except RepetitionError:
+                raise
             except TranscribeError as exc:
                 log(f"ERROR track {label} failed: {exc}")
                 missing_tracks.append(label)
