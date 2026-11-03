@@ -14,6 +14,10 @@ MAX_CONCURRENT_CALLS = 8
 MAX_MODEL_WAVES = 6
 TERMINAL_FAILURES = {'topic_history_too_large', 'coverage_time_budget_exceeded'}
 LISTS = ('joe_tasks', 'dell_tasks', 'deal_updates', 'draft_proposals')
+REVIEW_OPERATIONS = {'operating_state': 'operating_state', 'rename': 'rename',
+                     'national_account_reassignment': 'workspace_change',
+                     'prospect_routing': 'workspace_change', 'business_task': 'commitment',
+                     'client_lifecycle': 'other'}
 
 
 class CoverageError(RuntimeError):
@@ -272,6 +276,9 @@ def _validate_dispositions(ledger, facts, questions, *, allow_pending=False, pro
         if kind == 'proposal':
             _require(not allow_pending and set(detail) == {'proposal_id'} and
                      detail['proposal_id'] in proposals, 'unverified_proposal')
+        elif kind == 'review_intent':
+            _require(not allow_pending and set(detail) == {'review_question_id'} and
+                     detail['review_question_id'] in questions, 'missing_intent_question')
         elif kind == 'superseded':
             _require(set(detail) == {'replacement_fact_id', 'correction_spans'}, 'invalid_supersession')
             target = detail.get('replacement_fact_id')
@@ -375,7 +382,32 @@ def reconcile_coverage(ledger, report):
         if inventory:
             receipt = ledger.get('history_receipts', {}).get(topic['topic_id'], {})
             _require(receipt.get('validated_completion') and receipt.get('input_sha256') == digest([topic, inventory]), 'history_audit_required')
-    linked, bindings = {}, {}
+    linked, bindings, intent_facts = {}, {}, set()
+    for question in report.get('review_questions', []):
+        if question.get('kind') != 'review_intent':
+            continue
+        ids = question.get('fact_ids', [])
+        _require(bool(ids) and all(i in facts for i in ids), 'unsupported_intent')
+        spans = []
+        for fact_id in ids:
+            fact = facts[fact_id]
+            _require(fact_id not in intent_facts and (fact['disposition'] is None or
+                     fact['disposition'] == {'review_intent': {'review_question_id': question['id']}}),
+                     'conflicting_intent_disposition')
+            identity = topics[fact['topic_id']]['identity']
+            _require(question.get('deal_id') == identity.get('deal_id'), 'intent_identity_mismatch')
+            _require('deal_id' in identity or bool(question.get('identity_question')), 'missing_identity_question')
+            _require(fact['kind'] == REVIEW_OPERATIONS.get(question.get('operation')), 'intent_kind_mismatch')
+            _require(fact['asserted_value'] == question.get('desired_value'), 'intent_value_mismatch')
+            for span in fact['source_spans']:
+                if span not in spans:
+                    spans.append(span)
+            fact['disposition'] = {'review_intent': {'review_question_id': question['id']}}
+            intent_facts.add(fact_id)
+        _require('source_spans' not in question or question['source_spans'] == spans, 'intent_source_mismatch')
+        question['source_spans'] = spans
+        bindings[question['id']] = digest({k: v for k, v in question.items()
+                                         if k not in ('resolved', 'resolution')})
     for kind, item in proposal_items(report):
         ids = item.get('fact_ids')
         _require(isinstance(ids, list) and bool(ids) and all(isinstance(i, str) for i in ids) and len(ids) == len(set(ids)) and
@@ -389,7 +421,7 @@ def reconcile_coverage(ledger, report):
         bindings[proposal_id] = digest({k: item[k] for k in fields if k in item})
         for fact_id in ids:
             fact = facts[fact_id]
-            _require(fact_id not in linked, 'multiple_dispositions')
+            _require(fact_id not in linked and fact_id not in intent_facts, 'multiple_dispositions')
             _require(fact['disposition'] is None or 'proposal' in fact['disposition'], 'conflicting_disposition')
             identity = topics[fact['topic_id']]['identity']
             _require('deal_id' in identity, 'unresolved_proposal_identity')
@@ -401,7 +433,7 @@ def reconcile_coverage(ledger, report):
             if kind == 'phase_move':
                 _require(item['value'] == fact['asserted_value'], 'proposal_value_mismatch')
             if kind not in ('phase_move', 'next_step'):
-                _require(fact['kind'] not in ('phase_change', 'next_step'), 'proposal_kind_mismatch')
+                _require(fact['kind'] not in ('phase_change', 'next_step', 'operating_state', 'rename', 'workspace_change'), 'proposal_kind_mismatch')
             linked[fact_id] = proposal_id
     for fact_id, proposal_id in linked.items():
         facts[fact_id]['disposition'] = {'proposal': {'proposal_id': proposal_id}}
@@ -428,7 +460,11 @@ def require_coverage(session_dir, report, read_json):
 
 def add_identity_questions(ledger, report, review_id):
     topics = {t['topic_id']: t for t in ledger['topics']}
+    intent_facts = {i for q in report.get('review_questions', []) if q.get('kind') == 'review_intent'
+                    for i in q.get('fact_ids', [])}
     for number, fact in enumerate(ledger['facts'], 1):
+        if fact['fact_id'] in intent_facts:
+            continue
         identity = topics[fact['topic_id']]['identity']
         if 'deal_id' not in identity:
             question_id = review_id(ledger['session'], 'coverage_identity', number)
@@ -459,7 +495,9 @@ def extraction_schema():
 
 def extraction_instruction(data_sentence):
     return (
-        'Extract every atomic spoken fact before generating proposals. ' + data_sentence +
+        'Extract every atomic spoken fact before generating proposals. Parking is operating_state, card naming is rename, '
+        'account reassignment and prospect routing are workspace_change, and owner business work is commitment. '
+        'Set asserted_value to the exact desired string for these operations. ' + data_sentence +
         ' Return topics, facts and non_fact_spans following the schema. Use full transcript segment coordinates, '
         'never substring-relative coordinates. Copy source_id and sha256 from sources into each span. '
         'Account for every nonwhitespace character in the core range with a fact span or a non-fact span and reason. '

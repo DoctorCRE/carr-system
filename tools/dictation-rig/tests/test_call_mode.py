@@ -1106,6 +1106,78 @@ class PostCallTests(unittest.TestCase):
         result.update(overrides)
         return result
 
+    def test_unsupported_call_commands_remain_typed_local_review_intents(self) -> None:
+        case = json.loads((Path(__file__).parent / "fixtures/synthetic-call.json").read_text())["intent_case"]
+        raw = self.output(joe_tasks=[], deal_updates=[], draft_proposals=[], review_intents=case["intents"])
+        result = post_call.normalize_distillation(raw, self.context, self.session.name,
+                                                  transcript=case["transcript"])
+        questions = result["review_questions"]
+        self.assertEqual(len(questions), 5)
+        self.assertEqual([q["operation"] for q in questions], [i["operation"] for i in case["intents"]])
+        self.assertTrue(all(q["kind"] == "review_intent" and not q["resolved"] for q in questions))
+        self.assertEqual([q["deal_id"] for q in questions], ["deal-a"] * 3 + [None, None])
+        for question in questions:
+            self.assertIn(question["desired_value"], question["question"])
+            self.assertIn(question["review_reason"], question["question"])
+        self.assertEqual(result["deal_updates"], [])
+        self.assertEqual(result["joe_tasks"], [])
+        self.assertFalse(post_call.review_complete(result))
+        post_call.write_private(self.session / post_call.REPORT_FILE, result)
+        self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"], [])
+        for question in questions:
+            post_call.resolve_question(self.session, question["id"], "Declined explicitly by Joe.")
+        self.assertTrue(post_call.review_complete(post_call.read_json(self.session / post_call.REPORT_FILE)))
+
+    def test_intent_sources_survive_coverage_and_resolution_without_remote_candidates(self) -> None:
+        case = json.loads((Path(__file__).parent / "fixtures/synthetic-call.json").read_text())["intent_case"]
+        transcript = case["transcript"]
+        kinds = ["operating_state", "rename", "workspace_change", "workspace_change", "commitment"]
+        topics, facts = [], []
+        for i, intent in enumerate(case["intents"]):
+            identity = ({"deal_id": "deal-a", "participant_ids": []} if intent["deal_id"] else
+                        {"mentioned_name": "prospect or partnership", "candidate_deal_ids": [], "reason": intent["identity_question"]})
+            topics.append({"topic_id": str(i), "identity": identity})
+            facts.append({"fact_id": intent["fact_ids"][0], "topic_id": str(i), "kind": kinds[i],
+                          "statement": transcript["segments"][i]["text"], "asserted_value": intent["desired_value"],
+                          "source_spans": [_REAL_COVERAGE.source_span(transcript, i)], "disposition": None})
+        def model(request):
+            if request.get("stage") == "coverage_history":
+                return {"dispositions": [{"fact_id": f["fact_id"], "disposition": None} for f in request["facts"]]}
+            return {"topics": topics, "facts": facts, "non_fact_spans": []}
+        ledger = _REAL_COVERAGE.build_call_ledger(transcript, self.context, model)
+        ledger = _REAL_COVERAGE.reconcile_history(ledger, transcript, model)
+        report = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[],
+                                                            review_intents=case["intents"]),
+                                                  self.context, self.session.name, transcript=transcript)
+        _REAL_COVERAGE.add_identity_questions(ledger, report, post_call._review_id)
+        self.assertEqual(len(report["review_questions"]), 5)
+        ledger = _REAL_COVERAGE.reconcile_coverage(ledger, report)
+        self.assertEqual(ledger["state"], "complete")
+        self.assertEqual(sum("review_intent" in f["disposition"] for f in ledger["facts"]), 5)
+        for i, question in enumerate(report["review_questions"]):
+            self.assertEqual(question["source_spans"], [_REAL_COVERAGE.source_span(transcript, i)])
+        self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report), ledger)
+        from copy import deepcopy
+        for field, value in (("desired_value", "different"), ("deal_id", "deal-b"), ("source_spans", [])):
+            changed = deepcopy(report)
+            changed["review_questions"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(_REAL_COVERAGE.CoverageError):
+                _REAL_COVERAGE.reconcile_coverage(ledger, changed)
+        missing = deepcopy(report)
+        missing["review_questions"].pop(0)
+        with self.assertRaises(_REAL_COVERAGE.CoverageError):
+            _REAL_COVERAGE.reconcile_coverage(ledger, missing)
+        report["review_questions"][0].update(resolved=True, resolution="Performed by Joe.")
+        self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report), ledger)
+
+    def test_intents_require_a_typed_operation_and_identity_question(self) -> None:
+        case = json.loads((Path(__file__).parent / "fixtures/synthetic-call.json").read_text())["intent_case"]
+        for change in ({"operation": "execute_verb"}, {"deal_id": None, "identity_question": None},
+                       {"fact_ids": []}, {"review_reason": ""}, {"owner": "Unknown"}):
+            with self.subTest(change=change), self.assertRaises(post_call.ContractError):
+                post_call.normalize_distillation(self.output(review_intents=[{**case["intents"][0], **change}]),
+                                                  self.context, self.session.name)
+
     def test_undated_actions_stay_undated_and_ask_the_partner_for_a_date(self) -> None:
         result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
                                                   call_date="2026-10-30")
@@ -2204,7 +2276,7 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--output-format") + 1], "json")
         self.assertEqual(json.loads(argv[argv.index("--json-schema") + 1])["required"],
                          ["schema_version", "report", "joe_tasks", "dell_tasks",
-                          "deal_updates", "draft_proposals", "review_questions"])
+                          "deal_updates", "draft_proposals", "review_questions", "review_intents"])
         schema = json.loads(argv[argv.index("--json-schema") + 1])
         for owner in ("joe", "dell"):
             action = schema["properties"][f"{owner}_tasks"]["items"]

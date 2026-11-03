@@ -276,3 +276,36 @@ preserves the later edit. An intentional backward move is allowed when its cited
 instruction follows the latest recorded phase edit. Untimed proposals and genuine
 conflicts require review of the live deal followed by a fresh explicit decision;
 accepting the stale proposal never silently refreshes its base.
+
+### Unsupported operations remain local review intents
+
+The distiller returns `review_intents` for explicit operations outside the call
+mutation vocabulary. The operation enum contains `operating_state`, `rename`,
+`national_account_reassignment`, `prospect_routing`, `business_task`, and
+`client_lifecycle`. Parking uses `operating_state` with desired value `parked`.
+It never substitutes a phase move.
+
+Each intent contains the spoken `desired_value`, exact `deal_id` or null,
+`owner` as Joe, Dell, or null, supporting `fact_ids`, a concrete `review_reason`,
+and `identity_question` when identity or routing needs resolution. An account
+name does not establish an account ID. Partnership work has no fabricated deal.
+
+Normalization creates a local review question with `kind: review_intent` and
+retains these typed fields. Its question names the operation, deal or business
+work, desired value, reason, and required decision. The existing companion review
+panel displays it and the existing question resolver records its disposition.
+It remains unresolved until a partner records performance or explicit decline.
+U5 can consume these same question rows without a second intent resolver.
+
+Coverage derives `source_spans` from the cited ledger facts, verifies the desired
+value and exact deal identity, and binds the question content to the ledger.
+Unsupported operating-state, rename, and workspace facts cannot be filed as
+ordinary narrative notes. Unknown identities keep their precise question in the
+intent instead of creating a duplicate generic question. Removing an intent or
+changing its identity, desired value, or source references invalidates coverage.
+Resolution metadata can change without changing the source binding.
+
+Intents stay in the private report and create no backend mutation candidates.
+Existing reports without `review_intents` remain readable. The generated schema
+requires the array for new model responses. Automatic execution of these
+operations requires separate operation-specific domain contracts.
