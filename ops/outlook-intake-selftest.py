@@ -611,6 +611,46 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([one, two])
         self.assertEqual(len(self.fake.findings), 1)
 
+    def unresolved_competing_signatures(self, change=None):
+        a = self.signature_alias_fixture()
+        self.fake.fail_verbs.add('log-activity')
+        self.run_intake([a])
+        frozen = self.fake.writes('record-finding')[0][1]
+        one, two = ({**a, 'local_keys': k} for k in ('77', '88'))
+        result = self.run_intake([one, two])
+        self.assertEqual(result.counts['signature_held'], 2)
+        # Every run reloads JSON. Absence of a competitor is not new proof.
+        result = self.run_intake([two])
+        if change is None:
+            self.assertEqual(result.counts['signature_held'], 1,
+                             'previously competing candidate merged without unique proof')
+        elif change == 'party':
+            snapshot = self.fake.contacts_rows[0].contact_snapshot
+            snapshot['party_id'] = snapshot['provenance']['party_id'] = 102
+        else:
+            one = {**one, 'body': one['body'] + '\nTitle: Director'}
+        result = self.run_intake([one])
+        self.assertEqual(len(self.fake.findings), 1,
+                         'forgotten competing evidence bypassed frozen source binding')
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual([args for _, args in self.fake.writes('record-finding')], [frozen])
+        self.assertFalse(self.fake.writes('update-party-contact'))
+        self.assertFalse(self.fake.writes('correct-party-identity'))
+        if change is None:
+            for rows in ([two], [one], [a], [one, two]):
+                result = self.run_intake(rows)
+                self.assertEqual(result.counts['signature_held'], 0 if rows == [a] else len(rows))
+                self.assertEqual(len(self.fake.findings), 1)
+
+    def test_signature_competing_evidence_survives_lone_candidate_and_restart(self):
+        self.unresolved_competing_signatures()
+
+    def test_signature_competing_evidence_holds_changed_party(self):
+        self.unresolved_competing_signatures('party')
+
+    def test_signature_competing_evidence_holds_changed_body(self):
+        self.unresolved_competing_signatures('body')
+
     def test_signature_simultaneous_aliases_share_frozen_request(self):
         old = self.signature_alias_fixture()
         self.run_intake([old])
