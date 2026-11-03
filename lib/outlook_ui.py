@@ -102,6 +102,15 @@ class ReadState(Enum):
     UNCERTAIN = 'uncertain'
 
 
+def _row_status(label: str) -> tuple[ReadState, str]:
+    """Only the fixture-supported status slot may affect read state or identity."""
+    if label.startswith('Unread, Sender: '):
+        return ReadState.UNREAD, label[len('Unread, '):]
+    if label.startswith('Sender: '):
+        return ReadState.READ, label
+    return ReadState.UNCERTAIN, label
+
+
 @dataclass(frozen=True)
 class Row:
     label: str
@@ -115,14 +124,13 @@ class Row:
 
     @property
     def read_state(self) -> ReadState:
-        if re.search(r'\bunread\b', self.label, re.I):
-            return ReadState.UNREAD
-        return ReadState.READ if self.sender else ReadState.UNCERTAIN
+        state, _ = _row_status(self.label)
+        return state if self.sender else ReadState.UNCERTAIN
 
     @property
     def key(self) -> str:
-        """The label with any unread marker removed: the same email read or unread."""
-        return re.sub(r'\s+', ' ', re.sub(r'\bunread\b,?', '', self.label, flags=re.I)).strip()
+        """Normalize whitespace and remove only the explicit status prefix."""
+        return re.sub(r'\s+', ' ', _row_status(self.label)[1]).strip()
 
     @property
     def subject(self) -> str | None:
@@ -427,7 +435,11 @@ class Window:
                                          'include_screenshot': False, **bounds})
         if str(state.get('degraded_reason') or '').startswith('ax_window_unresolved'):
             raise UiError('ax_window_unresolved', step='_walk')
-        return state.get('elements') or []
+        elements = state.get('elements') or []
+        if bounds.get('max_elements') == BADGE_WALK and (
+                state.get('degraded_reason') or len(elements) >= BADGE_WALK):
+            raise UiError('inbox_badge_unverified', step='inbox_badge_clipped')
+        return elements
 
     def _menu(self, path: list[str]) -> None:
         act('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': path})
@@ -465,8 +477,13 @@ class Window:
             children.setdefault(e.get('parent_index'), []).append(e)
         found: list[tuple[dict, list[str]]] = []
         for row in (e for e in elements if e.get('role') == 'AXRow'):
-            texts = [(c.get('label') or c.get('value') or '').strip()
-                     for c in children.get(row['element_index'], [])]
+            texts = [''] if row.get('label') or row.get('value') else []
+            for child in children.get(row['element_index'], []):
+                if child.get('element_index') is not None and children.get(child['element_index']):
+                    texts.append('')
+                attributes = [str(child[k]).strip() for k in ('label', 'value')
+                              if child.get(k) is not None and child[k] != '']
+                texts.extend(dict.fromkeys(attributes or ['']))
             if 'Inbox' in texts:
                 found.append((row, texts))
         if not found:
@@ -485,10 +502,25 @@ class Window:
 
     def inbox_badge(self) -> int:
         """Unread count on the Inbox folder row; needs the folder pane showing."""
-        texts = self._inbox_rows()[1][0][1]
-        counts = [int(m.group(1)) for t in texts if (m := re.fullmatch(r'(\d+)(?: unread)?', t))]
+        self.badge_diagnostics = {'selected_inbox_rows': 0, 'badge_status': 'unverified'}
+        try:
+            elements, found = self._inbox_rows()
+        except UiError as exc:
+            raise UiError('inbox_badge_unverified', step=exc.step) from None
+        selected = [(row, texts) for row, texts in found if row.get('selected') is True]
+        self.badge_diagnostics['selected_inbox_rows'] = len(selected)
+        if len(selected) != 1 or (elements and not _in_inbox(elements)):
+            raise UiError('inbox_badge_unverified', step='inbox_badge_selection')
+        texts = selected[0][1]
+        counts = [int(m.group(1)) for t in texts
+                  if (m := re.fullmatch(r'([0-9]+)(?: unread)?', t))]
         if len(counts) > 1:
-            raise UiError('inbox_badge_ambiguous', step='inbox_badge')
+            raise UiError('inbox_badge_unverified', step='inbox_badge_multiple_counts')
+        # A complete walk with only the Inbox name is the synthetic zero contract.
+        # Live badge shapes have not been observed; unknown children fail closed.
+        if texts.count('Inbox') != 1 or len(texts) != 1 + len(counts):
+            raise UiError('inbox_badge_unverified', step='inbox_badge_shape')
+        self.badge_diagnostics['badge_status'] = 'count' if counts else 'complete_zero'
         return counts[0] if counts else 0
 
     def rows(self, require_inbox: bool = True) -> tuple[str | None, list[Row]]:
