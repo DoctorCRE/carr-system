@@ -24,9 +24,9 @@ export const HOME_INBOX_SETTLEMENT_CONTRACT = Object.freeze({
   ...HOME_INBOX_CONTRACT,
   schema_version: 'home-inbox.v3',
   read_verb: 'read-home-inbox-v3',
-  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write' },
-  auto_settle_source_types: ['next_action', 'capture_post_call_action', 'email_proposal'],
-  settlement: 'Canonical done tasks and sent replies settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Fact-review and tour-feedback sources are not included. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
+  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, kind_label: 'Task|Call follow-up|Call|Reply draft|Update|Fact review|Tour feedback', auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write' },
+  auto_settle_source_types: ['next_action', 'capture_post_call_action', 'email_proposal', 'fact_review', 'tour_feedback'],
+  settlement: 'Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
 });
 
 function withAutomaticSettlement(snapshot) {
@@ -55,9 +55,9 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
     },
     'read-home-inbox-v3': {
       writerConnection: true,
-      description: 'Read the Home inbox with automatic settlement of canonical done tasks and sent replies. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged. Fact-review and tour-feedback adapters remain outside this projection.',
+      description: 'Read the Home inbox with automatic settlement of canonical done tasks, sent replies, resolved fact reviews and received tour feedback. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v2() as result')).rows[0]?.result)),
+      handler: async c => withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v3() as result')).rows[0]?.result)),
     },
     'read-home-inbox-v2': {
       writerConnection: true,

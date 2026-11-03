@@ -536,6 +536,29 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     insert into next_action(id,owner_id,description,status,version,created_at,updated_at)
       values('${id(702)}','${joe.id}','Synthetic task','open',1,now(),now());`);
   await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  const schema=readFileSync(new URL('../../db/schema.sql',import.meta.url),'utf8');
+  for(const name of ['fact_observation','fact_observation_batch','canonical_fact',
+    'tour_share_grant','tour_share_feedback_event','tour_share_grant_revocation_receipt']) {
+    await c.query(schema.match(new RegExp(`CREATE TABLE ops\\.${name} \\([\\s\\S]*?\\n\\);`))[0]);
+  }
+  await c.query('alter table ops.tour_share_feedback_event alter column event_order add generated always as identity');
+  const reviewSql=readFileSync(new URL('../../migrations/1099_fact_review.sql',import.meta.url),'utf8');
+  await c.query(reviewSql.match(/create table ops\.fact_review_decision \([\s\S]*?\n\);/)[0].replace(/ references ops\.fact_key_contract\(fact_key\)/g,'').replace(/ references ops\.fact_observation\(id\)/g,''));
+  await c.query(`alter table ops.fact_observation add normalized_schedule jsonb,add region_id text;
+    alter table ops.canonical_fact add normalized_schedule jsonb;
+    alter table ops.fact_review_decision add extraction_job_ids uuid[] default '{}';
+    create table ops.deal_extraction_job(id uuid,organization_tenant_id text,entity_ref text,recorded_at timestamptz,receipt jsonb);`);
+  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','resolve_fact_review']]) {
+    const sql=readFileSync(new URL(`../../migrations/${file}`,import.meta.url),'utf8');
+    await c.query(sql.match(new RegExp(`create or replace function ops\\.${name}\\([\\s\\S]*?\\$\\$;`))[0]);
+  }
+  await c.query('alter table deal add owner text');
+  const v2Before=(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}));
+  await c.query(readFileSync(new URL('../../migrations/1140_home_inbox_resolution_adapters.sql',import.meta.url),'utf8'));
+  assert.deepEqual(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}),v2Before,'shared placement preserves the v2 snapshot');
+  await c.query('set role carr_writer');
+  assert.equal((await executeRegisteredTool(c,joe,'read-home-inbox-v3',{})).ok,true);
+  await c.query('reset role');
   const read=()=>executeRegisteredTool(c,joe,'read-home-inbox-v3',{});
   const item=async n=>(await read()).items.find(i=>i.source_id===id(n));
   let seq=800;
@@ -662,6 +685,81 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
       await c.query('delete from ops.home_inbox_disposition where item_id=$1',[`email_proposal:${sourceId}`]);
     });
   }
+  await t.test('fact review resolution and exact grant feedback receipt auto-settle through the same commands',async adapters=>{
+    await c.query(`insert into deal(id,name,owner) values('${id(2000)}','Synthetic review deal','joe');
+      insert into ops.fact_observation_batch(id,organization_tenant_id,idempotency_key,request_sha256,recorded_by_actor_id)
+        values('${id(2001)}','carr-internal','${id(2002)}',repeat('a',64),'${joe.id}');
+      insert into ops.fact_observation(id,organization_tenant_id,batch_id,ordinal,observation_ref,entity_ref,fact_key,
+        value,unit,normalized_value,document_ref,page_start,page_end,cited_text_sha256,cited_text_expires_at,
+        method,extractor_version,confidence_tier)
+        values('${id(2003)}','carr-internal','${id(2001)}',1,'synthetic','${id(2000)}','base_rent_per_sf',
+          '24','USD/SF/year',24,'synthetic',1,1,repeat('a',64),now()+interval '1 day','text_layer','synthetic','human_review');
+      insert into ops.tour_share_grant(id,organization_tenant_id,projection_id,grant_version,token_digest,audience,
+        permission_scopes,expires_at,status,created_by_actor_id)
+        values('${id(2010)}','carr-internal','${id(2011)}',1,'sha256:'||repeat('a',64),'client',
+          '["view_packet","comment"]',now()+interval '1 day','active','${joe.id}');`);
+    const find=async type=>(await read()).items.find(i=>i.source_type===type);
+    for(const type of ['fact_review','tour_feedback']) {
+      assert.equal((await find(type))?.section,'inbox',`${type} unresolved stays visible`);
+      assert.equal((await find(type)).auto_settled,false);
+    }
+    await c.query(`insert into ops.tour_share_grant(id,organization_tenant_id,projection_id,grant_version,token_digest,audience,
+      permission_scopes,expires_at,status,created_by_actor_id)
+      select '${id(2020)}',organization_tenant_id,projection_id,2,'sha256:'||repeat('b',64),audience,
+        permission_scopes,expires_at,status,'${dell.id}' from ops.tour_share_grant where id='${id(2010)}';
+      insert into ops.tour_share_feedback_event(id,organization_tenant_id,projection_id,share_grant_id,property_id,
+        idempotency_key,action,shortlisted,payload_digest)
+      values('${id(2021)}','carr-internal','${id(2011)}','${id(2020)}','${id(2013)}','${id(2022)}',
+        'shortlist',false,'sha256:'||repeat('b',64));`);
+    assert.equal((await find('tour_feedback')).section,'inbox','another grant feedback cannot settle this grant');
+    const dispositionsBefore=(await c.query('select count(*) n from ops.home_inbox_disposition')).rows[0].n;
+    const field=(await c.query("select ops.fact_review_field('carr-internal',$1,'base_rent_per_sf') result",[id(2000)])).rows[0].result;
+    assert.equal((await executeRegisteredTool(c,joe,'resolve-fact-review',{
+      idempotency_key:id(2004),entity_ref:id(2000),fact_key:'base_rent_per_sf',decision:'reject',
+      base_version:field.canonical_version,review_version:field.review_version,reason:'Synthetic review resolution',
+    })).ok,true);
+    await c.query(`
+      insert into ops.tour_share_feedback_event(id,organization_tenant_id,projection_id,share_grant_id,property_id,
+        idempotency_key,action,comment,payload_digest)
+      values('${id(2012)}','carr-internal','${id(2011)}','${id(2010)}','${id(2013)}','${id(2014)}',
+        'comment','Synthetic feedback','sha256:'||repeat('a',64));`);
+    assert.equal((await c.query('select count(*) n from ops.home_inbox_disposition')).rows[0].n,dispositionsBefore);
+    for(const type of ['fact_review','tour_feedback']) await adapters.test(`${type} modeled resolution, Undo, replay and snooze`,async()=>{
+      const settled=await find(type);
+      assert.equal(settled.section,'settled',`${type} modeled resolution transition`);
+      assert.equal(settled.auto_settled,true);
+      const args={idempotency_key:id(seq++),items:[{item_id:settled.item_id,base_version:settled.base_version}]};
+      const undo=await executeRegisteredTool(c,joe,'unsettle-home-inbox',args);
+      assert.equal(undo.results[0].ok,true);
+      const replay=await executeRegisteredTool(c,joe,'unsettle-home-inbox',args);
+      assert.equal(replay.replayed,true); assert.deepEqual(replay.results,undo.results);
+      const restored=await find(type);
+      assert.equal(restored.section,'inbox'); assert.equal(restored.explicit_unsettle,true);
+      assert.equal(restored.auto_settled,false); assert.deepEqual(await find(type),restored);
+      assert.equal((await change('snooze',restored,'2099-01-01T00:00:00Z')).results[0].ok,true);
+      assert.equal((await find(type)).section,'snoozed');
+      await c.query("update ops.home_inbox_disposition set snoozed_until=now()-interval '1 second' where item_id=$1",[restored.item_id]);
+      assert.equal((await find(type)).auto_settled,true);
+      assert.equal((await change('settle',await find(type))).results[0].ok,true);
+      assert.equal((await find(type)).auto_settled,false);
+      assert.equal((await change('unsettle',await find(type))).results[0].ok,true);
+    });
+    const before=await find('fact_review');
+    await c.query(`insert into ops.fact_observation select '${id(2005)}'::uuid,organization_tenant_id,batch_id,2,
+      'new-evidence',entity_ref,fact_key,value,unit,expense_basis,normalized_value,document_ref,content_hash,
+      document_family_id,derivation_chain,page_start,page_end,cited_text,cited_text_sha256,cited_text_expires_at,
+      method,extractor_version,extraction_pass,extraction_model,confidence_tier,now(),normalized_schedule,region_id
+      from ops.fact_observation where id='${id(2003)}'`);
+    const reopened=await find('fact_review');
+    assert.equal(reopened.source_state,'needs_attention'); assert.equal(reopened.section,'inbox');
+    assert.equal(reopened.explicit_unsettle,false);
+    assert.equal((await change('settle',before)).results[0].error,'version_conflict');
+    const v2=await executeRegisteredTool(c,joe,'read-home-inbox-v2',{});
+    assert.ok(v2.items.every(i=>!['fact_review','tour_feedback'].includes(i.source_type)));
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.ok((await executeRegisteredTool(c,dell,'read-home-inbox-v3',{})).items.every(i=>i.source_type!=='fact_review' && i.source_id!==id(2010)));
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+  });
   await t.test('v3 contract matches its runtime declaration',()=>{
     assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v3.json',import.meta.url),'utf8')),HOME_INBOX_SETTLEMENT_CONTRACT);
   });
@@ -671,6 +769,6 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     assert.ok(v2.items.every(i=>!Object.hasOwn(i,'auto_settled')));
     const v3=await read(); assert.equal(v3.auto_settle_enabled,true); assert.equal(v3.schema_version,'home-inbox.v3');
     await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
-    assert.deepEqual((await executeRegisteredTool(c,dell,'read-home-inbox-v3',{})).items,[]);
+    assert.ok((await executeRegisteredTool(c,dell,'read-home-inbox-v3',{})).items.every(i=>i.source_id===id(2020)));
   });
 });
