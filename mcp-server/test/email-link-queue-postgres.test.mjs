@@ -31,7 +31,7 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
       c = new pg.Client({ host: fixture.root, user: 'carr_ci', database: 'postgres' });
     }
     await c.connect();
-    await c.query(`create table activity (id uuid primary key, deal_id uuid, client_id uuid, vendor_id uuid,
+    await c.query(`create table activity (id uuid primary key, version integer not null default 1, deal_id uuid, client_id uuid, vendor_id uuid,
       lead_id uuid, actor_id uuid, kind text, detail text, email_context jsonb, email_source jsonb,
       occurred_at timestamptz, recorded_at timestamptz, email_identity jsonb)`);
     await c.query(`create table email_proposal (kind text, owner text, created_at timestamptz, activity_id uuid)`);
@@ -71,6 +71,7 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
     await c.query("delete from activity where id='10000000-0000-0000-0000-000000000099'");
     const first = await queue.handler(c, caller, { purpose: 'links', limit: 1 });
     assert.equal(first.emails[0].body, 'full body');
+    assert.equal(first.emails[0].version, 1);
     assert.equal(first.emails[0].activity_id, ids[0]);
     assert.equal(first.next_cursor, ids[0]);
     const next = await queue.handler(c, caller, { purpose: 'links', limit: 1, after: first.next_cursor });
@@ -79,9 +80,10 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
     const other = await queue.handler(c, { human: true, slug: 'dell', id: '30000000-0000-0000-0000-000000000002' }, { purpose: 'links' });
     assert.deepEqual(other.emails.map(row => row.activity_id), []);
     const secondDeal = '20000000-0000-0000-0000-000000000002';
-    await c.query('update activity set deal_id=$1 where id=$2', [secondDeal, ids[0]]);
+    await c.query('update activity set deal_id=$1,version=version+1 where id=$2', [secondDeal, ids[0]]);
     const refiled = await queue.handler(c, caller, { purpose: 'links' });
     assert.equal(refiled.emails.find(row => row.activity_id === ids[0]).deal, secondDeal);
+    assert.equal(refiled.emails.find(row => row.activity_id === ids[0]).version, 2);
   } finally {
     await c?.end();
     if (database) await admin.query(`drop database "${database}"`);
