@@ -14,6 +14,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -1375,6 +1376,81 @@ class BadgeDriverTest(FakeOutlookCase):
                 self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
                 self.assertEqual((state['selections'], state['moved']), ([], []))
                 self.assertIn('badge_status=unverified', outcome.detail)
+
+
+class UnreadRoundFixTest(FakeOutlookCase):
+    def test_checking_offscreen_arrival_fails_without_settling(self):
+        self.given([FILE_A, NEWS, UNREAD, msg('sender-test', 'filler')], visible_limit=3)
+        from lib.outlook_ui import Window
+        original = Window.rows
+        injected = []
+        def rows(window, *args, **kwargs):
+            state = json.loads(self.state.read_text())
+            if state['moved'] and not injected and inspect.stack()[1].function == '_inbox':
+                state['lists']['only'].append(ARRIVAL)
+                self.state.write_text(json.dumps(state))
+                injected.append(True)
+            return original(window, *args, **kwargs)
+        with patch.object(Window, 'rows', rows):
+            outcome, state = self.run_triage()
+        self.assertEqual(len(injected), 1)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
+        self.assertFalse(self.settled().exists())
+
+    def test_deadline_at_final_badge_skips_before_callback(self):
+        self.given([FILE_A, NEWS, UNREAD, ARRIVAL], visible_limit=3)
+        from lib.outlook_ui import Window
+        original = Window.inbox_badge
+        clock, badges = [0], []
+        def badge(window):
+            badges.append(True)
+            if len(badges) == 4:
+                clock[0] = 121
+            return original(window)
+        with patch.object(Window, 'inbox_badge', badge), \
+                patch('lib.outlook_triage.time.monotonic', side_effect=lambda: clock[0]), \
+                patch.object(triage, '_move_all', wraps=triage._move_all) as action:
+            outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
+        self.assertIn('coverage=coverage_deadline', outcome.detail)
+        action.assert_not_called()
+        self.assertEqual((state['selections'], state['moved']), ([], []))
+
+    def test_deadline_at_each_selection_point_skips(self):
+        from lib.outlook_ui import Window
+        original = Window.rows
+        for point in ('first_row', 'next_row', 'folder'):
+            with self.subTest(point=point):
+                self.given([FILE_A, NEWS, VENDOR])
+                clock = [0]
+                def rows(window, *args, **kwargs):
+                    result = original(window, *args, **kwargs)
+                    state = json.loads(self.state.read_text())
+                    if ((point == 'first_row' and not state['sidebar']) or
+                        (point == 'next_row' and state['moved']) or
+                        (point == 'folder' and state.get('selected'))):
+                        clock[0] = 121
+                    return result
+                with patch.object(Window, 'rows', rows), \
+                        patch('lib.outlook_triage.time.monotonic', side_effect=lambda: clock[0]):
+                    outcome, state = self.run_triage()
+                self.assertEqual(outcome.state, 'skipped')
+                self.assertIn('coverage=coverage_deadline', outcome.detail)
+                self.assertEqual(len(state['moved']), int(point == 'next_row'))
+                self.assertEqual(len(state['selections']), int(point in ('next_row', 'folder')))
+
+    def test_all_emitted_diagnostics_have_no_hash_values(self):
+        for change in (False, True):
+            with self.subTest(change=change):
+                self.given([FILE_A, NEWS, VENDOR], arrive_after_move=[ARRIVAL] if change else [])
+                with redirect_stdout(io.StringIO()) as output:
+                    outcome, state = self.run_triage()
+                diagnostics = output.getvalue() + outcome.detail + self.report()
+                self.assertNotRegex(diagnostics, r'(?i)\b[0-9a-f]{12,64}\b')
+                self.assertNotIn(FILE_A['label'], diagnostics)
+                self.assertIn('moved: ', diagnostics)
+                if change:
+                    self.assertIn('unread_changed: 1', diagnostics)
 
 
 class UnreadAgreementTest(unittest.TestCase):
