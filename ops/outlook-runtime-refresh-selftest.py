@@ -233,6 +233,92 @@ class HostTests(unittest.TestCase):
                 self.assertEqual(registered, {LABELS[0]})
                 self.assertFalse(self.host.recovery_pending())
 
+    def failed_symlink_install(self):
+        target = self.root / 'vendor-target'
+        target.mkdir()
+        self.settings.vendor.symlink_to(target, target_is_directory=True)
+        decoder = target / 'decoder'
+        decoder.write_text('old')
+        self.settings.copy_helper.write_text('old helper')
+        registered = {LABELS[0], LABELS[1]}
+        overrides = {LABELS[1]}
+        sha = [self.host.previous]
+        fail_bootstrap = [False]
+        for label in LABELS:
+            self.host.plist_path(label).write_text('old plist')
+        def command(*args, **kwargs):
+            out = ''
+            if args[:2] == ('launchctl', 'list'):
+                out = '\n'.join('- 0 ' + label for label in registered)
+            elif args[:2] == ('launchctl', 'print-disabled'):
+                out = '\n'.join('"' + label + '" => true' for label in overrides)
+            elif args[:2] == ('launchctl', 'disable'):
+                overrides.add(args[2].split('/')[-1])
+            elif args[:2] == ('launchctl', 'enable'):
+                overrides.discard(args[2].split('/')[-1])
+            elif args[:2] == ('launchctl', 'bootout'):
+                self.assertTrue(self.host.locked)
+                registered.discard(args[2].split('/')[-1])
+            elif args[:2] == ('launchctl', 'bootstrap'):
+                self.assertTrue(self.host.locked)
+                if fail_bootstrap[0]:
+                    raise OSError('synthetic bootstrap failure')
+                registered.add(Path(args[3]).stem)
+            elif args[0] == 'git' and args[3] == 'checkout':
+                sha[0] = args[-1]
+            elif args[0] == '/bin/zsh':
+                sha[0] = self.host.sha
+                decoder.write_text('new')
+                self.settings.copy_helper.write_text('new helper')
+                raise ValueError('synthetic installer failure')
+            return subprocess.CompletedProcess(args, 0, out, '')
+        self.host.command = command
+        self.host.validate = Mock()
+        return target, decoder, registered, overrides, sha, fail_bootstrap
+
+    def assert_symlink_restored(self, fixture):
+        target, decoder, registered, overrides, sha, _ = fixture
+        self.assertTrue(self.settings.vendor.is_symlink())
+        self.assertEqual(self.settings.vendor.resolve(), target)
+        self.assertEqual(decoder.read_text(), 'old')
+        self.assertEqual(self.settings.copy_helper.read_text(), 'old helper')
+        self.assertEqual(sha[0], self.host.previous)
+        self.assertEqual(registered, {LABELS[0], LABELS[1]})
+        self.assertEqual(overrides, {LABELS[1]})
+        self.assertFalse(self.host.recovery_pending())
+        self.assertFalse(self.host.locked)
+
+    def test_symlink_vendor_installer_failure_rolls_back(self):
+        fixture = self.failed_symlink_install()
+        with self.assertRaisesRegex(ValueError, 'synthetic installer failure'):
+            refresh(self.host, apply=True)
+        self.assert_symlink_restored(fixture)
+
+    def test_symlink_crash_journal_recovers_with_real_host(self):
+        fixture = self.failed_symlink_install()
+        self.host.snapshot()
+        self.host.quiesce()
+        self.assertTrue(self.host.drained())
+        with self.assertRaisesRegex(ValueError, 'synthetic installer failure'):
+            self.host.swap()
+        self.host.locks.close()
+        self.host.locked = False
+        self.host.recover()
+        self.assert_symlink_restored(fixture)
+
+    def test_interrupted_symlink_restoration_retries_from_journal(self):
+        fixture = self.failed_symlink_install()
+        fixture[-1][0] = True
+        with self.assertRaises(OSError):
+            refresh(self.host, apply=True)
+        self.assertTrue(self.host.recovery_pending())
+        self.assertFalse(self.host.locked)
+        fixture[-1][0] = False
+        self.host.recover()
+        self.assert_symlink_restored(fixture)
+        self.host.previous = self.host.sha
+        self.assertEqual(refresh(self.host, apply=True), 'already current')
+
     def test_restore_failure_keeps_journal(self):
         self.host.snapshot()
         self.host.command.side_effect = OSError('launchd unavailable')
@@ -258,6 +344,8 @@ class HealthTests(unittest.TestCase):
             target = root / 'ops/launchd'
             target.mkdir(parents=True)
             settings = SimpleNamespace(repo=root / 'pinned')
+            pinned = settings.repo / 'ops/launchd'
+            pinned.mkdir(parents=True)
             def render(path):
                 return path.read_bytes().replace(b'{{REPO}}', str(settings.repo).encode()).replace(
                     b'{{COPY_HELPER}}', str(root / 'helper').encode()).replace(b'{{EXECUTABLE_PATH}}', b'/usr/bin')
@@ -267,21 +355,41 @@ class HealthTests(unittest.TestCase):
                     'Label': label, 'ProgramArguments': ['{{COPY_HELPER}}', '--run'],
                     'WorkingDirectory': '{{REPO}}', 'RunAtLoad': True,
                     'StandardOutPath': '{{REPO}}/out/log', 'StandardErrorPath': '{{REPO}}/out/log'}))
+            for path in target.glob('*.plist'):
+                (pinned / path.name).write_bytes(path.read_bytes())
+                definition = plistlib.loads(path.read_bytes())
+                definition['ProgramArguments'][-1] = '--new'
+                definition['RunAtLoad'] = False
+                definition['StartCalendarInterval'] = {'Minute': 15}
+                path.write_bytes(plistlib.dumps(definition))
             with patch.object(jobs.launchd_hold, 'read_holds', return_value={}):
                 manifest = jobs.native_manifest(root, outlook_settings=settings)
             snapshot = {'launchctl_list': '\n'.join('- 0 ' + label for label in LABELS),
                         'launchctl_disabled': '', 'cron': '', 'machine_role': 'primary',
-                        'plists': {label: plistlib.loads(render(target / (label + '.plist'))) for label in LABELS},
+                        'plists': {label: plistlib.loads(render(pinned / (label + '.plist'))) for label in LABELS},
                         'launchctl_print': {}, 'log_mtimes': {}, 'git': {'branch': 'main'},
                         'runtime_freshness': {label: {'commits_behind_main': 77, 'main_ancestor': True} for label in LABELS}}
             rows = jobs.report(manifest, snapshot, 0)
-            self.assertFalse({r['code'] for r in rows} & {'wrong_checkout', 'program_drift', 'log_path_drift'})
+            self.assertFalse({r['code'] for r in rows} & {'wrong_checkout', 'program_drift', 'log_path_drift', 'schedule_drift'})
             self.assertEqual(len([r for r in rows if r.get('freshness', {}).get('commits_behind_main') == 77]), 3)
             snapshot['plists'][LABELS[0]]['WorkingDirectory'] = str(root / 'outside')
             self.assertIn('wrong_checkout', {r['code'] for r in jobs.report(manifest, snapshot, 0)})
             snapshot['plists'][LABELS[0]]['WorkingDirectory'] = str(settings.repo)
             snapshot['launchctl_print'][LABELS[0]] = 'working directory = ' + str(root / 'outside')
             self.assertIn('wrong_checkout', {r['code'] for r in jobs.report(manifest, snapshot, 0)})
+
+    def test_missing_pinned_definition_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            templates = root / 'ops/launchd'
+            templates.mkdir(parents=True)
+            label = LABELS[0]
+            (templates / (label + '.plist')).write_bytes(plistlib.dumps({'Label': label}))
+            settings = SimpleNamespace(repo=root / 'pinned', render_plist=lambda path: path.read_bytes())
+            with patch.object(jobs.launchd_hold, 'read_holds', return_value={}):
+                manifest = jobs.native_manifest(root, outlook_settings=settings)
+            self.assertEqual(manifest['jobs'], [])
+            self.assertEqual(manifest['errors'], [label])
 
 
 if __name__ == '__main__':
