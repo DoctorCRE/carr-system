@@ -94,6 +94,24 @@ class LinksTest(unittest.TestCase):
                     self.assertEqual(unwrap_safe_links(body), prefix + destination + '"')
                     self.assertEqual(extract_links(body), [('listing', destination)])
 
+    def test_html_context_comes_from_tags(self):
+        destination = 'https://loopnet.com/a?x=1&copy=2#end!'
+        for template in ('<a href="{}">Open</a>', "<A\n HREF='{}'>Open</A>",
+                         '<a title="a > b" href={}>Open</a>', '<img src="{}"/>'):
+            body = template.format(wrap(destination))
+            expected = template.format(destination.replace('&', '&amp;'))
+            with self.subTest(body=body):
+                self.assertEqual(unwrap_safe_links(body), expected)
+                self.assertEqual(extract_links(body), [('listing', destination)])
+                self.assertEqual(extract_links(expected), [('listing', destination)])
+        destination = 'https://loopnet.com/a?x=1&amp;copy=2'
+        for template in ('foo="{}"', '<p>foo="{}"</p>', '<!-- foo="{}" -->',
+                         '<script>foo="{}"</script>'):
+            body = template.format(wrap(destination))
+            with self.subTest(body=body):
+                self.assertEqual(unwrap_safe_links(body), template.format(destination))
+                self.assertEqual(extract_links(body), [('listing', destination)])
+
     def test_plain_query_names_are_not_html_entities(self):
         destination = 'https://loopnet.com/Listing/a?x=1&copy=2'
         self.assertEqual(extract_links(destination), [('listing', destination)])

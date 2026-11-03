@@ -1,6 +1,7 @@
 """Extract useful, untrusted URLs from decoded email text without fetching them."""
 import html
 import re
+from html.parser import HTMLParser
 from urllib.parse import unquote, unquote_plus, urlsplit, urlunsplit
 
 URL = re.compile(r'https?://[^\s<>"\']+', re.I)
@@ -8,51 +9,79 @@ CONTROL = re.compile(r'[\x00-\x1f\x7f]')
 MAX_LINKS = 20
 
 
+class _HTMLTags(HTMLParser):
+    def __init__(self, text: str):
+        super().__init__(convert_charrefs=False)
+        self.offsets = [0]
+        for match in re.finditer('\n', text):
+            self.offsets.append(match.end())
+        self.spans = []
+        self.feed(text)
+
+    def handle_starttag(self, tag, attrs):
+        line, column = self.getpos()
+        start = self.offsets[line - 1] + column
+        self.spans.append((start, start + len(self.get_starttag_text())))
+
+
+def _url_matches(text: str):
+    spans = _HTMLTags(text).spans
+    for match in URL.finditer(text):
+        attribute = any(start <= match.start() < end for start, end in spans)
+        yield match, attribute
+
+
+def _unwrap_url(original: str, attribute: bool) -> str:
+    token = original if attribute else original.rstrip('.,;!?)]')
+    initial = html.unescape(token) if attribute else token
+    url = initial
+    for _ in range(8):
+        try:
+            parts = urlsplit(url)
+            host = (parts.hostname or '').lower()
+            if (parts.scheme.lower() not in ('http', 'https') or not host
+                    or not re.fullmatch(r'[A-Za-z0-9.-]+(?::[0-9]+)?', parts.netloc)
+                    or CONTROL.search(unquote(url)) or '\\' in unquote(url)
+                    or re.search(r'%(?![0-9a-fA-F]{2})', url)
+                    or re.search(r'''[\s<>"']''', url)):
+                return original
+            if not re.fullmatch(r'(?:[a-z0-9-]+\.)+safelinks\.protection\.outlook\.com', host):
+                if url == initial:
+                    return original
+                destination = html.escape(url, quote=True) if attribute else url
+                return destination + original[len(token):]
+            values = [value for field in parts.query.split('&')
+                      for name, _, value in [field.partition('=')] if name == 'url']
+            if len(values) != 1:
+                return original
+            url = unquote_plus(values[0], errors='strict')
+            for _ in range(4):
+                if re.match(r'https?://', url, re.I):
+                    break
+                url = unquote(url, errors='strict')
+        except (ValueError, UnicodeError):
+            return original
+    return original
+
+
 def unwrap_safe_links(text: str) -> str:
     """Recover HTTP destinations without changing unrelated text or malformed wrappers."""
-    def replace(match: re.Match) -> str:
-        original = match.group()
-        token = original.rstrip('.,;!?)]')
-        url = html.unescape(token)
-        for _ in range(8):
-            try:
-                parts = urlsplit(url)
-                host = (parts.hostname or '').lower()
-                if (parts.scheme.lower() not in ('http', 'https') or not host
-                        or not re.fullmatch(r'[A-Za-z0-9.-]+(?::[0-9]+)?', parts.netloc)
-                        or CONTROL.search(unquote(url)) or '\\' in unquote(url)
-                        or re.search(r'%(?![0-9a-fA-F]{2})', url)
-                        or re.search(r'''[\s<>"']''', url)):
-                    return original
-                if not re.fullmatch(r'(?:[a-z0-9-]+\.)+safelinks\.protection\.outlook\.com', host):
-                    if url == html.unescape(token):
-                        return original
-                    attribute = re.search(r'''=\s*["']?$''', text[:match.start()])
-                    destination = html.escape(url, quote=True) if attribute or '&amp;' in token else url
-                    return destination + original[len(token):]
-                values = [value for field in parts.query.split('&')
-                          for name, _, value in [field.partition('=')] if name == 'url']
-                if len(values) != 1:
-                    return original
-                url = unquote_plus(values[0], errors='strict')
-                for _ in range(4):
-                    if re.match(r'https?://', url, re.I):
-                        break
-                    url = unquote(url, errors='strict')
-            except (ValueError, UnicodeError):
-                return original
-        return original
-
-    return URL.sub(replace, text)
+    chunks = []
+    end = 0
+    for match, attribute in _url_matches(text):
+        chunks.extend((text[end:match.start()], _unwrap_url(match.group(), attribute)))
+        end = match.end()
+    chunks.append(text[end:])
+    return ''.join(chunks)
 
 
 def extract_links(text: str) -> list[tuple[str, str]]:
     found = []
     seen = set()
-    text = unwrap_safe_links(text)
-    for match in URL.finditer(text):
-        url = match.group().rstrip('.,;!?)]')
-        if re.search(r'''=\s*["']?$''', text[:match.start()]):
+    for match, attribute in _url_matches(text):
+        token = match.group() if attribute else match.group().rstrip('.,;!?)]')
+        url = _unwrap_url(token, attribute)
+        if attribute:
             url = html.unescape(url)
         if CONTROL.search(unquote(url)) or '\\' in unquote(url):
             continue
