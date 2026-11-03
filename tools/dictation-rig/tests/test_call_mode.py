@@ -112,6 +112,15 @@ def tearDownModule() -> None:
         client_patch.stop()
 
 
+def timing_fixture(transcript, expressions):
+    import hashlib
+    return {"sources": [{"segment_index": i, "char_start": 0, "char_end": len(row["text"]),
+        "segment_sha256": hashlib.sha256(row["text"].encode()).hexdigest(),
+        "speaker": row.get("speaker", "Joe"), "quote": row["text"],
+        "status": "stated" if phrases else "unstated", "expressions": phrases}
+        for i, (row, phrases) in enumerate(zip(transcript["segments"], expressions, strict=True))]}
+
+
 class CallState(TypedDict, total=False):
     sessions: list[dict[str, object]]
     hidden_older_count: int
@@ -1093,8 +1102,8 @@ class PostCallTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def output(self, **overrides: object) -> dict[str, object]:
-        result: dict[str, object] = {
+    def output(self, **overrides: Any) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "schema_version": 1,
             "report": {"summary": "Summary", "decisions": [], "open_questions": []},
             "joe_tasks": [{"title": "Call vendor", "deal_id": "deal-a", "participant_ids": ["p-1"], "evidence": "Joe agreed to call."}],
@@ -1251,13 +1260,272 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report)["state"], "complete")
         self.assertNotIn("kind", report["review_questions"][0])
 
-    def test_undated_actions_stay_undated_and_ask_the_partner_for_a_date(self) -> None:
-        result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
-                                                  call_date="2026-10-30")
+    def test_timing_cases_control_filing_and_retention(self) -> None:
+        spec = importlib.util.spec_from_file_location("deadline_score", BIN_DIR.parents[2] / "evals/post-call-deadlines/score.py")
+        assert spec and spec.loader
+        score = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(score)
+        suite = SimpleNamespace(post_call=post_call, _REAL_COVERAGE=_REAL_COVERAGE, PostCallTests=PostCallTests)
+        for case in map(json.loads, score.CASES.read_text().splitlines()):
+            with self.subTest(case=case["id"]):
+                self.assertEqual(score.run_case(suite, case), case["expected"])
+
+    def test_event_reference_case_preserves_source_text(self) -> None:
+        for reference in ("before the lunch call", "Before the lunch call"):
+            for anchor in (None, "Our lunch call is Tuesday."):
+                with self.subTest(reference=reference, anchor=anchor):
+                    texts = [f"{reference} I will call Harbor vendor."] + ([anchor] if anchor else [])
+                    transcript = {"segments": [{"speaker": "Joe", "text": text} for text in texts]}
+                    timing = timing_fixture(transcript, [[reference]] + ([["Tuesday"]] if anchor else []))
+                    if anchor:
+                        timing["sources"][1]["anchor_for"] = [reference]
+                    ledger = {"facts": [{"fact_id": "task", "source_spans": [
+                        _REAL_COVERAGE.source_span(transcript, i) for i in range(len(texts))]}]}
+                    item = {"evidence": texts[0], "fact_ids": ["task"], "timing": timing}
+                    result = post_call.task_deadline(item, transcript, "2026-10-26", ledger)
+                    self.assertEqual((result.state, result.due_on),
+                                     ("resolved", "2026-10-27" if anchor else "2026-10-26"))
+
+    def test_event_anchor_binding_requires_cited_date(self) -> None:
+        from copy import deepcopy
+        transcript = {"segments": [
+            {"speaker": "Joe", "text": "I will call before the lunch call."},
+            {"speaker": "Dell", "text": "Our lunch call is Tuesday."},
+        ]}
+        timing = timing_fixture(transcript, [["before the lunch call"], ["Tuesday"]])
+        timing["sources"][1]["anchor_for"] = ["before the lunch call"]
+        ledger = {"facts": [{"fact_id": "task", "source_spans": [
+            _REAL_COVERAGE.source_span(transcript, i) for i in range(2)]}]}
+        item = {"evidence": transcript["segments"][0]["text"], "fact_ids": ["task"], "timing": timing}
+        result = post_call.task_deadline(item, transcript, "2026-10-26", ledger)
+        self.assertEqual((result.state, result.due_on), ("resolved", "2026-10-27"))
+        for value in ("before the lunch call", ["before the unrelated call"], [None]):
+            changed = deepcopy(item)
+            changed["timing"]["sources"][1]["anchor_for"] = value
+            self.assertEqual(post_call.task_deadline(changed, transcript, "2026-10-26", ledger).state, "ambiguous")
+        uncited = deepcopy(ledger)
+        uncited["facts"][0]["source_spans"] = uncited["facts"][0]["source_spans"][:1]
+        self.assertEqual(post_call.task_deadline(item, transcript, "2026-10-26", uncited).state, "ambiguous")
+        missing = deepcopy(item)
+        del missing["timing"]["sources"][1]["anchor_for"]
+        self.assertEqual(post_call.task_deadline(missing, transcript, "2026-10-26", ledger).state, "ambiguous")
+
+    def test_timing_quotes_do_not_bypass_narrative_copy_hold(self) -> None:
+        quote = "I will call the Harbor vendor about the requested proposal and revised terms before Friday morning."
+        transcript = {"segments": [{"speaker": "Joe", "text": quote}]}
+        report: dict[str, Any] = {"joe_tasks": [{"timing": timing_fixture(transcript, [["before Friday morning"]])}]}
+        self.assertIsNone(post_call.transcript_repeat_field(report, transcript))
+        report["report"] = {"summary": quote}
+        self.assertEqual(post_call.transcript_repeat_field(report, transcript), "report.summary")
+
+    def test_timing_evidence_integrity(self) -> None:
+        from copy import deepcopy
+        transcript = {"segments": [{"speaker": "Joe", "text": "I will call tomorrow."},
+                                   {"speaker": "Dell", "text": "Actually, COB."}]}
+        ledger = {"facts": [{"fact_id": "task", "source_spans": [
+            _REAL_COVERAGE.source_span(transcript, i) for i in range(2)]}]}
+        timing = timing_fixture(transcript, [["tomorrow"], ["Actually, COB"]])
+        item = {"evidence": "I will call", "due_on": None, "fact_ids": ["task"], "timing": timing}
+        mutations: list[Any] = [None, {"sources": []}, {"sources": timing["sources"][:1]}]
+        for key, value in (("speaker", "Joe"), ("quote", "COB."), ("segment_sha256", "stale"), ("char_start", 1), ("char_end", 4),
+                           ("expressions", ["Tuesday"]), ("status", "uncertain")):
+            changed = deepcopy(timing)
+            changed["sources"][1][key] = value
+            mutations.append(changed)
+        for changed in mutations:
+            with self.subTest(changed=changed):
+                result = post_call.task_deadline({**item, "timing": changed}, transcript, "2026-10-31", ledger)
+                self.assertEqual((result.state, result.due_on), ("ambiguous", None))
+        self.assertEqual(post_call.task_deadline(item, transcript, "2026-10-31", ledger).state, "ambiguous")
+
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    def test_task_deadline_source_spans_control_filing_and_retention(self) -> None:
+        cases = (
+            ("11/6 or 11/9.", True, None, False),
+            ("Tuesday next month.", False, None, False),
+            ("November 6 or November 9.", True, None, False),
+            ("end of next week.", False, None, False),
+            ("on November 6, 2026.", False, None, False),
+            ("sometime next month.", False, None, False),
+            ("sometime next month.", False, "2026-11-02", False),
+            ("November 6 or November 9.", False, "2026-11-06", False),
+            ("Tuesday.", False, None, True),
+            ("tomorrow or Friday.", False, None, False),
+            ("end of next week.", True, None, False),
+            ("on November 6, 2026.", False, "2026-11-06", True),
+            (".", True, None, True),
+        )
+        for index, (timing, full_quote, supplied, can_file) in enumerate(cases):
+            with self.subTest(timing=timing, full_quote=full_quote, supplied=supplied):
+                session = self.session / str(index)
+                session.mkdir()
+                context = {**self.context, "session": session.name}
+                post_call.store_context(session, context)
+                post_call.write_private(session / "meta.json", {"started": "2026-10-26T12:00:00Z"})
+                action = "I will call Harbor vendor"
+                spoken = action + (" " if timing != "." else "") + timing
+                texts = [spoken] if full_quote else [action, timing]
+                transcript = {"segments": [{"speaker": "Joe", "text": text} for text in texts]}
+                post_call.write_private(session / "transcript.json", transcript)
+                raw = self.output(joe_tasks=[{
+                    "title": "Call Harbor vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": spoken if full_quote else action, "due_on": supplied, "fact_ids": ["task"],
+                }], deal_updates=[], draft_proposals=[])
+                phrases = [] if timing == "." else [timing.rstrip(".").removeprefix("on ")]
+                raw["joe_tasks"][0]["timing"] = timing_fixture(transcript,
+                    [phrases] if full_quote else [[], phrases])
+                extraction = {"topics": [{"topic_id": "harbor", "identity": {
+                    "deal_id": "deal-a", "participant_ids": []}}], "facts": [{
+                    "fact_id": "task", "topic_id": "harbor", "kind": "commitment",
+                    "statement": spoken, "asserted_value": None,
+                    "source_spans": [_REAL_COVERAGE.source_span(transcript, i) for i in range(len(texts))],
+                    "disposition": None,
+                }], "non_fact_spans": []}
+
+                def distill(request):
+                    if request.get("stage") == "coverage":
+                        return json.loads(json.dumps(extraction))
+                    if request.get("stage") == "coverage_history":
+                        return {"dispositions": [{"fact_id": "task", "disposition": None}]}
+                    return json.loads(json.dumps(raw))
+
+                fixture = BIN_DIR.parent / "tests" / "fixtures" / "rehearsal_jev.py"
+                with patch.dict(os.environ, {"CARR_POST_CALL_JEV_FIXTURE": str(fixture)}):
+                    status = post_call.process_session(session, distiller=distill)
+                self.assertEqual(status["state"], "ready_review", status)
+                report = post_call.read_json(session / post_call.REPORT_FILE)
+                if timing == "." or not can_file:
+                    self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                if timing == "Tuesday.":
+                    self.assertEqual(report["joe_tasks"][0]["due_on"], "2026-10-27")
+                report["joe_tasks"][0].update(candidate_id="task", candidate_status="confirmed")
+                post_call.write_private(session / post_call.REPORT_FILE, report)
+                _REAL_COVERAGE.require_coverage(session, report, post_call.read_json)
+                self.assertEqual((post_call.review_complete(report),
+                                  post_call.retention_ready(session, "b" * 64) is not None),
+                                 (can_file, can_file))
+                self.assertEqual(bool(report["optional_reminders"]), timing == ".")
+
+    def test_structured_deadline_expressions_fail_closed(self) -> None:
+        cases = (
+            ("the 14th", "ambiguous"), ("11/14", "ambiguous"),
+            ("14 Nov", "ambiguous"), ("11/6 or 11/9", "ambiguous"),
+            ("Tuesday next month", "ambiguous"), ("end of month", "ambiguous"),
+            ("in two weeks", "ambiguous"), ("in 2 days", "ambiguous"),
+            ("before Thanksgiving", "ambiguous"), ("within a week", "ambiguous"),
+            ("after Christmas", "ambiguous"), ("by the holidays", "ambiguous"),
+            ("next", "ambiguous"), ("this", "ambiguous"),
+            ("by", "ambiguous"), ("before", "ambiguous"), ("after", "ambiguous"),
+            ("within", "ambiguous"), ("November", "ambiguous"),
+            ("end of next week", "ambiguous"), ("Tuesday or Wednesday", "contradictory"),
+            ("Friday, no, Monday", "ambiguous"), ("Tuesday", "resolved"),
+            ("next Tuesday", "resolved"), ("this Tuesday", "resolved"),
+            ("Monday", "ambiguous"), ("today", "resolved"),
+            ("tomorrow", "resolved"), ("day after tomorrow", "resolved"),
+            ("sometime around November 6", "ambiguous"),
+            ("November 6 or tomorrow", "ambiguous"),
+            ("call the vendor", "unstated"), ("review the proposal", "unstated"),
+            ("send the survey", "unstated"), ("ask for availability", "unstated"),
+            ("", "unstated"), ("next quarter", "ambiguous"),
+            ("yesterday", "ambiguous"), ("soon", "ambiguous"),
+            ("Tuesday or next week", "ambiguous"), ("this Tuesday next week", "ambiguous"),
+            ("Tuesday next week", "resolved"), ("about Tuesday", "ambiguous"),
+            ("Thursday November 6, 2026", "ambiguous"),
+            ("the fourteenth", "ambiguous"), ("Tue", "ambiguous"),
+            ("ASAP", "ambiguous"), ("in two hours", "ambiguous"),
+        )
+        for phrase, expected in cases:
+            for supplied in (None, "2026-11-06"):
+                with self.subTest(phrase=phrase, supplied=supplied):
+                    quote = f"I will call Harbor vendor {phrase}."
+                    transcript = {"segments": [{"speaker": "Joe", "text": quote}]}
+                    expressions = [] if expected == "unstated" else phrase.split(" or ") if expected == "contradictory" else [phrase]
+                    report = post_call.normalize_distillation(self.output(joe_tasks=[{
+                        "title": "Call Harbor vendor", "deal_id": "deal-a", "participant_ids": [],
+                        "evidence": quote, "due_on": supplied,
+                        "timing": timing_fixture(transcript, [expressions]),
+                    }], deal_updates=[], draft_proposals=[]), self.context, self.session.name,
+                        call_date="2026-10-26", transcript=transcript)
+                    task = report["joe_tasks"][0]
+                    self.assertEqual(task["deadline_state"], expected)
+                    self.assertEqual(post_call.review_complete(report), expected in {"resolved", "unstated"})
+                    self.assertEqual(bool(report["optional_reminders"]), expected == "unstated")
+                    if expected != "resolved":
+                        self.assertIsNone(task["due_on"])
+
+    def test_deal_step_keeps_unsupported_relative_offset(self) -> None:
+        quote = "I will call two weeks from Friday."
+        report = post_call.normalize_distillation(self.output(joe_tasks=[], draft_proposals=[],
+            deal_updates=[{"deal_id": "deal-a", "participant_ids": [], "summary": "Call vendor",
+                "evidence": quote, "next_step": {"text": "Call vendor",
+                    "next_date": "2026-11-13", "needs_review": None}}]),
+            self.context, self.session.name, call_date="2026-10-26",
+            transcript={"segments": [{"text": quote}]})
+        self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], "2026-11-13")
+
+    def test_lunch_anchor_cannot_ignore_unresolved_temporal_expression(self) -> None:
+        quote = "I will call before the lunch call."
+        for anchor in ("The lunch call is Tuesday next month.", "The lunch call is 11/14."):
+            with self.subTest(anchor=anchor):
+                report = post_call.normalize_distillation(self.output(joe_tasks=[{
+                    "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": quote, "due_on": "2026-10-27",
+                }], deal_updates=[], draft_proposals=[]), self.context, self.session.name,
+                    call_date="2026-10-26", transcript={"segments": [{"text": quote}, {"text": anchor}]})
+                self.assertEqual(report["joe_tasks"][0]["deadline_state"], "ambiguous")
+                self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                self.assertFalse(post_call.review_complete(report))
+
+    def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
+        excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
+        context = {**self.context, "skipped_deals": excluded}
+        result = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[]),
+                                                  context, self.session.name, call_date="2026-10-30")
+        self.assertEqual(result["review_questions"], [])
+        self.assertTrue(post_call.review_complete(result))
+        self.assertEqual(result["diagnostics"]["skipped_deals"], excluded)
+        duplicate = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[]),
+            {**context, "skipped_deals": excluded + excluded}, self.session.name, call_date="2026-10-30")
+        self.assertEqual(duplicate["diagnostics"], result["diagnostics"])
+        post_call.write_private(self.session / post_call.REPORT_FILE, result)
+        self.assertEqual(post_call.report_for_deal_room(self.session)["report"]["diagnostics"]["skipped_deals"], excluded)
+
+    def test_mentioned_unknown_deal_and_missing_audio_remain_decisions(self) -> None:
+        for overrides, transcript in (
+            ({"deal_updates": [{"deal_id": "uncertain", "summary": "Follow up", "participant_ids": [],
+                                "evidence": "Follow up on that clinic"}]}, {}),
+            ({}, {"missing_tracks": ["remote"]}),
+        ):
+            with self.subTest(overrides=overrides, transcript=transcript):
+                raw = self.output(joe_tasks=[], deal_updates=[], draft_proposals=[])
+                raw.update(overrides)
+                result = post_call.normalize_distillation(raw, self.context, self.session.name,
+                                                          call_date="2026-10-30", transcript=transcript)
+                self.assertEqual(len(result["review_questions"]), 1)
+                self.assertFalse(post_call.review_complete(result))
+
+    def test_existing_explicit_holds_remain_unresolved_without_rewriting(self) -> None:
+        legacy = {"schema_version": 1, "review_questions": [
+            {"id": "old-skip", "question": "Skipped deal inactive: parked", "resolved": False},
+            {"id": "old-date", "question": "No due date was said on the call", "resolved": False},
+        ]}
+        post_call.write_private(self.session / post_call.REPORT_FILE, legacy)
+        original = (self.session / post_call.REPORT_FILE).read_bytes()
+        self.assertFalse(post_call.review_complete(post_call.read_json(self.session / post_call.REPORT_FILE)))
+        self.assertEqual((self.session / post_call.REPORT_FILE).read_bytes(), original)
+
+    def test_undated_actions_stay_undated_with_optional_reminders(self) -> None:
+        transcript = {"segments": [{"speaker": "Joe", "text": "Joe agreed to call."}]}
+        raw = self.output()
+        raw["joe_tasks"][0]["timing"] = timing_fixture(transcript, [[]])
+        result = post_call.normalize_distillation(raw, self.context, self.session.name,
+                                                  call_date="2026-10-30", transcript=transcript)
         task = result["joe_tasks"][0]
         self.assertIsNone(task["due_on"])
         self.assertTrue(task["due_defaulted"])
-        self.assertEqual([q["question"] for q in result["review_questions"]],
+        self.assertEqual(result["review_questions"], [])
+        self.assertTrue(post_call.review_complete(result))
+        self.assertEqual([q["question"] for q in result["optional_reminders"]],
                          ["joe_tasks item 1 (Call vendor): No due date was said on the call; set one if it has a deadline."])
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
         self.assertIsNone(post_call.sanitized_candidates(self.session)["post_call_items"][0]["due_on"])
@@ -1265,11 +1533,11 @@ class PostCallTests(unittest.TestCase):
 
     def test_repeated_task_in_one_extraction_is_written_once_with_its_stated_date(self) -> None:
         (self.session / "transcript.json").write_text(json.dumps({"segments": [
-            {"speaker": "Joe", "text": "I will call the vendor on November 6, 2026."}]}))
-        task = {"title": "Call vendor", "deal_id": "deal-a", "participant_ids": [], "evidence": "Joe agreed to call."}
+            {"speaker": "Joe", "text": "I will call the vendor on November 6, 2026."}, {"speaker": "Joe", "text": "Joe agreed to call."}]}))
+        task = {"timing": {"sources": [{**timing_fixture({"segments": [{"speaker": "Joe", "text": "Joe agreed to call."}]}, [[]])["sources"][0], "segment_index": 1}]}, "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [], "evidence": "Joe agreed to call."}
         result = post_call.normalize_distillation(self.output(joe_tasks=[
             {**task, "participant_ids": ["p-1"]},
-            {**task, "title": "  call   VENDOR ", "evidence": "I will call the vendor on November 6, 2026.",
+            {**task, "timing": timing_fixture({"segments": [{"speaker": "Joe", "text": "I will call the vendor on November 6, 2026."}]}, [["November 6, 2026"]]), "title": "  call   VENDOR ", "evidence": "I will call the vendor on November 6, 2026.",
              "due_on": "2026-11-06"},
             {**task, "deal_id": "deal-b"},
         ], dell_tasks=[task]), self.context, self.session.name, call_date="2026-10-30",
@@ -1278,7 +1546,7 @@ class PostCallTests(unittest.TestCase):
                          [("deal-a", "2026-11-06", ["p-1"]), ("deal-b", None, [])])
         self.assertFalse(result["joe_tasks"][0]["due_defaulted"])
         self.assertEqual(len(result["dell_tasks"]), 1)
-        self.assertEqual([q["question"].split(":")[0] for q in result["review_questions"]],
+        self.assertEqual([q["question"].split(":")[0] for q in result["optional_reminders"]],
                          ["joe_tasks item 2 (Call vendor)", "dell_tasks item 1 (Call vendor)"])
 
     def test_counterpart_reaches_action_and_draft_candidates_when_named(self) -> None:
@@ -1471,7 +1739,8 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
         self.assertEqual(report["deal_updates"][0]["deal_id"], "deal-b")
-        self.assertTrue(any("deal-a" in q["question"] and "skip" in q["question"].lower() for q in report["review_questions"]))
+        self.assertEqual(report["review_questions"], [])
+        self.assertEqual(report["diagnostics"]["skipped_deals"][0]["id"], "deal-a")
 
     def test_stored_terminal_deal_is_skipped_before_context_validation(self) -> None:
         context = json.loads(json.dumps(self.context))
@@ -1877,11 +2146,16 @@ class PostCallTests(unittest.TestCase):
         post_call.store_context(self.session, self.context)
         output = self.output(joe_tasks=[{
             "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
-            "evidence": "Joe will call on February 29, 2028.", "due_on": "2028-02-29",
+            "evidence": "I will call Vendor A on February 29, 2028.", "due_on": "2028-02-29",
         }], dell_tasks=[{
             "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
-            "evidence": "Dell will review the proposal.", "due_on": None,
+            "evidence": "I will review the proposal.", "due_on": None,
         }])
+        tr = post_call.read_json(self.session / "transcript.json")
+        for index, task in enumerate(output["joe_tasks"] + output["dell_tasks"]):
+            source = timing_fixture({"segments": [tr["segments"][index]]}, [[['February 29, 2028'], []][index]])["sources"][0]
+            source["segment_index"] = index
+            task["timing"] = {"sources": [source]}
         status = post_call.process_session(self.session, distiller=lambda _request: output)
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
@@ -1932,6 +2206,16 @@ class PostCallTests(unittest.TestCase):
                         "text": "Call Vendor A", "next_date": None, "needs_review": None,
                     },
                 }], draft_proposals=[])
+                expression = {
+                    "review Friday's proposal before the lunch call": "before the lunch call",
+                    "Friday since we talked Monday": "Friday",
+                    "tomorrow since we met Friday": "tomorrow",
+                }.get(phrase, phrase)
+                tr = post_call.read_json(self.session / "transcript.json")
+                for index, (task, expressions) in enumerate(zip(output["joe_tasks"] + output["dell_tasks"], [[expression], []])):
+                    source = timing_fixture({"segments": [tr["segments"][index]]}, [expressions])["sources"][0]
+                    source["segment_index"] = index
+                    task["timing"] = {"sources": [source]}
                 requests = []
 
                 def distill(request):
@@ -1961,6 +2245,11 @@ class PostCallTests(unittest.TestCase):
             "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
             "evidence": quote, "due_on": "2026-10-28",
         }], deal_updates=[], draft_proposals=[])
+        tr = post_call.read_json(self.session / "transcript.json")
+        for index, task in enumerate(output["joe_tasks"] + output["dell_tasks"]):
+            source = timing_fixture({"segments": [tr["segments"][index]]}, [[['tomorrow']][index]])["sources"][0]
+            source["segment_index"] = index
+            task["timing"] = {"sources": [source]}
         status = post_call.process_session(self.session, distiller=lambda _request: output)
         self.assertEqual(status["state"], "ready_review")
         report = post_call.report_for_deal_room(self.session)["report"]
@@ -2017,6 +2306,7 @@ class PostCallTests(unittest.TestCase):
                     }], dell_tasks=[{
                         "title": "Review proposal", "deal_id": "deal-b", "participant_ids": [],
                         "evidence": "I will review the proposal on November 6, 2026.", "due_on": "2026-11-06",
+                        "timing": {"sources": [{**timing_fixture({"segments": [transcript["segments"][1]]}, [["November 6, 2026"]])["sources"][0], "segment_index": 1}]},
                     }], deal_updates=[{
                         "deal_id": "deal-a", "summary": "Vendor follow-up", "participant_ids": [],
                         "evidence": quote, "next_step": {
@@ -2045,7 +2335,7 @@ class PostCallTests(unittest.TestCase):
         cases = (
             ("I will call Friday, November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call before the lunch call on November 6, 2026.", "2026-11-06", "2026-11-06"),
-            ("I will call two weeks from Friday.", "2026-11-13", "2026-11-13"),
+            ("I will call two weeks from Friday.", "2026-11-13", None),
             ("Review last Friday's proposal.", None, None),
             ("I will review Friday's proposal.", None, None),
             ("I will call Vendor A tomorrow.", None, None),
@@ -2064,6 +2354,9 @@ class PostCallTests(unittest.TestCase):
                     "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
                     "evidence": quote, "due_on": supplied,
                 }], deal_updates=[], draft_proposals=[])
+                if expected is not None:
+                    tr = post_call.read_json(self.session / "transcript.json")
+                    output["joe_tasks"][0]["timing"] = timing_fixture(tr, [["November 6, 2026"]])
                 status = post_call.process_session(self.session, distiller=lambda _request: output)
                 self.assertEqual(status["state"], "ready_review")
                 report = post_call.report_for_deal_room(self.session)["report"]
@@ -2082,6 +2375,9 @@ class PostCallTests(unittest.TestCase):
             "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
             "evidence": quote, "due_on": "2026-10-30",
         }], deal_updates=[], draft_proposals=[])
+        tr = post_call.read_json(self.session / "transcript.json")
+        output["joe_tasks"][0]["timing"] = timing_fixture(tr, [["Friday"], ["before the lunch call"]])
+        output["joe_tasks"][0]["timing"]["sources"][0]["anchor_for"] = ["before the lunch call"]
         status = post_call.process_session(self.session, distiller=lambda _request: output)
         self.assertEqual(status["state"], "ready_review")
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
@@ -2118,6 +2414,11 @@ class PostCallTests(unittest.TestCase):
             "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
             "evidence": quote, "due_on": None,
         }], deal_updates=[], draft_proposals=[])
+        tr = post_call.read_json(self.session / "transcript.json")
+        for index, task in enumerate(output["joe_tasks"] + output["dell_tasks"]):
+            source = timing_fixture({"segments": [tr["segments"][index]]}, [[['before Friday morning']][index]])["sources"][0]
+            source["segment_index"] = index
+            task["timing"] = {"sources": [source]}
         status = post_call.process_session(self.session, distiller=lambda _request: output)
         self.assertEqual(status["state"], "ready_review")
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
@@ -2208,7 +2509,7 @@ class PostCallTests(unittest.TestCase):
 
     def test_retention_requires_final_candidate_dispositions(self) -> None:
         post_call.store_context(self.session, self.context)
-        post_call.process_session(self.session, distiller=lambda _request: self.output())
+        post_call.process_session(self.session, distiller=lambda _request: self.output(review_questions=["Which clinic was discussed?"]))
         self.assertIsNone(post_call.retention_ready(self.session, "b" * 64))
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         assert report is not None

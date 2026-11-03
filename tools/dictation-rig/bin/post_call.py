@@ -22,7 +22,6 @@ import sys
 import tempfile
 import urllib.parse
 import fcntl
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -30,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 import call_budget
 import post_call_coverage as coverage
+from post_call_timing import DeadlineResolution, WEEKDAYS, task_deadline, timing_schema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -76,11 +76,13 @@ def distiller_json_schema() -> dict[str, Any]:
             "joe_tasks": {"type": "array", "items": item({
                 **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
-            }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
+                "timing": timing_schema(),
+            }, ["title", "deal_id", "participant_ids", "evidence", "due_on", "timing"])},
             "dell_tasks": {"type": "array", "items": item({
                 **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
-            }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
+                "timing": timing_schema(),
+            }, ["title", "deal_id", "participant_ids", "evidence", "due_on", "timing"])},
             "deal_updates": {"type": "array", "items": item({
                 **common, "summary": {"type": "string"},
                 "phase_move": {"anyOf": [{"type": "null"}, item({
@@ -321,7 +323,6 @@ def _calendar_date_or_none(value: Any, field: str) -> None:
 
 
 CALL_TIME_ZONE = "America/Chicago"
-WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 RELATIVE_DAY = re.compile(
     r"\b(day after tomorrow|tomorrow|today|next week|"
     r"(?:(?:next|this)\s+)?(?:" + "|".join(WEEKDAYS) + r"))\b", re.IGNORECASE,
@@ -340,6 +341,9 @@ CALENDAR_DAY = re.compile(
     r"\b(?:\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|"
     r"September|October|November|December)\s+\d{1,2})\b", re.IGNORECASE,
 )
+
+def _unsupported_lunch_anchor(evidence: str) -> bool:
+    return re.fullmatch(r"(?:The lunch call is )?" + RELATIVE_DAY.pattern + r"[.]?", evidence.strip(), re.IGNORECASE) is None
 
 
 def recorded_call_date(session_dir: Path) -> str | None:
@@ -362,24 +366,22 @@ def _relative_phrases(evidence: str) -> list[str]:
         return []
     evidence = PAST_RELATIVE_DAY.sub("", evidence)
     weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
+    relative_context = re.sub(r"\bday after tomorrow\b", "tomorrow", evidence, flags=re.IGNORECASE)
     if re.search(r"\bfollowing\s+" + weekdays +
                  r"\b|\b(?:days?|weeks?|months?)\s+(?:from|after|before)\b|\b" + weekdays +
-                 r"\s+after next\b|\bthis time next week\b", evidence, re.IGNORECASE):
+                 r"\s+after next\b|\bthis time next week\b", relative_context, re.IGNORECASE):
         return []
     phrases = [match.group().lower() for match in RELATIVE_DAY.finditer(evidence)
                if not re.match(r"['’]s\b", evidence[match.end():])
                or re.match(r"['’]s\s+lunch call\b", evidence[match.end():], re.IGNORECASE)
                and re.search(r"\bbefore\s+$", evidence[:match.start()], re.IGNORECASE)]
     if "next week" in phrases and any(phrase.split()[-1] in WEEKDAYS for phrase in phrases):
+        if not re.search(r"\b(?:" + weekdays + r"\s+next week|next week\s+" + weekdays + r")\b",
+                         evidence, re.IGNORECASE) or re.search(r"\b(?:or|this)\b", evidence, re.IGNORECASE):
+            return []
         phrases = ["next " + phrase.split()[-1] if phrase.split()[-1] in WEEKDAYS else phrase
                    for phrase in phrases if phrase != "next week"]
     return phrases
-
-
-@dataclass(frozen=True)
-class DeadlineResolution:
-    due_on: str | None
-    review_reason: str | None = None
 
 
 def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
@@ -393,16 +395,17 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
     if CALENDAR_DAY.search(evidence):
         return None
     if QUALIFIED_RELATIVE_DAY.search(PAST_RELATIVE_DAY.sub("", evidence)):
-        return DeadlineResolution(None, "The quoted deadline is qualified; clarify the exact date.")
+        return DeadlineResolution("ambiguous", None, "The quoted deadline is qualified; clarify the exact date.")
     phrases = _relative_phrases(evidence)
     if not phrases and re.search(r"\bbefore (?:the )?lunch call\b", evidence, re.IGNORECASE):
         lunch_anchors = [sentence for sentence in re.split(r"[.!?]", spoken)
                          if re.search(r"\blunch call\b", sentence, re.IGNORECASE)
                          and _words(sentence) != _words(evidence)
-                         and (RELATIVE_DAY.search(sentence) or CALENDAR_DAY.search(sentence))]
+                         and sentence.strip()]
         if lunch_anchors:
-            if any(QUALIFIED_RELATIVE_DAY.search(sentence) for sentence in lunch_anchors):
-                return DeadlineResolution(None, "The lunch call deadline is qualified; clarify the exact date.")
+            if any(QUALIFIED_RELATIVE_DAY.search(sentence) or _unsupported_lunch_anchor(sentence)
+                   for sentence in lunch_anchors):
+                return DeadlineResolution("ambiguous", None, "The lunch call deadline is qualified; clarify the exact date.")
             anchored = [_relative_phrases(sentence) for sentence in lunch_anchors]
             if not all(anchored):
                 return None
@@ -411,10 +414,10 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
             phrases = ["today"]
     if not phrases:
         if PAST_RELATIVE_DAY.search(evidence):
-            return DeadlineResolution(None, "The quoted day refers to the past; clarify the deadline.")
+            return DeadlineResolution("ambiguous", None, "The quoted day refers to the past; clarify the deadline.")
         return None
     if call_date is None:
-        return DeadlineResolution(None, "A relative deadline requires the recorded call start date in America/Chicago.")
+        return DeadlineResolution("ambiguous", None, "A relative deadline requires the recorded call start date in America/Chicago.")
     anchor = date.fromisoformat(call_date)
     resolved: set[date] = set()
     for phrase in phrases:
@@ -426,11 +429,11 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
             weekday = WEEKDAYS.index(phrase.split()[-1])
             offset = 7 - anchor.weekday() + weekday if phrase.startswith("next ") else (weekday - anchor.weekday()) % 7
             if offset == 0 and "today" not in phrases:
-                return DeadlineResolution(None, "A weekday matching the call day is ambiguous unless today was stated.")
+                return DeadlineResolution("ambiguous", None, "A weekday matching the call day is ambiguous unless today was stated.")
         resolved.add(anchor + timedelta(days=offset))
     if len(resolved) != 1:
-        return DeadlineResolution(None, "The evidence gives conflicting relative deadlines; clarify the deadline.")
-    return DeadlineResolution(resolved.pop().isoformat())
+        return DeadlineResolution("contradictory", None, "The evidence gives conflicting relative deadlines; clarify the deadline.")
+    return DeadlineResolution("resolved", resolved.pop().isoformat())
 
 
 UNSAID_REVIEW = "The model did not say whether this was settled."
@@ -446,7 +449,8 @@ def _review_note(change: dict[str, Any], field: str) -> None:
 
 
 def _validate_distillation(value: Any, *, call_date: str | None = None,
-                           transcript: dict[str, Any] | None = None) -> dict[str, Any]:
+                           transcript: dict[str, Any] | None = None,
+                           ledger: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ContractError("distiller output must be an object")
     _strict_keys(value, {"schema_version", "report", "joe_tasks", "dell_tasks", "deal_updates", "draft_proposals", "review_questions"}, {"review_intents"})
@@ -473,7 +477,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
-            _strict_keys(item, required, {"fact_ids"} | ({"due_on", "counterpart"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"}))
+            _strict_keys(item, required, {"fact_ids"} | ({"due_on", "counterpart", "timing"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"}))
             if "counterpart" in item:
                 name = _string(item["counterpart"], f"{list_name}.counterpart")
                 if len(name) > 200:
@@ -509,9 +513,11 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                 raise ContractError(f"{list_name}.participant_ids must be string IDs")
             resolved = None
             if is_action or step is not None:
-                resolved = _relative_due_date(item["evidence"], transcript, call_date)
+                resolved = (task_deadline(item, transcript, call_date, ledger) if is_action
+                            else _relative_due_date(item["evidence"], transcript, call_date))
                 if resolved is not None:
                     if is_action:
+                        item["deadline_state"] = resolved.state
                         item["due_on"] = resolved.due_on
                     elif step is not None:
                         step["next_date"] = resolved.due_on
@@ -523,8 +529,6 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                             f"{list_name} item {number} ({subject}): {resolved.review_reason}"
                         )
             if is_action:
-                # Only a date said on the call is kept; an undated task stays
-                # undated and normalize_distillation asks the partner for one.
                 item["due_defaulted"] = item["due_on"] is None
             if _word_count(item["evidence"]) > 15:
                 # Retain the quoted timing inside the remote 15-word ceiling.
@@ -569,14 +573,12 @@ def _review_id(session: str, kind: str, number: int) -> str:
 
 
 def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
-                           call_date: str | None = None, transcript: dict[str, Any] | None = None) -> dict[str, Any]:
-    raw = _validate_distillation(value, call_date=call_date, transcript=transcript)
+                           call_date: str | None = None, transcript: dict[str, Any] | None = None,
+                           ledger: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw = _validate_distillation(value, call_date=call_date, transcript=transcript, ledger=ledger)
     deal_ids = {deal["id"] for deal in context["deals"]}
     parties_by_deal = {deal["id"]: {party["party_id"]: party for party in deal["participants"]} for deal in context["deals"]}
     review = [{"id": _review_id(session, "model", n), "question": q, "resolved": False} for n, q in enumerate(raw["review_questions"], 1)]
-    review.extend({"id": _review_id(session, "skipped_deal", n),
-                   "question": f"Skipped deal {row['id']}: {row['reason']}", "resolved": False}
-                  for n, row in enumerate(context.get("skipped_deals", []), 1))
     for number, intent in enumerate(raw.get("review_intents", []), 1):
         intent = deepcopy(intent)
         if intent["deal_id"] is not None and intent["deal_id"] not in deal_ids:
@@ -638,8 +640,18 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
             if first is None:
                 kept.append(task)
                 continue
+            if first["deadline_state"] == "unstated" and task["deadline_state"] != "unstated":
+                first["deadline_state"] = task["deadline_state"]
             if first["due_on"] is None and task["due_on"] is not None:
-                first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"], evidence=task["evidence"])
+                first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"],
+                             deadline_state=task["deadline_state"], evidence=task["evidence"])
+            timing_sources = [source for item in (first, task)
+                              if isinstance(item.get("timing"), dict)
+                              and isinstance(item["timing"].get("sources"), list)
+                              for source in item["timing"]["sources"]]
+            if timing_sources:
+                first["timing"] = {"sources": list({json.dumps(source, sort_keys=True): source
+                                                     for source in timing_sources}.values())}
             first["fact_ids"] = list(dict.fromkeys(first.get("fact_ids", []) + task.get("fact_ids", [])))
             first["participant_ids"] = list(dict.fromkeys(first["participant_ids"] + task["participant_ids"]))
         return kept
@@ -651,11 +663,15 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
         "dell_tasks": merge_repeats(clean(raw["dell_tasks"], "dell_task")),
         "deal_updates": clean(raw["deal_updates"], "deal_update"), "draft_proposals": clean(raw["draft_proposals"], "draft_proposal"),
         "review_questions": review, "missing_tracks": missing_tracks,
+        "diagnostics": {"skipped_deals": [
+            {"id": deal_id, "reason": reason} for deal_id, reason in dict.fromkeys(
+                (row["id"], row["reason"]) for row in context.get("skipped_deals", []))]},
+        "optional_reminders": [],
     }
     for list_name in ("joe_tasks", "dell_tasks"):
         for number, task in enumerate(result[list_name], 1):
-            if task["due_on"] is None:
-                review.append({"id": _review_id(session, f"undated_{list_name}", number), "resolved": False,
+            if task["deadline_state"] == "unstated":
+                result["optional_reminders"].append({"id": _review_id(session, f"undated_{list_name}", number),
                                "question": f"{list_name} item {number} ({task['title']}): "
                                            "No due date was said on the call; set one if it has a deadline."})
     for index, draft in enumerate(result["draft_proposals"], 1):
@@ -712,6 +728,19 @@ def _distiller_instruction() -> str:
         "the numbers with Dell'. Keep genuinely distinct individual actions separate, even on the same deal. "
         "If no single owner can be established, including conflicting individual commitments or a missing deal owner, "
         "add a review question instead of duplicating the action or guessing an owner. "
+        "For each task include timing.sources for EVERY segment cited by its coverage facts, including "
+        "other speakers, later corrections, and alternatives. Review each FULL segment, not the short evidence quote. "
+        "Each source includes segment_index, segment_sha256 (from COVERAGE), char_start=0, "
+        "char_end=full segment length, speaker, exact full quote, "
+        "status stated/unstated/uncertain, and expressions. Expressions are exact complete timing phrases, "
+        "including qualifiers, alternatives and correction words; never select just a recognizable day. "
+        "Use unstated with empty expressions only when the entire turn contains no deadline for this task. "
+        "Property numbers, prices, suite numbers and non-temporal words are not deadlines. "
+        "Use uncertain when context or supersession cannot be established. Never drop a correction. "
+        "Include event anchors among the cited facts. On each dated anchor source add anchor_for, "
+        "an array of exact event-reference expressions from other cited turns, such as before the lunch call. "
+        "Keep the complete date expression in expressions. Never bind an unrelated event or discard "
+        "uncertain or competing anchors. Unsupported event references hold for review. "
         "For each task, resolve spoken deadlines into due_on as YYYY-MM-DD against CALL_DATE in TIME_ZONE, "
         "the recording's America/Chicago calendar date, never the processing date. "
         "Bare weekdays (including Friday morning) mean the next occurrence after the call day. "
@@ -721,7 +750,9 @@ def _distiller_instruction() -> str:
         "Today, tomorrow and day after tomorrow are offsets of zero, one and two calendar days. "
         "Before the lunch call means CALL_DATE unless the transcript dates that lunch call differently. "
         "Preserve an explicitly stated calendar date and year. Include the spoken timing in the evidence quote. "
-        "Use null when no time was stated or the deadline is ambiguous. If multiple days conflict, "
+        "Use null when no time was stated or the deadline is ambiguous. Unstated dates need no review question. "
+        "Routine skipped_deals in CONTEXT are diagnostics, not review questions unless discussed work needs a decision. "
+        "If multiple days conflict, "
         "a stated deadline cannot be resolved or CALL_DATE is missing, keep the item with a null date and "
         "add a review question rather than invent a date. "
         "A deal status statement creates a deal_updates item with next_step and phase_move null. "
@@ -901,7 +932,7 @@ def transcript_repeat_field(report: Any, transcript: dict[str, Any]) -> str | No
                 return path
         elif isinstance(value, dict):
             for key, child in value.items():
-                if key in {"evidence", "evidence_quote"}:
+                if key in {"evidence", "evidence_quote"} or key == "timing" and re.fullmatch(r"(?:joe|dell)_tasks\[\d+\]", path):
                     continue
                 found = find(child, f"{path}.{key}" if path else key)
                 if found is not None:
@@ -1117,7 +1148,7 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
             write_private(session_dir / "post-call-held-draft.json", raw)
             return held
         result = normalize_distillation(raw, context, session_dir.name,
-                                       call_date=call_date, transcript=transcript)
+                                       call_date=call_date, transcript=transcript, ledger=ledger)
         coverage.add_identity_questions(ledger, result, _review_id)
         ledger = coverage.reconcile_coverage(ledger, result)
         write_private(session_dir / coverage.FILE, ledger)

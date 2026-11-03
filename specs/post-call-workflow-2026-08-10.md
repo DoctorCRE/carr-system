@@ -85,11 +85,48 @@ a human-facing call title. `created_at` remains the proposal creation timestamp.
 These fields are additive to `post-call-followups.v1`. Neither outcome review nor
 the source call's age removes provenance from an otherwise eligible candidate.
 Task payloads contain `deal_id`, `assignee`, `action`, and `due_on`.
-Due dates come only from what was said on the call. When no usable deadline is
-stated, `due_on` stays null, the task and stored candidate carry
-`due_defaulted: true`, and a visible review question asks the partner for a
-date. No date is invented. An ambiguous spoken deadline still retains its review
-question. Undated tasks remain proposals, just like explicitly dated tasks.
+Due dates come only from what was said on the call. Task timing is classified
+from all complete source spans of the cited ledger facts, before the short
+remote evidence quote is trimmed. The states are `unstated`, `resolved`,
+`ambiguous`, and `contradictory`.
+
+The task extractor returns `timing.sources`, one semantic timing judgment for
+EVERY full speaker turn cited by the task's ledger facts. Each entry includes
+segment_index, the ledger's segment_sha256, char_start=0, char_end equal to
+the full turn length, exact speaker, complete quote,
+status (`stated`, `unstated`, `uncertain`) and complete timing expressions.
+Corrections and alternatives remain in the expressions, with speaker turns
+preserved. Property numbers and non-temporal words do not imply deadlines.
+
+Only explicit, source-bound `unstated` judgments on every cited turn support the
+optional-reminder transition. Missing, stale, incomplete, misattributed or
+uncertain evidence holds review. Semantic classification remains model output;
+exact source binding and date validation are deterministic. The supplied model
+date never proves resolution. The validator matches WHOLE expressions against a
+small supported date grammar; unsupported phrases hold rather than becoming
+unstated. Corrections are never silently discarded or assumed superseded.
+
+- `unstated` keeps `due_on` null and `due_defaulted: true`. Only this state adds
+  an optional date reminder in `optional_reminders`, which does not block retention.
+- `resolved` keeps the stated calendar date or the deterministic relative date.
+  An unqualified weekday uses the upcoming occurrence under the existing call-date rule.
+- `ambiguous` keeps `due_on` null and creates a blocking review question. This
+  includes qualified timing such as "end of next week" or "sometime next month",
+  numeric dates, "Tuesday next month", "in two weeks", "before Thanksgiving",
+  and a calendar deadline present in the source but missing from `due_on`.
+  Calendar dates are checked against their literal year, or the upcoming occurrence
+  from the recorded call date when the year is omitted. The model date must match.
+- `contradictory` keeps `due_on` null and creates a blocking review question for
+  conflicting calendar or relative deadlines.
+
+No date is invented. Undated tasks remain proposals, just like explicitly dated tasks.
+The filing and retention predicates stay unchanged. Existing report holds are preserved.
+
+The [deadline statechart](post-call-deadline-states.md) names every transition
+and its executable filing/retention test. The [offline evaluation](../evals/post-call-deadlines/README.md)
+compares the same authored extraction responses on main, the prior PR head and
+the new implementation. It measures validation policy, not live model accuracy.
+
 One extraction writes each owner's task once: tasks on the same deal whose
 titles match after case and whitespace normalization merge, a stated date
 winning over none; two different stated dates stay separate proposals.
@@ -246,9 +283,11 @@ synchronization before exhaustion clears its temporary failure state. Pending
 human proposals do not consume synchronization attempts.
 
 Deals excluded from active context, including IDs refused after the board read,
-produce review questions naming the skipped deal and the reason. Other deals
-continue. Jev failures retain proposals with item-level flags and a review
-question. Exception classes and safe cause categories are visible; raw provider
+remain inspectable in the local report at `diagnostics.skipped_deals`, with
+each distinct ID and reason counted once. Routine exclusions do not create human
+questions. A discussed reference that cannot be placed still creates a blocking
+review question. Other deals continue. Jev failures retain proposals with
+item-level flags and a review question. Exception classes and safe cause categories are visible; raw provider
 errors are not copied into the pack.
 
 
@@ -298,6 +337,10 @@ It remains unresolved until a partner answers `Performed: <outcome>` or
 `Declined: <reason>` with a nonempty outcome or reason. Identity and routing
 answers are saved as intermediate information and keep retention on hold.
 Ordinary review questions still resolve on any nonempty answer.
+Existing stored reports retain every explicit unresolved hold, including older
+exclusion and date questions, until manually resolved. Reading a report never
+reclassifies or rewrites those holds. Missing audio, uncertain identity, ambiguous
+spoken deadlines, and failed required checks retain their filing holds.
 U5 can consume these same question rows without a second intent resolver.
 
 Coverage derives `source_spans` from the cited ledger facts, verifies the desired
