@@ -505,10 +505,11 @@ test('legacy duplicate dispositions survive in v1 and carry to stable v2 cards',
     assert.equal(result.results[0].ok,true);
   }
   const fixture=await readV1();
-  const stored=(await c.query('select * from ops.home_inbox_disposition order by actor_id,item_id')).rows;
+  const legacyColumns='actor_id,item_id,disposition,snoozed_until,source_version,material_version,version,explicit_unsettle,updated_at';
+  const stored=(await c.query(`select ${legacyColumns} from ops.home_inbox_disposition order by actor_id,item_id`)).rows;
   await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
   assert.deepEqual(await readV1(),fixture,'both v1 duplicate pairs keep their original dispositions and versions');
-  assert.deepEqual((await c.query("select * from ops.home_inbox_disposition where item_id not like 'home-inbox.v2:%' order by actor_id,item_id")).rows,stored);
+  assert.deepEqual((await c.query(`select ${legacyColumns} from ops.home_inbox_disposition order by actor_id,item_id`)).rows,stored);
   for(const status of ['open','dropped']) {
     await c.query('update next_action set status=$1,version=version+1,updated_at=now() where id=any($2::uuid[])',[status,[id(74),id(76)]]);
     const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;

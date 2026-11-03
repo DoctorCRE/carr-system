@@ -1,6 +1,6 @@
 -- rollback: forward-only; restore prior projection bodies in a new migration if needed.
 -- expand-contract: expand; install v2 beside unchanged v1 reads and disposition commands.
--- lock-review: additive functions and v2-only disposition copies; existing rows stay unchanged.
+-- lock-review: nullable carry metadata and a partial alias index on dispositions; legacy values stay unchanged.
 set local lock_timeout = '5s';
 set local statement_timeout = '30s';
 
@@ -109,6 +109,13 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
 $$;
 revoke all on function ops.home_inbox_sources_v2(uuid) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
+alter table ops.home_inbox_disposition
+  add column v2_item_id text,
+  add column v2_source_version text,
+  add column v2_material_version text;
+create index home_inbox_disposition_v2_item_idx on ops.home_inbox_disposition(actor_id,v2_item_id)
+  where v2_item_id is not null;
+
 create or replace function ops.home_inbox_items_v2(p_actor uuid)
 returns setof jsonb language sql stable set search_path=pg_catalog,pg_temp as $$
   with observed as (
@@ -118,9 +125,12 @@ returns setof jsonb language sql stable set search_path=pg_catalog,pg_temp as $$
         (s.source_state in ('needs_attention','failed') and d.source_version<>s.source_version),false) new_activity
     from ops.home_inbox_sources_v2(p_actor) s
     left join lateral (
-      select d.* from ops.home_inbox_disposition d where d.actor_id=p_actor
-        and d.item_id in (s.item_id,'home-inbox.v2:'||s.item_id)
-      order by (d.item_id=s.item_id) desc limit 1
+      select d.disposition,d.snoozed_until,d.version,d.explicit_unsettle,
+        case when d.item_id=s.item_id then d.source_version else d.v2_source_version end source_version,
+        case when d.item_id=s.item_id then d.material_version else d.v2_material_version end material_version
+      from ops.home_inbox_disposition d where d.actor_id=p_actor
+        and (d.item_id=s.item_id or d.v2_item_id=s.item_id)
+      order by (d.item_id=s.item_id) desc,d.updated_at desc,d.item_id limit 1
     ) d on true
   ), placed as (
     select *,case when stored_disposition='snoozed' and (snoozed_until<=now() or new_activity)
@@ -170,10 +180,9 @@ carry as (
   where not exists(select 1 from ops.home_inbox_disposition existing
     where existing.actor_id=a.actor_id and existing.item_id=s.item_id)
 )
-insert into ops.home_inbox_disposition
-  (actor_id,item_id,disposition,snoozed_until,source_version,material_version,version,explicit_unsettle,updated_at)
-select d.actor_id,'home-inbox.v2:'||c.item_id,d.disposition,d.snoozed_until,c.source_version,c.material_version,d.version,d.explicit_unsettle,d.updated_at
-from carry c join ops.home_inbox_disposition d on d.actor_id=c.actor_id and d.item_id=c.old_item_id;
+update ops.home_inbox_disposition d set v2_item_id=c.item_id,
+  v2_source_version=c.source_version,v2_material_version=c.material_version
+from carry c where d.actor_id=c.actor_id and d.item_id=c.old_item_id;
 
 -- Append the new definer without replacing concurrent grant declarations.
 do $append_grant$
