@@ -219,23 +219,24 @@ begin;
 do $fixtures$
 declare a uuid; p uuid; c uuid;
 begin
- insert into public.actor(slug,kind,display_name) values('wr586-proof','human','Synthetic Tour Partner') returning id into a;
+ insert into public.actor(slug,kind,display_name) values('joe','human','Synthetic Tour Partner') on conflict(slug) do update set active=true returning id into a;
  insert into public.party(kind,name,created_by,updated_by) values('person','Synthetic Tour Client',a,a) returning id into p;
  insert into public.client(party_id,created_by,updated_by) values(p,a,a) returning id into c;
- insert into public.deal(id,client_id,name,deal_type,phase,created_by,updated_by) values
- ('58600000-0000-4000-8000-000000000001',c,'Synthetic Deal One','other','legal',a,a),
- ('58600000-0000-4000-8000-000000000002',c,'Synthetic Deal Two','other','legal',a,a);
+ insert into public.deal(id,client_id,name,deal_type,phase,created_by,updated_by,owner) values
+ ('58600000-0000-4000-8000-000000000001',c,'Synthetic Deal One','other','legal',a,a,'joe'),
+ ('58600000-0000-4000-8000-000000000002',c,'Synthetic Deal Two','other','legal',a,a,'joe');
 end $fixtures$;
 set local session authorization carr_writer;
-set local carr.acting_actor_slug='wr586-proof';
+set local carr.acting_actor_slug='joe';
+select set_config('carr.tour_deal_access',jsonb_build_object('slug','joe','id',(select id::text from public.actor where slug='joe'),'deals',(select jsonb_object_agg(id::text,jsonb_build_object('owner',owner,'version',version)) from public.deal where id::text like '58600000%'))::text,true);
 do $proof$
 declare t uuid; t2 uuid; legacy uuid; j jsonb; missing uuid:='58600000-0000-4000-8000-000000000099';
 begin
  t:=ops.create_tour_domain('carr-internal','Synthetic deal tour','deal','58600000-0000-4000-8000-000000000001','proof','{}','{}');
  t2:=ops.create_tour_domain('carr-internal','Synthetic second tour','deal','58600000-0000-4000-8000-000000000002','proof','{}','{}');
- j:=ops.read_tour_internal_detail('carr-internal',t,'wr586-proof');
+ j:=ops.read_tour_internal_detail('carr-internal',t,'joe');
  if j->>'deal_id'<>'58600000-0000-4000-8000-000000000001' or j->>'deal_name'<>'Synthetic Deal One' then raise exception 'detail lost deal binding'; end if;
- j:=ops.list_tour_library('carr-internal','wr586-proof');
+ j:=ops.list_tour_library('carr-internal','joe');
  if not exists(select 1 from jsonb_array_elements(j->'tours') x where x->>'deal_id'='58600000-0000-4000-8000-000000000001') or
  not exists(select 1 from jsonb_array_elements(j->'tours') x where x->>'deal_id'='58600000-0000-4000-8000-000000000002') then raise exception 'cross-deal listing lost a deal'; end if;
  if ops.read_tour_internal_detail('carr-internal',t,'inactive-proof') is not null then raise exception 'inaccessible deal detail leaked'; end if;
@@ -253,10 +254,10 @@ begin
   perform ops.create_tour_domain('carr-internal','Inaccessible','deal','58600000-0000-4000-8000-000000000001','proof','{}','{}');
   raise exception 'inaccessible actor accepted';
  exception when raise_exception then if sqlerrm<>'tour deal is unavailable' then raise; end if; end;
- perform set_config('carr.acting_actor_slug','wr586-proof',true);
+ perform set_config('carr.acting_actor_slug','joe',true);
  foreach j in array array['"client"'::jsonb,'"work"'::jsonb] loop
   legacy:=ops.create_tour_domain('legacy-fixture','Legacy',j#>>'{}','opaque:legacy','proof','{}','{}');
-  if (ops.read_tour_internal_detail('legacy-fixture',legacy,'wr586-proof')->>'deal_id') is not null then raise exception 'legacy tour acquired a deal'; end if;
+  if (ops.read_tour_internal_detail('legacy-fixture',legacy,'joe')->>'deal_id') is not null then raise exception 'legacy tour acquired a deal'; end if;
  end loop;
 end $proof$;
 reset session authorization;
@@ -275,4 +276,21 @@ begin
   raise exception 'deal subject without reference accepted';
  exception when check_violation then null; end;
 end $constraints$;
+rollback;
+
+\set ON_ERROR_STOP on
+begin;
+do $denied_creation$
+declare a uuid; p uuid; c uuid; d uuid;
+begin
+ insert into public.actor(slug,kind,display_name) values('dell','human','Synthetic Outsider') on conflict(slug) do update set active=true returning id into a;
+ insert into public.party(kind,name,created_by,updated_by) values('person','Synthetic Private Client',a,a) returning id into p;
+ insert into public.client(party_id,created_by,updated_by) values(p,a,a) returning id into c;
+ insert into public.deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values(c,'Private Deal','other','legal','joe',a,a) returning id into d;
+ perform set_config('carr.acting_actor_slug','dell',true);
+ begin
+  perform ops.create_tour_domain('carr-internal','Forbidden','deal',d::text,'proof','{}','{}');
+  raise exception 'active actor created inaccessible deal tour';
+ exception when raise_exception then if sqlerrm<>'tour deal is unavailable' then raise; end if; end;
+end $denied_creation$;
 rollback;
