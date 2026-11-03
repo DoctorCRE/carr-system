@@ -1550,5 +1550,106 @@ class InstallTest(unittest.TestCase):
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 27.5 * 3600)
 
 
+
+class UnreadVerificationTest(UnreadAgreementTest):
+    def test_content_and_prefix_contract(self):
+        from lib.outlook_ui import ReadState
+        for field in ('sender', 'subject', 'preview'):
+            label = msg('unread' if field == 'sender' else 'sender-test',
+                        'unread' if field == 'subject' else 'subject-test')['label']
+            if field == 'preview':
+                label = label.replace('preview-text', 'unread')
+            row = Row(label, 'token', False)
+            self.assertEqual(row.read_state, ReadState.READ)
+            self.assertEqual(row.key, ' '.join(label.split()))
+            self.assertEqual(Row('Unread, ' + label, '', False).key, row.key)
+            self.assertEqual(Row('Unread, ' + label, '', False).read_state, ReadState.UNREAD)
+            calls = []
+            result = triage.preserve_unread(self.Window({None: [row]}, 0), triage.Report(),
+                lambda tabs: calls.append(tabs) or triage.Outcome('succeeded', 'filed'), lambda: False)
+            self.assertEqual((result.state, len(calls)), ('succeeded', 1))
+        self.assertNotEqual(self.row('unread').key, self.row('').key)
+        for prefix in ('Read, ', 'Flagged, ', 'unread, ', 'Unread ', 'Unknown, '):
+            row = Row(prefix + msg('sender-test', 'subject-test')['label'], '', False)
+            self.assertEqual(row.read_state, ReadState.UNCERTAIN)
+            calls = []
+            result = triage.preserve_unread(self.Window({None: [row]}, 0), triage.Report(),
+                lambda tabs: calls.append(tabs), lambda: False)
+            self.assertEqual((result.state, len(calls)), ('skipped', 0))
+
+    def test_selected_badge_boundary(self):
+        from lib.outlook_ui import Window, UiError
+        def walk(selections=(True,), texts=('Inbox', '3')):
+            elements = [{'role': 'AXWindow', 'label': MAILBOX, 'element_index': 0}]
+            for selected in selections:
+                idx = len(elements)
+                elements.append({'role': 'AXRow', 'selected': selected, 'element_index': idx})
+                elements.extend({'role': 'AXStaticText', 'label': t, 'value': t,
+                                 'parent_index': idx} for t in texts)
+            return elements
+        window = Window(1, 2, Waits())
+        for texts, expected in [(('Inbox', '3'), 3), (('Inbox', '3 unread'), 3), (('Inbox',), 0)]:
+            with patch('lib.outlook_ui.cua', return_value={'elements': walk((False, True), texts)}):
+                self.assertEqual(window.inbox_badge(), expected)
+        for selections, texts in [((), ('Inbox',)), ((False,), ('Inbox',)),
+                                  ((True, True), ('Inbox',)), ((True,), ('Inbox', '')),
+                                  ((True,), ('Inbox', '3', '3')), ((True,), ('Inbox', '3 unread messages'))]:
+            with self.subTest(selections=selections, texts=texts):
+                with patch('lib.outlook_ui.cua', return_value={'elements': walk(selections, texts)}):
+                    with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
+                        window.inbox_badge()
+        for state in ({'elements': walk() + [{}] * 120},
+                      {'elements': walk(), 'degraded_reason': 'truncated'}):
+            with patch('lib.outlook_ui.cua', return_value=state):
+                with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
+                    window.inbox_badge()
+        elements = walk()
+        elements[-1]['value'] = '4'
+        with patch('lib.outlook_ui.cua', return_value={'elements': elements}):
+            with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
+                window.inbox_badge()
+
+    def test_lifecycle_edges_and_count_only_diagnostics(self):
+        from lib.outlook_ui import UiError
+        x, y = self.row('x', True), self.row('y', True)
+        for mode in ('stable', 'initial_unknown', 'preaction_unknown', 'first_scan_change',
+                     'second_scan_change', 'deadline', 'arrival', 'read', 'post_unknown', 'post_scan'):
+            with self.subTest(mode=mode):
+                window = self.Window({None: [x]}, 2 if 'scan' in mode else 1,
+                                     {None: [x, y]})
+                calls, badges = [], []
+                def badge():
+                    badges.append(True)
+                    n = len(badges)
+                    if ((mode == 'initial_unknown' and n == 1) or
+                        (mode == 'preaction_unknown' and n == 2) or
+                        (mode == 'post_unknown' and calls)):
+                        raise UiError('inbox_badge_unverified', step='inbox_badge_shape')
+                    return window.badge + int((mode == 'first_scan_change' and n == 2) or
+                                              (mode == 'second_scan_change' and n == 3))
+                window.inbox_badge = badge
+                def action(tabs):
+                    calls.append(True)
+                    if mode == 'arrival':
+                        window.tabs = {None: [x, y]}
+                        window.badge = 2
+                    if mode == 'read':
+                        window.tabs = {None: [self.row('x')]}
+                        window.badge = 0
+                    if mode == 'post_scan':
+                        window.scans = {None: [x]}
+                    return triage.Outcome('succeeded', 'filed')
+                report = triage.Report()
+                result = triage.preserve_unread(window, report, action, lambda: mode == 'deadline')
+                expected = ('succeeded' if mode == 'stable' else
+                            'failed' if mode in ('arrival', 'read', 'post_unknown', 'post_scan') else 'skipped')
+                self.assertEqual(result.state, expected)
+                self.assertEqual(len(calls), int(expected != 'skipped'))
+                fields = dict(part.split('=', 1) for part in result.detail.split())
+                self.assertEqual(set(fields), {'selected_inbox_rows', 'badge_status', 'viewport_rows',
+                    'viewport_unread', 'full_scan_rows', 'full_scan_unread', 'scan_count', 'coverage'})
+                self.assertNotIn('Sender:', report.text(result))
+
+
 if __name__ == '__main__':
     unittest.main()
