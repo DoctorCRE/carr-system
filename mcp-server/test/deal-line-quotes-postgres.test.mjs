@@ -16,6 +16,8 @@ test('line quotes preserve exact versions, ranges and access across retries', as
   const call = async (fn, args) => (await c.query(`select ops.${fn}(${args.map((_, i) => '$' + (i + 1)).join(',')}) r`, args)).rows[0].r;
   try {
     await c.query(`create schema ops;
+      create function ops.scac_current_grant_contract() returns jsonb language sql immutable
+        set search_path=pg_catalog as 'select ''{"secdef_execute":[]}''::jsonb';
       create role carr_reader; create role carr_writer; create role carr_authority; create role dot_reader; create role carr_jobs;
       create table public.actor(id uuid primary key,slug text,kind text,active boolean default true);
       create table public.party(id uuid primary key,merged_into uuid,deleted_at timestamptz);
@@ -36,6 +38,7 @@ test('line quotes preserve exact versions, ranges and access across retries', as
       assert.fail('Baseline has no exact-version quote storage');
     }
     await c.query(await readFile(migration, 'utf8'));
+    assert.equal((await c.query("select jsonb_array_length(ops.scac_current_grant_contract()->'secdef_execute') n")).rows[0].n,5);
     const key = randomUUID();
     const source = await call('register_deal_quote_text', [doc, key, hash, text]);
     assert.equal(source.version, 1);

@@ -184,3 +184,22 @@ begin
 end $$;
 revoke all on function ops.read_deal_quote_text(uuid,uuid,text) from public;
 grant execute on function ops.read_deal_quote_text(uuid,uuid,text) to carr_writer;
+
+do $quote_grants$
+declare contract jsonb := ops.scac_current_grant_contract();
+begin
+  contract := jsonb_set(contract,'{secdef_execute}',(contract->'secdef_execute')||(
+    select jsonb_agg(jsonb_build_object('config',jsonb_build_array('search_path=pg_catalog, pg_temp'),
+      'grantee',grantee,'parallel','u','grantable',false,'privilege','execute','signature',signature,
+      'volatility',volatility,'ingress_key','db-function-acl:'||signature||':'||grantee||':execute',
+      'ingress_kind','db_function_acl','function_kind','f','security_definer',true) order by signature)
+    from (values
+      ('ops.register_deal_quote_text(p_document uuid, p_key uuid, p_hash text, p_text text)','carr_authority','v'),
+      ('ops.read_deal_quote_text(p_deal uuid, p_document uuid, p_hash text)','carr_writer','s'),
+      ('ops.save_deal_line_quote(p_deal uuid, p_key uuid, p_request jsonb)','carr_writer','v'),
+      ('ops.detach_deal_line_quote(p_deal uuid, p_quote uuid, p_key uuid)','carr_writer','v'),
+      ('ops.list_deal_line_quotes(p_deal uuid, p_after uuid)','carr_writer','s')
+    ) as grants(signature,grantee,volatility)));
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+end $quote_grants$;
