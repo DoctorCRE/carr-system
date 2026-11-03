@@ -532,6 +532,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             const identity = await lockEmailIdentity(c, owner, args.sender_account, args.sent_item_id);
             const existing = await capturedEmail(c, identity);
             if (existing) {
+              if (existing.email_context?.lifecycle?.state) fail('email_not_live');
               if (existing.kind !== 'email_out' || (existing.email_context?.send_id && existing.email_context.send_id !== row.id))
                 fail('email_identity_conflict');
               await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=coalesce($4,deal_id),email_context=$5::jsonb,

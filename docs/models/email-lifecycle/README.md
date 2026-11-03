@@ -12,7 +12,10 @@ stateDiagram-v2
   Live --> Deleted: observed deletion
   Live --> Recalled: observed recall
   Live --> Superseded: observed revision
-  Live --> Live: capture or action
+  Live --> Live: capture, action or sent confirmation
+  Deleted --> Deleted: delayed confirmation refused
+  Recalled --> Recalled: delayed confirmation refused
+  Superseded --> Superseded: delayed confirmation refused
   Deleted --> Deleted: exact observation replay
   Recalled --> Recalled: exact observation replay
   Superseded --> Superseded: exact observation replay
@@ -38,3 +41,9 @@ Throughput checkpoint: resolve overlap and acceptance before modeling and red
 tests. One worker owns this coupled contract, with no subagents permitted.
 Identity and ordered activity locks serialize shared state. The smallest safe
 decomposition is record contract first and Outlook detection second.
+
+Round-2 delayed confirmation has two identities. The inbound reply source may
+remain live while the captured outbound item is deleted. Both must remain live
+for a new receipt write. A successful receipt replay preserves the outbound
+row after deletion, while the source guard still applies. Mail.tla models these
+independently, and verification.md maps every transition to named tests.

@@ -72,7 +72,8 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
       const identity={mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()};
       const captureArgs={ref:'C-999442',kind:'email_out',summary:'Synthetic sent capture',email_identity:identity};
       const captured=await call('log-activity',{...captureArgs,idempotency_key:randomUUID()});
-      const source=await call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Independent live reply source'});
+      const sourceIdentity={...identity,item_id:randomUUID()};
+      const source=await call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Independent live reply source',email_identity:sourceIdentity});
       const submitted={subject:'Reply',body:'Synthetic body',sha256:'a'.repeat(64),to:['sender@example.test'],cc:['dell@example.test']};
       const draft=(await c.query(`insert into email_proposal(kind,activity_id,owner,draft_subject,draft_body,status,evidence_quote,confidence,created_by,resolved_by,resolved_at,submitted_at,submitted_email)
         values('reply_draft',$1,'joe','Reply','Synthetic body','approved_to_send','Synthetic quote',1,$2,$2,now(),now(),$3::jsonb) returning id,version`,
@@ -96,6 +97,8 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
       }
       assert.equal((await call('record-email-lifecycle',{...observation,idempotency_key:randomUUID()})).replayed,true);
       assert.equal((await c.query('select status from email_proposal where id=$1',[draft.id])).rows[0].status,receiptFirst?'sent':'approved_to_send');
+      await call('record-email-lifecycle',{...observation,email_identity:sourceIdentity,observation_id:randomUUID(),idempotency_key:randomUUID()});
+      await assert.rejects(call('record-email-sent',{...receipt,idempotency_key:randomUUID()},machine),e=>e.payload?.error==='email_not_live');
     });
   }
   await t.test('reader and action enforcement independently rejects terminal source metadata',async st => {
