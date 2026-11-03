@@ -77,6 +77,23 @@ class LinksTest(unittest.TestCase):
         body = ' '.join(f'https://loopnet.com/Listing/{i}' for i in range(30))
         self.assertEqual(len(extract_links(body)), 20)
 
+    def test_decoded_terminal_punctuation_is_part_of_destination(self):
+        for suffix in ('/(123)', '/a?key=value;', '/a#fragment!', '/a]'):
+            destination = 'https://www.loopnet.com' + suffix
+            wrapper = wrap(destination) + '&data=opaque'
+            for body in (wrapper, wrapper + ').', '<a href="' + wrapper + '">Open</a>'):
+                with self.subTest(body=body):
+                    self.assertEqual(extract_links(body), [('listing', destination)])
+
+    def test_plain_assignments_preserve_query_bytes(self):
+        destination = 'https://loopnet.com/a?x=1&copy=2'
+        for prefix in ('Link=', 'foo="', "foo='", 'foo= "'):
+            for value in (destination, wrap(destination)):
+                body = prefix + value + '"'
+                with self.subTest(body=body):
+                    self.assertEqual(unwrap_safe_links(body), prefix + destination + '"')
+                    self.assertEqual(extract_links(body), [('listing', destination)])
+
     def test_plain_query_names_are_not_html_entities(self):
         destination = 'https://loopnet.com/Listing/a?x=1&copy=2'
         self.assertEqual(extract_links(destination), [('listing', destination)])
