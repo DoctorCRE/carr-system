@@ -7,6 +7,7 @@ import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
+import { homeWaitingTools } from "./home-waiting.ts";
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
@@ -10867,6 +10868,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
+registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
 registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer

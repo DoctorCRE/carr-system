@@ -598,6 +598,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "clear-home-waiting": {
+    "ingress_key": "mcp-tool:clear-home-waiting",
+    "source_locator": "mcp-server/src/home-waiting.ts",
+    "schema_digest": "e151e38d47cf26da7d90f57c138fa6cabe18d05574caf5640f98df41224cd125",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "clear-the-deck": {
     "ingress_key": "mcp-tool:clear-the-deck",
     "source_locator": "mcp-server/src/clear-the-deck.js",
@@ -2374,6 +2384,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-home-inbox-v4": {
+    "ingress_key": "mcp-tool:read-home-inbox-v4",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-invoice-tracker": {
     "ingress_key": "mcp-tool:read-invoice-tracker",
     "source_locator": "mcp-server/src/invoice-tracker.ts",
@@ -3513,6 +3533,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:set-doctrine-refs",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "fe2da3aa52b6ae0980c2f7da2a8efae02cd0bb92ed0ffaa9e3adacefbdad7208",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "set-home-waiting": {
+    "ingress_key": "mcp-tool:set-home-waiting",
+    "source_locator": "mcp-server/src/home-waiting.ts",
+    "schema_digest": "eaf02fb9f3e3612d0e4d49bb70035e3f111696506dede62b7b4303edf8460f33",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
