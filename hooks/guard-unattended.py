@@ -2533,10 +2533,7 @@ def zsh_glob_reason(cmd, invocations, depth=0):
     for token in list(lexer) + [';']:
         if re.fullmatch(r'[;&|<>()]+', token):
             if '(' in token or ')' in token or token not in SHELL_BOUNDARIES | SHELL_REDIRECTS:
-                words = _without_redirects(segment)
-                while words and words[0] in modifiers:
-                    words.pop(0)
-                incomplete_programs.update(program for program, _ in command_invocations(words))
+                incomplete_programs.update(_exe_name(word) for word in segment)
             if token in SHELL_REDIRECTS:
                 segment.append(token)
             else:

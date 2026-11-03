@@ -1724,7 +1724,8 @@ ZSH_GLOB_TRUNCATED_READS = [
 ]
 ZSH_GLOB_TRUNCATED_READS += [
     prefix + ' git diff --no-index /tmp/p/(one|two) --output=/tmp/j147-write'
-    for prefix in ('noglob', 'nocorrect', '-', 'nocorrect noglob -', 'command', 'env')
+    for prefix in ('noglob', 'nocorrect', '-', 'nocorrect noglob -', 'command', 'env',
+                   'X=1 nocorrect', 'X=1 noglob')
 ]
 for command in ZSH_GLOB_TRUNCATED_READS:
     case('J147 incomplete read ' + command, bash(command, '/tmp'), DENY)
