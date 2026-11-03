@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
-create temporary table deal_tour_cases(kind text,deal_id uuid,tour_id uuid,client_party uuid,projection_id uuid,render_id uuid,route_id uuid);
+create temporary table deal_tour_cases(kind text,deal_id uuid,tour_id uuid,client_party uuid,projection_id uuid,render_id uuid,route_id uuid,approved_id uuid,share_session text);
 grant all on deal_tour_cases to carr_writer,carr_authority;
 create function pg_temp.authorize_deal_tours(who text) returns void language sql security definer as $$
  select set_config('carr.tour_deal_access',jsonb_build_object('slug',who,'id',(select id::text from public.actor where slug=who),'deals',coalesce((select jsonb_object_agg(id::text,jsonb_build_object('owner',owner,'version',version)) from public.deal where owner=who),'{}'))::text,true)::text::void
@@ -68,9 +68,13 @@ begin
 end $create_accessible$;
 reset session authorization;
 do $internal_fixtures$
-declare fixture record; prop uuid; projection uuid; job uuid; route uuid; dig text:='sha256:'||repeat('a',64);
+declare fixture record; prop uuid; projection uuid; approved uuid; job uuid; route uuid; rights uuid; evidence uuid; fa uuid; fact_key text; token text; session text; dig text:='sha256:'||repeat('a',64);
 begin
  insert into ops.tour_property(organization_tenant_id,property_status) values('carr-internal','active') returning id into prop;
+ insert into ops.tour_rights_receipt(organization_tenant_id,provider,policy_key,receipt_version,receipt_digest,terms_url,reviewed_at,reviewer,intended_use,allowed_field_classes,allowed_use_classes,effective_at,status)
+ values('carr-internal','matrix','matrix',1,dig,'https://example.invalid',now(),'joe','proof','["*"]','["source_intake","canonical_fact","client_public_display"]',now(),'active') returning id into rights;
+ insert into ops.tour_source_evidence(organization_tenant_id,stable_locator,evidence_class,retrieved_at,retrieval_status,content_digest,rights_receipt_id,data_classification,rights_provider,rights_policy_key)
+ values('carr-internal','proof:matrix','direct_source',now(),'read',dig,rights,'public','matrix','matrix') returning id into evidence;
  for fixture in select * from deal_tour_cases where tour_id is not null loop
   select id into route from ops.tour_route_version where tour_id=fixture.tour_id;
   insert into ops.tour_route_version_acceptance(organization_tenant_id,tour_id,route_version_id,expected_prior_route_version,accepted_by_actor_id,acceptance_digest)
@@ -81,7 +85,22 @@ begin
    values('carr-internal',fixture.tour_id,1,1,now(),true,dig,'draft') returning id into projection;
   insert into ops.tour_pdf_render_job(organization_tenant_id,projection_id,requested_by_actor_id,request,projection_digest,packet_digest,template_digest,renderer_digest,qc_ruleset_digest,expected_property_count)
    values('carr-internal',projection,'joe','{}',dig,dig,dig,dig,dig,1) returning id into job;
-  update deal_tour_cases set projection_id=projection,render_id=job,route_id=route where kind=fixture.kind;
+  insert into ops.tour_public_projection(organization_tenant_id,tour_id,projection_version,route_version,as_of,facts_only,projection_digest,status)
+   values('carr-internal',fixture.tour_id,2,1,now(),true,dig,'draft') returning id into approved;
+  foreach fact_key in array array['display.name','display.address'] loop
+   insert into ops.tour_field_assertion(organization_tenant_id,property_id,field_key,value,source_evidence_id,rights_receipt_id,observed_at,effective_from,confidence,data_classification,review_state)
+   values('carr-internal',prop,fact_key,to_jsonb(case when fact_key='display.name' then 'Synthetic Plaza' else '100 Main Road' end),evidence,rights,now(),now(),'high','public','reviewed') returning id into fa;
+   insert into ops.tour_public_projection_fact(organization_tenant_id,projection_id,property_id,field_assertion_id,route_version,display_field_key)
+   values('carr-internal',approved,prop,fa,1,fact_key);
+  end loop;
+  insert into ops.tour_public_projection_seal_receipt(organization_tenant_id,projection_id,sealed_at,sealed_state,actor_id,receipt_digest,canonical_projection_digest)
+   values('carr-internal',approved,now(),'approved','joe',dig,ops.tour_canonical_projection_digest('carr-internal',approved));
+  token:='sha256:'||encode(public.digest(approved::text,'sha256'),'hex');
+  session:='sha256:'||encode(public.digest(token,'sha256'),'hex');
+  perform ops.issue_tour_share_grant('carr-internal',approved,token,'["view_packet"]',now()+interval '1 day',dig,'joe');
+  perform ops.exchange_tour_share_token(token,session,now()+interval '1 hour',token);
+  update deal_tour_cases set projection_id=projection,approved_id=approved,share_session=session,render_id=job,route_id=route where kind=fixture.kind;
+
  end loop;
 end $internal_fixtures$;
 update public.deal set owner='dell' where id=(select deal_id from deal_tour_cases where kind='inaccessible');
@@ -114,6 +133,7 @@ begin
  if ops.read_tour_projection_seal_candidates('carr-internal',f.projection_id,'joe') is null then raise exception 'accessible candidates missing'; end if;
  if ops.read_tour_feedback('carr-internal',f.projection_id,'joe',null,100) is null then raise exception 'accessible feedback missing'; end if;
  if ops.read_tour_sharing_library('carr-internal',f.projection_id,'joe',null,100) is null then raise exception 'accessible shares missing'; end if;
+ if ops.read_tour_public_projection('carr-internal',f.approved_id) is null then raise exception 'accessible approved projection missing'; end if;
  if ops.read_tour_pdf_render('carr-internal',f.render_id,'joe') is null then raise exception 'accessible PDF status missing'; end if;
 end $internal_reads_accessible$;
 do $read_unavailable$
@@ -127,6 +147,7 @@ begin
   if ops.read_tour_projection_seal_candidates('carr-internal',coalesce(fixture.projection_id,t),'joe') is not null then raise exception 'unavailable candidates %',fixture.kind; end if;
   if ops.read_tour_feedback('carr-internal',coalesce(fixture.projection_id,t),'joe',null,100) is not null then raise exception 'unavailable feedback %',fixture.kind; end if;
   if ops.read_tour_sharing_library('carr-internal',coalesce(fixture.projection_id,t),'joe',null,100) is not null then raise exception 'unavailable shares %',fixture.kind; end if;
+  if ops.read_tour_public_projection('carr-internal',coalesce(fixture.approved_id,t)) is not null then raise exception 'unavailable approved projection %',fixture.kind; end if;
   if ops.read_tour_pdf_render('carr-internal',coalesce(fixture.render_id,t),'joe') is not null then raise exception 'unavailable PDF status %',fixture.kind; end if;
   if ops.read_tour_pdf_artifact_for_review('carr-internal',coalesce(fixture.render_id,t),'joe') is not null then raise exception 'unavailable preview %',fixture.kind; end if;
   if ops.read_tour_pdf_artifact_for_download('carr-internal',coalesce(fixture.render_id,t),'joe') is not null then raise exception 'unavailable download %',fixture.kind; end if;
@@ -140,6 +161,13 @@ set local session authorization carr_authority;
 select pg_temp.test_denied_tour_mutators();
 set local session authorization carr_writer;
 select pg_temp.test_denied_tour_mutators();
+do $authorized_public_share$
+declare session text:=(select share_session from deal_tour_cases where kind='inaccessible');
+begin
+ perform set_config('carr.tour_deal_access','',true);
+ if ops.read_tour_share_packet(session) is null then raise exception 'authorized public packet was blocked by internal deal access'; end if;
+end $authorized_public_share$;
+select pg_temp.authorize_deal_tours('joe');
 do $mixed_library$
 declare ids jsonb;
 begin
@@ -178,4 +206,12 @@ begin
  end loop;
 end $legacy_unchanged$;
 reset session authorization;
+do $private_projection_content$
+begin
+ if has_function_privilege('carr_writer','ops.tour_projection_content(text,uuid)','execute')
+ or has_function_privilege('carr_reader','ops.tour_projection_content(text,uuid)','execute')
+ or has_function_privilege('carr_authority','ops.tour_projection_content(text,uuid)','execute') then
+  raise exception 'raw projection content is directly callable';
+ end if;
+end $private_projection_content$;
 rollback;

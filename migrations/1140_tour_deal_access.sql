@@ -95,3 +95,25 @@ begin
    'ops.tour_deal_visible(p_tenant,t.deal_id,p_actor_id)');
  execute definition;
 end $guard_internal$;
+
+-- The registered read-tour-public-projection tool is an internal UUID door.
+-- Share-session doors validate their grant independently and use private content.
+do $projection_doors$
+declare definition text; body text; f record;
+begin
+ select pg_get_functiondef('ops.read_tour_public_projection(text,uuid)'::regprocedure) into definition;
+ execute replace(definition,'FUNCTION ops.read_tour_public_projection(', 'FUNCTION ops.tour_projection_content(');
+ revoke all on function ops.tour_projection_content(text,uuid) from public,carr_reader,carr_writer,carr_jobs,carr_authority;
+ select prosrc into body from pg_proc where oid='ops.read_tour_public_projection(text,uuid)'::regprocedure;
+ execute replace(definition,body,
+   'select case when ops.tour_target_visible(p_tenant,''projection'',p_projection_id,'||
+   '(nullif(current_setting(''carr.tour_deal_access'',true),'''')::jsonb->>''slug'')) '||
+   'then ops.tour_projection_content(p_tenant,p_projection_id) else null end');
+ for f in select p.oid,p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+ where n.nspname='ops' and p.proname=any(array[
+   'read_tour_share_packet','read_tour_share_map','read_tour_share_feedback',
+   'tour_share_feedback_target','tour_public_map_projection_evidence_ready']) loop
+  definition:=pg_get_functiondef(f.oid);
+  execute replace(definition,f.prosrc,replace(f.prosrc,'ops.read_tour_public_projection(', 'ops.tour_projection_content('));
+ end loop;
+end $projection_doors$;
