@@ -75,7 +75,7 @@ class Host:
         if not re.fullmatch(r'[0-9a-f]{40}', self.sha):
             raise ValueError('--sha must be the full main commit SHA')
         url = self.git(self.source, 'remote', 'get-url', 'origin')
-        if url not in ('https://github.com/DoctorCRE/carr-system.git', 'git@github.com:DoctorCRE/carr-system.git'):
+        if not re.fullmatch(r'(?:https://github\.com/|git@github\.com:)DoctorCRE/carr-system(?:\.git)?', url):
             raise ValueError('source origin must be DoctorCRE/carr-system')
         remote = self.git(self.source, 'ls-remote', 'origin', 'refs/heads/main').split()
         if not remote:

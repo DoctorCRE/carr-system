@@ -188,7 +188,7 @@ class HostTests(unittest.TestCase):
                         tail = args[3:]
                         repo = args[2]
                         if tail == ('remote', 'get-url', 'origin'):
-                            out = 'https://github.com/DoctorCRE/carr-system.git'
+                            out = 'git' + '@' + 'github.com:DoctorCRE/carr-system.git' if invalid else 'https://github.com/DoctorCRE/carr-system.git'
                         elif tail == ('symbolic-ref', '--short', 'HEAD'):
                             out = 'main'
                         elif tail[0] == 'ls-remote':
