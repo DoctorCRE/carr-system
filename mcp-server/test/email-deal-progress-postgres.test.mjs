@@ -2829,3 +2829,55 @@ test('the deployed app creates a deal then confirms its v1 possible-new-deal pre
     deal: created.deal_id });
   assert.equal(receipt.deal, created.deal_id);
 });
+
+
+test('v1 new-deal compatibility refuses changed source, another proposal and handled actions', async () => {
+  const { stored, source } = await filingAction();
+  const item = (await listed()).find(p => p.id === stored.proposal_id);
+  const created = await command('new-deal', { idempotency_key: randomUUID(), client: clientRef,
+    name: 'Synthetic guarded new deal', deal_type: 'purchase', phase: 'research' });
+  const args = { proposal_id: item.id, base_version: item.version,
+    proposal_digest: item.preview.proposal_digest, deal: created.deal_id };
+  const confirmLegacy = extra => command('confirm-email-filing', { ...args, idempotency_key: randomUUID(), ...extra });
+  await assert.rejects(confirmLegacy({ disposition: 'handled' }), e => e.payload?.error === 'email_proposal_stale');
+  const other = await filingAction();
+  await assert.rejects(confirmLegacy({ proposal_id: other.stored.proposal_id }), e => e.payload?.error === 'email_proposal_stale');
+  await c.query('update activity set detail=detail || $2,version=version+1 where id=$1', [source.activity_id, ' Changed source.']);
+  await assert.rejects(confirmLegacy({}), e => e.payload?.error === 'email_proposal_stale');
+  assert.equal((await c.query('select deal_id from activity where id=$1', [source.activity_id])).rows[0].deal_id, null);
+});
+
+test('v1 filing cannot correct clients or change the original suggested deal', async () => {
+  const { stored } = await filingAction('file_to_deal');
+  const item = (await listed()).find(p => p.id === stored.proposal_id);
+  const created = await command('new-deal', { idempotency_key: randomUUID(), client: clientRef,
+    name: 'Synthetic v1 target exclusion', deal_type: 'purchase', phase: 'research' });
+  await assert.rejects(command('confirm-email-filing', { idempotency_key: randomUUID(),
+    proposal_id: item.id, base_version: item.version, proposal_digest: item.preview.proposal_digest,
+    deal: created.deal_id }), e => e.payload?.error === 'email_proposal_stale');
+  const fresh = await filingAction();
+  const preview = (await listed()).find(p => p.id === fresh.stored.proposal_id).preview;
+  const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic incompatible client',$1,$1) returning id", [actor.id])).rows[0].id;
+  const client = (await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id", [party,actor.id])).rows[0].id;
+  const target = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic incompatible deal',$1,'purchase','research','joe',$2,$2) returning id", [client,actor.id])).rows[0].id;
+  for (const extra of [{}, { correction_reason: 'Correct captured client.' }]) {
+    await assert.rejects(command('confirm-email-filing', { idempotency_key: randomUUID(),
+      proposal_id: fresh.stored.proposal_id, base_version: 1, proposal_digest: preview.proposal_digest,
+      deal: target, ...extra }), e => e.payload?.error === (extra.correction_reason ? 'email_proposal_stale' : 'email_new_deal_client_mismatch'));
+  }
+});
+
+test('v2 new-deal digests remain target-bound and reject changed target versions', async () => {
+  const { stored } = await filingAction();
+  const shown = await targetPreview(stored);
+  const created = await command('new-deal', { idempotency_key: randomUUID(), client: clientRef,
+    name: 'Synthetic v2 created deal', deal_type: 'purchase', phase: 'research' });
+  const args = { proposal_id: stored.proposal_id, base_version: 1, proposal_digest: shown.proposal_digest };
+  await assert.rejects(command('confirm-email-filing', { ...args, idempotency_key: randomUUID(),
+    deal: created.deal_id }), e => e.payload?.error === 'email_proposal_stale');
+  const selected = await targetPreview(stored, created.deal_id);
+  await command('update-deal', { idempotency_key: randomUUID(), deal: created.deal_id,
+    base_version: selected.target_version, fields: { city: 'Synthetic updated target' } });
+  await assert.rejects(command('confirm-email-filing', { ...args, idempotency_key: randomUUID(),
+    proposal_digest: selected.proposal_digest, deal: created.deal_id }), e => e.payload?.error === 'email_proposal_stale');
+});

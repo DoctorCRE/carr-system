@@ -261,8 +261,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if (corrected && !args.correction_reason?.trim()) fail('email_new_deal_client_mismatch');
         const current = await matchingPreview(c, row, null, args.deal ? { deal: target.id, correction_reason: args.correction_reason } : null);
         if (current.proposal_digest !== args.proposal_digest) {
-          const legacy = row.kind === 'file_to_deal' && target.id === row.deal_id && !args.correction_reason
-            ? await matchingPreview(c,row) : null;
+          const legacyTarget = row.kind === 'file_to_deal' ? target.id === row.deal_id
+            : Boolean(args.deal) && !corrected && args.disposition !== 'handled';
+          const legacy = legacyTarget && !args.correction_reason ? await matchingPreview(c,row) : null;
           if (legacy?.proposal_digest !== args.proposal_digest) fail('email_proposal_stale');
         }
         if (!current.sender.party_id) fail('email_sender_contact_required', { message: 'Create the sender contact before confirming this filing.' });
