@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> Prepared
+    Prepared --> Changed: Contact changes
+    Prepared --> Recorded: Submit current snapshot
+    Changed --> Held: Submit stale snapshot
+    Held --> Prepared: Observe current snapshot
+    Recorded --> Recorded: Replay request
+    %% never A stale snapshot creates a finding
+    %% never A held request writes a finding
