@@ -598,6 +598,35 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
         self.lookup.write_text('raise SystemExit(1)')
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
+    def test_marker_and_chmod_failure(self):
+        self.now=1000000
+        self.assertEqual(self.mint_fixture().returncode,0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode,0)
+        self.reply_fixture(False)
+        import subprocess
+        code=f"""
+import sys,runpy,time,errno,os
+sys.path.insert(0,{str(self.root)!r})
+from lib.agent_card_cache import RegistrationCache
+from pathlib import Path
+original=RegistrationCache._open
+def open_file(path,flags):
+ if Path(path).name.startswith('revoked-'):raise OSError(errno.ENOSPC,'synthetic marker full')
+ return original(path,flags)
+def chmod(*args,**kwargs):raise OSError(errno.EIO,'synthetic metadata I/O error')
+RegistrationCache._open=staticmethod(open_file)
+os.chmod=chmod
+time.time=lambda:1000000
+runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r},run_name='__main__')
+"""
+        event={'hook_event_name':'PreToolUse','tool_name':'Agent','cwd':str(self.root),'tool_input':{'prompt':'Card: WR557.S6.J1'}}
+        negative=subprocess.run([sys.executable,'-c',code],input=json.dumps(event),text=True,capture_output=True,env=dict(fixture_env(),HOME=str(self.home)),timeout=10)
+        self.assertEqual(negative.returncode,2,negative.stderr)
+        print('DOUBLE_STORAGE_FAILURE negative hook rc=',negative.returncode)
+        self.lookup.write_text('raise SystemExit(1)')
+        later=self.run_hook(prompt='Card: WR557.S6.J1')
+        print('DOUBLE_STORAGE_FAILURE outage rc=',later.returncode)
+        self.assertEqual(later.returncode,2,later.stderr)
 
 if __name__ == '__main__':
     unittest.main()
