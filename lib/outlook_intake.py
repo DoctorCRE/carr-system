@@ -99,6 +99,7 @@ import tempfile
 from typing import Callable
 import uuid
 
+from lib import email_contact_review
 from lib import email_delivery_failure, email_links, unresolved_email
 from lib.email_outcomes import business_day_deadline
 from lib.outlook_settings import load_settings, OutlookSettings
@@ -205,6 +206,7 @@ class Contact:
     ref: str
     name: str
     exact: bool = True
+    contact_snapshot: dict | None = None
 
 
 @dataclass
@@ -865,12 +867,14 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
 
 class Matcher:
     def __init__(self, contacts: list, domain: str):
+        self.contact_rows: dict[str, list[Contact]] = {}
         self.by_email: dict[str, set] = {}
         self.unsupported: set[str] = set()
         self.shared: set[str] = set()
         self.people = [(c.email.lower(), c.ref, c.name) for c in contacts
                        if c.exact and '@' in c.email and RECORD_REF.match(c.ref) and not _internal(c.email, domain)]
         for c in contacts:
+            self.contact_rows.setdefault(c.email.lower(), []).append(c)
             if '@' in c.email and not _internal(c.email, domain):
                 if not c.exact:
                     self.shared.add(c.email.lower())
@@ -881,6 +885,26 @@ class Matcher:
         for address in self.shared:  # a possibly shared inbox is never exact, on any record
             self.by_email.pop(address, None)
             self.unsupported.discard(address)
+
+    def signature_contact(self, address: str) -> Contact | None:
+        rows = self.contact_rows.get(address.lower(), [])
+        if (not rows or address.lower() in self.shared
+                or any(not c.exact or not c.contact_snapshot for c in rows)):
+            return None
+        snapshots = [c.contact_snapshot for c in rows]
+        if any(snapshot != snapshots[0] for snapshot in snapshots):
+            return None
+        snapshot = snapshots[0]
+        if (not isinstance(snapshot, dict) or not snapshot.get('party_id')
+                or type(snapshot.get('party_version')) is not int
+                or snapshot['party_version'] < 1
+                or not isinstance(snapshot.get('values'), dict)
+                or not isinstance(snapshot.get('provenance'), dict)
+                or snapshot['provenance'].get('party_id') != snapshot['party_id']
+                or snapshot['provenance'].get('party_version') != snapshot['party_version']
+                or snapshot['provenance'].get('source') != 'party'):
+            return None
+        return sorted(rows, key=lambda c: c.ref)[0]
 
     def fingerprint(self) -> str:
         return _hash(json.dumps({'supported': {a: sorted(refs) for a, refs in self.by_email.items()},
@@ -925,7 +949,8 @@ class Run:
                                       'flags_unknown', 'flags_untracked', 'flags_reflagged', 'flags_filed',
                                       'flags_completed', 'flags_cleared', 'flags_closed_elsewhere',
                                       'mail_rekeyed', 'mail_inherited', 'message_id_ambiguous', 'mail_ids_reset',
-                                      'delivery_failures_recorded', 'delivery_failures_pending')}
+                                      'delivery_failures_recorded', 'delivery_failures_pending',
+                                      'signature_recorded', 'signature_held', 'signature_pending')}
         self.deals: dict[str, str] = {}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str, str]] = set()
@@ -981,6 +1006,8 @@ class Run:
                     _save(self.out, self.state)
                     return True
                 blocked = error.code in BLOCKED_ERRORS or (
+                    verb == 'record-finding' and args.get('kind') == email_contact_review.KIND
+                    and error.code in {'auth_refused', 'version_conflict'}) or (
                     verb in ('complete-deal-item', 'drop-action') and error.code == 'version_conflict')
                 request.update(error_code=error.code, disposition='blocked' if blocked else 'retry',
                                retry_at=None if blocked else int(self.now.timestamp()) +
@@ -1047,6 +1074,49 @@ class Run:
                     done.setdefault(target['ck'], []).append(target['sent_unix'])
                     self.counts['mail_rekeyed'] += 1
             ids[mid] = holder
+
+    def signature_findings(self, mails: list[dict], matcher: Matcher) -> None:
+        observations = self.state.setdefault('signature_observations', {})
+        for mail in mails:
+            if (mail['metadata_incomplete'] or not mail['full']
+                    or _internal(mail['sender'], self.settings.internal_domain)
+                    or mail['sent_unix'] > self.now.timestamp() + 300):
+                continue
+            contact = matcher.signature_contact(mail['sender'])
+            if contact is None:
+                self.counts['signature_held'] += 1
+                continue
+            snapshot = contact.contact_snapshot
+            assert snapshot is not None
+            source = email_contact_review.digest([self.settings.owner, self.settings.account.lower(),
+                                                  self.settings.folder_account_id, mail['ident']])
+            binding = email_contact_review.digest([mail['sender'].lower(), mail.get('body', mail['text']),
+                                                    snapshot['party_id'], contact.ref,
+                                                    mail['local_keys'], mail.get('message_id'),
+                                                    (snapshot['provenance'].get('company') or {}).get('party_id')])
+            observation = observations.get(source)
+            if observation is None:
+                if mail['sent_unix'] < (self.now - BACKFILL).timestamp():
+                    continue
+                requests, reason = email_contact_review.plan(
+                    mail, contact, owner=self.settings.owner, account=self.settings.account,
+                    account_id=self.settings.folder_account_id)
+                if reason:
+                    self.counts['signature_held'] += 1
+                    continue
+                observation = observations.setdefault(source, {'binding': binding, 'requests': requests})
+                _save(self.out, self.state)
+            if binding != observation['binding']:
+                self.counts['signature_held'] += 1
+                continue
+            for args in observation['requests']:
+                request = self.state.get('requests', {}).get(args['idempotency_key'], {})
+                if request.get('acknowledged'):
+                    continue
+                if self.write('record-finding', args, 'signature observation'):
+                    self.counts['signature_recorded'] += 1
+                else:
+                    self.counts['signature_pending'] += 1
 
     def delivery_mailbox(self) -> dict:
         account = _hash(f'{self.settings.owner}|{self.settings.account.lower()}|{self.settings.folder_account_id}')
@@ -1719,6 +1789,7 @@ def _prune(state: dict, now: datetime) -> None:
                           or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon
+                         or (r['verb'] == 'record-finding' and json.loads(r['payload']).get('kind') == email_contact_review.KIND)
                          or (r['created_at'] >= oldest and r['verb'] == 'log-activity'
                              and json.loads(r['payload']).get('kind') == 'email_out')}
     activity_ids = {r['activity_id'] for r in state['requests'].values() if r.get('activity_id')}
@@ -2132,10 +2203,14 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         for request in list(state.get('requests', {}).values()):
             if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
                 continue
+            if (request['verb'] == 'record-finding'
+                    and json.loads(request['payload']).get('kind') == email_contact_review.KIND):
+                continue
             if not request['acknowledged'] and request.get('disposition') != 'calendar_unsupported':
                 args = json.loads(request['payload'])
                 work.write(request['verb'], args, 'pending write')
         # Outlook can expose a message after its sent time has left the watermark overlap.
+        work.signature_findings(mails, matcher)
         work.emails(mails, matcher, min(since, int((now - BACKFILL).timestamp())))
         work.file_attachments(prepared)
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
@@ -2144,7 +2219,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.full_text(complete_mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
                                                   if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
-                                                                 'decoder_alarm')
+                                                                 'decoder_alarm', 'signature_held')
                                                   and not key.endswith(('_bp', '_sample'))))
         work.events(events, matcher, since)
         snapshot, agenda_counts = agenda(events, meta, settings, now)
@@ -2234,7 +2309,7 @@ def _contacts(carr: Callable[[str, dict], dict]) -> Callable[[], list]:
     """Every live party address in any market, through the record layer's one contact read."""
     def read() -> list:
         try:
-            rows = [Contact(c['address'], c['ref'], c['name'], c['exact'])
+            rows = [Contact(c['address'], c['ref'], c['name'], c['exact'], c.get('contact_snapshot'))
                     for c in carr('email-match-contacts', {})['contacts']]
         except (CarrError, KeyError, TypeError):
             raise CarrError(code='contacts_read_failed') from None

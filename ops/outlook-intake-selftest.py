@@ -187,6 +187,9 @@ class Fake:
         if verb == 'record-finding':
             if args['idempotency_key'] in self.findings:
                 return {'ok': True}
+            if args.get('kind') == 'email_signature_observation':
+                self.findings[args['idempotency_key']] = args
+                return {'ok': True}
             ids = args['value']['source_activity_ids']
             versions = args['value'].get('source_activity_versions', {})
             rows = {m['activity_id']: m for m in self.email_queue}
@@ -451,6 +454,39 @@ class IntakeTest(unittest.TestCase):
 
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
+
+    def test_signature_stage_runs_for_filed_mail_and_keeps_retry_guard(self):
+        snapshot = {'party_id': 101, 'party_version': 7,
+                    'values': {'phone': '555-0100', 'email': CLIENT.email},
+                    'provenance': {'source': 'party', 'party_id': 101, 'party_version': 7},
+                    'unread_fields': []}
+        self.fake.contacts_rows = [intake.Contact(CLIENT.email, CLIENT.ref, CLIENT.name,
+                                                 contact_snapshot=snapshot)]
+        message = mail(CLIENT.email, -timedelta(hours=1), local_keys='77',
+                       body='-- \nEmail: pat@example.test\nPhone: 555-0199')
+        self.fake.fail_verbs.add('record-finding')
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=2)
+        changed = {**message, 'body': message['body'] + '\nTitle: Director'}
+        self.run_intake([changed])
+        self.assertEqual(len(self.fake.writes('record-finding')), 1,
+                         'generic journal replay cannot bypass changed-source guard')
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.writes('record-finding')), 2)
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertFalse(self.fake.writes('update-party-contact'))
+        self.assertFalse(self.fake.writes('correct-party-identity'))
+
+    def test_contact_adapter_preserves_snapshot_without_changing_mail_matching(self):
+        snapshot = {'party_id': 101, 'party_version': 7, 'values': {}, 'provenance': {}}
+        rows = intake._contacts(lambda *_: {'contacts': [
+            {'address': CLIENT.email, 'ref': CLIENT.ref, 'name': CLIENT.name,
+             'exact': True, 'contact_snapshot': snapshot}]})()
+        self.assertEqual(rows[0].contact_snapshot, snapshot)
+        self.assertEqual(intake.Matcher(rows, 'internal.test').ref(CLIENT.email), CLIENT.ref)
 
     def delivery_pair(self, recipients=CLIENT.email):
         source = mail(OWNER, -timedelta(hours=2), recipients=recipients,

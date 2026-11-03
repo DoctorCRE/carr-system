@@ -1,0 +1,22 @@
+---
+title: "Email signature findings"
+---
+stateDiagram-v2
+  s0: Unread
+  s1: Held
+  s2: Prepared
+  s3: Recorded
+  s4: Refused
+  s5: Retry
+  s6: Changed
+  [*] --> s0
+  s0 --> s1: resolve sender and inspect signature
+  s0 --> s2: resolve sender and inspect signature
+  s1 --> s0: read full source with exact party
+  s2 --> s3: submit frozen proposal
+  s2 --> s4: submit frozen proposal
+  s2 --> s5: submit frozen proposal
+  s5 --> s3: retry or hold after validation
+  s5 --> s4: retry or hold after validation
+  s5 --> s6: retry or hold after validation
+  s6 --> s5: original source binding restored
