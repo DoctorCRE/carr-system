@@ -8,6 +8,8 @@ Follow the generated opening act in AGENTS.md / CLAUDE.md: call attach-memory wi
 
 Briefs require one Type: <type> line in the header before any blank line or task-data fence. Use a type from ops/config/job-workflows.v1.yaml. Use the skills required by the task. Size first using poteto-mode's playbook routing. PR body must include a "Skills used:" line.
 
+Before code, builders write a short system design note answering the PR template's questions and put it in the PR's "System design" section. Proceed without waiting for approval. Reviewers check the note against the diff and flag missing notes on non-trivial PRs, answers the code contradicts, and answered rules without a failing-first test.
+
 Pre-approved: decide test seams, interfaces and design forks yourself; nobody is available to confirm, so never pause for confirmation or message /root/orchestrator. Put every decision in the PR body and your final reply.
 
 Full autonomy: run until done. When the code or a verb contract lacks what the change needs (a field, column, option or guard), adding it is the job, not a reason to stop; poteto-mode's "show it and stop" applies only when the ask itself is ruled out. Stop only for money, client-facing sends, credentials, identity edits or rule retirement.
