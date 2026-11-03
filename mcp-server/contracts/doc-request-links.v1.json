@@ -1,0 +1,75 @@
+{
+  "schema": "carr-doc-request-links.v1",
+  "version": "1.0.0",
+  "card": "WR620.S1.J2",
+  "producer": "complete-doc-request",
+  "path_template": "/doc/conversations/{conversation_id}/turns/{msg_id}",
+  "parameters": {
+    "conversation_id": "Conversation UUID, normalized to lowercase.",
+    "msg_id": "Target turn UUID, normalized to lowercase."
+  },
+  "target": "The validated answer_msg_id when supplied; otherwise request_msg_id. Answered outcomes require an answer. Failed and refused outcomes may omit it. The target belongs to the conversation; an answer follows the human request and has a non-human role.",
+  "retry": "The first stored completion selects the outcome and target for every retry.",
+  "notification": "The minted notification and completion response carry the same relative deep_link, without a query or fragment.",
+  "consumer_adoption": "Mirror this contract byte-for-byte in contracts/carr-interface.v1/doc_request_links.json. Pin its exact producer commit and content hash. Open the conversation at msg_id; the notification subject_ref is the request, not the target.",
+  "examples": [
+    {
+      "name": "answered",
+      "input": {
+        "conversation_id": "5b1c0a52-0000-4000-8000-000000000001",
+        "request_msg_id": "5b1c0a52-0000-4000-8000-0000000000a1",
+        "outcome": "answered",
+        "answer_msg_id": "5b1c0a52-0000-4000-8000-0000000000b1"
+      },
+      "deep_link": "/doc/conversations/5b1c0a52-0000-4000-8000-000000000001/turns/5b1c0a52-0000-4000-8000-0000000000b1"
+    },
+    {
+      "name": "failed",
+      "input": {
+        "conversation_id": "5b1c0a52-0000-4000-8000-000000000001",
+        "request_msg_id": "5b1c0a52-0000-4000-8000-0000000000a1",
+        "outcome": "failed"
+      },
+      "deep_link": "/doc/conversations/5b1c0a52-0000-4000-8000-000000000001/turns/5b1c0a52-0000-4000-8000-0000000000a1"
+    },
+    {
+      "name": "refused",
+      "input": {
+        "conversation_id": "5b1c0a52-0000-4000-8000-000000000001",
+        "request_msg_id": "5b1c0a52-0000-4000-8000-0000000000a1",
+        "outcome": "refused"
+      },
+      "deep_link": "/doc/conversations/5b1c0a52-0000-4000-8000-000000000001/turns/5b1c0a52-0000-4000-8000-0000000000a1"
+    },
+    {
+      "name": "failed-with-answer",
+      "input": {
+        "conversation_id": "5b1c0a52-0000-4000-8000-000000000001",
+        "request_msg_id": "5b1c0a52-0000-4000-8000-0000000000a1",
+        "outcome": "failed",
+        "answer_msg_id": "5b1c0a52-0000-4000-8000-0000000000b1"
+      },
+      "deep_link": "/doc/conversations/5b1c0a52-0000-4000-8000-000000000001/turns/5b1c0a52-0000-4000-8000-0000000000b1"
+    },
+    {
+      "name": "refused-with-answer",
+      "input": {
+        "conversation_id": "5b1c0a52-0000-4000-8000-000000000001",
+        "request_msg_id": "5b1c0a52-0000-4000-8000-0000000000a1",
+        "outcome": "refused",
+        "answer_msg_id": "5b1c0a52-0000-4000-8000-0000000000b1"
+      },
+      "deep_link": "/doc/conversations/5b1c0a52-0000-4000-8000-000000000001/turns/5b1c0a52-0000-4000-8000-0000000000b1"
+    },
+    {
+      "name": "uppercase-input",
+      "input": {
+        "conversation_id": "5B1C0A52-0000-4000-8000-000000000001",
+        "request_msg_id": "5B1C0A52-0000-4000-8000-0000000000A1",
+        "outcome": "answered",
+        "answer_msg_id": "5B1C0A52-0000-4000-8000-0000000000B1"
+      },
+      "deep_link": "/doc/conversations/5b1c0a52-0000-4000-8000-000000000001/turns/5b1c0a52-0000-4000-8000-0000000000b1"
+    }
+  ]
+}
