@@ -67,6 +67,37 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     const queue=await call('email-router-queue',{purpose:'links'});
     assert.ok(!queue.emails.some(e=>e.activity_id===source.activity_id));
   });
+  for (const state of ['deleted','recalled','superseded']) {
+    for (const receiptFirst of [false,true]) await t.test(`${state}: ${receiptFirst ? 'sent confirmation before observation' : 'delayed sent confirmation after observation'} preserves terminal capture`,async () => {
+      const identity={mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()};
+      const captureArgs={ref:'C-999442',kind:'email_out',summary:'Synthetic sent capture',email_identity:identity};
+      const captured=await call('log-activity',{...captureArgs,idempotency_key:randomUUID()});
+      const source=await call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Independent live reply source'});
+      const submitted={subject:'Reply',body:'Synthetic body',sha256:'a'.repeat(64),to:['sender@example.test'],cc:['dell@example.test']};
+      const draft=(await c.query(`insert into email_proposal(kind,activity_id,owner,draft_subject,draft_body,status,evidence_quote,confidence,created_by,resolved_by,resolved_at,submitted_at,submitted_email)
+        values('reply_draft',$1,'joe','Reply','Synthetic body','approved_to_send','Synthetic quote',1,$2,$2,now(),now(),$3::jsonb) returning id,version`,
+        [source.activity_id,actor.id,JSON.stringify(submitted)])).rows[0];
+      const machine={...actor,human:false,slug:'joe-local',sponsoring_human_slug:'joe',native_agent_verified:true};
+      const receipt={proposal_id:draft.id,base_version:draft.version,status:'sent',sha256:submitted.sha256,
+        sender_account:identity.mailbox_account,sent_item_id:identity.item_id,sent_at:'2026-01-01T12:00:00Z'};
+      if (receiptFirst) {
+        assert.equal((await call('record-email-sent',{...receipt,idempotency_key:randomUUID()},machine)).status,'sent');
+        assert.equal((await call('log-activity',{...captureArgs,idempotency_key:randomUUID()})).activity_id,captured.activity_id);
+      }
+      const observation={email_identity:identity,base_version:0,state,observation_id:randomUUID(),observed_at:'2026-01-01T12:00:00Z',method:'outlook_tombstone'};
+      await call('record-email-lifecycle',{...observation,idempotency_key:randomUUID()});
+      const before=(await c.query('select * from activity where id=$1',[captured.activity_id])).rows[0];
+      assert.ok(before.email_context.lifecycle.action_notes.length > 0);
+      for (let retry=0; retry<2; retry++) {
+        if (receiptFirst) assert.equal((await call('record-email-sent',{...receipt,idempotency_key:randomUUID()},machine)).replayed,true);
+        else await assert.rejects(call('record-email-sent',{...receipt,idempotency_key:randomUUID()},machine),e=>e.payload?.error==='email_not_live');
+        await assert.rejects(call('log-activity',{...captureArgs,idempotency_key:randomUUID()}),e=>e.payload?.error==='email_not_live');
+        assert.deepEqual((await c.query('select * from activity where id=$1',[captured.activity_id])).rows[0],before);
+      }
+      assert.equal((await call('record-email-lifecycle',{...observation,idempotency_key:randomUUID()})).replayed,true);
+      assert.equal((await c.query('select status from email_proposal where id=$1',[draft.id])).rows[0].status,receiptFirst?'sent':'approved_to_send');
+    });
+  }
   await t.test('reader and action enforcement independently rejects terminal source metadata',async st => {
     const source=await call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Terminal fixture',detail:'Please call me.'});
     await c.query(`update activity set deal_id=$2,email_context='{"lifecycle":{"state":"deleted"}}' where id=$1`,[source.activity_id,deal]);
