@@ -14,7 +14,7 @@
 import test, { before, after } from 'node:test';
 import { NOW } from './helpers/fixed-clock.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -171,6 +171,9 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     await call.request('/api/call-context', context);
   }
   await call.waitFor(r => r.report?.automatic?.finished_at, { attempts: SONNET ? 600 : 240 });
+  const marker = JSON.parse(readFileSync(path.join(call.session, '.capture.json'), 'utf8'));
+  assert.equal(marker.claim_elapsed_ms, 5000);
+  assert.equal(marker.claim_round_trip_ms, 1000);
   const logs = call.logs;
 
   // 4. One durable call outcome lists every applied change with its evidence
