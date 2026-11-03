@@ -34,7 +34,7 @@ class RegistrationCache:
         self.clock = clock or time.time
         self.directory = Path.home() / '.cache/carr/agent-card-cache-v1'
         self.scope = [os.getuid(), os.environ.get('CARR_MCP_URL') or 'https://api.doctorcre.com/mcp',
-                      os.environ.get('CARR_MCP_CLIENT_PROFILE') or 'joe-local',
+                      os.environ.get('CARR_MCP_CLIENT_PROFILE') or 'local',
                       os.environ.get('CARR_MCP_ENV') or str(Path.home() / '.config/carr/mcp-tokens.env')]
 
     @staticmethod

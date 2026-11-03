@@ -42,6 +42,11 @@ class CacheTests(unittest.TestCase):
         self.now += 24 * 60 * 60
         self.assertFalse(self.cache.consume_mint(self.card))
 
+    def test_explicit_default_profile_matches_client_default(self):
+        self.cache.record(self.card, minted=True)
+        with patch.dict(os.environ, {'CARR_MCP_CLIENT_PROFILE': 'local'}):
+            self.assertTrue(RegistrationCache(clock=lambda: self.now).consume_mint(self.card))
+
     def test_scope_change_refuses(self):
         for name, value in [('CARR_MCP_URL', 'https://synthetic.invalid/mcp'),
                             ('CARR_MCP_CLIENT_PROFILE', 'hermes-projector'),
