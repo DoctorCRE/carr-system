@@ -14,7 +14,8 @@ The leading unread form is a synthetic contract, still unverified live.
 The complete synthetic zero shape has exactly one direct child text, `Inbox`.
 A positive count adds one child containing ASCII digits, optionally ` unread`.
 Matching label and value on the same child are one observation. Conflicting
-attributes, empty children, extra children, multiple counts, no selected Inbox,
+attributes, nonempty row attributes, nested children, empty children, extra
+children, multiple counts, no selected Inbox,
 or multiple selected Inboxes fail closed. A walk at the element cap or with a
 degraded result is unknown. An absent Inbox is unknown. A missing numeric child
 is zero only in the complete zero shape. No live badge-shape observation was

@@ -1628,6 +1628,18 @@ class UnreadVerificationTest(unittest.TestCase):
             with patch('lib.outlook_ui.cua', return_value=state):
                 with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
                     window.inbox_badge()
+        for attribute in ('label', 'value'):
+            elements = walk(texts=('Inbox',))
+            elements[1][attribute] = 'unrecognized-count'
+            with patch('lib.outlook_ui.cua', return_value={'elements': elements}):
+                with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
+                    window.inbox_badge()
+        nested = walk(texts=('Inbox',))
+        nested[-1]['element_index'] = 2
+        nested.append({'role': 'AXStaticText', 'label': '3', 'parent_index': 2})
+        with patch('lib.outlook_ui.cua', return_value={'elements': nested}):
+            with self.assertRaisesRegex(UiError, 'inbox_badge_unverified'):
+                window.inbox_badge()
         elements = walk()
         elements[-1]['value'] = '4'
         with patch('lib.outlook_ui.cua', return_value={'elements': elements}):

@@ -477,8 +477,10 @@ class Window:
             children.setdefault(e.get('parent_index'), []).append(e)
         found: list[tuple[dict, list[str]]] = []
         for row in (e for e in elements if e.get('role') == 'AXRow'):
-            texts = []
+            texts = [''] if row.get('label') or row.get('value') else []
             for child in children.get(row['element_index'], []):
+                if child.get('element_index') is not None and children.get(child['element_index']):
+                    texts.append('')
                 attributes = [str(child[k]).strip() for k in ('label', 'value')
                               if child.get(k) is not None and child[k] != '']
                 texts.extend(dict.fromkeys(attributes or ['']))
