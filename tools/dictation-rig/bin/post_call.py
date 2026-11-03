@@ -545,10 +545,9 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if is_action or step is not None:
                 resolved = (_task_deadline(item, transcript, call_date, ledger) if is_action
                             else _relative_due_date(item["evidence"], transcript, call_date))
-                if is_action:
-                    item["deadline_state"] = resolved.state
                 if resolved is not None:
                     if is_action:
+                        item["deadline_state"] = resolved.state
                         item["due_on"] = resolved.due_on
                     elif step is not None:
                         step["next_date"] = resolved.due_on
