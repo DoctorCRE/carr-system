@@ -25,7 +25,7 @@ after(async () => { try { await c?.end(); } finally { await fixture?.close(); } 
 async function evidence() {
   const rows = (await c.query('select id,version from activity where id=any($1::uuid[])', [ids])).rows;
   return { idempotency_key: randomUUID(), subject: deal, kind: 'email_delivery_failure',
-    source: 'outlook-delivery-report/synthetic/report', value: { source_activity_ids: ids,
+    source: `outlook-delivery-report/synthetic/${randomUUID()}`, value: { source_activity_ids: ids,
       source_activity_versions: Object.fromEntries(rows.map(row => [row.id, row.version])) } };
 }
 async function finding(args, client = c) {
@@ -89,4 +89,59 @@ test('source locks prevent corrections between validation and finding commit', a
     await c.query('rollback');
     await other.end();
   }
+});
+
+
+test('frozen bounce retry converges before, at and long after receipt expiry', async () => {
+  for (const age of ['29 days', '30 days', '31 days', '36500 days']) {
+    const args = await evidence();
+    const first = await finding(args);
+    await c.query('begin');
+    try {
+      await c.query('update tool_call set created_at=now()-$2::interval where idempotency_key=$1',
+        [args.idempotency_key, age]);
+      const replay = await TOOLS['record-finding'].handler(c, actor, args);
+      assert.equal(replay.flag_id, first.flag_id, age);
+      assert.equal(replay.replayed, true, age);
+      assert.equal((await c.query("select count(*) from record_flag where created_by=$1 and kind='email_delivery_failure' and source=$2",
+        [actor.id, args.source])).rows[0].count, '1', age);
+      await c.query('commit');
+    } catch (error) { await c.query('rollback'); throw error; }
+  }
+});
+
+test('expired bounce replay survives later filing corrections', async () => {
+  const args = await evidence();
+  const first = await finding(args);
+  await c.query('delete from tool_call where idempotency_key=$1', [args.idempotency_key]);
+  await c.query('update activity set deal_id=null,version=version+1 where id=$1', [ids[0]]);
+  try {
+    const replay = await finding(args);
+    assert.equal(replay.flag_id, first.flag_id);
+    assert.equal(replay.subject_id, first.subject_id);
+    assert.equal(replay.replayed, true);
+  } finally {
+    await c.query('update activity set deal_id=$2,version=version+1 where id=$1', [ids[0], deal]);
+  }
+});
+
+test('concurrent bounce sweeps converge after receipt pruning', async () => {
+  const other = new pg.Client(connection);
+  await other.connect();
+  try {
+    for (const alreadyCommitted of [false, true]) {
+      const args = await evidence();
+      const first = alreadyCommitted ? await finding(args) : null;
+      await c.query('delete from tool_call where idempotency_key=$1', [args.idempotency_key]);
+      const [a, b] = await Promise.all([finding(args), finding({ ...args, idempotency_key: randomUUID() }, other)]);
+      assert.equal(a.flag_id, b.flag_id);
+      if (first) assert.equal(a.flag_id, first.flag_id);
+      assert.equal((await c.query("select count(*) from record_flag where created_by=$1 and kind='email_delivery_failure' and source=$2",
+        [actor.id, args.source])).rows[0].count, '1');
+      await c.query('delete from tool_call where idempotency_key=$1', [args.idempotency_key]);
+      const sameKey = await Promise.all([finding(args), finding(args, other)]);
+      assert.equal(sameKey[0].flag_id, a.flag_id);
+      assert.equal(sameKey[1].flag_id, a.flag_id);
+    }
+  } finally { await other.end(); }
 });

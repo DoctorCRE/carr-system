@@ -728,6 +728,32 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.delivery_findings()[-1], next(iter(stored.values())))
         self.assertTrue(all(v not in ('update-party-contact', 'correct-party-identity', 'record-deal-item') for v, _ in self.fake.calls))
 
+    def test_delivery_failure_replays_frozen_request_long_after_receipt_expiry(self):
+        source, report = self.delivery_pair()
+        original_carr = self.fake.carr
+        sent = []
+        def lose_reply(verb, args):
+            result = original_carr(verb, args)
+            if verb == 'record-finding':
+                sent.append(args)
+                raise intake.CarrError(code='timeout')
+            return result
+        with patch.object(self.fake, 'carr', side_effect=lose_reply):
+            self.run_intake([source, report])
+        self.fake.now += timedelta(days=31)
+        def retry(verb, args):
+            if verb == 'record-finding':
+                sent.append(args)
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=retry):
+            result = self.run_intake([source, report])
+        self.assertGreaterEqual(len(sent), 2)
+        self.assertTrue(all(args == sent[0] for args in sent))
+        self.assertEqual(result.counts['delivery_failures_recorded'], 1)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        mailbox = next(iter(state['delivery_mailboxes'].values()))
+        self.assertEqual(next(iter(mailbox['reports'].values()))['disposition'], 'recorded')
+
     def test_no_filing_fails_at_one_business_day_and_recovers_on_inbound(self):
         self.fake.now = datetime(2026, 10, 20, 23, tzinfo=timezone.utc)
         quiet = mail('no-reply@example.test', -timedelta(hours=1))
