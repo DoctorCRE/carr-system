@@ -408,6 +408,12 @@ def reconcile_coverage(ledger, report):
         question['source_spans'] = spans
         bindings[question['id']] = digest({k: v for k, v in question.items()
                                          if k not in ('resolved', 'resolution')})
+    for fact in facts.values():
+        identity = topics[fact['topic_id']]['identity']
+        requires_intent = (fact['kind'] in ('operating_state', 'rename', 'workspace_change', 'other') or
+                           (fact['kind'] == 'commitment' and 'deal_id' not in identity))
+        if requires_intent and 'superseded' not in (fact['disposition'] or {}):
+            _require(fact['fact_id'] in intent_facts, 'missing_review_intent')
     for kind, item in proposal_items(report):
         ids = item.get('fact_ids')
         _require(isinstance(ids, list) and bool(ids) and all(isinstance(i, str) for i in ids) and len(ids) == len(set(ids)) and
@@ -496,7 +502,7 @@ def extraction_schema():
 def extraction_instruction(data_sentence):
     return (
         'Extract every atomic spoken fact before generating proposals. Parking is operating_state, card naming is rename, '
-        'account reassignment and prospect routing are workspace_change, and owner business work is commitment. '
+        'account reassignment and prospect routing are workspace_change, owner business work is commitment, and client lifecycle is other. '
         'Set asserted_value to the exact desired string for these operations. ' + data_sentence +
         ' Return topics, facts and non_fact_spans following the schema. Use full transcript segment coordinates, '
         'never substring-relative coordinates. Copy source_id and sha256 from sources into each span. '

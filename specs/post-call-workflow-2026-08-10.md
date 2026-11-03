@@ -294,7 +294,10 @@ Normalization creates a local review question with `kind: review_intent` and
 retains these typed fields. Its question names the operation, deal or business
 work, desired value, reason, and required decision. The existing companion review
 panel displays it and the existing question resolver records its disposition.
-It remains unresolved until a partner records performance or explicit decline.
+It remains unresolved until a partner answers `Performed: <outcome>` or
+`Declined: <reason>` with a nonempty outcome or reason. Identity and routing
+answers are saved as intermediate information and keep retention on hold.
+Ordinary review questions still resolve on any nonempty answer.
 U5 can consume these same question rows without a second intent resolver.
 
 Coverage derives `source_spans` from the cited ledger facts, verifies the desired
@@ -304,6 +307,11 @@ ordinary narrative notes. Unknown identities keep their precise question in the
 intent instead of creating a duplicate generic question. Removing an intent or
 changing its identity, desired value, or source references invalidates coverage.
 Resolution metadata can change without changing the source binding.
+Reconciliation rejects missing intents for operating-state, rename, workspace,
+and unclassified `other` facts, plus commitments without an exact deal.
+This holds even when a generic identity question was generated. Unclassified
+facts fail closed for distillation retry rather than becoming narrative.
+Explicitly superseded facts retain their verified history disposition.
 
 Intents stay in the private report and create no backend mutation candidates.
 Existing reports without `review_intents` remain readable. The generated schema

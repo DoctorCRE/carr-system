@@ -105,7 +105,11 @@ class LedgerTests(unittest.TestCase):
             'dell_tasks': [], 'deal_updates': [
                 {'deal_id': 'cedar', 'participant_ids': [], 'summary': 'Survey complete', 'evidence': 'the survey is complete', 'fact_ids': ['survey'],
                  'phase_move': {'value': 'negotiation', 'fact_ids': ['phase']}}],
-            'draft_proposals': [], 'review_questions': []}
+            'draft_proposals': [], 'review_questions': [],
+            'review_intents': [{'operation': 'business_task', 'desired_value': 'ask',
+                'deal_id': None, 'owner': 'Joe', 'fact_ids': ['oak'],
+                'identity_question': 'Which exact deal or business workspace should receive the Oak availability task?',
+                'review_reason': 'Route and perform the availability request.'}]}
 
     def distill(self, request):
         if request.get('stage') == 'coverage_history':
@@ -141,6 +145,7 @@ class LedgerTests(unittest.TestCase):
             item['candidate_status'] = 'confirmed'
         for question in report['review_questions']:
             question['resolved'] = True
+            question['resolution'] = 'Performed: Joe recorded the outcome.'
         report['backend_report_sha256'] = 'a' * 64
         pc.write_private(self.session / pc.REPORT_FILE, report)
         (self.session / cov.FILE).unlink()

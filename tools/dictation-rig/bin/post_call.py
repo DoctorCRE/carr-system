@@ -586,7 +586,9 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
         subject = intent["deal_id"] or "business or prospect work"
         question = (f"{intent['operation']} for {subject}: {intent['desired_value']}. "
                     f"Owner {intent['owner'] or 'unassigned'}. "
-                    f"{intent['review_reason']} {intent['identity_question'] or 'Perform this operation or explicitly decline it.'}")
+                    f"{intent['review_reason']} {intent['identity_question'] or ''} "
+                    "After performing or declining the operation, answer Performed: <outcome> or Declined: <reason>. "
+                    "Identity and routing answers alone keep this operation open.")
         review.append({**intent, "kind": "review_intent", "id": _review_id(session, "intent", number),
                        "question": question, "resolved": False})
     missing_tracks = (transcript or {}).get("missing_tracks", [])
@@ -1208,7 +1210,9 @@ def apply_candidate_statuses(session_dir: Path, statuses: dict[str, str]) -> dic
 
 def review_complete(report: dict[str, Any]) -> bool:
     """Unresolved review questions keep the source recording recoverable."""
-    return all(question.get("resolved") is True for question in report.get("review_questions", []))
+    return all(question.get("resolved") is True and
+               (question.get("kind") != "review_intent" or intent_outcome(question.get("resolution")) is not None)
+               for question in report.get("review_questions", []))
 
 
 def is_filed_legacy_report(session_dir: Path, report: dict[str, Any]) -> bool:
@@ -1570,6 +1574,14 @@ def clear_checks_hold(report: dict[str, Any]) -> None:
         narrative["open_questions"] = [q for q in narrative.get("open_questions", []) if q != hold]
 
 
+def intent_outcome(resolution: Any) -> str | None:
+    if isinstance(resolution, str):
+        match = re.fullmatch(r"(performed|declined):\s*\S.*", resolution.strip(), re.IGNORECASE | re.DOTALL)
+        if match:
+            return match[1].lower()
+    return None
+
+
 def resolve_question(session_dir: Path, question_id: str, resolution: str) -> dict[str, Any]:
     with update_report(session_dir) as report:
         _string(resolution, "resolution")
@@ -1577,11 +1589,11 @@ def resolve_question(session_dir: Path, question_id: str, resolution: str) -> di
             if question.get("id") == question_id:
                 if question.get("resolved") is True:
                     raise ContractError("already_resolved")
-                question["resolved"] = True
+                question["resolved"] = question.get("kind") != "review_intent" or intent_outcome(resolution) is not None
                 question["resolution"] = resolution
                 if question_id == jev_question_id(session_dir.name):
                     clear_checks_hold(report)
-                return {"question_id": question_id, "resolved": True}
+                return {"question_id": question_id, "resolved": question["resolved"]}
         raise ContractError("unknown question id")
 
 

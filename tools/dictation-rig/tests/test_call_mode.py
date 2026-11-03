@@ -1125,7 +1125,7 @@ class PostCallTests(unittest.TestCase):
         post_call.write_private(self.session / post_call.REPORT_FILE, result)
         self.assertEqual(post_call.sanitized_candidates(self.session)["post_call_items"], [])
         for question in questions:
-            post_call.resolve_question(self.session, question["id"], "Declined explicitly by Joe.")
+            post_call.resolve_question(self.session, question["id"], "Declined: Joe explicitly declined the request.")
         self.assertTrue(post_call.review_complete(post_call.read_json(self.session / post_call.REPORT_FILE)))
 
     def test_intent_sources_survive_coverage_and_resolution_without_remote_candidates(self) -> None:
@@ -1216,8 +1216,13 @@ class PostCallTests(unittest.TestCase):
         self.assertFalse(response["resolved"])
         self.assertEqual(after["review_questions"][0]["resolution"], answer)
         self.assertFalse(post_call.review_complete(after))
+        after["review_questions"][0]["resolved"] = True
+        self.assertFalse(post_call.review_complete(after))
         _REAL_COVERAGE.require_coverage(self.session, after, post_call.read_json)
         self.assertIsNone(post_call.retention_ready(self.session, "a" * 64))
+        for answer in ("Performed:", "Declined:   ", "Not performed: still waiting"):
+            post_call.resolve_question(self.session, question["id"], answer)
+            self.assertFalse(post_call.review_complete(post_call.read_json(self.session / post_call.REPORT_FILE)))
         for outcome in ("Performed", "Declined"):
             with self.subTest(outcome=outcome):
                 post_call.write_private(self.session / post_call.REPORT_FILE, report)
@@ -1235,6 +1240,12 @@ class PostCallTests(unittest.TestCase):
                 with self.assertRaises(_REAL_COVERAGE.CoverageError):
                     _REAL_COVERAGE.add_identity_questions(ledger, report, post_call._review_id)
                     _REAL_COVERAGE.reconcile_coverage(ledger, report)
+        _, ledger, report = self.intent_ledger("other", "former client",
+            {"deal_id": "deal-a", "participant_ids": []}, [])
+        report["deal_updates"].append({"deal_id": "deal-a", "participant_ids": [],
+            "summary": "Make Clinic a former client", "fact_ids": ["f0"]})
+        with self.assertRaisesRegex(_REAL_COVERAGE.CoverageError, "missing_review_intent"):
+            _REAL_COVERAGE.reconcile_coverage(ledger, report)
         _, ledger, report = self.intent_ledger("status", "survey complete", ambiguous, [])
         _REAL_COVERAGE.add_identity_questions(ledger, report, post_call._review_id)
         self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report)["state"], "complete")
