@@ -637,6 +637,32 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
+    def test_ingested_safe_link_boundaries_survive_confirmed_queue(self):
+        cases = [('/(123)', '{}'), ('/a]', '{}'), ('/a.', '{}'),
+                 ('/a,', '{}'), ('/(123)', 'See ({}).')]
+        for index, (suffix, template) in enumerate(cases):
+            with self.subTest(suffix=suffix, template=template):
+                destination = 'https://loopnet.com/Listing' + suffix
+                wrapper = ('https://nam12.safelinks.protection.outlook.com/?url='
+                           + quote(destination, safe='') + '&data=opaque')
+                message = mail(CLIENT.email, -timedelta(hours=1),
+                               subject=f'Boundary {index}', body=template.format(wrapper))
+                before = len(self.fake.writes('log-activity'))
+                self.assertEqual(self.run_intake([message]).state, 'succeeded')
+                filings = [args for _, args in self.fake.writes('log-activity')[before:]
+                           if args['kind'] == 'email_in']
+                self.assertEqual(len(filings), 1)
+                self.assertIn(destination, filings[0]['detail'])
+                self.assertNotIn('safelinks.protection', filings[0]['detail'])
+                self.fake.email_queue = [{'activity_id': f'email-boundary-{index}',
+                                         'deal': 'synthetic-deal', 'body': filings[0]['detail'],
+                                         'occurred_at': NOW.isoformat()}]
+                self.assertEqual(self.run_intake([message], touch=False).state, 'succeeded')
+                notes = [args for _, args in self.fake.writes('log-activity')[before:]
+                         if args['summary'] == 'Links from matched email']
+                self.assertEqual(len(notes), 1)
+                self.assertEqual(notes[0]['detail'], 'listing: ' + destination)
+
     def test_unfiled_email_links_remain_unattached_until_confirmed(self):
         self.fake.email_queue = [{'activity_id': 'email-2', 'deal': None,
                                  'body': 'https://loopnet.com/Listing/789',

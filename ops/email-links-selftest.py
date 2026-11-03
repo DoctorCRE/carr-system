@@ -85,6 +85,17 @@ class LinksTest(unittest.TestCase):
                 with self.subTest(body=body):
                     self.assertEqual(extract_links(body), [('listing', destination)])
 
+    def test_normalized_destination_boundaries_survive_extraction(self):
+        for suffix in ('/(123)', '/a)', '/a]', '/a.', '/a,', '/a?key=value;', '/a#end!'):
+            destination = 'https://loopnet.com' + suffix
+            for template in ('{}', 'See ({}).', '"{}"', "'{}'", '<p>{}</p>',
+                             '<a href="{}">Open</a>'):
+                body = template.format(wrap(destination) + '&data=opaque')
+                with self.subTest(body=body):
+                    normalized = unwrap_safe_links(body)
+                    self.assertEqual(extract_links(normalized), [('listing', destination)])
+                    self.assertEqual(unwrap_safe_links(normalized), normalized)
+
     def test_plain_assignments_preserve_query_bytes(self):
         destination = 'https://loopnet.com/a?x=1&copy=2'
         for prefix in ('Link=', 'foo="', "foo='", 'foo= "'):
