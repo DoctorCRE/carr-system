@@ -179,9 +179,8 @@ for (const firstWriter of ['ask', 'answer']) {
       const secondWriter = firstWriter === 'ask' ? 'answer' : 'ask';
       const first = await write(firstWriter);
       pending = write(secondWriter).then(result => ({ result }), error => ({ error }));
-      const deadline = Date.now() + 5000;
       let blocked = false;
-      while (Date.now() < deadline) {
+      for (let attempt = 0; attempt < 500; attempt++) {
         const row = (await pool.query('select $1::int = any(pg_blocking_pids($2)) as blocked',
           [clients[firstWriter].processID, clients[secondWriter].processID])).rows[0];
         if (row.blocked) { blocked = true; break; }
