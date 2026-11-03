@@ -71,7 +71,7 @@ class CacheTests(unittest.TestCase):
         self.cache.record_mint(self.card)
         path = self.cache.directory / 'entries.json'
         entries = json.loads(path.read_text())
-        entries[self.card]['body']['seen'] += 1
+        entries['body']['entries'][self.card]['seen'] += 1
         path.write_text(json.dumps(entries))
         self.assertIsNot(self.cache.claim_mint(self.card), MintClaim.FRESH)
         path.write_text(json.dumps({self.card: self.now}))
@@ -151,6 +151,7 @@ class CacheTests(unittest.TestCase):
             self.assertIs(self.cache.claim_mint(f'WR557.S6.J{job}'), MintClaim.ONLINE_REQUIRED)
         path = self.cache.directory / 'entries.json'
         self.assertLess(path.stat().st_size, 1024)
+        self.assertEqual(json.loads(path.read_text())['body']['entries'], {})
         self.assertFalse(self.cache.record_mint('WR557.S6.J1'))
         self.assertIs(self.cache.claim_mint('WR557.S6.J1'), MintClaim.ONLINE_REQUIRED)
 
@@ -159,6 +160,7 @@ class CacheTests(unittest.TestCase):
             self.cache.record_mint(f'WR557.S6.J{job}')
         path = self.cache.directory / 'entries.json'
         self.assertLess(path.stat().st_size, 200000)
+        self.assertLessEqual(len(json.loads(path.read_text())['body']['entries']), 256)
         self.assertFalse(self.cache.record_mint(self.card))
         self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
         self.now += 3650 * 24 * 60 * 60
@@ -185,6 +187,33 @@ class CacheTests(unittest.TestCase):
                 self.assertFalse(restarted.record_mint(self.card))
                 self.assertFalse(restarted.record_mint('WR999.S9.J999'))
                 self.assertIs(restarted.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+
+    def test_unknown_claims_preserve_existing_receipts_but_prevent_late_mints(self):
+        self.assertTrue(self.cache.record_mint(self.card))
+        self.assertIs(self.cache.claim_mint('WR999.S9.J999'), MintClaim.ONLINE_REQUIRED)
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.FRESH)
+        self.assertFalse(self.cache.record_mint('WR557.S6.J2'))
+        self.assertIs(self.cache.claim_mint('WR557.S6.J2'), MintClaim.ONLINE_REQUIRED)
+        self.assertTrue(self.cache.record_mint('WR1000.S1.J1'))
+        self.assertIs(self.cache.claim_mint('WR1000.S1.J1'), MintClaim.FRESH)
+
+    def test_recovery_must_persist_before_online_lookup(self):
+        self.assertTrue(self.cache.record_mint(self.card))
+        path = self.cache.directory / 'entries.json'
+        path.write_text('invalid')
+        with patch('pathlib.Path.replace', side_effect=OSError('synthetic recovery failure')):
+            self.assertIs(self.cache.claim_mint(self.card), MintClaim.INCOMPLETE)
+            self.assertFalse(self.cache.record_mint(self.card))
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+        self.assertFalse(self.cache.record_mint(self.card))
+
+    def test_mint_writer_can_rebuild_damaged_ledger_without_creating_evidence(self):
+        self.assertTrue(self.cache.record_mint(self.card))
+        (self.cache.directory / 'entries.json').unlink()
+        self.assertFalse(self.cache.record_mint('WR557.S6.J2'))
+        self.assertIs(self.cache.claim_mint('WR557.S6.J2'), MintClaim.ONLINE_REQUIRED)
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
 
     def test_legacy_negative_marker_blocks_mint_replay(self):
         self.cache.directory.mkdir(parents=True, mode=0o700)

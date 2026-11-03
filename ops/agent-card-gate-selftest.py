@@ -139,9 +139,9 @@ class AgentCardGate(unittest.TestCase):
         self.mint_fixture()
         cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
         entries = json.loads(cache.read_text())
-        entry = entries.pop('WR557.S6.J1')
-        entry['body']['card_id'] = 'WR558.S6.J1'
-        entries['WR558.S6.J1'] = entry
+        entry = entries['body']['entries'].pop('WR557.S6.J1')
+        entry['card_id'] = 'WR558.S6.J1'
+        entries['body']['entries']['WR558.S6.J1'] = entry
         cache.write_text(json.dumps(entries))
         self.assertEqual(self.run_hook(prompt='Card: WR558.S6.J1').returncode, 2)
 

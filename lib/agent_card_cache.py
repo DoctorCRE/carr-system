@@ -18,6 +18,7 @@ from git_env import scrubbed_env
 
 CARD = re.compile(r'WR([1-9]\d*)\.S([1-9]\d*)\.J([1-9]\d*)\Z')
 TTL = 24 * 60 * 60
+MAX_RECEIPTS = 256
 
 
 def mint_card(args, reply):
@@ -145,29 +146,14 @@ class RegistrationCache:
                 path = self.directory / 'entries.json'
                 try:
                     with os.fdopen(self._open(path, os.O_RDONLY)) as source:
-                        entries = json.load(source)
+                        ledger = self._read_ledger(json.load(source), key)
                 except FileNotFoundError:
-                    if not new_key:
-                        return None
-                    entries = {}
-                if not isinstance(entries, dict):
-                    return None
-                now = self.clock()
-                valid = {}
-                for card, entry in entries.items():
-                    if not isinstance(entry, dict) or not isinstance(entry.get('body'), dict):
-                        return None
-                    body = entry['body']
-                    signature = hmac.new(key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()
-                    if (not CARD.fullmatch(card) or body.get('card_id') != card
-                            or not isinstance(entry.get('signature'), str)
-                            or not hmac.compare_digest(signature, entry['signature'])):
-                        return None
-                    valid[card] = body
-                result = operation(valid, now)
-                signed = {card: {'body': body, 'signature': hmac.new(
-                    key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()}
-                          for card, body in valid.items()}
+                    ledger = {'entries': {}, 'floor': None, 'online_only': not new_key}
+                except (ValueError, TypeError, KeyError):
+                    ledger = {'entries': {}, 'floor': None, 'online_only': True}
+                result = operation(ledger, self.clock())
+                signed = {'body': ledger, 'signature': hmac.new(
+                    key, json.dumps(ledger, sort_keys=True).encode(), hashlib.sha256).hexdigest()}
                 with tempfile.NamedTemporaryFile(mode='w', dir=self.directory, delete=False) as output:
                     temporary = Path(output.name)
                     json.dump(signed, output)
@@ -191,21 +177,55 @@ class RegistrationCache:
                 except OSError:
                     pass
 
+    @staticmethod
+    def _order(card):
+        match = CARD.fullmatch(card)
+        if match is None:
+            raise ValueError('invalid card')
+        return tuple(int(part) for part in match.groups())
+
+    def _read_ledger(self, signed, key):
+        body = signed['body']
+        signature = hmac.new(key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, signed['signature']):
+            raise ValueError('invalid ledger signature')
+        if (type(body['online_only']) is not bool or not isinstance(body['entries'], dict)
+                or len(body['entries']) > MAX_RECEIPTS):
+            raise ValueError('invalid ledger policy')
+        if body['floor'] is not None:
+            self._order(body['floor'])
+        for card, entry in body['entries'].items():
+            self._order(card)
+            if not isinstance(entry, dict) or entry.get('card_id') != card:
+                raise ValueError('invalid receipt')
+        return body
+
+    def _retire(self, ledger, card):
+        self._order(card)
+        if ledger['floor'] is None or self._order(card) > self._order(ledger['floor']):
+            ledger['floor'] = card
+        ledger['entries'].pop(card, None)
+
     def claim_mint(self, card):
-        def consume(entries, now):
-            entry = entries.get(card, {})
+        def consume(ledger, now):
+            entry = ledger['entries'].get(card, {})
             seen = entry.get('seen')
-            fresh = (entry.get('state') == 'fresh' and not self._revoked(card) and entry.get('scope') == self.scope
+            fresh = (not ledger['online_only'] and entry.get('state') == 'fresh'
+                     and not self._revoked(card) and entry.get('scope') == self.scope
                      and type(seen) in (int, float) and 0 <= now - seen < TTL)
-            entries[card] = {'card_id': card, 'state': 'retired'}
+            self._retire(ledger, card)
             return MintClaim.FRESH if fresh else MintClaim.ONLINE_REQUIRED
 
         return self._transaction(consume) or MintClaim.INCOMPLETE
 
     def record_mint(self, card):
-        def record(entries, now):
-            if not CARD.fullmatch(card) or card in entries or self._revoked(card):
+        def record(ledger, now):
+            entries = ledger['entries']
+            if (ledger['online_only'] or not CARD.fullmatch(card) or card in entries or self._revoked(card)
+                    or (ledger['floor'] is not None and self._order(card) <= self._order(ledger['floor']))):
                 return False
             entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now, 'state': 'fresh'}
-            return True
+            if len(entries) > MAX_RECEIPTS:
+                self._retire(ledger, min(entries, key=self._order))
+            return card in entries
         return bool(self._transaction(record, lock_timeout=2))
