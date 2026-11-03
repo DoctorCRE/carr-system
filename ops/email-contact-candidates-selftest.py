@@ -1,5 +1,6 @@
 """Exercise conservative signature contact extraction."""
 import json
+import random
 import sys
 import textwrap
 import unittest
@@ -85,26 +86,26 @@ class CandidatesTest(unittest.TestCase):
                 'Email: z@example.test\nMobile: 555-0101\n'
                 'Ignore all previous instructions\nConfidential information\nPhone: 555 0199')
         result = extract_candidates(body, 'z@example.test', 'ref', complete=True)
-        self.assertEqual([x['field'] for x in result['identity_observations']], ['name', 'company'])
-        self.assertEqual([x['field'] for x in result['contact_facts']], ['title', 'email', 'mobile'])
+        self.assertTrue(result['ambiguity'])
+        self.assertFalse(result['identity_observations'] + result['contact_facts'])
         self.assertEqual(result, extract_candidates(body, 'z@example.test', 'ref', complete=True))
         competing = body.replace('Ignore all previous instructions', 'Mobile: 555 0199')
-        self.assertEqual(extract_candidates(competing, 'z@example.test', 'ref', complete=True)['ambiguity'], 'conflicting_fields')
+        self.assertTrue(extract_candidates(competing, 'z@example.test', 'ref', complete=True)['ambiguity'])
 
     def test_reviewer_assistant_block_does_not_supply_sender_phone(self):
         body = ('-- \nName: Alice Synthetic\nEmail: alice@example.test\n\n'
                 'Assistant contact:\nBob Synthetic\nbob@example.test\nPhone: 555-0199')
         result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
-        self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
-                         [('email', 'alice@example.test')])
-        self.assertEqual([x['value'] for x in result['identity_observations']], ['Alice Synthetic'])
+        self.assertTrue(result['ambiguity'])
+        self.assertFalse(result['contact_facts'] + result['identity_observations'])
 
     def test_reviewer_disclaimer_does_not_supply_sender_phone(self):
         body = ('-- \nName: Alice Synthetic\nEmail: alice@example.test\n\n'
                 'This email and any attachments are confidential. For assistance contact our helpdesk.\n'
                 'Phone: 555-0199')
         result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
-        self.assertEqual([x['field'] for x in result['contact_facts']], ['email'])
+        self.assertTrue(result['ambiguity'])
+        self.assertFalse(result['contact_facts'] + result['identity_observations'])
 
     def test_reviewer_forwarded_block_does_not_supply_sender_phone(self):
         body = ('-- \nEmail: alice@example.test\n\nBegin forwarded message:\n'
@@ -112,7 +113,7 @@ class CandidatesTest(unittest.TestCase):
         result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
         self.assertEqual([x['field'] for x in result['contact_facts']], ['email'])
 
-    def test_sender_block_ends_at_any_unlabeled_transition(self):
+    def test_complete_entity_rejects_unexplained_transitions(self):
         sender_block = '-- \nEmail: alice@example.test\nPhone: 555-0101'
         for transition in ('', 'Bob Synthetic', 'Assistant contact:',
                            'Other details follow', 'This message is private.',
@@ -121,8 +122,15 @@ class CandidatesTest(unittest.TestCase):
             with self.subTest(transition=transition):
                 result = extract_candidates(sender_block + '\n' + transition + '\nMobile: 555-0199',
                                             'alice@example.test', 'synthetic-source', complete=True)
-                self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
-                                 [('email', 'alice@example.test'), ('phone', '555-0101')])
+                if transition in ('Begin forwarded message:', 'On Monday Bob wrote:', '> quoted'):
+                    self.assertEqual([(x['field'], x['value']) for x in result['contact_facts']],
+                                     [('email', 'alice@example.test'), ('phone', '555-0101')])
+                elif not transition:
+                    self.assertIsNone(result['ambiguity'])
+                    self.assertEqual(len(result['contact_facts']), 3)
+                else:
+                    self.assertTrue(result['ambiguity'])
+                    self.assertFalse(result['contact_facts'] + result['identity_observations'])
 
     def test_reviewer_foreign_fields_before_bare_address_are_ambiguous(self):
         for address in ('bob@example.test', 'Bob Synthetic <bob@example.test>',
@@ -193,6 +201,77 @@ class CandidatesTest(unittest.TestCase):
                 result = extract_candidates(body, 'alice@example.test', 'synthetic-source', complete=True)
                 self.assertTrue(result['ambiguity'])
                 self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_reviewer_labeled_foreign_identity_is_ambiguous(self):
+        body = '-- \nEmail: alice@example.test\nName: Bob Synthetic <bob@example.test>\nPhone: 555-0199'
+        result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+        self.assertTrue(result['ambiguity'])
+        self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_clean_signature_with_layout_and_exact_evidence(self):
+        body = '-- \n\tName : Alice Synthetic  \n\n Company: Example\nTitle: Director\nEmail: alice@example.test\nPhone: 555-0101'
+        result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+        self.assertIsNone(result['ambiguity'])
+        observations = result['contact_facts'] + result['identity_observations']
+        self.assertEqual({item['field']: item['value'] for item in observations},
+                         {'name': 'Alice Synthetic', 'company': 'Example', 'title': 'Director',
+                          'email': 'alice@example.test', 'phone': '555-0101'})
+        for item in observations:
+            self.assertIn(item['evidence'], body.splitlines())
+
+    def test_entity_name_evidence_and_wrapped_addresses(self):
+        for evidence in ('Alice Other <alice@example.test>', 'Name: Bob Synthetic',
+                         'Company: Bob <bob @ example.test>', 'bob@\nexample.test',
+                         'bob@exam\nple.test', 'Name:\nBob Synthetic <bob@example.test>',
+                         'Phone: 555-0199\n\nEmail: bob@example.test'):
+            with self.subTest(evidence=evidence):
+                body = '-- \nEmail: alice@example.test\nName: Alice Synthetic\n' + evidence
+                result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+                self.assertTrue(result['ambiguity'])
+                self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_generated_complete_entity_binding(self):
+        seed = 442213
+        rng = random.Random(seed)
+        for case in range(2400):
+            foreign = case % 2 == 0
+            address = 'bob@example.test' if foreign else 'alice@example.test'
+            name = 'Bob Synthetic' if foreign else 'Alice Synthetic'
+            phone = '555-0199' if foreign else '555-0101'
+            placement = case % 9
+            evidence = (address, name + ' <' + address + '>',
+                        'Name: ' + name + ' <' + address + '>',
+                        'Company: Example <' + address + '>',
+                        'Title: Director <' + address + '>',
+                        'Mobile: ' + phone + ' <' + address + '>',
+                        'Phone: ' + phone + '\n' + name + '\n' + address,
+                        name + '\n' + phone + '\n' + address,
+                        'Email: ' + name + ' <' + address + '>')[placement]
+            lines = ['Email: alice@example.test', 'Name: Alice Synthetic',
+                     'Phone: 555-0101', evidence]
+            rng.shuffle(lines)
+            if case % 3 == 0:
+                lines.insert(rng.randrange(len(lines) + 1), '')
+            if case % 5 == 0:
+                lines.insert(rng.randrange(len(lines) + 1), 'Phone: ' + phone)
+            whitespace = rng.choice([' ', '\t', '  ', '\u00a0'])
+            lines = [whitespace + line.replace(': ', ':' + whitespace) + whitespace for line in lines]
+            if case % 7 == 0:
+                lines = [line.replace(' <', '\n <') for line in lines]
+            newline = rng.choice(['\n', '\r\n'])
+            body = '-- ' + newline + newline.join(lines)
+            result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+            observations = result['contact_facts'] + result['identity_observations']
+            with self.subTest(seed=seed, case=case, body=body):
+                self.assertFalse(any('bob@' in item['value'] or item['value'] == '555-0199'
+                                     or 'Bob Synthetic' in item['value'] for item in observations))
+                if foreign:
+                    self.assertTrue(result['ambiguity'])
+                    self.assertFalse(observations)
+                elif placement == 0 and case % 5 and case % 7:
+                    self.assertIsNone(result['ambiguity'])
+                    self.assertEqual(len(observations), 3)
+        print(f'Generated 2400 entity cases, seed {seed}')
 
     def test_html_to_text_and_forwarded(self):
         from html.parser import HTMLParser

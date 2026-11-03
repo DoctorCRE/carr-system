@@ -3,13 +3,14 @@ import re
 from dataclasses import dataclass
 
 VERSION = 'email-contact-candidates/v1'
-LABEL = re.compile(r'^(name|company|title|phone|mobile|email):\s*(\S.*?)\s*$', re.I)
+LABEL = re.compile(r'^(name|company|title|phone|mobile|email)\s*:\s*(\S.*?)\s*$', re.I)
 EMAIL = re.compile(r'^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$')
 PHONE = re.compile(r'^\+?[\d () .-]{7,30}$')
 HISTORY = re.compile(
     r'^[ \t]*(?:>|on\s+[\s\S]*?\bwrote:|from:|sent:|subject:|-{5,}|'
-    r'(?:begin\s+)?forwarded\s+message\b|confidential|disclaimer)', re.I | re.M)
-ADDRESS = re.compile(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+')
+    r'(?:begin\s+)?forwarded\s+message\b)', re.I | re.M)
+ADDRESS = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
+DISPLAY_ADDRESS = re.compile(r'([^<>]+)\s*<([^<>]+)>')
 
 
 @dataclass(frozen=True)
@@ -25,15 +26,47 @@ class MessageSections:
 
 
 @dataclass(frozen=True)
-class SignatureBlock:
-    labels: tuple[str, ...]
-    identity_lines: tuple[str, ...]
+class SignatureEntity:
+    lines: tuple[str, ...]
 
-    @classmethod
-    def parse(cls, lines):
-        block = lines[:next((i for i, line in enumerate(lines) if not line.strip()), len(lines))]
-        end = next((i for i, line in enumerate(block) if not LABEL.fullmatch(line.strip())), len(block))
-        return cls(tuple(block[:end]), tuple(block[end:]))
+    def fields_for(self, sender):
+        text = '\n'.join(self.lines)
+        addresses = ADDRESS.findall(text)
+        if any(address.casefold() != sender.casefold() for address in addresses):
+            return {}, 'competing_identity'
+        if text.count('@') != len(addresses):
+            return {}, 'invalid_identity'
+        fields = {}
+        names = set()
+        for line in self.lines:
+            value_line = line.strip()
+            if not value_line:
+                continue
+            match = LABEL.fullmatch(value_line)
+            if match:
+                field, value = match.group(1).lower(), match.group(2)
+                if field in fields:
+                    return {}, 'conflicting_fields'
+                if field == 'email' and not EMAIL.fullmatch(value):
+                    return {}, 'invalid_email'
+                if field in ('phone', 'mobile') and (not PHONE.fullmatch(value) or sum(c.isdigit() for c in value) < 7):
+                    return {}, 'invalid_phone'
+                if field == 'name':
+                    names.add(value.casefold())
+                fields[field] = (value, line)
+            elif value_line.casefold() == sender.casefold():
+                continue
+            elif display := DISPLAY_ADDRESS.fullmatch(value_line):
+                if display.group(2).casefold() != sender.casefold():
+                    return {}, 'competing_identity'
+                names.add(display.group(1).strip().casefold())
+            else:
+                return {}, 'ambiguous_entity'
+        if len(names) > 1:
+            return {}, 'competing_identity'
+        if 'email' not in fields or fields['email'][0].casefold() != sender.casefold():
+            return {}, 'sender_binding'
+        return fields, None
 
 
 def extract_candidates(body, sender, source_ref, *, complete):
@@ -54,23 +87,9 @@ def extract_candidates(body, sender, source_ref, *, complete):
     region = lines[start + 1:]
     if len(region) > 20 or sum(map(len, region)) > 2000:
         return reject('signature_too_large')
-    signature = SignatureBlock.parse(region)
-    addresses = ADDRESS.findall('\n'.join(signature.identity_lines))
-    if any(address.casefold() != sender.casefold() for address in addresses):
-        return reject('competing_identity')
-    fields = {}
-    for line in signature.labels:
-        match = LABEL.fullmatch(line.strip())
-        field, value = match.group(1).lower(), match.group(2)
-        if field in fields:
-            return reject('conflicting_fields')
-        if field == 'email' and not EMAIL.fullmatch(value):
-            return reject('invalid_email')
-        if field in ('phone', 'mobile') and (not PHONE.fullmatch(value) or sum(c.isdigit() for c in value) < 7):
-            return reject('invalid_phone')
-        fields[field] = (value, line)
-    if 'email' not in fields or fields['email'][0].casefold() != sender.casefold():
-        return reject('sender_binding')
+    fields, ambiguity = SignatureEntity(tuple(region)).fields_for(sender)
+    if ambiguity:
+        return reject(ambiguity)
     for field, (value, evidence) in fields.items():
         item = {'field': field, 'value': value, 'evidence': evidence, 'source_ref': source_ref,
                 'sender': sender, 'extraction_version': VERSION, 'verified': False}

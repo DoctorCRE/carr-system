@@ -22,6 +22,20 @@
       "sender": "alice@example.test",
       "count": 0,
       "ambiguity": "quoted_or_forwarded"
+    },
+    {
+      "name": "round_three_labeled_foreign_identity",
+      "body": "-- \nEmail: alice@example.test\nName: Bob Synthetic <bob@example.test>\nPhone: 555-0199",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "name": "foreign_identity_after_blank",
+      "body": "-- \nEmail: alice@example.test\n\nPhone: 555-0199\nEmail: bob@example.test",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
     }
   ]
 }
