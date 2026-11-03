@@ -1,0 +1,31 @@
+---
+title: "Home inbox settlement"
+---
+stateDiagram-v2
+  s0: Open
+  s1: Auto-settled
+  s2: Settled manually
+  s3: Snoozed
+  s4: Working
+  s5: Explicitly returned to Inbox
+  [*] --> s0
+  s0 --> s1: canonical work resolves
+  s0 --> s2: settle
+  s0 --> s3: snooze
+  s0 --> s4: work starts
+  s1 --> s0: canonical work reopens
+  s1 --> s2: settle
+  s1 --> s3: snooze
+  s1 --> s5: undo settlement or snooze
+  s2 --> s5: undo settlement or snooze
+  s3 --> s0: snooze expires
+  s3 --> s2: settle
+  s3 --> s5: undo settlement or snooze
+  s4 --> s1: canonical work resolves
+  s4 --> s2: settle
+  s4 --> s3: snooze
+  s3 --> s1: snooze expires
+  s3 --> s4: snooze expires
+  s5 --> s0: canonical work reopens
+  s5 --> s2: settle
+  s5 --> s3: snooze
