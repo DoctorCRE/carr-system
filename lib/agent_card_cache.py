@@ -8,8 +8,12 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'ops'))
+from git_env import scrubbed_env
 
 CARD = re.compile(r'WR([1-9]\d*)\.S([1-9]\d*)\.J([1-9]\d*)\Z')
 TTL = 24 * 60 * 60
@@ -41,7 +45,7 @@ def repository_name(value):
 def launch_repository(cwd=None):
     try:
         result = subprocess.run(['git', '-C', str(cwd or Path.cwd()), 'remote', 'get-url', 'origin'],
-                                capture_output=True, text=True, timeout=0.5)
+                                capture_output=True, text=True, timeout=0.5, env=scrubbed_env())
         return repository_name(result.stdout.strip()) if result.returncode == 0 else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None

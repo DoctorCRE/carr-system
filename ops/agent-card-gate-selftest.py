@@ -22,16 +22,16 @@ class AgentCardGate(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for directory in ('hooks', 'lib', 'tools'):
+        for directory in ('hooks', 'lib', 'tools', 'ops'):
             (self.root / directory).mkdir()
         for relative in ('hooks/agent-card-gate.py', 'hooks/cmd_text.py', 'hooks/guard-unattended.py',
                          'hooks/gate_paths.py', 'hooks/refused_content.py', 'lib/hook_runtime.py',
-                         'lib/agent_card_cache.py', 'tools/call-verb.py'):
+                         'lib/agent_card_cache.py', 'tools/call-verb.py', 'ops/git_env.py'):
             if (REPO / relative).exists():
                 shutil.copyfile(REPO / relative, self.root / relative)
-        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True, env=fixture_env())
         subprocess.run(['git', 'remote', 'add', 'origin',
-                        'https://github.com/DoctorCRE/carr-system.git'], cwd=self.root, check=True)
+                        'https://github.com/DoctorCRE/carr-system.git'], cwd=self.root, check=True, env=fixture_env())
         self.now = None
         self.home = self.root / 'home'
         self.home.mkdir()
@@ -544,12 +544,12 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
                 'model': 'synthetic', 'repository': 'DoctorCRE/carr-system'}
         self.assertEqual(self.mint_fixture(args=args).returncode, 0)
         other = self.root / 'doctorcre-app'
-        for directory in ('hooks', 'lib', 'tools'):
+        for directory in ('hooks', 'lib', 'tools', 'ops'):
             shutil.copytree(self.root / directory, other / directory)
         (other / 'tools/call-verb.py').write_text('raise SystemExit(1)')
-        subprocess.run(['git', 'init', '-q', str(other)], check=True)
+        subprocess.run(['git', 'init', '-q', str(other)], check=True, env=fixture_env())
         subprocess.run(['git', 'remote', 'add', 'origin',
-                        'https://github.com/jbookout/doctorcre-app.git'], cwd=other, check=True)
+                        'https://github.com/jbookout/doctorcre-app.git'], cwd=other, check=True, env=fixture_env())
         event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Agent', 'cwd': str(other),
                  'tool_input': {'prompt': 'Card: WR557.S6.J1'}}
         command = [sys.executable, '-c', f'import time,runpy;time.time=lambda:1000000;'
@@ -564,9 +564,9 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
         self.now = 1000000
         self.assertEqual(self.mint_fixture().returncode, 0)
         subprocess.run(['git', '-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
-                        'commit', '-q', '--allow-empty', '-m', 'fixture'], cwd=self.root, check=True)
+                        'commit', '-q', '--allow-empty', '-m', 'fixture'], cwd=self.root, check=True, env=fixture_env())
         worktree = self.root / 'other-worktree'
-        subprocess.run(['git', 'worktree', 'add', '-q', '--detach', str(worktree)], cwd=self.root, check=True)
+        subprocess.run(['git', 'worktree', 'add', '-q', '--detach', str(worktree)], cwd=self.root, check=True, env=fixture_env())
         self.lookup.write_text('raise SystemExit(1)')
         hook = self.root / 'hooks/agent-card-gate.py'
         event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Agent', 'cwd': str(worktree),
