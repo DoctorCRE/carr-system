@@ -28,6 +28,17 @@ class NeonTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
+        original_open = Path.open
+
+        def fixture_open(path, *args, **kwargs):
+            if path.name == 'db.env':
+                self.assertTrue(path.resolve().is_relative_to(self.home.resolve()),
+                                'selftest attempted a non-fixture credential read')
+            return original_open(path, *args, **kwargs)
+
+        guard = patch.object(Path, 'open', fixture_open)
+        guard.start()
+        self.addCleanup(guard.stop)
         self.marker = self.home / 'calls'
         self.browser = self.home / 'browser'
         self.fake = self.home / 'neonctl'
@@ -48,6 +59,11 @@ print('fixture-dsn')
         self.addCleanup(self.patch.stop)
         self.tap = load('test_neon_db_tap', 'tools/db-tap.py')
         self.tap.NEONCTL = str(self.fake)
+
+    def test_harness_rejects_non_fixture_credential_reads(self):
+        with tempfile.TemporaryDirectory() as outside:
+            with self.assertRaisesRegex(AssertionError, 'non-fixture credential read'):
+                (Path(outside) / 'db.env').read_text()
 
     def test_staging_selftest_never_reads_ambient_credentials(self):
         config = self.home / '.config/carr/db.env'
