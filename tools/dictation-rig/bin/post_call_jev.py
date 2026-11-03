@@ -387,7 +387,7 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
                 parents.append(parent)
                 children.extend((field, parent[field]) for field in ("phase_move", "next_step") if parent.get(field))
             for claim_kind, item in children:
-                if resuming and not (item.get("checks") or {}).get("reason"):
+                if resuming and item.get("checks") and not item["checks"].get("reason"):
                     continue
                 outcomes = []
                 targets.append((item, outcomes))

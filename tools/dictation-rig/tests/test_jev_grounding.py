@@ -153,5 +153,22 @@ def test_insufficient_model_evidence_is_distinct_from_contradiction(tmp_path):
     assert not item['checks']['details']['pass']
 
 
+def test_budget_resume_checks_a_previously_unchecked_nested_mutation(tmp_path):
+    transcript = {'segments': [{'speaker': 'Joe', 'text': 'Synthetic renewal approved.'},
+                               {'speaker': 'Joe', 'text': 'negotiation'}]}
+    ledger = ledger_for(transcript, [coverage.source_span(transcript, i) for i in range(2)])
+    item = {'deal_id': 'synthetic', 'summary': 'Synthetic renewal approved.',
+            'evidence': 'Synthetic renewal', 'fact_ids': ['f0'],
+            'checks': {'unavailable': True, 'reason': 'budget exhausted'},
+            'phase_move': {'value': 'closing', 'fact_ids': ['f1']}}
+    result = {'deal_updates': [item], 'checks_hold': 'budget exhausted'}
+    judge = Judge()
+    jev.check_distillation(result, {'deals': [{'id': 'synthetic', 'name': 'Synthetic'}]},
+                           transcript, coverage_ledger=ledger, client=judge, budget_ledger=tmp_path / 'budget.json')
+    assert len(judge.states) == 2
+    assert not item['phase_move']['checks']['details']['pass']
+    assert item['checks']['flagged']
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))
