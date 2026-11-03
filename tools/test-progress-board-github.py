@@ -2,6 +2,7 @@
 """The board's GitHub reads: one GraphQL query per repository per refresh."""
 import importlib.util
 import copy
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -23,8 +24,9 @@ B = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(B)
 REPO, APP = "DoctorCRE/carr-system", "jbookout/doctorcre-app"
 SHA = "a" * 40
-RECENT = (B.now_utc() - B.timedelta(days=3)).isoformat(timespec="seconds")
-EARLIER = (B.now_utc() - B.timedelta(days=4)).isoformat(timespec="seconds")
+NOW = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
+RECENT = (NOW - B.timedelta(days=3)).isoformat(timespec="seconds")
+EARLIER = (NOW - B.timedelta(days=4)).isoformat(timespec="seconds")
 CI = {"__typename": "CheckRun", "name": "CI", "status": "COMPLETED", "conclusion": "SUCCESS"}
 
 
@@ -98,6 +100,9 @@ class FakeGitHub:
 
 class GitHubReads(unittest.TestCase):
     def setUp(self):
+        clock = patch.object(B, "now_utc", return_value=NOW)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": self.tmp.name, "PROGRESS_BOARD_SKIP_PROBE": "1"})
         self.env.start()
@@ -141,7 +146,7 @@ class GitHubReads(unittest.TestCase):
         self.assertEqual(self.card(5)["pr_phase"], "Awaiting review")
 
     def test_a_card_for_an_unlisted_pr_is_read_once_in_one_batch_per_repository(self):
-        start = B.now_utc()
+        start = NOW
         def at(hours):
             return patch.object(B, "now_utc", return_value=start + B.timedelta(hours=hours))
         B.write_json({"project": "x", "tasks": {}})
@@ -285,7 +290,7 @@ class GitHubReads(unittest.TestCase):
         self.assertEqual(tasks["app-pr-5"]["pr_phase"], "Merged")
 
     def test_closed_backfill_stops_at_fourteen_days_and_resumes_from_disk(self):
-        start = B.now_utc()
+        start = NOW
         recent = (start - B.timedelta(days=3)).isoformat(timespec='seconds')
         old = (start - B.timedelta(days=20)).isoformat(timespec='seconds')
         self.github.closed[REPO] = [merged(REPO, n, recent) for n in range(1, 43)] + \
