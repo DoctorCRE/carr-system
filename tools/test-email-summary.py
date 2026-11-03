@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Check incoming-email summaries and resumable backfill with fake models."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
