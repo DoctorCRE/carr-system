@@ -2,6 +2,8 @@
 import json
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 import wave
 from pathlib import Path
 
@@ -11,11 +13,122 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bin'))
 import transcribe_session as transcription
 
 
+
+class FakeClock:
+    elapsed = 0.0
+
+    def __call__(self):
+        return self.elapsed
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr(time, 'monotonic', clock)
+
+    class FixedDatetime:
+        @staticmethod
+        def now(tz):
+            return datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(transcription, 'datetime', FixedDatetime)
+    return clock
+
+
+@pytest.mark.parametrize('seconds_per_chunk', [100, 120])
+def test_call_recovery_budget_preserves_unrecovered_speech(tmp_path, monkeypatch, clock,
+                                                         seconds_per_chunk):
+    audio = tmp_path / 'synthetic.wav'
+    with wave.open(str(audio), 'wb') as output:
+        output.setparams((1, 2, 100, 0, 'NONE', 'not compressed'))
+        output.writeframes(b'\0\0' * 100 * 300)
+    original = ' '.join(['Synthetic repeated phrase.'] * 30)
+    calls = []
+
+    def decode(cmd, **kwargs):
+        recovery = '-mc' in cmd
+        if recovery:
+            elapsed = min(seconds_per_chunk, kwargs['timeout'])
+            clock.elapsed += elapsed
+            calls.append(kwargs['timeout'])
+            if elapsed < seconds_per_chunk:
+                raise subprocess.TimeoutExpired(cmd, kwargs['timeout'])
+        rows = ([segment(0, 1000, f'Recovered useful speech number {len(calls)}.')] if recovery else
+                [segment(0, 300000, original)])
+        target = Path(cmd[cmd.index('-of') + 1]).with_suffix('.json')
+        target.write_text(json.dumps({'transcription': [
+            {'offsets': {'from': row.start_ms, 'to': row.end_ms}, 'text': row.text}
+            for row in rows]}))
+        return subprocess.CompletedProcess(cmd, 0, '', '')
+
+    monkeypatch.setattr(transcription.subprocess, 'run', decode)
+    result = transcription.run_whisper(audio, tmp_path / 'model.bin', '', tmp_path,
+                                       lambda _: None)
+    assert clock.elapsed <= 240, f'recovery took {clock.elapsed} synthetic seconds'
+    assert len(calls) <= 3
+    assert result[-1].text == original
+    assert result[-1].unrecovered
+    assert result[-1].start_ms == 60000
+    assert result[-1].end_ms == 300000
+    tagged = transcription.shift_and_tag(result, 500, ['Speaker'] * len(result))
+    assert tagged[-1]['unrecovered'] is True
+    assert tagged[-1]['start_ms'] == 60500
+    assert tagged[-1]['text'] == original
+
+
+def test_budget_is_shared_across_call_tracks_and_reaches_summary(tmp_path, monkeypatch, clock):
+    for name in ('mic', 'system'):
+        with wave.open(str(tmp_path / f'{name}.wav'), 'wb') as output:
+            output.setparams((1, 2, 100, 0, 'NONE', 'not compressed'))
+            output.writeframes(b'\0\0' * 100 * 90)
+    (tmp_path / 'meta.json').write_text(json.dumps({
+        'files': {'mic': 'mic.wav', 'system': 'system.wav'}, 'start_offset_ms': {'system': 500}}))
+    model = tmp_path / 'model.bin'
+    model.write_bytes(b'synthetic')
+    monkeypatch.setattr(transcription, 'resolve_model', lambda _: model)
+    monkeypatch.setattr(transcription, 'verify_model_pin', lambda *_: None)
+    monkeypatch.setattr(transcription, 'load_prompt', lambda: '')
+    monkeypatch.setattr(transcription, 'convert_caf_to_wav', lambda path, *_: path)
+    monkeypatch.setattr(transcription.speaker_split, 'run_diarizer', lambda *_: [])
+    recovered_calls = []
+    original = ' '.join(['Synthetic looping speech.'] * 30)
+
+    def decode(cmd, **kwargs):
+        if '-mc' in cmd:
+            recovered_calls.append(cmd)
+            clock.elapsed += 120
+            rows = [segment(0, 1000, f'Recovered passage {len(recovered_calls)}.')]
+        else:
+            clock.elapsed += 500
+            rows = [segment(0, 90000, original)]
+        Path(cmd[cmd.index('-of') + 1]).with_suffix('.json').write_text(json.dumps({
+            'transcription': [{'offsets': {'from': row.start_ms, 'to': row.end_ms}, 'text': row.text}
+                              for row in rows]}))
+        return subprocess.CompletedProcess(cmd, 0, '', '')
+
+    monkeypatch.setattr(transcription.subprocess, 'run', decode)
+    summaries = []
+
+    def summarize(path):
+        summaries.append(json.loads((path / 'transcript.json').read_text()))
+        return {'state': 'ready'}
+
+    monkeypatch.setattr(transcription.post_call, 'run_session', summarize)
+    transcription.process_session(tmp_path, lambda _: None)
+    assert len(recovered_calls) == 2
+    assert clock.elapsed == 1240
+    assert len(summaries) == 1
+    transcript = summaries[0]
+    assert transcript['unrecovered_speech'].startswith('Some speech was not recovered')
+    flagged = [row for row in transcript['segments'] if row.get('unrecovered')]
+    assert [(row['start_ms'], row['end_ms'], row['text']) for row in flagged] == [
+        (500, 90500, original), (60000, 90000, original)]
+
 def segment(start, end, text):
     return transcription.RawSegment(start, end, text)
 
 
-def run_decoder(tmp_path, monkeypatch, initial, recovered):
+def run_decoder(tmp_path, monkeypatch, initial, recovered, *, clock=None):
     audio = tmp_path / 'synthetic.wav'
     with wave.open(str(audio), 'wb') as output:
         output.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
@@ -24,6 +137,8 @@ def run_decoder(tmp_path, monkeypatch, initial, recovered):
 
     def decode(cmd, **kwargs):
         calls.append((cmd, kwargs))
+        if clock is not None and len(calls) > 1:
+            clock.elapsed += 10
         rows = initial if len(calls) == 1 else recovered
         target = Path(cmd[cmd.index('-of') + 1]).with_suffix('.json')
         target.write_text(json.dumps({'transcription': [
@@ -39,17 +154,18 @@ def run_decoder(tmp_path, monkeypatch, initial, recovered):
 
 
 @pytest.mark.parametrize('packed', [False, True])
-def test_loop_is_redecoded_and_normal_neighbors_survive(tmp_path, monkeypatch, packed):
+def test_loop_is_redecoded_and_normal_neighbors_survive(tmp_path, monkeypatch, packed, clock):
     before = segment(0, 1000, 'The synthetic proposal is ready.')
     after = segment(61000, 62000, 'Review the revised plan next week.')
     phrase = 'Please revise the synthetic plan.'
     looping = ([segment(1000, 61000, ' '.join([phrase] * 150))] if packed else
                [segment(1000 + i * 400, 1400 + i * 400, phrase) for i in range(150)])
     recovered = [segment(0, 1000, 'The recovered speech has useful details.')]
-    result, calls = run_decoder(tmp_path, monkeypatch, [before, *looping, after], recovered)
+    result, calls = run_decoder(tmp_path, monkeypatch, [before, *looping, after], recovered, clock=clock)
     assert result == [before, segment(1000, 2000, recovered[0].text),
                       segment(31000, 32000, recovered[0].text), after]
     assert len(calls) == 3
+    assert clock.elapsed == 20
     for cmd, kwargs in calls[1:]:
         assert cmd[cmd.index('-mc') + 1] == '0'
         assert '--prompt' not in cmd
@@ -94,7 +210,7 @@ def test_unrecovered_loop_stops_before_summary(tmp_path, monkeypatch):
     monkeypatch.setattr(transcription, 'load_prompt', lambda: '')
     monkeypatch.setattr(transcription, 'convert_caf_to_wav', lambda *_: track)
 
-    def fail(*_):
+    def fail(*_, **__):
         raise transcription.RepetitionError('Unresolved transcription repetition')
 
     monkeypatch.setattr(transcription, 'run_whisper', fail)

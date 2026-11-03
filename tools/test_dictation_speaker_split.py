@@ -191,7 +191,7 @@ class ProcessSessionWiringTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.stub(transcribe_session, "convert_caf_to_wav",
                   lambda caf, out_dir, log: out_dir / (caf.stem + ".wav"))
-        self.stub(transcribe_session, "run_whisper", lambda wav, *_a: [
+        self.stub(transcribe_session, "run_whisper", lambda wav, *_a, recovery_budget=None: [
             transcribe_session.RawSegment(0, 1000, f"{wav.stem} one"),
             transcribe_session.RawSegment(1000, 2000, f"{wav.stem} two"),
         ])

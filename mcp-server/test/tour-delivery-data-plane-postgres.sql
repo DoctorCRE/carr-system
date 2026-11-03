@@ -208,14 +208,20 @@ begin
 end $owner$;
 
 -- storage_ref bound (0583; moved from tour-pdf-render-result-storage-ref-local-pg-gate.py).
--- Render job b87f59da (2026-09-24): 0430's '{16,400}' regex exceeded RE_DUP_MAX,
--- so every real storage_ref raised 2201B. The job FK is dropped (rolled back) to
--- keep the fixture to what ops.record_tour_pdf_render_result reads.
-alter table ops.tour_pdf_render_job drop constraint tour_pdf_render_job_organization_tenant_id_projection_id_fkey;
+-- The storage-ref proof retains a real legacy Tour/projection parent so the
+-- internal deal-access guard can resolve its subject without dropping a FK.
+insert into ops.tour(id,organization_tenant_id,tour_name,tour_status,route_version,canonical_dataset_version)
+values('ab000000-0000-4000-8000-000000000010','tour-pdf-storage-ref-proof','Legacy storage proof','draft',1,'proof');
+insert into ops.tour_property(id,organization_tenant_id,property_status)
+values('ab000000-0000-4000-8000-000000000011','tour-pdf-storage-ref-proof','active');
+insert into ops.tour_property_membership(organization_tenant_id,tour_id,property_id,route_version,route_sequence,route_label,assertion_set_digest)
+values('tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000010','ab000000-0000-4000-8000-000000000011',1,1,'A','sha256:'||repeat('a',64));
+insert into ops.tour_public_projection(id,organization_tenant_id,tour_id,projection_version,route_version,as_of,facts_only,projection_digest,status)
+values('ab000000-0000-4000-8000-000000000012','tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000010',1,1,now(),true,'sha256:'||repeat('a',64),'draft');
 insert into actor(id,slug,kind,display_name)
 values('ab000000-0000-4000-8000-0000000000aa','tour-pdf-storage-ref-proof','automation','Tour PDF storage_ref proof');
 insert into ops.tour_pdf_render_job(id,organization_tenant_id,projection_id,requested_by_actor_id,request,projection_digest,packet_digest,template_digest,renderer_digest,qc_ruleset_digest,expected_property_count)
-select j::uuid,'tour-pdf-storage-ref-proof',gen_random_uuid(),'actor:ab000000-0000-4000-8000-0000000000aa','{"fixture":true}',
+select j::uuid,'tour-pdf-storage-ref-proof','ab000000-0000-4000-8000-000000000012'::uuid,'actor:ab000000-0000-4000-8000-0000000000aa','{"fixture":true}',
        'sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'sha256:'||repeat('3',64),'sha256:'||repeat('4',64),'sha256:'||repeat('5',64),1
 from unnest(array['ab000000-0000-4000-8000-000000000001','ab000000-0000-4000-8000-000000000002']) j;
 set local session authorization carr_authority;

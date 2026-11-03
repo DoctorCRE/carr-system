@@ -565,6 +565,23 @@ def test_database_scope_receipts():
               and json.loads(receipt.read_text())["full"] is True, result.stdout + result.stderr)
 
 
+def test_scope_checkout_needs_only_current_tree():
+    workflow = _hosted_workflow()
+    checkout = next(step for step in workflow["jobs"]["scope"]["steps"]
+                    if step.get("uses", "").startswith("actions/checkout@"))
+    check("scope checkout does not fetch repository history",
+          checkout.get("with", {}).get("fetch-depth", 1) == 1)
+    spec = importlib.util.spec_from_file_location("db_scope_shallow", REPO / "ops/db-acceptance-scope.py")
+    scope = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scope)
+    from unittest.mock import patch
+    with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "merge_group", "GITHUB_EVENT_PATH": "/dev/null"}), \
+         patch.object(scope.json, "loads", return_value={"merge_group": {}}), \
+         patch.object(scope, "changed_paths", side_effect=AssertionError("history must not be queried")):
+        full, paths, reason = scope.classify()
+    check("merge group requires full proof without history", full and paths is None)
+
+
 def test_hosted_migration_ownership():
     wf = _hosted_workflow()
     runner = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Run this group's check classes")
@@ -1780,7 +1797,7 @@ def main(argv=None):
                test_postgres_path_boundary_rejects_platform_defaults,
                test_hosted_migration_ownership,
                test_hosted_draft_lifecycle,
-               test_database_scope_receipts,
+               test_database_scope_receipts, test_scope_checkout_needs_only_current_tree,
                test_migration_refuses_non_loopback,
                test_migration_fixtures_ignore_hosted_pr_event,
                test_secret_scanner_catches_and_respects_allow,

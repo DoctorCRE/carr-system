@@ -138,7 +138,7 @@ function validContent(value) {
   catch { return false; }
 }
 
-const SUBJECT_TYPES = new Set(["client", "work"]);
+const SUBJECT_TYPES = new Set(["client", "work", "deal"]);
 const STOP_STATES = new Set(["active", "held", "excluded"]);
 const ACCESS_STATUS = new Set(["unknown", "candidate", "approved", "excluded"]);
 const DISPOSITIONS = new Set(["unchanged", "reordered", "removed", "held", "excluded", "merged", "added"]);
@@ -159,7 +159,7 @@ function validPoint(value, role) {
 function validCreate(v) {
   return exact(v, ["idempotency_key", "tour_name", "subject_type", "subject_id", "canonical_dataset_version", "start_point", "end_point"]) &&
     validId(v.idempotency_key) && text(v.tour_name, 240) && SUBJECT_TYPES.has(v.subject_type) &&
-    typeof v.subject_id === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v.subject_id) && text(v.canonical_dataset_version, 240) &&
+    typeof v.subject_id === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v.subject_id) && (v.subject_type !== "deal" || validId(v.subject_id)) && text(v.canonical_dataset_version, 240) &&
     validPoint(v.start_point, "start") && validPoint(v.end_point, "end");
 }
 function validRouteDraft(v) {
@@ -303,6 +303,7 @@ const VALIDATION_CODES = new Set(["tour_input_invalid", "tour_input_unknown_fiel
   "caller_authority_field_forbidden"]);
 // Deterministic SQL refusals of a transition's shape: the same input can never succeed.
 const VALIDATION_MESSAGES = new Set([
+  "tour deal is unavailable",
   "reordered route transition requires a sequence change",
   "unchanged route transition requires the same sequence",
   "route transition property identity mismatch",

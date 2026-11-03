@@ -61,7 +61,7 @@ for (const [path, seam, body] of ROUTES) {
 test("create refuses a bad subject type, a missing point, a wrong point role and a phase or deal field", async () => {
   const s = surface();
   for (const bad of [
-    { ...createBody, subject_type: "deal" }, { ...createBody, subject_id: "has space" }, { ...createBody, tour_name: "  " },
+    { ...createBody, subject_type: "unknown" }, { ...createBody, subject_id: "has space" }, { ...createBody, tour_name: "  " },
     { ...createBody, start_point: null }, { ...createBody, start_point: end }, { ...createBody, end_point: { ...end, latitude: 91 } },
     { ...createBody, deal_phase: "touring" }, { ...createBody, assignment_id: id(5) },
   ]) assert.equal((await fetchWith(s, post("/api/tours/create", bad))).status, 400, JSON.stringify(bad).slice(0, 80));
@@ -314,4 +314,19 @@ test("runtime maps each route to the existing verb and adds no Assignment, Deal 
   assert.match(runtime, /appendRouteStopTransitionFn: context => invoke\(context, "append-tour-route-stop-transition"/);
   assert.match(runtime, /routing_source: "manual"/);
   assert.doesNotMatch(runtime, /assignment|deal_phase|advance-deal/i);
+});
+
+
+test("HTTP create accepts a canonical deal UUID and refuses opaque deal references", async () => {
+  const s = surface();
+  assert.equal((await fetchWith(s, post("/api/tours/create", {...createBody, subject_type:"deal", subject_id:propA}))).status, 200);
+  assert.equal((await fetchWith(s, post("/api/tours/create", {...createBody, subject_type:"deal", subject_id:"opaque"}))).status, 400);
+});
+
+
+test("HTTP create refuses unavailable canonical deals without returning database details", async () => {
+  const s = surface({createTourFn:async () => {throw new Error("tour deal is unavailable");}});
+  const response = await fetchWith(s, post("/api/tours/create", {...createBody,subject_type:"deal",subject_id:propA}));
+  assert.equal(response.status,400);
+  assert.deepEqual(await response.json(),{error:"invalid_request"});
 });
