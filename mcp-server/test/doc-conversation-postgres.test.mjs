@@ -158,3 +158,57 @@ test('frozen uppercase identifiers echo exactly for the app consumer and replay 
   refused(await submit({ ...args, idempotency_key: args.idempotency_key.toLowerCase() }), 'doc_request_key_reuse');
   await counts(args, 1);
 });
+
+for (const firstWriter of ['ask', 'answer']) {
+  test(`concurrent ${firstWriter} first serializes queued ask and assistant answer`, async () => {
+    const args = await setup();
+    await submit({ ...args, idempotency_key: randomUUID(), body: 'Previous synthetic ask' });
+    const answerArgs = { conversation_id: args.conversation_id, idempotency_key: randomUUID(),
+      msg_id: randomUUID(), role: 'assistant', body: 'Synthetic answer' };
+    const clients = { ask: await pool.connect(), answer: await pool.connect() };
+    let pending;
+    try {
+      for (const [writer, c] of Object.entries(clients)) {
+        await c.query('begin');
+        await c.query(`set local role ${writer === 'ask' ? 'carr_writer' : 'carr_authority'}`);
+        await c.query("set local statement_timeout = '10s'");
+        await c.query("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)");
+      }
+      const write = writer => executeRegisteredTool(clients[writer], joe,
+        writer === 'ask' ? 'submit-doc-request' : 'add-doc-conversation-turn', writer === 'ask' ? args : answerArgs);
+      const secondWriter = firstWriter === 'ask' ? 'answer' : 'ask';
+      const first = await write(firstWriter);
+      pending = write(secondWriter).then(result => ({ result }), error => ({ error }));
+      const deadline = Date.now() + 5000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const row = (await pool.query('select $1::int = any(pg_blocking_pids($2)) as blocked',
+          [clients[firstWriter].processID, clients[secondWriter].processID])).rows[0];
+        if (row.blocked) { blocked = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.equal(blocked, true, 'second writer must wait for the first transaction');
+      await clients[firstWriter].query('commit');
+      const second = await pending;
+      if (second.error) throw second.error;
+      await clients[secondWriter].query('commit');
+      const ask = firstWriter === 'ask' ? first : second.result;
+      const answer = firstWriter === 'answer' ? first : second.result;
+      assert.deepEqual(ask, accepted(args));
+      assert.equal(answer.ok, true);
+      await counts(args, 1);
+      assert.deepEqual((await pool.query('select sequence,role,body from ops.doc_conversation_turn where conversation_id=$1 order by sequence',
+        [args.conversation_id])).rows, [
+        { sequence: 0, role: 'human', body: 'Previous synthetic ask' },
+        ...(firstWriter === 'ask'
+          ? [{ sequence: 1, role: 'human', body: args.body }, { sequence: 2, role: 'assistant', body: answerArgs.body }]
+          : [{ sequence: 1, role: 'assistant', body: answerArgs.body }, { sequence: 2, role: 'human', body: args.body }]),
+      ]);
+    } finally {
+      // Release the first transaction before awaiting a possibly blocked second writer.
+      await clients[firstWriter].query('rollback');
+      await pending;
+      for (const c of Object.values(clients)) { await c.query('rollback'); c.release(); }
+    }
+  });
+}
