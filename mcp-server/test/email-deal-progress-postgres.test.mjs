@@ -2818,3 +2818,14 @@ test('snooze boundary is inclusive at the stored instant and same-key concurrenc
   } finally { await c.query('rollback'); }
   assert.equal((await c.query("select count(*)::int n from event where verb='snooze-email-proposal' and new_value->>'proposal_id'=$1",[stored.proposal_id])).rows[0].n,1);
 });
+
+test('the deployed app creates a deal then confirms its v1 possible-new-deal preview', async () => {
+  const { source, stored } = await filingAction();
+  const item = (await listed()).find(p => p.id === stored.proposal_id);
+  const created = await command('new-deal', { idempotency_key: randomUUID(), client: clientRef,
+    name: 'Synthetic legacy app created deal', deal_type: 'purchase', phase: 'research' });
+  const receipt = await command('confirm-email-filing', { idempotency_key: randomUUID(),
+    proposal_id: item.id, base_version: item.version, proposal_digest: item.preview.proposal_digest,
+    deal: created.deal_id });
+  assert.equal(receipt.deal, created.deal_id);
+});
