@@ -13,6 +13,7 @@ shows an unread row's label starting with "Unread". Fixtures use neutral IDs
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import hashlib
 import inspect
 import io
 import json
