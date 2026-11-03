@@ -164,11 +164,50 @@ assert result == 0 and not reads, 'selftest read a credential file'
         cursor.fetchall.return_value = [(1, None, 'fixture')]
         cursor.nextset.return_value = False
         with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
-            for _ in range(6):
+            for attempt in range(60):
                 result = health.query('select 1')
                 self.assertEqual((result.returncode, result.stdout), (0, '1||fixture'))
+                if attempt == 0:
+                    os.environ.pop('NEON_API_KEY')
         self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+        self.assertEqual(connection.call_count, 60)
         self.assertIn('default_transaction_read_only=on', connection.call_args.kwargs['options'])
+        self.assertEqual(connection.call_args.kwargs['connect_timeout'], 15)
+        self.assertIn('statement_timeout=120000', connection.call_args.kwargs['options'])
+
+    def test_health_timeout_opens_process_lifetime_breaker(self):
+        from lib import neon_cli
+        health = load('test_health_store_timeout', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        with patch.object(neon_cli.subprocess, 'run', side_effect=
+                          subprocess.TimeoutExpired('fixture', 60)) as provider:
+            for _ in range(60):
+                result = health.query('select 1')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('timed out', result.stderr)
+            provider.assert_called_once()
+            self.assertEqual(provider.call_args.kwargs['timeout'], 60)
+            self.assertEqual(provider.call_args.kwargs['stdin'], subprocess.DEVNULL)
+            self.assertEqual(provider.call_args.kwargs['env']['NEON_API_KEY'], 'synthetic-key')
+            self.assertNotIn('synthetic-key', provider.call_args.args[0])
+
+    def test_health_refusal_requires_fresh_reader_to_recover(self):
+        health = load('test_health_store_refusal_lifetime', 'tools/health_store.py')
+        health._tap = self.tap
+        self.assertEqual(health.query('select 1').returncode, 1)
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        self.assertEqual(health.query('select 1').returncode, 1)
+        self.assertFalse(self.marker.exists())
+        fresh = load('test_health_store_fresh', 'tools/health_store.py')
+        fresh._tap = self.tap
+        from unittest.mock import MagicMock
+        connection = MagicMock()
+        cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.nextset.return_value = False
+        with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
+            self.assertEqual(fresh.query('select 1').returncode, 0)
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
 
     def test_health_caches_failed_resolution(self):
         health = load('test_health_store_failure', 'tools/health_store.py')
@@ -178,6 +217,21 @@ assert result == 0 and not reads, 'selftest read a credential file'
             self.assertEqual(result.returncode, 1)
             self.assertIn('~/.config/carr/db.env', result.stderr)
         self.assertFalse(self.marker.exists())
+
+    def test_health_database_failure_refuses_without_caching_rows(self):
+        health = load('test_health_store_database_failure', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        from unittest.mock import Mock
+        connection = Mock(side_effect=RuntimeError('synthetic-private-detail'))
+        with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
+            for _ in range(2):
+                result = health.query('select 1')
+                self.assertEqual((result.returncode, result.stdout), (1, ''))
+                self.assertIn('RuntimeError', result.stderr)
+                self.assertNotIn('synthetic-private-detail', result.stderr)
+        self.assertEqual(connection.call_count, 2)
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
 
     def test_health_provider_failure_is_not_retried(self):
         health = load('test_health_store_provider_failure', 'tools/health_store.py')
