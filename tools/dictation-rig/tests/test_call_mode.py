@@ -1251,6 +1251,63 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report)["state"], "complete")
         self.assertNotIn("kind", report["review_questions"][0])
 
+    @patch.object(post_call, "coverage", _REAL_COVERAGE)
+    def test_task_deadline_source_spans_control_filing_and_retention(self) -> None:
+        cases = (
+            ("November 6 or November 9.", True, None, False),
+            ("end of next week.", False, None, False),
+            ("on November 6, 2026.", False, None, False),
+            ("sometime next month.", False, None, False),
+            ("Tuesday.", False, None, True),
+            ("tomorrow or Friday.", False, None, False),
+            ("end of next week.", True, None, False),
+            ("on November 6, 2026.", False, "2026-11-06", True),
+            (".", True, None, True),
+        )
+        for index, (timing, full_quote, supplied, can_file) in enumerate(cases):
+            with self.subTest(timing=timing, full_quote=full_quote, supplied=supplied):
+                session = self.session / str(index)
+                session.mkdir()
+                context = {**self.context, "session": session.name}
+                post_call.store_context(session, context)
+                post_call.write_private(session / "meta.json", {"started": "2026-10-26T12:00:00Z"})
+                action = "I will call Harbor vendor"
+                spoken = action + (" " if timing != "." else "") + timing
+                transcript = {"segments": [{"speaker": "Joe", "text": spoken}]}
+                post_call.write_private(session / "transcript.json", transcript)
+                raw = self.output(joe_tasks=[{
+                    "title": "Call Harbor vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": spoken if full_quote else action, "due_on": supplied, "fact_ids": ["task"],
+                }], deal_updates=[], draft_proposals=[])
+                extraction = {"topics": [{"topic_id": "harbor", "identity": {
+                    "deal_id": "deal-a", "participant_ids": []}}], "facts": [{
+                    "fact_id": "task", "topic_id": "harbor", "kind": "commitment",
+                    "statement": spoken, "asserted_value": None,
+                    "source_spans": [_REAL_COVERAGE.source_span(transcript, 0)], "disposition": None,
+                }], "non_fact_spans": []}
+
+                def distill(request):
+                    if request.get("stage") == "coverage":
+                        return json.loads(json.dumps(extraction))
+                    if request.get("stage") == "coverage_history":
+                        return {"dispositions": [{"fact_id": "task", "disposition": None}]}
+                    return json.loads(json.dumps(raw))
+
+                fixture = BIN_DIR.parent / "tests" / "fixtures" / "rehearsal_jev.py"
+                with patch.dict(os.environ, {"CARR_POST_CALL_JEV_FIXTURE": str(fixture)}):
+                    status = post_call.process_session(session, distiller=distill)
+                self.assertEqual(status["state"], "ready_review", status)
+                report = post_call.read_json(session / post_call.REPORT_FILE)
+                if timing == ".":
+                    self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                report["joe_tasks"][0].update(candidate_id="task", candidate_status="confirmed")
+                post_call.write_private(session / post_call.REPORT_FILE, report)
+                _REAL_COVERAGE.require_coverage(session, report, post_call.read_json)
+                self.assertEqual((post_call.review_complete(report),
+                                  post_call.retention_ready(session, "b" * 64) is not None),
+                                 (can_file, can_file))
+                self.assertEqual(bool(report["optional_reminders"]), timing == ".")
+
     def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
         excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
         context = {**self.context, "skipped_deals": excluded}
