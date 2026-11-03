@@ -27,6 +27,48 @@ before(async () => {
 });
 after(async () => { await fixture?.close(); });
 
+for (const [name, recorderStart, mapping, editTime, applies] of [
+  ['aligned control', '2026-11-02T15:00:00Z', true, '2026-11-02T15:01:30Z', false],
+  ['fast recorder without calibration', '2026-11-02T15:02:00Z', false, '2026-11-02T15:01:30Z', false],
+  ['fast recorder calibrated', '2026-11-02T15:02:00Z', true, '2026-11-02T15:01:30Z', false],
+  ['equal timestamp', '2026-11-02T15:00:00Z', true, '2026-11-02T15:01:00Z', false],
+  ['uncertainty overlaps edit', '2026-11-02T15:00:00Z', true, '2026-11-02T15:00:59Z', false],
+  ['later backward instruction', '2026-11-02T15:02:00Z', true, '2026-11-02T15:00:30Z', true],
+]) test(`claim through registered acceptance preserves chronology: ${name}`, async () => {
+  const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic chronology',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
+  await command('patch-deal-field', {idempotency_key:randomUUID(), deal, field:'phase', value:'closing', base_event_id:null});
+  await c.query("update event set recorded_at=$2 where subject_id=$1 and field='phase'", [deal, editTime]);
+  const handler = createCaptureHandler({withWriter: fn => transaction(fn, 'carr_writer')});
+  const environment = {CAPTURE_TOKENS: JSON.stringify({joe:'synthetic-device-proof'})};
+  const post = (path, body, headers = {}) => handler.fetch(new Request(`http://127.0.0.1/capture/${path}`, {
+    method:'POST', headers:{'content-type':'application/json', ...headers}, body:JSON.stringify(body),
+  }), environment);
+  const claim = await post('claim', {nonce:randomUUID(),device_id:'joe',mode:'meeting',workflow:'post_call',
+    started_at:recorderStart,consent:{announced_at:recorderStart}}, {authorization:'Bearer synthetic-device-proof'});
+  assert.equal(claim.status,200);
+  const token = (await claim.json()).session_token;
+  const session = (await c.query("update capture_session set created_at='2026-11-02T15:00:06Z' where session_token_hash=$1 returning id", [createHash('sha256').update(token).digest('hex')])).rows[0].id;
+  const quote='Move the synthetic deal to legal';
+  const filed = await post('candidates', {session_token:token,idempotency_key:randomUUID(),items:[
+    {kind:'phase_move',payload:{deal,field:'phase',value:'legal'},evidence_quote:quote,confidence:1},
+    {kind:'activity',payload:{ref:deal,kind:'note',summary:'Discussed synthetic deal'},evidence_quote:'Discussed synthetic deal',confidence:1}],
+    evidence_sources:[{speaker:'joe',source_sha256:'b'.repeat(64),quote_sha256:createHash('sha256').update(quote).digest('hex'),
+      recording_started_at:recorderStart,occurrence_start_ms:60000,occurrence_end_ms:65000,
+      ...(mapping ? {claim_elapsed_ms:5000,claim_round_trip_ms:1000} : {})},null]});
+  assert.equal(filed.status,200,JSON.stringify(await filed.clone().json()));
+  const [id,note] = (await filed.json()).candidate_ids;
+  const accept = () => command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true});
+  if (applies) await accept();
+  else {
+    await assert.rejects(accept(), e => !!e.payload?.conflict || e.payload?.error === 'missing_phase_chronology');
+    assert.equal((await c.query('select status from capture_candidate where id=$1',[id])).rows[0].status,'pending');
+    const outcome=(await command('read-call-outcomes')).calls.find(call=>call.session_id===session);
+    assert.ok(outcome.open_cards.some(card=>card.candidate_id===id));
+  }
+  await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:note,accept:true});
+  assert.equal((await command('get-deal-room',{deal})).phase,applies?'legal':'closing');
+});
+
 async function transaction(fn, role = null) {
   await c.query('begin');
   try {

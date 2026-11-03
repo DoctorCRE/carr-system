@@ -2386,10 +2386,16 @@ class AutomaticApplyTests(unittest.TestCase):
         quote = str(self.update()["evidence"])
         post_call.write_private(self.session / post_call.REPORT_FILE, {"deal_updates": [
             self.update(phase_move={"value": "due_diligence"})]})
-        post_call.write_private(self.session / post_call.CONTEXT_FILE, {"started_at": "2026-11-02T15:00:00Z"})
+        post_call.write_private(self.session / "meta.json", {"started": "2026-11-02T15:00:00Z"})
+        with patch.object(call_mode, "iso_utc", return_value="2026-11-02T15:00:01Z"):
+            call_mode.write_call_context(self.session, "weekly_deal_call", "Joe")
+        post_call.write_private(self.session / ".capture.json", {
+            "claim_elapsed_ms": 1000, "claim_round_trip_ms": 100})
         self.transcript["segments"][0].update(start_ms=60000, end_ms=65000)
         post_call.write_private(self.session / "transcript.json", self.transcript)
         source = post_call.automatic_evidence(self.session)[1]
+        self.assertEqual(source["claim_elapsed_ms"], 1000)
+        self.assertEqual(source["claim_round_trip_ms"], 100)
         self.assertEqual(source["occurrence_start_ms"], 60000)
         self.assertEqual(source["occurrence_end_ms"], 65000)
         self.assertEqual(source["recording_started_at"], "2026-11-02T15:00:00Z")
