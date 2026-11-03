@@ -22,11 +22,25 @@ export function deliverableMime(b) {
   if (starts(b, [255, 216, 255])) return "image/jpeg";
   if (text(b.subarray(0, 4)) === "RIFF" && text(b.subarray(8, 12)) === "WEBP")
     return "image/webp";
-  if (
-    text(b.subarray(4, 8)) === "ftyp" &&
-    ["heic", "heix", "hevc", "hevx"].includes(text(b.subarray(8, 12)))
-  )
-    return "image/heic";
+  if (text(b.subarray(4, 8)) === "ftyp" && b.length >= 16) {
+    const boxSize = new DataView(
+      b.buffer,
+      b.byteOffset,
+      b.byteLength,
+    ).getUint32(0);
+    for (
+      let offset = 8;
+      offset + 4 <= Math.min(boxSize, b.length, 128);
+      offset += offset === 8 ? 8 : 4
+    ) {
+      if (
+        ["heic", "heix", "hevc", "hevx"].includes(
+          text(b.subarray(offset, offset + 4)),
+        )
+      )
+        return "image/heic";
+    }
+  }
   if (starts(b, [208, 207, 17, 224, 161, 177, 26, 225]) && b.length >= 512) {
     const directory = new TextDecoder("utf-16le").decode(b);
     if (directory.includes("WordDocument\0")) return "application/msword";

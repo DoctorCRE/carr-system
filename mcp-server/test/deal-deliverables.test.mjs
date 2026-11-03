@@ -44,6 +44,18 @@ test("content validation accepts PDF and common images without trusting extensio
     /unsupported_mime/,
   );
 });
+test("HEIC content accepts compatible HEIC brands and refuses unrelated ISO media", () => {
+  const container = (brand) =>
+    new Uint8Array([
+      0,
+      0,
+      0,
+      24,
+      ...new TextEncoder().encode(`ftypmif10000${brand}mif1`),
+    ]);
+  assert.equal(deliverableMime(container("heic")), "image/heic");
+  assert.throws(() => deliverableMime(container("avif")), /unsupported_mime/);
+});
 test("byte verification refuses size, MIME and SHA mismatches", async () => {
   const receipt = {
     bytes: pdf.length,
