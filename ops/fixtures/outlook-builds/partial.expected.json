@@ -1,0 +1,74 @@
+{
+  "schema": "hxprobe-db-fixture/v1",
+  "tables": {
+    "folders": {
+      "columns": [
+        "id",
+        "account_id",
+        "name",
+        "parent_status",
+        "parent_id"
+      ],
+      "rows": []
+    },
+    "message_objects": {
+      "columns": [
+        "local_key",
+        "account_id",
+        "folder_id",
+        "subject",
+        "recipients_status"
+      ],
+      "rows": []
+    },
+    "messages": {
+      "columns": [
+        "id",
+        "local_keys",
+        "sender",
+        "subject",
+        "body",
+        "html",
+        "body_kind",
+        "body_source",
+        "copies",
+        "flag_status",
+        "flag_due_unix",
+        "flag_completed_unix",
+        "folder_links_unresolved",
+        "sent_unix",
+        "received_unix"
+      ],
+      "rows": []
+    },
+    "recipients": {
+      "columns": [
+        "local_key",
+        "kind",
+        "kind_code",
+        "position",
+        "address",
+        "name"
+      ],
+      "rows": []
+    },
+    "message_folders": {
+      "columns": [
+        "message_id",
+        "folder_id"
+      ],
+      "rows": []
+    }
+  },
+  "meta": {
+    "blocks_found": 1,
+    "blocks_verified": 0,
+    "messages": 0,
+    "messages_full": 0,
+    "copies_collapsed": 0,
+    "details_rejected": 0,
+    "messages_with_detail": 0,
+    "recipient_conflicts": 0,
+    "recipients": 0
+  }
+}
