@@ -345,11 +345,15 @@ MONTHS = ("january", "february", "march", "april", "may", "june", "july", "augus
           "september", "october", "november", "december")
 TEMPORAL_EXPRESSION = re.compile(
     r"\b(?:\d+(?:st|nd|rd|th)?|" + "|".join(WEEKDAYS + MONTHS)
-    + r"|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+    + r"|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|"
+    r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|"
+    r"eighteenth|nineteenth|twentieth|thirtieth|"
     r"today|tomorrow|yesterday|next|this|last|previous|following|"
-    r"end|middle|mid|late|later|early|sometime|around|soon|eventually|"
+    r"end|middle|mid|late|later|early|sometime|around|soon|eventually|asap|immediately|"
     r"by|before|after|within|since|until|during|from|"
-    r"days?|weeks?|months?|years?|quarters?|weekends?|"
+    r"minutes?|hours?|days?|weeks?|months?|years?|quarters?|weekends?|"
     r"morning|afternoon|evening|tonight|noon|midnight|"
     r"thanksgiving|christmas|easter|holidays?)\b", re.IGNORECASE,
 )

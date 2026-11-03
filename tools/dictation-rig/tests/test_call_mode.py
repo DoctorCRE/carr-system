@@ -1341,6 +1341,8 @@ class PostCallTests(unittest.TestCase):
             ("Tuesday or next week", "ambiguous"), ("this Tuesday next week", "ambiguous"),
             ("Tuesday next week", "resolved"), ("about Tuesday", "ambiguous"),
             ("Thursday November 6, 2026", "ambiguous"),
+            ("the fourteenth", "ambiguous"), ("Tue", "ambiguous"),
+            ("ASAP", "ambiguous"), ("in two hours", "ambiguous"),
         )
         for phrase, expected in cases:
             for supplied in (None, "2026-11-06"):
