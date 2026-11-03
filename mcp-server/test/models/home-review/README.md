@@ -39,3 +39,28 @@ another-actor refusal and refused-to-projected refresh transitions. It verifies
 fact evidence and decision lists, resolved refusals and duplicate representatives.
 The chart-to-spec check tests only the abstract state graph and TypeOK, not domain
 guards. PostgreSQL tests are the executable authority and freshness checks.
+
+Round 2 state agreement. Exact mailbox-owned reads can open a pending reply
+before its email deferral deadline. Broad email lists still hide it until due.
+Home snooze and settlement change placement, not the pending owner's operations.
+Home v3 checks pending reply IDs in one bounded batch in the projection query.
+It derives references from owner status and detail uses that same reference.
+Existing Home fields, v1 and v2 stay unchanged. Sending, failed and handled replies
+have no inline draft reference. Sent replies refuse as resolved; dismissed replies
+are absent. No external call, queue, cache, new write or per-card query is added.
+
+Named table-driven tests in home-review-postgres.test.mjs cover every reply status
+and the placement states. `reply state agreement: future deferred via owner snooze`
+executes Not now, rejects the old version, opens the refreshed card, checks mailbox
+scope, edits through the owner, refuses stale detail and opens the fresh version.
+`reply state agreement: deferred deadline reached` covers Deferred to Projected
+and then DetailLoaded. `Home snoozed` and `Home settled` preserve owner actions.
+`approved to send`, `sent resolved`, `failed`, `dismissed resolved` and
+`confirmed handled` verify null references and their corresponding open refusals.
+The original named task tests still cover submission, refresh, Undo and refusal.
+
+Design comparison. Suppressing deferred references would require changing the
+projection's established placement. Exact owner hydration instead bypasses only
+the list deadline. The extra handled-state mismatch is addressed by a bounded
+pending-ID read inside the existing projection statement, without changing source
+fields or duplicating domain status transitions in a new migration.

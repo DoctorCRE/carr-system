@@ -851,7 +851,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (a.email_source is null and a.actor_id=$7::uuid))) as summary_owned
           from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
           where p.status=$4 and ($8::uuid is null or (p.id=$8 and p.kind='reply_draft' and p.owner=$6 and a.email_source->>'mailbox_owner'=$6))
-            and (p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
+            and ($8::uuid is not null or p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
             and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
           order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false,partnerAuthoritySlugForActor(actor),actor.id,args.proposal_id ?? null]);

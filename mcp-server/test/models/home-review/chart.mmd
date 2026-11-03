@@ -1,5 +1,8 @@
 stateDiagram-v2
   [*] --> Projected
+  Projected --> Deferred: Choose Not now on a pending reply
+  Deferred --> DetailLoaded: Open the refreshed deferred reply
+  Deferred --> Projected: Deadline arrives and the email list shows the reply
   Projected --> DetailLoaded: Open the exact current card
   Projected --> Refused: Card changed, disappeared, resolved or unsupported
   Projected --> Refused: Another actor requests the card

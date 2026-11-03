@@ -44,7 +44,7 @@ export function homeReviewTools({ ToolError, readTool }) {
         const item = await current();
         if (item.source_version !== args.source_version) fail('home_review_stale');
         if (item.source_state === 'done') fail('home_review_resolved');
-        const reference = homeReviewReference(item);
+        const reference = item.review_reference;
         if (!reference) fail('home_review_unsupported');
         let detail, operations;
         if (reference.kind === 'action') {

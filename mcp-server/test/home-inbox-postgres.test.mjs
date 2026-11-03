@@ -561,6 +561,7 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
   const v2Before=(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}));
   await c.query(readFileSync(new URL('../../migrations/1140_home_inbox_resolution_adapters.sql',import.meta.url),'utf8'));
   assert.deepEqual(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}),v2Before,'shared placement preserves the v2 snapshot');
+  await c.query('grant select on email_proposal to carr_writer');
   await c.query('set role carr_writer');
   assert.equal((await executeRegisteredTool(c,joe,'read-home-inbox-v3',{})).ok,true);
   await c.query('reset role');
