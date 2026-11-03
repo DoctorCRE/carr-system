@@ -30,13 +30,15 @@ after(async () => { await fixture?.close(); });
 
 for (const [name, recorderStart, mapping, editTime, applies] of [
   ['real Call Mode receipt with later observation', '2026-11-02T15:00:00Z', 'python', '2026-11-02T15:01:30Z', false],
+  ['clock moved backward before claim', '2026-11-02T15:00:00Z', 'clockstep', '2026-11-02T15:01:30Z', false],
+  ['skew exceeds the bound even for a later instruction', '2026-11-02T15:02:00Z', true, '2026-11-02T15:00:30Z', false],
   ['aligned control', '2026-11-02T15:00:00Z', true, '2026-11-02T15:01:30Z', false],
   ['fast recorder without calibration', '2026-11-02T15:02:00Z', false, '2026-11-02T15:01:30Z', false],
   ['excessive request uncertainty', '2026-11-02T15:02:00Z', 'slow', '2026-11-02T15:01:30Z', false],
   ['fast recorder calibrated', '2026-11-02T15:02:00Z', true, '2026-11-02T15:01:30Z', false],
   ['equal timestamp', '2026-11-02T15:00:00Z', true, '2026-11-02T15:01:00Z', false],
   ['uncertainty overlaps edit', '2026-11-02T15:00:00Z', true, '2026-11-02T15:00:59Z', false],
-  ['later backward instruction', '2026-11-02T15:02:00Z', true, '2026-11-02T15:00:30Z', true],
+  ['later backward instruction', '2026-11-02T15:00:00Z', true, '2026-11-02T15:00:30Z', true],
 ]) test(`claim through registered acceptance preserves chronology: ${name}`, async () => {
   const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic chronology',$1,'purchase','site_selection','joe',$2,$2) returning id", [clientId, actor.id])).rows[0].id;
   await command('patch-deal-field', {idempotency_key:randomUUID(), deal, field:'phase', value:'closing', base_event_id:null});
@@ -50,7 +52,7 @@ for (const [name, recorderStart, mapping, editTime, applies] of [
     started_at:recorderStart,consent:{announced_at:recorderStart}}, {authorization:'Bearer synthetic-device-proof'});
   assert.equal(claim.status,200);
   const token = (await claim.json()).session_token;
-  const session = (await c.query("update capture_session set created_at='2026-11-02T15:00:06Z' where session_token_hash=$1 returning id", [createHash('sha256').update(token).digest('hex')])).rows[0].id;
+  const session = (await c.query("update capture_session set created_at=$2 where session_token_hash=$1 returning id", [createHash('sha256').update(token).digest('hex'), mapping === 'clockstep' ? '2026-11-02T15:02:06Z' : '2026-11-02T15:00:06Z'])).rows[0].id;
   const quote='Move the synthetic deal to legal';
   let source = {speaker:'joe',source_sha256:'b'.repeat(64),quote_sha256:createHash('sha256').update(quote).digest('hex'),
     recording_started_at:recorderStart,occurrence_start_ms:60000,occurrence_end_ms:65000,
