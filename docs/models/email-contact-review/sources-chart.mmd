@@ -1,0 +1,44 @@
+---
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
+---
+stateDiagram-v2
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
+  }
+  class legendWorks works
+  state "At the same time" as regions {
+    [*] --> r0s1
+    state "Mail with store key" as r0s0
+    state "Mail without store key" as r0s1
+    r0s1 --> r0s1 : scan another decoder alias<br/>[when Waiting for next scan,<br/>frozen signature retained]
+    %% when r1s4
+    r0s1 --> r0s0 : scan another decoder alias<br/>[when Waiting for next scan,<br/>frozen signature retained]
+    %% when r1s4
+    --
+    [*] --> r1s1
+    state "Checking signature, frozen<br/>signature retained" as r1s0
+    state "Checking signature,<br/>signature unread" as r1s1
+    state "Filing mail activity,<br/>frozen signature retained" as r1s2
+    state "Reconciling mail, frozen<br/>signature retained" as r1s3
+    state "Waiting for next scan,<br/>frozen signature retained" as r1s4
+    r1s1 --> r1s2 : hold changed evidence or<br/>submit frozen proposal
+    r1s2 --> r1s4 : file activity or retain its<br/>retry
+    r1s3 --> r1s0 : resolve saved signature source
+    r1s4 --> r1s3 : scan another decoder alias
+  }
+  class r0s0 works
+  class r0s1 works
+  class r1s0 works
+  class r1s1 works
+  class r1s2 works
+  class r1s3 works
+  class r1s4 works
