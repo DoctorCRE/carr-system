@@ -120,6 +120,48 @@ class LedgerTests(unittest.TestCase):
         ledger = cov.build_call_ledger(self.transcript, self.context, self.extract, **kwargs)
         return cov.reconcile_history(ledger, self.transcript, self.history)
 
+    def test_unrecovered_speech_is_visible_without_model_cooperation(self):
+        self.transcript['unrecovered_speech'] = 'Call recovery budget spent.'
+        span = self.transcript['segments'][1]
+        span.update(start_ms=61500, end_ms=94000, unrecovered=True)
+        pc.write_private(self.session / 'transcript.json', self.transcript)
+        with patch.object(pc, 'now', return_value='2026-01-01T00:00:00Z'), patch.object(
+                pc, 'LOG_PATH', self.session / 'post-call.log'):
+            status = pc.process_session(self.session, self.distill, run_checks=False)
+        self.assertEqual(status['state'], 'ready_review')
+        report = pc.read_json(self.session / pc.REPORT_FILE)
+        self.assertIn('Part of this call could not be transcribed', report['report']['summary'])
+        self.assertIn('1:01 to 1:34', report['report']['summary'])
+        self.assertTrue(any('1:01 to 1:34' in q['question'] and not q['resolved']
+                            for q in report['review_questions']))
+        self.assertFalse(pc.review_complete(report))
+        self.assertIn(self.raw_report()['report']['summary'], report['report']['summary'])
+
+        for state in ('ready_review', 'blocked'):
+            with self.subTest(state=state):
+                report['report']['summary'] = self.raw_report()['report']['summary']
+                report['review_questions'] = [q for q in report['review_questions']
+                                              if 'could not be transcribed' not in q['question']]
+                pc.write_private(self.session / pc.REPORT_FILE, report)
+                pc.write_private(self.session / pc.STATUS_FILE, {'state': state})
+                with patch.object(pc, 'now', return_value='2026-01-01T00:00:00Z'):
+                    for _ in range(2):
+                        pc.process_session(self.session, lambda _: self.fail('resume distilled'), run_checks=False)
+                report = pc.read_json(self.session / pc.REPORT_FILE)
+                self.assertEqual(report['report']['summary'].count('Part of this call could not be transcribed'), 1)
+                self.assertEqual(sum('could not be transcribed' in q['question']
+                                     for q in report['review_questions']), 1)
+
+    def test_unrecovered_speech_without_span_is_disclosed(self):
+        self.transcript['unrecovered_speech'] = 'Call recovery budget spent.'
+        pc.write_private(self.session / 'transcript.json', self.transcript)
+        with patch.object(pc, 'now', return_value='2026-01-01T00:00:00Z'), patch.object(
+                pc, 'LOG_PATH', self.session / 'post-call.log'):
+            pc.process_session(self.session, self.distill, run_checks=False)
+        report = pc.read_json(self.session / pc.REPORT_FILE)
+        self.assertIn('Part of this call could not be transcribed', report['report']['summary'])
+        self.assertIn('time span unavailable', report['report']['summary'])
+
     def test_publish_coverage_failure_is_visible(self):
         pc.process_session(self.session, self.distill, run_checks=False)
         pc.write_private(self.session / '.capture.json', {'session_token': 'synthetic'})

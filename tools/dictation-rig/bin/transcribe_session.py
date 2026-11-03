@@ -54,6 +54,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -68,6 +69,7 @@ import speaker_split
 STATUS_FILE = ".transcription-status.json"
 MAX_ATTEMPTS = 3
 RECOVERY_TIMEOUT_SECONDS = 120
+CALL_RECOVERY_BUDGET_SECONDS = 2 * RECOVERY_TIMEOUT_SECONDS
 
 AFCONVERT_BIN = "/usr/bin/afconvert"
 WHISPER_CLI_BIN = "/opt/homebrew/bin/whisper-cli"
@@ -102,11 +104,15 @@ class MetaJson(TypedDict):
     start_offset_ms: dict[str, int]
 
 
-class Segment(TypedDict):
+class SegmentFields(TypedDict):
     start_ms: int
     end_ms: int
     speaker: str
     text: str
+
+
+class Segment(SegmentFields, total=False):
+    unrecovered: bool
 
 
 class TrackSpeakers(TypedDict):
@@ -116,7 +122,7 @@ class TrackSpeakers(TypedDict):
     speakers: int
 
 
-class TranscriptJson(TypedDict):
+class TranscriptFields(TypedDict):
     engine: str
     model: str
     model_sha256: str
@@ -130,6 +136,10 @@ class TranscriptJson(TypedDict):
     segments: list[Segment]
 
 
+class TranscriptJson(TranscriptFields, total=False):
+    unrecovered_speech: str
+
+
 @dataclass(frozen=True)
 class RawSegment:
     """One whisper-cli segment, offsets still relative to its own track."""
@@ -137,6 +147,12 @@ class RawSegment:
     start_ms: int
     end_ms: int
     text: str
+    unrecovered: bool = False
+
+
+@dataclass
+class RecoveryBudget:
+    remaining: float = CALL_RECOVERY_BUDGET_SECONDS
 
 
 class TranscribeError(Exception):
@@ -359,7 +375,10 @@ def repetition_spans(segments: list[RawSegment]) -> list[tuple[int, int]]:
 def run_whisper(
     wav_path: Path, model_path: Path, prompt: str, out_dir: Path, log: LogFunc,
     *, timeout: int | None = None, env: dict[str, str] | None = None,
+    recovery_budget: RecoveryBudget | None = None,
 ) -> list[RawSegment]:
+    budget = recovery_budget if recovery_budget is not None else RecoveryBudget()
+
     def decode(audio: Path, *, recovery: bool = False) -> list[RawSegment]:
         out_stem = out_dir / audio.stem
         cmd = [WHISPER_CLI_BIN, "-m", str(model_path), "-oj", "-of", str(out_stem),
@@ -371,11 +390,17 @@ def run_whisper(
         log(f"WHISPER {audio.name} model={model_path.name} recovery={recovery}")
         json_path = out_stem.with_suffix(".json")
         json_path.unlink(missing_ok=True)
-        decode_timeout = timeout
+        decode_timeout: float | None = timeout
         if recovery:
             decode_timeout = (RECOVERY_TIMEOUT_SECONDS if timeout is None
                               else min(timeout, RECOVERY_TIMEOUT_SECONDS))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=decode_timeout, env=env)
+            decode_timeout = min(decode_timeout, budget.remaining)
+        started = time.monotonic() if recovery else 0
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=decode_timeout, env=env)
+        finally:
+            if recovery:
+                budget.remaining = max(0, budget.remaining - (time.monotonic() - started))
         if result.returncode != 0 or not json_path.exists():
             raise TranscribeError(f"whisper-cli failed for {audio.name} (rc={result.returncode})")
         return parse_whisper_json(json_path)
@@ -398,12 +423,24 @@ def run_whisper(
                 log(f"REPETITION start_ms={start_ms} end_ms={end_ms}")
                 for offset in range(start_ms, end_ms, 30000):
                     duration = min(30000, end_ms - offset)
-                    chunk = out_dir / f"{wav_path.stem}-recovery-{offset}.wav"
-                    source.setpos(offset * rate // 1000)
-                    with wave.open(str(chunk), "wb") as output:
-                        output.setparams(source.getparams())
-                        output.writeframes(source.readframes(duration * rate // 1000))
-                    rows = decode(chunk, recovery=True)
+                    rows = None
+                    if budget.remaining > 0:
+                        chunk = out_dir / f"{wav_path.stem}-recovery-{offset}.wav"
+                        source.setpos(offset * rate // 1000)
+                        with wave.open(str(chunk), "wb") as output:
+                            output.setparams(source.getparams())
+                            output.writeframes(source.readframes(duration * rate // 1000))
+                        try:
+                            rows = decode(chunk, recovery=True)
+                        except subprocess.TimeoutExpired:
+                            if budget.remaining > 0:
+                                raise
+                    if rows is None:
+                        recovered.extend(RawSegment(max(row.start_ms, offset), row.end_ms,
+                                                    row.text, unrecovered=True)
+                                         for row in segments[first:last] if row.end_ms > offset)
+                        log(f"WARN unrecovered speech start_ms={offset} end_ms={end_ms}: recovery budget spent")
+                        break
                     if not rows or repetition_spans(rows):
                         raise RepetitionError("Unresolved transcription repetition")
                     if any(row.start_ms < 0 or row.end_ms <= row.start_ms or row.end_ms > duration
@@ -415,7 +452,7 @@ def run_whisper(
     except (OSError, ValueError, wave.Error, subprocess.SubprocessError, TranscribeError) as exc:
         raise RepetitionError("Transcription repetition recovery failed") from exc
     recovered.extend(segments[previous:])
-    if repetition_spans(recovered):
+    if repetition_spans([row for row in recovered if not row.unrecovered]):
         raise RepetitionError("Unresolved transcription repetition across recovery chunks")
     return recovered
 
@@ -423,15 +460,18 @@ def run_whisper(
 def shift_and_tag(
     raw_segments: list[RawSegment], offset_ms: int, speakers: list[str]
 ) -> list[Segment]:
-    return [
-        {
+    segments: list[Segment] = []
+    for raw, speaker in zip(raw_segments, speakers):
+        segment: Segment = {
             "start_ms": raw.start_ms + offset_ms,
             "end_ms": raw.end_ms + offset_ms,
             "speaker": speaker,
             "text": raw.text,
         }
-        for raw, speaker in zip(raw_segments, speakers)
-    ]
+        if raw.unrecovered:
+            segment["unrecovered"] = True
+        segments.append(segment)
+    return segments
 
 
 # --- rendering -------------------------------------------------------------
@@ -469,6 +509,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
     split_tracks: list[str] = []
     speaker_tracks: dict[str, TrackSpeakers] = {}
 
+    recovery_budget = RecoveryBudget()
     with tempfile.TemporaryDirectory(prefix="carr-transcribe-") as tmp_str:
         tmp_dir = Path(tmp_str)
         for label in ("mic", "system"):
@@ -484,7 +525,8 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
 
             try:
                 wav_path = convert_caf_to_wav(caf_path, tmp_dir, log)
-                raw_segments = run_whisper(wav_path, model_path, prompt, tmp_dir, log)
+                raw_segments = run_whisper(wav_path, model_path, prompt, tmp_dir, log,
+                                           recovery_budget=recovery_budget)
             except RepetitionError:
                 raise
             except TranscribeError as exc:
@@ -525,6 +567,11 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
         "missing_tracks": missing_tracks,
         "segments": merged_segments,
     }
+    if any(row.get("unrecovered") for row in merged_segments):
+        transcript["unrecovered_speech"] = (
+            "Some speech was not recovered because the call recovery budget was spent. "
+            "Flagged segments retain the original looping text. Review the saved recording."
+        )
     write_outputs(session_dir, transcript)
 
     post_status = post_call.run_session(session_dir)
