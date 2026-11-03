@@ -400,6 +400,8 @@ async function candidates(request, dependencies) {
                   and e.recorded_at < s.created_at + (($3::bigint - $5::bigint - $6::bigint - $7::bigint) * interval '1 millisecond')
                 order by e.recorded_at desc,e.id desc limit 1) as event_id
                from capture_session s where s.id=$2 and s.started_at=$4::timestamptz
+                 and s.created_at >= s.started_at + (($5::bigint - $7::bigint) * interval '1 millisecond')
+                 and s.created_at <= s.started_at + (($5::bigint + $6::bigint + $7::bigint) * interval '1 millisecond')
                /* capture:phase-chronology-base */`,
               [item.payload.deal, session.id, source.occurrence_start_ms, source.recording_started_at,
                 source.claim_elapsed_ms, source.claim_round_trip_ms, RECORDING_CLOCK_UNCERTAINTY_MS]);
