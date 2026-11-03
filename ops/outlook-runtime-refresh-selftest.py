@@ -156,6 +156,76 @@ class HostTests(unittest.TestCase):
         self.assertIn(('launchctl', 'disable', self.host.domain + '/' + LABELS[1]), calls)
         self.assertFalse(any('bootstrap' in c and str(self.host.plist_path(LABELS[1])) in c for c in calls))
 
+    def test_complete_host_transaction_and_verify_rollback(self):
+        for invalid in (False, True):
+            with self.subTest(invalid=invalid):
+                self.settings.vendor.mkdir(exist_ok=True)
+                decoder = self.settings.vendor / 'decoder'
+                decoder.write_text('old')
+                self.settings.decoder = decoder
+                self.settings.services = ('intake', 'triage', 'outbox')
+                self.settings.verify_helper = Mock()
+                templates = self.runtime / 'ops/launchd'
+                templates.mkdir(parents=True, exist_ok=True)
+                for label in LABELS:
+                    (templates / (label + '.plist')).write_bytes(plistlib.dumps({'Label': label}))
+                    self.host.plist_path(label).write_text('old plist')
+                self.settings.render_plist = lambda path: path.read_bytes()
+                registered = {LABELS[0]}
+                sha = ['b' * 40]
+                calls = []
+                def command(*args, **kwargs):
+                    calls.append(args)
+                    out = ''
+                    if args[0] == 'git':
+                        tail = args[3:]
+                        repo = args[2]
+                        if tail == ('remote', 'get-url', 'origin'):
+                            out = 'https://github.com/DoctorCRE/carr-system.git'
+                        elif tail == ('symbolic-ref', '--short', 'HEAD'):
+                            out = 'main'
+                        elif tail[0] == 'ls-remote':
+                            out = 'a' * 40 + ' refs/heads/main'
+                        elif tail == ('rev-parse', 'HEAD'):
+                            out = sha[0] if repo == self.runtime else 'a' * 40
+                        elif tail[0] == 'checkout':
+                            sha[0] = tail[-1]
+                    elif args[:2] == ('launchctl', 'list'):
+                        out = '\n'.join('- 0 ' + label for label in registered)
+                    elif args[:2] == ('launchctl', 'bootout'):
+                        self.assertTrue(self.host.locked)
+                        registered.discard(args[2].split('/')[-1])
+                    elif args[:2] == ('launchctl', 'bootstrap'):
+                        registered.add(Path(args[3]).stem)
+                    elif args[0] == '/bin/zsh' and 'install-outlook-intake.sh' in str(args[1]):
+                        self.assertFalse(registered)
+                        self.assertTrue(self.host.locked)
+                        sha[0] = 'c' * 40 if invalid else 'a' * 40
+                        decoder.write_text('new')
+                    return subprocess.CompletedProcess(args, 0, out, '')
+                self.host.command = command
+                self.assertEqual(refresh(self.host), 'dry run')
+                self.assertFalse(self.host.journal.exists())
+                self.assertFalse(any(c[0] == '/bin/zsh' or c[:2] in (
+                    ('launchctl', 'disable'), ('launchctl', 'bootout'), ('launchctl', 'bootstrap')) for c in calls))
+                calls.clear()
+                if invalid:
+                    with self.assertRaises(ValueError):
+                        refresh(self.host, apply=True)
+                    self.assertEqual(sha[0], 'b' * 40)
+                    self.assertEqual(decoder.read_text(), 'old')
+                    self.assertEqual(self.host.plist_path(LABELS[0]).read_text(), 'old plist')
+                else:
+                    self.assertEqual(refresh(self.host, apply=True), 'refreshed')
+                    self.assertEqual(sha[0], 'a' * 40)
+                    self.assertEqual(decoder.read_text(), 'new')
+                    calls.clear()
+                    self.assertEqual(refresh(self.host, apply=True), 'already current')
+                    self.assertFalse(any(c[0] == '/bin/zsh' or c[:2] in (
+                        ('launchctl', 'disable'), ('launchctl', 'bootout'), ('launchctl', 'bootstrap')) for c in calls))
+                self.assertEqual(registered, {LABELS[0]})
+                self.assertFalse(self.host.recovery_pending())
+
     def test_restore_failure_keeps_journal(self):
         self.host.snapshot()
         self.host.command.side_effect = OSError('launchd unavailable')
