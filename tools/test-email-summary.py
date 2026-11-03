@@ -15,7 +15,7 @@ class SummaryTests(unittest.TestCase):
         seen = []
         result = email_summary.generate({'body': body}, lambda text: seen.append(text) or {
             'text': 'The sender asks for a review of the terms.', 'evidence': 'Please review the terms.'})
-        self.assertEqual(seen, ['Please review the terms.'])
+        self.assertEqual(seen, ['<incoming_email>\nPlease review the terms.\n</incoming_email>'])
         self.assertEqual(result['status'], 'available')
 
     def test_refusal_failure_incomplete_and_ungrounded_are_unavailable(self):

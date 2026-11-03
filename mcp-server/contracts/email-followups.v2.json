@@ -19,7 +19,7 @@
     "email_summary": {
       "type": "object|null",
       "default": null,
-      "presentation": "Null is permitted for old producers. This producer returns available metadata only for the current captured source hash and generator version; otherwise text=null and status=unavailable. Reads never generate. Evidence quote remains separate and unchanged.",
+      "presentation": "Null is returned outside the actor's mailbox scope and is permitted for old producers. This producer returns available metadata only for the current captured source hash and generator version; otherwise text=null and status=unavailable. Reads never generate. Evidence quote remains separate and unchanged.",
       "properties": {
         "text": "One or two plain sentences, at most 300 characters, or null when unavailable.",
         "source_hash": "sha256 of the JSON tuple [captured activity summary, detail, email_context]; excludes filing, proposal, action and version state.",
@@ -56,9 +56,9 @@
   },
   "summary_producer": {
     "reservation": "record-email-proposal mode=summary_claim with activity_id and source_hash atomically grants at most three attempts per source hash and generator version. A five minute lease excludes concurrent generation. Successful summaries are immutable for that key.",
-    "result": "mode=summary_result requires the live claim_id, unchanged source_hash, summary_status, and summary_provenance. Available results require summary_text and literal source evidence; unavailable results have no text. Failures, refusals and stale results never manufacture text or block filing.",
-    "routing": "Recent incoming messages are summarized independently of action proposals. Summaries are stored once per activity/source/version, shared by every proposal. No reply draft is used as input.",
+    "result": "mode=summary_result requires the live claim_id, unchanged source_hash, summary_status, and summary_provenance. Available results require summary_text and literal captured body, subject or sender evidence; unavailable results have no text. Failures, refusals and stale results never manufacture text or block filing.",
+    "routing": "Queue reads and both mutations require the server-derived partner mailbox owner, or exact capturing actor for ownerless legacy sources. Foreign direct writes fail with email_summary_source_not_owned before touching generation state. Recent incoming messages are summarized independently of action proposals. Summaries are stored once per activity/source/version, shared by every proposal. No reply draft is used as input.",
     "backfill": "python -m lib.email_summary defaults to a dry-run page of pending sources and reports activity_ids, counts and next_cursor. Resume with --after. --execute requires explicit --activity-id values from that dry run. --limit is bounded to 200. No historical backfill executes during deployment.",
-    "quality": "Generator strips signatures, boilerplate and quoted history, preserves forwarded attribution and treats instructions as data. Known incomplete or over-limit captures return unavailable. Legacy body-only capture completeness is unknown; evidence is confined to captured text. Fixed-output evals prove validation and boilerplate handling, not semantic model quality. Independent semantic review and deployed consumer checks are required before claiming quality improvement."
+    "quality": "Generator strips signatures, boilerplate and quoted history, preserves forwarded attribution and treats instructions as data. The model receives bounded, fenced captured subject and sender context with the substantive body. Output validation rejects more than two sentences with common titles and decimal points excluded from sentence breaks. Known incomplete or over-limit captures return unavailable. Legacy body-only capture completeness is unknown; evidence is confined to captured text. Fixed-output evals prove validation and boilerplate handling, not semantic model quality. Independent semantic review and deployed consumer checks are required before claiming quality improvement."
   }
 }

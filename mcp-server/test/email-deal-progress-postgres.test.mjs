@@ -3073,7 +3073,7 @@ for (const legacy of [false, true]) {
       await result(creator);
       for (const identity of [humans[other], local(other)]) {
         const list = await command('list-email-proposals', { deal, limit: 200 }, identity, 'carr_reader');
-        if (operation === 'read') assert.equal(list.proposals.some(row => row.source.activity_id === source.activity_id), false);
+        if (operation === 'read') assert.equal(list.proposals.find(row => row.source.activity_id === source.activity_id)?.email_summary, null);
       }
       for (const identity of [humans[owner], local(owner)]) {
         if (legacy && identity.id !== creator.id) continue;
@@ -3086,3 +3086,17 @@ for (const legacy of [false, true]) {
   }
 }
 }
+
+test('summary provenance can cite captured headers but cannot invent them', async () => {
+  const source = await command('log-activity', { idempotency_key: randomUUID(), ref: clientRef,
+    kind: 'email_in', summary: 'Synthetic decision', detail: 'Yes.',
+    email_context: { subject: 'Re: Approve the purchase?', sender: { name: 'Synthetic sender', email: 'sender@example.test' }, recipients: [] } });
+  const queued = (await command('email-router-queue', { purpose: 'summaries', pending_only: false, limit: 200 })).emails
+    .find(row => row.activity_id === source.activity_id);
+  const claim = await claimSummary(queued);
+  const result = evidence => command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_result',
+    activity_id: source.activity_id, source_hash: queued.source_hash, claim_id: claim.claim_id,
+    summary_status: 'available', summary_text: 'The sender agrees to approve the purchase.', summary_provenance: { evidence } });
+  await refuses(result('Re: Cancel the purchase?'), 'email_summary_evidence_invalid');
+  assert.equal((await result('Re: Approve the purchase?')).status, 'available');
+});

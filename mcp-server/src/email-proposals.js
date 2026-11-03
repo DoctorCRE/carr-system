@@ -624,9 +624,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             ...(args.mode === 'summary_result' ? ['claim_id','summary_status','summary_text','summary_provenance'] : [])];
           if (!args.activity_id || !args.source_hash || Object.keys(args).some(key => !allowed.includes(key)))
             fail('email_proposal_fields_invalid');
-          const row = (await c.query(`select summary,detail,email_context from activity where id=$1
-            and kind='email_in' for update`, [args.activity_id])).rows[0];
-          if (!row || summaryHash(row) !== args.source_hash) fail('email_summary_source_stale');
+          const owner = partnerAuthoritySlugForActor(actor);
+          if (!owner) fail('email_summary_source_not_owned');
+          const row = (await c.query(`select a.summary,a.detail,a.email_context from activity a where a.id=$1
+            and a.kind='email_in' and (a.email_source->>'mailbox_owner'=$2 or
+              (a.email_source is null and a.actor_id=$3::uuid)) for update`, [args.activity_id,owner,actor.id])).rows[0];
+          if (!row) fail('email_summary_source_not_owned');
+          if (summaryHash(row) !== args.source_hash) fail('email_summary_source_stale');
           await c.query(`insert into email_message_summary(activity_id,source_hash,generator_version)
             values($1,$2,$3) on conflict do nothing`, [args.activity_id,args.source_hash,SUMMARY_VERSION]);
           const saved = (await c.query(`select *,claim_until>now() as claim_active from email_message_summary where activity_id=$1
@@ -647,7 +651,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (available ? !args.summary_text?.trim() || /[\r\n<>]/.test(args.summary_text)
                 : args.summary_text !== undefined)) fail('email_proposal_fields_invalid');
           const evidence = args.summary_provenance.evidence;
-          if (available && (!evidence?.trim() || !row.detail?.includes(evidence))) fail('email_summary_evidence_invalid');
+          if (available && (!evidence?.trim() || ![row.detail,row.email_context?.subject,
+            row.email_context?.sender?.name,row.email_context?.sender?.email].some(value => value?.includes(evidence)))) fail('email_summary_evidence_invalid');
           await c.query(`update email_message_summary set text=$4,status=$5,provenance=$6::jsonb,
             claim_until=null,claim_id=null,updated_at=now() where activity_id=$1 and source_hash=$2 and generator_version=$3`,
           [args.activity_id,args.source_hash,SUMMARY_VERSION,available ? args.summary_text.trim() : null,
@@ -839,12 +844,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
             p.resolution_reason,p.match_evidence,p.disposition,p.resolution_note,p.deferred_until,p.correction_provenance,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.sender_role,p.next_date::text as next_date,p.owner,
-            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.detail,a.email_context,a.occurred_at
+            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.detail,a.email_context,a.occurred_at,
+            ($6::text is not null and (a.email_source->>'mailbox_owner'=$6 or
+              (a.email_source is null and a.actor_id=$7::uuid))) as summary_owned
           from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
           where p.status=$4 and (p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
             and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
-          order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false]);
+          order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false,partnerAuthoritySlugForActor(actor),actor.id]);
         if (!args.limit && rows.length > LIMIT) fail('email_proposals_limit_exceeded', { limit: LIMIT });
         const more = rows.length > limit;
         const proposals = [];
@@ -878,8 +885,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           }
           const named = sender(row.summary);
           proposals.push({ id: row.id, version: row.version, kind: row.kind, status: row.status, deal: row.correction_provenance?.target_deal ?? row.deal_id,
-            email_summary: summaryMetadata(row, (await c.query(`select * from email_message_summary where activity_id=$1
-              and source_hash=$2 and generator_version=$3`, [row.activity_id,summaryHash(row),SUMMARY_VERSION])).rows[0]), disposition: row.disposition, note: row.resolution_note,
+            email_summary: row.summary_owned ? summaryMetadata(row, (await c.query(`select * from email_message_summary where activity_id=$1
+              and source_hash=$2 and generator_version=$3`, [row.activity_id,summaryHash(row),SUMMARY_VERSION])).rows[0]) : null, disposition: row.disposition, note: row.resolution_note,
             deferred_until: row.deferred_until ? new Date(row.deferred_until).toISOString() : null, correction_provenance: row.correction_provenance,
             match_evidence: row.match_evidence, suggested_deals: suggested, deal_name: row.deal_name, confidence: row.confidence, sender_role: row.sender_role,
             subject_type: shown?.subject_type ?? null, subject_id: shown?.subject_id ?? null, subject_name: shown?.subject_name ?? null,
@@ -913,10 +920,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const clock = new Date().toISOString();
         if (args.purpose === 'summaries') {
           if (Object.keys(args).some(key => !['purpose','limit','after','pending_only'].includes(key))) fail('email_proposal_fields_invalid');
+          const owner = partnerAuthoritySlugForActor(_actor);
+          if (!owner) fail('email_summary_source_not_owned');
           const rows = (await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.email_context
             from activity a where a.kind='email_in' and ($1::uuid is null or a.id>$1)
+              and (a.email_source->>'mailbox_owner'=$4 or (a.email_source is null and a.actor_id=$5::uuid))
               and (case when $3 then exists(select 1 from email_proposal p where p.activity_id=a.id and p.status='pending')
-                else a.recorded_at>now()-interval '3 days' end) order by a.id limit $2`, [args.after ?? null,limit+1,args.pending_only ?? true])).rows;
+                else a.recorded_at>now()-interval '3 days' end) order by a.id limit $2`, [args.after ?? null,limit+1,args.pending_only ?? true,owner,_actor.id])).rows;
           return { schema_version: 'email-summary-queue.v1', more: rows.length>limit,
             next_cursor: rows.length>limit ? rows[limit-1].activity_id : null,
             emails: rows.slice(0,limit).map(row => ({ ...row, source_hash: summaryHash(row) })) };

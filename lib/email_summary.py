@@ -58,7 +58,11 @@ def generate(email: dict, model) -> dict:
     if not text:
         return unavailable('empty_message')
     try:
-        result = model(text)
+        captured = {key: str(value)[:998] for key, value in {
+            'subject': context.get('subject'), 'sender_name': (context.get('sender') or {}).get('name'),
+            'sender_email': (context.get('sender') or {}).get('email')}.items() if value}
+        prompt = fence('incoming_email', text, **captured)
+        result = model(prompt)
     except Exception:
         return unavailable('generation_failed')
     if not isinstance(result, dict):
@@ -67,15 +71,18 @@ def generate(email: dict, model) -> dict:
     if not isinstance(summary, str) or not summary.strip():
         return unavailable('refused')
     summary = summary.strip()
-    if (len(summary) > 300 or re.search(r'[\r\n<>]', summary) or not isinstance(evidence, str)
-            or not evidence.strip() or evidence not in text):
+    sentence_text = re.sub(r'\b(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc)\.', '', summary, flags=re.I)
+    sentence_text = re.sub(r'(?<=\d)\.(?=\d)', '', sentence_text)
+    sentences = [part for part in re.split(r'''[.!?。！？]+["'”’)]*(?:\s+|$)''', sentence_text) if part.strip()]
+    if (not sentences or len(sentences) > 2 or len(summary) > 300 or re.search(r'[\r\n<>]', summary) or not isinstance(evidence, str)
+            or not evidence.strip() or not any(evidence in value for value in [text, *captured.values()])):
         return unavailable('invalid_output')
-    evidence = evidence if evidence in body else body
+    evidence = evidence if any(evidence in value for value in [body, *captured.values()]) else body
     return {'text': summary, 'status': 'available', 'provenance': {'evidence': evidence, **({'model': result['_model']} if result.get('_model') else {})}}
 
 
 def ask_model(text: str, model: str) -> dict:
-    return {**model_call.ask(fence('incoming_email', text), model=model, schema=SCHEMA, system_prompt=SYSTEM), '_model': model}
+    return {**model_call.ask(text, model=model, schema=SCHEMA, system_prompt=SYSTEM), '_model': model}
 
 
 def backfill(carr, model, *, now: datetime, clock=None, after=None, limit=25, dry_run=False, pending_only=True, activity_ids=None) -> dict:
