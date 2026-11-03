@@ -5,7 +5,7 @@ import pg from 'pg';
 import { setTimeout } from 'node:timers/promises';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { HOME_INBOX_CONTRACT } from '../src/home-inbox.js';
+import { HOME_INBOX_CONTRACT, HOME_INBOX_SETTLEMENT_CONTRACT } from '../src/home-inbox.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
 const id = n => `ae000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -523,4 +523,135 @@ test('legacy duplicate dispositions survive in v1 and carry to stable v2 cards',
   assert.equal(changed.results[0].ok,true);
   const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
   assert.equal(after.items.find(i=>i.source_id===id(73)).disposition,'settled','a representative command overrides inherited disposition');
+});
+
+test('Inbox v3 auto-settlement follows canonical work and preserves reversible dispositions',async t=>{
+  const db=await postgresDatabase('inbox-settlement-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into activity values('${id(700)}','{"mailbox_owner":"joe"}');
+    insert into email_proposal values('${id(701)}','reply_draft','joe','${id(700)}',1,'pending','Synthetic reply',now(),null,null);
+    insert into next_action(id,owner_id,description,status,version,created_at,updated_at)
+      values('${id(702)}','${joe.id}','Synthetic task','open',1,now(),now());`);
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  const read=()=>executeRegisteredTool(c,joe,'read-home-inbox-v3',{});
+  const item=async n=>(await read()).items.find(i=>i.source_id===id(n));
+  let seq=800;
+  const change=async(command,current,until=null)=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
+    idempotency_key:id(seq++),items:[{item_id:current.item_id,base_version:current.base_version}],...(until?{until}:{})});
+  await t.test('open to working to auto-settled uses the canonical reply state',async()=>{
+    assert.equal((await item(701)).section,'inbox');
+    await c.query("update email_proposal set status='approved_to_send',version=version+1 where id=$1",[id(701)]);
+    assert.equal((await item(701)).section,'working');
+    await c.query("update email_proposal set status='sent',result_recorded_at=now(),version=version+1 where id=$1",[id(701)]);
+    const sent=await item(701);
+    assert.equal(sent.section,'settled'); assert.equal(sent.auto_settled,true);
+    assert.equal(sent.disposition,'settled');
+  });
+  await t.test('open to done automatically settles a task without mutating its disposition',async()=>{
+    await c.query("update next_action set status='done',updated_at=now(),version=version+1 where id=$1",[id(702)]);
+    const done=await item(702);
+    assert.equal(done.section,'settled'); assert.equal(done.auto_settled,true);
+    assert.equal((await c.query('select count(*)::int n from ops.home_inbox_disposition')).rows[0].n,0);
+  });
+  await t.test('Undo an automatic settlement persists until real activity and supports exact-key replay',async()=>{
+    const done=await item(702);
+    const args={idempotency_key:id(seq++),items:[{item_id:done.item_id,base_version:done.base_version}]};
+    const undo=await executeRegisteredTool(c,joe,'unsettle-home-inbox',args);
+    assert.equal(undo.results[0].ok,true);
+    const replay=await executeRegisteredTool(c,joe,'unsettle-home-inbox',args);
+    assert.equal(replay.replayed,true); assert.deepEqual(replay.results,undo.results);
+    for(let n=0;n<2;n++) {
+      const undone=await item(702);
+      assert.equal(undone.section,'inbox'); assert.equal(undone.explicit_unsettle,true); assert.equal(undone.auto_settled,false);
+    }
+    await c.query("update next_action set status='open',version=version+1,updated_at=now() where id=$1",[id(702)]);
+    assert.equal((await item(702)).section,'inbox'); assert.equal((await item(702)).explicit_unsettle,false);
+  });
+  await t.test('manual settlement and its Undo keep their authority and receipt versions',async()=>{
+    const current=await item(702);
+    assert.equal((await change('settle',current)).results[0].ok,true);
+    assert.equal((await item(702)).section,'settled'); assert.equal((await item(702)).auto_settled,false);
+    assert.equal((await change('unsettle',await item(702))).results[0].ok,true);
+    assert.equal((await item(702)).section,'inbox');
+  });
+  await t.test('snooze wins over completion until expiry, and can be undone',async()=>{
+    assert.equal((await change('snooze',await item(702),'2099-01-01T00:00:00Z')).results[0].ok,true);
+    await c.query("update next_action set status='done',version=version+1,updated_at=now() where id=$1",[id(702)]);
+    assert.equal((await item(702)).section,'snoozed'); assert.equal((await item(702)).auto_settled,false);
+    await c.query("update ops.home_inbox_disposition set snoozed_until=now()-interval '1 second' where item_id=$1",[`next_action:${id(702)}`]);
+    assert.equal((await item(702)).section,'settled'); assert.equal((await item(702)).auto_settled,true);
+    assert.equal((await change('unsettle',await item(702))).results[0].ok,true);
+    assert.equal((await item(702)).section,'inbox');
+  });
+  await t.test('snooze can be undone or settled manually without completing work',async()=>{
+    await c.query("update next_action set status='open',version=version+1,updated_at=now() where id=$1",[id(702)]);
+    await change('snooze',await item(702),'2099-01-01T00:00:00Z');
+    assert.equal((await change('unsettle',await item(702))).results[0].ok,true);
+    assert.equal((await item(702)).section,'inbox');
+    await change('snooze',await item(702),'2099-01-01T00:00:00Z');
+    assert.equal((await change('settle',await item(702))).results[0].ok,true);
+    assert.equal((await item(702)).section,'settled'); assert.equal((await item(702)).auto_settled,false);
+    assert.equal((await c.query('select status from next_action where id=$1',[id(702)])).rows[0].status,'open');
+  });
+  await t.test('reopening an automatically settled reply returns it to Inbox',async()=>{
+    await c.query("update email_proposal set status='pending',version=version+1 where id=$1",[id(701)]);
+    assert.equal((await item(701)).section,'inbox'); assert.equal((await item(701)).auto_settled,false);
+  });
+  await t.test('unknown completion notifications never prove canonical resolution',async()=>{
+    await c.query(`insert into ops.notification values('${id(703)}','${joe.id}','deal','unknown','completion','Synthetic completion',null,now())`);
+    const notification=(await read()).items.find(i=>i.source_type==='notification');
+    assert.equal(notification.section,'done'); assert.equal(notification.auto_settled,false);
+  });
+  await t.test('newer canonical failure evidence prevents automatic settlement',async()=>{
+    await c.query("update email_proposal set status='sent',result_recorded_at=now()-interval '1 minute',version=version+1 where id=$1",[id(701)]);
+    await c.query(`insert into ops.notification values('${id(704)}','${joe.id}','email_proposal','${id(701)}','failure','Synthetic failure',null,now())`);
+    const failed=await item(701);
+    assert.equal(failed.source_state,'failed'); assert.equal(failed.section,'inbox'); assert.equal(failed.auto_settled,false);
+  });
+  const transitions=[
+    ['open','inbox','resolve','settled'], ['open','inbox','settle','settled'],
+    ['open','inbox','snooze','snoozed'], ['open','inbox','start','working'],
+    ['done','inbox','reopen','inbox'], ['done','inbox','settle','settled'],
+    ['done','inbox','snooze','snoozed'], ['done','inbox','unsettle','inbox'],
+    ['open','settled','unsettle','inbox'], ['open','snoozed','expire','inbox'],
+    ['open','snoozed','settle','settled'], ['open','snoozed','unsettle','inbox'],
+    ['working','inbox','resolve','settled'], ['working','inbox','settle','settled'],
+    ['working','inbox','snooze','snoozed'], ['done','snoozed','expire','settled'],
+    ['working','snoozed','expire','working'], ['done','override','reopen','inbox'],
+    ['open','override','settle','settled'], ['open','override','snooze','snoozed'],
+  ];
+  for(const [index,[source,disposition,event,expected]] of transitions.entries()) {
+    await t.test(`statechart ${index+1}: ${source} with ${disposition}, ${event} reaches ${expected}`,async()=>{
+      const sourceId=id(1000+index);
+      const status={open:'pending',working:'approved_to_send',done:'sent'};
+      await c.query(`insert into email_proposal values($1,'reply_draft','joe',$2,1,$3,'Synthetic transition',now(),null,now())`,[sourceId,id(700),status[source]]);
+      const current=async()=>(await read()).items.find(i=>i.source_id===sourceId);
+      if(disposition!=='inbox') await change(disposition==='override'?'unsettle':disposition==='settled'?'settle':'snooze',await current(),disposition==='snoozed'?'2099-01-01T00:00:00Z':null);
+      if(['start','resolve','reopen'].includes(event)) {
+        await c.query('update email_proposal set status=$1,version=version+1,result_recorded_at=now() where id=$2',
+          [{start:'approved_to_send',resolve:'sent',reopen:'pending'}[event],sourceId]);
+      } else if(event==='expire') {
+        await c.query("update ops.home_inbox_disposition set snoozed_until=now()-interval '1 second' where item_id=$1",[`email_proposal:${sourceId}`]);
+      } else {
+        assert.equal((await change(event,await current(),event==='snooze'?'2099-01-01T00:00:00Z':null)).results[0].ok,true);
+      }
+      assert.equal((await current()).section,expected);
+      await c.query('delete from email_proposal where id=$1',[sourceId]);
+      await c.query('delete from ops.home_inbox_disposition where item_id=$1',[`email_proposal:${sourceId}`]);
+    });
+  }
+  await t.test('v3 contract matches its runtime declaration',()=>{
+    assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v3.json',import.meta.url),'utf8')),HOME_INBOX_SETTLEMENT_CONTRACT);
+  });
+  await t.test('v2 remains compatible and v3 stays actor scoped',async()=>{
+    const v2=await executeRegisteredTool(c,joe,'read-home-inbox-v2',{});
+    assert.equal(v2.auto_settle_enabled,false); assert.equal(v2.schema_version,'home-inbox.v2');
+    assert.ok(v2.items.every(i=>!Object.hasOwn(i,'auto_settled')));
+    const v3=await read(); assert.equal(v3.auto_settle_enabled,true); assert.equal(v3.schema_version,'home-inbox.v3');
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.deepEqual((await executeRegisteredTool(c,dell,'read-home-inbox-v3',{})).items,[]);
+  });
 });
