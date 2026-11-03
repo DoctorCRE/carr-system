@@ -1371,6 +1371,19 @@ class PostCallTests(unittest.TestCase):
             transcript={"segments": [{"text": quote}]})
         self.assertEqual(report["deal_updates"][0]["next_step"]["next_date"], "2026-11-13")
 
+    def test_lunch_anchor_cannot_ignore_unresolved_temporal_expression(self) -> None:
+        quote = "I will call before the lunch call."
+        for anchor in ("The lunch call is Tuesday next month.", "The lunch call is 11/14."):
+            with self.subTest(anchor=anchor):
+                report = post_call.normalize_distillation(self.output(joe_tasks=[{
+                    "title": "Call vendor", "deal_id": "deal-a", "participant_ids": [],
+                    "evidence": quote, "due_on": "2026-10-27",
+                }], deal_updates=[], draft_proposals=[]), self.context, self.session.name,
+                    call_date="2026-10-26", transcript={"segments": [{"text": quote}, {"text": anchor}]})
+                self.assertEqual(report["joe_tasks"][0]["deadline_state"], "ambiguous")
+                self.assertIsNone(report["joe_tasks"][0]["due_on"])
+                self.assertFalse(post_call.review_complete(report))
+
     def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
         excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
         context = {**self.context, "skipped_deals": excluded}

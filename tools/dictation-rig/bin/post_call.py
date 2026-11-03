@@ -437,9 +437,10 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
         lunch_anchors = [sentence for sentence in re.split(r"[.!?]", spoken)
                          if re.search(r"\blunch call\b", sentence, re.IGNORECASE)
                          and _words(sentence) != _words(evidence)
-                         and (RELATIVE_DAY.search(sentence) or CALENDAR_DAY.search(sentence))]
+                         and TEMPORAL_EXPRESSION.search(sentence)]
         if lunch_anchors:
-            if any(QUALIFIED_RELATIVE_DAY.search(sentence) for sentence in lunch_anchors):
+            if any(QUALIFIED_RELATIVE_DAY.search(sentence) or _unresolved_temporal_expression(sentence)
+                   for sentence in lunch_anchors):
                 return DeadlineResolution("ambiguous", None, "The lunch call deadline is qualified; clarify the exact date.")
             anchored = [_relative_phrases(sentence) for sentence in lunch_anchors]
             if not all(anchored):
