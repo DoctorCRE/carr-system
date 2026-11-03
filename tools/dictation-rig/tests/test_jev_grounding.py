@@ -1,5 +1,6 @@
 """Synthetic evidence routing at the offline SDK seam."""
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -171,4 +172,6 @@ def test_budget_resume_checks_a_previously_unchecked_nested_mutation(tmp_path):
 
 
 if __name__ == '__main__':
-    raise SystemExit(pytest.main([__file__, '-q']))
+    with tempfile.TemporaryDirectory(prefix='jev-grounding-') as root:
+        result = pytest.main([__file__, '-q', '--basetemp', str(Path(root) / 'cases')])
+    raise SystemExit(result)

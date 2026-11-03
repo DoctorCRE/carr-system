@@ -389,7 +389,7 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
             for claim_kind, item in children:
                 if resuming and item.get("checks") and not item["checks"].get("reason"):
                     continue
-                outcomes = []
+                outcomes: list[dict[str, Any]] = []
                 targets.append((item, outcomes))
                 claims = _claim_items(claim_kind, item)
                 if not claims or len(claims) > MAX_CLAIMS_PER_ITEM:
