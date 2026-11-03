@@ -1737,6 +1737,24 @@ class UnreadVerificationTest(unittest.TestCase):
                 self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
                 self.assertEqual(report.coverage['scan_count'], 2)
 
+    def test_deadline_during_checking_skips_on_both_scan_paths(self):
+        x, y = self.row('x', True), self.row('y', True)
+        for scanned in (False, True):
+            with self.subTest(scanned=scanned):
+                window = self.Window({None: [x]}, 2 if scanned else 1, {None: [x, y]})
+                original, checking, clock = window.rows, [], [0]
+                def rows():
+                    if checking:
+                        clock[0] = 121
+                    return original()
+                window.rows = rows
+                with patch('lib.outlook_triage.time.monotonic', side_effect=lambda: clock[0]):
+                    outcome = triage.preserve_unread(window, triage.Report(),
+                        lambda tabs: checking.append(True) or triage.Outcome('succeeded', 'filed'),
+                        lambda: False)
+                self.assertEqual((outcome.state, outcome.reason), ('skipped', 'unread_set_unverified'))
+                self.assertIn('coverage=coverage_deadline', outcome.detail)
+
     def test_unknown_closing_badge_fails_after_rows(self):
         from lib.outlook_ui import UiError
         x = self.row('x', True)
