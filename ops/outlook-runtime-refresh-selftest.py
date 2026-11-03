@@ -15,6 +15,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.outlook_runtime_refresh import refresh, Host, LABELS
 from lib import scheduled_jobs as jobs
+from git_env import fixture_env
 
 
 class RefreshTests(unittest.TestCase):
@@ -332,7 +333,7 @@ class HostTests(unittest.TestCase):
     def test_runtime_git_restore_preserves_directory_and_lock_inode(self):
         def git(repo, *args):
             return subprocess.run(['git', '-C', str(repo), *args], check=True,
-                                  capture_output=True, text=True).stdout.strip()
+                                  capture_output=True, text=True, env=fixture_env()).stdout.strip()
         git(self.runtime, 'init', '--quiet')
         git(self.runtime, 'config', 'user.name', 'Synthetic Fixture')
         git(self.runtime, 'config', 'user.email', 'fixture@example.test')
