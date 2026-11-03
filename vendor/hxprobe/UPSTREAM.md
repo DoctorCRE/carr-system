@@ -248,3 +248,38 @@ attachment ID. The activity record contract and model prompt remain unchanged.
 No attachment bytes or cache paths enter those dictionaries. Production mail
 loading requires the configured address as sender or recipient. BCC-only mail
 without that evidence is omitted.
+
+## Synthetic build fixture matrix
+
+CARR owns `spec/outlook/build-fixtures.v1.json` and the committed inputs and
+sanitized goldens in `ops/fixtures/outlook-builds/`. The manifest records the
+observed Outlook build from the repository surface atlas. Its layout association
+is unknown. Both accepted folder envelope tags have synthetic coverage, but
+neither fixture is attributed to an observed Outlook build. No fixture bytes
+came from a mailbox, Outlook installation, or private store.
+
+`write-inputs.py` constructs the inputs using Python's standard library, without
+importing or invoking hxprobe. The expected JSON was authored separately from
+the writer and decoder. Its versioned projection checks account and folder
+membership, recipient kinds, full and preview bodies, tied subject conflicts,
+flag due and completion dates, and coverage counters. It is not a snapshot of
+every SQLite column. `ops/outlook-build-fixtures-selftest.py` runs the actual
+`hxprobe db` command in private temporary directories and compares each fixture
+to its committed golden. Existing gates discovery runs this test in CI.
+
+CRC corruption and block truncation currently produce a successful export with
+one found block, zero verified blocks, and no decoded mail. The partial golden
+locks down that behavior; exit success does not mean complete recovery.
+A truncated header fails before a database is created. These cases do not change
+the runtime's intake coverage policy.
+
+Input and golden digests are pinned separately in the manifest. Changes to an
+expected output require review of the corresponding fixture bytes, writer,
+layout evidence, and decoder behavior. Reviewers must check the asserted values
+independently rather than regenerate goldens from the decoder. The writer never
+writes expected JSON. A future build entry needs repository evidence for that
+exact build. A future proven layout association needs its own supporting study.
+
+This matrix delivers source CI coverage. It establishes neither real mailbox
+completeness nor compatibility with an observed or newly installed Outlook
+build. Runtime refusal of unrecognized Outlook builds remains separate.

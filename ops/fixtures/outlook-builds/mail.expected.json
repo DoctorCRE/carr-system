@@ -1,0 +1,166 @@
+{
+  "schema": "hxprobe-db-fixture/v1",
+  "tables": {
+    "folders": {
+      "columns": [
+        "id",
+        "account_id",
+        "name",
+        "parent_status",
+        "parent_id"
+      ],
+      "rows": [
+        [
+          50,
+          7,
+          "Synthetic Inbox",
+          "top",
+          null
+        ]
+      ]
+    },
+    "message_objects": {
+      "columns": [
+        "local_key",
+        "account_id",
+        "folder_id",
+        "subject",
+        "recipients_status"
+      ],
+      "rows": [
+        [
+          70,
+          7,
+          50,
+          "Full synthetic mail",
+          "listed"
+        ],
+        [
+          71,
+          7,
+          50,
+          null,
+          "none"
+        ]
+      ]
+    },
+    "messages": {
+      "columns": [
+        "id",
+        "local_keys",
+        "sender",
+        "subject",
+        "body",
+        "html",
+        "body_kind",
+        "body_source",
+        "copies",
+        "flag_status",
+        "flag_due_unix",
+        "flag_completed_unix",
+        "folder_links_unresolved",
+        "sent_unix",
+        "received_unix"
+      ],
+      "rows": [
+        [
+          1,
+          "70",
+          "sender@example.test",
+          "Full synthetic mail",
+          "Full synthetic body with Unicode café.",
+          "<p>Full synthetic body with Unicode café.</p>",
+          "full",
+          "inline",
+          1,
+          "flagged",
+          1793232000,
+          null,
+          0,
+          1764403200,
+          1764403200
+        ],
+        [
+          2,
+          "71",
+          "sender@example.test",
+          null,
+          "Synthetic preview has four words.",
+          null,
+          "preview",
+          null,
+          2,
+          "complete",
+          null,
+          1793145600,
+          0,
+          1764403200,
+          1764403200
+        ]
+      ]
+    },
+    "recipients": {
+      "columns": [
+        "local_key",
+        "kind",
+        "kind_code",
+        "position",
+        "address",
+        "name"
+      ],
+      "rows": [
+        [
+          70,
+          "bcc",
+          206,
+          1,
+          "bcc@example.test",
+          "Bcc"
+        ],
+        [
+          70,
+          "cc",
+          205,
+          1,
+          "cc@example.test",
+          "Cc"
+        ],
+        [
+          70,
+          "to",
+          204,
+          1,
+          "to@example.test",
+          "To"
+        ]
+      ]
+    },
+    "message_folders": {
+      "columns": [
+        "message_id",
+        "folder_id"
+      ],
+      "rows": [
+        [
+          1,
+          50
+        ],
+        [
+          2,
+          50
+        ]
+      ]
+    }
+  },
+  "meta": {
+    "blocks_found": 1,
+    "blocks_verified": 1,
+    "messages": 2,
+    "messages_full": 1,
+    "copies_collapsed": 1,
+    "details_rejected": 0,
+    "messages_with_detail": 2,
+    "recipient_conflicts": 0,
+    "recipients": 3
+  }
+}

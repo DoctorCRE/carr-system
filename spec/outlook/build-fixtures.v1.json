@@ -1,0 +1,111 @@
+{
+  "description": "Synthetic decoder fixtures and bounded repository Outlook build evidence.",
+  "schema": "outlook-build-fixtures/v1",
+  "observed_builds": [
+    {
+      "build": "16.114.26101123",
+      "evidence": {
+        "path": "spec/outlook/surface-atlas.json",
+        "pointer": "/outlook/CFBundleVersion"
+      },
+      "layout_association": null
+    }
+  ],
+  "fixture_root": "ops/fixtures/outlook-builds",
+  "fixtures": [
+    {
+      "id": "folder-04c2",
+      "input": "folder-04c2.hxd",
+      "sha256": "2606e61244890744c8b79c41237e8060947f8fc4da4220be03fe42c1e8969e62",
+      "schema": "hxprobe-db-fixture/v1",
+      "outcome": "decoded",
+      "expected": "mail.expected.json",
+      "expected_sha256": "db5b0897cafa3177c980e75824df09a9b49ba5767fe91611b74cd4f224322dc5",
+      "stderr_contains": null,
+      "observed_build": null,
+      "layout_evidence": "spec/outlook/hxstore-atlas.json",
+      "assertions": [
+        "folder_tag_04c2",
+        "account",
+        "folder",
+        "recipients_to_cc_bcc",
+        "inline_full_body",
+        "preview_body",
+        "tied_subject_conflict",
+        "flag_due_and_completed_dates"
+      ],
+      "claim": "Hand-constructed synthetic bytes; layout/build association unknown."
+    },
+    {
+      "id": "folder-04d8",
+      "input": "folder-04d8.hxd",
+      "sha256": "cd0a8cf9db4f6237cfe1651e619589401885e87d043fe36457359038b81d29f1",
+      "schema": "hxprobe-db-fixture/v1",
+      "outcome": "decoded",
+      "expected": "mail.expected.json",
+      "expected_sha256": "db5b0897cafa3177c980e75824df09a9b49ba5767fe91611b74cd4f224322dc5",
+      "stderr_contains": null,
+      "observed_build": null,
+      "layout_evidence": "spec/outlook/hxstore-atlas.json",
+      "assertions": [
+        "folder_tag_04d8",
+        "account",
+        "folder",
+        "recipients_to_cc_bcc",
+        "inline_full_body",
+        "preview_body",
+        "tied_subject_conflict",
+        "flag_due_and_completed_dates"
+      ],
+      "claim": "Hand-constructed synthetic bytes; layout/build association unknown."
+    },
+    {
+      "id": "corrupt-crc",
+      "input": "corrupt-crc.hxd",
+      "sha256": "c94e203cc7a4eac492f90a8ebf8ff6867eb5747f24cfcefdc63a6c977881bd9c",
+      "schema": "hxprobe-db-fixture/v1",
+      "outcome": "partial",
+      "expected": "partial.expected.json",
+      "expected_sha256": "2ee9b47e68965ff1acb6a6dca828c6cf6f4cbf8cdaa50996b012235a6df30b89",
+      "stderr_contains": null,
+      "observed_build": null,
+      "layout_evidence": "spec/outlook/hxstore-atlas.json",
+      "assertions": [
+        "invalid_block_not_decoded"
+      ],
+      "claim": "Hand-constructed synthetic bytes; layout/build association unknown."
+    },
+    {
+      "id": "truncated-block",
+      "input": "truncated-block.hxd",
+      "sha256": "006ebd49392c5291e0b82519f21ade3a79f97246ac6f7f51871812b7f8140d58",
+      "schema": "hxprobe-db-fixture/v1",
+      "outcome": "partial",
+      "expected": "partial.expected.json",
+      "expected_sha256": "2ee9b47e68965ff1acb6a6dca828c6cf6f4cbf8cdaa50996b012235a6df30b89",
+      "stderr_contains": null,
+      "observed_build": null,
+      "layout_evidence": "spec/outlook/hxstore-atlas.json",
+      "assertions": [
+        "invalid_block_not_decoded"
+      ],
+      "claim": "Hand-constructed synthetic bytes; layout/build association unknown."
+    },
+    {
+      "id": "truncated-header",
+      "input": "truncated-header.hxd",
+      "sha256": "167e3041ae8585d401c7b7a99de51d47917de684e22254f955682344beb9d737",
+      "schema": "hxprobe-db-fixture/v1",
+      "outcome": "rejected",
+      "expected": null,
+      "expected_sha256": null,
+      "stderr_contains": "too small to hold a header",
+      "observed_build": null,
+      "layout_evidence": "spec/outlook/hxstore-atlas.json",
+      "assertions": [
+        "header_rejection"
+      ],
+      "claim": "Hand-constructed synthetic bytes; layout/build association unknown."
+    }
+  ]
+}
