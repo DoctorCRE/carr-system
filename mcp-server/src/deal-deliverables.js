@@ -1,3 +1,4 @@
+// Own partner deliverable authorization, quota and private/shared lifecycle.
 import { organizationTenantForActor } from "./identity.js";
 import { evaluateActorAuthority } from "./global-boundaries.v5.js";
 import { ToolError } from "./tool-error.ts";

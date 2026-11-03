@@ -1,3 +1,4 @@
+// Verify bounded partner upload bytes and gate private downloads on a current session.
 import {
   DELIVERABLE_POLICY,
   DELIVERABLE_PREFIX,
