@@ -210,7 +210,8 @@ def test_controller_sigterm_cleans_children_and_temp_state():
                 "signal.signal(signal.SIGTERM,stop)\n"
                 "while not Path('child-ready').exists(): time.sleep(.01)\n"
                 "print('cancellation fixture log', flush=True)\n"
-                "Path('pids').write_text(f'{os.getpid()} {child.pid}')\n"
+                "Path('pids.pending').write_text(f'{os.getpid()} {child.pid}')\n"
+                "Path('pids.pending').replace('pids')\n"
                 "while True: time.sleep(1)\n")
             for finalizer in ("ci-evidence.py", "ci-secret-scan.py"):
                 (root / "ops" / finalizer).write_text(
