@@ -30,7 +30,7 @@ class BudgetTests(unittest.TestCase):
                 client = Mock()
                 with patch.object(post_call_jev, 'TypeSafeClient') as factory:
                     checked = post_call_jev.check_distillation(
-                        result, {}, {}, client=client, budget_ledger=self.ledger)
+                        result, {}, {"segments": [{"speaker": "Joe", "text": "Review proposal"}]}, client=client, budget_ledger=self.ledger)
                     factory.assert_not_called()
                 client.system_one.assert_not_called()
                 self.assertIn('unconfigured', checked['checks_hold'])
@@ -38,7 +38,7 @@ class BudgetTests(unittest.TestCase):
                 self.assertTrue(checked['review_questions'])
                 self.assertFalse(self.ledger.exists())
                 with patch.object(post_call_jev, 'TypeSafeClient') as factory:
-                    post_call_jev.check_distillation(result, {}, {}, budget_ledger=self.ledger)
+                    post_call_jev.check_distillation(result, {}, {"segments": [{"speaker": "Joe", "text": "Review proposal"}]}, budget_ledger=self.ledger)
                     factory.assert_not_called()
 
     def test_configured_and_lowered_caps(self):
@@ -88,7 +88,7 @@ class BudgetTests(unittest.TestCase):
         result = {'session': 'synthetic', 'joe_tasks': [{'title': 'Review proposal', 'evidence': 'Review proposal'}]}
         client = Mock()
         with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': 'invalid'}):
-            checked = post_call_jev.check_distillation(result, {}, {}, client=client, budget_ledger=self.ledger)
+            checked = post_call_jev.check_distillation(result, {}, {"segments": [{"speaker": "Joe", "text": "Review proposal"}]}, client=client, budget_ledger=self.ledger)
         client.system_one.assert_not_called()
         self.assertIn('unconfigured', checked['joe_tasks'][0]['checks']['reason'])
         self.assertTrue(checked['review_questions'])
@@ -99,7 +99,7 @@ class BudgetTests(unittest.TestCase):
             {'title': 'Review', 'evidence': 'Review proposal'}]}
         with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.002753'}), \
              patch.object(post_call_jev, 'TypeSafeClient', side_effect=RuntimeError('no key')):
-            checked = post_call_jev.check_distillation(result, {}, {}, budget_ledger=self.ledger)
+            checked = post_call_jev.check_distillation(result, {}, {"segments": [{"speaker": "Joe", "text": "Review proposal"}]}, budget_ledger=self.ledger)
         checks = checked['joe_tasks'][0]['checks']
         self.assertTrue(checks['unavailable'])
         self.assertIn('RuntimeError, missing key', checks['reasons'][0])
@@ -117,8 +117,8 @@ class BudgetTests(unittest.TestCase):
         def result():
             return {'session': 'synthetic', 'joe_tasks': [{'title': 'Review', 'evidence': 'Review proposal'}]}
         with patch.dict('os.environ', {'CALL_JEV_DAILY_DOLLARS': '0.002753'}):
-            post_call_jev.check_distillation(result(), {}, {}, client=client, budget_ledger=self.ledger)
-            checked = post_call_jev.check_distillation(result(), {}, {}, client=client, budget_ledger=self.ledger)
+            post_call_jev.check_distillation(result(), {}, {"segments": [{"speaker": "Joe", "text": "Review proposal"}]}, client=client, budget_ledger=self.ledger)
+            checked = post_call_jev.check_distillation(result(), {}, {"segments": [{"speaker": "Joe", "text": "Review proposal"}]}, client=client, budget_ledger=self.ledger)
         self.assertEqual(client.system_one.call_count, 1)
         arguments = client.system_one.call_args.kwargs
         self.assertEqual(arguments['retry'].max_retries, 0)

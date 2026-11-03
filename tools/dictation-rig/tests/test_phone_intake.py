@@ -373,7 +373,8 @@ class PhoneIntakeTests(unittest.TestCase):
             'deal_match': SimpleNamespace(choice='none', confidence=0.9),
             'deal_in_candidates': SimpleNamespace(noul=0.9),
             'speaker_right': SimpleNamespace(noul=0.9),
-            'details_supported': SimpleNamespace(noul=0.9)})
+            'details_supported': SimpleNamespace(noul=0.9),
+            'evidence_sufficient': SimpleNamespace(noul=0.9)})
         client.__enter__ = Mock(return_value=client)
         client.__exit__ = Mock(return_value=False)
         bridge = phone_intake.bridge_module()
@@ -393,7 +394,8 @@ class PhoneIntakeTests(unittest.TestCase):
             clock.now.return_value = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
             ledger = self.root / '.jev-budget.json'
             call_budget.reserve(ledger)
-            post_call_jev.check_distillation(report, context, transcript, client=client, budget_ledger=ledger)
+            post_call_jev.check_distillation(report, context, transcript, client=client, budget_ledger=ledger,
+                                                coverage_ledger=post_call.read_json(session / post_call.coverage.FILE))
             post_call.write_private(session / post_call.REPORT_FILE, report)
             post_call.process_session(session)
             self.assertIsNone(post_call.context_from_session(session))
