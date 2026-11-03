@@ -810,6 +810,12 @@
       "sha256": "19e6b86eaa85aceb8dc77fa1b82b76c3c04c6bf7536cb6546aff031ef810c328",
       "rule": "pii-address",
       "reason": "Synthetic deadline regression supplied in J86; invented address only, no record-layer data."
+    },
+    {
+      "path": "evals/post-call-deadlines/cases.jsonl",
+      "sha256": "60eced1b03624879c92f5e908e524ca78624fe01f41bf77339d75ae5d2a137f5",
+      "rule": "pii-address",
+      "reason": "Retained synthetic deadline corpus plus J90 event-binding regressions; invented address only."
     }
   ]
 }

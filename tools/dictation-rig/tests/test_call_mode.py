@@ -2337,6 +2337,7 @@ class PostCallTests(unittest.TestCase):
         }], deal_updates=[], draft_proposals=[])
         tr = post_call.read_json(self.session / "transcript.json")
         output["joe_tasks"][0]["timing"] = timing_fixture(tr, [["Friday"], ["before the lunch call"]])
+        output["joe_tasks"][0]["timing"]["sources"][0]["anchor_for"] = ["before the lunch call"]
         status = post_call.process_session(self.session, distiller=lambda _request: output)
         self.assertEqual(status["state"], "ready_review")
         action = post_call.sanitized_candidates(self.session)["post_call_items"][0]
