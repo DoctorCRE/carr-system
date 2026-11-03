@@ -55,11 +55,17 @@ State lives under `~/.cache/carr/orchestrator-rotation/`, keyed by session ID.
 Unreadable transcripts or state fail open.
 
 Follow the hook instruction to write team-memory section handoff/orchestrator-latest,
-including every running delegated job and its reporting thread. Mint a card
+including every running delegated job and its reporting thread. Include the retiring
+orchestrator's T3 thread id in both the handoff and successor launch prompt. Use
+the T3 thread id, not the Claude session id. Mint a card
 through `dispatch-job`, launch a successor with `t3_thread_launch`, post its link,
 and stop. The successor starts `/pstack:poteto-mode` in Orchestrate, reads the
 handoff and Session pickup playbook, and owns the program, never the code
-(rule 974655e1).
+(rule 974655e1). As part of its opening act, the successor calls
+`t3_thread_organize` with action `"pin"` and omits `threadId` to pin itself. Then
+it calls `t3_thread_organize` with action `"unpin"` and `threadId` set to the
+retiring orchestrator's T3 thread id from the launch prompt and handoff. The
+successor performs both pin actions after it starts (rule d6b2b1ca).
 
 Idle subscription sessions over about 200K tokens can compact near cache expiry
 regardless of the window. PreCompact is the one-attempt backstop for that case.

@@ -1,0 +1,75 @@
+# Outlook runtime refresh
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Current: requested SHA already installed
+    Idle --> Planned: dry run
+    Idle --> Quiescing: apply / persist recovery snapshot
+    Quiescing --> Draining: disable three labels
+    Draining --> Draining: active PID or lock held / wait
+    Draining --> Restoring: bounded timeout / no swap
+    Draining --> Swapping: locks held and no active jobs / remove registrations
+    Swapping --> Verifying: installer and rendered plists installed
+    Verifying --> Restoring: wrong SHA or ancestry / rollback artifacts
+    Swapping --> Restoring: installer failure / rollback artifacts
+    Quiescing --> Restoring: failure / rollback registrations
+    Verifying --> Restoring: verified / retain new artifacts
+    Restoring --> Done: prior registrations and disabled states restored
+    Restoring --> RecoveryRequired: restoration failed / retain journal
+    RecoveryRequired --> Restoring: rerun / recover before refreshing
+```
+
+Invariants. Never bootout until the send and outbox locks are held and observed jobs are idle. Never swap before all three registrations are removed. Hold locks through verification and restoration. A timeout never changes runtime artifacts. Dry run and already-current do not mutate. Restoration errors preserve the recovery snapshot for rerun. No kickstart, signal or process termination command is issued.
+
+The model covers process failures and reruns. It excludes simultaneous manual installers, manual starts outside launchd and system power loss during filesystem restoration. Launchd can race the idle observation; held send/outbox locks fence that race from dispatch. A raced invocation can be removed only before it can acquire its write lock.
+
+TLC checked the abstract drain invariants across 18 states and 24 steps. Both
+`NoSendInterrupted` and `SwapDrained` held, with no deadlocks. The abstract model
+omits artifact copying, installer internals and recovery failures; the transition
+and filesystem tests cover those separately. Regenerate with pstack's
+`statechart/scripts/statechart Refresh.tla --out /tmp/outlook-refresh-model` from
+this fixture directory, with Java 11+ and `TLA2TOOLS` pointing at tla2tools.jar.
+
+Round 1 regression coverage (WR634.S1.J60). Transaction transitions are unchanged.
+Round 2 replaces target-only snapshots with typed path snapshots. Each symlink
+stores its original link text and a recursive target snapshot. Rollback restores
+target contents before restoring links, handling both write-through and atomic
+replacement. Runtime directories use their previous Git revision through the
+same restore interface, preserving the directory and held drain-lock inodes. The real Host tests in `ops/outlook-runtime-refresh-selftest.py` cover:
+
+| Transition | Test |
+| --- | --- |
+| Swapping to Restoring after installer failure | `test_symlink_vendor_installer_failure_rolls_back` |
+| RecoveryRequired to Restoring after a persisted swapped journal | `test_symlink_crash_journal_recovers_with_real_host` |
+| Restoring to RecoveryRequired, then retry to Done | `test_interrupted_symlink_restoration_retries_from_journal` |
+
+These fixtures assert old target bytes, preserved vendor symlink, prior SHA,
+mixed registrations and disabled states, and journal cleanup. Process effects
+are synthetic; filesystem copies and drain locks use the real Host methods.
+The crash-journal test also exercises a journal written with the configured
+symlink path, as older versions did. TLC was rerun with `Refresh.cfg`; both
+configured invariants hold (26 generated states, 18 distinct states).
+
+
+Round 2 regression coverage (WR634.S1.J63). Transaction transitions are unchanged.
+`test_path_type_failure_matrix` crosses regular files, directories, two-hop
+relative symlinks, dangling links and absent paths with failures after disable,
+bootout, runtime checkout, each of six artifact replacements, each installer,
+verification and registration restoration. Each case runs immediate rollback
+and persisted-journal recovery. All six artifact slots use the same mechanism,
+including vendor, helper, pin and each registration plist. The runtime uses a
+relative symlink and a simulated Git checkout, never a directory replacement
+that would unlink active drain locks.
+
+`test_path_type_restore_interruption_matrix` interrupts restoration before and
+after each artifact, across the same five path types and both recovery entry
+points. Retried restoration converges to the prior type, link text, target bytes,
+mode and registration state. `test_symlink_crash_journal_recovers_with_real_host`
+now explicitly removes the new fields to exercise a legacy content-only journal.
+Legacy journals cannot reconstruct link text that their writer did not record;
+they retain the previous target-only restoration semantics.
+
+The abstract TLC model still proves drain ordering only. No filesystem type or
+crash-recovery claim is inferred from its two invariants. The synthetic tests
+exercise real copies, atomic replacement and locks, with process effects mocked.
