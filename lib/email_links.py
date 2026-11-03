@@ -8,9 +8,10 @@ URL = re.compile(r'https?://[^\s<>"\']+', re.I)
 CONTROL = re.compile(r'[\x00-\x1f\x7f]')
 PROSE_PUNCTUATION = '.,;!?)]'
 MAX_LINKS = 20
+ATTRIBUTE = re.compile(r'''\s*[^\s/=<>"']+(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s<>"']+)))?''')
 
 
-class _HTMLTags(HTMLParser):
+class _HTMLAttributes(HTMLParser):
     def __init__(self, text: str):
         super().__init__(convert_charrefs=False)
         self.offsets = [0]
@@ -20,11 +21,17 @@ class _HTMLTags(HTMLParser):
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
-        if re.match(r'<https?://', self.get_starttag_text(), re.I):
+        raw = self.get_starttag_text()
+        if re.match(r'<https?://', raw, re.I):
             return
         line, column = self.getpos()
         start = self.offsets[line - 1] + column
-        self.spans.append((start, start + len(self.get_starttag_text())))
+        position = re.match(r'<[^\s/>]+', raw).end()
+        while attribute := ATTRIBUTE.match(raw, position):
+            for group in (1, 2, 3):
+                if attribute.start(group) != -1:
+                    self.spans.append((start + attribute.start(group), start + attribute.end(group)))
+            position = attribute.end()
 
 
 def _trim_prose(token: str) -> str:
@@ -42,7 +49,7 @@ def _trim_prose(token: str) -> str:
 
 
 def _url_matches(text: str):
-    spans = _HTMLTags(text).spans
+    spans = _HTMLAttributes(text).spans
     for match in URL.finditer(text):
         attribute = any(start <= match.start() < end for start, end in spans)
         delimited = (match.start() > 0 and match.end() < len(text)
