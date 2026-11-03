@@ -4,12 +4,15 @@ from dataclasses import dataclass
 
 VERSION = 'email-contact-candidates/v1'
 LABEL = re.compile(r'^(name|company|title|phone|mobile|email)\s*:\s*(\S.*?)\s*$', re.I)
-EMAIL = re.compile(r'^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$')
+ATOM = r"[a-z0-9!#$%&'*+/=?^_`{|}~-]+"
+DOMAIN_LABEL = r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?'
+EMAIL = re.compile(ATOM + r'(?:\.' + ATOM + r')*@' + DOMAIN_LABEL + r'(?:\.' + DOMAIN_LABEL + r')+', re.I)
 PHONE = re.compile(r'^\+?[\d () .-]{7,30}$')
 HISTORY = re.compile(
     r'^[ \t]*(?:>|on\s+[\s\S]*?\bwrote:|from:|sent:|subject:|-{5,}|'
     r'(?:begin\s+)?forwarded\s+message\b)', re.I | re.M)
-ADDRESS = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
+ADDRESS = re.compile(r"(?<![\w.!#$%&'*+/=?^_`{|}~@-])" + EMAIL.pattern
+                     + r"(?![\w.!#$%&'*+/=?^_`{|}~@-])", re.I)
 DISPLAY_ADDRESS = re.compile(r'([^<>]+)\s*<([^<>]+)>')
 
 
@@ -43,8 +46,12 @@ class SignatureEntity:
             if not value_line:
                 continue
             match = LABEL.fullmatch(value_line)
+            value = match.group(2) if match else value_line
+            display = DISPLAY_ADDRESS.fullmatch(value)
+            names.update(identity.group(1).strip().casefold()
+                         for identity in DISPLAY_ADDRESS.finditer(value))
             if match:
-                field, value = match.group(1).lower(), match.group(2)
+                field = match.group(1).lower()
                 if field in fields:
                     return {}, 'conflicting_fields'
                 if field == 'email' and not EMAIL.fullmatch(value):
@@ -52,14 +59,12 @@ class SignatureEntity:
                 if field in ('phone', 'mobile') and (not PHONE.fullmatch(value) or sum(c.isdigit() for c in value) < 7):
                     return {}, 'invalid_phone'
                 if field == 'name':
-                    names.add(value.casefold())
+                    names.add(display.group(1).strip().casefold() if display else value.casefold())
                 fields[field] = (value, line)
             elif value_line.casefold() == sender.casefold():
                 continue
-            elif display := DISPLAY_ADDRESS.fullmatch(value_line):
-                if display.group(2).casefold() != sender.casefold():
-                    return {}, 'competing_identity'
-                names.add(display.group(1).strip().casefold())
+            elif display:
+                continue
             else:
                 return {}, 'ambiguous_entity'
         if len(names) > 1:

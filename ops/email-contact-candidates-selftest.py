@@ -308,7 +308,8 @@ class CandidatesTest(unittest.TestCase):
                             if placement == 'Name: ':
                                 lines.pop(0)
                                 lines.append("Anne O'Brien <" + sender + '>')
-                            lines.append(placement + name + ' <' + address + '>')
+                            suffix = ' Director' if layout % 2 and (foreign_name or foreign_address) else ''
+                            lines.append(placement + name + ' <' + address + '>' + suffix)
                             rng.shuffle(lines)
                             pad = rng.choice(['', ' ', '\t', '\u00a0'])
                             nl = rng.choice(['\n', '\r\n', '\r'])
