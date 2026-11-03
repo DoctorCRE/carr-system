@@ -3211,6 +3211,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                 "deal_in_candidates": {"type": "noul", "noul": deal_in_candidates},
                 "speaker_right": {"type": "noul", "noul": speaker_probability},
                 "details_supported": {"type": "noul", "noul": details_probability},
+                "evidence_sufficient": {"type": "noul", "noul": 0.9},
             }
             return SimpleNamespace(answers={key: SimpleNamespace(**body[key]) for key in questions})
         return Mock(system_one=_ask)
@@ -3222,6 +3223,7 @@ class PostCallJevChecksTests(unittest.TestCase):
                 "deal_in_candidates": SimpleNamespace(noul=0.9),
                 "speaker_right": SimpleNamespace(noul=0.9),
                 "details_supported": SimpleNamespace(noul=0.9),
+                "evidence_sufficient": SimpleNamespace(noul=0.9),
             })
         client = Mock()
         client.system_one.side_effect = lambda *, state, questions, **kwargs: answers(
@@ -3234,7 +3236,7 @@ class PostCallJevChecksTests(unittest.TestCase):
         self.assertEqual(client.system_one.call_count, 2)
         for call in client.system_one.call_args_list:
             self.assertEqual(set(call.kwargs["questions"]),
-                             {"deal_match", "deal_in_candidates", "speaker_right", "details_supported"})
+                             {"deal_match", "deal_in_candidates", "speaker_right", "details_supported", "evidence_sufficient"})
             self.assertNotIn("checks", call.kwargs["state"])
 
     def test_deal_choice_has_no_none_option_and_a_companion_question_covers_it(self) -> None:

@@ -95,7 +95,7 @@ def test_separate_turns_and_structured_mutations(tmp_path):
     ledger = ledger_for(transcript, [coverage.source_span(transcript, i) for i in range(3)])
     item = {'deal_id': 'synthetic', 'summary': 'Synthetic renewal approved. Synthetic plans postponed.',
             'evidence': 'Synthetic renewal', 'fact_ids': ['f0', 'f1'],
-            'phase_move': {'value': 'closing', 'evidence': 'negotiation', 'fact_ids': ['f2']}}
+            'phase_move': {'value': 'closing', 'started_on': None, 'fact_ids': ['f2']}}
     judge = Judge()
     jev.check_distillation({'deal_updates': [item]}, {'deals': [{'id': 'synthetic', 'name': 'Synthetic'}]},
                            transcript, coverage_ledger=ledger, client=judge, budget_ledger=tmp_path / 'budget.json')
@@ -110,3 +110,44 @@ def test_ambiguous_speaker_stays_for_review(tmp_path):
     checks, _ = run_check(tmp_path, [{'speaker': 'unknown', 'text': 'Approve synthetic renewal'}],
                            {'deal_id': 'synthetic', 'title': 'Approve synthetic renewal', 'evidence': 'Approve synthetic renewal'})
     assert not checks['speaker']['pass']
+
+
+def test_span_offsets_do_not_send_other_text(tmp_path):
+    transcript = {'segments': [{'speaker': 'Joe', 'text': 'PRIVATE PREFIX. Approve synthetic renewal. PRIVATE SUFFIX.'}]}
+    text = transcript['segments'][0]['text']
+    start = text.index('Approve')
+    span = coverage.source_span(transcript, 0, start, start + len('Approve synthetic renewal.'))
+    checks, states = run_check(tmp_path, transcript['segments'],
+                              {'deal_id': 'synthetic', 'title': 'Approve synthetic renewal',
+                               'evidence': 'PRIVATE PREFIX', 'fact_ids': ['f0']},
+                              ledger=ledger_for(transcript, [span]))
+    assert checks['details']['pass']
+    assert 'PRIVATE' not in str(states)
+    assert checks['request_chars'] <= jev.MAX_REQUEST_CHARS
+
+
+def test_complete_request_size_is_bounded(tmp_path):
+    judge = Judge()
+    item = {'deal_id': 'synthetic', 'title': 'Approve synthetic renewal', 'evidence': 'Approve synthetic renewal'}
+    jev.check_distillation({'joe_tasks': [item]},
+                           {'deals': [{'id': 'synthetic', 'name': 'name' * 3000}]},
+                           {'segments': [{'speaker': 'Joe', 'text': 'Approve synthetic renewal'}]},
+                           client=judge, budget_ledger=tmp_path / 'budget.json')
+    assert item['checks']['evidence_status'] == 'insufficient'
+    assert not judge.states
+
+
+def test_insufficient_model_evidence_is_distinct_from_contradiction(tmp_path):
+    judge = Judge()
+    original = judge.system_one
+    def insufficient(**kwargs):
+        response = original(**kwargs)
+        response.answers['evidence_sufficient'].noul = .1
+        return response
+    judge.system_one = insufficient
+    item = {'deal_id': 'synthetic', 'title': 'Approve synthetic renewal', 'evidence': 'Approve synthetic renewal'}
+    jev.check_distillation({'joe_tasks': [item]}, {'deals': []},
+                           {'segments': [{'speaker': 'Joe', 'text': 'Approve synthetic renewal'}]},
+                           client=judge, budget_ledger=tmp_path / 'budget.json')
+    assert item['checks']['evidence_status'] == 'insufficient'
+    assert not item['checks']['details']['pass']
