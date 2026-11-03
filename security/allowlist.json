@@ -804,6 +804,12 @@
       "sha256": "d5860ef6b7b4b1b04ecf8ae320976b9bac2082c3d95e8d8bc7fbfdac7d7bafd8",
       "rule": "pii-email",
       "reason": "Public GitHub SSH origin syntax in the historical validator, not a personal email or credential. The current validator uses an escaped hostname regex; this exact historical blob is retained under the no-rewrite policy."
+    },
+    {
+      "path": "evals/post-call-deadlines/cases.jsonl",
+      "sha256": "19e6b86eaa85aceb8dc77fa1b82b76c3c04c6bf7536cb6546aff031ef810c328",
+      "rule": "pii-address",
+      "reason": "Synthetic deadline regression supplied in J86; invented address only, no record-layer data."
     }
   ]
 }
