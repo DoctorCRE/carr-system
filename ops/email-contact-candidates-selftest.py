@@ -15,6 +15,9 @@ class CandidatesTest(unittest.TestCase):
         for case in json.loads(path.read_text())['cases']:
             result = extract_candidates(case['body'], case['sender'], 'ref', complete=True)
             self.assertEqual(len(result['contact_facts']), case['count'])
+            if 'ambiguity' in case:
+                self.assertEqual(result['ambiguity'], case['ambiguity'])
+                self.assertFalse(result['identity_observations'])
 
     def test_signature_candidate_is_bound_to_current_sender_and_exact_quote(self):
         body = 'Hello\n-- \nName: Zoë Smith\nEmail: zoe@example.test\nPhone: 555 0101'
@@ -114,7 +117,7 @@ class CandidatesTest(unittest.TestCase):
         for transition in ('', 'Bob Synthetic', 'Assistant contact:',
                            'Other details follow', 'This message is private.',
                            'Begin forwarded message:', 'On Monday Bob wrote:', '> quoted',
-                           'Earlier conversation:\nBob Synthetic\nbob@example.test'):
+                           'Earlier conversation:\nBob Synthetic'):
             with self.subTest(transition=transition):
                 result = extract_candidates(sender_block + '\n' + transition + '\nMobile: 555-0199',
                                             'alice@example.test', 'synthetic-source', complete=True)
@@ -122,7 +125,9 @@ class CandidatesTest(unittest.TestCase):
                                  [('email', 'alice@example.test'), ('phone', '555-0101')])
 
     def test_reviewer_foreign_fields_before_bare_address_are_ambiguous(self):
-        for address in ('bob@example.test', 'Bob Synthetic <bob@example.test>'):
+        for address in ('bob@example.test', 'Bob Synthetic <bob@example.test>',
+                        'Bob Synthetic\nbob@example.test',
+                        'Earlier conversation:\nBob Synthetic\nbob@example.test'):
             body = ('-- \nEmail: alice@example.test\nName: Bob Synthetic\n'
                     'Phone: 555-0199\n' + address)
             with self.subTest(address=address):

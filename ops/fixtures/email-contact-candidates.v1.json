@@ -1,7 +1,27 @@
 {
   "description": "Synthetic signature extraction cases.",
   "cases": [
-    {"body": "Hello\n-- \nEmail: a@example.test\nPhone: 555 0101", "sender": "a@example.test", "count": 2},
-    {"body": "Hello\n-- \nEmail: b@example.test\nPhone: 555 0101", "sender": "a@example.test", "count": 0}
+    {
+      "body": "Hello\n-- \nEmail: a@example.test\nPhone: 555 0101",
+      "sender": "a@example.test",
+      "count": 2
+    },
+    {
+      "body": "Hello\n-- \nEmail: b@example.test\nPhone: 555 0101",
+      "sender": "a@example.test",
+      "count": 0
+    },
+    {
+      "body": "-- \nEmail: alice@example.test\nName: Bob Synthetic\nPhone: 555-0199\nbob@example.test",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "body": "Thanks\nOn Monday,\nAlice Synthetic <alice@example.test> wrote:\n-- \nName: Alice Synthetic\nEmail: alice@example.test\nPhone: 555-0199",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "quoted_or_forwarded"
+    }
   ]
 }

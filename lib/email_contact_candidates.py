@@ -1,11 +1,39 @@
 """Extract bounded, unverified signature observations from captured text."""
 import re
+from dataclasses import dataclass
 
 VERSION = 'email-contact-candidates/v1'
 LABEL = re.compile(r'^(name|company|title|phone|mobile|email):\s*(\S.*?)\s*$', re.I)
 EMAIL = re.compile(r'^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$')
 PHONE = re.compile(r'^\+?[\d () .-]{7,30}$')
-STOP = re.compile(r'^(?:>|on .+ wrote:|from:|sent:|subject:|-----|(?:begin )?forwarded message|confidential|disclaimer)', re.I)
+HISTORY = re.compile(
+    r'^[ \t]*(?:>|on\s+[\s\S]*?\bwrote:|from:|sent:|subject:|-{5,}|'
+    r'(?:begin\s+)?forwarded\s+message\b|confidential|disclaimer)', re.I | re.M)
+ADDRESS = re.compile(r'[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+')
+
+
+@dataclass(frozen=True)
+class MessageSections:
+    current: tuple[str, ...]
+    history: tuple[str, ...]
+
+    @classmethod
+    def parse(cls, body):
+        boundary = HISTORY.search(body)
+        offset = boundary.start() if boundary else len(body)
+        return cls(tuple(body[:offset].splitlines()), tuple(body[offset:].splitlines()))
+
+
+@dataclass(frozen=True)
+class SignatureBlock:
+    labels: tuple[str, ...]
+    identity_lines: tuple[str, ...]
+
+    @classmethod
+    def parse(cls, lines):
+        block = lines[:next((i for i, line in enumerate(lines) if not line.strip()), len(lines))]
+        end = next((i for i, line in enumerate(block) if not LABEL.fullmatch(line.strip())), len(block))
+        return cls(tuple(block[:end]), tuple(block[end:]))
 
 
 def extract_candidates(body, sender, source_ref, *, complete):
@@ -17,23 +45,22 @@ def extract_candidates(body, sender, source_ref, *, complete):
         return reject('incomplete_or_oversized')
     if not isinstance(sender, str) or not EMAIL.fullmatch(sender) or not source_ref:
         return reject('missing_sender_or_source')
-    lines = body.splitlines()
+    message = MessageSections.parse(body)
+    lines = message.current
     delimiters = [i for i, line in enumerate(lines) if line == '-- ' or line == '--']
     if len(delimiters) != 1:
-        return reject('signature_boundary')
+        return reject('quoted_or_forwarded' if message.history else 'signature_boundary')
     start = delimiters[0]
-    if any(STOP.match(line.strip()) for line in lines[:start]):
-        return reject('quoted_or_forwarded')
     region = lines[start + 1:]
     if len(region) > 20 or sum(map(len, region)) > 2000:
         return reject('signature_too_large')
+    signature = SignatureBlock.parse(region)
+    addresses = ADDRESS.findall('\n'.join(signature.identity_lines))
+    if any(address.casefold() != sender.casefold() for address in addresses):
+        return reject('competing_identity')
     fields = {}
-    for line in region:
-        if STOP.match(line.strip()):
-            break
+    for line in signature.labels:
         match = LABEL.fullmatch(line.strip())
-        if not match:
-            break
         field, value = match.group(1).lower(), match.group(2)
         if field in fields:
             return reject('conflicting_fields')
