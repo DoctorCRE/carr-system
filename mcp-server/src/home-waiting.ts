@@ -1,3 +1,4 @@
+// Explicit waiting relationships on canonical Home items.
 import type { Actor, Db, WithEnvelope } from './verb-contract.ts';
 import { ToolError } from './tool-error.ts';
 import { organizationTenantForActor } from './identity.js';
@@ -17,7 +18,7 @@ const properties = {
   idempotency_key: uuid,
   item_id: { type: 'string', minLength: 1, maxLength: 1000 },
   item_version: { type: 'string', pattern: '^[a-f0-9]{32}$' },
-  base_version: { type: 'integer', minimum: 0, maximum: 2147483646 },
+  base_version: { type: 'integer', minimum: 0, maximum: 0x7ffffffe },
   reason: { type: 'string', minLength: 1, maxLength: 2000 },
   evidence: { type: 'array', minItems: 1, maxItems: 20,
     items: { type: 'string', minLength: 1, maxLength: 2000 } },

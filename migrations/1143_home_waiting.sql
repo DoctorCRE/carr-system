@@ -88,7 +88,7 @@ begin
     or coalesce(length(p_args->>'item_id'),0) not between 1 and 1000 then
     return jsonb_build_object('ok',false,'error','invalid_waiting_command');
   end if;
-  if (p_args->>'base_version')::bigint>2147483646 then
+  if (p_args->>'base_version')::bigint>power(2,31)-2 then
     return jsonb_build_object('ok',false,'error','invalid_waiting_command');
   end if;
   perform pg_advisory_xact_lock(hashtextextended('home-waiting-key:'||p_key,0));
