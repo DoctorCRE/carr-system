@@ -970,6 +970,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "detach-deal-line-quote": {
+    "ingress_key": "mcp-tool:detach-deal-line-quote",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "f1a06c459e4f04456fb50db935695b2e673006cfe0958dc9c72028d8efeaffd5",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "detach-decision": {
     "ingress_key": "mcp-tool:detach-decision",
     "source_locator": "mcp-server/src/tools.js",
@@ -1479,6 +1489,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "3600bc2b80820a44c2584c3f4e2296db8a3dadb6aa1364cc733d07c4a2688366",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-deal-line-quotes": {
+    "ingress_key": "mcp-tool:list-deal-line-quotes",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "ec06a38a83b87f94b00d4aeb5dcadcd83f8ec21eb0ce0b7b211ac7d2a539ad45",
+    "write": false,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -2240,6 +2260,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "dea18d62c4d0d7540e62126001e36ff80807d968599261b03e56a705b2c1e9a6",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-deal-quote-text": {
+    "ingress_key": "mcp-tool:read-deal-quote-text",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "09f77db30ee9984290f75b4f75c35d2443f9d18c8cc9bc4968f9e063e07e7a77",
+    "write": false,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []
@@ -3084,6 +3114,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "register-deal-quote-text": {
+    "ingress_key": "mcp-tool:register-deal-quote-text",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "511725db55a25370c233dc778d5edbc45073d55869bbdaae5205d8439469e8e7",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": true,
+    "delegates_to": []
+  },
   "register-derivative-source-link": {
     "ingress_key": "mcp-tool:register-derivative-source-link",
     "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
@@ -3455,6 +3495,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "ce4da3e1effcf733376b25bce4c52ab9d9fbc7eeb301edb6d0c7fcc39576c3b7",
     "write": true,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "save-deal-line-quote": {
+    "ingress_key": "mcp-tool:save-deal-line-quote",
+    "source_locator": "mcp-server/src/deal-files.js",
+    "schema_digest": "c7a258ce69a9cd78b4fd130bdcd86aeb031cf5a141f28f01afff3b7ade84dc64",
+    "write": true,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []

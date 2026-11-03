@@ -97,6 +97,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "confirm-merge",
     "confirm-requirement-reply",
     "decide-doc-suggestion",
+    "detach-deal-line-quote",
     "dismiss-email-proposal",
     "drop-action",
     "edit-email-draft",
@@ -104,9 +105,11 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "handle-email-proposal",
     "instruct-deal-item",
     "link-lead-client",
+    "list-deal-line-quotes",
     "propose-doc-correction",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
+    "read-deal-quote-text",
     "record-artifact-preservation-hold",
     // DoctorCRE V5-J103: a partner's own consent for the local mail and
     // calendar adapter to READ their own carr.us mailbox, and its withdrawal.
@@ -136,6 +139,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
+    "save-deal-line-quote",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
     "submit-email-draft",

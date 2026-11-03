@@ -1,5 +1,6 @@
 // Record an archived email attachment against the deal its mail matched.
 import { recordRequirementReply } from "./requirement-replies.js";
+import { installTourDealAccess } from "./tour-deal-access.js";
 import { organizationTenantForActor } from "./identity.js";
 import { ToolError } from "./tool-error.ts";
 
@@ -17,6 +18,73 @@ const KEY = /^documents\/([A-Za-z0-9._-]+)\/([0-9a-f]{16})\/([A-Za-z0-9._-]+)$/;
 
 export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
   return {
+    "register-deal-quote-text": {
+      write: true, authorityOnly: true,
+      description: "Register a byte-verified lease or LOI text layer as an immutable snapshot. Caller must verify attachment bytes and extraction before this authority-only call. Hash changes create numbered versions. Refuses different text for the same document hash. No extraction or sending occurs here.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string", format: "uuid" },
+        document_id: { type: "string", format: "uuid" },
+        content_hash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        text: { type: "string", minLength: 1, maxLength: 200000 },
+      }, required: ["idempotency_key", "document_id", "content_hash", "text"] },
+      handler: async (c, actor, args) => (await c.query(
+        "select ops.register_deal_quote_text($1::uuid,$2::uuid,$3::text,$4::text) r",
+        [args.document_id,args.idempotency_key,args.content_hash,args.text])).rows[0].r,
+    },
+    "read-deal-quote-text": {
+      writerConnection: true, humanOnly: true,
+      description: "Read one immutable lease or LOI text snapshot by attachment and byte hash, after current deal access. Offsets count Unicode code points with exclusive ends. An unavailable text layer refuses; this never fabricates extracted text.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        deal_id: { type: "string", format: "uuid" }, document_id: { type: "string", format: "uuid" },
+        content_hash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      }, required: ["deal_id", "document_id", "content_hash"] },
+      handler: async (c, actor, args) => {
+        await installTourDealAccess(c, actor);
+        return (await c.query("select ops.read_deal_quote_text($1::uuid,$2::uuid,$3::text) r",
+          [args.deal_id,args.document_id,args.content_hash])).rows[0].r;
+      },
+    },
+    "save-deal-line-quote": {
+      write: true, writerConnection: true, humanOnly: true,
+      description: "Save an exact text selection and partner comment against an immutable document version. Range is zero-based Unicode code points with exclusive end. Verifies selected text against stored text. Actor/key retries return the original receipt; changed arguments refuse. Does not attach to or send an ask.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string", format: "uuid" }, deal_id: { type: "string", format: "uuid" },
+        snapshot_id: { type: "string", format: "uuid" },
+        start: { type: "integer", minimum: 0, maximum: 199999 }, end: { type: "integer", minimum: 1, maximum: 200000 },
+        quoted_text: { type: "string", minLength: 1, maxLength: 4000 },
+        comment: { type: "string", minLength: 1, maxLength: 4000 },
+      }, required: ["idempotency_key", "deal_id", "snapshot_id", "start", "end", "quoted_text", "comment"] },
+      handler: async (c, actor, args) => {
+        await installTourDealAccess(c, actor);
+        const {deal_id,idempotency_key,...request} = args;
+        return (await c.query("select ops.save_deal_line_quote($1::uuid,$2::uuid,$3::jsonb) r",
+          [deal_id,idempotency_key,JSON.stringify(request)])).rows[0].r;
+      },
+    },
+    "list-deal-line-quotes": {
+      writerConnection: true, humanOnly: true,
+      description: "Read a UUID-cursor page of up to 100 saved or detached quotes for a currently readable deal. Historical selections retain their original text and version. version_changed and from version N expose newer source versions. No send or attachment is implied.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        deal_id: { type: "string", format: "uuid" }, cursor: { type: "string", format: "uuid" },
+      }, required: ["deal_id"] },
+      handler: async (c, actor, args) => {
+        await installTourDealAccess(c, actor);
+        return (await c.query("select ops.list_deal_line_quotes($1::uuid,$2::uuid) r",[args.deal_id,args.cursor ?? null])).rows[0].r;
+      },
+    },
+    "detach-deal-line-quote": {
+      write: true, writerConnection: true, humanOnly: true,
+      description: "Record a partner removing their own saved quote from future ask attachment. Retains text, range and author as evidence. Key retries return the original receipt. This does not cancel an accepted ask.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string", format: "uuid" }, deal_id: { type: "string", format: "uuid" },
+        quote_id: { type: "string", format: "uuid" },
+      }, required: ["idempotency_key", "deal_id", "quote_id"] },
+      handler: async (c, actor, args) => {
+        await installTourDealAccess(c, actor);
+        return (await c.query("select ops.detach_deal_line_quote($1::uuid,$2::uuid,$3::uuid) r",
+          [args.deal_id,args.quote_id,args.idempotency_key])).rows[0].r;
+      },
+    },
     "list-deal-documents": {
       write: false,
       description: "List stored, undeleted documents for one visible deal UUID. IDs are the attachment UUIDs used by fact citations. Returns display name, MIME document type, null page count, content hash and stored date. Source is omitted because attachments have no stored source field. No bytes, object keys or signed URLs. Pages sort by immutable document UUID; cursors bind tenant and deal. New IDs before the cursor appear on a fresh scan.",

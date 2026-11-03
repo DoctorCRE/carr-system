@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Drafting: Select text and write a comment
+    Drafting --> Saved: Save against the displayed version
+    Saved --> Saved: Retry the same write key
+    Saved --> Detached: Remove from the next ask
+    Saved --> VersionChanged: A newer document version arrives
+    Detached --> VersionChanged: A newer document version arrives
+    VersionChanged --> VersionChanged: Reopen the quote from version N
+    Saved --> AttachedToAsk: Freeze the next ask [follow-up]
+    VersionChanged --> AttachedToAsk: Explicitly include the old version [follow-up]
+    AttachedToAsk --> Sent: Ask accepted with the frozen quote [follow-up]
+    AttachedToAsk --> Saved: Ask cancelled before acceptance [follow-up]
