@@ -81,9 +81,12 @@ class AgentCardGate(unittest.TestCase):
         self.now = 1000000
         minted = self.mint_fixture()
         self.assertEqual(minted.returncode, 0, minted.stderr)
-        self.lookup.write_text('import time\ntime.sleep(30)\n')
+        marker = self.root / 'lookup-attempted'
+        self.lookup.write_text('from pathlib import Path\nimport time\nPath(' + repr(str(marker))
+                               + ').touch()\ntime.sleep(30)\n')
         result = self.run_hook(prompt='Card: WR557.S6.J1')
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists(), 'first admission started a registration lookup')
 
     def test_mint_from_stdin_preserves_response_and_seeds(self):
         self.now = 1000000

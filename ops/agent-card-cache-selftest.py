@@ -4,11 +4,12 @@ from concurrent.futures import ProcessPoolExecutor
 import fcntl
 import json
 import os
+import runpy
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.agent_card_cache import RegistrationCache, mint_card
@@ -90,6 +91,15 @@ class CacheTests(unittest.TestCase):
         self.cache.remove(self.card)
         self.cache.record('WR557.S6.J13')
         self.assertFalse(self.cache.contains(self.card))
+
+    def test_mint_hit_cannot_outlive_launch_deadline(self):
+        gate = runpy.run_path(str(Path(__file__).resolve().parent.parent / 'hooks/agent-card-gate.py'))
+        cache = Mock(consume_mint=lambda card: True)
+        with patch('lib.agent_card_cache.RegistrationCache', return_value=cache), \
+                patch('time.monotonic', side_effect=[0, 9, 9]):
+            result = gate['check_prompts']([f'Card: {self.card}'])
+        self.assertEqual(result.code, 2)
+        self.assertIn('deadline exceeded', result.stderr)
 
     def test_contended_lock_does_not_block_admission(self):
         self.cache.record(self.card, minted=True)

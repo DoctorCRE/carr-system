@@ -156,7 +156,7 @@ def check_prompts(prompts):
     cache = RegistrationCache()
     deadline = time.monotonic() + 8
     for card in dict.fromkeys(cards):
-        if cache.consume_mint(card):
+        if cache.consume_mint(card) and time.monotonic() < deadline:
             continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
