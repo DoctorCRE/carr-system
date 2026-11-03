@@ -572,6 +572,27 @@ def _review_id(session: str, kind: str, number: int) -> str:
     return hashlib.sha256(f"{session}:{kind}:{number}".encode()).hexdigest()[:16]
 
 
+def disclose_unrecovered_speech(report: dict[str, Any], transcript: dict[str, Any]) -> None:
+    if not transcript.get("unrecovered_speech"):
+        return
+    spans = []
+    for row in transcript.get("segments", []):
+        if row.get("unrecovered"):
+            start = row["start_ms"] // 1000
+            end = (row["end_ms"] + 999) // 1000
+            spans.append(f"{row.get('speaker', 'Unknown speaker')} at {start // 60}:{start % 60:02d} "
+                         f"to {end // 60}:{end % 60:02d}")
+    warning = ("Part of this call could not be transcribed (approximately "
+               + ("; ".join(spans) if spans else "time span unavailable")
+               + "). This summary covers only the recovered speech. Review the saved recording.")
+    if warning not in report["report"]["summary"]:
+        report["report"]["summary"] = warning + "\n\n" + report["report"]["summary"]
+    question_id = _review_id(report["session"], "unrecovered_speech", 1)
+    if not any(q["id"] == question_id for q in report["review_questions"]):
+        report["review_questions"].append({"id": question_id, "resolved": False,
+            "question": warning + " Recover the missing speech or confirm you knowingly file this partial call."})
+
+
 def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
                            call_date: str | None = None, transcript: dict[str, Any] | None = None,
                            ledger: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -691,6 +712,7 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
         for item in result[list_name]:
             item["candidate_id"] = None
             item["candidate_status"] = "unfiled"
+    disclose_unrecovered_speech(result, transcript or {})
     return result
 
 
@@ -1037,6 +1059,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
             raise ContractError("post-call report is unreadable")
+        transcript = read_json(session_dir / "transcript.json") or {}
+        if transcript.get("unrecovered_speech"):
+            with update_report(session_dir, initial=report, locked=True) as current:
+                disclose_unrecovered_speech(current, transcript)
+                report = deepcopy(current)
         if existing.get("state") != "filed":
             try:
                 require_review_coverage(session_dir, report)
