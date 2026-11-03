@@ -196,10 +196,71 @@ class PublicationTests(unittest.TestCase):
         self.build()
         self.assertEqual(old, self.digest())
 
-    def cli(self):
+    def cli(self, destination=None, *options):
         return subprocess.run([sys.executable, str(ROOT / 'tools/email-local-search.py'), 'build',
-            '--source', str(self.source), '--index', str(self.target), '--mailbox', 'synthetic',
-            '--account-id', '42', '--source-revision', 'synthetic-r1'], capture_output=True, text=True)
+            '--source', str(self.source), '--index', str(destination or self.target), '--mailbox', 'synthetic',
+            '--account-id', '42', '--source-revision', 'synthetic-r1', *options],
+            capture_output=True, text=True, cwd=self.home)
+
+    def test_cli_alias_destination_preserves_source(self):
+        link = self.home / 'link.db'
+        link.symlink_to(self.source)
+        parent = self.home / 'linked-parent'
+        parent.symlink_to(self.home, target_is_directory=True)
+        aliases = (self.source, link,
+                   Path(self.source.name), parent / self.source.name,
+                   self.home / 'absent' / '..' / self.source.name,
+                   Path('/' + str(self.source)))
+        before = self.source.read_bytes()
+        hard = self.home / 'hard.db'
+        os.link(self.source, hard)
+        result = self.cli(hard)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual(self.source.read_bytes(), before)
+        hard.unlink()
+        for alias in aliases:
+            with self.subTest(alias=alias):
+                result = self.cli(alias)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(self.source.read_bytes(), before)
+                self.assertFalse(list(self.home.glob('.*.lock')))
+                self.assertFalse(list(self.home.glob('.email-search-*')))
+
+    def test_cli_case_alias_preserves_source(self):
+        alias = self.source.with_name(self.source.name.upper())
+        if not alias.exists() or not alias.samefile(self.source):
+            self.skipTest('case-sensitive filesystem has no case alias')
+        before = self.source.read_bytes()
+        result = self.cli(alias)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertEqual(self.source.read_bytes(), before)
+
+    def test_cli_empty_source_preserves_previous_index(self):
+        self.assertEqual(self.cli().returncode, 0)
+        before = self.target.read_bytes()
+        with closing(sqlite3.connect(self.source)) as db:
+            db.execute('DELETE FROM messages')
+            db.commit()
+        source_before = self.source.read_bytes()
+        result = self.cli()
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('--allow-empty', result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.source.read_bytes(), source_before)
+        self.assertFalse(list(self.home.glob('.email-search-*')))
+        result = self.cli(None, '--allow-empty')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['message_count'], 0)
+        with closing(sqlite3.connect(self.target)) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM messages').fetchone()[0], 0)
+
+    def test_cli_empty_source_can_create_initial_index(self):
+        with closing(sqlite3.connect(self.source)) as db:
+            db.execute('DELETE FROM messages')
+            db.commit()
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['message_count'], 0)
 
     def test_cli_bounded_output_and_sanitized_failure(self):
         result = self.cli()
