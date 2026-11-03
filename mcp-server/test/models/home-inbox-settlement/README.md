@@ -2,7 +2,7 @@
 
 The v3 read derives automatic settlement from canonical task completion, sent replies, resolved fact reviews and received tour feedback. It preserves v1 and v2 and their opaque command versions. Reads write no domain rows or dispositions.
 
-The model separates canonical work, manual disposition and explicit Undo. The numbered PostgreSQL cases execute every non-stuttering model step through registered verbs. Repeated reads cover stuttering in every reachable state. The chart has 20 visible arrows. The chart hides 28 stuttering steps and omits 15 steps within one label. TLC checked 28 states and 113 steps. ResolvedOnly, OverrideWins, SnoozeWins and NoDeadlock hold.
+The model separates canonical work, manual disposition and explicit Undo. The numbered PostgreSQL cases execute the work lifecycle through registered verbs. Adapter cases exercise both new named resolution transitions and their command behavior. Repeated reads cover stuttering across the work lifecycle and after adapter Undo. The chart has 20 visible arrows. The chart hides 28 stuttering steps and omits 15 steps within one label. TLC checked 28 states and 113 steps. ResolvedOnly, OverrideWins, SnoozeWins and NoDeadlock hold.
 
 The model excludes networking, actors, stale writes, truncation and source storage. Separate PostgreSQL tests cover replay, actors, stale writes and bounds. Reopening in this model covers automatic settlement and explicit Undo. Manual settlement remains a separate choice.
 
