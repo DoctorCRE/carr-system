@@ -10042,6 +10042,7 @@ registerTools({
       }
       delete innerArgs.plan_base;
       delete innerArgs.evidence_source;
+      delete innerArgs.phase_chronology_verified;
       if (candidate.kind === "meeting_record") innerArgs.kind = "meeting";
       if (candidate.kind === "phase_move") {
         // The partners' own words on the call are the evidence for the move,
@@ -10052,7 +10053,31 @@ registerTools({
         innerArgs.change_reason = "Stated on the weekly pipeline call";
       }
       let assessmentDealId;
-      if (["next_step", "phase_move"].includes(candidate.kind)) {
+      let satisfiedPhase;
+      if (candidate.post_call && candidate.kind === "phase_move") {
+        const subject = await resolveSubject(c, candidate.payload.deal);
+        await lockDealField(c, subject.id, "phase");
+        const source = candidate.payload.evidence_source;
+        const later = await c.query(
+          `select id from capture_candidate where session_id=$1 and kind='phase_move' and id<>$2
+             and payload->>'deal'=$3
+             and ((payload->'evidence_source'->>'occurrence_start_ms')::bigint > $4
+               or ((payload->'evidence_source'->>'occurrence_start_ms')::bigint = $4 and payload->>'value'<>$5)
+               or (payload->'evidence_source'->>'occurrence_start_ms' is null and payload->>'value'<>$5))
+             /* capture:phase-superseded */`,
+          [candidate.session_id, candidate.id, subject.id, source?.occurrence_start_ms ?? 0, candidate.payload.value]);
+        if (later.rows.length) throw new ToolError({ error: "superseded_call_instruction",
+          hint: "Review the final spoken phase disposition. The earlier instruction cannot change this deal." });
+        const live = (await c.query(`select phase from deal where id=$1 /* capture:phase-current */`,
+          [subject.id])).rows[0];
+        if (live?.phase === candidate.payload.value) {
+          satisfiedPhase = { ok: true, deal_id: subject.id, field: "phase", already_satisfied: true };
+        } else if (!candidate.payload.phase_chronology_verified) {
+          throw new ToolError({ error: "missing_phase_chronology",
+            hint: "The call timing could not be bounded against the server clock. Review the live deal and make a fresh explicit phase decision." });
+        }
+      }
+      if (!satisfiedPhase && ["next_step", "phase_move"].includes(candidate.kind)) {
         const subject = await resolveSubject(c, candidate.payload.deal);
         if (candidate.kind === "next_step")
           await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0))", [subject.id]);
@@ -10091,7 +10116,7 @@ registerTools({
         }
       }
       if (candidate.kind === 'next_step') innerArgs[callNextStepItems] = true;
-      const result = await executeRegisteredTool(c, actor, verb, innerArgs);
+      const result = satisfiedPhase || await executeRegisteredTool(c, actor, verb, innerArgs);
       if (!result || result.ok === false) throw new ToolError(result || { error: "inner_write_failed" });
       if (candidate.kind === 'next_step') {
         result.items = [];

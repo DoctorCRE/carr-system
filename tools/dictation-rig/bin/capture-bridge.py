@@ -323,7 +323,10 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     url = f"{cfg['base_url']}/capture/claim"
 
     try:
+        claim_sent_at = datetime.now(timezone.utc)
+        claim_tick = time.monotonic()
         status, resp = http_request("POST", url, body, headers)
+        claim_round_trip_ms = (time.monotonic() - claim_tick) * 1000
     except BridgeNetworkError as exc:
         log_line(f"ERROR claim network failure session={name}: {exc}")
         return Outcome.UNAVAILABLE
@@ -348,11 +351,18 @@ def claim_cmd(cfg: dict[str, str], session_dir: Path) -> int:
     except (TypeError, ValueError):
         log_line(f"WARN claim response has no usable ttl_seconds session={name}")
 
-    marker = {
+    marker: dict[str, Any] = {
         "session_token": session_token,
         "claimed_at": claimed_at,
         "expires_at": expires_at,
     }
+    recording_start = datetime.fromisoformat(body["started_at"].replace("Z", "+00:00"))
+    elapsed_ms = (claim_sent_at - recording_start).total_seconds() * 1000
+    wall_round_trip_ms = (now - claim_sent_at).total_seconds() * 1000
+    if (0 <= elapsed_ms <= 86400000 and 0 <= claim_round_trip_ms <= 5000
+            and abs(wall_round_trip_ms - claim_round_trip_ms) <= 1000):
+        marker["claim_elapsed_ms"] = round(elapsed_ms)
+        marker["claim_round_trip_ms"] = round(claim_round_trip_ms)
     if not write_json_atomic(capture_marker, marker, mode=0o600):
         log_line(f"ERROR claim: could not persist .capture.json session={name}")
         return Outcome.UNAVAILABLE
@@ -528,7 +538,10 @@ def apply_automatic(session_dir: Path) -> bool:
             outcomes[candidate_id] = None
         else:
             error = reply.get("error") or "the record layer refused it"
-            outcomes[candidate_id] = f"Could not apply automatically ({error}); review it here."
+            if "value" in change:
+                outcomes[candidate_id] = f"The call timing or current phase could not be confirmed ({error}); review this phase here."
+            else:
+                outcomes[candidate_id] = f"Could not apply automatically ({error}); review it here."
         log_line(f"AUTO session={session_dir.name} candidate={candidate_id} applied={outcomes[candidate_id] is None}")
     try:
         post_call.record_automatic(session_dir, outcomes)

@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { neonConfig } from '@neondatabase/serverless';
 import { acquireDisposablePostgres } from './disposable-postgres.mjs';
-import { callContext, openCallSession, seedSyntheticBook } from './call-rehearsal.mjs';
+import { callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './call-rehearsal.mjs';
 import { APP_STAGING_HOST } from '../../src/staging-browser.ts';
 import { TOOLS, executeRegisteredTool } from '../../src/tools.js';
 
@@ -222,6 +222,8 @@ export async function startLocalCarr({ port = 0, assets = async () => new Respon
     const root = mkdtempSync(path.join(tmpdir(), 'local-carr-call-'));
     roots.push(root);
     const call = await openCallSession({ root, started, captureUrl: url, deviceToken, distiller,
+      clock: rehearsalClock(started),
+      observeClaim: (token, clock) => observeRehearsalClaim((sql, params) => admin.query(sql, params), token, clock),
       env: { CARR_MCP_URL: `${url}/mcp`, CARR_MCP_LOCAL_TOKEN: localToken, CARR_MCP_ENV: path.join(root, 'no-token-file') } });
     calls.push(call);
     const { deals: index } = await mcp('get-call-context', { deal_ids: Object.values(deals) });

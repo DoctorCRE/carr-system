@@ -32,6 +32,8 @@ const INTERNAL_ONLY = new Set([
   "bad_occurred_on",
   "bad_option",
   "below_confidence_bar",
+  "missing_phase_chronology",
+  "superseded_call_instruction",
   "calendar_history_too_large",
   "call_already_undone",
   "campaign_exists",
@@ -297,6 +299,7 @@ test("every tools.js ToolError code is classified", t => {
   assert.deepEqual(fingerprints, [
     "090b814f8e6237373e71306c7e3f5493252cf7c730241328ad3bc254b3170a8e",
     "195bc5561ebbcfe865e46d0b5b6dcbd7d493d8db604ba7988a11762123fe4211",
+    "19da80dd7ccb57947f11846b3fac8ee1517314c2537833626a362dff67724289",
     "59ca89a7c09faa9d51104039816f63ec7c2f7a251f953cc016b32a2140338f17",
     "a2b254f60a6c0186b71b352bd2f4d483268dadfc918b415d0c9a5a6154a6653e",
     "a51a7e48501621ccd17585ed3b6fc0364e758a8ae05371b31fdc8acbcc0947e7",
@@ -306,7 +309,6 @@ test("every tools.js ToolError code is classified", t => {
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
-    "d991b45fcdc81eaa20d6007a204fb851ab870c0cf692adea81390b6a0268b152",
     "f63a0f2a5645ee4947efb2591ff71cead89f796204ec510bc9e682a4e66c6c1f",
     "f9dde66e80d9054fb24315138b160492e95f21ea42f98ee20018448d728f0bd9",
   ], "review changed dynamic code producers");

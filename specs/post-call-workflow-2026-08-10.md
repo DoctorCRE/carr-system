@@ -250,3 +250,29 @@ produce review questions naming the skipped deal and the reason. Other deals
 continue. Jev failures retain proposals with item-level flags and a review
 question. Exception classes and safe cause categories are visible; raw provider
 errors are not copied into the pack.
+
+
+### Call phase chronology
+
+Post-call phase proposals reuse the private transcript evidence receipt. A unique
+partner quote adds `recording_started_at`, `occurrence_start_ms`, and
+`occurrence_end_ms` alongside the quote and source hashes. The span uses the
+recorded segment offsets. Repeated quotes, absent offsets, and unknown recording
+starts carry no temporal authority. Raw transcript text stays on the recorder.
+
+The server verifies that the recording start matches the claimed capture session.
+A phase proposal pins the last phase event strictly before the cited instruction,
+never the phase base at filing time. The short historical note stays available.
+The summarizer selects the final explicit phase disposition for each deal. At
+acceptance, the server also refuses an earlier proposal when this session contains
+a later timed phase instruction for the same deal. Conflicting instructions at the
+same source offset require a fresh explicit decision.
+
+The live phase is read under the phase field lock. An equal value confirms as
+`already_satisfied` without writing a phase event or changing its start date.
+A different value requires a timed source, and the normal locked field patch
+conflicts on every event after the instruction's historical base. The default
+preserves the later edit. An intentional backward move is allowed when its cited
+instruction follows the latest recorded phase edit. Untimed proposals and genuine
+conflicts require review of the live deal followed by a fresh explicit decision;
+accepting the stale proposal never silently refreshes its base.

@@ -41,15 +41,19 @@ async function command(name, args = {}, identity = actor, role = null, client = 
 }
 
 const sessionTokens = new Map();
+const recordingStartedAt = "2099-01-01T15:00:00Z";
+const occurrenceOffsets = new Map();
 async function filedCall() {
   const token = randomUUID();
   const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,consent_announced_at,
-    session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture',$2,'meeting',now(),now(),$1,
-    now()+interval '1 day','distilling',now(),true) returning id`, [createHash('sha256').update(token).digest('hex'),actor.id])).rows[0].id;
+    session_token_hash,expires_at,state,state_at,post_call,created_at) values($1,'fixture',$2,'meeting',$3::timestamptz,$3::timestamptz,$1,
+    now()+interval '1 day','distilling',now(),true,$3::timestamptz) returning id`, [createHash('sha256').update(token).digest('hex'),actor.id,recordingStartedAt])).rows[0].id;
   sessionTokens.set(session, token);
   return session;
 }
 async function fileCandidate(session, item, key = randomUUID()) {
+  if (!occurrenceOffsets.has(key)) occurrenceOffsets.set(key, occurrenceOffsets.size * 10000);
+  const occurrenceStart = occurrenceOffsets.get(key);
   const handler = createCaptureHandler({ withWriter: async fn => {
     await c.query('begin');
     await c.query('set local role carr_writer');
@@ -60,7 +64,8 @@ async function fileCandidate(session, item, key = randomUUID()) {
     method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({
       session_token:sessionTokens.get(session), idempotency_key:key, items:[item],
       evidence_sources:[{speaker:'joe', source_sha256:createHash('sha256').update('Synthetic stored partner transcript').digest('hex'),
-        quote_sha256:createHash('sha256').update(item.evidence_quote).digest('hex')}],
+        quote_sha256:createHash('sha256').update(item.evidence_quote).digest('hex'),
+        recording_started_at:recordingStartedAt,claim_elapsed_ms:0,claim_round_trip_ms:0,occurrence_start_ms:occurrenceStart,occurrence_end_ms:occurrenceStart+5000}],
     })
   }), {});
   const body = await response.json();
@@ -320,29 +325,30 @@ test('verified sponsored partners can undo and unattended sessions cannot', asyn
   assert.equal(result.undone,true);
 });
 
-async function phaseCandidate(session, value) {
-  const id=await filePhase(session,value);
+async function phaseCandidate(session, value, ref = deal) {
+  const id=await filePhase(session,value,ref);
   await command('resolve-candidate',{idempotency_key:randomUUID(),candidate_id:id,accept:true,automatic:true});
   return id;
 }
 test('phase calls restore dates when supported and otherwise refuse atomically', async () => {
+  const ref=await secondDeal();
   const session=await filedCall();
-  await command('set-next-step',{idempotency_key:randomUUID(),deal,text:'Review the overdue original phase plan',
-    next_date:'2026-01-01',base_version:(await room()).base_version});
-  const before=await room();
-  await phaseCandidate(session,'negotiation');
-  assert.equal((await room()).phase,'negotiation');
+  await command('set-next-step',{idempotency_key:randomUUID(),deal:ref,text:'Review the overdue original phase plan',
+    next_date:'2026-01-01',base_version:(await room(ref)).base_version});
+  const before=await room(ref);
+  await phaseCandidate(session,'negotiation',ref);
+  assert.equal((await room(ref)).phase,'negotiation');
   const args={idempotency_key:randomUUID(),session_id:session};
   const supported=(await c.query(`select position('revert-deal-field' in
     pg_get_viewdef('v_deal_room_phase_start'::regclass)) > 0 as supported`)).rows[0].supported;
   if (!supported) {
     await assert.rejects(command('undo-call',args),error=>error.payload?.error==='phase_start_undo_unavailable');
-    assert.equal((await room()).phase,'negotiation');
+    assert.equal((await room(ref)).phase,'negotiation');
   }
   if (supported) {
     const result=await command('undo-call',args);
     assert.equal(result.undone,true);
-    const restored=await room();
+    const restored=await room(ref);
     assert.equal(restored.phase,before.phase);
     assert.equal(restored.next_step,before.next_step);
     assert.equal(restored.next_date,before.next_date);
@@ -377,14 +383,15 @@ test('a previously undone sibling change causes a safe whole-call refusal', asyn
 });
 
 test('multiple phase moves on one deal refuse without restoring only part of the call', async () => {
+  const ref=await secondDeal();
   const session=await filedCall();
-  await phaseCandidate(session,'negotiation');
-  await phaseCandidate(session,'due_diligence');
-  const before=await room();
+  await phaseCandidate(session,'negotiation',ref);
+  await phaseCandidate(session,'due_diligence',ref);
+  const before=await room(ref);
   await assert.rejects(command('undo-call',{idempotency_key:randomUUID(),session_id:session}),
     error=>error.payload?.error==='phase_history_undo_unavailable');
-  assert.equal((await room()).phase,before.phase);
-  assert.deepEqual((await room()).phase_started_on,before.phase_started_on);
+  assert.equal((await room(ref)).phase,before.phase);
+  assert.deepEqual((await room(ref)).phase_started_on,before.phase_started_on);
 });
 
 test('a later ordinary action with the same date is preserved', async () => {
