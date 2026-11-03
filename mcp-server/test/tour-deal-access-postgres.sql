@@ -1,11 +1,46 @@
 \set ON_ERROR_STOP on
 begin;
 create temporary table deal_tour_cases(kind text,deal_id uuid,tour_id uuid,client_party uuid,projection_id uuid,render_id uuid,route_id uuid);
-grant all on deal_tour_cases to carr_writer;
+grant all on deal_tour_cases to carr_writer,carr_authority;
 create function pg_temp.authorize_deal_tours(who text) returns void language sql security definer as $$
  select set_config('carr.tour_deal_access',jsonb_build_object('slug',who,'id',(select id::text from public.actor where slug=who),'deals',coalesce((select jsonb_object_agg(id::text,jsonb_build_object('owner',owner,'version',version)) from public.deal where owner=who),'{}'))::text,true)::text::void
 $$;
 grant execute on function pg_temp.authorize_deal_tours(text) to carr_writer;
+create function pg_temp.test_denied_tour_mutators() returns void language plpgsql as $internal_mutations_unavailable$
+declare fixture record; f record; i integer; args text; value text; result jsonb;
+begin
+ for fixture in select * from deal_tour_cases where kind<>'accessible' loop
+  for f in select p.* from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='ops' and has_function_privilege(current_user,p.oid,'EXECUTE') and p.proname=any(array[
+    'append_tour_cheat_sheet_revision','restore_tour_cheat_sheet_revision',
+    'append_tour_route_version','prepare_tour_route_version','append_tour_route_stop',
+    'append_tour_route_stop_transition','accept_tour_route_version',
+    'append_tour_selection_cart_version','create_tour_public_projection_draft',
+    'seal_tour_public_projection','request_tour_pdf_render','record_tour_pdf_render_result',
+    'record_tour_pdf_human_review','record_tour_map_promotion_receipt',
+    'issue_tour_share_grant','rotate_tour_share_grant','revoke_tour_share_grant']) loop
+   args:='';
+   for i in 1..f.pronargs loop
+    value:=case f.proargnames[i]
+     when 'p_tenant' then quote_literal('carr-internal')
+     when 'p_actor_id' then quote_literal('joe')
+     when 'p_tour_id' then quote_literal(coalesce(fixture.tour_id,fixture.deal_id))
+     when 'p_route_version_id' then quote_literal(coalesce(fixture.route_id,fixture.deal_id))
+     when 'p_old_route_version_id' then quote_literal(coalesce(fixture.route_id,fixture.deal_id))
+     when 'p_new_route_version_id' then quote_literal(coalesce(fixture.route_id,fixture.deal_id))
+     when 'p_projection_id' then quote_literal(coalesce(fixture.projection_id,fixture.deal_id))
+     when 'p_render_job_id' then quote_literal(coalesce(fixture.render_id,fixture.deal_id))
+     when 'p_share_grant_id' then quote_literal(fixture.deal_id)
+     when 'p_request' then quote_literal(jsonb_build_object('projection_id',coalesce(fixture.projection_id,fixture.deal_id))::text)
+     else 'null' end;
+    args:=args||case when i>1 then ',' else '' end||value||'::'||format_type(f.proargtypes[i-1],null);
+   end loop;
+   execute format('select to_jsonb(ops.%I(%s))',f.proname,args) into result;
+   if result is not null then raise exception 'unavailable mutation returned a result: % %',f.proname,fixture.kind; end if;
+  end loop;
+ end loop;
+end $internal_mutations_unavailable$;
+grant execute on function pg_temp.test_denied_tour_mutators() to carr_writer,carr_authority;
 do $fixtures$
 declare a uuid; p uuid; c uuid; d uuid; kind text;
 begin
@@ -101,6 +136,10 @@ begin
  -- The actor argument alone cannot impersonate another partner.
  if ops.read_tour_internal_detail('carr-internal',(select tour_id from deal_tour_cases where kind='inaccessible'),'dell') is not null then raise exception 'actor substitution leaked'; end if;
 end $read_unavailable$;
+set local session authorization carr_authority;
+select pg_temp.test_denied_tour_mutators();
+set local session authorization carr_writer;
+select pg_temp.test_denied_tour_mutators();
 do $mixed_library$
 declare ids jsonb;
 begin
