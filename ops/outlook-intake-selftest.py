@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import random
 import runpy
 import struct
 from pathlib import Path
@@ -150,6 +151,7 @@ class Fake:
     def __init__(self, test):
         self.test = test
         self.calls = []
+        self.findings = {}
         self.email_queue = []
         self.hydrated_bodies = {}
         self.decodes = 0
@@ -179,9 +181,20 @@ class Fake:
         if verb == 'email-router-queue':
             rows = sorted([m for m in self.email_queue if m['activity_id'] > args.get('after', '')],
                           key=lambda m: m['activity_id'])
-            page = [{**m, 'body': self.hydrated_bodies.get(m['activity_id'], m.get('body'))}
+            page = [{'version': 1, **m, 'body': self.hydrated_bodies.get(m['activity_id'], m.get('body'))}
                     for m in rows[:args['limit']]]
             return {'emails': page, 'next_cursor': page[-1]['activity_id'] if len(rows) > len(page) else None}
+        if verb == 'record-finding':
+            if args['idempotency_key'] in self.findings:
+                return {'ok': True}
+            ids = args['value']['source_activity_ids']
+            versions = args['value'].get('source_activity_versions', {})
+            rows = {m['activity_id']: m for m in self.email_queue}
+            if any(a not in rows or rows[a].get('deal') != args['subject']
+                   or rows[a].get('version', 1) != versions.get(a) for a in ids):
+                raise intake.CarrError(code='email_delivery_filing_changed')
+            self.findings[args['idempotency_key']] = args
+            return {'ok': True}
         if verb == 'log-activity':
             source = args.get('email_context', {}).get('source_activity_id')
             if source:
@@ -438,6 +451,308 @@ class IntakeTest(unittest.TestCase):
 
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
+
+    def delivery_pair(self, recipients=CLIENT.email):
+        source = mail(OWNER, -timedelta(hours=2), recipients=recipients,
+                      message_id='<original@example.com>', local_keys='77')
+        self.run_intake([source])
+        activity = next(a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out')
+        activity_id = str(uuid.uuid5(uuid.NAMESPACE_URL, activity['idempotency_key']))
+        self.fake.email_queue = [{'activity_id': activity_id, 'deal': '11111111-1111-4111-8111-111111111111',
+                                 'body': source['body'], 'occurred_at': NOW.isoformat()}]
+        report = mail('postmaster@example.com', -timedelta(hours=1),
+                      message_id='<report@example.com>', local_keys='78', body=
+                      'Reporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\n'
+                      'Final-Recipient: rfc822; pat@example.test\nAction: failed\nStatus: 5.7.520\n'
+                      'Diagnostic-Code: smtp; 550 5.7.520 Message rejected')
+        return source, report
+
+    def delivery_findings(self):
+        return list(self.fake.findings.values())
+
+    def test_matching_ndr_is_recorded_before_automated_sender_skip(self):
+        source, report = self.delivery_pair()
+        self.run_intake([source, report])
+        findings = self.delivery_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]['subject'], self.fake.email_queue[0]['deal'])
+        self.assertEqual(findings[0]['value']['source_activity_ids'], [self.fake.email_queue[0]['activity_id']])
+        self.assertEqual(findings[0]['value']['verification'], 'unverified_report')
+        self.assertRegex(findings[0]['source'], r'^outlook-delivery-report/[0-9a-f]{64}/[0-9a-f]{64}$')
+        self.run_intake([source, report])
+        self.assertEqual(len(self.delivery_findings()), 1)
+        self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 1)
+
+    def test_unmatched_delivery_report_retries_when_source_arrives(self):
+        source, report = self.delivery_pair()
+        report['body'] = report['body'].replace('<original@example.com>', '<later@example.com>')
+        first = self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(first.counts['delivery_failures_pending'], 1)
+        later = {**source, 'message_id': '<later@example.com>', 'local_keys': '79'}
+        self.run_intake([source, later, report])
+        request = next(a for v, a in reversed(self.fake.calls) if v == 'log-activity' and a['kind'] == 'email_out')
+        self.fake.email_queue = [{**self.fake.email_queue[0], 'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, request['idempotency_key']))}]
+        self.run_intake([source, later, report])
+        self.assertEqual(len(self.delivery_findings()), 1)
+
+    def paginated_delivery_pair(self):
+        source, report = self.delivery_pair(CLIENT.email + ',' + LEAD.email)
+        activities = sorted({str(uuid.uuid5(uuid.NAMESPACE_URL, a['idempotency_key']))
+                             for v, a in self.fake.calls if v == 'log-activity' and a.get('kind') == 'email_out'})
+        first, last = [int(uuid.UUID(a)) for a in activities]
+        template = self.fake.email_queue[0]
+        self.fake.email_queue = [{**template, 'activity_id': activities[0]}]
+        self.fake.email_queue += [{**template, 'activity_id': str(uuid.UUID(int=first + (last-first)*i//200))}
+                                  for i in range(1, 200)]
+        return source, report, activities, template
+
+    def test_delivery_failure_waits_for_last_filing_page_and_rejects_conflict(self):
+        source, report, activities, template = self.paginated_delivery_pair()
+        self.fake.email_queue.append({**template, 'activity_id': activities[-1],
+                                      'deal': '22222222-2222-4222-8222-222222222222'})
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_failure_rejects_correction_between_filing_pages(self):
+        source, report, activities, template = self.paginated_delivery_pair()
+        self.fake.email_queue.append({**template, 'activity_id': activities[-1]})
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.fake.email_queue[0]['deal'] = '22222222-2222-4222-8222-222222222222'
+        self.fake.email_queue[0]['version'] = 2
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        box = next(iter(json.loads((self.out() / intake.STATE).read_text())['delivery_mailboxes'].values()))
+        self.assertEqual(next(iter(box['reports'].values()))['disposition'], 'retryable')
+
+    def test_delivery_failure_random_corrections_never_attribute_stale_filings(self):
+        for seed in range(48):
+            with self.subTest(seed=seed):
+                case = IntakeTest()
+                case.setUp()
+                try:
+                    rng = random.Random(seed)
+                    source, report, activities, template = case.paginated_delivery_pair()
+                    case.fake.email_queue.append({**template, 'activity_id': activities[-1]})
+                    case.run_intake([source, report])
+                    self.assertEqual(case.delivery_findings(), [])
+                    changed = set()
+                    for _ in range(rng.randint(1, 8)):
+                        activity = rng.choice(activities)
+                        row = next(m for m in case.fake.email_queue if m['activity_id'] == activity)
+                        row.update(deal=rng.choice([template['deal'], None,
+                                   '22222222-2222-4222-8222-222222222222']),
+                                   version=row.get('version', 1) + 1)
+                        changed.add(activity)
+                    final = {m['activity_id']: m for m in case.fake.email_queue}
+                    case.run_intake([source, report])
+                    for finding in case.delivery_findings():
+                        self.assertTrue(all(final[a]['deal'] == finding['subject'] for a in activities))
+                    if activities[0] in changed:
+                        self.assertEqual(case.delivery_findings(), [])
+                    for _ in range(2):
+                        case.run_intake([source, report])
+                    agreement = {final[a]['deal'] for a in activities}
+                    self.assertEqual(len(case.delivery_findings()), int(len(agreement) == 1 and None not in agreement))
+                finally:
+                    case.doCleanups()
+
+    def test_delivery_failure_continuous_corrections_exhaust_existing_budget(self):
+        source, report = self.delivery_pair()
+        original_carr = self.fake.carr
+        def correct_before_write(verb, args):
+            if verb == 'record-finding':
+                row = self.fake.email_queue[0]
+                row['version'] = row.get('version', 1) + 1
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=correct_before_write):
+            for _ in range(40):
+                self.run_intake([source, report])
+        box = next(iter(json.loads((self.out() / intake.STATE).read_text())['delivery_mailboxes'].values()))
+        retained = next(iter(box['reports'].values()))
+        self.assertEqual(retained['disposition'], 'unresolved')
+        self.assertEqual(retained['attempts'], intake.DELIVERY_RETRY_LIMIT)
+        self.assertNotIn('request', retained)
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(intake._reply_error({'error': 'email_delivery_filing_changed'}),
+                         'email_delivery_filing_changed')
+
+    def test_delivery_failure_resolves_source_on_last_filing_page(self):
+        source, report, activities, template = self.paginated_delivery_pair()
+        self.fake.email_queue.append({**template, 'activity_id': activities[-1]})
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.run_intake([source, report])
+        self.assertEqual(len(self.delivery_findings()), 1)
+        self.assertEqual(self.delivery_findings()[0]['value']['source_activity_ids'], activities)
+
+    def test_delivery_failure_keeps_absent_filing_unresolved(self):
+        source, report, _, _ = self.paginated_delivery_pair()
+        self.run_intake([source, report])
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_unmatched_delivery_report_expires_and_indexes_are_pruned(self):
+        source, report = self.delivery_pair()
+        self.fake.email_queue = []
+        self.run_intake([source, report])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        box = next(iter(state['delivery_mailboxes'].values()))
+        retained = next(iter(box['reports'].values()))
+        intake._prune(state, NOW + timedelta(days=31))
+        self.assertEqual(retained['disposition'], 'unresolved')
+        intake._prune(state, NOW + timedelta(days=3650))
+        self.assertEqual(box['reports'], {})
+        self.assertEqual(box['sources'], {})
+        self.assertEqual(box.get('deals', {}), {})
+
+    def test_unmatched_delivery_report_retry_storm_is_bounded_and_terminal(self):
+        source, report = self.delivery_pair()
+        self.fake.email_queue = []
+        for _ in range(40):
+            result = self.run_intake([source, report])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        box = next(iter(state['delivery_mailboxes'].values()))
+        self.assertEqual(len(box['reports']), 1)
+        retained = next(iter(box['reports'].values()))
+        self.assertEqual(retained['disposition'], 'unresolved')
+        self.assertEqual(result.counts['delivery_failures_pending'], 0)
+        before = dict(retained)
+        self.fake.email_queue = [{'activity_id': r['activity_id'], 'deal': '11111111-1111-4111-8111-111111111111',
+                                 'body': '', 'occurred_at': NOW.isoformat()}
+                                for r in state['requests'].values() if r.get('activity_id')]
+        self.run_intake([source, report])
+        after = next(iter(next(iter(json.loads(path.read_text())['delivery_mailboxes'].values()))['reports'].values()))
+        self.assertEqual(after, before)
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_retention_does_not_reopen_expired_reports(self):
+        source, report = self.delivery_pair()
+        self.fake.email_queue = []
+        self.run_intake([source, report])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        intake._prune(state, NOW + timedelta(days=3650))
+        path.write_text(json.dumps(state))
+        self.fake.now += timedelta(days=3650)
+        self.run_intake([source, report])
+        box = next(iter(json.loads(path.read_text())['delivery_mailboxes'].values()))
+        self.assertEqual(box['reports'], {})
+        self.assertEqual(box['sources'], {})
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_retention_preserves_all_source_receipts(self):
+        source, report = self.delivery_pair(CLIENT.email + ',' + LEAD.email)
+        self.run_intake([source, report])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        before = {k: r for k, r in state['requests'].items() if json.loads(r['payload']).get('kind') == 'email_out'}
+        intake._prune(state, NOW + timedelta(days=20))
+        self.assertEqual({k: state['requests'].get(k) for k in before}, before)
+
+    def test_delivery_retention_preserves_frozen_requests(self):
+        source, report = self.delivery_pair()
+        path = self.out() / intake.STATE
+        original_carr = self.fake.carr
+        def lose_reply(verb, args):
+            if verb == 'record-finding':
+                original_carr(verb, args)
+                raise intake.CarrError(code='timeout')
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=lose_reply):
+            self.run_intake([source, report])
+        state = json.loads(path.read_text())
+        box = next(iter(state['delivery_mailboxes'].values()))
+        frozen = next(iter(box['reports'].values()))['request']
+        intake._prune(state, NOW + timedelta(days=3650))
+        self.assertEqual(next(iter(box['reports'].values()))['request'], frozen)
+
+    def test_delivery_failure_rejects_cross_account_spoofed_quoted_and_ambiguous_mail(self):
+        source, report = self.delivery_pair()
+        bad = [dict(report, folder_account=8), dict(report, sender='attacker@example.com'),
+               dict(report, body='> ' + report['body'].replace('\n', '\n> ')), dict(report, body_kind='preview'),
+               dict(report, recipients=PARTNER)]
+        for row in bad:
+            self.run_intake([source, row])
+            self.assertEqual(self.delivery_findings(), [])
+        sibling = dict(source, local_keys='79')
+        self.run_intake([source, sibling, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 2)
+
+    def test_subject_recipient_and_time_do_not_establish_delivery_failure_identity(self):
+        source, report = self.delivery_pair()
+        report['body'] = report['body'].replace('Original-Message-ID: <original@example.com>\n', '')
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 1)
+
+    def test_ordinary_machine_mail_keeps_automated_skip_behavior(self):
+        result = self.run_intake([mail('postmaster@example.com', -timedelta(hours=1), body='bounce digest')])
+        self.assertEqual(result.counts['skipped_automated'], 1)
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_original_receipt_must_belong_to_selected_mailbox(self):
+        source, report = self.delivery_pair()
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        for request in state['requests'].values():
+            args = json.loads(request['payload'])
+            if args.get('kind') == 'email_out':
+                args['email_identity']['mailbox_account'] = 'other@example.com'
+                request['payload'] = json.dumps(args)
+        state_path.write_text(json.dumps(state))
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_failure_uses_frozen_request_after_lost_response(self):
+        source, report = self.delivery_pair()
+        original_carr = self.fake.carr
+        stored = {}
+        def lose_reply(verb, args):
+            if verb == 'record-finding':
+                stored.setdefault(args['idempotency_key'], dict(args))
+                original_carr(verb, args)
+                raise intake.CarrError(code='timeout')
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=lose_reply):
+            self.assertEqual(self.run_intake([source, report]).state, 'failed')
+        self.fake.now += timedelta(minutes=2)
+        report['body'] = report['body'].replace('Message rejected', 'Changed diagnostic')
+        self.run_intake([source, report])
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(self.delivery_findings()[-1], next(iter(stored.values())))
+        self.assertTrue(all(v not in ('update-party-contact', 'correct-party-identity', 'record-deal-item') for v, _ in self.fake.calls))
+
+    def test_delivery_failure_replays_frozen_request_long_after_receipt_expiry(self):
+        source, report = self.delivery_pair()
+        original_carr = self.fake.carr
+        sent = []
+        def lose_reply(verb, args):
+            result = original_carr(verb, args)
+            if verb == 'record-finding':
+                sent.append(args)
+                raise intake.CarrError(code='timeout')
+            return result
+        with patch.object(self.fake, 'carr', side_effect=lose_reply):
+            self.run_intake([source, report])
+        self.fake.now += timedelta(days=31)
+        def retry(verb, args):
+            if verb == 'record-finding':
+                sent.append(args)
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=retry):
+            result = self.run_intake([source, report])
+        self.assertGreaterEqual(len(sent), 2)
+        self.assertTrue(all(args == sent[0] for args in sent))
+        self.assertEqual(result.counts['delivery_failures_recorded'], 1)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        mailbox = next(iter(state['delivery_mailboxes'].values()))
+        self.assertEqual(next(iter(mailbox['reports'].values()))['disposition'], 'recorded')
 
     def test_no_filing_fails_at_one_business_day_and_recovers_on_inbound(self):
         self.fake.now = datetime(2026, 10, 20, 23, tzinfo=timezone.utc)
@@ -4450,6 +4765,13 @@ class LoadObjectFieldsTest(unittest.TestCase):
 
     def load(self, account=None):
         return intake._load(self.db, account)
+
+    def test_delivery_report_reply_identity_is_projected_from_decoder_object(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute('ALTER TABLE message_objects ADD COLUMN in_reply_to TEXT')
+            con.execute('UPDATE message_objects SET in_reply_to=? WHERE local_key=71', ('original@example.com',))
+        _, mails, _ = self.load(7)
+        self.assertEqual(mails[0]['in_reply_to'], 'original@example.com')
 
     def test_object_subject_recovers_missing_heuristic_and_recipients_in_order(self):
         with sqlite3.connect(self.db) as con:

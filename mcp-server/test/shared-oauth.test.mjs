@@ -536,7 +536,16 @@ test("Chrome completes approve and deny at an external client while consent form
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     servers.push(server);
     await call("Page.navigate", { url: `http://127.0.0.1:${server.address().port}/` });
-    for (let i = 0; i < 300; i++) { if (await evaluate('!!document.querySelector("form")')) break; await new Promise(resolve => setTimeout(resolve, 10)); }
+    await evaluate(`new Promise(resolve => {
+      const ready = () => {
+        if (!document.querySelector('form button[value="${decision}"]:enabled')) return;
+        observer.disconnect();
+        resolve();
+      };
+      const observer = new MutationObserver(ready);
+      observer.observe(document, { childList: true, subtree: true, attributes: true });
+      ready();
+    })`);
     assert.match(f.response.headers.get("content-security-policy"), /form-action 'self';/);
     await evaluate(`document.querySelector('button[value="${decision}"]').click()`);
     for (let i = 0; i < 300 && !callback; i++) await new Promise(resolve => setTimeout(resolve, 10));
