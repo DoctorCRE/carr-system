@@ -6971,6 +6971,21 @@ export const TOOLS = {
         subjectType = s.type; subjectId = s.id;
       }
 
+      if (args.kind === "email_delivery_failure") {
+        const ids = args.value?.source_activity_ids;
+        const versions = args.value?.source_activity_versions;
+        if (subjectType !== "deal" || !Array.isArray(ids) || !ids.length || ids.length > 200
+            || new Set(ids).size !== ids.length
+            || ids.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+              || !Number.isSafeInteger(versions?.[id]) || versions[id] < 1))
+          throw new ToolError({ error: "email_delivery_filing_changed" });
+        const sources = (await c.query(`select id,deal_id,version,kind,actor_id from activity
+          where id=any($1::uuid[]) order by id for share`, [ids])).rows;
+        if (sources.length !== ids.length || sources.some(row => row.kind !== "email_out"
+            || row.actor_id !== actor.id || row.deal_id !== subjectId || row.version !== versions[row.id]))
+          throw new ToolError({ error: "email_delivery_filing_changed" });
+      }
+
       // The correction is DATA, not an instruction. It rides inside value so it is
       // impossible to store one without its provenance, and no code path applies it.
       const value = {

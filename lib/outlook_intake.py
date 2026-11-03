@@ -152,7 +152,7 @@ ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reus
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed',
-                         'agenda_version_conflict', 'version_conflict'})
+                         'agenda_version_conflict', 'version_conflict', 'email_delivery_filing_changed'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
@@ -160,7 +160,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'version_conflict', *CLOSED_ELSEWHERE):
+    if error in ('key_reuse', 'version_conflict', 'email_delivery_filing_changed', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -1121,7 +1121,9 @@ class Run:
                         'observed_at': report['observed_at'],
                         'value': {'verification': 'unverified_report', 'mailbox_account': self.settings.account,
                                   'mailbox_owner': self.settings.owner, 'original_message_id': report['original_id'],
-                                  'source_activity_ids': sorted(activities), 'report_id': report['report_id'],
+                                  'source_activity_ids': sorted(activities),
+                                  'source_activity_versions': {a: mailbox.get('versions', {}).get(a) for a in sorted(activities)},
+                                  'report_id': report['report_id'],
                                   'recipient': report['recipient'], 'status': report['status'],
                                   'diagnostic': report['diagnostic'], 'parser_version': 1}}
                 report['request'] = args
@@ -1129,6 +1131,11 @@ class Run:
             if self.write('record-finding', args, 'delivery report'):
                 report['disposition'] = 'recorded'
                 self.counts['delivery_failures_recorded'] += 1
+            elif self.state['requests'][args['idempotency_key']].get('error_code') == 'email_delivery_filing_changed':
+                del self.state['requests'][args['idempotency_key']]
+                report.pop('request', None)
+                mailbox['filing_complete'] = False
+                _save(self.out, self.state)
         self.counts['delivery_failures_pending'] = sum(r['disposition'] == 'retryable' for r in mailbox['reports'].values())
         return not any(self.counts[k] for k in ('writes_failed', 'writes_deferred', 'requests_blocked'))
 
@@ -1332,6 +1339,7 @@ class Run:
         mailbox = self.delivery_mailbox()
         if not self.state.get('links_cursor'):
             mailbox['deals'] = {}
+            mailbox['versions'] = {}
         mailbox['filing_complete'] = False
         source_activities = {r['activity_id'] for r in self.state.get('requests', {}).values()
                              if r.get('activity_id') and r['verb'] == 'log-activity'
@@ -1344,6 +1352,7 @@ class Run:
                 self.deals[mail['activity_id']] = mail['deal']
                 if mail['activity_id'] in source_activities:
                     mailbox.setdefault('deals', {})[mail['activity_id']] = mail['deal']
+                    mailbox.setdefault('versions', {})[mail['activity_id']] = mail.get('version')
             if not mail.get('deal') or mail['activity_id'] in pending_sources:
                 continue
             links = sorted(email_links.extract_links(mail.get('body') or ''))
@@ -1726,6 +1735,7 @@ def _prune(state: dict, now: datetime) -> None:
                               if (kept := {ident: source for ident, source in sources.items()
                                            if int(ident.rsplit(':', 1)[1]) >= oldest})}
         mailbox['deals'] = {a: d for a, d in mailbox.get('deals', {}).items() if a in activity_ids}
+        mailbox['versions'] = {a: v for a, v in mailbox.get('versions', {}).items() if a in activity_ids}
     for name in ('events_logged', 'events_balled'):
         state[name] = {k: t for k, t in state.get(name, {}).items() if t >= horizon}
 

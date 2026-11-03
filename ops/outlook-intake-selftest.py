@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import random
 import runpy
 import struct
 from pathlib import Path
@@ -150,6 +151,7 @@ class Fake:
     def __init__(self, test):
         self.test = test
         self.calls = []
+        self.findings = {}
         self.email_queue = []
         self.hydrated_bodies = {}
         self.decodes = 0
@@ -179,9 +181,20 @@ class Fake:
         if verb == 'email-router-queue':
             rows = sorted([m for m in self.email_queue if m['activity_id'] > args.get('after', '')],
                           key=lambda m: m['activity_id'])
-            page = [{**m, 'body': self.hydrated_bodies.get(m['activity_id'], m.get('body'))}
+            page = [{'version': 1, **m, 'body': self.hydrated_bodies.get(m['activity_id'], m.get('body'))}
                     for m in rows[:args['limit']]]
             return {'emails': page, 'next_cursor': page[-1]['activity_id'] if len(rows) > len(page) else None}
+        if verb == 'record-finding':
+            if args['idempotency_key'] in self.findings:
+                return {'ok': True}
+            ids = args['value']['source_activity_ids']
+            versions = args['value'].get('source_activity_versions', {})
+            rows = {m['activity_id']: m for m in self.email_queue}
+            if any(a not in rows or rows[a].get('deal') != args['subject']
+                   or rows[a].get('version', 1) != versions.get(a) for a in ids):
+                raise intake.CarrError(code='email_delivery_filing_changed')
+            self.findings[args['idempotency_key']] = args
+            return {'ok': True}
         if verb == 'log-activity':
             source = args.get('email_context', {}).get('source_activity_id')
             if source:
@@ -455,7 +468,7 @@ class IntakeTest(unittest.TestCase):
         return source, report
 
     def delivery_findings(self):
-        return [a for v, a in self.fake.calls if v == 'record-finding']
+        return list(self.fake.findings.values())
 
     def test_matching_ndr_is_recorded_before_automated_sender_skip(self):
         source, report = self.delivery_pair()
@@ -514,6 +527,58 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.delivery_findings(), [])
         box = next(iter(json.loads((self.out() / intake.STATE).read_text())['delivery_mailboxes'].values()))
         self.assertEqual(next(iter(box['reports'].values()))['disposition'], 'retryable')
+
+    def test_delivery_failure_random_corrections_never_attribute_stale_filings(self):
+        for seed in range(48):
+            with self.subTest(seed=seed):
+                case = IntakeTest()
+                case.setUp()
+                try:
+                    rng = random.Random(seed)
+                    source, report, activities, template = case.paginated_delivery_pair()
+                    case.fake.email_queue.append({**template, 'activity_id': activities[-1]})
+                    case.run_intake([source, report])
+                    self.assertEqual(case.delivery_findings(), [])
+                    changed = set()
+                    for _ in range(rng.randint(1, 8)):
+                        activity = rng.choice(activities)
+                        row = next(m for m in case.fake.email_queue if m['activity_id'] == activity)
+                        row.update(deal=rng.choice([template['deal'], None,
+                                   '22222222-2222-4222-8222-222222222222']),
+                                   version=row.get('version', 1) + 1)
+                        changed.add(activity)
+                    final = {m['activity_id']: m for m in case.fake.email_queue}
+                    case.run_intake([source, report])
+                    for finding in case.delivery_findings():
+                        self.assertTrue(all(final[a]['deal'] == finding['subject'] for a in activities))
+                    if activities[0] in changed:
+                        self.assertEqual(case.delivery_findings(), [])
+                    for _ in range(2):
+                        case.run_intake([source, report])
+                    agreement = {final[a]['deal'] for a in activities}
+                    self.assertEqual(len(case.delivery_findings()), int(len(agreement) == 1 and None not in agreement))
+                finally:
+                    case.doCleanups()
+
+    def test_delivery_failure_continuous_corrections_exhaust_existing_budget(self):
+        source, report = self.delivery_pair()
+        original_carr = self.fake.carr
+        def correct_before_write(verb, args):
+            if verb == 'record-finding':
+                row = self.fake.email_queue[0]
+                row['version'] = row.get('version', 1) + 1
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=correct_before_write):
+            for _ in range(40):
+                self.run_intake([source, report])
+        box = next(iter(json.loads((self.out() / intake.STATE).read_text())['delivery_mailboxes'].values()))
+        retained = next(iter(box['reports'].values()))
+        self.assertEqual(retained['disposition'], 'unresolved')
+        self.assertEqual(retained['attempts'], intake.DELIVERY_RETRY_LIMIT)
+        self.assertNotIn('request', retained)
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(intake._reply_error({'error': 'email_delivery_filing_changed'}),
+                         'email_delivery_filing_changed')
 
     def test_delivery_failure_resolves_source_on_last_filing_page(self):
         source, report, activities, template = self.paginated_delivery_pair()
