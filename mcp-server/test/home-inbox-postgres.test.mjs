@@ -3,19 +3,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { setTimeout } from 'node:timers/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
+import { HOME_INBOX_CONTRACT } from '../src/home-inbox.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
 const id = n => `ae000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const joe = { id: id(1), slug: 'joe', human: true };
 const dell = { id: id(2), slug: 'dell', human: true };
 
-
-test('Home inbox is an actor-scoped bounded snapshot over canonical records', async t => {
-  const db = await postgresDatabase('home-inbox-');
-  const c = db.client;
-  t.after(() => db.close());
+async function initialize(c) {
   await c.query(`create schema ops;
     create function ops.scac_current_grant_contract() returns jsonb language sql as
       $$select '{"secdef_execute":[]}'::jsonb$$;
@@ -46,6 +43,13 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
   const cadence=readFileSync(new URL('../../migrations/0617_delivery_cadence_a05.sql', import.meta.url),'utf8');
   await c.query(cadence.match(/create or replace function ops\.notification_feed_facts\(p_after timestamptz, p_limit integer\)[\s\S]*?end \$\$;/)[0]);
   await c.query(readFileSync(new URL('../../migrations/1114_home_inbox.sql', import.meta.url),'utf8'));
+}
+
+test('Home inbox is an actor-scoped bounded snapshot over canonical records', async t => {
+  const db = await postgresDatabase('home-inbox-');
+  const c = db.client;
+  t.after(() => db.close());
+  await initialize(c);
   await c.query(`insert into next_action values
     ($1,$2,'Synthetic open task','open',1,'2026-10-29','2026-10-29','2026-11-02'),
     ($3,$2,'Synthetic done task','done',2,'2026-10-28','2026-10-29',null),
@@ -266,4 +270,257 @@ test('Home inbox is an actor-scoped bounded snapshot over canonical records', as
     await assert.rejects(read(),e=>e.payload.error==='inbox_limit_exceeded');
   });
 
+});
+
+test('Home inbox v2 projects current partner work with context', async t => {
+  const db=await postgresDatabase('home-inbox-v2-');
+  const c=db.client;
+  t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal', add subject_id uuid, add due_on date;
+    alter table capture_post_call_action add deal_id uuid, add due_on date, add version integer default 1;
+    create table deal(id uuid primary key,name text);
+    create table loop_item(id uuid primary key,number text,title text);
+    insert into deal values('${id(60)}','Synthetic lease');
+    insert into loop_item values('${id(61)}','250','Synthetic orb panel');
+    insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at,hold_until,due_on) values
+    ('${id(70)}','${joe.id}','${id(60)}','Call owner','open',1,now(),now(),null,current_date),
+    ('${id(71)}','${joe.id}','${id(60)}',' CALL   owner ','open',2,now()-interval '1 day',now()-interval '1 day',null,current_date),
+    ('${id(72)}','${joe.id}','${id(60)}','Recent done','done',1,now(),now(),null,null),
+    ('${id(73)}','${joe.id}','${id(60)}','Old done','done',1,now()-interval '8 days',now()-interval '8 days',null,null),
+    ('${id(74)}','${joe.id}','${id(60)}','Dropped','dropped',1,now(),now(),null,null),
+    ('${id(75)}','${joe.id}','${id(60)}','Held','open',1,now(),now(),current_date+1,null);
+    insert into ops.notification values
+    ('${id(80)}','${joe.id}','loop','${id(61)}','action_required','Action needed on an open loop',null,now());`);
+  const read=async()=> (await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+  const before=(await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  console.log('Synthetic v1 seed items',before.items.length);
+  if (!process.env.HOME_INBOX_TEST_V1) {
+    await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  }
+  const snapshot=await executeRegisteredTool(c,joe,'read-home-inbox-v2',{});
+  assert.deepEqual(snapshot,await read());
+  console.log('Synthetic v2 seed items',snapshot.items.length);
+  await t.test('done has a seven-day shelf and dropped is hidden',()=>{
+    const done=snapshot.items.find(i=>i.source_id===id(72));
+    assert.equal(done.section,'done');
+    assert.ok(!snapshot.items.some(i=>[id(73),id(74)].includes(i.source_id)));
+  });
+  await t.test('identical open tasks collapse by owner and deal with actionable context',()=>{
+    const task=snapshot.items.find(i=>i.source_id===id(71));
+    assert.equal(snapshot.items.filter(i=>[id(70),id(71)].includes(i.source_id)).length,1);
+    assert.deepEqual(task.merged_source_ids,[id(71),id(70)]);
+    assert.equal(task.context_label,'Synthetic lease');
+    assert.equal(task.kind_label,'Task');
+    assert.ok(task.due_on);
+    assert.equal(task.open_url,`/deals?deal=${id(60)}&focus=next-step`);
+  });
+  await t.test('task completion uses canonical action identity and integer version',()=>{
+    const task=snapshot.items.find(i=>i.source_id===id(71));
+    assert.equal(task.action_id,id(71));
+    assert.equal(task.action_version,2);
+    assert.equal(task.deal_id,id(60));
+  });
+  await t.test('future hold belongs to Held',()=>{
+    assert.equal(snapshot.items.find(i=>i.source_id===id(75)).section,'held');
+  });
+  await t.test('notification title names its loop',()=>{
+    assert.match(snapshot.items.find(i=>i.source_type==='notification' && i.title.includes('loop')).title,/Synthetic orb panel/);
+  });
+  await t.test('notifications admit exactly the partner-facing subject allowlist',async()=>{
+    const allowed=['deal','loop','call','email','doc_conversation_request'];
+    const subjects=[...allowed,'engineering','release','next_action','capture_session','email_proposal','unknown'];
+    const notificationIds=subjects.map((_,n)=>id(800+n));
+    for (const [n,subject] of subjects.entries()) {
+      await c.query(`insert into ops.notification values($1,$2,$3,$4,'action_required','Allowlist request',null,now())`,
+        [notificationIds[n],joe.id,subject,`allowlist-${subject}`]);
+    }
+    const notifications=(await read()).items.filter(i=>i.source_type==='notification' && i.title.startsWith('Allowlist request'));
+    assert.deepEqual(notifications.map(i=>JSON.parse(i.source_id)[0]).sort(),allowed.toSorted());
+    await c.query('delete from ops.notification where id=any($1::uuid[])',[notificationIds]);
+  });
+  await t.test('v2 keeps completion identity across task kinds and non-deal tasks',async()=>{
+    await c.query(`insert into next_action(id,owner_id,subject_type,subject_id,description,status,version,created_at,updated_at)
+      values($1,$2,'client',$3,'Client task','open',7,now(),now())`,[id(90),joe.id,id(62)]);
+    await c.query(`insert into capture_post_call_action(id,owner_id,deal_id,description,status,updated_at,version)
+      values('${id(91)}','${joe.id}','${id(60)}','Accepted call task','open',now(),4)`);
+    const items=(await read()).items;
+    const client=items.find(i=>i.source_id===id(90));
+    assert.equal(client.action_id,id(90));
+    assert.equal(client.action_version,7);
+    assert.equal(client.deal_id,null);
+    const call=items.find(i=>i.source_id===id(91));
+    assert.equal(call.action_id,id(91));
+    assert.equal(call.action_version,4);
+    assert.equal(call.deal_id,id(60));
+    await c.query('delete from next_action where id=$1',[id(90)]);
+    await c.query('delete from capture_post_call_action where id=$1',[id(91)]);
+  });
+  await t.test('v2 dispositions stay private and reject stale canonical edits',async()=>{
+    const task=(await read()).items.find(i=>i.source_id===id(71));
+    await c.query('set role carr_reader');
+    await assert.rejects(c.query('select ops.read_home_inbox_v2()'),e=>e.code==='42501');
+    await c.query('reset role');
+    await c.query('set role carr_writer');
+    assert.equal((await read()).ok,true);
+    await c.query('reset role');
+    const change=async(key,item)=> (await c.query("select ops.change_home_inbox($1,'settle',$2,null) result",
+      [key,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])])).rows[0].result;
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.equal((await read()).items.length,0);
+    assert.equal((await change(id(93),task)).results[0].error,'inbox_item_not_found');
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    assert.equal((await change(id(94),task)).results[0].item.disposition,'settled');
+    await c.query('update next_action set version=version+1 where id=$1',[id(71)]);
+    assert.equal((await change(id(95),task)).results[0].error,'version_conflict');
+  });
+  await t.test('generated v2 contract matches the runtime declaration and projected fields',()=>{
+    const contract=JSON.parse(readFileSync(new URL('../contracts/home-inbox.v2.json',import.meta.url),'utf8'));
+    assert.deepEqual(contract,HOME_INBOX_CONTRACT);
+    assert.equal(snapshot.schema_version,contract.schema_version);
+    for(const item of snapshot.items) {
+      for(const field of Object.keys(contract.item_fields)) assert.ok(Object.hasOwn(item,field),field);
+      assert.ok(contract.sections.includes(item.section));
+    }
+  });
+  await t.test('newer duplicate edits and drops retain snooze and stable identity',async()=>{
+    const item=(await read()).items.find(i=>i.source_id===id(71));
+    const result=(await c.query("select ops.change_home_inbox($1,'snooze',$2,'2099-01-01') result",
+      [id(96),JSON.stringify([{item_id:item.item_id,base_version:item.base_version}])])).rows[0].result;
+    assert.equal(result.results[0].ok,true);
+    await c.query("update next_action set updated_at=now(),version=version+1 where id=$1",[id(70)]);
+    let current=(await read()).items.find(i=>i.item_id===item.item_id);
+    assert.equal(current.disposition,'snoozed');
+    await c.query("update next_action set status='dropped',version=version+1 where id=$1",[id(70)]);
+    current=(await read()).items.find(i=>i.item_id===item.item_id);
+    assert.equal(current.disposition,'snoozed');
+  });
+  await t.test('document conversation requests remain partner work and loop numbers never resolve titles',async()=>{
+    await c.query(`insert into ops.notification values
+      ('${id(83)}','${joe.id}','doc_conversation_request','request','action_required','Review document',null,now()),
+      ('${id(84)}','${joe.id}','loop','250','action_required','Review loop',null,now())`);
+    const items=(await read()).items;
+    assert.ok(items.some(i=>i.source_type==='notification' && i.source_id.includes('doc_conversation_request')));
+    assert.equal(items.find(i=>i.source_type==='notification' && i.source_id.includes('250')).context_label,'loop 250');
+  });
+  await t.test('over-cap returns newest open work without refusing the snapshot',async()=>{
+    await c.query(`insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at)
+      select ('af000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,$1,$2,'Bound '||n,'open',1,
+        now()+n*interval '1 second',now()+n*interval '1 second' from generate_series(1,1002)n`,[joe.id,id(60)]);
+    const result=await read();
+    assert.equal(result.ok,true);
+    assert.equal(result.items.length,1000);
+    assert.equal(result.items[0].title,'Bound 1002');
+    assert.equal(result.truncated,true);
+    assert.equal(result.schema_version,'home-inbox.v2');
+  });
+});
+
+test('v1 snapshots and stored dispositions survive the projection expansion',async t=>{
+  const db=await postgresDatabase('inbox-upgrade-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into next_action(id,owner_id,description,status,version,created_at,updated_at) values
+      ('${id(70)}','${joe.id}','Snoozed task','open',1,now(),now()),
+      ('${id(71)}','${joe.id}','Settled task','open',1,now(),now()),
+      ('${id(72)}','${joe.id}','Done task','done',1,now(),now());`);
+  const read=async()=> (await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  let seq=500;
+  const change=async(command,item)=> (await c.query('select ops.change_home_inbox($1,$2,$3,$4) result',
+    [id(seq++),command,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}]),command==='snooze'?'2099-01-01':null])).rows[0].result;
+  const items=(await read()).items;
+  await change('snooze',items.find(i=>i.source_id===id(70)));
+  await change('settle',items.find(i=>i.source_id===id(71)));
+  const fixture=await read();
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  await t.test('v1 fixture shape and values are byte compatible',async()=>{
+    assert.equal(JSON.stringify(await read()),JSON.stringify(fixture));
+    for (const command of ['unsettle','snooze','settle']) {
+      const result=await change(command,(await read()).items.find(i=>i.source_id===id(72)));
+      assert.equal(result.schema_version,'home-inbox-command.v1');
+      assert.deepEqual(Object.keys(result.results[0].item).sort(),Object.keys(fixture.items[0]).sort());
+      assert.ok(['inbox','working','snoozed','settled'].includes(result.results[0].item.section));
+    }
+  });
+  await t.test('v2 retains dispositions written under migration 1114',async()=>{
+    const current=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    assert.equal(current.items.find(i=>i.source_id===id(70)).disposition,'snoozed');
+    assert.equal(current.items.find(i=>i.source_id===id(71)).disposition,'settled');
+  });
+});
+
+test('projection read at realistic synthetic volume',{skip:!process.env.HOME_INBOX_BENCHMARK},async t=>{
+  const db=await postgresDatabase('inbox-benchmark-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into deal select md5('deal'||n)::uuid,'Synthetic deal '||n from generate_series(1,300)n;
+    insert into next_action(id,owner_id,subject_id,description,status,version,created_at,updated_at)
+      select md5('task'||n)::uuid,'${joe.id}',md5('deal'||(1+n%300))::uuid,'Task '||n,
+        case when n%5=0 then 'done' else 'open' end,1,now()-n*interval '1 minute',now()-n*interval '1 minute'
+      from generate_series(1,20000)n;
+    insert into ops.notification select md5('notification'||n)::uuid,'${joe.id}','deal',
+      md5('deal'||(1+n%300))::uuid::text,'action_required','Synthetic request',null,now()-n*interval '1 second'
+      from generate_series(1,10000)n;
+    analyze next_action; analyze deal; analyze ops.notification;`);
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  const times=[];
+  for(let n=0;n<6;n++){
+    const start=performance.now();
+    const result=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    const elapsed=performance.now()-start;
+    assert.equal(result.ok,true); assert.equal(result.items.length,1000); assert.equal(result.truncated,true);
+    if(n) times.push(elapsed);
+  }
+  const explain=(await c.query('explain (analyze,buffers,verbose) select ops.read_home_inbox_v2()')).rows;
+  const migration=readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8');
+  const sourceSql=migration.match(/as \$\$([\s\S]*?)\$\$;/)[1].replaceAll(/\bp_actor\b/g,()=>'$1');
+  const sources=(await c.query('explain (analyze,buffers,verbose) '+sourceSql,[joe.id])).rows;
+  times.sort((a,b)=>a-b);
+  const report={tasks:20000,deals:300,notifications:10000,successful_reads:6,failures:0,median_ms:times[2],range_ms:[times[0],times[4]],times_ms:times,explain,sources};
+  writeFileSync('/tmp/WR39.S1.J33-benchmark.json',JSON.stringify(report,null,2)+'\n');
+  console.log('Synthetic projection benchmark',JSON.stringify({...report,explain:undefined,sources:undefined}));
+});
+
+test('legacy duplicate dispositions survive in v1 and carry to stable v2 cards',async t=>{
+  const db=await postgresDatabase('inbox-carry-'); const c=db.client; t.after(()=>db.close());
+  await initialize(c);
+  await c.query(`alter table next_action add subject_type text default 'deal',add subject_id uuid,add due_on date;
+    alter table capture_post_call_action add deal_id uuid,add due_on date,add version integer default 1;
+    create table deal(id uuid primary key,name text); create table loop_item(id uuid primary key,number text,title text);
+    insert into next_action(id,owner_id,description,status,version,created_at,updated_at) values
+      ('${id(73)}','${joe.id}','Duplicate task','open',1,now()-interval '2 days',now()),
+      ('${id(74)}','${joe.id}','Duplicate task','open',1,now(),now()),
+      ('${id(75)}','${joe.id}','Settled duplicate','open',1,now()-interval '2 days',now()),
+      ('${id(76)}','${joe.id}','Settled duplicate','open',1,now(),now())`);
+  const readV1=async()=> (await c.query('select ops.read_home_inbox() result')).rows[0].result;
+  const before=await readV1();
+  for(const [n,command] of [[74,'snooze'],[76,'settle']]) {
+    const item=before.items.find(i=>i.source_id===id(n));
+    const result=(await c.query('select ops.change_home_inbox($1,$2,$3,$4) result',
+      [id(500+n),command,JSON.stringify([{item_id:item.item_id,base_version:item.base_version}]),command==='snooze'?'2099-01-01':null])).rows[0].result;
+    assert.equal(result.results[0].ok,true);
+  }
+  const fixture=await readV1();
+  const legacyColumns='actor_id,item_id,disposition,snoozed_until,source_version,material_version,version,explicit_unsettle,updated_at';
+  const stored=(await c.query(`select ${legacyColumns} from ops.home_inbox_disposition order by actor_id,item_id`)).rows;
+  await c.query(readFileSync(new URL('../../migrations/1136_home_inbox_projection.sql',import.meta.url),'utf8'));
+  assert.deepEqual(await readV1(),fixture,'both v1 duplicate pairs keep their original dispositions and versions');
+  assert.deepEqual((await c.query(`select ${legacyColumns} from ops.home_inbox_disposition order by actor_id,item_id`)).rows,stored);
+  for(const status of ['open','dropped']) {
+    await c.query('update next_action set status=$1,version=version+1,updated_at=now() where id=any($2::uuid[])',[status,[id(74),id(76)]]);
+    const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+    assert.equal(after.items.length,2);
+    assert.equal(after.items.find(i=>i.source_id===id(73)).disposition,'snoozed');
+    assert.equal(after.items.find(i=>i.source_id===id(75)).disposition,'settled');
+  }
+  const representative=(await readV1()).items.find(i=>i.source_id===id(73));
+  const changed=(await c.query("select ops.change_home_inbox($1,'settle',$2,null) result",
+    [id(600),JSON.stringify([{item_id:representative.item_id,base_version:representative.base_version}])])).rows[0].result;
+  assert.equal(changed.results[0].ok,true);
+  const after=(await c.query('select ops.read_home_inbox_v2() result')).rows[0].result;
+  assert.equal(after.items.find(i=>i.source_id===id(73)).disposition,'settled','a representative command overrides inherited disposition');
 });
