@@ -1,10 +1,13 @@
 // Install transaction-local decisions from the ordinary canonical deal policy.
 import { evaluateActorAuthority } from './global-boundaries.v5.js';
+import { doorAuthoritySubject } from './global-boundaries-door.v5.js';
 import { organizationTenantForActor } from './identity.js';
 
 // Bind the existing deal-policy decision to this transaction and deal revision.
 export async function installTourDealAccess(client, actor) {
   const tenant = organizationTenantForActor(actor);
+  const subject = doorAuthoritySubject(actor).subject;
+  const policyActor = subject === null ? actor : {slug:subject, human:true};
   const deals = {};
   if (tenant === 'carr-internal') {
     const result = await client.query(`select d.id, d.owner, d.version
@@ -14,7 +17,7 @@ export async function installTourDealAccess(client, actor) {
         and exists(select 1 from public.actor a where a.slug=$1 and a.active)`, [actor.slug]);
     for (const deal of result.rows) {
       if (!deal.owner) continue;
-      const decision = evaluateActorAuthority({actor, action:'business.read_deal', tenant,
+      const decision = evaluateActorAuthority({actor:policyActor, action:'business.read_deal', tenant,
         now:new Date().toISOString(), controls:{deal_owner_slug:deal.owner,
           policy_scope:['business.read_deal'], capabilities:['deal.read']}});
       if (decision.decision === 'allow') deals[deal.id] = {owner:deal.owner, version:deal.version};

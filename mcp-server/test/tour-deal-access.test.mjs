@@ -122,3 +122,14 @@ test('installed HTTP create, detail, cart and cross-deal library enforce canonic
     assert(tours.every(t=>t.deal_id===cases[0].d));
   } finally {await c.query('rollback');await c.end();}
 });
+
+test('verified sponsored native agents reuse their existing authority subject without crossing deals', async () => {
+  let context;
+  const actor={slug:'codex',human:false,native_agent_verified:true,sponsoring_human_slug:'joe'};
+  await installTourDealAccess({query:async(sql,params)=>{
+    if (sql.startsWith('select set_config')) {context=JSON.parse(params[0]);return {rows:[]};}
+    return {rows:[{id:'mine',owner:'joe',version:1},{id:'other',owner:'dell',version:1}]};
+  }},actor);
+  assert.equal(context.slug,'codex');
+  assert.deepEqual(Object.keys(context.deals),['mine']);
+});
