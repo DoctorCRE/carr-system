@@ -273,6 +273,62 @@ class CandidatesTest(unittest.TestCase):
                     self.assertEqual(len(observations), 3)
         print(f'Generated 2400 entity cases, seed {seed}')
 
+    def test_reviewer_conflicting_display_identity_in_labeled_fields(self):
+        for label in ('Title', 'Company'):
+            with self.subTest(label=label):
+                body = ('-- \nName: Alice Synthetic\nEmail: alice@example.test\n'
+                        'Phone: 555-0101\n' + label + ': Bob Synthetic <alice@example.test>')
+                result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+                self.assertTrue(result['ambiguity'])
+                self.assertFalse(result['identity_observations'] + result['contact_facts'])
+
+    def test_reviewer_clean_apostrophe_sender_retains_candidates(self):
+        sender = "anne.o'brien@example.test"
+        body = "-- \nName: Anne O'Brien\nEmail: " + sender + '\nPhone: 555-0101'
+        result = extract_candidates(body, sender, 'ref', complete=True)
+        self.assertIsNone(result['ambiguity'])
+        self.assertEqual(len(result['identity_observations'] + result['contact_facts']), 3)
+
+    def test_generated_display_names_and_punctuated_addresses(self):
+        seed = 442215
+        rng = random.Random(seed)
+        addresses = ["anne.o'brien", 'anne+team', 'anne.obrien', "Anne.O'Brien+Team",
+                     'anne%team', "!#$%&'*+-/=?^_`{|}~"]
+        placements = ('', 'Name: ', 'Company: ', 'Title: ', 'Email: ', 'Phone: ', 'Mobile: ')
+        count = 0
+        for local in addresses:
+            sender = local + '@Example.Test'
+            for placement in placements:
+                for foreign_address in (False, True):
+                    for foreign_name in (False, True):
+                        for layout in range(10):
+                            address = 'foreign.' + sender if foreign_address else sender.swapcase()
+                            name = 'Bob Synthetic' if foreign_name else "Anne O'Brien"
+                            lines = ["Name: Anne O'Brien", 'Email: ' + sender, 'Phone: 555-0101']
+                            if placement == 'Name: ':
+                                lines.pop(0)
+                                lines.append("Anne O'Brien <" + sender + '>')
+                            lines.append(placement + name + ' <' + address + '>')
+                            rng.shuffle(lines)
+                            pad = rng.choice(['', ' ', '\t', '\u00a0'])
+                            nl = rng.choice(['\n', '\r\n', '\r'])
+                            body = '-- ' + nl + nl.join(pad + line + pad for line in lines)
+                            result = extract_candidates(body, sender, 'ref', complete=True)
+                            observations = result['identity_observations'] + result['contact_facts']
+                            count += 1
+                            with self.subTest(seed=seed, case=count, layout=layout):
+                                if foreign_address or foreign_name:
+                                    self.assertTrue(result['ambiguity'])
+                                    self.assertFalse(observations)
+                                elif placement in ('', 'Name: ', 'Company: ', 'Title: '):
+                                    self.assertIsNone(result['ambiguity'])
+                                    self.assertEqual(len(observations), 3 + (placement in ('Company: ', 'Title: ')))
+            body = "-- \nName: Anne O'Brien\nEmail: " + sender.swapcase() + '\nPhone: 555-0101'
+            result = extract_candidates(body, sender, 'ref', complete=True)
+            self.assertIsNone(result['ambiguity'])
+            self.assertEqual(len(result['identity_observations'] + result['contact_facts']), 3)
+        print(f'Generated {count} display/address cases, seed {seed}')
+
     def test_html_to_text_and_forwarded(self):
         from html.parser import HTMLParser
         class Text(HTMLParser):

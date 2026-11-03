@@ -36,6 +36,19 @@
       "sender": "alice@example.test",
       "count": 0,
       "ambiguity": "competing_identity"
+    },
+    {
+      "name": "round_five_labeled_conflicting_display_name",
+      "body": "-- \nName: Alice Synthetic\nEmail: alice@example.test\nPhone: 555-0101\nTitle: Bob Synthetic <alice@example.test>",
+      "sender": "alice@example.test",
+      "count": 0,
+      "ambiguity": "competing_identity"
+    },
+    {
+      "name": "round_five_clean_apostrophe_sender",
+      "body": "-- \nName: Anne O'Brien\nEmail: anne.o'brien@example.test\nPhone: 555-0101",
+      "sender": "anne.o'brien@example.test",
+      "count": 2
     }
   ]
 }
