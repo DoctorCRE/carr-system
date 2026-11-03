@@ -68,8 +68,9 @@ def generate(email: dict, model) -> dict:
         return unavailable('refused')
     summary = summary.strip()
     if (len(summary) > 300 or re.search(r'[\r\n<>]', summary) or not isinstance(evidence, str)
-            or not evidence.strip() or evidence not in text or evidence not in body):
+            or not evidence.strip() or evidence not in text):
         return unavailable('invalid_output')
+    evidence = evidence if evidence in body else body
     return {'text': summary, 'status': 'available', 'provenance': {'evidence': evidence, **({'model': result['_model']} if result.get('_model') else {})}}
 
 

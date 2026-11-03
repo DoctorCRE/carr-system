@@ -26,6 +26,14 @@ class SummaryTests(unittest.TestCase):
         ]:
             self.assertEqual(email_summary.generate(email, model)['status'], 'unavailable')
 
+    def test_decoded_transport_evidence_keeps_literal_raw_provenance(self):
+        body = 'Please=20review=20the=20terms=20&amp;=20confirm.'
+        result = email_summary.generate({'body': body}, lambda text: {
+            'text': 'The sender asks for a review and confirmation.',
+            'evidence': 'Please review the terms & confirm.'})
+        self.assertEqual(result['status'], 'available')
+        self.assertEqual(result['provenance']['evidence'], body)
+
     def test_exception_is_honest(self):
         def fails(_):
             raise RuntimeError('synthetic failure')
