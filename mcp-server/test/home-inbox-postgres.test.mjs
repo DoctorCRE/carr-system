@@ -566,6 +566,103 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
   let seq=800;
   const change=async(command,current,until=null)=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
     idempotency_key:id(seq++),items:[{item_id:current.item_id,base_version:current.base_version}],...(until?{until}:{})});
+  await c.query(readFileSync(new URL('../../migrations/1143_home_inbox_bulk.sql',import.meta.url),'utf8'));
+  await t.test('bulk receipts and exact undo',async bulk=>{
+    let batchSeq=9000;
+    const batch=async(command,items,extra={})=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
+      idempotency_key:id(batchSeq++),reversible:true,...(items?{items:items.map(({item_id,base_version})=>({item_id,base_version}))}:{}),...extra});
+    for(const state of ['working','done','auto-settled','set-aside','snoozed','override']) {
+      for(const command of ['settle','snooze']) await bulk.test(`bulk statechart ${state} ${command} and exact undo`,async()=>{
+        await c.query('begin');
+        try {
+          await c.query('update email_proposal set status=$1,version=version+1,result_recorded_at=now() where id=$2',[state==='working'?'approved_to_send':state==='auto-settled'?'sent':'pending',id(701)]);
+          if(state==='done') await c.query("insert into capture_session values($1,$2,'done',now(),now())",[id(9500),joe.id]);
+          const current=async()=>state==='done'?(await read()).items.find(i=>i.source_id===id(9500)):item(701);
+          if(['set-aside','snoozed','override'].includes(state)) await change(state==='set-aside'?'settle':state==='override'?'unsettle':'snooze',await current(),state==='snoozed'?'2099-01-01T00:00:00Z':null);
+          const before=await current();
+          const rows=async()=>(await c.query('select to_jsonb(d) row from ops.home_inbox_disposition d where actor_id=$1 and item_id=$2',[joe.id,before.item_id])).rows;
+          const saved=await rows();
+          const key=id(batchSeq++);
+          const args={idempotency_key:key,reversible:true,items:[{item_id:before.item_id,base_version:before.base_version}],...(command==='snooze'?{until:'2099-01-01T00:00:00Z'}:{})};
+          const applied=await executeRegisteredTool(c,joe,`${command}-home-inbox`,args);
+          const noop=(command==='settle'&&['set-aside','auto-settled'].includes(state))||(command==='snooze'&&state==='snoozed');
+          assert.equal(applied.results[0].status,noop?'already':'applied');
+          if(state==='auto-settled'&&command==='settle') assert.equal((await current()).auto_settled,true);
+          assert.deepEqual((await executeRegisteredTool(c,joe,`${command}-home-inbox`,args)).results,applied.results);
+          await c.query('delete from tool_call where idempotency_key=$1',[key]);
+          assert.deepEqual((await executeRegisteredTool(c,joe,`${command}-home-inbox`,args)).results,applied.results,'durable receipt survives envelope expiry');
+          const undo=await batch(command,null,{undo_of:key});
+          assert.equal(undo.results[0].status,noop?'already':'applied');
+          assert.deepEqual(await rows(),saved,'undo restores every saved column or absence');
+          assert.deepEqual(await current(),before);
+          assert.equal((await batch(command,null,{undo_of:key})).results[0].status,'already');
+        } finally {await c.query('rollback');}
+      });
+    }
+    await bulk.test('mixed batch isolates hidden, stale and forbidden items; subset then whole undo',async()=>{
+      await c.query('begin');
+      try {
+        const task=await item(702),reply=await item(701);
+        await c.query(`insert into next_action(id,owner_id,description,status,version,created_at,updated_at)
+          values($1,$2,'Private title must not leak','open',1,now(),now())`,[id(9999),dell.id]);
+        const hidden={item_id:`next_action:${id(9999)}`,base_version:'a'.repeat(32)};
+        const stale={item_id:'missing',base_version:'0'.repeat(32)};
+        await assert.rejects(batch('settle',[task,task]),/duplicate_inbox_item/);
+        const key=id(batchSeq++);
+        const result=await batch('settle',[task,hidden,stale,reply],{idempotency_key:key});
+        assert.deepEqual(result.results.map(r=>r.status),['applied','not_found','not_found','applied']);
+        assert.ok(!JSON.stringify(result).includes('Private title'));
+        const partial=await batch('settle',[task],{undo_of:key});
+        assert.equal(partial.results[0].status,'applied');
+        const rest=await batch('settle',null,{undo_of:key});
+        assert.deepEqual(rest.results.map(r=>r.status),['already','not_found','not_found','applied']);
+        assert.deepEqual(await item(702),task); assert.deepEqual(await item(701),reply);
+        const staleResult=await batch('settle',[{...task,base_version:'0'.repeat(32)},reply]);
+        assert.deepEqual(staleResult.results.map(r=>r.status),['not_allowed','applied']);
+        const conflictKey=id(batchSeq++);
+        const current=await item(702);
+        await batch('snooze',[current],{idempotency_key:conflictKey,until:'2099-01-01T00:00:00Z'});
+        await change('settle',await item(702));
+        const conflict=await batch('snooze',null,{undo_of:conflictKey});
+        assert.equal(conflict.results[0].error,'version_conflict');
+        assert.equal((await item(702)).disposition,'settled');
+        await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+        await assert.rejects(executeRegisteredTool(c,dell,'settle-home-inbox',{idempotency_key:id(batchSeq++),undo_of:key}),/inbox_batch_not_found/);
+        await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+      } finally {await c.query('rollback');}
+    });
+    await bulk.test('writer role can apply and undo but cannot read private batch rows',async()=>{
+      const before=await item(702),key=id(batchSeq++);
+      await c.query('set role carr_writer');
+      try {
+        assert.equal((await batch('settle',[before],{idempotency_key:key})).results[0].status,'applied');
+        assert.equal((await batch('settle',null,{undo_of:key})).results[0].status,'applied');
+        await assert.rejects(c.query('select * from ops.home_inbox_batch'),{code:'42501'});
+        await assert.rejects(c.query("select ops.reversible_home_inbox($1,'settle_reversible','[]',null)",[id(batchSeq++)]),{code:'42501'});
+      } finally {await c.query('reset role');}
+      assert.deepEqual(await item(702),before);
+    });
+    await bulk.test('a forbidden item rolls back alone and never blocks its neighbor',async()=>{
+      await c.query('begin');
+      try {
+        const before=await item(702);
+        await c.query(`create function ops.synthetic_inbox_denial() returns trigger language plpgsql as $$
+          begin if new.item_id='next_action:${id(702)}' then raise insufficient_privilege; end if; return new; end $$;
+          create trigger synthetic_inbox_denial before insert or update on ops.home_inbox_disposition
+          for each row execute function ops.synthetic_inbox_denial()`);
+        const result=await batch('snooze',[before,await item(701)],{until:'2099-01-01T00:00:00Z'});
+        assert.deepEqual(result.results.map(r=>r.status),['not_allowed','applied']);
+        assert.deepEqual(await item(702),before);
+        assert.equal((await item(701)).section,'snoozed');
+        await c.query(`create or replace function ops.synthetic_inbox_denial() returns trigger language plpgsql as $$
+          begin if new.item_id='next_action:${id(702)}' then raise check_violation; end if; return new; end $$`);
+        const failed=await batch('snooze',[before,await item(701)],{until:'2099-02-01T00:00:00Z'});
+        assert.deepEqual(failed.results.map(r=>r.status),['not_allowed','applied']);
+        assert.equal(failed.results[0].error,'item_failed');
+        assert.deepEqual(await item(702),before);
+      } finally {await c.query('rollback');}
+    });
+  });
   await t.test('open to working to auto-settled uses the canonical reply state',async()=>{
     assert.equal((await item(701)).section,'inbox');
     await c.query("update email_proposal set status='approved_to_send',version=version+1 where id=$1",[id(701)]);
