@@ -1270,6 +1270,22 @@ class PostCallTests(unittest.TestCase):
             with self.subTest(case=case["id"]):
                 self.assertEqual(score.run_case(suite, case), case["expected"])
 
+    def test_event_reference_case_preserves_source_text(self) -> None:
+        for reference in ("before the lunch call", "Before the lunch call"):
+            for anchor in (None, "Our lunch call is Tuesday."):
+                with self.subTest(reference=reference, anchor=anchor):
+                    texts = [f"{reference} I will call Harbor vendor."] + ([anchor] if anchor else [])
+                    transcript = {"segments": [{"speaker": "Joe", "text": text} for text in texts]}
+                    timing = timing_fixture(transcript, [[reference]] + ([["Tuesday"]] if anchor else []))
+                    if anchor:
+                        timing["sources"][1]["anchor_for"] = [reference]
+                    ledger = {"facts": [{"fact_id": "task", "source_spans": [
+                        _REAL_COVERAGE.source_span(transcript, i) for i in range(len(texts))]}]}
+                    item = {"evidence": texts[0], "fact_ids": ["task"], "timing": timing}
+                    result = post_call.task_deadline(item, transcript, "2026-10-26", ledger)
+                    self.assertEqual((result.state, result.due_on),
+                                     ("resolved", "2026-10-27" if anchor else "2026-10-26"))
+
     def test_event_anchor_binding_requires_cited_date(self) -> None:
         from copy import deepcopy
         transcript = {"segments": [
