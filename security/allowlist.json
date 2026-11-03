@@ -816,6 +816,12 @@
       "sha256": "60eced1b03624879c92f5e908e524ca78624fe01f41bf77339d75ae5d2a137f5",
       "rule": "pii-address",
       "reason": "Retained synthetic deadline corpus plus J90 event-binding regressions; invented address only."
+    },
+    {
+      "path": "mcp-server/test/tour-deal-access-postgres.sql",
+      "sha256": "a0825123cd612a8bd22b24ef66192b018f0a01ab2c34df31204d7a70dff416b6",
+      "rule": "pii-address",
+      "reason": "WR586.S2.J4 synthetic PostgreSQL acceptance fixture. The historical blob at 8a584e5b2a4600c677c0568cb9fb5b980a4ae62d contains an invented address for a public-display assertion, not record-layer or contact data. The current fixture uses an explicit synthetic label. Qualification binds only this path, historical blob and detector."
     }
   ]
 }

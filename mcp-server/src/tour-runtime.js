@@ -2,6 +2,7 @@
 // reports leaf. Identity remains owned by Deal Room; writes remain owned by the
 // registered tool envelope; public reads accept digests only.
 import { Pool } from "@neondatabase/serverless";
+import { installTourDealAccess } from './tour-deal-access.js';
 import { callTool } from "./mcp.js";
 import { ToolError } from "./tool-error.ts";
 import { trustedTourRendererResult } from "./tour-artifacts.js";
@@ -132,6 +133,7 @@ export function toolEnvironment(env, ctx) {
 async function internalRead({ env, actor }, sql, params) {
   const actorId = actor?.id || actor?.slug;
   return withPool(env.DATABASE_URL_WRITER, "begin read only", async client => {
+    await installTourDealAccess(client, actor);
     const result = await client.query(sql, [...params, actorId]);
     return result.rows[0]?.data || null;
   });
@@ -253,15 +255,19 @@ export async function runTourPdfRender(context, dependencies = {}) {
 // without a database read or a PDF render (and may capture failure records);
 // production passes nothing.
 export function createTourRuntimeAdapters(renderDependencies = {}) {
+  const readInternal = renderDependencies.internalReadFn || internalRead;
   return {
     searchTourPropertiesFn: context => invoke(context, "search-tour-properties", context.input),
     readTourSelectionCartFn: context => invoke(context, "read-tour-selection-cart", context.input),
     appendTourSelectionCartVersionFn: context => invoke(context, "append-tour-selection-cart-version", context.input),
-    listToursFn: async context => ({ ok: true, data: projectTourLibrary(await internalRead(context,
+    listToursFn: async context => ({ ok: true, data: projectTourLibrary(await readInternal(context,
       "select ops.list_tour_library($1::text,$2::text) as data", [organizationTenantForActor(context.actor)])) }),
-    readTourFn: async context => ({ ok: true, data: projectTourDetail(await internalRead(context,
-      "select ops.read_tour_internal_detail($1::text,$2::uuid,$3::text) as data",
-      [organizationTenantForActor(context.actor), context.input.tour_id])) }),
+    readTourFn: async context => {
+      const data = projectTourDetail(await readInternal(context,
+        "select ops.read_tour_internal_detail($1::text,$2::uuid,$3::text) as data",
+        [organizationTenantForActor(context.actor), context.input.tour_id]));
+      return data ? { ok: true, data } : { ok: false, status: 404 };
+    },
     readPropertyEvidenceFn: async context => ({ ok: true, data: await withPool(
       context.env.DATABASE_URL_WRITER, "begin read only", client => readPropertyEvidence(
         client, organizationTenantForActor(context.actor), context.input.property_id, context.input.as_of)) }),
@@ -285,7 +291,7 @@ export function createTourRuntimeAdapters(renderDependencies = {}) {
     autosaveCheatSheetFn: context => invoke(context, "append-tour-cheat-sheet-revision", context.input),
     restoreCheatSheetFn: context => invoke(context, "restore-tour-cheat-sheet-revision", context.input),
     createProjectionFn: async context => {
-      const meta = await internalRead(context,
+      const meta = await readInternal(context,
         "select ops.read_tour_projection_creation_metadata($1::text,$2::uuid,$3::uuid,$4::text) as data",
         [organizationTenantForActor(context.actor), context.input.tour_id, context.input.route_version_id]);
       if (!meta) return { ok: false, status: 404 };
@@ -296,14 +302,14 @@ export function createTourRuntimeAdapters(renderDependencies = {}) {
       });
     },
     readProjectionCandidatesFn: async context => {
-      const candidates = await internalRead(context,
+      const candidates = await readInternal(context,
         "select ops.read_tour_projection_seal_candidates($1::text,$2::uuid,$3::text) as data",
         [organizationTenantForActor(context.actor), context.input.projection_id]);
       if (!candidates) return { ok: false, status: 404 };
       return { ok: true, data: { projection_id: candidates.projection_id, candidate_digest: candidates.candidate_digest, preview: candidates.preview } };
     },
     sealProjectionFn: async context => {
-      const candidates = await internalRead(context,
+      const candidates = await readInternal(context,
         "select ops.read_tour_projection_seal_candidates($1::text,$2::uuid,$3::text) as data",
         [organizationTenantForActor(context.actor), context.input.projection_id]);
       if (!candidates || candidates.candidate_digest !== context.input.candidate_digest) return { ok: false, status: 409 };

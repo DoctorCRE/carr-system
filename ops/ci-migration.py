@@ -44,6 +44,11 @@ ACCEPTANCE_ENV = {
 
 PROOFS = (
     Proof(
+        "mcp-server/test/tour-deal-access.test.mjs",
+        "Tour deal authorization and HTTP PostgreSQL acceptance failed",
+        env={"CARR_TOUR_DEAL_TEST_DATABASE_URL": "{dsn}"},
+    ),
+    Proof(
         "mcp-server/test/fact-review-installed-postgres.test.mjs",
         "installed fact-review behavior regressed; reconcile the later function body with the earlier behavior and update the proof",
         log="migration-fact-review",

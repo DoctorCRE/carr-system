@@ -11,6 +11,7 @@
 //
 // NO SEND CAPABILITY EXISTS OR WILL EXIST IN THIS WORKER.
 
+import { installTourDealAccess } from './tour-deal-access.js';
 import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
 import { neon, Pool } from "@neondatabase/serverless";
 import { budgetedAi } from "./ai-budget.js";
@@ -891,6 +892,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     const actorWithId = Object.assign(actor, { id: a.rows[0].id });
     await setWriterActorContext(client, actorWithId,
       { partnerAuthorityAct: tool.humanOnly === true });
+    if (name.includes('tour')) await installTourDealAccess(client, actorWithId);
     const principalReadback = await client.query(SCAC_TRUSTED_PRINCIPAL_READBACK_SQL.text);
     if (principalReadback.rows.length !== 1)
       throw new ToolError({ error: "trusted_database_principal_unavailable" });
