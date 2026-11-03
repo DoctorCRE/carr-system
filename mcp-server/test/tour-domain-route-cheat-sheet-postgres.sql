@@ -213,3 +213,66 @@ begin
  if has_function_privilege('carr_reader','ops.read_tour_internal_detail(text,uuid,text)','execute') then raise exception 'internal subject read widened reader access'; end if;
 end $subject_acl$;
 rollback;
+
+\set ON_ERROR_STOP on
+begin;
+do $fixtures$
+declare a uuid; p uuid; c uuid;
+begin
+ insert into public.actor(slug,kind,display_name) values('wr586-proof','human','Synthetic Tour Partner') returning id into a;
+ insert into public.party(kind,name,created_by,updated_by) values('person','Synthetic Tour Client',a,a) returning id into p;
+ insert into public.client(party_id,created_by,updated_by) values(p,a,a) returning id into c;
+ insert into public.deal(id,client_id,name,deal_type,phase,created_by,updated_by) values
+ ('58600000-0000-4000-8000-000000000001',c,'Synthetic Deal One','other','legal',a,a),
+ ('58600000-0000-4000-8000-000000000002',c,'Synthetic Deal Two','other','legal',a,a);
+end $fixtures$;
+set local session authorization carr_writer;
+set local carr.acting_actor_slug='wr586-proof';
+do $proof$
+declare t uuid; t2 uuid; legacy uuid; j jsonb; missing uuid:='58600000-0000-4000-8000-000000000099';
+begin
+ t:=ops.create_tour_domain('carr-internal','Synthetic deal tour','deal','58600000-0000-4000-8000-000000000001','proof','{}','{}');
+ t2:=ops.create_tour_domain('carr-internal','Synthetic second tour','deal','58600000-0000-4000-8000-000000000002','proof','{}','{}');
+ j:=ops.read_tour_internal_detail('carr-internal',t,'wr586-proof');
+ if j->>'deal_id'<>'58600000-0000-4000-8000-000000000001' or j->>'deal_name'<>'Synthetic Deal One' then raise exception 'detail lost deal binding'; end if;
+ j:=ops.list_tour_library('carr-internal','wr586-proof');
+ if not exists(select 1 from jsonb_array_elements(j->'tours') x where x->>'deal_id'='58600000-0000-4000-8000-000000000001') or
+ not exists(select 1 from jsonb_array_elements(j->'tours') x where x->>'deal_id'='58600000-0000-4000-8000-000000000002') then raise exception 'cross-deal listing lost a deal'; end if;
+ if ops.read_tour_internal_detail('carr-internal',t,'inactive-proof') is not null then raise exception 'inaccessible deal detail leaked'; end if;
+ if exists(select 1 from jsonb_array_elements(ops.list_tour_library('carr-internal','inactive-proof')->'tours') x where x->>'deal_id' is not null) then raise exception 'inaccessible deal library leaked'; end if;
+ begin
+  perform ops.create_tour_domain('carr-internal','Unknown','deal',missing::text,'proof','{}','{}');
+  raise exception 'unknown deal accepted';
+ exception when raise_exception then if sqlerrm<>'tour deal is unavailable' then raise; end if; end;
+ begin
+  perform ops.create_tour_domain('other-tenant','Inaccessible','deal','58600000-0000-4000-8000-000000000001','proof','{}','{}');
+  raise exception 'inaccessible tenant accepted';
+ exception when raise_exception then if sqlerrm<>'tour deal is unavailable' then raise; end if; end;
+ perform set_config('carr.acting_actor_slug','inactive-proof',true);
+ begin
+  perform ops.create_tour_domain('carr-internal','Inaccessible','deal','58600000-0000-4000-8000-000000000001','proof','{}','{}');
+  raise exception 'inaccessible actor accepted';
+ exception when raise_exception then if sqlerrm<>'tour deal is unavailable' then raise; end if; end;
+ perform set_config('carr.acting_actor_slug','wr586-proof',true);
+ foreach j in array array['"client"'::jsonb,'"work"'::jsonb] loop
+  legacy:=ops.create_tour_domain('legacy-fixture','Legacy',j#>>'{}','opaque:legacy','proof','{}','{}');
+  if (ops.read_tour_internal_detail('legacy-fixture',legacy,'wr586-proof')->>'deal_id') is not null then raise exception 'legacy tour acquired a deal'; end if;
+ end loop;
+end $proof$;
+reset session authorization;
+do $constraints$
+begin
+ begin
+  delete from public.deal where id='58600000-0000-4000-8000-000000000001';
+  raise exception 'canonical deal reference was not preserved';
+ exception when foreign_key_violation then null; end;
+ begin
+  update ops.tour set deal_id='58600000-0000-4000-8000-000000000002',subject_id='58600000-0000-4000-8000-000000000002' where tour_name='Synthetic deal tour';
+  raise exception 'deal rebinding accepted';
+ exception when raise_exception then if sqlerrm<>'tour deal binding is immutable' then raise; end if; end;
+ begin
+  update ops.tour set subject_type='deal' where tour_name='Legacy';
+  raise exception 'deal subject without reference accepted';
+ exception when check_violation then null; end;
+end $constraints$;
+rollback;
