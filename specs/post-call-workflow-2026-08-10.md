@@ -90,13 +90,22 @@ from all complete source spans of the cited ledger facts, before the short
 remote evidence quote is trimmed. The states are `unstated`, `resolved`,
 `ambiguous`, and `contradictory`.
 
+A deadline is unstated only when no cited source span contains a temporal expression;
+any expression that cannot resolve to exactly one date with certainty blocks filing.
+The detector explicitly covers numerals, weekday and month names and abbreviations,
+relative terms, deadline prepositions, date units, qualifiers, and named holidays.
+The supplied model date never proves resolution.
+
 - `unstated` keeps `due_on` null and `due_defaulted: true`. Only this state adds
   an optional date reminder in `optional_reminders`, which does not block retention.
 - `resolved` keeps the stated calendar date or the deterministic relative date.
   An unqualified weekday uses the upcoming occurrence under the existing call-date rule.
 - `ambiguous` keeps `due_on` null and creates a blocking review question. This
   includes qualified timing such as "end of next week" or "sometime next month",
+  numeric dates, "Tuesday next month", "in two weeks", "before Thanksgiving",
   and a calendar deadline present in the source but missing from `due_on`.
+  Calendar dates are checked against their literal year, or the upcoming occurrence
+  from the recorded call date when the year is omitted. The model date must match.
 - `contradictory` keeps `due_on` null and creates a blocking review question for
   conflicting calendar or relative deadlines.
 
@@ -106,9 +115,9 @@ The filing and retention predicates stay unchanged. Existing report holds are pr
 ```mermaid
 stateDiagram-v2
     [*] --> Classify: Read cited source spans
-    Classify --> Unstated: No timing
-    Classify --> Resolved: Exact deadline
-    Classify --> Ambiguous: Timing unresolved
+    Classify --> Unstated: No temporal expression anywhere in cited spans
+    Classify --> Resolved: Entire expression resolves to one verified date
+    Classify --> Ambiguous: Any temporal expression remains unresolved
     Classify --> Contradictory: Deadlines conflict
     Unstated --> FilingEligible: Optional reminder
     Resolved --> FilingEligible

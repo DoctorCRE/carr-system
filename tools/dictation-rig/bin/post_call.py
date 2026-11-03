@@ -341,6 +341,35 @@ CALENDAR_DAY = re.compile(
     r"September|October|November|December)\s+\d{1,2})\b", re.IGNORECASE,
 )
 
+MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
+          "september", "october", "november", "december")
+TEMPORAL_EXPRESSION = re.compile(
+    r"\b(?:\d+(?:st|nd|rd|th)?|" + "|".join(WEEKDAYS + MONTHS)
+    + r"|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+    r"today|tomorrow|yesterday|next|this|last|previous|following|"
+    r"end|middle|mid|late|later|early|sometime|around|soon|eventually|"
+    r"by|before|after|within|since|until|during|from|"
+    r"days?|weeks?|months?|years?|quarters?|weekends?|"
+    r"morning|afternoon|evening|tonight|noon|midnight|"
+    r"thanksgiving|christmas|easter|holidays?)\b", re.IGNORECASE,
+)
+CALENDAR_WITH_YEAR = re.compile(
+    CALENDAR_DAY.pattern + r"(?:,?\s+\d{4})?", re.IGNORECASE,
+)
+
+
+def _unresolved_temporal_expression(evidence: str) -> bool:
+    remainder = PAST_RELATIVE_DAY.sub("", evidence)
+    remainder = re.sub(r"\bsince we\b", "", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:" + "|".join(WEEKDAYS) + r")[’']s(?!\s+lunch call\b)",
+                       "", remainder, flags=re.IGNORECASE)
+    remainder = RELATIVE_DAY.sub("", remainder)
+    remainder = re.sub(r"\bbefore\s+(?:(?:the|[’']s)\s+)?lunch call\b", "", remainder,
+                       flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:by|on|before|morning|afternoon|evening)\b", "", remainder,
+                       flags=re.IGNORECASE)
+    return TEMPORAL_EXPRESSION.search(remainder) is not None
+
 
 def recorded_call_date(session_dir: Path) -> str | None:
     stored = read_json(session_dir / CONTEXT_FILE) or {}
@@ -361,16 +390,15 @@ def _relative_phrases(evidence: str) -> list[str]:
     if CALENDAR_DAY.search(evidence):
         return []
     evidence = PAST_RELATIVE_DAY.sub("", evidence)
-    weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
-    if re.search(r"\bfollowing\s+" + weekdays +
-                 r"\b|\b(?:days?|weeks?|months?)\s+(?:from|after|before)\b|\b" + weekdays +
-                 r"\s+after next\b|\bthis time next week\b", evidence, re.IGNORECASE):
-        return []
     phrases = [match.group().lower() for match in RELATIVE_DAY.finditer(evidence)
                if not re.match(r"['’]s\b", evidence[match.end():])
                or re.match(r"['’]s\s+lunch call\b", evidence[match.end():], re.IGNORECASE)
                and re.search(r"\bbefore\s+$", evidence[:match.start()], re.IGNORECASE)]
     if "next week" in phrases and any(phrase.split()[-1] in WEEKDAYS for phrase in phrases):
+        weekdays = "(?:" + "|".join(WEEKDAYS) + ")"
+        if not re.search(r"\b(?:" + weekdays + r"\s+next week|next week\s+" + weekdays + r")\b",
+                         evidence, re.IGNORECASE) or re.search(r"\b(?:or|this)\b", evidence, re.IGNORECASE):
+            return []
         phrases = ["next " + phrase.split()[-1] if phrase.split()[-1] in WEEKDAYS else phrase
                    for phrase in phrases if phrase != "next week"]
     return phrases
@@ -445,25 +473,45 @@ def _task_deadline(item: dict[str, Any], transcript: dict[str, Any] | None,
         if spans:
             evidence = " ".join(transcript["segments"][s["segment_index"]]["text"][s["char_start"]:s["char_end"]]
                                 for s in sorted(spans, key=lambda s: (s["segment_index"], s["char_start"])))
-    calendar_days = {m.group().lower() for m in CALENDAR_DAY.finditer(evidence)}
-    if len(calendar_days) > 1:
+    if not TEMPORAL_EXPRESSION.search(evidence):
+        return DeadlineResolution("unstated", None)
+    ambiguous = DeadlineResolution("ambiguous", None,
+        "The cited source states timing that was not resolved with certainty; clarify the exact date.")
+    if re.search(r"\babout\s+(?:" + RELATIVE_DAY.pattern + "|" + CALENDAR_DAY.pattern + ")", evidence, re.IGNORECASE):
+        return ambiguous
+    calendar_days = list(CALENDAR_WITH_YEAR.finditer(evidence))
+    if len({m.group().lower() for m in calendar_days}) > 1:
         return DeadlineResolution("contradictory", None, "The cited source gives conflicting calendar deadlines; clarify the deadline.")
     if calendar_days:
-        if item["due_on"] is None:
-            return DeadlineResolution("ambiguous", None, "The cited source states a calendar deadline that was not resolved; clarify the exact date.")
-        return DeadlineResolution("resolved", item["due_on"])
+        match = calendar_days[0]
+        literal = match.group().lower()
+        try:
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", literal):
+                exact = date.fromisoformat(literal)
+            else:
+                parts = literal.replace(",", "").split()
+                year = int(parts[2]) if len(parts) == 3 else date.fromisoformat(call_date).year if call_date else None
+                if year is None:
+                    return ambiguous
+                exact = date(year, MONTHS.index(parts[0]) + 1, int(parts[1]))
+                if len(parts) == 2 and call_date and exact < date.fromisoformat(call_date):
+                    exact = exact.replace(year=year + 1)
+        except ValueError:
+            return ambiguous
+        remainder = CALENDAR_WITH_YEAR.sub("", evidence)
+        weekday_matches = list(RELATIVE_DAY.finditer(remainder))
+        for weekday in weekday_matches:
+            if weekday.group().lower() != WEEKDAYS[exact.weekday()]:
+                return ambiguous
+        if _unresolved_temporal_expression(remainder):
+            return ambiguous
+        if item["due_on"] != exact.isoformat():
+            return ambiguous
+        return DeadlineResolution("resolved", exact.isoformat())
+    if _unresolved_temporal_expression(evidence):
+        return ambiguous
     relative = _relative_due_date(evidence, transcript, call_date)
-    if relative is not None:
-        return relative
-    timing = PAST_RELATIVE_DAY.sub("", evidence)
-    timing = re.sub(r"\b(?:" + "|".join(WEEKDAYS) + r")[’']s\b", "", timing, flags=re.IGNORECASE)
-    if (RELATIVE_DAY.search(timing) or re.search(
-            r"\b(?:(?:next|this|following)\s+(?:day|week|month|year)|"
-            r"(?:days?|weeks?|months?)\s+(?:from|after|before))\b", timing, re.IGNORECASE)):
-        if item["due_on"] is not None and not re.search(DEADLINE_QUALIFIER, timing, re.IGNORECASE):
-            return DeadlineResolution("resolved", item["due_on"])
-        return DeadlineResolution("ambiguous", None, "The cited source states timing that was not resolved; clarify the exact date.")
-    return DeadlineResolution("resolved" if item["due_on"] else "unstated", item["due_on"])
+    return relative if relative is not None else ambiguous
 
 
 UNSAID_REVIEW = "The model did not say whether this was settled."
