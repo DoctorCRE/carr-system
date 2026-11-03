@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS } from '../src/tools.js';
 
-test('every live party address comes back with its record ref, in or out of market', async () => {
+test('every live party address comes back with its record ref, in or out of market', async t => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { createServer } = await import('node:net');
@@ -88,6 +88,44 @@ test('every live party address comes back with its record ref, in or out of mark
       {address: 'pm@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: true},
       {address: 'office@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: false},
     ], 'out-of-market and role-less parties are read, plus open-deal contacts by deal ref; merged-away and deleted parties never are');
+    const mainContacts = reply.contacts.map(({contact_snapshot, ...contact}) => contact)
+      .filter(contact => contact.ref !== 'P-0007');
+    for (const state of ['deleted', 'merged']) {
+      await t.test(`${state} organization preserves main contact fields and duplicate plan`, async () => {
+        await db.query('reset role');
+        await db.query(state === 'deleted'
+          ? "update party set deleted_at=now(), merged_into=null where id=7"
+          : "update party set deleted_at=null, merged_into=1 where id=7");
+        await db.query('set role carr_reader');
+        const actual = await tool.handler(db, {}, {});
+        assert.deepEqual(actual.contacts.map(({contact_snapshot, ...contact}) => contact), mainContacts);
+        const plans = JSON.parse(execFileSync('python3', ['-c', `
+import importlib.util, json, sys
+from pathlib import Path
+root = Path.cwd()
+spec = importlib.util.spec_from_file_location('calendar_loader', root / 'tools/load-calendar-contacts.py')
+loader = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(loader)
+from lib.outlook_intake import _contacts
+contacts, main_contacts = json.load(sys.stdin)
+assert _contacts(lambda *_: {'contacts': contacts})() == _contacts(lambda *_: {'contacts': main_contacts})()
+attendees = {'events': [{'attendees': [{'email': 'taylor@newdomain.test', 'name': 'Practice Org'}]}]}
+print(json.dumps([loader.plan(attendees, rows, [], internal_domain='internal.test')
+                  for rows in [contacts, main_contacts]]))
+`], {cwd: path.resolve(import.meta.dirname, '../..'),
+          input: JSON.stringify([actual.contacts, mainContacts]), encoding: 'utf8'}));
+        assert.deepEqual(plans[0], plans[1]);
+        assert.deepEqual(plans[0].add, []);
+        assert.deepEqual(plans[0].skipped, {name_matches_existing_party: 1});
+        const snapshot = actual.contacts.find(contact => contact.address === 'dr@practice.test').contact_snapshot;
+        assert.deepEqual(snapshot.unread_fields, ['company']);
+        assert.equal(Object.hasOwn(snapshot.values, 'company'), false);
+        assert.equal(snapshot.provenance.company, null);
+      });
+    }
+    await db.query('reset role');
+    await db.query('update party set deleted_at=null, merged_into=null where id=7');
+    await db.query('set role carr_reader');
     const pat = reply.contacts.filter(item => item.address === 'pat@client.test');
     assert.deepEqual(pat[0].contact_snapshot, {
       party_id: 1, party_version: 7,
