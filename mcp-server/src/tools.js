@@ -4055,10 +4055,11 @@ export const TOOLS = {
       const rows = (await c.query(`
         select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email,
                p.id as party_id, p.version as party_version, p.name as party_name,
-               p.phone, p.cell, p.title, p.org_id, org.id as company_id,
-               org.version as company_version, org.name as company_name
+               p.phone, p.cell, p.title, p.org_id, live_org.id as company_id,
+               live_org.version as company_version, live_org.name as company_name
           from party p
-          left join party org on org.id = p.org_id and org.merged_into is null and org.deleted_at is null
+          left join party org on org.id = p.org_id
+          left join party live_org on live_org.id = p.org_id and live_org.merged_into is null and live_org.deleted_at is null
           left join lateral (
             select roster_ref as ref from client where party_id = p.id and merged_into is null
             union all select registry_ref from lead where party_id = p.id
