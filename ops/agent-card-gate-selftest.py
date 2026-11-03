@@ -59,7 +59,7 @@ class AgentCardGate(unittest.TestCase):
                                                 'tool_name': tool, 'tool_input': inputs}),
                               text=True, capture_output=True, env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
 
-    def mint_fixture(self, reply=None, rc=0, args=None):
+    def mint_fixture(self, reply=None, rc=0, args=None, stdin=False):
         wrapper = self.root / 'tools/mint-wrapper.py'
         shutil.copyfile(REPO / 'tools/call-verb.py', wrapper)
         (self.root / 'mcp-server').mkdir(exist_ok=True)
@@ -68,11 +68,13 @@ class AgentCardGate(unittest.TestCase):
         fake.write_text('import sys\nprint(' + repr(json.dumps(reply)) + ')\nraise SystemExit(' + str(rc) + ')')
         args = args if args is not None else {'work_request': 'WR-000557', 'slice': 6,
                                              'executor': 'codex', 'model': 'synthetic'}
+        argument = '-' if stdin else json.dumps(args)
         code = (f'import runpy, sys, time; time.time = lambda: {self.now or 1000000}; '
                 f'm = runpy.run_path({str(wrapper)!r}); '
                 'm["main"].__globals__["NODE_CANDIDATES"] = [sys.executable]; '
-                f'sys.argv = ["call-verb.py", "dispatch-job", {json.dumps(args)!r}]; m["main"]()')
-        return subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                f'sys.argv = ["call-verb.py", "dispatch-job", {argument!r}]; m["main"]()')
+        return subprocess.run([sys.executable, '-c', code], input=json.dumps(args) if stdin else None,
+                              capture_output=True, text=True,
                               env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
 
     def test_fresh_mint_first_launch_does_not_lookup(self):
@@ -82,6 +84,63 @@ class AgentCardGate(unittest.TestCase):
         self.lookup.write_text('import time\ntime.sleep(30)\n')
         result = self.run_hook(prompt='Card: WR557.S6.J1')
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_mint_from_stdin_preserves_response_and_seeds(self):
+        self.now = 1000000
+        minted = self.mint_fixture(stdin=True)
+        self.assertEqual(minted.returncode, 0, minted.stderr)
+        self.assertEqual(json.loads(minted.stdout), {'ok': True, 'card_id': 'WR557.S6.J1', 'priority': 1})
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+
+    def test_mint_cache_refuses_unverified_replies_and_wrong_work_request(self):
+        self.now = 1000000
+        for reply, rc in [({'ok': False, 'card_id': 'WR557.S6.J1', 'priority': 1}, 0),
+                          ({'ok': True, 'card_id': 'WR558.S6.J1', 'priority': 1}, 0),
+                          ({'ok': True, 'card_id': 'WR557.S7.J1', 'priority': 1}, 0),
+                          ({'ok': True, 'card_id': 'WR557.S6.J1'}, 0),
+                          ({'ok': True, 'card_id': 'WR557.S6.J1', 'priority': 1}, 1)]:
+            with self.subTest(reply=reply, rc=rc):
+                self.mint_fixture(reply=reply, rc=rc)
+                self.lookup.write_text('raise SystemExit(1)')
+                self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+                self.assertEqual(self.run_hook(prompt='Card: WR558.S6.J1').returncode, 2)
+
+    def test_mint_cache_is_card_bound_and_one_use_before_live_checks(self):
+        self.now = 1000000
+        self.assertEqual(self.mint_fixture().returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 2)
+        self.assertEqual(self.run_hook(prompt='Card: WR558.S6.J1').returncode, 2)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.reply_fixture(False)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+
+    def test_minted_cache_expiry_and_tampering_refuse(self):
+        self.now = 1000000
+        self.mint_fixture()
+        self.lookup.write_text('raise SystemExit(1)')
+        self.now += 24 * 60 * 60
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.mint_fixture()
+        cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
+        entries = json.loads(cache.read_text())
+        entry = entries.pop('WR557.S6.J1')
+        entry['body']['card_id'] = 'WR558.S6.J1'
+        entries['WR558.S6.J1'] = entry
+        cache.write_text(json.dumps(entries))
+        self.assertEqual(self.run_hook(prompt='Card: WR558.S6.J1').returncode, 2)
+
+    def test_minted_card_still_requires_exactly_one_card_line(self):
+        self.now = 1000000
+        self.mint_fixture()
+        self.lookup.write_text('raise SystemExit(1)')
+        for prompt in ('Review.', 'Card: WR557.S6.J1\nCard: WR557.S6.J2',
+                       'Card: WR557.S6.J1\nCard: malformed', 'Card: WR557.S6.J0'):
+            self.assertEqual(self.run_hook(prompt=prompt).returncode, 2)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
 
     def test_agent_without_card_denied_with_mint_command(self):
         result = self.run_hook(prompt='Review the plan.')
@@ -285,9 +344,10 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 0)
 
     def test_successful_registration_repairs_corrupt_cache(self):
-        cache = self.home / '.cache/carr/agent-card-registrations.json'
-        cache.parent.mkdir(parents=True)
+        cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
+        cache.parent.mkdir(parents=True, mode=0o700)
         cache.write_text('invalid')
+        cache.chmod(0o600)
         self.register_fixture()
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
         self.lookup.write_text('raise SystemExit(1)')
@@ -318,10 +378,9 @@ class AgentCardGate(unittest.TestCase):
         self.assertIn('agent-card-gate: Card registration lookup deadline exceeded', result.stderr)
 
     def test_shared_deadline_refuses_even_with_cached_cards(self):
-        cache = self.home / '.cache/carr/agent-card-registrations.json'
-        cache.parent.mkdir(parents=True)
-        cache.write_text(json.dumps(dict.fromkeys(
-            (f'WR557.S6.J{job}' for job in (1, 2, 3)), time.time())))
+        self.register_fixture()
+        for job in (1, 2):
+            self.assertEqual(self.run_hook(prompt=f'Card: WR557.S6.J{job}').returncode, 0)
         self.lookup.write_text('import time\ntime.sleep(30)\n')
         started = time.monotonic()
         result = self.run_hook('mcp__t3-code__create_threads', threads=[

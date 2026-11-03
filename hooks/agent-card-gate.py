@@ -8,7 +8,6 @@ import re
 import runpy
 import sys
 import subprocess
-import tempfile
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -143,48 +142,22 @@ def codex_operands(args):
     return words
 
 
-def registration_cache(registered=None, removed=()):
-    path = Path.home() / '.cache/carr/agent-card-registrations.json'
-    temporary = None
-    try:
-        try:
-            entries = json.loads(path.read_text())
-        except (FileNotFoundError, ValueError):
-            entries = {}
-        if not isinstance(entries, dict):
-            entries = {}
-        now = time.time()
-        entries = {card: seen for card, seen in entries.items()
-                   if isinstance(seen, (int, float)) and 0 <= now - seen < 24 * 60 * 60}
-        if registered is None:
-            return set(entries)
-        for card in removed:
-            entries.pop(card, None)
-        entries.update(dict.fromkeys(registered, now))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as output:
-            temporary = Path(output.name)
-            json.dump(entries, output)
-        temporary.replace(path)
-    except (OSError, ValueError, AttributeError, TypeError):
-        return set()
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return set()
-
-
 def check_prompts(prompts):
     cards = []
     for prompt in prompts:
         found = re.findall(r'^Card:[ \t]*(WR[1-9]\d*\.S[1-9]\d*\.J[1-9]\d*)[ \t]*$', prompt, re.M)
-        if len(found) != 1:
+        if len(found) != 1 or len(re.findall(r'^Card:', prompt, re.M)) != 1:
             return refuse('The launch prompt requires one Card: WRn.Sn.Jn line.')
         cards.extend(found)
     if not cards:
         return
+    from lib.agent_card_cache import RegistrationCache
+
+    cache = RegistrationCache()
     deadline = time.monotonic() + 8
     for card in dict.fromkeys(cards):
+        if cache.consume_mint(card):
+            continue
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return refuse('Card registration lookup deadline exceeded. Retry the launch.')
@@ -215,15 +188,15 @@ def check_prompts(prompts):
         except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as exc:
             if time.monotonic() >= deadline:
                 return refuse('Card registration lookup deadline exceeded. Retry the launch.')
-            if card in registration_cache():
+            if cache.contains(card):
                 continue
             reason = str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else type(exc).__name__
             return refuse('Card registration lookup unreachable or invalid (' + reason + '). '
                           'No registration cached within 24 hours for ' + card + '.')
         if not registration['registered']:
-            registration_cache([], removed=[card])
+            cache.remove(card)
             return refuse(card + ' is not registered in the work queue.')
-        registration_cache([card])
+        cache.record(card)
 
 
 if __name__ == '__main__':

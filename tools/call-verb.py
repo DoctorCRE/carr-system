@@ -58,6 +58,7 @@ clear the selector in verb_io.py and remain joe-local.
 Never prints the DSN or any token value.
 """
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -163,8 +164,24 @@ def main() -> None:
         env = dict(os.environ)
         env.pop("DATABASE_URL", None)  # never let a caller's stray export force break-glass mode
         os.chdir(os.path.join(REPO, "mcp-server"))
-        rc = subprocess.run([node_bin(), LOCAL_VERB, verb, args_json, *extra], env=env).returncode
-        sys.exit(rc)
+        command = [node_bin(), LOCAL_VERB, verb, args_json, *extra]
+        if verb == 'dispatch-job':
+            sys.path.insert(0, REPO)
+            from lib.agent_card_cache import RegistrationCache, mint_card
+
+            payload = sys.stdin.read() if args_json == '-' else args_json
+            result = subprocess.run(command, env=env, stdout=subprocess.PIPE, text=True,
+                                    input=payload if args_json == '-' else None)
+            if result.returncode == 0:
+                try:
+                    card = mint_card(json.loads(payload), json.loads(result.stdout))
+                    if card and not RegistrationCache().record(card, minted=True):
+                        print('Mint succeeded; registration cache unavailable.', file=sys.stderr)
+                except (ValueError, TypeError):
+                    pass
+            sys.stdout.write(result.stdout)
+            sys.exit(result.returncode)
+        sys.exit(subprocess.run(command, env=env).returncode)
 
     # ---- break-glass path: direct database connection, receipted ----
     url = break_glass_dsn(_db_tap(), branch)
