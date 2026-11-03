@@ -35,5 +35,7 @@ for path in manifest['files']:
 
 Run the selftest and relevant CI classes after refresh. Review byte changes as
 baseline policy changes. Do not edit fixture source to silence a failing probe.
-The zsh alternation probe records a pre-existing allowance in both versions;
-it does not claim the rm glob parsing gap is fixed.
+The zsh alternation probe retains its original baseline allowance. Its contract
+override now requires head to refuse it. J134 adds quote-aware checks for word
+groups and extended globs after the raw decision. The selftest lists intended
+new refusals separately and verifies that the frozen main allowed each one.

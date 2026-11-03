@@ -56,7 +56,7 @@ from urllib.parse import unquote, urlsplit
 # for the reason its own docstring gives: two copies of "what counts as inert"
 # drift silently, because each copy still passes its own tests.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens as _shell_tokens, strip_inert_text  # noqa: E402
+from cmd_text import SHELL_BOUNDARIES, SHELL_REDIRECTS, shell_operands, shell_tokens as _shell_tokens, strip_inert_text  # noqa: E402
 # Shared with hooks/record-home-gate.py, which refuses the FILE-TOOL spelling of
 # the same write. One memory, so a record refused through either door is
 # recognised at the other (rule 76a53dfe).
@@ -2470,11 +2470,134 @@ def source_restore_reason(cmd, cwd=None):
     return None
 
 
+def zsh_glob_reason(cmd, invocations, depth=0):
+    """Refuse ambiguous word globs in commands containing a guarded program.
+
+    Hook payloads carry no authoritative shell or option state. Even a bash
+    wrapper can launch zsh, so assume zsh with EXTENDED_GLOB enabled. This is
+    an additional refusal, never a replacement interpretation of raw text.
+    """
+    if depth >= 4:
+        raise ValueError('shell glob inspection nesting exceeds limit')
+    modifiers = {'noglob', 'nocorrect', '-'}
+    for program, arguments in invocations[:]:
+        if program in modifiers:
+            words = list(arguments)
+            while words and words[0] in modifiers:
+                words.pop(0)
+            invocations = invocations + command_invocations(words)
+    text = strip_inert_text(cmd).replace('\\\n', '')
+    quote, word, groups, hashes, i = None, False, False, False, 0
+    expansion_lead = False
+    while i < len(text):
+        char = text[i]
+        expansion, expansion_lead = expansion_lead, False
+        if char == '\\' and quote != "'":
+            word = True
+            i += 2
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+        elif char in {'"', "'", '`'}:
+            quote, word = char, True
+        elif char == '(':
+            # A glued group is a glob or an unsupported expansion. A bare
+            # (a|b) operand is indistinguishable from a compact subshell pipe.
+            compact = re.match(r'\([^\s]*\||\((?:#|N\)|\.\))', text[i:])
+            groups |= (word or compact is not None) and not expansion
+            word = False
+        elif char == '#':
+            if not word and (i == 0 or text[i - 1] != '('):
+                end = text.find('\n', i)
+                if end < 0:
+                    break
+                i = end
+                continue
+            hashes |= word
+            word = True
+        elif char.isspace() or char in ';&|<>':
+            word = False
+            expansion_lead = char in '<>'
+        else:
+            word = char != ')'
+            expansion_lead = char == '$'
+        i += 1
+    guarded = {'rm', 'mv', 'cp', 'rsync', 'srm', 'shred', 'find', 'git', 'gh',
+               'curl', 'wget', 'dd', 'tee', 'diskutil', 'age', 'psql', 'sqlite3'}
+    complete_text = re.sub(
+        r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|\n",
+        lambda match: ';' if match[0] == '\n' else re.sub(r'[;&|<>()]', '_', match[0]), without_shell_comments(text))
+    lexer = shlex.shlex(complete_text, posix=True,
+                        punctuation_chars=';&|<>()')
+    lexer.whitespace_split = True
+    lexer.commenters = ''
+    incomplete_programs, segment, parentheses = set(), [], 0
+    tokens = [piece for token in lexer for piece in (
+        re.findall(r'[()]|[^()]+', token)
+        if re.fullmatch(r'[;&|<>()]+', token) else [token])]
+    for token in tokens + [';']:
+        if re.fullmatch(r'[;&|<>()]+', token):
+            if (token == '(' or (token == ')' and not parentheses)
+                    or token not in SHELL_BOUNDARIES | SHELL_REDIRECTS | {'(', ')'}):
+                incomplete_programs.update(_exe_name(word) for word in segment)
+            if token == '(':
+                parentheses += 1
+            elif token == ')' and parentheses:
+                parentheses -= 1
+            if token in SHELL_REDIRECTS:
+                segment.append(token)
+            else:
+                segment = []
+        else:
+            segment.append(token)
+    sensitive = False
+    for program, arguments in invocations:
+        if program not in guarded:
+            continue
+        if program in incomplete_programs:
+            sensitive = True
+            continue
+        if program == 'git':
+            words = _git_command_words(arguments)
+            if (words and arguments[0] == words[0]
+                    and words[0] in {'status', 'log', 'diff', 'show', 'rev-parse', 'ls-files'}
+                    and not any(word.startswith('--output') for word in words[1:])):
+                continue
+        if program == 'gh':
+            words = _gh_command_words(arguments)
+            if (words[:2] == arguments[:2]
+                    and words[:2] in (['pr', 'view'], ['pr', 'checks'], ['pr', 'list'], ['pr', 'status'])):
+                continue
+            if (words == arguments and len(words) > 1
+                    and words[0] == 'api' and words[1] != 'graphql'
+                    and all(not word.startswith('-') for word in words[1:])):
+                continue
+        sensitive = True
+    if (groups or hashes) and sensitive:
+        return 'cannot classify zsh word glob safely; quote literal operands or use explicit paths'
+    for program, arguments in invocations:
+        script = ' '.join(arguments) if program == 'eval' else (
+            _shell_c_script(arguments) if _SHELLS.match(program) else None)
+        if script:
+            reason = zsh_glob_reason(script, list(executed_invocations(script)), depth + 1)
+            if reason:
+                return reason
+    for body in shell_expansions(without_shell_comments(text)):
+        reason = zsh_glob_reason(body, list(executed_invocations(body)), depth + 1)
+        if reason:
+            return reason
+    return None
+
+
 def check(cmd, cwd=None):
     """Normalization adds checks and can never replace the raw decision."""
     try:
         invocations = list(executed_invocations(cmd))
         reason = _check_candidate(cmd, cwd, invocations, cmd)
+        if reason:
+            return reason
+        reason = zsh_glob_reason(cmd, invocations)
         if reason:
             return reason
         for program, arguments in invocations:

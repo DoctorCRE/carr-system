@@ -3753,6 +3753,10 @@
     ]
   ],
   "contract_overrides": {
+    "j129: existing zsh alternation gap": {
+      "expect": "DENY",
+      "reason": "J134 intentionally closes zsh word alternation hiding unsafe deletion operands."
+    },
     "j121/2: heredoc apostrophe + nc": {
       "expect": "ALLOW",
       "reason": "Documented existing limitation, outside the bypass class assigned to this PR."
