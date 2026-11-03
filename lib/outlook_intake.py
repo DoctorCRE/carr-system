@@ -1107,7 +1107,7 @@ class Run:
                 args = {'idempotency_key': self.owner_key('record-finding', deal,
                         f'delivery-failure|{self.settings.account}|{self.settings.folder_account_id}|' + report['report_id']),
                         'subject': deal, 'kind': 'email_delivery_failure', 'epistemic_status': 'observed',
-                        'source': 'outlook-delivery-report:' + _hash(report['report_id']),
+                        'source': 'outlook-delivery-report/' + _hash(self.settings.account.lower()) + '/' + _hash(report['report_id']),
                         'observed_at': report['observed_at'],
                         'value': {'verification': 'unverified_report', 'mailbox_account': self.settings.account,
                                   'mailbox_owner': self.settings.owner, 'original_message_id': report['original_id'],

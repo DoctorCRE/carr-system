@@ -465,6 +465,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(findings[0]['subject'], self.fake.email_queue[0]['deal'])
         self.assertEqual(findings[0]['value']['source_activity_ids'], [self.fake.email_queue[0]['activity_id']])
         self.assertEqual(findings[0]['value']['verification'], 'unverified_report')
+        self.assertRegex(findings[0]['source'], r'^outlook-delivery-report/[0-9a-f]{64}/[0-9a-f]{64}$')
         self.run_intake([source, report])
         self.assertEqual(len(self.delivery_findings()), 1)
         self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 1)
