@@ -89,7 +89,7 @@ begin
    values('carr-internal',fixture.tour_id,2,1,now(),true,dig,'draft') returning id into approved;
   foreach fact_key in array array['display.name','display.address'] loop
    insert into ops.tour_field_assertion(organization_tenant_id,property_id,field_key,value,source_evidence_id,rights_receipt_id,observed_at,effective_from,confidence,data_classification,review_state)
-   values('carr-internal',prop,fact_key,to_jsonb(case when fact_key='display.name' then 'Synthetic Plaza' else '100 Main Road' end),evidence,rights,now(),now(),'high','public','reviewed') returning id into fa;
+   values('carr-internal',prop,fact_key,to_jsonb(case when fact_key='display.name' then 'Synthetic Plaza' else 'Synthetic Address' end),evidence,rights,now(),now(),'high','public','reviewed') returning id into fa;
    insert into ops.tour_public_projection_fact(organization_tenant_id,projection_id,property_id,field_assertion_id,route_version,display_field_key)
    values('carr-internal',approved,prop,fa,1,fact_key);
   end loop;
