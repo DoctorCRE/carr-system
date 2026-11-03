@@ -1,22 +1,57 @@
 ---
-title: "Email signature findings"
+title: "Email signature findings across decoder aliases"
 ---
 stateDiagram-v2
-  s0: Unread
-  s1: Held
-  s2: Prepared
-  s3: Recorded
-  s4: Refused
-  s5: Retry
-  s6: Changed
-  [*] --> s0
-  s0 --> s1: resolve sender and inspect signature
-  s0 --> s2: resolve sender and inspect signature
-  s1 --> s0: read full source with exact party
-  s2 --> s3: submit frozen proposal
+  state "keyless" as s0 {
+    s1: Unread
+    s2: Prepared
+    s3: Held
+    s4: Recorded
+    s5: Refused
+    s6: Retry
+    s7: Changed
+  }
+  state "keyed" as s8 {
+    s9: Unread
+    s10: Prepared
+    s11: Held
+    s12: Recorded
+    s13: Refused
+    s14: Retry
+    s15: Changed
+  }
+  [*] --> s1
+  s1 --> s2: resolve sender and inspect signature
+  s1 --> s9: prove decoder alias by unambiguous Message-ID
+  s1 --> s3: resolve sender and inspect signature
+  s2 --> s10: prove decoder alias by unambiguous Message-ID
   s2 --> s4: submit frozen proposal
   s2 --> s5: submit frozen proposal
-  s5 --> s3: retry or hold after validation
-  s5 --> s4: retry or hold after validation
-  s5 --> s6: retry or hold after validation
-  s6 --> s5: original source binding restored
+  s2 --> s6: submit frozen proposal
+  s9 --> s1: prove decoder alias by unambiguous Message-ID
+  s9 --> s10: resolve sender and inspect signature
+  s9 --> s11: resolve sender and inspect signature
+  s3 --> s1: read full source with exact party
+  s3 --> s11: prove decoder alias by unambiguous Message-ID
+  s10 --> s12: submit frozen proposal
+  s10 --> s13: submit frozen proposal
+  s10 --> s14: submit frozen proposal
+  s10 --> s2: prove decoder alias by unambiguous Message-ID
+  s4 --> s12: prove decoder alias by unambiguous Message-ID
+  s5 --> s13: prove decoder alias by unambiguous Message-ID
+  s6 --> s4: retry or hold after validation
+  s6 --> s5: retry or hold after validation
+  s6 --> s14: prove decoder alias by unambiguous Message-ID
+  s6 --> s7: retry or hold after validation
+  s11 --> s9: read full source with exact party
+  s11 --> s3: prove decoder alias by unambiguous Message-ID
+  s12 --> s4: prove decoder alias by unambiguous Message-ID
+  s13 --> s5: prove decoder alias by unambiguous Message-ID
+  s14 --> s12: retry or hold after validation
+  s14 --> s13: retry or hold after validation
+  s14 --> s15: retry or hold after validation
+  s14 --> s6: prove decoder alias by unambiguous Message-ID
+  s7 --> s6: original source binding restored
+  s7 --> s15: prove decoder alias by unambiguous Message-ID
+  s15 --> s14: original source binding restored
+  s15 --> s7: prove decoder alias by unambiguous Message-ID

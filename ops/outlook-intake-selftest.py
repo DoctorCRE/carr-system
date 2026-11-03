@@ -541,6 +541,45 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([one, two])
         self.assertEqual(len(self.fake.findings), 3)
 
+    def test_signature_simultaneous_aliases_share_frozen_request(self):
+        old = self.signature_alias_fixture()
+        self.run_intake([old])
+        new = {**old, 'local_keys': '77'}
+        self.run_intake([old, new])
+        self.run_intake([new, old])
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+
+    def test_signature_reverse_alias_keeps_store_key_conflict_guard(self):
+        old = {**self.signature_alias_fixture(), 'local_keys': '77'}
+        self.run_intake([old])
+        self.run_intake([{**old, 'local_keys': None}])
+        result = self.run_intake([{**old, 'local_keys': '78'}])
+        self.assertEqual(result.counts['message_id_ambiguous'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_ambiguous_keyless_message_ids_stay_separate(self):
+        old = self.signature_alias_fixture()
+        other = {**old, 'subject': 'Different source', 'copy_key': 'different-source'}
+        result = self.run_intake([old, other])
+        self.assertEqual(result.counts['message_id_ambiguous'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+        self.run_intake([old, other])
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_alias_preserves_reviewed_head_observation_format(self):
+        old = self.signature_alias_fixture()
+        self.run_intake([old])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        observation = next(iter(state['signature_observations'].values()))
+        observation.pop('ident', None)
+        observation.pop('binding_keys', None)
+        state_path.write_text(json.dumps(state))
+        self.run_intake([{**old, 'local_keys': '77'}])
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+
     def test_signature_alias_changed_source_or_party_stays_held(self):
         for change in ('body', 'party'):
             with self.subTest(change=change):
