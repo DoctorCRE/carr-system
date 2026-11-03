@@ -3016,6 +3016,7 @@ test('expired summary leases retry without accepting a late result and legacy pe
   assert.ok((await summaryQueue()).emails.some(row => row.activity_id === source.activity_id));
   const recent = await command('email-router-queue', { purpose: 'summaries', pending_only: false, limit: 200 });
   assert.ok(!recent.emails.some(row => row.activity_id === source.activity_id));
+  await summarySource();
   const first = await command('email-router-queue', { purpose: 'summaries', limit: 1 });
   const next = await command('email-router-queue', { purpose: 'summaries', limit: 1, after: first.next_cursor });
   assert.notEqual(first.emails[0].activity_id, next.emails[0].activity_id);
