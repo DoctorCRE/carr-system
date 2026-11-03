@@ -29,6 +29,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import call_budget
+import post_call_coverage as coverage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -54,12 +55,13 @@ def distiller_json_schema() -> dict[str, Any]:
     def item(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
         return {
             "type": "object", "additionalProperties": False,
-            "properties": properties, "required": required,
+            "properties": properties, "required": required + (["fact_ids"] if "fact_ids" in properties else []),
         }
 
     common = {
         "deal_id": {"type": "string"},
         "participant_ids": string_array,
+        "fact_ids": string_array,
         "evidence": {"type": "string"},
     }
     return {
@@ -81,11 +83,13 @@ def distiller_json_schema() -> dict[str, Any]:
             "deal_updates": {"type": "array", "items": item({
                 **common, "summary": {"type": "string"},
                 "phase_move": {"anyOf": [{"type": "null"}, item({
+                    "fact_ids": string_array,
                     "value": {"type": "string", "enum": list(CALL_PHASES)},
                     "started_on": {"type": ["string", "null"], "format": "date"},
                     "needs_review": {"type": ["string", "null"]},
                 }, ["value", "started_on", "needs_review"])]},
                 "next_step": {"anyOf": [{"type": "null"}, item({
+                    "fact_ids": string_array,
                     "text": {"type": "string", "minLength": 1, "maxLength": 500},
                     "next_date": {"type": ["string", "null"], "format": "date"},
                     "needs_review": {"type": ["string", "null"]},
@@ -459,7 +463,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
-            _strict_keys(item, required, {"due_on", "counterpart"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"})
+            _strict_keys(item, required, {"fact_ids"} | ({"due_on", "counterpart"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"}))
             if "counterpart" in item:
                 name = _string(item["counterpart"], f"{list_name}.counterpart")
                 if len(name) > 200:
@@ -470,7 +474,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if step is not None:
                 if not isinstance(step, dict):
                     raise ContractError("deal_updates.next_step must be an object or null")
-                _strict_keys(step, {"text", "next_date"}, {"needs_review"})
+                _strict_keys(step, {"text", "next_date"}, {"needs_review", "fact_ids"})
                 _review_note(step, "deal_updates.next_step.needs_review")
                 text = _string(step["text"], "deal_updates.next_step.text")
                 if len(text) > 500:
@@ -480,7 +484,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if phase is not None:
                 if not isinstance(phase, dict):
                     raise ContractError("deal_updates.phase_move must be an object or null")
-                _strict_keys(phase, {"value"}, {"started_on", "needs_review"})
+                _strict_keys(phase, {"value"}, {"started_on", "needs_review", "fact_ids"})
                 _review_note(phase, "deal_updates.phase_move.needs_review")
                 if phase["value"] not in CALL_PHASES:
                     raise ContractError("deal_updates.phase_move.value must be a supported open phase")
@@ -592,6 +596,7 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
                 continue
             if first["due_on"] is None and task["due_on"] is not None:
                 first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"], evidence=task["evidence"])
+            first["fact_ids"] = list(dict.fromkeys(first.get("fact_ids", []) + task.get("fact_ids", [])))
             first["participant_ids"] = list(dict.fromkeys(first["participant_ids"] + task["participant_ids"]))
         return kept
 
@@ -632,13 +637,13 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
 def command_distiller(request: dict[str, Any], command: str | None = None, runner: Callable[..., Any] = subprocess.run) -> dict[str, Any]:
     command = command or os.environ.get("CARR_POST_CALL_DISTILLER_COMMAND")
     if not command:
-        raise RuntimeError("no local post-call distiller configured")
+        raise coverage.ExtractionTransportError("no local post-call distiller configured")
     argv = shlex.split(command)
     if not argv:
-        raise RuntimeError("local post-call distiller command is empty")
+        raise coverage.ExtractionTransportError("local post-call distiller command is empty")
     result = runner(argv, input=json.dumps(request), text=True, capture_output=True, shell=False, timeout=120, check=False)
     if result.returncode != 0:
-        raise RuntimeError("local post-call distiller failed")
+        raise coverage.ExtractionTransportError("local post-call distiller failed")
     try:
         parsed = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -705,6 +710,10 @@ def _distiller_instruction() -> str:
         '"draft_proposals": [{"recipient_party_id": "<exact party id>", "deal_id": "<exact deal id>", "subject": "<string>", "body": "<string>", "participant_ids": ["<id>", ...], "evidence": "<<=15 words>"}], '
         '"review_questions": ["<string>", ...]}\n'
         "If there is nothing for a section, use an empty array. Never omit schema_version or report. "
+        "Use COVERAGE as the complete fact inventory. Each item and nested phase_move or next_step must have "
+        "fact_ids naming its supporting coverage facts. A status note and a phase move have separate fact_ids. "
+        "Do not propose superseded facts, no_change decisions or unresolved identities. Unresolved identity questions "
+        "are generated locally. Do not add duplicate identity questions. Unsupported operations remain visible review proposals. "
         "Return only that JSON object and no transcript field."
     )
 
@@ -716,27 +725,34 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
         return command_distiller(request, command=command)
     from lib.headless_tasks import API_ENV
 
+    stage = request.get("stage")
+    if stage == "coverage":
+        schema, instruction = coverage.extraction_schema(), coverage.extraction_instruction(DATA_SENTENCE)
+    elif stage == "coverage_history":
+        schema, instruction = coverage.history_schema(), coverage.history_instruction(DATA_SENTENCE)
+    else:
+        schema, instruction = distiller_json_schema(), _distiller_instruction()
     argv = [
         "claude", "-p", "--model", "sonnet", "--no-session-persistence",
         "--tools", "", "--setting-sources", "", "--strict-mcp-config",
         "--disable-slash-commands", "--exclude-dynamic-system-prompt-sections",
-        "--output-format", "json", "--json-schema", json.dumps(distiller_json_schema()),
-        "--system-prompt", _distiller_instruction(),
+        "--output-format", "json", "--json-schema", json.dumps(schema),
+        "--system-prompt", instruction,
     ]
     child_env = {k: v for k, v in os.environ.items() if k not in API_ENV and k != "CLAUDECODE"}
-    prompt = json.dumps({"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"],
+    prompt = json.dumps(request if request.get("stage") in {"coverage", "coverage_history"} else {"CONTEXT": request["context"], "TRANSCRIPT": request["transcript"], "COVERAGE": request.get("coverage"),
                          "CALL_DATE": request.get("call_date"), "TIME_ZONE": CALL_TIME_ZONE}, ensure_ascii=False)
     try:
         with tempfile.TemporaryDirectory() as empty:
             done = subprocess.run(argv, input=prompt, text=True, capture_output=True,
                                   cwd=empty, env=child_env, timeout=180, check=False)
     except FileNotFoundError as exc:
-        raise RuntimeError("headless Sonnet requires the Claude CLI; install claude in "
+        raise coverage.ExtractionTransportError("headless Sonnet requires the Claude CLI; install claude in "
                            "~/.local/bin, /opt/homebrew/bin or /usr/local/bin") from exc
     except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("headless Sonnet could not complete the post-call review pack") from exc
+        raise coverage.ExtractionTransportError("headless Sonnet could not complete the post-call review pack") from exc
     if done.returncode:
-        raise RuntimeError(f"headless Sonnet exited with code {done.returncode}")
+        raise coverage.ExtractionTransportError(f"headless Sonnet exited with code {done.returncode}")
     try:
         reply = json.loads(done.stdout)
     except json.JSONDecodeError as exc:
@@ -901,7 +917,18 @@ def process_session(session_dir: Path, distiller: Callable[[dict[str, Any]], dic
         return _process_session_locked(session_dir, distiller, run_checks=run_checks, max_attempts=min(max_attempts, len(EXTRACTION_RETRY_DELAYS) + 1))
 
 
+def require_review_coverage(session_dir: Path, report: dict[str, Any]) -> None:
+    try:
+        coverage.require_coverage(session_dir, report, read_json)
+    except coverage.CoverageError as exc:
+        status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
+        status.update(state="needs_attention", reason=str(exc), next_attempt_at=None, updated_at=now())
+        write_private(session_dir / STATUS_FILE, status)
+        raise
+
+
 def _complete_session(session_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
+    require_review_coverage(session_dir, report)
     with context_lock(session_dir):
         stored = read_json(session_dir / CONTEXT_FILE) or {}
         stored.pop("call_context", None)
@@ -925,6 +952,11 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
         report = read_json(session_dir / REPORT_FILE)
         if report is None:
             raise ContractError("post-call report is unreadable")
+        if existing.get("state") != "filed":
+            try:
+                require_review_coverage(session_dir, report)
+            except coverage.CoverageError:
+                return read_json(session_dir / STATUS_FILE) or {}
         if report.get("checks_hold") and any((item.get("checks") or {}).get("reason")
                                              for item in _report_candidates(report)):
             hold_day = report.get("checks_hold_day") or call_budget.budget_day(
@@ -966,6 +998,8 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     if held is not None:
         return held
     existing = read_json(session_dir / STATUS_FILE) or {}
+    if existing.get("coverage_terminal") and not releasing:
+        return existing
     attempts = 0 if releasing else existing.get("extraction_attempts", 0)
     if attempts >= max_attempts:
         existing.update({"state": "needs_attention", "next_attempt_at": None})
@@ -1016,14 +1050,39 @@ def _process_session_locked(session_dir: Path, distiller: Callable[[dict[str, An
     if not releasing:
         write_private(session_dir / STATUS_FILE, status)
     try:
-        raw = distiller(request)
+        ledger = coverage.build_call_ledger(
+            transcript, context, distiller, previous=read_json(session_dir / coverage.FILE),
+            persist=lambda value: write_private(session_dir / coverage.FILE, value),
+            recording_started_at=metadata.get("started_at") or (read_json(session_dir / "meta.json") or {}).get("started"))
+        ledger = coverage.reconcile_history(ledger, transcript, distiller,
+            persist=lambda value: write_private(session_dir / coverage.FILE, value))
+        raw = distiller({**request, "coverage": ledger})
         held = hold_transcript_repeat(session_dir, raw)
         if held is not None:
             write_private(session_dir / "post-call-held-draft.json", raw)
             return held
         result = normalize_distillation(raw, context, session_dir.name,
                                        call_date=call_date, transcript=transcript)
+        coverage.add_identity_questions(ledger, result, _review_id)
+        ledger = coverage.reconcile_coverage(ledger, result)
+        write_private(session_dir / coverage.FILE, ledger)
+        result["coverage_sha256"] = coverage.digest(ledger)
     except (RuntimeError, ContractError, OSError, subprocess.SubprocessError) as exc:
+        if isinstance(exc, (coverage.CoverageError, coverage.ExtractionTransportError)):
+            failed_ledger = read_json(session_dir / coverage.FILE)
+            if failed_ledger is not None:
+                if failed_ledger.get("state") != "incomplete":
+                    failed_ledger = coverage.incomplete_ledger(failed_ledger, str(exc))
+                write_private(session_dir / coverage.FILE, failed_ledger)
+                status["coverage_counts"] = {
+                    "sources": len(failed_ledger["sources"]), "merged_facts": len(failed_ledger["facts"]),
+                    "validated_windows": sum(w["validated_completion"] for w in failed_ledger["windows"]),
+                    "total_windows": len(failed_ledger["windows"]),
+                }
+                status["coverage_source_ids"] = [s["source_id"] for s in failed_ledger["sources"]]
+        if isinstance(exc, coverage.CoverageError) and str(exc) in coverage.TERMINAL_FAILURES:
+            next_attempt_at = None
+            status["coverage_terminal"] = True
         failed_at = now()
         if next_attempt_at is not None:
             next_attempt_at = (datetime.fromisoformat(failed_at.replace("Z", "+00:00"))
@@ -1099,6 +1158,49 @@ def review_complete(report: dict[str, Any]) -> bool:
     return all(question.get("resolved") is True for question in report.get("review_questions", []))
 
 
+def is_filed_legacy_report(session_dir: Path, report: dict[str, Any]) -> bool:
+    return ((read_json(session_dir / STATUS_FILE) or {}).get("state") == "filed"
+            and "coverage_sha256" not in report)
+
+
+def filing_sha256(session_dir: Path, report: dict[str, Any]) -> str:
+    return (report.get("backend_report_sha256") or report.get("filing_report_sha256")
+            or report_sha256(session_dir))
+
+
+def verify_prior_filing(session_dir: Path, response: dict[str, Any]) -> None:
+    with update_report(session_dir) as report:
+        remote = response.get("post_call_report") or {}
+        if remote.get("filed") is not True or remote.get("sha256") != filing_sha256(session_dir, report):
+            raise ContractError("prior filing hash mismatch")
+        verify_filing_dispositions(report, response)
+        report["filing_report_sha256"] = remote["sha256"]
+
+
+def verify_filing_dispositions(report: dict[str, Any], response: dict[str, Any]) -> None:
+    items = _report_candidates(report)
+    known = {item.get("candidate_id"): item for item in items}
+    rows = response.get("candidate_statuses")
+    if (None in known or "" in known or len(known) != len(items) or not isinstance(rows, list)
+            or len(rows) != len(known) or (response.get("candidates") or {}).get("pending") != 0):
+        raise ContractError("filing candidate identities incomplete")
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ContractError("filing disposition malformed")
+        candidate_id, status = row.get("id"), row.get("status")
+        if (candidate_id not in known or candidate_id in seen
+                or status not in {"confirmed", "skipped", "rejected"}):
+            raise ContractError("filing candidate disposition refused")
+        local = known[candidate_id].get("candidate_status")
+        if local in {"confirmed", "skipped", "rejected"} and local != status:
+            raise ContractError("filing candidate disposition conflict")
+        seen.add(candidate_id)
+    remote = response.get("post_call_report") or {}
+    if "candidate_count" in remote and remote["candidate_count"] != len(known):
+        raise ContractError("filing candidate count mismatch")
+
+
 def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | None:
     """Return a purge-safe filing receipt only after every candidate is final."""
     with session_lock(session_dir):
@@ -1107,12 +1209,23 @@ def retention_ready(session_dir: Path, report_sha256: str) -> dict[str, Any] | N
         with update_report(session_dir, required=False, locked=True) as report:
             if report is None or not isinstance(report_sha256, str) or re.fullmatch(r"[0-9a-fA-F]{64}", report_sha256) is None:
                 return None
+            saved_hash = report.get("backend_report_sha256") or report.get("filing_report_sha256")
+            if saved_hash is not None and saved_hash != report_sha256:
+                return None
+            if is_filed_legacy_report(session_dir, report):
+                if filing_sha256(session_dir, report) != report_sha256:
+                    return None
+            else:
+                try:
+                    require_review_coverage(session_dir, report)
+                except coverage.CoverageError:
+                    return None
             if not review_complete(report):
                 return None
             items = _report_candidates(report)
             if any(item.get("candidate_status") not in {"confirmed", "skipped", "rejected"} for item in items):
                 return None
-            digest = hashlib.sha256(json.dumps(report, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            digest = report.get("aggregate_report_hash") or report_sha256
             report.update({"backend_report_sha256": report_sha256, "aggregate_report_hash": digest, "filed_at": now()})
         status = read_json(session_dir / STATUS_FILE) or {"schema_version": SCHEMA_VERSION, "session": session_dir.name}
         status.update({"state": "filed", "updated_at": now(), "pending_items": 0, "aggregate_report_hash": digest})
@@ -1402,6 +1515,7 @@ def sanitized_candidates(session_dir: Path) -> dict[str, Any]:
     report = read_json(session_dir / REPORT_FILE)
     if report is None:
         raise ContractError("post-call report is not ready")
+    require_review_coverage(session_dir, report)
     post_call_items: list[dict[str, Any]] = []
     legacy_items: list[dict[str, Any]] = []
     bindings: list[dict[str, Any]] = []

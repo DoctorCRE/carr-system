@@ -358,3 +358,60 @@ test('answer text after byte 480 is searchable and sections rank once by their b
     await c.query('rollback');
   } finally { await fixture.close(); }
 });
+
+const flushEmbeddingPromises = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+
+for (const stage of ['reservation', 'provider']) test(`stalled ${stage} expires before SQL and ignores late resolution`, async t => {
+  const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let resolve, calls = 0, queries = 0, released = false;
+  const stalled = new Promise(done => { resolve = done; });
+  const runner = { run: async (_model, { text }) => { calls++; return stage === 'provider' ? stalled : { data: text.map(() => unit()) }; } };
+  const ai = { ...runner, reserveOperation: () => stage === 'reservation' ? stalled : Promise.resolve(runner) };
+  const pending = embedDoctrineRevisions({ ai, query: async () => {
+    queries++;
+    assert.equal(released, false, 'late SQL used a released transaction');
+    assert.fail('timed-out embeddings must never begin SQL');
+  } }, Array.from({ length: 33 }, (_, i) => ({ revision_id: fixtureIds[i % 30], plain_text: 'synthetic' })));
+  const observed = Promise.race([pending, new Promise(done => setTimeout(() => done({ status: 'hung' }), 2100))]);
+  await flushEmbeddingPromises();
+  t.mock.timers.tick(2000);
+  await flushEmbeddingPromises();
+  t.mock.timers.tick(100);
+  assert.equal((await observed).status, 'unavailable');
+  released = true;
+  resolve(stage === 'reservation' ? runner : { data: Array.from({ length: 16 }, () => unit()) });
+  await flushEmbeddingPromises();
+  assert.equal(calls, stage === 'reservation' ? 0 : 1, 'late completion cannot start another batch');
+  assert.equal(queries, 0, 'no SQL may run even if its rejection is handled internally');
+});
+
+test('reservation and multiple batches share one total AI deadline', async t => {
+  const { embedDoctrineRevisions } = await import('../src/doctrine-embeddings.ts');
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  let calls = 0, resolve;
+  const runner = { run: (_model, { text }) => {
+    calls++;
+    return new Promise(done => { resolve = () => done({ data: text.map(() => unit()) }); });
+  } };
+  let reserve;
+  const pending = embedDoctrineRevisions({ ai: { ...runner, reserveOperation: () => new Promise(done => { reserve = () => done(runner); }) },
+    query: async () => assert.fail('expired multi-batch operation reached SQL') },
+    Array.from({ length: 33 }, () => ({ revision_id: fixtureIds[0], plain_text: 'synthetic' })));
+  const observed = Promise.race([pending, new Promise(done => setTimeout(() => done({ status: 'hung' }), 2100))]);
+  await flushEmbeddingPromises();
+  t.mock.timers.tick(700);
+  reserve();
+  await flushEmbeddingPromises();
+  t.mock.timers.tick(700);
+  resolve();
+  await flushEmbeddingPromises();
+  assert.equal(calls, 2);
+  t.mock.timers.tick(600);
+  await flushEmbeddingPromises();
+  t.mock.timers.tick(100);
+  assert.equal((await observed).status, 'unavailable');
+  resolve();
+  await flushEmbeddingPromises();
+  assert.equal(calls, 2, 'third batch cannot start after the operation expires');
+});

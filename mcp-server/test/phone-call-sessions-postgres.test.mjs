@@ -231,6 +231,14 @@ post_call.LOG_PATH = root/'processor.log'
 post_call.store_context(session, {'session':session.name,'workspace_kind':'all',
     'generated_at':'2026-01-01T12:00:00Z','deals':[]})
 def distiller(request):
+    if request.get('stage') == 'coverage':
+        import post_call_coverage
+        transcript = post_call.read_json(session/'transcript.json')
+        return {'topics':[], 'facts':[], 'non_fact_spans':[
+            {'span':post_call_coverage.source_span(transcript,0),
+             'reason':'Synthetic recording marker without a business assertion'}]}
+    if request.get('stage') == 'coverage_history':
+        return {'dispositions':[]}
     assert request['transcript']['segments'][0]['text'] == 'Synthetic recording.'
     return {'schema_version':1,'report':{'summary':'Synthetic imported conversation.','decisions':[], 'open_questions':[]},
         'joe_tasks':[],'dell_tasks':[],'deal_updates':[],'draft_proposals':[],'review_questions':[]}
