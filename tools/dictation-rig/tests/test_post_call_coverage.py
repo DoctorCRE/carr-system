@@ -536,6 +536,42 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(pc.process_session(self.session, self.distill, run_checks=False)['state'], 'ready_review')
         self.assertEqual(len(self.calls), count)
 
+    def test_window_failure_drains_queued_attempts_before_restart(self):
+        released = threading.Event()
+        executor = cov.ThreadPoolExecutor
+
+        class DrainExecutor(executor):
+            def __exit__(self, *args):
+                released.set()
+                return super().__exit__(*args)
+
+        transcript = {'segments': [{'text': 'x' * 40}]}
+        saved = []
+        calls = []
+
+        def invalid(request):
+            start = request['window']['core_range'][0]
+            calls.append(start)
+            if start:
+                self.assertTrue(released.wait(5), 'executor did not drain')
+            return {'topics': [], 'facts': [], 'non_fact_spans': []}
+
+        with patch.object(cov, 'ThreadPoolExecutor', DrainExecutor), \
+                patch.object(cov, 'MAX_CONCURRENT_CALLS', 1), \
+                patch.object(cov, 'MAX_MODEL_WAVES', 20):
+            for attempt in range(1, 5):
+                released.clear()
+                with self.assertRaises(cov.CoverageError):
+                    cov.build_call_ledger(transcript, self.context, invalid,
+                        core_chars=10, overlap_chars=0,
+                        previous=saved[-1] if saved else None,
+                        persist=lambda ledger: saved.append(deepcopy(ledger)))
+                self.assertEqual([w['attempts'] for w in saved[-1]['windows']],
+                                 [min(attempt, 3)] * 4)
+        from collections import Counter
+        self.assertEqual(Counter(calls), {0: 3, 10: 3, 20: 3, 30: 3})
+        self.assertEqual(saved[-1]['failures'][0]['code'], 'window_budget_exhausted')
+
     def test_window_budget_survives_restarts(self):
         saved = []
         calls = []
