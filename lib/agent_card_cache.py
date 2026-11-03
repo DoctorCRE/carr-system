@@ -36,6 +36,39 @@ class RegistrationCache:
         self.scope = [os.getuid(), os.environ.get('CARR_MCP_URL') or 'https://api.doctorcre.com/mcp',
                       os.environ.get('CARR_MCP_CLIENT_PROFILE') or 'local',
                       os.environ.get('CARR_MCP_ENV') or str(Path.home() / '.config/carr/mcp-tokens.env')]
+        self.scope.append(self._credential_digest())
+
+    def _credential_digest(self):
+        try:
+            try:
+                with os.fdopen(self._open(self.scope[3], os.O_RDONLY), 'rb') as source:
+                    if os.fstat(source.fileno()).st_mode & 0o777 != 0o600:
+                        return None
+                    raw = source.read()
+            except FileNotFoundError:
+                raw = b''
+            overrides = {name: value for name, value in os.environ.items()
+                         if name.startswith('CARR_') and 'TOKEN' in name}
+            digest = hashlib.sha256(json.dumps(overrides, sort_keys=True).encode())
+            digest.update(b'\0' + raw)
+            return digest.hexdigest()
+        except (OSError, ValueError):
+            return None
+
+    def _prepare_directory(self):
+        self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = self.directory.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError('cache directory is not private')
+
+    def _revoked(self, card):
+        try:
+            (self.directory / ('revoked-' + card)).lstat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
 
     @staticmethod
     def _open(path, flags):
@@ -49,10 +82,9 @@ class RegistrationCache:
     def _transaction(self, operation, *, lock_timeout=0.1):
         temporary = None
         try:
-            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            info = self.directory.lstat()
-            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            if self.scope[-1] is None or self._credential_digest() != self.scope[-1]:
                 return False
+            self._prepare_directory()
             with os.fdopen(self._open(self.directory / 'lock', os.O_RDWR | os.O_CREAT), 'r+') as lock:
                 deadline = time.monotonic() + lock_timeout
                 while True:
@@ -93,7 +125,8 @@ class RegistrationCache:
                         continue
                     signature = hmac.new(key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()
                     seen = body.get('seen')
-                    if (CARD.fullmatch(card) and body.get('card_id') == card and body.get('scope') == self.scope
+                    if (CARD.fullmatch(card) and not self._revoked(card) and body.get('card_id') == card
+                            and body.get('scope') == self.scope
                             and type(seen) in (int, float) and 0 <= now - seen < TTL
                             and type(body.get('minted')) is bool
                             and isinstance(entry.get('signature'), str)
@@ -115,7 +148,7 @@ class RegistrationCache:
                 temporary.unlink(missing_ok=True)
 
     def contains(self, card):
-        return self._transaction(lambda entries, now: card in entries)
+        return self._transaction(lambda entries, now: card in entries) and not self._revoked(card)
 
     def consume_mint(self, card):
         def consume(entries, now):
@@ -123,15 +156,29 @@ class RegistrationCache:
                 return False
             entries[card]['minted'] = False
             return True
-        return self._transaction(consume)
+        return self._transaction(consume) and not self._revoked(card)
 
     def record(self, card, *, minted=False):
         def record(entries, now):
-            if not CARD.fullmatch(card):
+            if not CARD.fullmatch(card) or self._revoked(card):
                 return False
             entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now, 'minted': minted}
             return True
         return self._transaction(record, lock_timeout=2 if minted else 0.1)
 
     def remove(self, card):
-        return self._transaction(lambda entries, now: entries.pop(card, None))
+        if not CARD.fullmatch(card):
+            return False
+        try:
+            self._prepare_directory()
+            with os.fdopen(self._open(self.directory / ('revoked-' + card), os.O_WRONLY | os.O_CREAT), 'wb') as output:
+                output.flush()
+                os.fsync(output.fileno())
+            self._transaction(lambda entries, now: entries.pop(card, None))
+            return True
+        except (OSError, ValueError):
+            try:
+                (self.directory / 'entries.json').unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False

@@ -120,6 +120,39 @@ class CacheTests(unittest.TestCase):
             self.assertFalse(self.cache.consume_mint(self.card))
         self.assertTrue(self.cache.consume_mint(self.card))
 
+    def test_revocation_blocks_inflight_and_future_positive_writers(self):
+        self.assertTrue(self.cache.record(self.card, minted=True))
+        original_replace = Path.replace
+
+        def revoke_before_replace(path, target):
+            (self.cache.directory / ('revoked-' + self.card)).touch(mode=0o600)
+            return original_replace(path, target)
+
+        with patch.object(Path, 'replace', revoke_before_replace):
+            self.assertFalse(self.cache.consume_mint(self.card))
+        self.assertFalse(self.cache.record(self.card, minted=True))
+        self.assertFalse(self.cache.contains(self.card))
+
+    def test_failed_tombstone_write_discards_positive_entries(self):
+        self.assertTrue(self.cache.record(self.card, minted=True))
+        original_open = self.cache._open
+
+        def fail_marker(path, flags):
+            if Path(path).name.startswith('revoked-'):
+                raise PermissionError('synthetic marker failure')
+            return original_open(path, flags)
+
+        with patch.object(self.cache, '_open', side_effect=fail_marker):
+            self.assertFalse(self.cache.remove(self.card))
+        self.assertFalse(self.cache.contains(self.card))
+
+    def test_identity_change_during_mint_cannot_seed(self):
+        with patch.dict(os.environ, {'CARR_MCP_LOCAL_TOKEN': 'fixture-first'}):
+            cache = RegistrationCache(clock=lambda: self.now)
+            os.environ['CARR_MCP_LOCAL_TOKEN'] = 'fixture-second'
+            self.assertFalse(cache.record(self.card, minted=True))
+        self.assertFalse(self.cache.contains(self.card))
+
     def test_mint_response_binds_explicit_job_and_slice(self):
         reply = {'ok': True, 'card_id': self.card, 'priority': 1}
         for request in ({'work_request': 'WR557', 'slice': 6, 'job': 2},

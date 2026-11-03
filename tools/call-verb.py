@@ -42,9 +42,10 @@ mcp-server/local-verb.mjs's own header for the full design, and
 mcp-server/src/index.js's "local token" comment for the server side.
 
 IDENTITY. There is no actor-slug argument. On the default path, identity is
-server-derived from a LOCAL_TOKENS bearer (see mcp-server/src/identity.js);
-this script never sees or handles that token, it just runs local-verb.mjs with
-no DATABASE_URL set. On the break-glass path, identity comes from
+server-derived from a LOCAL_TOKENS bearer (see mcp-server/src/identity.js).
+The cache hashes credential inputs to invalidate mint evidence on rotation;
+it stores no bearer. local-verb.mjs selects the bearer with no DATABASE_URL set.
+On the break-glass path, identity comes from
 ~/.config/carr/local-actor.json (bin/set-local-actor.sh) — see
 mcp-server/local-verb.mjs for the resolution and its stated limits.
 
@@ -169,13 +170,14 @@ def main() -> None:
             sys.path.insert(0, REPO)
             from lib.agent_card_cache import RegistrationCache, mint_card
 
+            cache = RegistrationCache()
             payload = sys.stdin.read() if args_json == '-' else args_json
             result = subprocess.run(command, env=env, stdout=subprocess.PIPE, text=True,
                                     input=payload if args_json == '-' else None)
             if result.returncode == 0:
                 try:
                     card = mint_card(json.loads(payload), json.loads(result.stdout))
-                    if card and not RegistrationCache().record(card, minted=True):
+                    if card and not cache.record(card, minted=True):
                         print('Mint succeeded; registration cache unavailable.', file=sys.stderr)
                 except (ValueError, TypeError):
                     pass

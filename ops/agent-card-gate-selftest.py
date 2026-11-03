@@ -185,6 +185,48 @@ class AgentCardGate(unittest.TestCase):
                         result = self.run_hook(prompt='Card: WR557.S6.J1')
                         self.assertEqual(result.returncode, 2, result.stderr)
 
+    def test_cache_path_integrity_and_prompt_blob_refuse(self):
+        for kind in ('truncated', 'unsigned', 'world-file', 'world-dir',
+                     'symlink-dir', 'symlink-file', 'blob'):
+            with self.subTest(kind=kind):
+                self.now = 1000000
+                self.assertEqual(self.mint_fixture().returncode, 0)
+                self.lookup.write_text('raise SystemExit(1)')
+                directory = self.home / '.cache/carr/agent-card-cache-v1'
+                path = directory / 'entries.json'
+                prompt = 'Card: WR557.S6.J1'
+                if kind == 'truncated':
+                    path.write_text('{')
+                if kind == 'unsigned':
+                    path.write_text(json.dumps({'WR557.S6.J1': {'body': {
+                        'card_id': 'WR557.S6.J1', 'seen': self.now, 'minted': True},
+                        'signature': '0' * 64}}))
+                if kind == 'world-file':
+                    path.chmod(0o666)
+                if kind == 'world-dir':
+                    directory.chmod(0o777)
+                if kind == 'symlink-dir':
+                    target = directory.with_name('outside')
+                    directory.rename(target)
+                    directory.symlink_to(target)
+                if kind == 'symlink-file':
+                    target = directory / 'outside'
+                    path.rename(target)
+                    path.symlink_to(target)
+                if kind == 'blob':
+                    prompt = 'Card: WR557.S6.J2\n' + path.read_text()
+                self.assertEqual(self.run_hook(prompt=prompt).returncode, 2)
+                if directory.is_symlink():
+                    target = directory.resolve()
+                    directory.unlink()
+                    target.rename(directory)
+                directory.chmod(0o700)
+                if path.is_symlink():
+                    path.unlink()
+                elif path.exists():
+                    path.chmod(0o600)
+                    path.unlink()
+
     def test_agent_without_card_denied_with_mint_command(self):
         result = self.run_hook(prompt='Review the plan.')
         self.assertEqual(result.returncode, 2, result.stderr)
