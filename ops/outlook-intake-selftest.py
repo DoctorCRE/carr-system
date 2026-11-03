@@ -439,8 +439,8 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
-    def delivery_pair(self):
-        source = mail(OWNER, -timedelta(hours=2), recipients=CLIENT.email,
+    def delivery_pair(self, recipients=CLIENT.email):
+        source = mail(OWNER, -timedelta(hours=2), recipients=recipients,
                       message_id='<original@example.com>', local_keys='77')
         self.run_intake([source])
         activity = next(a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out')
@@ -482,6 +482,76 @@ class IntakeTest(unittest.TestCase):
         self.fake.email_queue = [{**self.fake.email_queue[0], 'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, request['idempotency_key']))}]
         self.run_intake([source, later, report])
         self.assertEqual(len(self.delivery_findings()), 1)
+
+    def paginated_delivery_pair(self):
+        source, report = self.delivery_pair(CLIENT.email + ',' + LEAD.email)
+        activities = sorted({str(uuid.uuid5(uuid.NAMESPACE_URL, a['idempotency_key']))
+                             for v, a in self.fake.calls if v == 'log-activity' and a.get('kind') == 'email_out'})
+        first, last = [int(uuid.UUID(a)) for a in activities]
+        template = self.fake.email_queue[0]
+        self.fake.email_queue = [{**template, 'activity_id': activities[0]}]
+        self.fake.email_queue += [{**template, 'activity_id': str(uuid.UUID(int=first + (last-first)*i//200))}
+                                  for i in range(1, 200)]
+        return source, report, activities, template
+
+    def test_delivery_failure_waits_for_last_filing_page_and_rejects_conflict(self):
+        source, report, activities, template = self.paginated_delivery_pair()
+        self.fake.email_queue.append({**template, 'activity_id': activities[-1],
+                                      'deal': '22222222-2222-4222-8222-222222222222'})
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_failure_resolves_source_on_last_filing_page(self):
+        source, report, activities, template = self.paginated_delivery_pair()
+        self.fake.email_queue.append({**template, 'activity_id': activities[-1]})
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.run_intake([source, report])
+        self.assertEqual(len(self.delivery_findings()), 1)
+        self.assertEqual(self.delivery_findings()[0]['value']['source_activity_ids'], activities)
+
+    def test_delivery_failure_keeps_absent_filing_unresolved(self):
+        source, report, _, _ = self.paginated_delivery_pair()
+        self.run_intake([source, report])
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_unmatched_delivery_report_expires_and_indexes_are_pruned(self):
+        source, report = self.delivery_pair()
+        self.fake.email_queue = []
+        self.run_intake([source, report])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        box = next(iter(state['delivery_mailboxes'].values()))
+        retained = next(iter(box['reports'].values()))
+        intake._prune(state, NOW + timedelta(days=31))
+        self.assertEqual(retained['disposition'], 'unresolved')
+        intake._prune(state, NOW + timedelta(days=3650))
+        self.assertEqual(box['reports'], {})
+        self.assertEqual(box['sources'], {})
+        self.assertEqual(box.get('deals', {}), {})
+
+    def test_unmatched_delivery_report_retry_storm_is_bounded_and_terminal(self):
+        source, report = self.delivery_pair()
+        self.fake.email_queue = []
+        for _ in range(40):
+            result = self.run_intake([source, report])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        box = next(iter(state['delivery_mailboxes'].values()))
+        self.assertEqual(len(box['reports']), 1)
+        retained = next(iter(box['reports'].values()))
+        self.assertEqual(retained['disposition'], 'unresolved')
+        self.assertEqual(result.counts['delivery_failures_pending'], 0)
+        before = dict(retained)
+        self.fake.email_queue = [{'activity_id': r['activity_id'], 'deal': '11111111-1111-4111-8111-111111111111',
+                                 'body': '', 'occurred_at': NOW.isoformat()}
+                                for r in state['requests'].values() if r.get('activity_id')]
+        self.run_intake([source, report])
+        after = next(iter(next(iter(json.loads(path.read_text())['delivery_mailboxes'].values()))['reports'].values()))
+        self.assertEqual(after, before)
+        self.assertEqual(self.delivery_findings(), [])
 
     def test_delivery_failure_rejects_cross_account_spoofed_quoted_and_ambiguous_mail(self):
         source, report = self.delivery_pair()
