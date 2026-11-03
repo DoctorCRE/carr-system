@@ -80,21 +80,21 @@ def task_text(payload):
     session_id = payload.get('session_id') or payload.get('sessionId')
     child_path = None
     if path.name.startswith('rollout-'):
-        for line in _transcript_lines(path):
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            if record.get('type') != 'session_meta':
-                continue
-            meta = record.get('payload', {})
-            source = meta.get('source')
-            if not isinstance(source, dict):
-                continue
-            spawn = source.get('subagent', {}).get('thread_spawn', {})
-            native_id = meta.get('id')
-            if (isinstance(native_id, str) and path.name.endswith(f'-{native_id}.jsonl')
-                    and (not agent or agent == native_id)):
-                child_path = spawn.get('agent_path')
+        with path.open(encoding='utf-8') as transcript:
+            for line in transcript:
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if record.get('type') != 'session_meta':
+                    continue
+                meta = record.get('payload', {})
+                native_id = meta.get('id')
+                if (not isinstance(native_id, str) or not path.name.endswith(f'-{native_id}.jsonl')
+                        or (agent and agent != native_id)):
+                    continue
+                source = meta.get('source')
+                if isinstance(source, dict):
+                    child_path = source.get('subagent', {}).get('thread_spawn', {}).get('agent_path')
                 break
     grok_index = None
     grok_chunks = []
