@@ -146,6 +146,46 @@ class CacheTests(unittest.TestCase):
             self.assertFalse(self.cache.remove(self.card))
         self.assertFalse(self.cache.contains(self.card))
 
+    def test_failed_marker_cannot_resurrect_through_any_positive_writer(self):
+        for operation in ('contains', 'consume_mint', 'record'):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as home:
+                with patch.dict(os.environ, {'HOME': home}):
+                    cache = RegistrationCache(clock=lambda: self.now)
+                    self.assertTrue(cache.record(self.card, minted=True))
+                    original_open = cache._open
+                    original_replace = Path.replace
+
+                    def fail_marker(path, flags):
+                        if Path(path).name.startswith('revoked-'):
+                            raise OSError('synthetic marker failure')
+                        return original_open(path, flags)
+
+                    def revoke_before_replace(path, target):
+                        with patch.object(cache, '_open', side_effect=fail_marker):
+                            self.assertFalse(cache.remove(self.card))
+                        return original_replace(path, target)
+
+                    with patch.object(Path, 'replace', revoke_before_replace):
+                        self.assertFalse(getattr(cache, operation)(self.card))
+                    self.assertFalse(cache.contains(self.card))
+                    self.assertFalse(cache.record(self.card, minted=True))
+                    self.assertFalse(RegistrationCache(clock=lambda: self.now).consume_mint(self.card))
+
+    def test_marker_failure_during_initial_cache_creation_disables_it(self):
+        original_open = self.cache._open
+
+        def revoke_before_lock(path, flags):
+            if Path(path).name.startswith('revoked-'):
+                raise OSError('synthetic marker failure')
+            if Path(path).name == 'lock':
+                self.assertFalse(self.cache.remove(self.card))
+            return original_open(path, flags)
+
+        with patch.object(self.cache, '_open', side_effect=revoke_before_lock):
+            self.assertFalse(self.cache.record(self.card, minted=True))
+        self.assertFalse(self.cache.record(self.card, minted=True))
+        self.assertFalse(self.cache.contains(self.card))
+
     def test_identity_change_during_mint_cannot_seed(self):
         with patch.dict(os.environ, {'CARR_MCP_LOCAL_TOKEN': 'fixture-first'}):
             cache = RegistrationCache(clock=lambda: self.now)

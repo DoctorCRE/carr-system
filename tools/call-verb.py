@@ -168,16 +168,21 @@ def main() -> None:
         command = [node_bin(), LOCAL_VERB, verb, args_json, *extra]
         if verb == 'dispatch-job':
             sys.path.insert(0, REPO)
-            from lib.agent_card_cache import RegistrationCache, mint_card
+            from lib.agent_card_cache import RegistrationCache, mint_card, repository_name
 
-            cache = RegistrationCache()
             payload = sys.stdin.read() if args_json == '-' else args_json
+            try:
+                request = json.loads(payload)
+                repository = repository_name(request.get('repository')) if isinstance(request, dict) else None
+            except ValueError:
+                repository = None
+            cache = RegistrationCache(repository=repository) if repository else None
             result = subprocess.run(command, env=env, stdout=subprocess.PIPE, text=True,
                                     input=payload if args_json == '-' else None)
             if result.returncode == 0:
                 try:
                     card = mint_card(json.loads(payload), json.loads(result.stdout))
-                    if card and not cache.record(card, minted=True):
+                    if card and cache is not None and not cache.record(card, minted=True):
                         print('Mint succeeded; registration cache unavailable.', file=sys.stderr)
                 except (ValueError, TypeError):
                     pass

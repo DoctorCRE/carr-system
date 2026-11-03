@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import tempfile
 import time
 
@@ -29,13 +30,31 @@ def mint_card(args, reply):
     return card
 
 
+def repository_name(value):
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r'(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)?'
+                         r'([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?', value)
+    return match[1].lower() if match else None
+
+
+def launch_repository(cwd=None):
+    try:
+        result = subprocess.run(['git', '-C', str(cwd or Path.cwd()), 'remote', 'get-url', 'origin'],
+                                capture_output=True, text=True, timeout=0.5)
+        return repository_name(result.stdout.strip()) if result.returncode == 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 class RegistrationCache:
-    def __init__(self, clock=None):
+    def __init__(self, clock=None, repository=''):
         self.clock = clock or time.time
         self.directory = Path.home() / '.cache/carr/agent-card-cache-v1'
         self.scope = [os.getuid(), os.environ.get('CARR_MCP_URL') or 'https://api.doctorcre.com/mcp',
                       os.environ.get('CARR_MCP_CLIENT_PROFILE') or 'local',
                       os.environ.get('CARR_MCP_ENV') or str(Path.home() / '.config/carr/mcp-tokens.env')]
+        self.scope.append(launch_repository() if repository == '' else repository_name(repository))
         self.scope.append(self._credential_digest())
 
     def _credential_digest(self):
@@ -58,8 +77,8 @@ class RegistrationCache:
     def _prepare_directory(self):
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = self.directory.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise ValueError('cache directory is not private')
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o777 != 0o700:
+            raise ValueError('cache directory is not private or has been disabled')
 
     def _revoked(self, card):
         try:
@@ -82,7 +101,7 @@ class RegistrationCache:
     def _transaction(self, operation, *, lock_timeout=0.1):
         temporary = None
         try:
-            if self.scope[-1] is None or self._credential_digest() != self.scope[-1]:
+            if self.scope[-2] is None or self.scope[-1] is None or self._credential_digest() != self.scope[-1]:
                 return False
             self._prepare_directory()
             with os.fdopen(self._open(self.directory / 'lock', os.O_RDWR | os.O_CREAT), 'r+') as lock:
@@ -140,12 +159,17 @@ class RegistrationCache:
                     temporary = Path(output.name)
                     json.dump(signed, output)
                 temporary.replace(path)
+                if self.directory.stat().st_mode & 0o777 != 0o700:
+                    return False
                 return result
         except (OSError, ValueError, TypeError):
             return False
         finally:
             if temporary is not None:
-                temporary.unlink(missing_ok=True)
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def contains(self, card):
         return self._transaction(lambda entries, now: card in entries) and not self._revoked(card)
@@ -178,7 +202,8 @@ class RegistrationCache:
             return True
         except (OSError, ValueError):
             try:
-                (self.directory / 'entries.json').unlink(missing_ok=True)
+                # Positive writers never restore directory permissions, even if they already hold the lock.
+                os.chmod(self.directory, 0o500, follow_symlinks=False)
             except OSError:
                 pass
             return False

@@ -98,7 +98,7 @@ def decide(event):
                 prompts.append(words[1])
     else:
         return
-    return check_prompts(prompts)
+    return check_prompts(prompts, event.get('cwd'))
 
 
 VALUE_OPTIONS = frozenset({
@@ -142,7 +142,7 @@ def codex_operands(args):
     return words
 
 
-def check_prompts(prompts):
+def check_prompts(prompts, cwd=None):
     cards = []
     for prompt in prompts:
         found = re.findall(r'^Card:[ \t]*(WR[1-9]\d*\.S[1-9]\d*\.J[1-9]\d*)[ \t]*$', prompt, re.M)
@@ -151,10 +151,11 @@ def check_prompts(prompts):
         cards.extend(found)
     if not cards:
         return
-    from lib.agent_card_cache import RegistrationCache
+    from lib.agent_card_cache import RegistrationCache, launch_repository, repository_name
 
-    cache = RegistrationCache()
     deadline = time.monotonic() + 8
+    repository = launch_repository(cwd)
+    cache = RegistrationCache(repository=repository)
     for card in dict.fromkeys(cards):
         if cache.consume_mint(card) and time.monotonic() < deadline:
             continue
@@ -196,7 +197,11 @@ def check_prompts(prompts):
         if not registration['registered']:
             cache.remove(card)
             return refuse(card + ' is not registered in the work queue.')
-        cache.record(card)
+        registered_repository = registration['repository']
+        if registered_repository is not None:
+            if repository is None or repository_name(registered_repository) != repository:
+                return refuse(card + ' is registered for a different repository.')
+            cache.record(card)
 
 
 if __name__ == '__main__':

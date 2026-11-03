@@ -29,6 +29,9 @@ class AgentCardGate(unittest.TestCase):
                          'lib/agent_card_cache.py', 'tools/call-verb.py'):
             if (REPO / relative).exists():
                 shutil.copyfile(REPO / relative, self.root / relative)
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', 'remote', 'add', 'origin',
+                        'https://github.com/DoctorCRE/carr-system.git'], cwd=self.root, check=True)
         self.now = None
         self.home = self.root / 'home'
         self.home.mkdir()
@@ -43,7 +46,7 @@ class AgentCardGate(unittest.TestCase):
                                f'"registered": {registered!r} and card in '
                                '("WR557.S6.J1", "WR557.S6.J2"), '
                                '"executor": "codex", "model": "synthetic", '
-                               '"repository": None, "work_request_state": "captured"}))\n')
+                               '"repository": "DoctorCRE/carr-system", "work_request_state": "captured"}))\n')
 
 
     def run_hook(self, tool='Agent', **inputs):
@@ -59,7 +62,7 @@ class AgentCardGate(unittest.TestCase):
                        f'runpy.run_path({str(hook)!r}, run_name="__main__")']
         return subprocess.run(command,
                               input=json.dumps({'hook_event_name': 'PreToolUse',
-                                                'tool_name': tool, 'tool_input': inputs}),
+                                                'cwd': str(self.root), 'tool_name': tool, 'tool_input': inputs}),
                               text=True, capture_output=True, env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
 
     def mint_fixture(self, reply=None, rc=0, args=None, stdin=False):
@@ -70,7 +73,8 @@ class AgentCardGate(unittest.TestCase):
         reply = reply if reply is not None else {'ok': True, 'card_id': 'WR557.S6.J1', 'priority': 1}
         fake.write_text('import sys\nprint(' + repr(json.dumps(reply)) + ')\nraise SystemExit(' + str(rc) + ')')
         args = args if args is not None else {'work_request': 'WR-000557', 'slice': 6,
-                                             'executor': 'codex', 'model': 'synthetic'}
+                                             'executor': 'codex', 'model': 'synthetic',
+                                             'repository': 'DoctorCRE/carr-system'}
         argument = '-' if stdin else json.dumps(args)
         code = (f'import runpy, sys, time; time.time = lambda: {self.now or 1000000}; '
                 f'm = runpy.run_path({str(wrapper)!r}); '
@@ -392,7 +396,7 @@ class AgentCardGate(unittest.TestCase):
                                'card = json.loads(sys.argv[2])["card_id"]\n'
                                'print(json.dumps({"ok": True, "card_id": card, "registered": True, '
                                '"executor": "codex", "model": "synthetic", '
-                               '"repository": None, "work_request_state": "captured"}))\n')
+                               '"repository": "DoctorCRE/carr-system", "work_request_state": "captured"}))\n')
         result = self.run_hook(prompt='Card: WR557.S6.J1')
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -430,7 +434,8 @@ class AgentCardGate(unittest.TestCase):
 
     def test_successful_registration_repairs_corrupt_cache(self):
         cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
-        cache.parent.mkdir(parents=True, mode=0o700)
+        self.now = 1000000
+        self.assertEqual(self.mint_fixture().returncode, 0)
         cache.write_text('invalid')
         cache.chmod(0o600)
         self.register_fixture()
@@ -553,6 +558,45 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
                                 cwd=other, env=dict(fixture_env(), HOME=str(self.home)))
         print('CROSS_REPOSITORY gate rc=', result.returncode)
         self.assertEqual(result.returncode, 2, result.stderr)
+
+
+    def test_same_repository_other_worktree_accepts(self):
+        self.now = 1000000
+        self.assertEqual(self.mint_fixture().returncode, 0)
+        subprocess.run(['git', '-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
+                        'commit', '-q', '--allow-empty', '-m', 'fixture'], cwd=self.root, check=True)
+        worktree = self.root / 'other-worktree'
+        subprocess.run(['git', 'worktree', 'add', '-q', '--detach', str(worktree)], cwd=self.root, check=True)
+        self.lookup.write_text('raise SystemExit(1)')
+        hook = self.root / 'hooks/agent-card-gate.py'
+        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Agent', 'cwd': str(worktree),
+                 'tool_input': {'prompt': 'Card: WR557.S6.J1'}}
+        result = subprocess.run([sys.executable, '-c', 'import runpy,time;time.time=lambda:1000000;'
+                                 f'runpy.run_path({str(hook)!r},run_name="__main__")'],
+                                input=json.dumps(event), capture_output=True, text=True, cwd=worktree,
+                                env=dict(fixture_env(), HOME=str(self.home)), timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_null_repository_mint_requires_live_lookup(self):
+        self.now = 1000000
+        args = {'work_request': 'WR-000557', 'slice': 6, 'executor': 'codex', 'model': 'synthetic',
+                'repository': None}
+        self.assertEqual(self.mint_fixture(args=args).returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.reply_fixture(True)
+        self.lookup.write_text(self.lookup.read_text().replace('"DoctorCRE/carr-system"', 'None'))
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+
+    def test_live_other_repository_refuses_without_seeding(self):
+        self.now = 1000000
+        self.reply_fixture(True)
+        self.lookup.write_text(self.lookup.read_text().replace('DoctorCRE/carr-system', 'jbookout/doctorcre-app'))
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
 
 if __name__ == '__main__':
