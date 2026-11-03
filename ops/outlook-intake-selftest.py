@@ -667,6 +667,64 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(len(self.fake.writes('record-finding')), 1)
                 self.assertEqual(result.counts['signature_held'], 1)
 
+    def signature_competing_history(self, *, party=False, lost=False, resolved=False):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        if not resolved:
+            self.fake.fail_verbs.add('log-activity')
+        carr = self.fake.carr
+        def transport(verb, args):
+            reply = carr(verb, args)
+            if lost and verb == 'record-finding':
+                raise intake.CarrError(code='unavailable')
+            return reply
+        with patch.object(self.fake, 'carr', transport):
+            self.run_intake([a, b])
+        frozen = {args['idempotency_key']: args for _, args in self.fake.writes('record-finding')}
+        for n, rows in enumerate(([a], [{**a, 'local_keys': '77'}], [b],
+                                  [{**b, 'local_keys': '88'}], [a, b],
+                                  [{**a, 'local_keys': '77'}, {**b, 'local_keys': '88'}])):
+            if party and n == 3:
+                self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
+            self.fake.now += timedelta(minutes=2)
+            result = self.run_intake(rows)
+            self.assertEqual(len(self.fake.findings), 2, 'competing MID history duplicated a source')
+            for _, args in self.fake.writes('record-finding'):
+                self.assertEqual(args, frozen[args['idempotency_key']])
+            if party and n >= 3:
+                self.assertEqual(result.counts['signature_held'], len(rows))
+        self.assertFalse(self.fake.writes('update-party-contact'))
+        self.assertFalse(self.fake.writes('correct-party-identity'))
+
+    def test_signature_competing_history_preserves_both_sources(self):
+        self.signature_competing_history()
+
+    def test_signature_competing_history_holds_changed_party(self):
+        self.signature_competing_history(party=True)
+
+    def test_signature_competing_history_resolved_activity(self):
+        self.signature_competing_history(resolved=True)
+
+    def test_signature_competing_history_lost_responses(self):
+        self.signature_competing_history(lost=True)
+
+    def test_signature_competing_history_lost_response_changed_party(self):
+        self.signature_competing_history(lost=True, party=True)
+
+    def test_signature_ambiguous_new_representation_waits_for_proof(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        unknown = {**a, 'copy_key': 'unknown-representation', 'subject': 'Unknown',
+                   'local_keys': '77'}
+        result = self.run_intake([unknown])
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+        self.run_intake([{**a, 'local_keys': '77'}])
+        self.assertEqual(len(self.fake.findings), 2)
+
     def test_contact_adapter_preserves_snapshot_without_changing_mail_matching(self):
         snapshot = {'party_id': 101, 'party_version': 7, 'values': {}, 'provenance': {}}
         rows = intake._contacts(lambda *_: {'contacts': [
