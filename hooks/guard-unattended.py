@@ -2526,17 +2526,25 @@ def zsh_glob_reason(cmd, invocations, depth=0):
     guarded = {'rm', 'mv', 'cp', 'rsync', 'srm', 'shred', 'find', 'git', 'gh',
                'curl', 'wget', 'dd', 'tee', 'diskutil', 'age', 'psql', 'sqlite3'}
     complete_text = re.sub(
-        r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]",
-        lambda match: re.sub(r'[;&|<>()]', '_', match[0]), without_shell_comments(text))
+        r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|\n",
+        lambda match: ';' if match[0] == '\n' else re.sub(r'[;&|<>()]', '_', match[0]), without_shell_comments(text))
     lexer = shlex.shlex(complete_text, posix=True,
                         punctuation_chars=';&|<>()')
     lexer.whitespace_split = True
     lexer.commenters = ''
-    incomplete_programs, segment = set(), []
-    for token in list(lexer) + [';']:
+    incomplete_programs, segment, parentheses = set(), [], 0
+    tokens = [piece for token in lexer for piece in (
+        re.findall(r'[()]|[^()]+', token)
+        if re.fullmatch(r'[;&|<>()]+', token) else [token])]
+    for token in tokens + [';']:
         if re.fullmatch(r'[;&|<>()]+', token):
-            if '(' in token or ')' in token or token not in SHELL_BOUNDARIES | SHELL_REDIRECTS:
+            if (token == '(' or (token == ')' and not parentheses)
+                    or token not in SHELL_BOUNDARIES | SHELL_REDIRECTS | {'(', ')'}):
                 incomplete_programs.update(_exe_name(word) for word in segment)
+            if token == '(':
+                parentheses += 1
+            elif token == ')' and parentheses:
+                parentheses -= 1
             if token in SHELL_REDIRECTS:
                 segment.append(token)
             else:

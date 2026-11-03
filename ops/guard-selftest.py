@@ -1738,6 +1738,16 @@ for read in ('git status', 'gh pr view 1'):
         case('J147 quoted punctuation ' + command, bash(command, '/tmp'), ALLOW)
 
 
+
+for read in ('git status', 'gh pr view 1'):
+    for command in (read + '\nls /tmp/p/(a|b)',
+                    'ls /tmp/p/(a|b)\n' + read,
+                    read + ';(ls /tmp/p/(a|b))',
+                    read + '&&(ls /tmp/p/(a|b))',
+                    '(' + read + ') && echo issue#123'):
+        case('J147 complete read boundary ' + command, bash(command, '/tmp'), ALLOW)
+
+
 def zsh_glob_addition_cases():
     failures = []
     for name, command in ZSH_GLOB_ADDITIONS:
