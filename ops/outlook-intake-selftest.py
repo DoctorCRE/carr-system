@@ -553,6 +553,47 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertEqual(self.delivery_findings(), [])
 
+    def test_delivery_retention_does_not_reopen_expired_reports(self):
+        source, report = self.delivery_pair()
+        self.fake.email_queue = []
+        self.run_intake([source, report])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        intake._prune(state, NOW + timedelta(days=3650))
+        path.write_text(json.dumps(state))
+        self.fake.now += timedelta(days=3650)
+        self.run_intake([source, report])
+        box = next(iter(json.loads(path.read_text())['delivery_mailboxes'].values()))
+        self.assertEqual(box['reports'], {})
+        self.assertEqual(box['sources'], {})
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_retention_preserves_all_source_receipts(self):
+        source, report = self.delivery_pair(CLIENT.email + ',' + LEAD.email)
+        self.run_intake([source, report])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        before = {k: r for k, r in state['requests'].items() if json.loads(r['payload']).get('kind') == 'email_out'}
+        intake._prune(state, NOW + timedelta(days=20))
+        self.assertEqual({k: state['requests'].get(k) for k in before}, before)
+
+    def test_delivery_retention_preserves_frozen_requests(self):
+        source, report = self.delivery_pair()
+        path = self.out() / intake.STATE
+        original_carr = self.fake.carr
+        def lose_reply(verb, args):
+            if verb == 'record-finding':
+                original_carr(verb, args)
+                raise intake.CarrError(code='timeout')
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=lose_reply):
+            self.run_intake([source, report])
+        state = json.loads(path.read_text())
+        box = next(iter(state['delivery_mailboxes'].values()))
+        frozen = next(iter(box['reports'].values()))['request']
+        intake._prune(state, NOW + timedelta(days=3650))
+        self.assertEqual(next(iter(box['reports'].values()))['request'], frozen)
+
     def test_delivery_failure_rejects_cross_account_spoofed_quoted_and_ambiguous_mail(self):
         source, report = self.delivery_pair()
         bad = [dict(report, folder_account=8), dict(report, sender='attacker@example.com'),
