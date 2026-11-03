@@ -14,6 +14,9 @@ stateDiagram-v2
   Legacy --> Legacy: Read legacy Tour
 ```
 
+Migration `1139_tour_deal_binding.sql` introduces the binding;
+`1142_tour_deal_access.sql` enforces current deal access.
+
 The binding stays immutable while visibility follows current deal access.
 Physical deal deletion is refused by the foreign key. Deleted or merged clients
 and parties make their deals unavailable. Legacy Tours retain their behavior.
