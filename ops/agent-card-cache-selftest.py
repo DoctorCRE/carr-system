@@ -106,6 +106,13 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(result.code, 2)
         self.assertIn('deadline exceeded', result.stderr)
 
+    def test_mint_writer_retries_a_short_lock_stall(self):
+        with patch('fcntl.flock', side_effect=[BlockingIOError(), None]), \
+                patch('time.monotonic', side_effect=[0, 0.11]), patch('time.sleep'):
+            recorded = self.cache.record(self.card, minted=True)
+        self.assertTrue(recorded)
+        self.assertTrue(self.cache.consume_mint(self.card))
+
     def test_contended_lock_does_not_block_admission(self):
         self.cache.record(self.card, minted=True)
         with (self.cache.directory / 'lock').open() as lock:

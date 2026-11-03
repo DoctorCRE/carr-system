@@ -46,7 +46,7 @@ class RegistrationCache:
             raise ValueError('cache file is not private')
         return fd
 
-    def _transaction(self, operation):
+    def _transaction(self, operation, *, lock_timeout=0.1):
         temporary = None
         try:
             self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -54,7 +54,7 @@ class RegistrationCache:
             if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
                 return False
             with os.fdopen(self._open(self.directory / 'lock', os.O_RDWR | os.O_CREAT), 'r+') as lock:
-                deadline = time.monotonic() + 0.1
+                deadline = time.monotonic() + lock_timeout
                 while True:
                     try:
                         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -131,7 +131,7 @@ class RegistrationCache:
                 return False
             entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now, 'minted': minted}
             return True
-        return self._transaction(record)
+        return self._transaction(record, lock_timeout=2 if minted else 0.1)
 
     def remove(self, card):
         return self._transaction(lambda entries, now: entries.pop(card, None))
