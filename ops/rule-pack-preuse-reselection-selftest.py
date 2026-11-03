@@ -463,6 +463,21 @@ with patch.object(hook, 'session_catalog', return_value=source), patch.object(ho
         self.assertEqual(out.get('permissionDecision'), 'deny', out)
         self.assertIn('TASK CONTEXT UNAVAILABLE', out['permissionDecisionReason'])
 
+    def test_native_child_unusable_encrypted_body_still_denies(self):
+        for encrypted in (None, '', ' \n\t', 123, {}, []):
+            with self.subTest(encrypted=encrypted):
+                msg = self.message('')
+                msg['payload']['content'].append({'type': 'encrypted_content',
+                                                 'encrypted_content': encrypted})
+                self.write(self.metadata(), msg)
+                out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+                self.assertEqual(out.get('permissionDecision'), 'deny', out)
+
+    def test_native_child_blank_new_task_does_not_reuse_older_task(self):
+        self.write(self.metadata(), self.message(), self.message(' \n '))
+        out = self.invoke([self.RULE], payload=self.payload)['hookSpecificOutput']
+        self.assertEqual(out.get('permissionDecision'), 'deny', out)
+
     def test_native_child_encrypted_body_structural_delivery_uses_available_envelope(self):
         msg = self.message('')
         envelope = msg['payload']['content'][0]['text']

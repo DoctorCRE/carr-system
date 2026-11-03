@@ -127,11 +127,17 @@ def task_text(payload):
             text = '\n'.join(c['text'] for c in chunks if isinstance(c, dict)
                              and c.get('type') == 'input_text' and isinstance(c.get('text'), str))
             author = part.get('author')
+            envelope = (f'Message Type: NEW_TASK\nTask name: {child_path}\n'
+                        f'Sender: {author}\nPayload:\n')
             if (not isinstance(child_path, str) or not child_path
                     or part.get('recipient') != child_path or not isinstance(author, str) or not author
-                    or not text.startswith(f'Message Type: NEW_TASK\nTask name: {child_path}\n'
-                                           f'Sender: {author}\nPayload:\n')):
+                    or not text.startswith(envelope)):
                 continue
+            if not text[len(envelope):].strip() and not any(
+                    isinstance(c, dict) and c.get('type') == 'encrypted_content'
+                    and isinstance(c.get('encrypted_content'), str) and c['encrypted_content'].strip()
+                    for c in chunks):
+                raise ValueError('task_context_unavailable')
         if isinstance(text, str) and text:
             return _bounded(text)
     if grok_index is not None:
