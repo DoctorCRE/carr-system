@@ -65,7 +65,7 @@ class RegistrationCache:
         self.scope = [os.getuid(), os.environ.get('CARR_MCP_URL') or 'https://api.doctorcre.com/mcp',
                       os.environ.get('CARR_MCP_CLIENT_PROFILE') or 'local',
                       os.environ.get('CARR_MCP_ENV') or str(Path.home() / '.config/carr/mcp-tokens.env')]
-        self.scope.append('consume-before-lookup-v2')
+        self.scope.append('consume-before-lookup-v3')
         self.scope.append(launch_repository() if repository == '' else repository_name(repository))
         self.scope.append(self._credential_digest())
 
@@ -91,6 +91,15 @@ class RegistrationCache:
         info = self.directory.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o777 != 0o700:
             raise ValueError('cache directory is not private or has been disabled')
+
+    def _revoked(self, card):
+        try:
+            (self.directory / ('revoked-' + card)).lstat()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
 
     @staticmethod
     def _open(path, flags):
@@ -118,13 +127,17 @@ class RegistrationCache:
                             return None
                         time.sleep(0.005)
                 key_path = self.directory / 'integrity'
+                new_key = False
                 try:
                     fd = self._open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
                 except FileExistsError:
                     pass
                 else:
+                    new_key = True
                     with os.fdopen(fd, 'wb') as output:
                         output.write(os.urandom(32))
+                        output.flush()
+                        os.fsync(output.fileno())
                 with os.fdopen(self._open(key_path, os.O_RDONLY), 'rb') as source:
                     key = source.read()
                 if len(key) != 32:
@@ -133,26 +146,24 @@ class RegistrationCache:
                 try:
                     with os.fdopen(self._open(path, os.O_RDONLY)) as source:
                         entries = json.load(source)
-                except (FileNotFoundError, ValueError):
+                except FileNotFoundError:
+                    if not new_key:
+                        return None
                     entries = {}
                 if not isinstance(entries, dict):
-                    entries = {}
+                    return None
                 now = self.clock()
                 valid = {}
                 for card, entry in entries.items():
-                    if not isinstance(entry, dict):
-                        continue
-                    body = entry.get('body', {})
-                    if not isinstance(body, dict):
-                        continue
+                    if not isinstance(entry, dict) or not isinstance(entry.get('body'), dict):
+                        return None
+                    body = entry['body']
                     signature = hmac.new(key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()
-                    seen = body.get('seen')
-                    if (CARD.fullmatch(card) and body.get('card_id') == card
-                            and body.get('scope') == self.scope
-                            and type(seen) in (int, float) and 0 <= now - seen < TTL
-                            and isinstance(entry.get('signature'), str)
-                            and hmac.compare_digest(signature, entry['signature'])):
-                        valid[card] = body
+                    if (not CARD.fullmatch(card) or body.get('card_id') != card
+                            or not isinstance(entry.get('signature'), str)
+                            or not hmac.compare_digest(signature, entry['signature'])):
+                        return None
+                    valid[card] = body
                 result = operation(valid, now)
                 signed = {card: {'body': body, 'signature': hmac.new(
                     key, json.dumps(body, sort_keys=True).encode(), hashlib.sha256).hexdigest()}
@@ -182,15 +193,19 @@ class RegistrationCache:
 
     def claim_mint(self, card):
         def consume(entries, now):
-            entry = entries.pop(card, None)
-            return MintClaim.FRESH if entry else MintClaim.ONLINE_REQUIRED
+            entry = entries.get(card, {})
+            seen = entry.get('seen')
+            fresh = (entry.get('state') == 'fresh' and not self._revoked(card) and entry.get('scope') == self.scope
+                     and type(seen) in (int, float) and 0 <= now - seen < TTL)
+            entries[card] = {'card_id': card, 'state': 'retired'}
+            return MintClaim.FRESH if fresh else MintClaim.ONLINE_REQUIRED
 
         return self._transaction(consume) or MintClaim.INCOMPLETE
 
     def record_mint(self, card):
         def record(entries, now):
-            if not CARD.fullmatch(card):
+            if not CARD.fullmatch(card) or card in entries or self._revoked(card):
                 return False
-            entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now}
+            entries[card] = {'card_id': card, 'scope': self.scope, 'seen': now, 'state': 'fresh'}
             return True
         return bool(self._transaction(record, lock_timeout=2))

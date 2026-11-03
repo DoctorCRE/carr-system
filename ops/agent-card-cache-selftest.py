@@ -39,9 +39,10 @@ class CacheTests(unittest.TestCase):
         self.now -= 1
         self.assertIsNot(self.cache.claim_mint(self.card), MintClaim.FRESH)
         self.now += 1
-        self.cache.record_mint(self.card)
+        second = 'WR557.S6.J2'
+        self.assertTrue(self.cache.record_mint(second))
         self.now += 24 * 60 * 60
-        self.assertIsNot(self.cache.claim_mint(self.card), MintClaim.FRESH)
+        self.assertIsNot(self.cache.claim_mint(second), MintClaim.FRESH)
 
     def test_explicit_default_profile_matches_client_default(self):
         self.cache.record_mint(self.card)
@@ -49,12 +50,13 @@ class CacheTests(unittest.TestCase):
             self.assertIs(RegistrationCache(clock=lambda: self.now).claim_mint(self.card), MintClaim.FRESH)
 
     def test_scope_change_refuses(self):
-        for name, value in [('CARR_MCP_URL', 'https://synthetic.invalid/mcp'),
+        for job, (name, value) in enumerate([('CARR_MCP_URL', 'https://synthetic.invalid/mcp'),
                             ('CARR_MCP_CLIENT_PROFILE', 'hermes-projector'),
-                            ('CARR_MCP_ENV', '/synthetic/other-client')]:
-            self.cache.record_mint(self.card)
+                            ('CARR_MCP_ENV', '/synthetic/other-client')], 1):
+            card = f'WR557.S6.J{job}'
+            self.assertTrue(self.cache.record_mint(card))
             with patch.dict(os.environ, {name: value}):
-                self.assertIsNot(RegistrationCache(clock=lambda: self.now).claim_mint(self.card), MintClaim.FRESH)
+                self.assertIsNot(RegistrationCache(clock=lambda: self.now).claim_mint(card), MintClaim.FRESH)
 
     def test_user_home_isolation_and_private_modes(self):
         self.assertTrue(self.cache.record_mint(self.card))
@@ -133,8 +135,38 @@ class CacheTests(unittest.TestCase):
         unknown = RegistrationCache(clock=lambda: self.now, repository=None)
         self.assertIs(unknown.claim_mint(self.card), MintClaim.INCOMPLETE)
 
+    def test_retirement_survives_replay_ttl_and_scope_rotation(self):
+        self.assertTrue(self.cache.record_mint(self.card))
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.FRESH)
+        self.now += 2 * 24 * 60 * 60
+        with patch.dict(os.environ, {'CARR_MCP_URL': 'https://synthetic.invalid/mcp'}):
+            rotated = RegistrationCache(clock=lambda: self.now)
+            self.assertFalse(rotated.record_mint(self.card))
+            self.assertIs(rotated.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+        self.assertFalse(self.cache.record_mint(self.card))
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+
+    def test_lost_or_corrupt_ledger_cannot_be_reinitialized(self):
+        self.assertTrue(self.cache.record_mint(self.card))
+        path = self.cache.directory / 'entries.json'
+        for damage in ('missing', 'invalid'):
+            with self.subTest(damage=damage):
+                if damage == 'missing':
+                    path.unlink()
+                else:
+                    path.write_text('invalid')
+                    path.chmod(0o600)
+                self.assertFalse(self.cache.record_mint(self.card))
+                self.assertIs(self.cache.claim_mint(self.card), MintClaim.INCOMPLETE)
+
+    def test_legacy_negative_marker_blocks_mint_replay(self):
+        self.cache.directory.mkdir(parents=True, mode=0o700)
+        (self.cache.directory / ('revoked-' + self.card)).touch(mode=0o600)
+        self.assertFalse(self.cache.record_mint(self.card))
+        self.assertIs(self.cache.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)
+
     def test_old_contract_receipt_requires_online(self):
-        self.cache.scope.remove('consume-before-lookup-v2')
+        self.cache.scope.remove('consume-before-lookup-v3')
         self.assertTrue(self.cache.record_mint(self.card))
         current = RegistrationCache(clock=lambda: self.now)
         self.assertIs(current.claim_mint(self.card), MintClaim.ONLINE_REQUIRED)

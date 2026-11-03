@@ -134,6 +134,8 @@ class AgentCardGate(unittest.TestCase):
         self.lookup.write_text('raise SystemExit(1)')
         self.now += 24 * 60 * 60
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        shutil.rmtree(self.home)
+        self.home.mkdir()
         self.mint_fixture()
         cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
         entries = json.loads(cache.read_text())
@@ -171,6 +173,8 @@ class AgentCardGate(unittest.TestCase):
         for source in ('environment', 'file'):
             for minted in (True, False):
                 with self.subTest(source=source, minted=minted):
+                    shutil.rmtree(self.home)
+                    self.home.mkdir()
                     token_file.write_text('CARR_MCP_LOCAL_TOKEN=fixture-first')
                     token_file.chmod(0o600)
                     settings = {'CARR_MCP_ENV': str(token_file),
@@ -193,6 +197,8 @@ class AgentCardGate(unittest.TestCase):
         for kind in ('truncated', 'unsigned', 'world-file', 'world-dir',
                      'symlink-dir', 'symlink-file', 'blob'):
             with self.subTest(kind=kind):
+                shutil.rmtree(self.home)
+                self.home.mkdir()
                 self.now = 1000000
                 self.assertEqual(self.mint_fixture().returncode, 0)
                 self.lookup.write_text('raise SystemExit(1)')
@@ -315,6 +321,8 @@ class AgentCardGate(unittest.TestCase):
     def test_foreground_agents_need_card(self):
         for kind in ('Plan', 'general-purpose'):
             with self.subTest(kind=kind):
+                shutil.rmtree(self.home)
+                self.home.mkdir()
                 result = self.run_hook(prompt='Search code.', subagent_type=kind,
                                        run_in_background=False)
                 self.assertEqual(result.returncode, 2, result.stderr)
@@ -432,14 +440,14 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J2').returncode, 2)
 
-    def test_successful_registration_repairs_corrupt_cache(self):
+    def test_corrupt_retirement_ledger_refuses_online_and_offline(self):
         cache = self.home / '.cache/carr/agent-card-cache-v1/entries.json'
         self.now = 1000000
         self.assertEqual(self.mint_fixture().returncode, 0)
         cache.write_text('invalid')
         cache.chmod(0o600)
         self.register_fixture()
-        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
         self.lookup.write_text('raise SystemExit(1)')
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
@@ -597,6 +605,16 @@ runpy.run_path({str(self.root/'hooks/agent-card-gate.py')!r}, run_name='__main__
         self.lookup.write_text('raise SystemExit(1)')
         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
 
+    def test_replayed_mint_cannot_restore_retired_evidence(self):
+        self.now = 1000000
+        self.assertEqual(self.mint_fixture().returncode, 0)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
+        self.reply_fixture(False)
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+        self.assertEqual(self.mint_fixture().returncode, 0)
+        self.lookup.write_text('raise SystemExit(1)')
+        self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 2)
+
     def run_storage_fault_hook(self, failures):
         hook = self.root / 'hooks/agent-card-gate.py'
         code = f"""
@@ -647,6 +665,8 @@ runpy.run_path({str(hook)!r}, run_name='__main__')
             failures = tuple(name for name, enabled in zip(('marker', 'chmod', 'fsync', 'replace'), bits) if enabled)
             for minted in (False, True):
                 with self.subTest(failures=failures, minted=minted):
+                    shutil.rmtree(self.home)
+                    self.home.mkdir()
                     if minted:
                         self.assertEqual(self.mint_fixture().returncode, 0)
                         self.assertEqual(self.run_hook(prompt='Card: WR557.S6.J1').returncode, 0)
@@ -659,6 +679,8 @@ runpy.run_path({str(hook)!r}, run_name='__main__')
         self.now = 1000000
         for failure in ('fsync', 'replace'):
             with self.subTest(failure=failure):
+                shutil.rmtree(self.home)
+                self.home.mkdir()
                 self.assertEqual(self.mint_fixture().returncode, 0)
                 marker = self.root / 'negative-attempted'
                 self.reply_fixture(False)
