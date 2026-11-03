@@ -156,11 +156,11 @@ def task_deadline(item: dict[str, Any], transcript: dict[str, Any] | None,
         expressions_to_resolve.extend(expressions)
     if seen != expected:
         return hold
-    if any(reference not in expressions_to_resolve or reference != 'before the lunch call'
+    if any(reference not in expressions_to_resolve or reference.lower() != 'before the lunch call'
            for reference in bindings):
         return hold
     for expression in expressions_to_resolve:
-        if expression == 'before the lunch call':
+        if expression.lower() == 'before the lunch call':
             anchors = bindings.get(expression)
             if anchors:
                 values = {_exact_date(anchor, call_date) for anchor in anchors}
