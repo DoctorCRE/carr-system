@@ -15,7 +15,7 @@ class _HTMLTags(HTMLParser):
         self.offsets = [0]
         for match in re.finditer('\n', text):
             self.offsets.append(match.end())
-        self.spans = []
+        self.spans: list[tuple[int, int]] = []
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
@@ -66,7 +66,7 @@ def _unwrap_url(original: str, attribute: bool) -> str:
 
 def unwrap_safe_links(text: str) -> str:
     """Recover HTTP destinations without changing unrelated text or malformed wrappers."""
-    chunks = []
+    chunks: list[str] = []
     end = 0
     for match, attribute in _url_matches(text):
         chunks.extend((text[end:match.start()], _unwrap_url(match.group(), attribute)))
