@@ -1179,6 +1179,67 @@ class PostCallTests(unittest.TestCase):
                 post_call.normalize_distillation(self.output(review_intents=[{**case["intents"][0], **change}]),
                                                   self.context, self.session.name)
 
+    def intent_ledger(self, kind, desired_value, identity, intents):
+        transcript = {"segments": [{"speaker": "Joe", "text": f"Please {desired_value}."}]}
+        fact = {"fact_id": "f0", "topic_id": "topic", "kind": kind,
+                "statement": transcript["segments"][0]["text"], "asserted_value": desired_value,
+                "source_spans": [_REAL_COVERAGE.source_span(transcript, 0)], "disposition": None}
+        def model(request):
+            if request.get("stage") == "coverage_history":
+                return {"dispositions": [{"fact_id": "f0", "disposition": None}]}
+            return {"topics": [{"topic_id": "topic", "identity": identity}],
+                    "facts": [fact], "non_fact_spans": []}
+        ledger = _REAL_COVERAGE.build_call_ledger(transcript, self.context, model)
+        ledger = _REAL_COVERAGE.reconcile_history(ledger, transcript, model)
+        report = post_call.normalize_distillation(self.output(joe_tasks=[], deal_updates=[], draft_proposals=[],
+                                                            review_intents=intents),
+                                                  self.context, self.session.name, transcript=transcript)
+        return transcript, ledger, report
+
+    def test_identity_answer_keeps_intent_and_retention_unresolved(self) -> None:
+        intent = {"operation": "national_account_reassignment", "desired_value": "the national group",
+                  "deal_id": "deal-a", "owner": None, "fact_ids": ["f0"],
+                  "identity_question": "Which national account should own this deal?",
+                  "review_reason": "Perform the requested reassignment."}
+        transcript, ledger, report = self.intent_ledger("workspace_change", intent["desired_value"],
+            {"deal_id": "deal-a", "participant_ids": []}, [intent])
+        _REAL_COVERAGE.add_identity_questions(ledger, report, post_call._review_id)
+        ledger = _REAL_COVERAGE.reconcile_coverage(ledger, report)
+        report["coverage_sha256"] = _REAL_COVERAGE.digest(ledger)
+        post_call.write_private(self.session / "transcript.json", transcript)
+        post_call.write_private(self.session / _REAL_COVERAGE.FILE, ledger)
+        post_call.write_private(self.session / post_call.REPORT_FILE, report)
+        question = report["review_questions"][0]
+        answer = "The account is Synthetic National Group; reassignment still needs to be performed."
+        response = post_call.resolve_question(self.session, question["id"], answer)
+        after = post_call.read_json(self.session / post_call.REPORT_FILE)
+        self.assertFalse(response["resolved"])
+        self.assertEqual(after["review_questions"][0]["resolution"], answer)
+        self.assertFalse(post_call.review_complete(after))
+        _REAL_COVERAGE.require_coverage(self.session, after, post_call.read_json)
+        self.assertIsNone(post_call.retention_ready(self.session, "a" * 64))
+        for outcome in ("Performed", "Declined"):
+            with self.subTest(outcome=outcome):
+                post_call.write_private(self.session / post_call.REPORT_FILE, report)
+                post_call.resolve_question(self.session, question["id"], f"{outcome}: Joe recorded the outcome.")
+                self.assertTrue(post_call.review_complete(post_call.read_json(self.session / post_call.REPORT_FILE)))
+                self.assertIsNotNone(post_call.retention_ready(self.session, "a" * 64))
+
+    def test_omitted_unsupported_intents_cannot_be_generic_identity_or_narrative(self) -> None:
+        ambiguous = {"mentioned_name": "Clinic or partnership", "candidate_deal_ids": [],
+                     "reason": "Identity or routing is ambiguous"}
+        for kind, value in (("operating_state", "parked"), ("commitment", "Joe should discuss partnership"),
+                            ("other", "former client")):
+            with self.subTest(kind=kind):
+                _, ledger, report = self.intent_ledger(kind, value, ambiguous, [])
+                with self.assertRaises(_REAL_COVERAGE.CoverageError):
+                    _REAL_COVERAGE.add_identity_questions(ledger, report, post_call._review_id)
+                    _REAL_COVERAGE.reconcile_coverage(ledger, report)
+        _, ledger, report = self.intent_ledger("status", "survey complete", ambiguous, [])
+        _REAL_COVERAGE.add_identity_questions(ledger, report, post_call._review_id)
+        self.assertEqual(_REAL_COVERAGE.reconcile_coverage(ledger, report)["state"], "complete")
+        self.assertNotIn("kind", report["review_questions"][0])
+
     def test_undated_actions_stay_undated_and_ask_the_partner_for_a_date(self) -> None:
         result = post_call.normalize_distillation(self.output(), self.context, self.session.name,
                                                   call_date="2026-10-30")
