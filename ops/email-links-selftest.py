@@ -45,13 +45,13 @@ class LinksTest(unittest.TestCase):
         for region in ('nam12', 'eur03'):
             wrapper = wrap(destination).replace('example.', region + '.') + '&data=opaque%2520'
             for body, expected in (
-                ('See ' + wrapper, 'See ' + destination),
+                ('See ' + wrapper, 'See <' + destination + '>'),
                 ('<a href="' + wrap(destination) + '">Open</a>',
                  '<a href="' + destination.replace('&', '&amp;') + '">Open</a>'),
                 ('<a href="' + wrapper.replace('&', '&amp;') + '">Open</a>',
                  '<a href="' + destination.replace('&', '&amp;') + '">Open</a>'),
-                (wrap(wrapper), destination),
-                (wrap(quote(destination, safe='')), destination),
+                (wrap(wrapper), '<' + destination + '>'),
+                (wrap(quote(destination, safe='')), '<' + destination + '>'),
             ):
                 with self.subTest(region=region, body=body):
                     self.assertEqual(unwrap_safe_links(body), expected)
@@ -120,7 +120,8 @@ class LinksTest(unittest.TestCase):
             for value in (destination, wrap(destination)):
                 body = prefix + value + '"'
                 with self.subTest(body=body):
-                    self.assertEqual(unwrap_safe_links(body), prefix + destination + '"')
+                    expected = '<' + destination + '>' if value != destination and prefix in ('Link=', "foo='") else destination
+                    self.assertEqual(unwrap_safe_links(body), prefix + expected + '"')
                     self.assertEqual(extract_links(body), [('listing', destination)])
 
     def test_html_context_comes_from_tags(self):

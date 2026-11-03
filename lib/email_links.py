@@ -20,6 +20,8 @@ class _HTMLTags(HTMLParser):
         self.feed(text)
 
     def handle_starttag(self, tag, attrs):
+        if re.match(r'<https?://', self.get_starttag_text(), re.I):
+            return
         line, column = self.getpos()
         start = self.offsets[line - 1] + column
         self.spans.append((start, start + len(self.get_starttag_text())))
@@ -43,11 +45,11 @@ def _url_matches(text: str):
     spans = _HTMLTags(text).spans
     for match in URL.finditer(text):
         attribute = any(start <= match.start() < end for start, end in spans)
-        quoted = (match.start() > 0 and match.end() < len(text)
-                  and text[match.start() - 1] in ('"', "'")
-                  and text[match.end()] == text[match.start() - 1])
-        token = match.group() if attribute or quoted else _trim_prose(match.group())
-        yield match, attribute, quoted, token
+        delimited = (match.start() > 0 and match.end() < len(text)
+                  and text[match.start() - 1] in ('"', "'", '<')
+                  and text[match.end()] == {'"': '"', "'": "'", '<': '>'}[text[match.start() - 1]])
+        token = match.group() if attribute or delimited else _trim_prose(match.group())
+        yield match, attribute, delimited, token
 
 
 def _unwrap_url(original: str, attribute: bool) -> str:
@@ -86,11 +88,10 @@ def unwrap_safe_links(text: str) -> str:
     """Recover HTTP destinations without changing unrelated text or malformed wrappers."""
     chunks: list[str] = []
     end = 0
-    for match, attribute, quoted, token in _url_matches(text):
+    for match, attribute, delimited, token in _url_matches(text):
         destination = _unwrap_url(token, attribute)
-        if (destination != token and _trim_prose(destination) != destination
-                and not attribute and not quoted):
-            destination = '"' + destination + '"'
+        if destination != token and not attribute and not delimited:
+            destination = '<' + destination + '>'
         chunks.extend((text[end:match.start()], destination, match.group()[len(token):]))
         end = match.end()
     chunks.append(text[end:])

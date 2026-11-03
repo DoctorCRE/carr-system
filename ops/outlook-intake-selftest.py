@@ -2135,10 +2135,10 @@ class IntakeTest(unittest.TestCase):
         result = self.run_intake([m])
         self.assertEqual(result.state, 'succeeded')
         [(verb, args)] = self.fake.writes('log-activity')
-        self.assertEqual(args['detail'], 'Listing ' + destination)
+        self.assertEqual(args['detail'], 'Listing <' + destination + '>')
         _, messages, _ = intake._load(self.fake.fixture)
-        self.assertEqual(messages[0]['body'], 'Listing ' + destination)
-        self.assertEqual(messages[0]['preview'], 'Listing ' + destination)
+        self.assertEqual(messages[0]['body'], 'Listing <' + destination + '>')
+        self.assertEqual(messages[0]['preview'], 'Listing <' + destination + '>')
 
     def test_inbound_mail_from_a_known_address_logs_email_in_with_a_uuid5_key(self):
         m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example')
