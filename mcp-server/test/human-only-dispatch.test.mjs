@@ -139,6 +139,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-salesforce-read-consent",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
+    "submit-doc-request",
     "submit-email-draft",
     "undo-call",
     "undo-email-thread-filing",
