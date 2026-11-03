@@ -22,14 +22,14 @@ import sys
 import tempfile
 import urllib.parse
 import fcntl
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 import call_budget
 import post_call_coverage as coverage
+from post_call_timing import DeadlineResolution, WEEKDAYS, task_deadline, timing_schema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -76,11 +76,13 @@ def distiller_json_schema() -> dict[str, Any]:
             "joe_tasks": {"type": "array", "items": item({
                 **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
-            }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
+                "timing": timing_schema(),
+            }, ["title", "deal_id", "participant_ids", "evidence", "due_on", "timing"])},
             "dell_tasks": {"type": "array", "items": item({
                 **common, "counterpart": {"type": "string", "minLength": 1, "maxLength": 200}, "title": {"type": "string"},
                 "due_on": {"type": ["string", "null"], "format": "date"},
-            }, ["title", "deal_id", "participant_ids", "evidence", "due_on"])},
+                "timing": timing_schema(),
+            }, ["title", "deal_id", "participant_ids", "evidence", "due_on", "timing"])},
             "deal_updates": {"type": "array", "items": item({
                 **common, "summary": {"type": "string"},
                 "phase_move": {"anyOf": [{"type": "null"}, item({
@@ -321,7 +323,6 @@ def _calendar_date_or_none(value: Any, field: str) -> None:
 
 
 CALL_TIME_ZONE = "America/Chicago"
-WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 RELATIVE_DAY = re.compile(
     r"\b(day after tomorrow|tomorrow|today|next week|"
     r"(?:(?:next|this)\s+)?(?:" + "|".join(WEEKDAYS) + r"))\b", re.IGNORECASE,
@@ -341,38 +342,8 @@ CALENDAR_DAY = re.compile(
     r"September|October|November|December)\s+\d{1,2})\b", re.IGNORECASE,
 )
 
-MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august",
-          "september", "october", "november", "december")
-TEMPORAL_EXPRESSION = re.compile(
-    r"\b(?:\d+(?:st|nd|rd|th)?|" + "|".join(WEEKDAYS + MONTHS)
-    + r"|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|"
-    r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
-    r"first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
-    r"eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|"
-    r"eighteenth|nineteenth|twentieth|thirtieth|"
-    r"today|tomorrow|yesterday|next|this|last|previous|following|"
-    r"end|middle|mid|late|later|early|sometime|around|soon|eventually|asap|immediately|"
-    r"by|before|after|within|since|until|during|from|"
-    r"minutes?|hours?|days?|weeks?|months?|years?|quarters?|weekends?|"
-    r"morning|afternoon|evening|tonight|noon|midnight|"
-    r"thanksgiving|christmas|easter|holidays?)\b", re.IGNORECASE,
-)
-CALENDAR_WITH_YEAR = re.compile(
-    CALENDAR_DAY.pattern + r"(?:,?\s+\d{4})?", re.IGNORECASE,
-)
-
-
-def _unresolved_temporal_expression(evidence: str) -> bool:
-    remainder = PAST_RELATIVE_DAY.sub("", evidence)
-    remainder = re.sub(r"\bsince we\b", "", remainder, flags=re.IGNORECASE)
-    remainder = re.sub(r"\b(?:" + "|".join(WEEKDAYS) + r")[’']s(?!\s+lunch call\b)",
-                       "", remainder, flags=re.IGNORECASE)
-    remainder = RELATIVE_DAY.sub("", remainder)
-    remainder = re.sub(r"\bbefore\s+(?:(?:the|[’']s)\s+)?lunch call\b", "", remainder,
-                       flags=re.IGNORECASE)
-    remainder = re.sub(r"\b(?:by|on|before|morning|afternoon|evening)\b", "", remainder,
-                       flags=re.IGNORECASE)
-    return TEMPORAL_EXPRESSION.search(remainder) is not None
+def _unsupported_lunch_anchor(evidence: str) -> bool:
+    return re.fullmatch(r"(?:The lunch call is )?" + RELATIVE_DAY.pattern + r"[.]?", evidence.strip(), re.IGNORECASE) is None
 
 
 def recorded_call_date(session_dir: Path) -> str | None:
@@ -413,13 +384,6 @@ def _relative_phrases(evidence: str) -> list[str]:
     return phrases
 
 
-@dataclass(frozen=True)
-class DeadlineResolution:
-    state: Literal["unstated", "resolved", "ambiguous", "contradictory"]
-    due_on: str | None
-    review_reason: str | None = None
-
-
 def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
                        call_date: str | None) -> DeadlineResolution | None:
     if transcript is None:
@@ -437,9 +401,9 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
         lunch_anchors = [sentence for sentence in re.split(r"[.!?]", spoken)
                          if re.search(r"\blunch call\b", sentence, re.IGNORECASE)
                          and _words(sentence) != _words(evidence)
-                         and TEMPORAL_EXPRESSION.search(sentence)]
+                         and sentence.strip()]
         if lunch_anchors:
-            if any(QUALIFIED_RELATIVE_DAY.search(sentence) or _unresolved_temporal_expression(sentence)
+            if any(QUALIFIED_RELATIVE_DAY.search(sentence) or _unsupported_lunch_anchor(sentence)
                    for sentence in lunch_anchors):
                 return DeadlineResolution("ambiguous", None, "The lunch call deadline is qualified; clarify the exact date.")
             anchored = [_relative_phrases(sentence) for sentence in lunch_anchors]
@@ -470,58 +434,6 @@ def _relative_due_date(evidence: str, transcript: dict[str, Any] | None,
     if len(resolved) != 1:
         return DeadlineResolution("contradictory", None, "The evidence gives conflicting relative deadlines; clarify the deadline.")
     return DeadlineResolution("resolved", resolved.pop().isoformat())
-
-
-def _task_deadline(item: dict[str, Any], transcript: dict[str, Any] | None,
-                   call_date: str | None, ledger: dict[str, Any] | None) -> DeadlineResolution:
-    evidence = item["evidence"]
-    if ledger and transcript:
-        facts = {fact["fact_id"]: fact for fact in ledger["facts"]}
-        spans = [span for fact_id in item.get("fact_ids", []) if fact_id in facts
-                 for span in facts[fact_id]["source_spans"]]
-        spans = list({(s["segment_index"], s["char_start"], s["char_end"]): s for s in spans}.values())
-        if spans:
-            evidence = " ".join(transcript["segments"][s["segment_index"]]["text"][s["char_start"]:s["char_end"]]
-                                for s in sorted(spans, key=lambda s: (s["segment_index"], s["char_start"])))
-    if not TEMPORAL_EXPRESSION.search(evidence):
-        return DeadlineResolution("unstated", None)
-    ambiguous = DeadlineResolution("ambiguous", None,
-        "The cited source states timing that was not resolved with certainty; clarify the exact date.")
-    if re.search(r"\babout\s+(?:" + RELATIVE_DAY.pattern + "|" + CALENDAR_DAY.pattern + ")", evidence, re.IGNORECASE):
-        return ambiguous
-    calendar_days = list(CALENDAR_WITH_YEAR.finditer(evidence))
-    if len({m.group().lower() for m in calendar_days}) > 1:
-        return DeadlineResolution("contradictory", None, "The cited source gives conflicting calendar deadlines; clarify the deadline.")
-    if calendar_days:
-        match = calendar_days[0]
-        literal = match.group().lower()
-        try:
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", literal):
-                exact = date.fromisoformat(literal)
-            else:
-                parts = literal.replace(",", "").split()
-                year = int(parts[2]) if len(parts) == 3 else date.fromisoformat(call_date).year if call_date else None
-                if year is None:
-                    return ambiguous
-                exact = date(year, MONTHS.index(parts[0]) + 1, int(parts[1]))
-                if len(parts) == 2 and call_date and exact < date.fromisoformat(call_date):
-                    exact = exact.replace(year=year + 1)
-        except ValueError:
-            return ambiguous
-        remainder = CALENDAR_WITH_YEAR.sub("", evidence)
-        weekday_matches = list(RELATIVE_DAY.finditer(remainder))
-        for weekday in weekday_matches:
-            if weekday.group().lower() != WEEKDAYS[exact.weekday()]:
-                return ambiguous
-        if _unresolved_temporal_expression(remainder):
-            return ambiguous
-        if item["due_on"] != exact.isoformat():
-            return ambiguous
-        return DeadlineResolution("resolved", exact.isoformat())
-    if _unresolved_temporal_expression(evidence):
-        return ambiguous
-    relative = _relative_due_date(evidence, transcript, call_date)
-    return relative if relative is not None else ambiguous
 
 
 UNSAID_REVIEW = "The model did not say whether this was settled."
@@ -565,7 +477,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
             if not isinstance(item, dict):
                 raise ContractError(f"{list_name} item must be an object")
             is_action = list_name in {"joe_tasks", "dell_tasks"}
-            _strict_keys(item, required, {"fact_ids"} | ({"due_on", "counterpart"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"}))
+            _strict_keys(item, required, {"fact_ids"} | ({"due_on", "counterpart", "timing"} if is_action else {"next_step", "phase_move"} if list_name == "deal_updates" else {"counterpart"}))
             if "counterpart" in item:
                 name = _string(item["counterpart"], f"{list_name}.counterpart")
                 if len(name) > 200:
@@ -601,7 +513,7 @@ def _validate_distillation(value: Any, *, call_date: str | None = None,
                 raise ContractError(f"{list_name}.participant_ids must be string IDs")
             resolved = None
             if is_action or step is not None:
-                resolved = (_task_deadline(item, transcript, call_date, ledger) if is_action
+                resolved = (task_deadline(item, transcript, call_date, ledger) if is_action
                             else _relative_due_date(item["evidence"], transcript, call_date))
                 if resolved is not None:
                     if is_action:
@@ -733,6 +645,13 @@ def normalize_distillation(value: Any, context: dict[str, Any], session: str, *,
             if first["due_on"] is None and task["due_on"] is not None:
                 first.update(due_on=task["due_on"], due_defaulted=task["due_defaulted"],
                              deadline_state=task["deadline_state"], evidence=task["evidence"])
+            timing_sources = [source for item in (first, task)
+                              if isinstance(item.get("timing"), dict)
+                              and isinstance(item["timing"].get("sources"), list)
+                              for source in item["timing"]["sources"]]
+            if timing_sources:
+                first["timing"] = {"sources": list({json.dumps(source, sort_keys=True): source
+                                                     for source in timing_sources}.values())}
             first["fact_ids"] = list(dict.fromkeys(first.get("fact_ids", []) + task.get("fact_ids", [])))
             first["participant_ids"] = list(dict.fromkeys(first["participant_ids"] + task["participant_ids"]))
         return kept
@@ -809,6 +728,16 @@ def _distiller_instruction() -> str:
         "the numbers with Dell'. Keep genuinely distinct individual actions separate, even on the same deal. "
         "If no single owner can be established, including conflicting individual commitments or a missing deal owner, "
         "add a review question instead of duplicating the action or guessing an owner. "
+        "For each task include timing.sources for EVERY segment cited by its coverage facts, including "
+        "other speakers, later corrections, and alternatives. Review each FULL segment, not the short evidence quote. "
+        "Each source includes segment_index, segment_sha256 (from COVERAGE), char_start=0, "
+        "char_end=full segment length, speaker, exact full quote, "
+        "status stated/unstated/uncertain, and expressions. Expressions are exact complete timing phrases, "
+        "including qualifiers, alternatives and correction words; never select just a recognizable day. "
+        "Use unstated with empty expressions only when the entire turn contains no deadline for this task. "
+        "Property numbers, prices, suite numbers and non-temporal words are not deadlines. "
+        "Use uncertain when context or supersession cannot be established. Never drop a correction. "
+        "Include event anchors among the cited facts. Unsupported event references hold for review. "
         "For each task, resolve spoken deadlines into due_on as YYYY-MM-DD against CALL_DATE in TIME_ZONE, "
         "the recording's America/Chicago calendar date, never the processing date. "
         "Bare weekdays (including Friday morning) mean the next occurrence after the call day. "
@@ -1000,7 +929,7 @@ def transcript_repeat_field(report: Any, transcript: dict[str, Any]) -> str | No
                 return path
         elif isinstance(value, dict):
             for key, child in value.items():
-                if key in {"evidence", "evidence_quote"}:
+                if key in {"evidence", "evidence_quote"} or key == "timing" and re.fullmatch(r"(?:joe|dell)_tasks\[\d+\]", path):
                     continue
                 found = find(child, f"{path}.{key}" if path else key)
                 if found is not None:

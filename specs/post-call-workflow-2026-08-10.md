@@ -90,11 +90,21 @@ from all complete source spans of the cited ledger facts, before the short
 remote evidence quote is trimmed. The states are `unstated`, `resolved`,
 `ambiguous`, and `contradictory`.
 
-A deadline is unstated only when no cited source span contains a temporal expression;
-any expression that cannot resolve to exactly one date with certainty blocks filing.
-The detector explicitly covers numerals, weekday and month names and abbreviations,
-relative terms, deadline prepositions, date units, qualifiers, and named holidays.
-The supplied model date never proves resolution.
+The task extractor returns `timing.sources`, one semantic timing judgment for
+EVERY full speaker turn cited by the task's ledger facts. Each entry includes
+segment_index, the ledger's segment_sha256, char_start=0, char_end equal to
+the full turn length, exact speaker, complete quote,
+status (`stated`, `unstated`, `uncertain`) and complete timing expressions.
+Corrections and alternatives remain in the expressions, with speaker turns
+preserved. Property numbers and non-temporal words do not imply deadlines.
+
+Only explicit, source-bound `unstated` judgments on every cited turn support the
+optional-reminder transition. Missing, stale, incomplete, misattributed or
+uncertain evidence holds review. Semantic classification remains model output;
+exact source binding and date validation are deterministic. The supplied model
+date never proves resolution. The validator matches WHOLE expressions against a
+small supported date grammar; unsupported phrases hold rather than becoming
+unstated. Corrections are never silently discarded or assumed superseded.
 
 - `unstated` keeps `due_on` null and `due_defaulted: true`. Only this state adds
   an optional date reminder in `optional_reminders`, which does not block retention.
@@ -112,18 +122,10 @@ The supplied model date never proves resolution.
 No date is invented. Undated tasks remain proposals, just like explicitly dated tasks.
 The filing and retention predicates stay unchanged. Existing report holds are preserved.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Classify: Read cited source spans
-    Classify --> Unstated: No temporal expression anywhere in cited spans
-    Classify --> Resolved: Entire expression resolves to one verified date
-    Classify --> Ambiguous: Any temporal expression remains unresolved
-    Classify --> Contradictory: Deadlines conflict
-    Unstated --> FilingEligible: Optional reminder
-    Resolved --> FilingEligible
-    Ambiguous --> ReviewHold
-    Contradictory --> ReviewHold
-```
+The [deadline statechart](post-call-deadline-states.md) names every transition
+and its executable filing/retention test. The [offline evaluation](../evals/post-call-deadlines/README.md)
+compares the same authored extraction responses on main, the prior PR head and
+the new implementation. It measures validation policy, not live model accuracy.
 
 One extraction writes each owner's task once: tasks on the same deal whose
 titles match after case and whitespace normalization merge, a stated date
