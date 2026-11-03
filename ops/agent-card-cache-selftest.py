@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import runpy
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -185,6 +186,19 @@ class CacheTests(unittest.TestCase):
             self.assertFalse(self.cache.record(self.card, minted=True))
         self.assertFalse(self.cache.record(self.card, minted=True))
         self.assertFalse(self.cache.contains(self.card))
+
+    def test_launch_repository_ignores_inherited_git_location(self):
+        from lib.agent_card_cache import launch_repository
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from git_env import fixture_env
+
+        for name, origin in (('mint', 'DoctorCRE/carr-system'), ('launch', 'jbookout/doctorcre-app')):
+            path = self.home / name
+            subprocess.run(['git', 'init', '-q', str(path)], check=True, env=fixture_env())
+            subprocess.run(['git', 'remote', 'add', 'origin', 'https://github.com/' + origin + '.git'],
+                           cwd=path, check=True, env=fixture_env())
+        with patch.dict(os.environ, {'GIT_DIR': str(self.home / 'mint/.git')}):
+            self.assertEqual(launch_repository(self.home / 'launch'), 'jbookout/doctorcre-app')
 
     def test_identity_change_during_mint_cannot_seed(self):
         with patch.dict(os.environ, {'CARR_MCP_LOCAL_TOKEN': 'fixture-first'}):
