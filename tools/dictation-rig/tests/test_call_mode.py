@@ -1254,6 +1254,8 @@ class PostCallTests(unittest.TestCase):
     @patch.object(post_call, "coverage", _REAL_COVERAGE)
     def test_task_deadline_source_spans_control_filing_and_retention(self) -> None:
         cases = (
+            ("11/6 or 11/9.", True, None, False),
+            ("Tuesday next month.", False, None, False),
             ("November 6 or November 9.", True, None, False),
             ("end of next week.", False, None, False),
             ("on November 6, 2026.", False, None, False),
@@ -1313,6 +1315,46 @@ class PostCallTests(unittest.TestCase):
                                   post_call.retention_ready(session, "b" * 64) is not None),
                                  (can_file, can_file))
                 self.assertEqual(bool(report["optional_reminders"]), timing == ".")
+
+    def test_deadline_temporal_vocabulary_fails_closed(self) -> None:
+        cases = (
+            ("the 14th", "ambiguous"), ("11/14", "ambiguous"),
+            ("14 Nov", "ambiguous"), ("11/6 or 11/9", "ambiguous"),
+            ("Tuesday next month", "ambiguous"), ("end of month", "ambiguous"),
+            ("in two weeks", "ambiguous"), ("in 2 days", "ambiguous"),
+            ("before Thanksgiving", "ambiguous"), ("within a week", "ambiguous"),
+            ("after Christmas", "ambiguous"), ("by the holidays", "ambiguous"),
+            ("next", "ambiguous"), ("this", "ambiguous"),
+            ("by", "ambiguous"), ("before", "ambiguous"), ("after", "ambiguous"),
+            ("within", "ambiguous"), ("November", "ambiguous"),
+            ("end of next week", "ambiguous"), ("Tuesday or Wednesday", "contradictory"),
+            ("Friday, no, Monday", "ambiguous"), ("Tuesday", "resolved"),
+            ("next Tuesday", "resolved"), ("this Tuesday", "resolved"),
+            ("Monday", "ambiguous"), ("today", "resolved"),
+            ("tomorrow", "resolved"), ("day after tomorrow", "resolved"),
+            ("sometime around November 6", "ambiguous"),
+            ("November 6 or tomorrow", "ambiguous"),
+            ("call the vendor", "unstated"), ("review the proposal", "unstated"),
+            ("send the survey", "unstated"), ("ask for availability", "unstated"),
+            ("", "unstated"), ("next quarter", "ambiguous"),
+            ("yesterday", "ambiguous"), ("soon", "ambiguous"),
+        )
+        for phrase, expected in cases:
+            for supplied in (None, "2026-11-06"):
+                with self.subTest(phrase=phrase, supplied=supplied):
+                    quote = f"I will call Harbor vendor {phrase}."
+                    transcript = {"segments": [{"text": quote}]}
+                    report = post_call.normalize_distillation(self.output(joe_tasks=[{
+                        "title": "Call Harbor vendor", "deal_id": "deal-a", "participant_ids": [],
+                        "evidence": quote, "due_on": supplied,
+                    }], deal_updates=[], draft_proposals=[]), self.context, self.session.name,
+                        call_date="2026-10-26", transcript=transcript)
+                    task = report["joe_tasks"][0]
+                    self.assertEqual(task["deadline_state"], expected)
+                    self.assertEqual(post_call.review_complete(report), expected in {"resolved", "unstated"})
+                    self.assertEqual(bool(report["optional_reminders"]), expected == "unstated")
+                    if expected != "resolved":
+                        self.assertIsNone(task["due_on"])
 
     def test_routine_exclusions_are_diagnostics_without_filing_decisions(self) -> None:
         excluded = [{"id": f"inactive-{n}", "reason": "Deal is parked."} for n in range(26)]
@@ -2149,7 +2191,7 @@ class PostCallTests(unittest.TestCase):
         cases = (
             ("I will call Friday, November 6, 2026.", "2026-11-06", "2026-11-06"),
             ("I will call before the lunch call on November 6, 2026.", "2026-11-06", "2026-11-06"),
-            ("I will call two weeks from Friday.", "2026-11-13", "2026-11-13"),
+            ("I will call two weeks from Friday.", "2026-11-13", None),
             ("Review last Friday's proposal.", None, None),
             ("I will review Friday's proposal.", None, None),
             ("I will call Vendor A tomorrow.", None, None),
