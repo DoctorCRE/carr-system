@@ -400,6 +400,9 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
+  if (verb === "record-finding" && args.kind === "email_delivery_failure")
+    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
+      [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
   const prior = await client.query(`select request_hash, response from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
@@ -410,6 +413,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
     return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
+  if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
   await client.query(
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
        organization_tenant_id, sponsoring_human_slug, personal_scope, authorization_class, correlation_id)
@@ -6902,6 +6906,16 @@ export const TOOLS = {
       if (found && (!args.value || typeof args.value !== "object" || !Object.keys(args.value).length))
         throw new ToolError({ error: "value_required",
           hint: "pass the finding as value{}, or pass found:false to record a searched-and-empty result" });
+
+      if (args.kind === "email_delivery_failure") {
+        const prior = (await c.query(`select id, subject_type, subject_id, observed_at, value
+          from record_flag where kind='email_delivery_failure' and created_by=$1 and source=$2
+          order by observed_at, id limit 1`, [actor.id, src])).rows[0];
+        if (prior) return { ok: true, replayed: true, flag_id: prior.id,
+          subject_type: prior.subject_type, subject_id: prior.subject_id, kind: args.kind,
+          found: prior.value.found, observed_at: prior.observed_at,
+          correction_proposed: !!prior.value.proposes_correction };
+      }
 
       let subjectType, subjectId;
       const MARKETING_KINDS = ["campaign", "platform", "pillar", "format"];
