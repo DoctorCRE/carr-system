@@ -2669,7 +2669,7 @@ class AutomaticApplyTests(unittest.TestCase):
     def test_uncalibrated_phase_remains_visible_while_next_step_applies(self) -> None:
         self.write_report()
         def command(_verb, args):
-            return (False, {"error": "missing_phase_chronology"}) if args["candidate_id"] == "c-phase" else (True, {"status": "confirmed"})
+            return (False, {"error": "unhandled_verb_failure"}) if args["candidate_id"] == "c-phase" else (True, {"status": "confirmed"})
         with (patch.object(capture_bridge, "call_record_command", side_effect=command),
               patch.object(capture_bridge, "log_line"),
               patch.object(post_call, "now", return_value="2026-11-02T16:00:00Z")):
@@ -2677,9 +2677,9 @@ class AutomaticApplyTests(unittest.TestCase):
         report = post_call.read_json(self.session / post_call.REPORT_FILE)
         phase = report["deal_updates"][0]["phase_move"]
         self.assertEqual(phase["candidate_status"], "pending")
-        self.assertIn("server clock", phase["review_reason"])
+        self.assertIn("call timing", phase["review_reason"])
         self.assertTrue(report["deal_updates"][0]["next_step"]["applied_automatically"])
-        self.assertIn("server clock", json.dumps(post_call.report_for_deal_room(self.session)))
+        self.assertIn("call timing", json.dumps(post_call.report_for_deal_room(self.session)))
 
     def test_ready_report_is_filed_and_applied_without_waiting_for_the_sweep(self) -> None:
         worker = SimpleNamespace(returncode=0, stdout='{"state": "ready_review"}', stderr="")

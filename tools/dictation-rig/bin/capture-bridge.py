@@ -537,10 +537,10 @@ def apply_automatic(session_dir: Path) -> bool:
         if ok and reply.get("status", reply.get("already")) == "confirmed":
             outcomes[candidate_id] = None
         else:
-            if reply.get("error") == "missing_phase_chronology":
-                outcomes[candidate_id] = "The call timing could not be confirmed against the server clock. Review this phase here."
+            error = reply.get("error") or "the record layer refused it"
+            if "value" in change:
+                outcomes[candidate_id] = f"The call timing or current phase could not be confirmed ({error}); review this phase here."
             else:
-                error = reply.get("error") or "the record layer refused it"
                 outcomes[candidate_id] = f"Could not apply automatically ({error}); review it here."
         log_line(f"AUTO session={session_dir.name} candidate={candidate_id} applied={outcomes[candidate_id] is None}")
     try:
