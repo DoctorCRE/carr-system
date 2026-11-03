@@ -439,6 +439,106 @@ class IntakeTest(unittest.TestCase):
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
+    def delivery_pair(self):
+        source = mail(OWNER, -timedelta(hours=2), recipients=CLIENT.email,
+                      message_id='<original@example.com>', local_keys='77')
+        self.run_intake([source])
+        activity = next(a for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out')
+        activity_id = str(uuid.uuid5(uuid.NAMESPACE_URL, activity['idempotency_key']))
+        self.fake.email_queue = [{'activity_id': activity_id, 'deal': '11111111-1111-4111-8111-111111111111',
+                                 'body': source['body'], 'occurred_at': NOW.isoformat()}]
+        report = mail('postmaster@example.com', -timedelta(hours=1),
+                      message_id='<report@example.com>', local_keys='78', body=
+                      'Reporting-MTA: dns; mx.example.com\nOriginal-Message-ID: <original@example.com>\n'
+                      'Final-Recipient: rfc822; pat@example.test\nAction: failed\nStatus: 5.7.520\n'
+                      'Diagnostic-Code: smtp; 550 5.7.520 Message rejected')
+        return source, report
+
+    def delivery_findings(self):
+        return [a for v, a in self.fake.calls if v == 'record-finding']
+
+    def test_matching_ndr_is_recorded_before_automated_sender_skip(self):
+        source, report = self.delivery_pair()
+        self.run_intake([source, report])
+        findings = self.delivery_findings()
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]['subject'], self.fake.email_queue[0]['deal'])
+        self.assertEqual(findings[0]['value']['source_activity_ids'], [self.fake.email_queue[0]['activity_id']])
+        self.assertEqual(findings[0]['value']['verification'], 'unverified_report')
+        self.run_intake([source, report])
+        self.assertEqual(len(self.delivery_findings()), 1)
+        self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 1)
+
+    def test_unmatched_delivery_report_retries_when_source_arrives(self):
+        source, report = self.delivery_pair()
+        report['body'] = report['body'].replace('<original@example.com>', '<later@example.com>')
+        first = self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(first.counts['delivery_failures_pending'], 1)
+        later = {**source, 'message_id': '<later@example.com>', 'local_keys': '79'}
+        self.run_intake([source, later, report])
+        request = next(a for v, a in reversed(self.fake.calls) if v == 'log-activity' and a['kind'] == 'email_out')
+        self.fake.email_queue = [{**self.fake.email_queue[0], 'activity_id': str(uuid.uuid5(uuid.NAMESPACE_URL, request['idempotency_key']))}]
+        self.run_intake([source, later, report])
+        self.assertEqual(len(self.delivery_findings()), 1)
+
+    def test_delivery_failure_rejects_cross_account_spoofed_quoted_and_ambiguous_mail(self):
+        source, report = self.delivery_pair()
+        bad = [dict(report, folder_account=8), dict(report, sender='attacker@example.com'),
+               dict(report, body='> ' + report['body'].replace('\n', '\n> ')), dict(report, body_kind='preview'),
+               dict(report, recipients=PARTNER)]
+        for row in bad:
+            self.run_intake([source, row])
+            self.assertEqual(self.delivery_findings(), [])
+        sibling = dict(source, local_keys='79')
+        self.run_intake([source, sibling, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 2)
+
+    def test_subject_recipient_and_time_do_not_establish_delivery_failure_identity(self):
+        source, report = self.delivery_pair()
+        report['body'] = report['body'].replace('Original-Message-ID: <original@example.com>\n', '')
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+        self.assertEqual(len([1 for v, a in self.fake.calls if v == 'log-activity' and a['kind'] == 'email_out']), 1)
+
+    def test_ordinary_machine_mail_keeps_automated_skip_behavior(self):
+        result = self.run_intake([mail('postmaster@example.com', -timedelta(hours=1), body='bounce digest')])
+        self.assertEqual(result.counts['skipped_automated'], 1)
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_original_receipt_must_belong_to_selected_mailbox(self):
+        source, report = self.delivery_pair()
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        for request in state['requests'].values():
+            args = json.loads(request['payload'])
+            if args.get('kind') == 'email_out':
+                args['email_identity']['mailbox_account'] = 'other@example.com'
+                request['payload'] = json.dumps(args)
+        state_path.write_text(json.dumps(state))
+        self.run_intake([source, report])
+        self.assertEqual(self.delivery_findings(), [])
+
+    def test_delivery_failure_uses_frozen_request_after_lost_response(self):
+        source, report = self.delivery_pair()
+        original_carr = self.fake.carr
+        stored = {}
+        def lose_reply(verb, args):
+            if verb == 'record-finding':
+                stored.setdefault(args['idempotency_key'], dict(args))
+                original_carr(verb, args)
+                raise intake.CarrError(code='timeout')
+            return original_carr(verb, args)
+        with patch.object(self.fake, 'carr', side_effect=lose_reply):
+            self.assertEqual(self.run_intake([source, report]).state, 'failed')
+        self.fake.now += timedelta(minutes=2)
+        report['body'] = report['body'].replace('Message rejected', 'Changed diagnostic')
+        self.run_intake([source, report])
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(self.delivery_findings()[-1], next(iter(stored.values())))
+        self.assertTrue(all(v not in ('update-party-contact', 'correct-party-identity', 'record-deal-item') for v, _ in self.fake.calls))
+
     def test_no_filing_fails_at_one_business_day_and_recovers_on_inbound(self):
         self.fake.now = datetime(2026, 10, 20, 23, tzinfo=timezone.utc)
         quiet = mail('no-reply@example.test', -timedelta(hours=1))
@@ -4450,6 +4550,13 @@ class LoadObjectFieldsTest(unittest.TestCase):
 
     def load(self, account=None):
         return intake._load(self.db, account)
+
+    def test_delivery_report_reply_identity_is_projected_from_decoder_object(self):
+        with sqlite3.connect(self.db) as con:
+            con.execute('ALTER TABLE message_objects ADD COLUMN in_reply_to TEXT')
+            con.execute('UPDATE message_objects SET in_reply_to=? WHERE local_key=71', ('original@example.com',))
+        _, mails, _ = self.load(7)
+        self.assertEqual(mails[0]['in_reply_to'], 'original@example.com')
 
     def test_object_subject_recovers_missing_heuristic_and_recipients_in_order(self):
         with sqlite3.connect(self.db) as con:
