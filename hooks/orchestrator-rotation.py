@@ -14,10 +14,16 @@ Use write-doctrine-section through the record layer to write team-memory section
 handoff/orchestrator-latest with this session's attach_id and current base_version.
 Include program status, exact branches and PRs, decisions, next actions, and EVERY
 running delegated job with its task id and the thread/link each will report to.
+Include your retiring T3 thread id in both the handoff and successor prompt.
+Do not use the Claude session id as the T3 thread id.
 Mint a successor card through dispatch-job before launching it with t3_thread_launch.
 The successor prompt must include the returned Card: line and this exact role line:
 CARR-Session-Role: orchestrator
 Tell the successor: Start with /pstack:poteto-mode in its Orchestrate playbook.
+As part of your opening act, call t3_thread_organize with action "pin"
+and omit threadId to pin your own thread.
+Then call t3_thread_organize with action "unpin" and threadId set to the
+retiring T3 thread id named in this launch prompt and handoff.
 Resume from team-memory handoff/orchestrator-latest and pstack's Session pickup
 playbook. Run as the coordinator that owns the program, never the code (rule
 974655e1). pstack lives at /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack.
