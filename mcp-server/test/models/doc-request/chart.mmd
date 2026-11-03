@@ -1,0 +1,12 @@
+stateDiagram-v2
+  s0: asks=0 authorized=TRUE receipts=0 phase="absent"
+  s1: asks=0 authorized=FALSE receipts=0 phase="absent"
+  s2: asks=1 authorized=TRUE receipts=0 phase="pending"
+  s3: asks=1 authorized=TRUE receipts=1 phase="accepted"
+  s4: asks=1 authorized=FALSE receipts=1 phase="accepted"
+  [*] --> s0
+  s0 --> s1: Revoke
+  s0 --> s2: Submit
+  s2 --> s0: Rollback
+  s2 --> s3: Commit
+  s3 --> s4: Revoke
