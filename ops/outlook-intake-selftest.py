@@ -531,6 +531,60 @@ class IntakeTest(unittest.TestCase):
     def test_signature_alias_restart_preserves_uncertain_request(self):
         self.signature_alias_scans(lost=True, restart=True)
 
+    def unresolved_signature_alias_scans(self, change='version', lost=False, reverse=False):
+        old = self.signature_alias_fixture()
+        new = {**old, 'local_keys': '77'}
+        if reverse:
+            old, new = new, old
+        self.fake.fail_verbs.add('log-activity')
+        carr = self.fake.carr
+        def lose_receipt(verb, args):
+            reply = carr(verb, args)
+            if verb == 'record-finding':
+                raise intake.CarrError(code='unavailable')
+            return reply
+        with patch.object(self.fake, 'carr', lose_receipt if lost else carr):
+            self.run_intake([old])
+        frozen = self.fake.writes('record-finding')[0][1]
+        self.run_intake([new])
+        self.assertEqual(len(self.fake.findings), 1)
+        snapshot = self.fake.contacts_rows[0].contact_snapshot
+        if change == 'version':
+            snapshot['party_version'] = snapshot['provenance']['party_version'] = 8
+        elif change == 'party':
+            snapshot['party_id'] = snapshot['provenance']['party_id'] = 102
+        else:
+            old = {**old, 'body': old['body'] + '\nTitle: Director'}
+            new = {**new, 'body': new['body'] + '\nTitle: Director'}
+        self.fake.now += timedelta(minutes=2)
+        for message in (old, new, old, new, old):
+            result = self.run_intake([message])
+            self.assertEqual(len(self.fake.findings), 1,
+                             'repeated alias lost frozen signature while activity was unresolved')
+            if change != 'version':
+                self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual([a for _, a in self.fake.writes('record-finding')],
+                         [frozen, frozen] if lost and change == 'version' else [frozen])
+        self.assertFalse(self.fake.writes('update-party-contact'))
+
+    def test_signature_unresolved_activity_alias_reversal_freezes_snapshot(self):
+        self.unresolved_signature_alias_scans()
+
+    def test_signature_unresolved_activity_alias_reversal_holds_party(self):
+        self.unresolved_signature_alias_scans(change='party')
+
+    def test_signature_unresolved_activity_alias_reversal_holds_source(self):
+        self.unresolved_signature_alias_scans(change='body')
+
+    def test_signature_unresolved_activity_alias_reversal_retries_lost_response(self):
+        self.unresolved_signature_alias_scans(lost=True)
+
+    def test_signature_unresolved_activity_reverse_alias_reversal(self):
+        self.unresolved_signature_alias_scans(reverse=True)
+
+    def test_signature_unresolved_activity_alias_reversal_holds_uncertain_party(self):
+        self.unresolved_signature_alias_scans(change='party', lost=True)
+
     def test_signature_ambiguous_message_ids_stay_separate(self):
         old = self.signature_alias_fixture()
         self.run_intake([old])
