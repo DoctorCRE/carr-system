@@ -1,5 +1,8 @@
 """Offline acceptance for release-bound Studio runtime refresh."""
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
+from urllib.error import HTTPError
 import importlib.util
 import io
 import subprocess
@@ -69,6 +72,52 @@ class AutoRefreshTests(unittest.TestCase):
             self.run_tick(10600)
         self.assertEqual(self.run_tick(11200), 'open')
         self.assertEqual(self.host.refresh.call_count, 2)
+
+    def test_discovery_403_opens_breaker_and_alerts_without_third_request(self):
+        self.host.release.side_effect = HTTPError('http://localhost/release', 403, 'Forbidden', {}, None)
+        real = object.__new__(Host)
+        real.source = self.root
+        self.host.alert.side_effect = real.alert
+        self.assertEqual(self.run_tick(), 'refused')
+        self.assertEqual(self.run_tick(10300), 'open')
+        self.assertEqual(self.run_tick(10600), 'open')
+        self.assertEqual(self.host.release.call_count, 2)
+        self.host.refresh.assert_not_called()
+        rows = (self.root / 'out/watchdog/orchestrator-inbox.jsonl').read_text().splitlines()
+        self.assertEqual(len(rows), 1)
+        self.assertIn('discovery', json.loads(rows[0])['finding']['reason'].lower())
+
+    def test_discovery_success_resets_failure_budget(self):
+        self.host.release.side_effect = [TimeoutError(), A, TimeoutError(), A]
+        self.assertEqual(self.run_tick(), 'refused')
+        self.assertEqual(self.run_tick(10300), 'refreshed')
+        self.assertEqual(self.run_tick(10600), 'refused')
+        self.assertEqual(self.run_tick(10900), 'current')
+        self.host.alert.assert_not_called()
+
+    def test_discovery_reservation_survives_crash(self):
+        self.host.release.side_effect = SystemExit('crash')
+        for now in (10000, 10300):
+            with self.assertRaises(SystemExit):
+                self.run_tick(now)
+        self.assertEqual(self.run_tick(10600), 'open')
+        self.assertEqual(self.host.release.call_count, 2)
+        self.host.alert.assert_called_with(None, 10600)
+
+    def test_discovery_open_still_recovers(self):
+        (self.root / 'state.json').write_text(json.dumps({'failures': {}, 'discovery_failures': 2}))
+        self.assertEqual(self.run_tick(), 'open')
+        self.host.recover.assert_called_once()
+        self.host.release.assert_not_called()
+
+    def test_discovery_operator_reset_allows_read(self):
+        path = self.root / 'state.json'
+        path.write_text(json.dumps({'failures': {}, 'discovery_failures': 2}))
+        self.assertEqual(self.run_tick(), 'open')
+        state = json.loads(path.read_text())
+        state['discovery_failures'] = 0
+        path.write_text(json.dumps(state))
+        self.assertEqual(self.run_tick(10300), 'refreshed')
 
     def test_crash_after_install_reconciles_to_current(self):
         def crash(sha):
@@ -216,6 +265,33 @@ class RecoveryTests(unittest.TestCase):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_released_sha_uses_shared_release_reader(self):
+        class ReleaseServer(BaseHTTPRequestHandler):
+            def do_GET(self):
+                allowed = self.headers.get('User-Agent') == 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
+                self.send_response(200 if allowed else 403)
+                self.end_headers()
+                self.wfile.write(json.dumps({'git_sha': {'value': A},
+                                            'env': {'value': 'production'}}).encode())
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), ReleaseServer)
+        thread = Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            runs = [{'displayTitle': f'Production release {A}', 'headBranch': 'main',
+                     'event': 'workflow_run', 'conclusion': 'success'}]
+            with patch('lib.studio_runtime_auto_refresh.RELEASE_URL',
+                       f'http://127.0.0.1:{server.server_port}/release'), \
+                    patch('lib.studio_runtime_auto_refresh.command', return_value=json.dumps(runs)):
+                self.assertEqual(released_sha(), A)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
     def release(self, live=None, runs=None):
         live = live if live is not None else {'git_sha': {'value': A}, 'env': {'value': 'production'}}
         runs = runs if runs is not None else [{'displayTitle': f'Production release {A}',

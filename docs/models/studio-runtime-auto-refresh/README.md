@@ -13,7 +13,11 @@ stateDiagram-v2
     Observe --> Current: verified release matches, artifacts valid and jobs enabled
     Observe --> Refuse: matching SHA with missing artifacts or disabled jobs
     Observe --> Wait: checked less than five minutes ago
-    Observe --> Refuse: release identity or successful main deploy unavailable
+    Observe --> DiscoveryRetry: first discovery failure
+    DiscoveryRetry --> Observe: next five-minute tick
+    DiscoveryRetry --> DiscoveryOpen: second discovery failure, alert
+    DiscoveryOpen --> DiscoveryOpen: recover runtime, no network calls
+    DiscoveryOpen --> Observe: operator resets discovery_failures after repair
     Observe --> Open: two attempts failed for this SHA
     Observe --> Cooldown: last attempt less than ten minutes ago
     Observe --> Attempt: persist attempt before any refresh effects
@@ -99,3 +103,33 @@ The combined recovery tests use the wrapper's filesystem snapshot, drain locks,
 swap and restoration with synthetic launchctl/installer ports. They reproduce
 process death by releasing only the fixture's held locks. No live mailbox or
 launchd state is touched. No formal proof is claimed.
+
+## Discovery repair design for WR634.S1.J96
+
+The shared release reader owns GET headers, redirect refusal and HTTP replies.
+Both smoke commands and automatic discovery use it. The existing ledger gains
+`discovery_failures`, a consecutive failure count reserved before discovery.
+Two failures open discovery permanently and alert through the existing watchdog
+finding and inbox. Success clears the count before local runtime verification.
+Open discovery still recovers interrupted runtime work but makes no HTTP or
+GitHub call. After repair an operator resets only `discovery_failures` to zero
+under the ledger lock. This builder changes no live ledger.
+
+Loading the smoke CLI dynamically would couple runtime discovery to unrelated
+smoke imports. The shared module keeps the actual HTTP implementation in one
+place. The existing per-SHA refresh budget is unchanged. Discovery reservations
+survive crashes. Capacity remains one sequential read per five minutes at
+today's and 10x load. Discovery has a 20-second HTTP timeout. There is no fan-out,
+queue, database or N+1 access. The only cache is the atomic local ledger,
+cleared on success or explicit operator recovery after an open circuit.
+Stale release truth never authorizes a refresh. Writes reuse the existing lock,
+atomic replace and fsync. Alerts use the existing finding key for deduplication.
+
+| Transition | Test |
+| --- | --- |
+| Discovery sends smoke headers | `test_released_sha_uses_shared_release_reader` |
+| Two 403s open discovery, no third read, one alert | `test_discovery_403_opens_breaker_and_alerts_without_third_request` |
+| Successful discovery resets first failure | `test_discovery_success_resets_failure_budget` |
+| Discovery crash consumes reserved budget | `test_discovery_reservation_survives_crash` |
+| Open discovery still recovers runtime | `test_discovery_open_still_recovers` |
+| Counter reset permits fresh read | `test_discovery_operator_reset_allows_read` |
