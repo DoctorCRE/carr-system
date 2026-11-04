@@ -1,0 +1,14 @@
+stateDiagram-v2
+  [*] --> Absent
+  Absent --> Active: Enable this installation
+  Active --> Active: Refresh unchanged subscription
+  Active --> Active: Replace endpoint or keys with a new generation
+  Active --> Revoked: Disable this installation
+  Active --> Expired: Browser subscription expires
+  Revoked --> Active: Register again with a fresh action
+  Expired --> Active: Register a fresh subscription
+  Revoked --> Revoked: Disable again
+  Absent --> Absent: Disable unknown installation
+  Expired --> Revoked: Disable expired installation
+  %% never Active with another actor's subscription
+  %% never Active above three installations

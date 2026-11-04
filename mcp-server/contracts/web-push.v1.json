@@ -1,0 +1,17 @@
+{
+  "contract": "web-push-subscription.v1",
+  "verbs": ["read-web-push-config", "register-web-push-subscription", "revoke-web-push-subscription"],
+  "identity": "Server-established organization tenant and active actor; no caller identity fields.",
+  "installation_id": "Opaque UUID; scope is tenant plus actor, never a bearer credential.",
+  "states": ["absent", "active", "revoked", "expired"],
+  "expiry": "expires_at <= database clock is expired and must never be claimed by transport. Expiry requires no background write.",
+  "replacement": "Changed endpoint, keys, expiry or VAPID generation revokes the old version and creates a new generation; unchanged active refresh retains generation.",
+  "receipt": ["ok", "subscription_id", "state", "generation"],
+  "receipt_semantics": "Idempotent historical action receipt, not a current eligibility read. Exact replay must not resurrect revoked or expired versions.",
+  "sensitive": ["endpoint", "p256dh", "auth"],
+  "public_config": ["public_key", "key_generation"],
+  "configuration": "Only WEB_PUSH_VAPID_PUBLIC_KEY and WEB_PUSH_KEY_GENERATION are read. Missing or malformed config refuses registration with feature_unavailable. No key generation.",
+  "limits": {"active_installations_per_actor": 3, "successful_lifecycle_actions_per_rolling_minute": 10},
+  "preferences": "Registration and revocation never change device_opt_in or quiet hours. Existing notification preferences remain authoritative.",
+  "transport": "No endpoint fetch or push delivery. Later transport must recheck tenant, actor, revoked_at, expires_at, current key generation and current preferences before claiming."
+}
