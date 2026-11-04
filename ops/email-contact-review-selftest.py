@@ -71,10 +71,33 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(args['value']['evidence'], 'Phone: 555-0199')
         self.assertFalse(args['value']['verified'])
         self.assertEqual(args['value']['verification'], 'unverified_signature_observation')
-        self.assertEqual(args['value']['extraction_version'], 'email-contact-candidates/v1')
+        self.assertEqual(args['value']['extraction_version'], 'email-contact-candidates/v2')
         self.assertIn('outlook-signature/', args['source'])
         self.assertEqual(self.snapshot, prior)
         self.assertFalse({'update-party-contact', 'correct-party-identity'} & {v for v, _ in self.calls})
+
+    def test_html_signature_uses_proposal_journal_and_preserves_activity_body(self):
+        self.message['text'] = 'Hello Pat Example Director 555-0199 pat@example.test'
+        self.message['signature_html'] = ('<p>Hello</p><div>Pat Example</div><div>Director</div>'
+                                          '<div>555-0199</div><div>pat@example.test</div>')
+        before = copy.deepcopy(self.message)
+        self.error = 'lost'
+        self.run_review()
+        self.error = None
+        self.now += timedelta(minutes=2)
+        self.run_review()
+        self.run_review()
+        self.assertEqual(self.message, before)
+        self.assertEqual(len(self.receipts), 1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.calls[0], self.calls[1])
+        args = next(iter(self.receipts.values()))
+        self.assertEqual(args['value']['evidence'], '555-0199')
+        self.assertEqual(args['value']['source_locator']['local_keys'], ['item-1'])
+        self.assertEqual(args['value']['party_version'], 7)
+        self.assertEqual(args['proposes_correction']['proposed'], '555-0199')
+        self.assertEqual(args['epistemic_status'], 'proposed')
+        self.assertEqual({verb for verb, _ in self.calls}, {'record-finding'})
 
     def test_missing_fields_and_identity_observations_require_review(self):
         self.message['text'] += '\nTitle: Director\nName: Pat New\nCompany: New Org'

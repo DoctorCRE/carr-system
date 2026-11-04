@@ -332,6 +332,20 @@ class IntakeTest(unittest.TestCase):
         ports.decode = self.search_decode
         return intake.run(self.repo, self.home, ports)
 
+    def test_loaded_signature_html_is_bound_to_its_message_without_changing_body(self):
+        source = mail(CLIENT.email, timedelta(hours=-1), body='Hello Pat 555-0199 pat@example.test', local_keys='101')
+        write_db(self.fake.fixture, [source])
+        html = '<p>Hello</p><p>Pat Example</p><div>555-0199</div><div>pat@example.test</div>'
+        with closing(sqlite3.connect(self.fake.fixture)) as db, db:
+            db.execute('UPDATE messages SET html=? WHERE id=1', (html,))
+        _, rows, _ = intake._load(self.fake.fixture)
+        loaded = intake._best_copies(rows)[0]
+        self.assertEqual(loaded['signature_html'], html)
+        self.assertEqual(loaded['body'], source['body'])
+        self.assertEqual(loaded['text'], source['body'])
+        self.assertEqual(loaded['local_keys'], ['101'])
+        self.assertEqual(loaded['signature_ident'], ident(source))
+
     def test_intake_run_publishes_index_then_lookup_finds_fixture_message(self):
         from lib.email_local_search import query_index
         (self.repo / '.git').mkdir(parents=True)
@@ -2968,6 +2982,18 @@ class IntakeTest(unittest.TestCase):
         self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
         self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
 
+    def test_signature_extraction_version_reloads_unchanged_store_once(self):
+        self.run_intake(touch=False)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.pop('signature_policy', None)
+        path.write_text(json.dumps(state))
+        before = self.fake.decodes
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+
     def test_decoder_change_reloads_unchanged_store(self):
         receipt = load_settings(self.home).vendor / '.carr-build.json'
         receipt.parent.mkdir(parents=True, exist_ok=True)
@@ -4359,6 +4385,27 @@ class IntakeTest(unittest.TestCase):
 
     def codes(self):
         return [w['code'] for w in self.fake.agenda['warnings']]
+
+    def test_decoded_cancellation_reaches_published_agenda_and_review_through_intake(self):
+        events = [event(self.gid(91), timedelta(hours=2), subject='Synthetic upcoming',
+                        lifecycle=('canceled', 'outlook_canceled_subject')),
+                  event(self.gid(92), -timedelta(hours=2), subject='Synthetic recent',
+                        lifecycle=('canceled', 'outlook_canceled_subject'))]
+        self.assertEqual(self.run_intake(events=events, touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.agenda['items'], [])
+        self.assertEqual(self.fake.agenda['follow_up_reviews'], [])
+        self.assertIn({'code': 'canceled_hidden', 'count': 2}, self.fake.agenda['warnings'])
+        self.assertEqual(self.fake.writes(), [])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['calendar_policy'] = 3
+        path.write_text(json.dumps(state))
+        before = self.fake.decodes
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(self.fake.agenda['items'], [])
+        self.assertEqual(self.fake.agenda['follow_up_reviews'], [])
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
 
     def test_agenda_shows_only_meetings_that_name_joe(self):
         events = [

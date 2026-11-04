@@ -1,0 +1,14 @@
+stateDiagram-v2
+ [*] --> Captured
+ Captured --> Held: Incomplete body or invalid sender
+ Captured --> Current: Restore HTML lines and exclude quoted history
+ Current --> Held: No unique bounded sender contact run
+ Current --> Proposed: Sender-bound contact lines
+ Proposed --> Held: Missing contact snapshot or changed binding
+ Proposed --> Pending: Versioned proposed finding
+ Pending --> Pending: Lost response replays frozen request
+ Pending --> Recorded: Record layer acknowledges
+ Recorded --> Recorded: Same source returns
+ %% never Extract facts from quoted history or a competing identity.
+ %% never Overwrite a human contact field.
+ %% never Infer deletion from a folder label or missing message.
