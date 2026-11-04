@@ -65,8 +65,14 @@ test('null display refs retain canonical identities through registered lookup an
     const found = await call('find', { query: addresses[i] }, 'carr_reader');
     const refs = [...found.parties.map(row => row.ref), ...found.organizations.flatMap(row => row.refs)];
     assert.ok(refs.includes(expected[i]), 'find must return the same usable identity');
-    const resolved = await call('catch-me-up', { ref: row.ref });
-    assert.ok(resolved);
+    if (i < ids.length) {
+      await assert.rejects(call('get-next-action', { ref: row.ref, owner: 'joe' }),
+        error => error.payload?.error === 'next_action_subject_unsupported');
+    } else {
+      const resolved = await call('catch-me-up', { ref: row.ref });
+      assert.equal(resolved.subject.id, expected[i]);
+      assert.equal(resolved.subject.type, ['client','lead','vendor'][i - ids.length]);
+    }
   }
   assert.deepEqual((await call('email-match-contacts', {}, 'carr_reader')).contacts, contacts);
   const shared = (await c.query(`insert into party(kind,name,email,created_by,updated_by)
@@ -75,7 +81,10 @@ test('null display refs retain canonical identities through registered lookup an
   assert.ok(ambiguous.filter(row => row.address === addresses[0]).every(row => !row.contact_snapshot));
   const proof = JSON.parse(execFileSync('python3', ['-c', `
 import json, sys
-from lib.outlook_intake import _contacts, Matcher
+from lib.outlook_intake import _contacts, Matcher, Run
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from pathlib import Path
 unique, shared, addresses, ids = json.load(sys.stdin)
 def matcher(rows):
     return Matcher(_contacts(lambda *_: {'contacts': rows})(), 'internal.test')
@@ -87,6 +96,16 @@ assert b.reason(addresses[0]) == 'ambiguous'
 assert b.ref(addresses[0]) is None
 assert a.reason('foreign@unknown.test') == 'missing'
 assert a.ref('foreign@unknown.test') is None
+now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+settings = SimpleNamespace(timezone=timezone.utc, internal_domain='internal.test')
+event = {'start_unix': int(now.timestamp()), 'end_unix': int(now.timestamp()) + 3600,
+         'attendees': [('Synthetic', address) for address in addresses],
+         'organizer_email': '', 'organizer_name': ''}
+run = Run(None, {}, now, Path('.'), settings)
+run.events([event], a, 0)
+assert not run.state['calendar_unresolved']
+run.events([event], b, 0)
+assert any('ambiguous' in row['participants'].values() for row in run.state['calendar_unresolved'].values())
 print(json.dumps({'matched': len(addresses), 'ambiguous': True, 'unknown': True}))
 `], { cwd: new URL('../..', import.meta.url), encoding: 'utf8',
     input: JSON.stringify([contacts, ambiguous, addresses, expected]) }));
