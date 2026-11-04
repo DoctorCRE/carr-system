@@ -88,6 +88,10 @@ export function createDealDocumentHandler({transaction,bucket,callTool,backoff =
         return json(await transaction(async c=> {
           await lockUploadQuota(c);
           const row=await uploadRow(c,actor,id);
+          const prior=(await c.query<{id:string}>(`select id from ops.deal_document_upload
+            where organization_tenant_id=$1 and actor_slug=$2 and cancel_key=$3`,
+            [row.organization_tenant_id,actor.slug,key])).rows[0];
+          if(prior && prior.id!==id) uploadFail('upload_conflict');
           if(['receiving','retryable_unknown'].includes(row.state)) uploadFail('upload_conflict');
           if(row.state==='staged') {
             await storage(()=>bucket.delete(row.object_key),false);

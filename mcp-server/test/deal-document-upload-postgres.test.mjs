@@ -161,3 +161,11 @@ test('failed temporary deletion retains charge and never touches canonical bytes
  assert.equal((await cancel(row.upload_id)).status,503);assert.equal(tries,2);assert.equal(await quota(),bytes.length);
  assert.equal((await read(row.upload_id)).state,'staged');assert.equal(stored.has('documents/canonical'),true);
 });
+test('cancellation key reused for another upload refuses before deleting bytes',async()=> {
+ const first=await begin(await input());const second=await begin(await input());
+ await upload(first.upload_id);await upload(second.upload_id);
+ const key=randomUUID();assert.equal((await cancel(first.upload_id,key)).status,200);
+ const before=deletes;
+ assert.equal((await cancel(second.upload_id,key)).status,409);
+ assert.equal(deletes,before);assert.equal((await read(second.upload_id)).state,'staged');
+});
