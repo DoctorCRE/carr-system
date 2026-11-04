@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from git_env import fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
 PROGRAM = ROOT / 'ops/production-proof-plan.py'
@@ -49,7 +50,7 @@ class AdmissionTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(PROGRAM), '--root', str(self.root),
                                '--body-file', str(self.body), '--files-file', str(self.files)],
                               capture_output=True, text=True, timeout=20,
-                              env={k: v for k, v in os.environ.items() if not k.startswith('GIT_')})
+                              env=fixture_env())
 
     def test_hosted_invalid_then_corrected_declaration(self):
         for body in ['## Production proof\n', '## Production proof\n<!-- add proof -->\n']:
@@ -164,7 +165,7 @@ class AdmissionTest(unittest.TestCase):
     def test_first_parent_rollout_and_rename_sources_with_real_git(self):
         plan = module()
         from datetime import datetime
-        env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+        env = fixture_env()
         env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.com',
                    GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.com')
         def git(*args):
