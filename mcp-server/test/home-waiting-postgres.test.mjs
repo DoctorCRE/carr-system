@@ -7,8 +7,8 @@ import { TOOLS } from '../src/tools.js';
 test('Home waiting has a registered audited command and versioned read', () => {
   assert.equal(TOOLS['set-home-waiting']?.write, true);
   assert.equal(TOOLS['clear-home-waiting']?.write, true);
-  assert.ok(TOOLS['read-home-inbox-v4']);
-  assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v4.json',import.meta.url),'utf8')),HOME_INBOX_WAITING_CONTRACT);
+  assert.ok(TOOLS['read-home-inbox-v5']);
+  assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v5.json',import.meta.url),'utf8')),HOME_INBOX_WAITING_CONTRACT);
 });
 
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
@@ -34,7 +34,7 @@ test('waiting transitions preserve ownership, resolve identity and audit writes 
   const context = async who => c.query("select set_config('carr.acting_actor_slug',$1,false),set_config('carr.verified_human_actor_slug',$1,false),set_config('carr.organization_tenant_id','carr-internal',false)",[who.slug]);
   const read = async (who=actor) => {
     await context(who);
-    return executeRegisteredTool(c,who,'read-home-inbox-v4',{});
+    return executeRegisteredTool(c,who,'read-home-inbox-v5',{});
   };
   const item = async () => (await read()).items.find(i => i.source_id===task);
   const command = async (verb, current, extra={}, who=actor, key=randomUUID()) => {
@@ -52,7 +52,7 @@ test('waiting transitions preserve ownership, resolve identity and audit writes 
   const refuses = (promise,error) => assert.rejects(promise,e => e.payload?.error===error);
   const first = await item();
   assert.equal(first.waiting_on,null); assert.equal(first.waiting_version,0);
-  await t.test('v4 hydrates pending reply review references after the main merge',async()=>{
+  await t.test('v5 hydrates pending reply review references after the main merge',async()=>{
     const activity=randomUUID(), proposal=randomUUID();
     await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source)
       values($1,now(),$2,'email_in','Synthetic reply','Synthetic evidence',
@@ -71,6 +71,14 @@ test('waiting transitions preserve ownership, resolve identity and audit writes 
   await c.query('delete from tool_call where idempotency_key=$1',[key]);
   assert.deepEqual(await set(first,undefined,actor,key),named,'durable command replay survives envelope expiry');
   const waiting=await item();
+  const completionRead=await executeRegisteredTool(c,actor,'read-home-inbox-v4',{});
+  assert.equal(completionRead.schema_version,'home-inbox.v4');
+  assert.ok(completionRead.items.every(i=>!Object.hasOwn(i,'waiting_on') && !Object.hasOwn(i,'waiting_version')));
+  assert.ok(completionRead.items.every(i=>Object.hasOwn(i,'completed_at')));
+  assert.equal((await read()).schema_version,'home-inbox.v5');
+  assert.ok(Object.hasOwn(waiting,'completed_at'));
+  const v5Read=await read();
+  assert.deepEqual(v5Read.items.map(({waiting_on,waiting_version,...item})=>item),completionRead.items);
   assert.equal(waiting.base_version,first.base_version,'waiting never changes disposition version');
   assert.equal(waiting.waiting_on.reason,'Synthetic response owed');
   assert.deepEqual(waiting.waiting_on.evidence,['synthetic:call-1']);
@@ -212,11 +220,11 @@ test('waiting transitions preserve ownership, resolve identity and audit writes 
   assert.ok((await executeRegisteredTool(c,actor,'read-home-inbox-v3',{})).items.every(i=>!Object.hasOwn(i,'waiting_on')));
   await context(actor);
   await c.query("select set_config('carr.organization_tenant_id','foreign',false)");
-  await assert.rejects(c.query('select ops.read_home_inbox_v4()'),e=>e.code==='42501');
+  await assert.rejects(c.query('select ops.read_home_inbox_v5()'),e=>e.code==='42501');
   await assert.rejects(c.query('select ops.change_home_waiting($1,$2,$3)', ['foreign',randomUUID(),{}]),e=>e.code==='42501');
   await context(actor);
   await c.query('set role carr_reader');
   await assert.rejects(c.query('select * from ops.home_waiting'),e=>e.code==='42501');
-  await assert.rejects(c.query('select ops.read_home_inbox_v4()'),e=>e.code==='42501');
+  await assert.rejects(c.query('select ops.read_home_inbox_v5()'),e=>e.code==='42501');
   await c.query('reset role');
 });

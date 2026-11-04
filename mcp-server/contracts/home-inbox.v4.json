@@ -12,8 +12,7 @@
     "deal_id": "UUID|null; owning deal for completion readback, null for non-deal work",
     "auto_settled": "boolean; canonical resolution placed this item in Settled without a disposition write",
     "review_reference": "home-review.v1 reference|null; exact item and source version with candidate domain operations; load read-home-review for current detail and available operations",
-    "waiting_on": "null|{identity:{kind:party|actor,id:UUID,display_name:string|null,available:boolean},reason:string,evidence:string[],version:integer}; explicit canonical identity only, null for unknown or completed work",
-    "waiting_version": "integer; independent relationship version, 0 before the first command; pass as waiting command base_version"
+    "completed_at": "UTC ISO-8601 instant|null; proven canonical completion, never activity or ingestion time"
   },
   "sections": [
     "inbox",
@@ -42,5 +41,6 @@
     "fact_review",
     "tour_feedback"
   ],
-  "settlement": "Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read."
+  "settlement": "Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.",
+  "completion_time": "Done ordinary tasks use the exact complete-one-action, complete-action or complete-deal-item event, superseded by reopen-one-action. Done call actions use completed_at. Sent replies use send_result.sent_at. Open work, unsupported sources and unproven legacy completions return null. Later notifications never move completion. Clients group by America/Chicago."
 }

@@ -1,5 +1,5 @@
--- rollback: remove v4 and waiting commands before dropping waiting state and receipts.
--- expand-contract: expand; v1-v3 and canonical ownership remain unchanged.
+-- rollback: remove v5 and waiting commands before dropping waiting state and receipts.
+-- expand-contract: expand; v1-v4 and canonical ownership remain unchanged.
 -- lock-review: additive tables/functions and row completion triggers; no data rewrite.
 set local lock_timeout='5s';
 set local statement_timeout='30s';
@@ -56,12 +56,12 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
 $$;
 revoke all on function ops.home_waiting_identity(text,uuid) from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
-create function ops.read_home_inbox_v4() returns jsonb
+create function ops.read_home_inbox_v5() returns jsonb
 language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $$
 declare a uuid:=ops.home_waiting_actor('carr-internal'); snapshot jsonb;
 begin
-  snapshot:=ops.read_home_inbox_v3();
-  return snapshot||jsonb_build_object('schema_version','home-inbox.v4','items',(
+  snapshot:=ops.read_home_inbox_v4();
+  return snapshot||jsonb_build_object('schema_version','home-inbox.v5','items',(
     select coalesce(jsonb_agg(i||jsonb_build_object('waiting_version',coalesce(w.version,0),
       'waiting_on',case when w.identity_id is not null and i->>'source_state'<>'done' then
         jsonb_build_object('identity',ops.home_waiting_identity(w.identity_kind,w.identity_id),
@@ -69,8 +69,8 @@ begin
     from jsonb_array_elements(snapshot->'items') with ordinality e(i,ord)
     left join ops.home_waiting w on w.actor_id=a and w.item_id=i->>'item_id'));
 end $$;
-revoke all on function ops.read_home_inbox_v4() from public,carr_reader,carr_authority,carr_jobs,dot_reader;
-grant execute on function ops.read_home_inbox_v4() to carr_writer;
+revoke all on function ops.read_home_inbox_v5() from public,carr_reader,carr_authority,carr_jobs,dot_reader;
+grant execute on function ops.read_home_inbox_v5() to carr_writer;
 
 create function ops.change_home_waiting(p_tenant text,p_key uuid,p_args jsonb) returns jsonb
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
@@ -192,6 +192,6 @@ declare contract jsonb;
 begin
   contract:=ops.scac_current_grant_contract();
   contract:=jsonb_set(contract,'{secdef_execute}',coalesce(contract->'secdef_execute','[]'::jsonb)||
-    '[{"grantee":"carr_writer","signature":"ops.read_home_inbox_v4()","grantable":false,"privilege":"execute","ingress_key":"db-function-acl:ops.read_home_inbox_v4():carr_writer:execute","ingress_kind":"db_function_acl","function_kind":"f","security_definer":true,"volatility":"s","parallel":"u","config":["search_path=pg_catalog, pg_temp"]},{"grantee":"carr_writer","signature":"ops.change_home_waiting(p_tenant text, p_key uuid, p_args jsonb)","grantable":false,"privilege":"execute","ingress_key":"db-function-acl:ops.change_home_waiting(p_tenant text, p_key uuid, p_args jsonb):carr_writer:execute","ingress_kind":"db_function_acl","function_kind":"f","security_definer":true,"volatility":"v","parallel":"u","config":["search_path=pg_catalog, pg_temp"]}]'::jsonb);
+    '[{"grantee":"carr_writer","signature":"ops.read_home_inbox_v5()","grantable":false,"privilege":"execute","ingress_key":"db-function-acl:ops.read_home_inbox_v5():carr_writer:execute","ingress_kind":"db_function_acl","function_kind":"f","security_definer":true,"volatility":"s","parallel":"u","config":["search_path=pg_catalog, pg_temp"]},{"grantee":"carr_writer","signature":"ops.change_home_waiting(p_tenant text, p_key uuid, p_args jsonb)","grantable":false,"privilege":"execute","ingress_key":"db-function-acl:ops.change_home_waiting(p_tenant text, p_key uuid, p_args jsonb):carr_writer:execute","ingress_kind":"db_function_acl","function_kind":"f","security_definer":true,"volatility":"v","parallel":"u","config":["search_path=pg_catalog, pg_temp"]}]'::jsonb);
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
 end $append_grant$;

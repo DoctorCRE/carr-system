@@ -1,12 +1,12 @@
 {
   "schema_version": "home-waiting.v1",
-  "read_verb": "read-home-inbox-v4",
+  "read_verb": "read-home-inbox-v5",
   "set_verb": "set-home-waiting",
   "clear_verb": "clear-home-waiting",
   "identity": "Explicit canonical party or actor UUID only. Never inferred from owner, hold date or advisory waiting_on role.",
   "display": "Resolve current party merge chains to the survivor. A deleted, missing or inactive identity has available=false and display_name=null. Unknown or cleared waiting_on is null.",
   "versions": "item_version is the Home item's base_version. base_version is its independent waiting_version, initially 0. Both must match. Waiting writes never alter item base_version or ownership.",
-  "audit": "Every set, replacement, clear and canonical completion records a durable receipt. Each explicit command requires a UUID idempotency_key, nonblank reason and 1-20 nonblank evidence references. Exact retries replay the historical receipt; read v4 for current identity.",
+  "audit": "Every set, replacement, clear and canonical completion records a durable receipt. Each explicit command requires a UUID idempotency_key, nonblank reason and 1-20 nonblank evidence references. Exact retries replay the historical receipt; read v5 for current identity.",
   "completion": "Completion clears the relationship and increments its version in the canonical write transaction. Reopening work does not restore an old waiting identity. A completed item refuses a new wait.",
   "tenancy": "The existing Home and canonical party/actor store belongs to carr-internal. A foreign tenant refuses before identity resolution or replay.",
   "errors": ["invalid_waiting_command", "invalid_waiting_identity", "inbox_item_not_found", "inbox_item_completed", "version_conflict", "key_reuse"]
