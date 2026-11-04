@@ -824,6 +824,18 @@
       "reason": "WR586.S2.J4 synthetic PostgreSQL acceptance fixture. The historical blob at 8a584e5b2a4600c677c0568cb9fb5b980a4ae62d contains an invented address for a public-display assertion, not record-layer or contact data. The current fixture uses an explicit synthetic label. Qualification binds only this path, historical blob and detector."
     },
     {
+      "path": "mcp-server/src/home-waiting.ts",
+      "sha256": "39c106c1090c57733b00db04ab2814b536910253475689743bb431aa7dbb567e",
+      "rule": "pii-phone",
+      "reason": "Historical WR617.S15.J1 blob contains the numeric signed-integer version bound, not a phone number. The subsequent commit expresses the bound without a phone-shaped literal; this exact-blob exception preserves the no-rebase, no-force-push rule."
+    },
+    {
+      "path": "migrations/1143_home_waiting.sql",
+      "sha256": "46319af20960ee85a5753a53173bcd956314555091db5ccd9f106a4a59337ad3",
+      "rule": "pii-phone",
+      "reason": "Historical WR617.S15.J1 blob contains the numeric signed-integer version bound, not a phone number. The subsequent commit expresses the bound without a phone-shaped literal; this exact-blob exception preserves the no-rebase, no-force-push rule."
+    },
+    {
       "path": "lib/studio_runtime_auto_refresh.py",
       "sha256": "7bbb5079f7ee2e3c898f03bd671bd97b949b190fe7236ac4c8b7f720653eb342",
       "rule": "client-data",
