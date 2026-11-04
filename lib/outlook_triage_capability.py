@@ -1,5 +1,13 @@
 """Pure executor qualification. This module has no transport or runtime caller."""
 
+from enum import Enum
+
+
+class MoveEligibility(Enum):
+    ANY_READ_STATE = "any_read_state"
+    READ_ONLY = "read_only"
+
+
 REQUIRED_EVIDENCE = frozenset({
     "employer_permission", "mailbox_binding", "stable_identity",
     "same_mailbox_destination", "preserve_read_state", "routing_equivalence",
@@ -12,11 +20,15 @@ def select_candidate(contract: dict, candidate_id: str) -> str:
     if contract.get("schema") != "outlook-triage-executor-contract/v1":
         raise ValueError("unsupported_contract")
     policy = contract.get("read_state_policy", {})
-    required_read = policy.get("require_read_before_move")
-    if type(required_read) is not bool or policy.get("preserve_read_state") is not True:
+    if (not isinstance(policy, dict)
+            or set(policy) != {"source_decision", "preserve_read_state", "move_eligibility"}
+            or policy.get("preserve_read_state") is not True):
         raise ValueError("invalid_read_policy")
-    if policy.get("read_condition") != ("required" if required_read else "not_required"):
-        raise ValueError("inconsistent_read_policy")
+    try:
+        eligibility = MoveEligibility(policy["move_eligibility"])
+    except ValueError:
+        raise ValueError("invalid_read_policy") from None
+    required_read = eligibility is MoveEligibility.READ_ONLY
     matches = [item for item in contract.get("candidates", []) if item.get("id") == candidate_id]
     if len(matches) != 1:
         raise ValueError("unknown_or_duplicate_candidate")

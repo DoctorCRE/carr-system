@@ -117,8 +117,17 @@ class ExecutorContractTests(unittest.TestCase):
     def test_lifecycle_chart_matches_future_contract(self):
         lifecycle = self.contract["lifecycle"]
         chart = (ROOT / "spec/outlook/triage-executor-lifecycle.mmd").read_text()
-        edges = re.findall(r"^\s*(\w+) --> (\w+): (\w+)\s*$", chart, re.MULTILINE)
-        self.assertCountEqual(edges, map(tuple, lifecycle["transitions"]))
+        edges = re.findall(r"^\s*(\w+) --> (\w+): ([^\n]+)$", chart, re.MULTILINE)
+        labels = {
+            "all_required_evidence": "Sanctioned and every required proof present",
+            "prohibited": "Interface prohibited",
+            "disable_or_policy_change": "Operator disables or policy changes",
+            "evidence_invalidated": "Evidence invalidated",
+            "reverify_requested": "Reverification requested",
+            "selection_attempt": "Selection attempted",
+        }
+        self.assertCountEqual(edges, [(source, target, labels[event])
+                                     for source, target, event in lifecycle["transitions"]])
         self.assertEqual(set(lifecycle["states"]), {state for edge in edges for state in edge[:2]})
         self.assertIn("Future lifecycle specification", lifecycle["scope"])
         self.assertIn("Future lifecycle specification", chart)

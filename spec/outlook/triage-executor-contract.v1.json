@@ -11,10 +11,8 @@
   },
   "read_state_policy": {
     "source_decision": "fba2c07d",
-    "unread_may_move": true,
     "preserve_read_state": true,
-    "read_condition": "not_required",
-    "require_read_before_move": false
+    "move_eligibility": "any_read_state"
   },
   "open_fact": {
     "id": "employer_permitted_interface",
@@ -174,7 +172,7 @@
       "max_enabled_rule_bytes": 262144,
       "configurable_min_bytes": 32768,
       "max_rule_count": null,
-      "note": "No fixed count ceiling. Enabled-rule byte usage controls capacity; migrated mailboxes may have a lower quota. Manifest JSON byte size is not server rule storage usage."
+      "note": "No fixed count ceiling. Enabled-rule byte usage controls capacity; mailbox quotas can be configured below the maximum. Manifest JSON byte size is not server rule storage usage."
     },
     "maintenance": "Proposed CARR-generated reviewable manifest and diff, applied through Outlook Settings > Rules at low frequency by Joe or a separately authorized UI workflow. Compare ordered conditions, exceptions, stop-processing and exact destinations on readback. No Graph, EWS, PowerShell or connector calls from CARR. This slice generates no importable rules file.",
     "import_export": "Microsoft documents .rwz import/export only for classic Outlook. Do not promise new Outlook for Mac can import a generated file.",
@@ -183,6 +181,7 @@
     "timing": "Arrival rules run at delivery. They do not preserve the evening schedule, global 150-move run cap, fresh relationship lookups or automatic stale-rule shutdown. These are unresolved design differences, not waived by unread permission."
   },
   "lifecycle": {
+    "scope": "Future lifecycle specification. This slice implements snapshot qualification only, not persisted transitions. Tests check chart parity and selection at each edge endpoint.",
     "states": [
       "unverified",
       "verified",
