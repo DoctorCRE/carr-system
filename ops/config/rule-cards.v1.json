@@ -2177,57 +2177,6 @@
       }
     },
     {
-      "id": "R08",
-      "title": "Copilot for Microsoft-native work",
-      "wording": "When the task is Outlook triage, calendar, or Teams summaries, recommend Copilot as the executor; Claude handles all other pipeline work.",
-      "word_count": 21,
-      "placement": "PROMPT",
-      "merged_from_drafts": [
-        "G03"
-      ],
-      "source_rule_ids": [
-        "8aefcdce"
-      ],
-      "acknowledgement": "Before acting, answer one line: applies yes/no; action or reason.",
-      "scope": "shared",
-      "delivery_priority": 40,
-      "triggers": {
-        "matchers": [
-          {
-            "event": "UserPromptSubmit",
-            "prompt_regex": "(?i)outlook|\\bteams\\b|copilot|calendar|inbox"
-          }
-        ]
-      },
-      "fixtures": {
-        "positive": {
-          "event": {
-            "hook_event_name": "UserPromptSubmit",
-            "cwd": "/Users/booko/carr-system",
-            "prompt": "triage my outlook"
-          },
-          "expected_match": true
-        },
-        "negative": {
-          "event": {
-            "hook_event_name": "UserPromptSubmit",
-            "cwd": "/Users/booko/carr-system",
-            "prompt": "find new dental leads in pensacola"
-          },
-          "expected_match": false
-        },
-        "example_prompts": [
-          "triage my outlook",
-          "sum up the teams call from this am",
-          "who should clean up my calendar"
-        ],
-        "negative_prompt": "find new dental leads in pensacola"
-      },
-      "notes": [
-        "Drafter-added clauses (local-store mail reads, Model Room routing) are not in source 8aefcdce and were removed."
-      ]
-    },
-    {
       "id": "R09",
       "title": "Pipeline before polish; close before open",
       "wording": "When choosing what to work on, put prospecting and pipeline work ahead of low-impact polish. When Joe opens a substantial new build, offer once, in one line, to close his oldest open decision first.",

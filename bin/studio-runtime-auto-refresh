@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Reconcile the Studio runtime to the successful production release."""
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.studio_runtime_auto_refresh import main
+
+raise SystemExit(main())

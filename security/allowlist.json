@@ -822,6 +822,13 @@
       "sha256": "a0825123cd612a8bd22b24ef66192b018f0a01ab2c34df31204d7a70dff416b6",
       "rule": "pii-address",
       "reason": "WR586.S2.J4 synthetic PostgreSQL acceptance fixture. The historical blob at 8a584e5b2a4600c677c0568cb9fb5b980a4ae62d contains an invented address for a public-display assertion, not record-layer or contact data. The current fixture uses an explicit synthetic label. Qualification binds only this path, historical blob and detector."
+    },
+    {
+      "path": "lib/studio_runtime_auto_refresh.py",
+      "sha256": "7bbb5079f7ee2e3c898f03bd671bd97b949b190fe7236ac4c8b7f720653eb342",
+      "rule": "client-data",
+      "value_sha256": "f0be891b1f61d8c54f697ce4bb0d122db2b81e8c530d757807d1b083dbad5929",
+      "reason": "WR634.S1.J87 reviewed source-only Git fetch, remote-main revision readback and ancestry check. This token window contains code and Git ref names, no client record. Bound to exact file bytes and matched value hash."
     }
   ]
 }
