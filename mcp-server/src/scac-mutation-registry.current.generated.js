@@ -466,6 +466,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "begin-deal-document-upload": {
+    "ingress_key": "mcp-tool:begin-deal-document-upload",
+    "source_locator": "mcp-server/src/deal-document-upload.ts",
+    "schema_digest": "7acf681caf0b62425d692a528123a128529b704d5916a3cfe99401b333bbb43a",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "bind-rule-context-contract": {
     "ingress_key": "mcp-tool:bind-rule-context-contract",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
@@ -497,6 +507,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "delegates_to": [
       "*registered_operation"
     ]
+  },
+  "cancel-deal-document-upload": {
+    "ingress_key": "mcp-tool:cancel-deal-document-upload",
+    "source_locator": "mcp-server/src/deal-document-upload.ts",
+    "schema_digest": "86c85c61afcdba3850e0fd682c30d7b775d13707d1b334ee2f893c83598c0f20",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
   },
   "cancel-pending-deal": {
     "ingress_key": "mcp-tool:cancel-pending-deal",
@@ -2230,6 +2250,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "fddc80850e615ad4b807d4418efb9d238855d357df22f922327a06e8db08ec27",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-deal-document-upload": {
+    "ingress_key": "mcp-tool:read-deal-document-upload",
+    "source_locator": "mcp-server/src/deal-document-upload.ts",
+    "schema_digest": "4a347f147ac4467c738b318df1bd2939b8d9b98427d85a6e74a3c6a5b5e79ee3",
+    "write": false,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []

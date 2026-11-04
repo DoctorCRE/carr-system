@@ -1,0 +1,18 @@
+stateDiagram-v2
+  [*] --> reserved: Partner reserves selected files
+  reserved --> receiving: Partner sends bytes
+  receiving --> staged: Verified bytes stored and receipt committed
+  receiving --> rejected: Byte count, hash or format differs
+  receiving --> retryable_unknown: Storage or receipt result uncertain
+  retryable_unknown --> staged: Readback verifies object
+  reserved --> cancelled: Partner cancels
+  staged --> cancelled: Temporary object deleted
+  rejected --> cancelled: Partner cancels
+  reserved --> expired: One day passes
+  staged --> expired: One day passes
+  retryable_unknown --> expired: One day passes
+  receiving --> expired: One day passes
+  rejected --> expired: One day passes
+  %% never Report filed from byte staging
+  %% never Accept bytes for another actor, session, tenant or deal
+  %% never Refund quota while an uncertain object can still exist

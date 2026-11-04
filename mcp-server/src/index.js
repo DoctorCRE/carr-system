@@ -1,5 +1,6 @@
 // Serve the CARR MCP Worker and its authentication routes.
 import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
+import { executeRegisteredTool } from "./tools.js";
 
 // CARR MCP server — Worker entrypoint.
 //
@@ -94,6 +95,7 @@ import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-p
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,
          serveReviewRequest, unattendedActorForToken,
          hermesActorForTokenMaps, hermesCosActorForToken } from "./identity.js";
+import { createDealDocumentHandler } from "./deal-document-web.ts";
 import { pipelineChanges } from "./dealroom.ts";
 import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
@@ -629,6 +631,9 @@ const program6RoutineController = createProgram6RoutineController({ authorizeAct
 const tourInternalHandler = createTourInternalWebHandler(createTourRuntimeAdapters());
 const reportsHandler = createReportsWebHandler(createReportsRuntimeAdapters());
 const dealroomHandler = createDealroomHandler({
+  documentUploadHandler: (request, env, actor, sessionActive) => createDealDocumentHandler({
+    transaction: captureWriter(env), bucket: env.carr_documents, callTool: executeRegisteredTool,
+  })(request, actor, sessionActive),
   phoneCallHandler: (request, env, actor) => phoneCallHandler(env).fetch(request, env, actor),
   mcpHandler: (request, env, ctx, actor, sessionKey) => dispatch(request, env, ctx, actor, sessionKey),
   pipelineHandler: (request, env, _ctx, actor) => pipelineApi(request, env, actor),

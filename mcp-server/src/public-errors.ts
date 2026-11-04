@@ -15,6 +15,16 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["upload_denied", "Use the initiating partner browser session and a visible deal."],
+  ["upload_conflict", "Read the retained receipt. The upload metadata or state conflicts with this request."],
+  ["upload_expired", "The temporary upload expired. Reserve a new upload."],
+  ["upload_size_refused", "Send exactly the reserved bytes, up to 25 MiB per action."],
+  ["upload_format_refused", "Use a matching PDF, JPEG, PNG, HEIC or HEIF filename, MIME and byte signature."],
+  ["upload_hash_mismatch", "Send the bytes matching the reserved SHA-256."],
+  ["upload_rate_limited", "The upload action, stream or hourly reservation limit was reached."],
+  ["upload_storage_full", "Temporary document staging has reached its reserved capacity."],
+  ["upload_storage_unavailable", "Temporary document storage is unavailable. Read the retained receipt before retrying."],
+
   ["research_evidence_required", "Research is required before creating this person or assigning a business role. Supply the documented research_evidence."],
   ["research_source_invalid", "Each research source needs an HTTPS URL and a valid non-future observed_at timestamp."],
   ["research_evidence_incomplete", "Link every required research field to source indexes and supply discrepancies, including an empty array when none exist."],

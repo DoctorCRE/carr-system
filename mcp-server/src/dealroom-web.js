@@ -34,6 +34,7 @@ import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { bearerCredential } from "./bearer.ts";
 import { prepareStagingLoopFixtures } from "./staging-loop-fixtures.js";
+import { UPLOAD_PREFIX, uploadSessionDigest } from "./deal-document-upload.ts";
 import { PHONE_CALL_PREFIX, phoneCallByteLimit } from "./phone-call-sessions.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
@@ -133,7 +134,7 @@ const BUSINESS_ERROR_STATUS = {
 // bare code, so no driver message, statement text or schema name can reach a
 // browser through this door.
 const BUSINESS_DEPENDENCY_CLASSES = new Set(["read_access", "read_source", "read_credential"]);
-const DEALROOM_PATH_PREFIXES = ["/auth/", "/api/system-work/", "/api/room/", "/api/tours/", "/tours/", COMMAND_CENTER_API_PREFIX, "/css/", "/js/", "/data/", "/icons/"];
+const DEALROOM_PATH_PREFIXES = [UPLOAD_PREFIX,"/auth/", "/api/system-work/", "/api/room/", "/api/tours/", "/tours/", COMMAND_CENTER_API_PREFIX, "/css/", "/js/", "/data/", "/icons/"];
 const LEGACY_BROWSER_REDIRECT_PATHS = new Set([
   "/", "/index.html", "/deals", "/leads", "/leads.html", "/workspace", "/workspace.html",
   "/system-work.html", "/room.html", "/queue.html", "/auth/login", "/auth/reauth",
@@ -1096,6 +1097,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
           url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
+          url.pathname !== UPLOAD_PREFIX && !url.pathname.startsWith(UPLOAD_PREFIX + '/') &&
           url.pathname !== PHONE_CALL_PREFIX && !url.pathname.startsWith(PHONE_CALL_PREFIX + '/') &&
           !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
       // Home, Clients and Vendors are one workspace surface and share its flag.
@@ -1125,6 +1127,7 @@ async function handleRequest(request, env, ctx, dependencies) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || APP_FACT_ROUTES.has(url.pathname) ||
+            url.pathname === UPLOAD_PREFIX || url.pathname.startsWith(UPLOAD_PREFIX + '/') ||
             url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/') ||
             isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
@@ -1141,6 +1144,19 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname === "/auth/session") {
         response = request.method === "GET" ? await systemWorkSession(session, dependencies)
           : json({ error: "method_not_allowed" }, 405);
+      } else if (url.pathname === UPLOAD_PREFIX || url.pathname.startsWith(UPLOAD_PREFIX + '/')) {
+        if(request.method!=='GET') {
+          if(!sameOrigin(request,env) || request.headers.get('sec-fetch-site')!=='same-origin' ||
+             !equalStrings(request.headers.get('x-carr-csrf'),session.csrfToken)) return json({error:'forbidden'},403);
+        }
+        const budgetRefused=await verbRequestBudgetRefusal(env,session.actor,session.key);
+        if(budgetRefused) return budgetRefused;
+        const uploadActor={...session.actor,documentUploadSession:await uploadSessionDigest(session.key)};
+        response=dependencies.documentUploadHandler
+          ? await dependencies.documentUploadHandler(request,env,uploadActor,async()=> {
+            const current=await sessionFor(request,env,dependencies);
+            return !!current && current.key===session.key && current.actor.slug===session.actor.slug;
+          }) : json({error:'upload_storage_unavailable'},503);
       } else if (url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/')) {
         if (!['GET', 'POST', 'PUT'].includes(request.method)) return json({ error: 'method_not_allowed' }, 405);
         if (request.method !== 'GET') {
@@ -1180,6 +1196,9 @@ async function handleRequest(request, env, ctx, dependencies) {
         if (request.headers.has("x-carr-csrf") &&
             !equalStrings(request.headers.get("x-carr-csrf"), session.csrfToken)) {
           return json({ error: "forbidden", reason: "csrf_mismatch" }, 403);
+        }
+        if(equalStrings(request.headers.get('x-carr-csrf'),session.csrfToken) && request.headers.get('sec-fetch-site')==='same-origin') {
+          session.actor.documentUploadSession=await uploadSessionDigest(session.key);
         }
         response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }

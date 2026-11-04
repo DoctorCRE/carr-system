@@ -1,0 +1,85 @@
+{
+  "schema_version": "deal-document-upload.v1",
+  "reservation": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "idempotency_key": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "action_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "deal_id": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "filename": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255
+      },
+      "declared_mime": {
+        "enum": [
+          "application/pdf",
+          "image/jpeg",
+          "image/png",
+          "image/heic",
+          "image/heif"
+        ]
+      },
+      "bytes": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 26214400
+      },
+      "sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "required": [
+      "idempotency_key",
+      "action_id",
+      "deal_id",
+      "filename",
+      "declared_mime",
+      "bytes",
+      "sha256"
+    ]
+  },
+  "transport": {
+    "begin": "POST /api/v1/deal-documents/uploads",
+    "bytes": "POST /api/v1/deal-documents/uploads/{upload_id}/bytes",
+    "read": "GET /api/v1/deal-documents/uploads/{upload_id}",
+    "cancel": "POST /api/v1/deal-documents/uploads/{upload_id}/cancel",
+    "auth": "current initiating partner session, same-origin and x-carr-csrf on writes",
+    "body": "application/octet-stream for bytes; application/json for begin",
+    "cancel_key": "Idempotency-Key UUID"
+  },
+  "states": [
+    "reserved",
+    "receiving",
+    "staged",
+    "retryable_unknown",
+    "rejected",
+    "cancelled",
+    "expired"
+  ],
+  "policy": {
+    "file_bytes": 26214400,
+    "action_bytes": 26214400,
+    "action_files": 3,
+    "reserved_staging_bytes": 104857600,
+    "reservations_per_actor_hour": 10,
+    "streams_per_actor": 2,
+    "ttl_seconds": 86400,
+    "r2_attempts": 2,
+    "breaker_failures": 3,
+    "breaker_seconds": 300
+  },
+  "filing": false,
+  "uncertain": "Unknown or receiving outcomes remain charged. Unknown objects reconcile by exact stored hash and byte count; absent objects wait for P6b expiry cleanup. Expiry never refunds potentially stored bytes."
+}

@@ -90,6 +90,45 @@ function identityHandler(email, clock) {
   return createDealroomHandler(identityOverrides(email, clock));
 }
 
+test('partner document bytes require current session, same origin and CSRF', async()=> {
+  const environment=env();let calls=0;
+  environment.VERB_REQUEST_BUDGET_HUMAN={limit:async()=>({success:true})};
+  environment.VERB_REQUEST_BUDGET={idFromName:n=>n,get:()=>({fetch:async()=>Response.json({allowed:true})})};
+  const handler=createDealroomHandler({...identityOverrides(TEST_PARTNER_EMAIL),
+    documentUploadHandler:async(_request,_env,actor,active)=> {
+      calls++;assert.equal(actor.slug,'joe');assert.match(actor.documentUploadSession,/^[0-9a-f]{64}$/);
+      assert.equal(await active(),true);
+      for(const key of environment.OAUTH_KV.values.keys()) if(key.startsWith('dealroom_session:')) await environment.OAUTH_KV.delete(key);
+      assert.equal(await active(),false);
+      return Response.json({state:'staged'});
+    }});
+  const url=`https://${PRODUCTION_HOST}/api/v1/deal-documents/uploads/10000000-0000-0000-0000-000000000001/bytes`;
+  assert.equal(isDealroomRequest(new Request(url),environment),true);
+  assert.equal((await handler.fetch(new Request(url,{method:'POST'}),environment,{})).status,401);
+  const cookie=namedCookie(await login(handler,environment,TEST_PARTNER_EMAIL),'__Host-dealroom_session');
+  const session=await(await handler.fetch(new Request(`https://${PRODUCTION_HOST}/auth/session`,{headers:{cookie}}),environment,{})).json();
+  const send=extra=>handler.fetch(new Request(url,{method:'POST',headers:{cookie,origin:`https://${PRODUCTION_HOST}`,
+    'sec-fetch-site':'same-origin','content-type':'application/octet-stream',...extra},body:new Uint8Array(12)}),environment,{});
+  assert.equal((await send({})).status,403);
+  assert.equal((await send({'x-carr-csrf':session.csrf_token,origin:'https://evil.example.test'})).status,403);
+  assert.equal((await send({'x-carr-csrf':session.csrf_token,'sec-fetch-site':'cross-site'})).status,403);
+  assert.equal(calls,0);
+  assert.equal((await send({'x-carr-csrf':session.csrf_token})).status,200);
+  assert.equal((await send({'x-carr-csrf':session.csrf_token})).status,401);
+  assert.equal(calls,1);
+});
+
+test('upload metadata MCP context requires both CSRF and same-origin fetch metadata',async()=> {
+ const environment=env();
+ const handler=createDealroomHandler({...identityOverrides(TEST_PARTNER_EMAIL),mcpHandler:async(_r,_e,_c,actor)=>Response.json({bound:!!actor.documentUploadSession})});
+ const cookie=namedCookie(await login(handler,environment,TEST_PARTNER_EMAIL),'__Host-dealroom_session');
+ const bootstrap=await(await handler.fetch(new Request(`https://${PRODUCTION_HOST}/auth/session`,{headers:{cookie}}),environment,{})).json();
+ const send=extra=>handler.fetch(new Request(`https://${PRODUCTION_HOST}/mcp`,{method:'POST',headers:{cookie,origin:`https://${PRODUCTION_HOST}`,...extra},body:'{}'}),environment,{});
+ assert.equal((await(await send({})).json()).bound,false);
+ assert.equal((await(await send({'x-carr-csrf':bootstrap.csrf_token})).json()).bound,false);
+ assert.equal((await(await send({'x-carr-csrf':bootstrap.csrf_token,'sec-fetch-site':'same-origin'})).json()).bound,true);
+});
+
 test("comparison app routes require authentication and CSRF and name a blocked field", async () => {
   const environment = env();
   environment.WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true";
