@@ -1884,7 +1884,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "outbox-for-sender": {
     "ingress_key": "mcp-tool:outbox-for-sender",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "schema_digest": "3aa09e334ae783cfb56435758c51720cbd439f3579efca90945c95298c6b2bee",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

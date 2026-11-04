@@ -54,10 +54,10 @@
     ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
     "ops/ci.sh", "ops/ci-gates.py",
     "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
-    "ops/ci_unit_shards.py", "ops/node_test_summary.py",
+    "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",
     "ops/ci.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
     "ops/ci-migration.py", "ops/ci-migration-gates.py", "ops/ci-node-file.mjs",
     "ops/ci-apt.py", "ops/ci-postgres.sh", "ops/ci-zsh.sh", "ops/production-proof-plan.py",
-    "contracts/production-proof-plan.v1.json", "proofs/requirements/**"
+    "contracts/production-proof-plan.v1.json", "proofs/requirements/**", "ops/app-proof-observe.py"
   ]
 }

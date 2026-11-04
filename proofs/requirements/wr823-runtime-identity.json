@@ -1,0 +1,23 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S2-runtime-identity",
+  "targets": ["studio"],
+  "assertions": [
+    {
+      "id": "installed-intake-exact-runtime-receipt",
+      "predicate": "After normal deployment and Studio installation, independently verify the exact full installed runtime SHA, helper pin and rendered LaunchAgents. Verify the repaired merge belongs to the installed immutable Git ancestry. Supply one actual successful outlook-intake run receipt to studio-run-receipt.v1 with runtime_sha equal to that installed full SHA and run.mail_ids minimum 1. Retain the scheduler execution ID, completion time and local evidence reference. The proof coordinator may execute the already authorized bounded non-send intake immediately; no wait for the natural schedule or new human authorization is required. No synthetic run counts as production proof. The observer is diagnostic and does not establish trusted ingestion, freshness, signature extraction, calendar cancellation correctness or automatic filing.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "OBSERVED only for a successful receipt with exact installed full identity and an integer count meeting the predicate. Missing, short, wrong, failed or skipped receipt is BLOCKED. Source checks alone leave production unproven. Installation and execution evidence must be independently verified by reserved J3.",
+      "input_class": "one supplied actual authorized outlook-intake receipt, run.mail_ids minimum 1; observer only reads the receipt and never launches jobs, installs runtimes or sends mail",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}
