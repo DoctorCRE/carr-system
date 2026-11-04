@@ -1,0 +1,53 @@
+---
+title: "Bulk Home dispositions and exact undo"
+---
+stateDiagram-v2
+  s0: auto-settled
+  s1: done
+  s2: override
+  s3: set-aside
+  s4: snoozed
+  s5: working
+  s6: Undone to auto-settled
+  s7: Undone to done
+  s8: Undone to override
+  s9: Undone to set-aside
+  s10: Undone to snoozed
+  s11: Undone to working
+  [*] --> s0
+  [*] --> s1
+  [*] --> s2
+  [*] --> s3
+  [*] --> s4
+  [*] --> s5
+  s0 --> s4: snooze or settle selected items
+  s1 --> s3: snooze or settle selected items
+  s1 --> s4: snooze or settle selected items
+  s2 --> s3: snooze or settle selected items
+  s2 --> s4: snooze or settle selected items
+  s3 --> s4: snooze or settle selected items or undo one applied item
+  s4 --> s3: snooze or settle selected items or undo one applied item
+  s5 --> s3: snooze or settle selected items
+  s5 --> s4: snooze or settle selected items
+  s0 --> s6: undo the whole batch
+  s1 --> s7: undo the whole batch
+  s2 --> s8: undo the whole batch
+  s3 --> s1: undo one applied item
+  s3 --> s7: undo the whole batch
+  s3 --> s2: undo one applied item
+  s3 --> s8: undo the whole batch
+  s3 --> s10: undo the whole batch
+  s3 --> s5: undo one applied item
+  s3 --> s11: undo the whole batch
+  s3 --> s9: undo the whole batch
+  s4 --> s10: undo the whole batch
+  s4 --> s0: undo one applied item
+  s4 --> s6: undo the whole batch
+  s4 --> s1: undo one applied item
+  s4 --> s7: undo the whole batch
+  s4 --> s2: undo one applied item
+  s4 --> s8: undo the whole batch
+  s4 --> s9: undo the whole batch
+  s4 --> s5: undo one applied item
+  s4 --> s11: undo the whole batch
+  s5 --> s11: undo the whole batch
