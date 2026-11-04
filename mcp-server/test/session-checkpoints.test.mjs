@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import pg from 'pg';
 export const binding={provider:'codex',provider_instance:'synthetic',harness:'app-server',environment:'fixture',native_session_id:'native-1',role:'t3-worker',thread_id:'thread',task_id:'task',parent_destination:'parent',card:'WR826.S3.J2',worktree:'/synthetic',repository_revision:'synthetic-revision',lease_refs:['lease']};
 const checkpoint=Object.fromEntries(['acceptance','corrections','decisions','evidence_refs','active_operations','exact_jobs','destinations','watches','links','revisions','cards','leases'].map(k=>[k,[]]));
 checkpoint.next_action='synthetic recovery';
@@ -57,6 +58,30 @@ test('real PostgreSQL custody, CAS, exact replay, identity isolation and termina
  assert.deepEqual((await read()).record,archived.record);
  await assert.rejects(write({...first,idempotency_key:randomUUID(),envelope:{...envelope,expected_generation:2,cursor:2}}),e=>e.payload.error==='checkpoint_archived');
  assert.deepEqual(await write(first),result);
+
+ await t.test('aged receipts refuse changed payloads and exact expired retries',async()=>{
+  const scoped={...actor,session_checkpoint_authority:{...authority,authority_session:randomUUID()}};
+  const oldest={...first,idempotency_key:randomUUID()};
+  await call('write-session-checkpoint-v1',oldest,scoped);
+  for(let n=1;n<=9;n++) await call('write-session-checkpoint-v1',{
+   binding,idempotency_key:randomUUID(),envelope:{...envelope,cursor:n+1,expected_generation:n},
+  },scoped);
+  await assert.rejects(call('write-session-checkpoint-v1',oldest,scoped),e=>e.payload.error==='checkpoint_replay_expired');
+  await assert.rejects(call('write-session-checkpoint-v1',{...oldest,envelope:{...envelope,checkpoint:{...checkpoint,next_action:'changed'}}},scoped),e=>e.payload.error==='changed_checkpoint_replay');
+ });
+ await t.test('two concurrent connections admit only one expected generation',async()=>{
+  const second=new pg.Client(c.connectionParameters);
+  await second.connect();
+  try{
+   await second.query("select set_config('carr.acting_actor_slug','joe-local',false)");
+   await c.query("select set_config('carr.acting_actor_slug','joe-local',false)");
+   const scoped={...actor,session_checkpoint_authority:{...authority,authority_session:randomUUID()}};
+   const operation='write-session-checkpoint-v1';
+   const results=await Promise.allSettled([c,second].map(connection=>tools[operation].handler(connection,scoped,{...first,idempotency_key:randomUUID()})));
+   assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+   assert.equal(results.find(r=>r.status==='rejected').reason.payload.error,'checkpoint_cas_conflict');
+  }finally{await second.end();}
+ });
  await t.test('pinned bridge writes through the same real PG contract', {skip:!process.env.CARR_CONTINUITY_ARTIFACT_ROOT}, async()=>{
   const root=process.env.CARR_CONTINUITY_ARTIFACT_ROOT;
   const event=JSON.parse(readFileSync(root+'/tests/fixtures/session-continuity/codex-appserver.json','utf8')).envelope;
