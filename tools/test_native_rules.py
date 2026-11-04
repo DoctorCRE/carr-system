@@ -254,10 +254,15 @@ class NativeRulesTests(unittest.TestCase):
             self.assertFalse((root / ".claude/rules/new.md").exists())
             self.assertEqual(path.read_text(), "foreign")
 
+    def test_retired_copilot_rule_has_no_rendered_home(self):
+        outputs, report = rules.render(self.snapshot, rules.ROOT)
+        self.assertNotIn('8aefcdce-8c37-40a2-85bc-3c744db7f34e', report['homes'])
+        self.assertFalse(any('### 8aefcdce' in text for text in outputs.values()))
+
     def test_exactly_one_primary_home(self):
         rows = rules.placements(self.snapshot)
-        self.assertEqual(len(rows), 222)
-        self.assertEqual(len({row["id"] for row in rows}), 222)
+        self.assertEqual(len(rows), 221)
+        self.assertEqual(len({row["id"] for row in rows}), 221)
 
     def test_duplicate_and_missing_fail(self):
         data = copy.deepcopy(self.snapshot)
@@ -289,7 +294,7 @@ class NativeRulesTests(unittest.TestCase):
             skill = outputs[".claude/skills/carr-before-send/SKILL.md"]
             self.assertIn("email, Slack", skill)
             self.assertIn("Exempt: single drafts Joe reviews line-by-line.", skill)
-            self.assertEqual(len(report["homes"]), 222)
+            self.assertEqual(len(report["homes"]), 221)
             self.assertTrue(report["unmatched_globs"])
 
     def test_regeneration_is_idempotent_and_preserves_native_names(self):

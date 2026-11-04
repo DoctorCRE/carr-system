@@ -15,7 +15,7 @@ import time
 
 from lib.outlook_settings import load_settings
 from lib.scheduled_jobs import disabled, listed
-from git_env import scrubbed_env
+from ops.git_env import scrubbed_env
 
 LABELS = tuple('com.carr.outlook-' + service for service in ('intake', 'triage', 'outbox'))
 
@@ -54,8 +54,9 @@ class Host:
     clock = staticmethod(time.monotonic)
     sleep = staticmethod(time.sleep)
 
-    def __init__(self, source, sha, settings):
+    def __init__(self, source, sha, settings, *, released=False):
         self.source, self.sha, self.settings = source.resolve(), sha, settings
+        self.released = released
         self.runtime = settings.repo
         self.domain = f'gui/{os.getuid()}'
         self.journal = self.runtime.parent / ('.' + self.runtime.name + '-refresh')
@@ -81,10 +82,16 @@ class Host:
         if not remote:
             raise ValueError('remote main SHA is unavailable')
         remote = remote[0]
-        if (self.git(self.source, 'symbolic-ref', '--short', 'HEAD') != 'main'
-                or self.git(self.source, 'rev-parse', 'HEAD') != self.sha or remote != self.sha
-                or self.git(self.source, 'status', '--porcelain', '--untracked-files=no')):
+        if self.released:
+            from lib.studio_runtime_auto_refresh import released_sha
+            if released_sha() != self.sha:
+                raise ValueError('requested SHA is not the verified production release')
+            self.git(self.source, 'merge-base', '--is-ancestor', self.sha, remote)
+        elif self.git(self.source, 'symbolic-ref', '--short', 'HEAD') != 'main' or remote != self.sha:
             raise ValueError('source must be clean main at the requested current remote main SHA')
+        if (self.git(self.source, 'rev-parse', 'HEAD') != self.sha
+                or self.git(self.source, 'status', '--porcelain', '--untracked-files=no')):
+            raise ValueError('source must be clean at the requested SHA')
         if self.git(self.runtime, 'status', '--porcelain', '--untracked-files=no'):
             raise ValueError('runtime must be clean')
         self.previous = self.git(self.runtime, 'rev-parse', 'HEAD')
@@ -261,11 +268,16 @@ def main():
                                      'Run from a clean main checkout with --sha FULL_MAIN_SHA, then repeat with --apply.')
     parser.add_argument('--sha', required=True)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--released', action='store_true', help='require a verified successful production release')
+    parser.add_argument('--source', type=Path, help='clean release checkout, only with --released')
     parser.add_argument('--timeout', type=float, default=300, help='maximum drain wait in seconds (default 300)')
     args = parser.parse_args()
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error('--timeout must be positive')
-    host = Host(Path(__file__).resolve().parents[1], args.sha, load_settings())
+    if args.source and not args.released:
+        parser.error('--source requires --released')
+    host = Host(args.source or Path(__file__).resolve().parents[1], args.sha, load_settings(),
+                released=args.released)
     try:
         if args.apply:
             lock_path = host.runtime.parent / ('.' + host.runtime.name + '-refresh.lock')

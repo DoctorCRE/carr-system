@@ -253,6 +253,15 @@ prose, the private folder and briefs.
   both the new `rule_id` and `retired_rule_ids`.
 - **Card wording lives on the rule** (D16). `ops/sync-core-rule-cards.py` renders
   `ops/config/rule-cards.v1.json` and the CLAUDE.md and AGENTS.md block **from the store**.
+  The store owns the complete card metadata in `rule.card`; `rule.statement`
+  owns wording (migration 1027). The checked-in JSON is the last reviewed
+  projection, not a replacement authority for missing store metadata.
+  `python3 ops/sync-core-rule-cards.py --from-store` refuses before writing
+  when metadata required by the hook is missing or a checked-in card disappears
+  without retirement receipts for every `source_rule_ids` entry. It reads
+  receipts through `find-rule` using the old card wording and matches source
+  IDs, retired status and receipt IDs. A search miss refuses conservatively;
+  omission alone never proves retirement. Reconcile the store before retrying.
 - **CLAUDE.md and AGENTS.md** hold only the generated core-card block and
   navigation pointers. Their hand-written sections (12 in CLAUDE.md
   counting sub-sections, 16 in AGENTS.md) are migrated line by line in S5

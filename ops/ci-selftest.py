@@ -1355,6 +1355,8 @@ def test_hosted_draft_lifecycle():
         wf = _hosted_workflow(filename)
         events = wf["on"]
         expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft", "ready_for_review"}
+        if filename == "ci.yml":
+            expected_actions.add("edited")
         check(f"{filename}: only intended PR lifecycle events schedule runs",
               set(events["pull_request"]["types"]) == expected_actions)
         check(f"{filename}: all non-PR full-suite triggers survive",
@@ -1395,6 +1397,7 @@ def test_hosted_draft_lifecycle():
                     (True, "opened", "a" * 40), (False, "ready_for_review", "a" * 40),
                     (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
                     (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
+                    (False, "edited", "a" * 40), (True, "edited", "a" * 40),
                     (False, "synchronize", "b" * 40)):
                 if action not in events["pull_request"]["types"]:
                     continue
