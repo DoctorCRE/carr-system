@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "carr-production-proof-plan.v1",
+  "description": "Admission only. Acceptance never attests execution or authorizes completion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "requirement_id", "targets", "assertions", "safety"],
+  "properties": {
+    "schema": {"enum": ["carr-production-proof-plan.v1"]},
+    "requirement_id": {"type": "string", "minLength": 3, "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]+$"},
+    "targets": {
+      "type": "array", "minItems": 1, "maxItems": 3,
+      "items": {"enum": ["worker", "app", "studio"]}
+    },
+    "assertions": {
+      "type": "array", "minItems": 1, "maxItems": 100,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "predicate", "runner", "expected_result", "input_class", "deadline_seconds"],
+        "properties": {
+          "id": {"type": "string", "minLength": 3},
+          "predicate": {"type": "string", "minLength": 12},
+          "runner": {"type": "string", "minLength": 3},
+          "expected_result": {"type": "string", "minLength": 8},
+          "input_class": {"type": "string", "minLength": 3},
+          "deadline_seconds": {"type": "integer", "minimum": 1, "maximum": 300}
+        }
+      }
+    },
+    "safety": {
+      "type": "object", "additionalProperties": false,
+      "required": ["read_only", "no_sends", "max_requests", "max_records", "max_runtime_seconds", "max_artifact_bytes"],
+      "properties": {
+        "read_only": {"enum": [true]},
+        "no_sends": {"enum": [true]},
+        "max_requests": {"type": "integer", "minimum": 1, "maximum": 100},
+        "max_records": {"type": "integer", "minimum": 1, "maximum": 1000},
+        "max_runtime_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+        "max_artifact_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576}
+      }
+    }
+  },
+  "x-runners": {
+    "worker-release-smoke.v1": {
+      "path": "ops/release-smoke.py",
+      "revision": "8bdabfe3275668cd10401a8e58244b953d3d2428",
+      "targets": ["worker"]
+    },
+    "studio-run-receipt.v1": {"path": "ops/studio-proof-observe.py", "revision": "e105804540f17afba50dd45f78b84b50698a3ffc", "targets": ["studio"]}
+  },
+  "x-required-targets": {"worker": ["mcp-server/**", "migrations/**"], "studio": ["lib/outlook*.py", "bin/install-outlook-*", "bin/refresh-outlook-runtime", "ops/launchd/com.carr.outlook-*.plist"]},
+  "x-non-product-paths": [
+    "docs/**", "test/**", "mcp-server/test/**", "README.md",
+    ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
+    "ops/ci.sh", "ops/ci-gates.py",
+    "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
+    "ops/ci_unit_shards.py", "ops/node_test_summary.py",
+    "ops/ci.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
+    "ops/ci-migration.py", "ops/ci-migration-gates.py", "ops/ci-node-file.mjs",
+    "ops/ci-apt.py", "ops/ci-postgres.sh", "ops/ci-zsh.sh", "ops/production-proof-plan.py",
+    "contracts/production-proof-plan.v1.json", "proofs/requirements/**"
+  ]
+}

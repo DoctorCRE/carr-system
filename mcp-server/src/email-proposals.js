@@ -376,7 +376,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             ![a.sender,...a.recipients].find(p => p.email === email)?.internal);
         if (!sameConversation && !subjectThread) fail('email_thread_not_continuous');
         const otherFiled = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at
-          from activity where kind in ('email_in','email_out') and deal_id is not null and deal_id<>$1
+          from activity where coalesce(email_context#>>'{lifecycle,state}','live')='live' and kind in ('email_in','email_out') and deal_id is not null and deal_id<>$1
             and email_context is not null and occurred_at<$2`, [prior.deal,current.occurred_at])).rows;
         if (otherFiled.map(row => evidence(row, people)).some(other =>
           a.conversation_id ? other.conversation_id === a.conversation_id : !other.conversation_id &&
@@ -479,7 +479,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       handler: async (c, actor) => {
         const owner = senderOwner(actor);
         const { rows } = await c.query(`select id as proposal_id,version,deal_id as deal,activity_id,
-            submitted_at,submitted_email from email_proposal where kind='reply_draft'
+            submitted_at,submitted_email from email_proposal where exists (select 1 from activity a where a.id=activity_id and coalesce(a.email_context#>>'{lifecycle,state}','live')='live') and kind='reply_draft'
           and status='approved_to_send' and owner=$1 order by submitted_at,id`, [owner]);
         return { schema_version: 'email-outbox.v1', owner,
           drafts: rows.map(({ submitted_email, ...row }) => ({ ...row, ...submitted_email })) };
@@ -532,6 +532,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             const identity = await lockEmailIdentity(c, owner, args.sender_account, args.sent_item_id);
             const existing = await capturedEmail(c, identity);
             if (existing) {
+              if (existing.email_context?.lifecycle?.state) fail('email_not_live');
               if (existing.kind !== 'email_out' || (existing.email_context?.send_id && existing.email_context.send_id !== row.id))
                 fail('email_identity_conflict');
               await c.query(`update activity set occurred_at=$2,actor_id=$3,deal_id=coalesce($4,deal_id),email_context=$5::jsonb,
@@ -666,7 +667,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (Object.keys(args).some(key => !['mode','cursor','idempotency_key'].includes(key))) fail('email_proposal_fields_invalid');
           const owner = senderOwner(actor);
           const rows = (await c.query(`select p.*,p.next_date::text as next_date from email_proposal p join activity a on a.id=p.activity_id
-            where p.status='pending' and (p.deferred_until is null or p.deferred_until<=now()) and p.created_at<=now()-interval '30 days'
+            where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and p.status='pending' and (p.deferred_until is null or p.deferred_until<=now()) and p.created_at<=now()-interval '30 days'
               and (a.email_source->>'mailbox_owner'=$1 or (a.email_source is null and a.actor_id=$2))
               and ($3::uuid is null or (p.created_at,p.id)>(select created_at,id from email_proposal where id=$3))
             order by p.created_at,p.id limit 201 for update of p skip locked`, [owner,actor.id,args.cursor ?? null])).rows;
@@ -780,6 +781,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       write: false,
       description: 'With mode=lead_proposals, return pending outlook-intake lead candidates only for the authenticated partner mailbox, with sender name, domain and address, stored structured reading, current deal/contact names, pool and party versions, and evidence_quote_untrusted=true. limit defaults to 25; cursor pages oldest first and remains valid after resolution. Rejects status/deal arguments. not_business rows never appear; not_business_count counts distinct recorded exclusions over the mailbox recorded lifetime, without reconstructing older local-only exclusions. Ownerless legacy candidates are excluded. With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals. include_non_deal=true also returns next steps without a deal; legacy callers omit it until their review UI supports contact subjects. List all supported proposals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Pending matching items additionally return current suggested_deals and nullable stored match_evidence regardless of age. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
+        proposal_id: { type: 'string', format: 'uuid', description: 'Exact mailbox-owned reply draft for Home review; cannot combine with filters or paging.' },
         deal: { type: 'string', format: 'uuid' },
         mode: { type: 'string', enum: ['recent_outcomes', 'lead_proposals'] },
         include_non_deal: { type: 'boolean', default: false },
@@ -787,6 +789,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         limit: { type: 'integer', minimum: 1, maximum: LIMIT },
         cursor: { type: 'string', format: 'uuid' } } },
       handler: async (c, actor, args) => {
+        if (args.proposal_id && Object.keys(args).some(key => key !== 'proposal_id')) fail('email_proposals_arguments_invalid');
         if (args.mode === 'lead_proposals') {
           const owner = senderOwner(actor);
           if (args.deal !== undefined || args.status !== undefined) fail('email_leads_arguments_invalid');
@@ -848,10 +851,12 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             ($6::text is not null and (a.email_source->>'mailbox_owner'=$6 or
               (a.email_source is null and a.actor_id=$7::uuid))) as summary_owned
           from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
-          where p.status=$4 and (p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
+          where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and p.status=$4
+            and ($8::uuid is null or (p.id=$8 and p.kind='reply_draft' and p.owner=$6 and a.email_source->>'mailbox_owner'=$6))
+            and ($8::uuid is not null or p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
             and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
-          order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false,partnerAuthoritySlugForActor(actor),actor.id]);
+          order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false,partnerAuthoritySlugForActor(actor),actor.id,args.proposal_id ?? null]);
         if (!args.limit && rows.length > LIMIT) fail('email_proposals_limit_exceeded', { limit: LIMIT });
         const more = rows.length > limit;
         const proposals = [];
@@ -923,7 +928,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           const owner = partnerAuthoritySlugForActor(_actor);
           if (!owner) fail('email_summary_source_not_owned');
           const rows = (await c.query(`select a.id as activity_id,a.summary,a.detail as body,a.email_context
-            from activity a where a.kind='email_in' and ($1::uuid is null or a.id>$1)
+            from activity a where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and a.kind='email_in' and ($1::uuid is null or a.id>$1)
               and (a.email_source->>'mailbox_owner'=$4 or (a.email_source is null and a.actor_id=$5::uuid))
               and (case when $3 then exists(select 1 from email_proposal p where p.activity_id=a.id and p.status='pending')
                 else a.recorded_at>now()-interval '3 days' end) order by a.id limit $2`, [args.after ?? null,limit+1,args.pending_only ?? true,owner,_actor.id])).rows;
@@ -936,7 +941,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             fail('email_outcomes_arguments_invalid');
           const owner = senderOwner(_actor);
           const { rows } = await c.query(`with inbound as (
-              select a.recorded_at from activity a where a.kind='email_in'
+              select a.recorded_at from activity a where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and a.kind='email_in'
                 and (a.email_source->>'mailbox_owner'=$1 or
                   (a.email_source is null and a.actor_id=$3::uuid))
                 and (a.email_identity->>'mailbox_account' is null or
@@ -967,7 +972,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
                   or (h.deal_id is not null and h.deal_id=a.deal_id))
               order by h.recorded_at desc,h.id desc limit 1
             ) hydrated on true
-            where a.kind in ('email_in','email_out') and a.deal_id is not null
+            where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and a.kind in ('email_in','email_out') and a.deal_id is not null
               and a.occurred_at<=now() and ($1::uuid is null or a.id>$1::uuid)
               and (a.email_source->>'mailbox_owner'=$3 or (a.email_source is null and a.actor_id=$4::uuid))
               and (a.kind <> 'email_out' or a.actor_id=$4::uuid)
@@ -987,7 +992,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
           from activity a left join deal d on d.id=a.deal_id
           left join v_email_non_deal_step ns on ns.activity_id=a.id
-          where a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
+          where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()
             and a.recorded_at>$6::timestamptz-make_interval(days=>$1)
             and a.occurred_at>$6::timestamptz-interval '30 days' and a.id<>all($2::uuid[]) and (a.email_source is null or a.email_source->>'mailbox_owner'=$4)
             and (a.kind <> 'email_out' or a.actor_id=$5::uuid)
@@ -997,7 +1002,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const queued = rows.slice(0, limit);
         const conversations = queued.map(row => row.email_context?.conversation_id).filter(Boolean);
         const history = (await c.query(`select id as activity_id,deal_id as deal,summary,email_context,occurred_at
-          from activity where kind in ('email_in','email_out') and deal_id is not null
+          from activity where coalesce(email_context#>>'{lifecycle,state}','live')='live' and kind in ('email_in','email_out') and deal_id is not null
             and email_context is not null and occurred_at<=now()
             and (occurred_at >= $3::timestamptz-make_interval(days=>$1) or email_context->>'conversation_id'=any($2::text[]))`,
           [(args.days ?? 3) + 30, conversations, clock])).rows.map(row => evidence(row, people));

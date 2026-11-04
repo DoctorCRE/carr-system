@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
+from health_store import query as _store_query
 import health_submodule as _health_sub
 import uptime_health as _uptime
 import flashlib
@@ -435,15 +436,8 @@ def _workflow_truth_contradiction_alarm():
     the count; there is no exported classifier anywhere on this route and nothing
     here is reachable with caller-supplied input.
     """
-    venv = os.path.join(REPO_ROOT, ".venv/bin/python")
     try:
-        proc = subprocess.run(
-            [venv if os.path.exists(venv) else sys.executable,
-             os.path.join(REPO_ROOT, "tools/db-tap.py"), "sql", "/dev/stdin"],
-            input=_CONTRADICTION_STATEMENT, cwd=REPO_ROOT, text=True,
-            capture_output=True, timeout=120,
-            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
-        )
+        proc = _store_query(_CONTRADICTION_STATEMENT)
     except Exception:
         return _alarm_answer(_ALARM_UNAVAILABLE, reason="store_unreachable")
     if getattr(proc, "returncode", 1):
@@ -600,14 +594,7 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                    where v.created_at > now() - interval '40 days' and v.mode='live'
                   order by v.created_at desc;
                  """
-        _venv_python = os.path.join(REPO_ROOT, ".venv/bin/python")
-        _query_python = _venv_python if os.path.exists(_venv_python) else sys.executable
-        p = subprocess.run(
-            [_query_python,
-             os.path.join(REPO_ROOT, "tools/db-tap.py"), "sql", "/dev/stdin"],
-            input=sql, cwd=REPO_ROOT, text=True, capture_output=True, timeout=120,
-            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
-        )
+        p = _store_query(sql)
         if p.returncode:
             snapshot["errors"].append("jobs: " + ((p.stderr or "").strip() or "query failed"))
         else:
@@ -677,14 +664,7 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
             where policy_status='active'
               and enforcement_status not in ('{_enforced}')
               and enforcement_class = '{RULE_UNENFORCEABLE_CLASS}')"""
-        _venv_python = os.path.join(REPO_ROOT, ".venv/bin/python")
-        _query_python = _venv_python if os.path.exists(_venv_python) else sys.executable
-        p = subprocess.run(
-            [_query_python, os.path.join(REPO_ROOT, "tools/db-tap.py"),
-             "sql", "/dev/stdin"],
-            input=sql, cwd=REPO_ROOT, text=True, capture_output=True, timeout=120,
-            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
-        )
+        p = _store_query(sql)
         if p.returncode:
             snapshot["errors"].append("controls: " +
                                       ((p.stderr or "").strip() or "query failed"))
@@ -702,14 +682,8 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                     break
         # value::text, because db-tap prints str() of each column and a jsonb
         # column arrives as a Python dict whose str() is not JSON.
-        p = subprocess.run(
-            [_query_python, os.path.join(REPO_ROOT, "tools/db-tap.py"),
-             "sql", "/dev/stdin"],
-            input="select value::text from public.v_integrity_digest "
-                  "where line = 'verb_usage_30d';",
-            cwd=REPO_ROOT, text=True, capture_output=True, timeout=120,
-            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
-        )
+        p = _store_query("select value::text from public.v_integrity_digest "
+                  "where line = 'verb_usage_30d';")
         if p.returncode:
             snapshot["errors"].append("verb_usage: " +
                                       ((p.stderr or "").strip() or "query failed"))
@@ -2107,9 +2081,7 @@ print("Deprecation register — what is kept alive only for compatibility")
 import subprocess
 _q = ("select object_name, object_kind, coalesce(replaced_by,''), "
       "coalesce(safe_to_drop_after::text,'') from deprecation where dropped_at is null;")
-_p = subprocess.run([os.path.join(REPO_ROOT, ".venv/bin/python"),
-                     os.path.join(REPO_ROOT, "tools/db-tap.py"), "sql", "/dev/stdin"],
-                    input=_q, capture_output=True, text=True, timeout=90)
+_p = _store_query(_q)
 if _p.returncode != 0:
     # A FAILED READ IS NOT AN EMPTY REGISTER. The first cut of this check passed "-" as the
     # filename, db-tap rejected it, and the empty output printed as "none outstanding" — a
@@ -2579,9 +2551,7 @@ try:
           " (select count(*) from doctrine_section where review_after < now()),"
           " (select generation from doctrine_meta where id=1),"
           " (select count(*) from doctrine_document);")
-    _p = subprocess.run([os.path.join(REPO_ROOT, ".venv/bin/python"),
-                         os.path.join(REPO_ROOT, "tools/db-tap.py"), "sql", "/dev/stdin"],
-                        input=_q, capture_output=True, text=True, timeout=90)
+    _p = _store_query(_q)
     if _p.returncode != 0:
         print("  ⚠︎ store UNREADABLE — cannot say whether doctrine is healthy · "
               "on breach: check db.env / Neon, then rerun")

@@ -89,11 +89,13 @@ def changed_paths(event: dict) -> list[str] | None:
 
 
 def classify() -> tuple[bool, list[str] | None, str]:
+    if os.environ.get('GITHUB_EVENT_NAME') == 'merge_group':
+        return True, None, 'merge group requires full proof'
     if os.environ.get('GITHUB_EVENT_NAME') not in ('pull_request', 'merge_group'):
         return True, None, 'non-diff event requires full proof'
     try:
         paths = changed_paths(json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
-        full = paths is None or os.environ.get('GITHUB_EVENT_NAME') == 'merge_group' or needs_full(paths)
+        full = paths is None or needs_full(paths)
     except (KeyError, TypeError, AttributeError, OSError, ValueError, subprocess.SubprocessError):
         return True, None, 'diff unavailable; run full proof'
     if paths is None:

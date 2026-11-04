@@ -20,6 +20,7 @@ class IndexError(ValueError):
 
 FIELDS = ('id', 'sender', 'sender_name', 'recipients', 'subject', 'body',
           'message_id', 'body_kind', 'sent_unix', 'sent_utc')
+MAX_INDEX_BYTES = 512 * 1024 * 1024
 SCHEMA_VERSION = 1
 SCHEMA = """
 PRAGMA user_version=1;
@@ -35,6 +36,18 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
  content='messages',content_rowid='id',tokenize='porter unicode61'
 );
 """
+
+
+def published_index_path(account_id, *, home=None):
+    """Resolve the per-user retained index, outside any Git checkout."""
+    if type(account_id) is not int or not 0 <= account_id <= 2**63 - 1:
+        raise IndexError('invalid_binding')
+    root = (Path(home) if home is not None else Path.home()).resolve()
+    path = root / '.local/share/carr/email-search' / f'email-search-{account_id}.db'
+    for parent in path.parents:
+        if (parent / '.git').exists():
+            raise IndexError('publication_inside_checkout')
+    return path
 
 
 def _private_file(info):
@@ -87,7 +100,7 @@ def _reject_source_alias(source, destination):
         raise IndexError('source_is_destination')
 
 
-def _validate_source(db, account_id):
+def _validate_source(db, account_id, select_account=False):
     expected = {'messages': set(FIELDS), 'message_keys': {'message_id', 'local_key'},
                 'message_objects': {'local_key', 'account_id'}}
     for table, columns in expected.items():
@@ -97,6 +110,8 @@ def _validate_source(db, account_id):
             raise IndexError('invalid_decoded_schema')
     if db.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
         raise IndexError('invalid_decoded_database')
+    if select_account:
+        return
     invalid = db.execute('''SELECT 1 FROM messages m WHERE
         NOT EXISTS (SELECT 1 FROM message_keys k JOIN message_objects o
           ON o.local_key=k.local_key WHERE k.message_id=m.id AND o.account_id=?)
@@ -108,14 +123,23 @@ def _validate_source(db, account_id):
         raise IndexError('unbound_or_cross_account_rows')
 
 
-def _populate(source, target, mailbox, account_id, revision, digest, built_at):
+def _populate(source, target, mailbox, account_id, revision, digest, built_at, select_account):
     with closing(_readonly(source)) as src, closing(sqlite3.connect(target)) as dst:
-        _validate_source(src, account_id)
+        _validate_source(src, account_id, select_account)
         dst.execute('PRAGMA temp_store=MEMORY')
+        page_size = dst.execute('PRAGMA page_size').fetchone()[0]
+        dst.execute(f'PRAGMA max_page_count={MAX_INDEX_BYTES // page_size}')
         dst.executescript(SCHEMA)
         count = full = preview = undated = 0
         earliest = latest = None
-        for row in src.execute('SELECT ' + ','.join(FIELDS) + ' FROM messages ORDER BY id'):
+        selection = ''' WHERE EXISTS (SELECT 1 FROM message_keys k JOIN message_objects o
+            ON o.local_key=k.local_key WHERE k.message_id=m.id AND o.account_id=:account)
+            AND NOT EXISTS (SELECT 1 FROM message_keys k LEFT JOIN message_objects o
+            ON o.local_key=k.local_key WHERE k.message_id=m.id
+            AND (o.account_id IS NULL OR o.account_id!=:account))''' if select_account else ''
+        for row in src.execute('SELECT ' + ','.join('m.' + f for f in FIELDS) +
+                               ' FROM messages m' + selection + ' ORDER BY m.id',
+                               {'account': account_id} if select_account else {}):
             if (not isinstance(row[0], int) or row[0] <= 0
                     or any(value is not None and not isinstance(value, str) for value in row[1:8])
                     or (row[8] is not None and not isinstance(row[8], int))
@@ -145,17 +169,22 @@ def _populate(source, target, mailbox, account_id, revision, digest, built_at):
     return dict(schema_version=SCHEMA_VERSION, build_state='complete', message_count=count)
 
 
-def build_index(source, index, *, mailbox, account_id, source_revision, clock=None, allow_empty=False):
+def build_index(source, index, *, mailbox, account_id, source_revision, clock=None, allow_empty=False, select_account=False):
     """Replace one private index; source must be a closed, sidecar-free decoded copy.
 
     Paths must be absolute without symlink components. Root-owned sticky temporary
     ancestors are allowed, but both immediate parents must be owned 0700 directories.
     The caller supplies the mailbox label; every message must independently bind to
     account_id in the decoder tables. This does not attest source completeness.
-    A killed build may leave an owner-only generation for manual removal.
+    A killed build leaves at most one generation, removed under the writer lock
+    before the next build. All indexes in one parent share the recovery lock.
     Replacing an existing index with zero messages requires allow_empty=True.
+    select_account projects positively bound, non-conflicting rows from a multi-account
+    decode. Such intake builds reuse an identical source/revision generation.
+    Publications are capped at MAX_INDEX_BYTES.
     """
-    if (not isinstance(account_id, int) or isinstance(account_id, bool)
+    if (type(select_account) is not bool
+            or not isinstance(account_id, int) or isinstance(account_id, bool)
             or not 0 <= account_id <= 2**63 - 1
             or not isinstance(mailbox, str) or not mailbox.strip() or len(mailbox) > 256
             or not isinstance(source_revision, str) or not source_revision.strip()
@@ -163,22 +192,39 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
         raise IndexError('invalid_binding')
     source, index = Path(source), Path(index)
     lock = index.with_name('.' + index.name + '.lock')
+    recovery_lock = index.parent / '.email-search.lock'
+    if index == recovery_lock:
+        raise IndexError('destination_is_recovery_lock')
     _reject_source_alias(source, index)
     _reject_source_alias(source, lock)
+    _reject_source_alias(source, recovery_lock)
     _parent(source)
     _parent(index)
     _check_file(source)
     _check_file(index, optional=True)
     built_at = clock() if clock else datetime.now(timezone.utc).isoformat()
     lock_fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    recovery_fd = None
     try:
+        recovery_fd = os.open(recovery_lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        _private_file(os.fstat(recovery_fd))
         _private_file(os.fstat(lock_fd))
         try:
+            fcntl.flock(recovery_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise IndexError('writer_busy') from error
         _check_file(index, optional=True)
         _reject_source_alias(source, index)
+        for abandoned in index.parent.glob('.email-search-*'):
+            if not re.fullmatch(r'\.email-search-[a-z0-9_]{8}', abandoned.name):
+                continue
+            info = abandoned.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o700
+                    or abandoned.resolve() in source.resolve().parents):
+                raise IndexError('unsafe_abandoned_generation')
+            shutil.rmtree(abandoned)
         with tempfile.TemporaryDirectory(prefix='.email-search-', dir=index.parent) as generation:
             snapshot = Path(generation) / 'source.db'
             target = Path(generation) / 'index.db'
@@ -195,10 +241,20 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
             _check_file(source)
             with snapshot.open('rb') as reader:
                 digest = hashlib.file_digest(reader, 'sha256').hexdigest()
+            if select_account and index.exists():
+                try:
+                    with closing(_readonly(index)) as existing:
+                        coverage = _index_metadata(existing, account_id, source_revision, digest)
+                        metadata = json.loads(existing.execute('SELECT document FROM index_metadata').fetchone()[0])
+                    if metadata['mailbox'] == mailbox:
+                        return dict(schema_version=SCHEMA_VERSION, build_state='complete',
+                                    message_count=coverage['message_count'])
+                except (IndexError, sqlite3.Error, ValueError, KeyError, TypeError):
+                    pass
             fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             os.close(fd)
             try:
-                result = _populate(snapshot, target, mailbox, account_id, source_revision, digest, built_at)
+                result = _populate(snapshot, target, mailbox, account_id, source_revision, digest, built_at, select_account)
             except sqlite3.Error as error:
                 raise IndexError('invalid_decoded_database') from error
             _check_file(target)
@@ -218,6 +274,8 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
                 os.close(directory_fd)
             return result
     finally:
+        if recovery_fd is not None:
+            os.close(recovery_fd)
         os.close(lock_fd)
 
 
@@ -258,7 +316,7 @@ def _index_metadata(db, account_id, source_revision, source_digest):
             raise ValueError
     except (ValueError, TypeError, KeyError):
         raise IndexError('index_freshness_unavailable') from None
-    if (metadata['source_revision'] != source_revision
+    if source_revision is not None and (metadata['source_revision'] != source_revision
             or metadata['source_sha256'] != source_digest):
         raise IndexError('stale_index')
     observed = db.execute('''SELECT count(*),min(sent_unix),max(sent_unix),
@@ -273,17 +331,20 @@ def _index_metadata(db, account_id, source_revision, source_digest):
     return dict(message_count=observed[0], observed_min_unix=observed[1],
                 observed_max_unix=observed[2], undated_count=observed[3] or 0,
                 completeness='unknown', built_at=metadata['built_at'],
-                freshness='matches_current_decoded_source')
+                freshness=('matches_current_decoded_source' if source_revision is not None
+                           else 'published_snapshot_capture_recency_unverified'))
 
 
-def query_index(index, *, source, source_revision, account_id, query, limit=20, cursor=None, excerpts=False):
+def query_index(index=None, *, source=None, source_revision=None, account_id, query, limit=20, cursor=None, excerpts=False, published_snapshot=False):
     """Read one completed private index using a literal FTS phrase.
 
     All words form one phrase, including quoted names and email addresses. FTS
     operators, column selectors and wildcards are unsupported. Results sort by
     descending timestamp then id, with undated rows last. Cursors bind the query
     and account to the database bytes; rebuilding invalidates prior pages.
-    The caller must supply the current closed decoded copy and its revision.
+    By default the caller supplies the current closed decoded copy and revision.
+    published_snapshot=True instead reads only the retained index and explicitly
+    reports that capture recency is unverified. It cannot be combined with a source.
     Freshness is exact source byte identity, not a maximum age. Missing or invalid
     provenance and changed sources refuse every page before MATCH. A timestamp
     describes publication age only; it does not prove mailbox capture recency.
@@ -293,24 +354,28 @@ def query_index(index, *, source, source_revision, account_id, query, limit=20, 
     if (type(account_id) is not int or not 0 <= account_id <= 2**63 - 1
             or type(limit) is not int or not 1 <= limit <= 100
             or type(excerpts) is not bool
-            or not isinstance(source_revision, str) or not source_revision.strip()
-            or len(source_revision) > 256):
+            or type(published_snapshot) is not bool
+            or (published_snapshot and (source is not None or source_revision is not None))
+            or (not published_snapshot and (not isinstance(source_revision, str)
+                or not source_revision.strip() or len(source_revision) > 256))):
         raise IndexError('invalid_query_options')
     try:
-        source = Path(source)
-        _parent(source)
-        _check_file(source)
-        with source.open('rb') as reader:
-            before_source = os.fstat(reader.fileno())
-            _private_file(before_source)
-            source_digest = hashlib.file_digest(reader, 'sha256').hexdigest()
-            after_source = os.fstat(reader.fileno())
-        _check_file(source)
-        if ((before_source.st_size, before_source.st_mtime_ns, before_source.st_ctime_ns) !=
-                (after_source.st_size, after_source.st_mtime_ns, after_source.st_ctime_ns)
-                or not os.path.samestat(after_source, source.stat())):
-            raise IndexError('stale_index')
-        path = Path(index)
+        source_digest = None
+        if not published_snapshot:
+            source = Path(source)
+            _parent(source)
+            _check_file(source)
+            with source.open('rb') as reader:
+                before_source = os.fstat(reader.fileno())
+                _private_file(before_source)
+                source_digest = hashlib.file_digest(reader, 'sha256').hexdigest()
+                after_source = os.fstat(reader.fileno())
+            _check_file(source)
+            if ((before_source.st_size, before_source.st_mtime_ns, before_source.st_ctime_ns) !=
+                    (after_source.st_size, after_source.st_mtime_ns, after_source.st_ctime_ns)
+                    or not os.path.samestat(after_source, source.stat())):
+                raise IndexError('stale_index')
+        path = Path(index) if index is not None else published_index_path(account_id)
         _parent(path)
         _check_file(path)
         with path.open('rb') as reader:
@@ -355,13 +420,14 @@ def query_index(index, *, source, source_revision, account_id, query, limit=20, 
                 if excerpts:
                     item['excerpt'] = dict(subject=row[3], body=row[4])
                 results.append(item)
-        _check_file(source)
-        current_source = source.stat()
-        if (after_source.st_dev, after_source.st_ino, after_source.st_size,
-                after_source.st_mtime_ns, after_source.st_ctime_ns) != (
-                current_source.st_dev, current_source.st_ino, current_source.st_size,
-                current_source.st_mtime_ns, current_source.st_ctime_ns):
-            raise IndexError('stale_index')
+        if not published_snapshot:
+            _check_file(source)
+            current_source = source.stat()
+            if (after_source.st_dev, after_source.st_ino, after_source.st_size,
+                    after_source.st_mtime_ns, after_source.st_ctime_ns) != (
+                    current_source.st_dev, current_source.st_ino, current_source.st_size,
+                    current_source.st_mtime_ns, current_source.st_ctime_ns):
+                raise IndexError('stale_index')
         next_offset = offset + len(rows)
         next_cursor = None
         if next_offset < count:

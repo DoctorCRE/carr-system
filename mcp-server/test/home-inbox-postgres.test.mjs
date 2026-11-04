@@ -5,7 +5,8 @@ import pg from 'pg';
 import { setTimeout } from 'node:timers/promises';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { HOME_INBOX_CONTRACT, HOME_INBOX_SETTLEMENT_CONTRACT } from '../src/home-inbox.js';
+import { HOME_INBOX_CONTRACT, HOME_INBOX_SETTLEMENT_CONTRACT, HOME_INBOX_COMPLETION_CONTRACT } from '../src/home-inbox.js';
+import { homeReviewReference } from '../src/home-review.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
 const id = n => `ae000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -320,6 +321,8 @@ test('Home inbox v2 projects current partner work with context', async t => {
     assert.equal(task.action_id,id(71));
     assert.equal(task.action_version,2);
     assert.equal(task.deal_id,id(60));
+    assert.deepEqual(homeReviewReference(task),{kind:'action',item_id:task.item_id,
+      source_version:task.source_version,operations:['complete-one-action']});
   });
   await t.test('future hold belongs to Held',()=>{
     assert.equal(snapshot.items.find(i=>i.source_id===id(75)).section,'held');
@@ -550,7 +553,7 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     create table ops.deal_extraction_job(id uuid,organization_tenant_id text,entity_ref text,recorded_at timestamptz,receipt jsonb);
     create table ops.fact_key_contract(fact_key text,canonical_unit text);
     insert into ops.fact_key_contract values('base_rent_per_sf','USD/SF/year');`);
-  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','resolve_fact_review'],['1109_deal_schedules.sql','promote_fact']]) {
+  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','list_fact_review'],['1103_deal_extraction.sql','resolve_fact_review'],['1109_deal_schedules.sql','promote_fact']]) {
     const sql=readFileSync(new URL(`../../migrations/${file}`,import.meta.url),'utf8');
     await c.query(sql.match(new RegExp(`create or replace function ops\\.${name}\\([\\s\\S]*?\\$\\$;`))[0]);
   }
@@ -558,14 +561,176 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
   const v2Before=(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}));
   await c.query(readFileSync(new URL('../../migrations/1140_home_inbox_resolution_adapters.sql',import.meta.url),'utf8'));
   assert.deepEqual(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}),v2Before,'shared placement preserves the v2 snapshot');
+  await c.query('grant select on email_proposal to carr_writer');
   await c.query('set role carr_writer');
   assert.equal((await executeRegisteredTool(c,joe,'read-home-inbox-v3',{})).ok,true);
   await c.query('reset role');
   const read=()=>executeRegisteredTool(c,joe,'read-home-inbox-v3',{});
   const item=async n=>(await read()).items.find(i=>i.source_id===id(n));
+  const detail=current=>executeRegisteredTool(c,joe,'read-home-review',{
+    item_id:current.item_id,source_version:current.source_version});
+  await t.test('review statechart: projected to detail loaded reads no domain state',async()=>{
+    const current=await item(702);
+    assert.equal(current.review_reference.kind,'action');
+    assert.deepEqual(current.review_reference.operations,['complete-one-action']);
+    const before=(await c.query('select to_jsonb(t) row from next_action t order by id')).rows;
+    const loaded=await detail(current);
+    assert.equal(loaded.schema_version,'home-review.v1');
+    assert.deepEqual(loaded.operations,[{verb:'complete-one-action',args:{action_id:id(702),base_version:1}}]);
+    assert.deepEqual((await c.query('select to_jsonb(t) row from next_action t order by id')).rows,before);
+    assert.deepEqual(await detail(current),loaded);
+  });
+  await t.test('review statechart: projected to refused on stale source',async()=>{
+    const current=await item(702);
+    await c.query('update next_action set version=version+1 where id=$1',[id(702)]);
+    await assert.rejects(detail(current),e=>e.payload?.error==='home_review_stale');
+  });
+  await t.test('review statechart: another actor cannot load the card',async()=>{
+    const current=await item(702);
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    try {
+      await assert.rejects(executeRegisteredTool(c,dell,'read-home-review',{
+        item_id:current.item_id,source_version:current.source_version}),e=>e.payload?.error==='home_review_not_found');
+    } finally {
+      await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    }
+  });
+  await t.test('review statechart: refused to projected after refresh',async()=>{
+    const current=await item(702);
+    assert.equal((await detail(current)).operations[0].args.base_version,2);
+  });
   let seq=800;
   const change=async(command,current,until=null)=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
     idempotency_key:id(seq++),items:[{item_id:current.item_id,base_version:current.base_version}],...(until?{until}:{})});
+  await c.query(readFileSync(new URL('../../migrations/1145_home_inbox_bulk.sql',import.meta.url),'utf8'));
+  await t.test('bulk receipts and exact undo',async bulk=>{
+    let batchSeq=9000;
+    const batch=async(command,items,extra={})=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
+      idempotency_key:id(batchSeq++),reversible:true,...(items?{items:items.map(({item_id,base_version})=>({item_id,base_version}))}:{}),...extra});
+    for(const state of ['working','done','auto-settled','set-aside','snoozed','override']) {
+      for(const command of ['settle','snooze']) for(const mode of ['whole','subset']) await bulk.test(`bulk statechart ${state} ${command} ${mode} exact undo`,async()=>{
+        await c.query('begin');
+        try {
+          await c.query('update email_proposal set status=$1,version=version+1,result_recorded_at=now() where id=$2',[state==='working'?'approved_to_send':state==='auto-settled'?'sent':'pending',id(701)]);
+          if(state==='done') await c.query("insert into capture_session values($1,$2,'done',now(),now())",[id(9500),joe.id]);
+          const current=async()=>state==='done'?(await read()).items.find(i=>i.source_id===id(9500)):item(701);
+          if(['set-aside','snoozed','override'].includes(state)) await change(state==='set-aside'?'settle':state==='override'?'unsettle':'snooze',await current(),state==='snoozed'?'2099-01-01T00:00:00Z':null);
+          const before=await current();
+          const rows=async()=>(await c.query('select to_jsonb(d) row from ops.home_inbox_disposition d where actor_id=$1 and item_id=$2',[joe.id,before.item_id])).rows;
+          const saved=await rows();
+          const neighbor=mode==='subset'?await item(702):null;
+          const key=id(batchSeq++);
+          const args={idempotency_key:key,reversible:true,items:[before,...(neighbor?[neighbor]:[])].map(({item_id,base_version})=>({item_id,base_version})),...(command==='snooze'?{until:'2099-01-01T00:00:00Z'}:{})};
+          const applied=await executeRegisteredTool(c,joe,`${command}-home-inbox`,args);
+          const noop=(command==='settle'&&['set-aside','auto-settled'].includes(state))||(command==='snooze'&&state==='snoozed');
+          assert.equal(applied.results[0].status,noop?'already':'applied');
+          if(state==='auto-settled'&&command==='settle') assert.equal((await current()).auto_settled,true);
+          assert.deepEqual((await executeRegisteredTool(c,joe,`${command}-home-inbox`,args)).results,applied.results);
+          await c.query('delete from tool_call where idempotency_key=$1',[key]);
+          assert.deepEqual((await executeRegisteredTool(c,joe,`${command}-home-inbox`,args)).results,applied.results,'durable receipt survives envelope expiry');
+          const neighborAfter=neighbor?await item(702):null;
+          const undo=await batch(command,neighbor?[before]:null,{undo_of:key});
+          assert.equal(undo.results[0].status,noop?'already':'applied');
+          assert.deepEqual(await rows(),saved,'undo restores every saved column or absence');
+          assert.deepEqual(await current(),before);
+          assert.equal((await batch(command,neighbor?[before]:null,{undo_of:key})).results[0].status,'already');
+          if(neighbor) {
+            assert.equal(applied.results[1].status,'applied');
+            assert.deepEqual(await item(702),neighborAfter,'subset undo leaves the other selected item changed');
+            const rest=await batch(command,null,{undo_of:key});
+            assert.deepEqual(rest.results.map(r=>r.status),['already','applied']);
+            assert.deepEqual(await item(702),neighbor);
+          }
+        } finally {await c.query('rollback');}
+      });
+    }
+    for(const command of ['settle','snooze']) await bulk.test(`${command} projection queries stay constant across 1, 10 and 100 items`,async()=>{
+      await c.query("set track_functions='all'");
+      const counts=[];
+      for(const size of [1,10,100]) {
+        await c.query('begin');
+        try {
+          await c.query(`insert into next_action(id,owner_id,description,status,version,created_at,updated_at)
+            select ('ae000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,$1,'Synthetic batch task '||n,'open',1,now(),now()
+            from generate_series(20000,20000+$2::integer-1) n`,[joe.id,size]);
+          const selected=(await read()).items.filter(i=>i.source_type==='next_action'&&Number(i.source_id.slice(-12))>=20000);
+          assert.equal(selected.length,size);
+          const calls=async()=>(await c.query(`select coalesce(sum(pg_stat_get_xact_function_calls(oid)),0)::int calls
+            from pg_proc where pronamespace='ops'::regnamespace and proname in
+            ('home_inbox_items','home_inbox_items_v3','home_inbox_project_items','home_inbox_sources','home_inbox_sources_v3')`)).rows[0].calls;
+          const before=await calls();
+          const result=await batch(command,selected,command==='snooze'?{until:'2099-01-01T00:00:00Z'}:{});
+          assert.equal(result.results.filter(r=>r.status==='applied').length,size);
+          counts.push(await calls()-before);
+        } finally {await c.query('rollback');}
+      }
+      assert.ok(counts[0]>0,'PostgreSQL must record projection calls');
+      assert.deepEqual(counts,[counts[0],counts[0],counts[0]],'projection SELECT count must not grow with batch size');
+    });
+    await bulk.test('mixed batch isolates hidden, stale and forbidden items; subset then whole undo',async()=>{
+      await c.query('begin');
+      try {
+        const task=await item(702),reply=await item(701);
+        await c.query(`insert into next_action(id,owner_id,description,status,version,created_at,updated_at)
+          values($1,$2,'Private title must not leak','open',1,now(),now())`,[id(9999),dell.id]);
+        const hidden={item_id:`next_action:${id(9999)}`,base_version:'a'.repeat(32)};
+        const stale={item_id:'missing',base_version:'0'.repeat(32)};
+        await assert.rejects(batch('settle',[task,task]),/duplicate_inbox_item/);
+        const key=id(batchSeq++);
+        const result=await batch('settle',[task,hidden,stale,reply],{idempotency_key:key});
+        assert.deepEqual(result.results.map(r=>r.status),['applied','not_found','not_found','applied']);
+        assert.ok(!JSON.stringify(result).includes('Private title'));
+        const partial=await batch('settle',[task],{undo_of:key});
+        assert.equal(partial.results[0].status,'applied');
+        const rest=await batch('settle',null,{undo_of:key});
+        assert.deepEqual(rest.results.map(r=>r.status),['already','not_found','not_found','applied']);
+        assert.deepEqual(await item(702),task); assert.deepEqual(await item(701),reply);
+        const staleResult=await batch('settle',[{...task,base_version:'0'.repeat(32)},reply]);
+        assert.deepEqual(staleResult.results.map(r=>r.status),['not_allowed','applied']);
+        const conflictKey=id(batchSeq++);
+        const current=await item(702);
+        await batch('snooze',[current],{idempotency_key:conflictKey,until:'2099-01-01T00:00:00Z'});
+        await change('settle',await item(702));
+        const conflict=await batch('snooze',null,{undo_of:conflictKey});
+        assert.equal(conflict.results[0].error,'version_conflict');
+        assert.equal((await item(702)).disposition,'settled');
+        await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+        await assert.rejects(executeRegisteredTool(c,dell,'settle-home-inbox',{idempotency_key:id(batchSeq++),undo_of:key}),/inbox_batch_not_found/);
+        await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+      } finally {await c.query('rollback');}
+    });
+    await bulk.test('writer role can apply and undo but cannot read private batch rows',async()=>{
+      const before=await item(702),key=id(batchSeq++);
+      await c.query('set role carr_writer');
+      try {
+        assert.equal((await batch('settle',[before],{idempotency_key:key})).results[0].status,'applied');
+        assert.equal((await batch('settle',null,{undo_of:key})).results[0].status,'applied');
+        await assert.rejects(c.query('select * from ops.home_inbox_batch'),{code:'42501'});
+        await assert.rejects(c.query("select ops.reversible_home_inbox($1,'settle_reversible','[]',null)",[id(batchSeq++)]),{code:'42501'});
+      } finally {await c.query('reset role');}
+      assert.deepEqual(await item(702),before);
+    });
+    await bulk.test('a forbidden item rolls back alone and never blocks its neighbor',async()=>{
+      await c.query('begin');
+      try {
+        const before=await item(702);
+        await c.query(`create function ops.synthetic_inbox_denial() returns trigger language plpgsql as $$
+          begin if new.item_id='next_action:${id(702)}' then raise insufficient_privilege; end if; return new; end $$;
+          create trigger synthetic_inbox_denial before insert or update on ops.home_inbox_disposition
+          for each row execute function ops.synthetic_inbox_denial()`);
+        const result=await batch('snooze',[before,await item(701)],{until:'2099-01-01T00:00:00Z'});
+        assert.deepEqual(result.results.map(r=>r.status),['not_allowed','applied']);
+        assert.deepEqual(await item(702),before);
+        assert.equal((await item(701)).section,'snoozed');
+        await c.query(`create or replace function ops.synthetic_inbox_denial() returns trigger language plpgsql as $$
+          begin if new.item_id='next_action:${id(702)}' then raise check_violation; end if; return new; end $$`);
+        const failed=await batch('snooze',[before,await item(701)],{until:'2099-02-01T00:00:00Z'});
+        assert.deepEqual(failed.results.map(r=>r.status),['not_allowed','applied']);
+        assert.equal(failed.results[0].error,'item_failed');
+        assert.deepEqual(await item(702),before);
+      } finally {await c.query('rollback');}
+    });
+  });
   await t.test('open to working to auto-settled uses the canonical reply state',async()=>{
     assert.equal((await item(701)).section,'inbox');
     await c.query("update email_proposal set status='approved_to_send',version=version+1 where id=$1",[id(701)]);
@@ -705,6 +870,16 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
       assert.equal((await find(type))?.section,'inbox',`${type} unresolved stays visible`);
       assert.equal((await find(type)).auto_settled,false);
     }
+    await adapters.test('fact review detail names exact field evidence and owner decisions',async()=>{
+      const current=await find('fact_review');
+      const loaded=await detail(current);
+      assert.equal(loaded.detail.fact_key,'base_rent_per_sf');
+      assert.deepEqual(loaded.operations,[{verb:'resolve-fact-review',decisions:['approve','correct','reject'],args:{
+        entity_ref:id(2000),fact_key:'base_rent_per_sf',base_version:loaded.detail.canonical_version,
+        review_version:loaded.detail.review_version}}]);
+      assert.deepEqual(await detail(current),loaded);
+      await assert.rejects(detail(await find('tour_feedback')),e=>e.payload?.error==='home_review_unsupported');
+    });
     await c.query(`insert into ops.tour_share_grant(id,organization_tenant_id,projection_id,grant_version,token_digest,audience,
       permission_scopes,expires_at,status,created_by_actor_id)
       select '${id(2020)}',organization_tenant_id,projection_id,2,'sha256:'||repeat('b',64),audience,
@@ -844,4 +1019,81 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
     assert.ok((await executeRegisteredTool(c,dell,'read-home-inbox-v3',{})).items.every(i=>i.source_id===id(2020)));
   });
+  await t.test('v4 exposes only proven completion instants and preserves previous snapshots',async()=>{
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    await c.query(`alter table next_action add organization_tenant_id text default 'carr-internal';
+      alter table email_proposal add send_result jsonb;
+      create table event(id uuid primary key default gen_random_uuid(),organization_tenant_id text,
+        subject_type text,subject_id uuid,verb text,field text,old_value jsonb,new_value jsonb,
+        occurred_at timestamptz,mutation_order bigint generated always as identity);
+      insert into next_action(id,owner_id,description,status,version,created_at,updated_at,subject_id)
+        values('${id(3000)}','${joe.id}','Completion statechart','open',1,now(),now(),'${id(3001)}');`);
+    const previous=await Promise.all(['read-home-inbox','read-home-inbox-v2','read-home-inbox-v3'].map(v=>executeRegisteredTool(c,joe,v,{})));
+    await c.query(readFileSync(new URL('../../migrations/1147_home_inbox_completion.sql',import.meta.url),'utf8'));
+    assert.deepEqual(await Promise.all(['read-home-inbox','read-home-inbox-v2','read-home-inbox-v3'].map(v=>executeRegisteredTool(c,joe,v,{}))),previous);
+    assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v4.json',import.meta.url),'utf8')),HOME_INBOX_COMPLETION_CONTRACT);
+    const v4=()=>executeRegisteredTool(c,joe,'read-home-inbox-v4',{});
+    const completed=async n=>(await v4()).items.find(i=>i.source_id===id(n)).completed_at;
+    const event=async(verb,at,tenant='carr-internal',action=id(3000))=>c.query(`insert into event
+      (organization_tenant_id,subject_type,subject_id,verb,field,old_value,new_value,occurred_at)
+      values($1,'deal',$2,$3,case when $3='complete-deal-item' then 'deal_item' else 'status' end,'{"status":"open"}',jsonb_build_object('next_action_id',$4::text,'action_id',$4::text,'item_id',$4::text,'status',$5::text),$6)`,
+      [tenant,id(3001),verb,action,verb==='reopen-one-action'?'open':'done',at]);
+    const projected=await v4();
+    const {schema_version,...v3}=await executeRegisteredTool(c,joe,'read-home-inbox-v3',{});
+    assert.equal(projected.schema_version,'home-inbox.v4');
+    assert.deepEqual({...projected,schema_version:undefined,items:projected.items.map(({completed_at,...i})=>i)}, {...v3,schema_version:undefined});
+    assert.equal(await completed(3000),null,'open has no completion');
+    await c.query("update next_action set status='done',version=2 where id=$1",[id(3000)]);
+    assert.equal(await completed(3000),null,'legacy done cannot use updated_at');
+    await event('complete-one-action','2026-11-03T05:59:59.000000Z','other-tenant');
+    await event('complete-one-action','2026-11-03T05:59:59.000000Z','carr-internal',id(3999));
+    assert.equal(await completed(3000),null,'another tenant or action cannot prove completion');
+    await event('complete-one-action','2026-11-03T05:59:59.000000Z');
+    assert.equal(await completed(3000),'2026-11-03T05:59:59.000000Z');
+    await c.query(`insert into ops.notification values($1,$2,'next_action',$3,'completion','Later notification',null,now()+interval '1 day')`,[id(3002),joe.id,id(3000)]);
+    assert.equal(await completed(3000),'2026-11-03T05:59:59.000000Z','later notifications cannot move completion');
+    await c.query("update ops.notification set severity='failure' where id=$1",[id(3002)]);
+    assert.equal(await completed(3000),'2026-11-03T05:59:59.000000Z','notification failure does not erase canonical completion');
+    await c.query("update next_action set status='open',version=3 where id=$1",[id(3000)]);
+    await event('reopen-one-action','2026-11-03T06:00:00.000000Z');
+    assert.equal(await completed(3000),null,'reopened clears completion');
+    await c.query("update next_action set status='done',version=4 where id=$1",[id(3000)]);
+    assert.equal(await completed(3000),null,'an old completion cannot prove recompletion');
+    await event('complete-one-action','2026-11-03T06:00:01.000000Z');
+    assert.equal(await completed(3000),'2026-11-03T06:00:01.000000Z','recompletion has a new instant across Chicago midnight');
+    for(const verb of ['complete-action','complete-deal-item']) {
+      await event(verb,'2026-11-03T06:00:02.000000Z');
+      assert.equal(await completed(3000),'2026-11-03T06:00:02.000000Z',verb);
+    }
+    await c.query(`insert into capture_post_call_action(id,owner_id,description,status,accepted_at,updated_at,completed_at)
+      values($1,$2,'Completed call task','done',now(),now(),now()-interval '1 hour')`,[id(3010),joe.id]);
+    await c.query(`update email_proposal set status='sent',send_result='{"sent_at":"2026-11-02T23:30:00-06:00"}',result_recorded_at=now() where id=$1`,[id(701)]);
+    assert.equal(await completed(3010),(await c.query("select to_char(completed_at at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') at from capture_post_call_action where id=$1",[id(3010)])).rows[0].at);
+    assert.equal(await completed(701),'2026-11-03T05:30:00.000000Z','delayed Sent Items reporting uses the observed send');
+    assert.equal((await v4()).items.find(i=>i.source_id===id(701)).review_reference,null,'sent replies cannot offer inline review in v4');
+    await c.query("update email_proposal set status='pending' where id=$1",[id(701)]);
+    const pendingReply=(await v4()).items.find(i=>i.source_id===id(701));
+    assert.deepEqual(pendingReply.review_reference,homeReviewReference(pendingReply),'pending replies retain inline review in v4');
+    assert.equal(pendingReply.completed_at,null,'pending replies cannot retain sent completion evidence');
+    await c.query("update email_proposal set status='sent' where id=$1",[id(701)]);
+    await c.query("update email_proposal set result_recorded_at=now()+interval '1 day' where id=$1",[id(701)]);
+    assert.equal(await completed(701),'2026-11-03T05:30:00.000000Z','result ingestion cannot move completion');
+    await c.query("update email_proposal set send_result=null where id=$1",[id(701)]);
+    assert.equal(await completed(701),null,'legacy sent without evidence stays null');
+    await c.query("update email_proposal set send_result='{\"sent_at\":\"invalid\"}' where id=$1",[id(701)]);
+    assert.equal(await completed(701),null,'invalid legacy send evidence stays null');
+    await c.query("update capture_post_call_action set status='open' where id=$1",[id(3010)]);
+    assert.equal(await completed(3010),null,'stale call completion is hidden when open');
+    await c.query("update capture_post_call_action set status='done',completed_at='2099-11-03T06:00:00Z' where id=$1",[id(3010)]);
+    assert.equal(await completed(3010),'2099-11-03T06:00:00.000000Z','call recompletion uses the new source instant');
+    await c.query("update capture_post_call_action set completed_at=null where id=$1",[id(3010)]);
+    assert.ok((await v4()).items.filter(i=>!['next_action','capture_post_call_action','email_proposal'].includes(i.source_type)).every(i=>i.completed_at===null),'unsupported sources never infer completion');
+    await c.query('set role carr_writer');
+    assert.equal((await v4()).schema_version,'home-inbox.v4');
+    await c.query('reset role');
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.ok((await executeRegisteredTool(c,dell,'read-home-inbox-v4',{})).items.every(i=>i.source_id===id(2020)));
+    assert.equal((await c.query("select has_function_privilege('carr_reader','ops.read_home_inbox_v4()','execute') allowed")).rows[0].allowed,false);
+  });
+
 });

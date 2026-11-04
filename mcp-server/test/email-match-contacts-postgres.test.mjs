@@ -106,9 +106,12 @@ root = Path.cwd()
 spec = importlib.util.spec_from_file_location('calendar_loader', root / 'tools/load-calendar-contacts.py')
 loader = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(loader)
-from lib.outlook_intake import _contacts
+from lib.outlook_intake import _contacts, Matcher
 contacts, main_contacts = json.load(sys.stdin)
-assert _contacts(lambda *_: {'contacts': contacts})() == _contacts(lambda *_: {'contacts': main_contacts})()
+matchers = [Matcher(_contacts(lambda *_: {'contacts': rows})(), 'internal.test')
+            for rows in [contacts, main_contacts]]
+assert matchers[0].fingerprint() == matchers[1].fingerprint()
+assert matchers[0].people == matchers[1].people
 attendees = {'events': [{'attendees': [{'email': 'taylor@newdomain.test', 'name': 'Practice Org'}]}]}
 print(json.dumps([loader.plan(attendees, rows, [], internal_domain='internal.test')
                   for rows in [contacts, main_contacts]]))

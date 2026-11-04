@@ -105,6 +105,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "instruct-deal-item",
     "link-lead-client",
     "propose-doc-correction",
+    "read-home-review",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
     "record-artifact-preservation-hold",
@@ -138,6 +139,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-salesforce-read-consent",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
+    "submit-doc-request",
     "submit-email-draft",
     "undo-call",
     "undo-email-thread-filing",
