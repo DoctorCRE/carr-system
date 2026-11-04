@@ -1,4 +1,5 @@
 -- WR617.S3.J2. Forward-only lifecycle store; no transport or preference changes.
+-- rollback: forward-only; retain subscription history and revoke through the lifecycle door.
 -- lock-review: new tables only; bounded actor-scoped advisory lock.
 create table ops.web_push_subscription (
   subscription_id uuid primary key default gen_random_uuid(),
