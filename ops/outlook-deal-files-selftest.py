@@ -53,6 +53,11 @@ class Fakes:
 
 
 class FileAttachmentTest(unittest.TestCase):
+    def test_incomplete_pdf_never_reaches_archive_or_verb(self):
+        fake = Fakes()
+        self.assertEqual(fake.file(b'%PDF-1.7\nsynthetic'), {'status': 'not_deal_type'})
+        self.assertEqual((fake.puts, fake.calls), ([], []))
+
     def test_pdf_is_uploaded_then_recorded_on_the_deal(self):
         fake = Fakes()
         result = fake.file()
