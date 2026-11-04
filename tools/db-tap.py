@@ -59,7 +59,7 @@ NEONCTL = os.path.join(REPO, "mcp-server", "node_modules", ".bin", "neonctl")
 # two Homebrew prefixes therefore resolved to the bare name on that machine and
 # every psql path died as FileNotFoundError deep inside subprocess — see
 # psql_bin() below, which now refuses in words instead.
-from lib.credential_file import read_env_file
+from lib.neon_cli import api_key as _neon_api_key, run as run_neon
 from lib.local_principal import LocalPrincipalError, local_actor_slug as _established_actor_slug
 from lib.machine_prerequisites import PSQL_CANDIDATES, find_executable
 RECEIPT_LOG = os.path.join(REPO, "out", "break-glass-receipts.log")
@@ -91,40 +91,6 @@ def _load_credential_module():
 
 
 staging_credential = _load_credential_module()
-
-
-def _neon_api_key() -> str:
-    """NEON_API_KEY from the environment, or from db.env beside the other
-    credentials. Empty string when there is none.
-
-    WHY THIS EXISTS, 2026-08-10. neonctl's saved browser login expires on its own
-    schedule, and when it does it does not fail cleanly — it PROMPTS, waits 60
-    seconds for a browser nobody is sitting at, and times out. Because this
-    function is the one place four different jobs derive a credential, that one
-    expiry silently took down all four: the GitHub production deployment workflow, record imports,
-    bin/restore-rehearse.sh (the only proof the encrypted backups can be restored)
-    and pipelines/partner_ping.py, the Joe/Dell interrupt channel.
-
-    The ping is the one that shows how bad the failure mode is. It kept running
-    every 120 seconds and kept logging "nothing new since 2026-08-03T20:02:16",
-    382 consecutive identical lines over six days, because a channel whose query
-    is broken and a channel with genuinely nothing to say produce byte-identical
-    output. Its watermark had not moved since the day the login lapsed. Nothing
-    alarmed, because nothing watches it.
-
-    A Neon API key does not expire on a timer and needs no browser, and neonctl
-    reads it from NEON_API_KEY. This keeps the property the pattern was built for
-    — the DSN is still derived per invocation, still never on a command line and
-    never in a transcript — and removes only the human from the refresh."""
-    key = (os.environ.get("NEON_API_KEY") or "").strip()
-    if key:
-        return key
-    env_file = os.path.join(os.path.expanduser("~"), ".config", "carr", "db.env")
-    try:
-        return read_env_file(env_file, syntax="prefix", duplicates="first", names=("NEON_API_KEY",)).get("NEON_API_KEY", "")
-    except OSError:
-        pass
-    return ""
 
 
 # The two Neon PROJECTS, which is the isolation boundary that matters. A Neon
@@ -169,7 +135,7 @@ def _project_id_by_name(name: str, env: dict) -> str:
 
 def _json_command(args: list[str], env: dict, label: str):
     try:
-        out = subprocess.run(args, capture_output=True, text=True, timeout=60, env=env)
+        out = run_neon(args[1:], executable=args[0], env=env)
     except (OSError, subprocess.TimeoutExpired):
         sys.exit(f"db-tap: {label} did not complete; provider output suppressed")
     if out.returncode != 0:
@@ -245,23 +211,7 @@ _DSN_CACHE: dict[tuple, str] = {}
 
 
 def _no_dsn_message(detail: str, key: str) -> str:
-    """The ONE explanation of a failed derivation, shared by both routes out.
-
-    NAME THE ACTUAL CAUSE. Printing neonctl's stderr alone is true and useless:
-    on an expired login it is a browser URL and an "authentication timed out"
-    line, which points the reader at another browser trip when the fix is a
-    stored key. Rule a8c55a47 — a manual path and an automated path that do the
-    same job must be the same code — binds across the timeout route and the
-    nonzero-exit route, so they answer in the same words.
-    """
-    if not key:
-        return (
-            "neonctl could not derive a connection string, and NEON_API_KEY is NOT SET.\n"
-            "  This is almost certainly the expired-browser-login failure: neonctl\n"
-            "  prompts for a browser, waits 60 seconds, and gives up.\n"
-            "  Fix it once: create a Neon API key in the console and add it to\n"
-            "  ~/.config/carr/db.env as NEON_API_KEY=... (chmod 600, already gitignored).\n"
-            f"  neonctl said: {detail}")
+    """Keep provider diagnostics out of the transcript."""
     return f"neonctl failed with NEON_API_KEY set: {detail}"
 
 
@@ -304,8 +254,8 @@ def dsn(branch=None, project: str = "production", role_name: str = "neondb_owner
     if cache_key in _DSN_CACHE:
         return _DSN_CACHE[cache_key]
     try:
-        out = subprocess.run(
-            [NEONCTL, "connection-string", branch,
+        out = run_neon(
+            ["connection-string", branch,
              "--project-id", project_id,
              "--role-name", role_name,
              # A project can hold more than one database.  All sanctioned CARR
@@ -313,20 +263,12 @@ def dsn(branch=None, project: str = "production", role_name: str = "neondb_owner
              # provider's mutable default database selection.
              "--database-name", "neondb",
              "--endpoint-type", "read_write"],
-            capture_output=True, text=True, timeout=60, env=env,
+            executable=NEONCTL, env=env,
         )
-    except subprocess.TimeoutExpired:
-        # THE TIMEOUT IS THE EXPIRED-LOGIN SIGNATURE, AND IT USED TO ESCAPE THIS
-        # FUNCTION UNCAUGHT. `timeout=60` raises rather than returning a nonzero
-        # result, so the carefully-worded diagnosis below — the one that names a
-        # stored API key as the fix — was unreachable on the single failure it
-        # was written for. What the reader got instead was a raw TimeoutExpired
-        # traceback, which is why on 2026-08-21 this presented as "the whole
-        # system is slow" for two minutes per command rather than as one expired
-        # credential. Same finding, same words, on both routes out.
-        raise SystemExit(_no_dsn_message("timed out after 60s with no answer", key))
+    except (OSError, subprocess.TimeoutExpired):
+        raise SystemExit(_no_dsn_message("provider unavailable or timed out; provider output suppressed", key))
     if out.returncode != 0 or not out.stdout.strip():
-        detail = out.stderr.strip()[:200] or f"exit status {out.returncode}"
+        detail = f"exit status {out.returncode}; provider output suppressed"
         raise SystemExit(_no_dsn_message(detail, key))
     return _DSN_CACHE.setdefault(cache_key, out.stdout.strip())
 
