@@ -4,7 +4,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from urllib.error import HTTPError
 import importlib.util
-import io
 import subprocess
 from types import SimpleNamespace
 from pathlib import Path

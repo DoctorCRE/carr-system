@@ -32,4 +32,3 @@ def read(url: str, opener=_OPENER.open, timeout: int = 15) -> Reply:
         # Redirects are disabled by the caller for the auth probe, but HTTP
         # errors still carry useful status/headers and should be judged.
         return Reply(error.code, dict(error.headers.items()), error.read())
-
