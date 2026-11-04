@@ -2614,6 +2614,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-web-push-config": {
+    "ingress_key": "mcp-tool:read-web-push-config",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-work-shape": {
     "ingress_key": "mcp-tool:read-work-shape",
     "source_locator": "mcp-server/src/work-shape.ts",
@@ -3124,6 +3134,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "register-web-push-subscription": {
+    "ingress_key": "mcp-tool:register-web-push-subscription",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "0d178da14434980adcc13b5de4dbef39647c015db3bb71d1d7ab06b463be1307",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "reject-requirement-reply": {
     "ingress_key": "mcp-tool:reject-requirement-reply",
     "source_locator": "mcp-server/src/requirement-replies.js",
@@ -3427,6 +3447,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": false,
     "human_caller_only": false,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "revoke-web-push-subscription": {
+    "ingress_key": "mcp-tool:revoke-web-push-subscription",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "6ed0bbc2b237125af92dc33626597b1923340352bc1785ccd7b59a904f55fd7a",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "rotate-tour-share-grant": {

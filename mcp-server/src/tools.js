@@ -46,6 +46,7 @@ import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
+import { webPushTools } from "./web-push-subscriptions.ts";
 import { notificationTools } from "./notifications.ts";
 import { sessionIdentityTools } from "./session-identity.ts";
 import { dispatchSpineTools } from "./dispatch-spine.ts";
@@ -396,6 +397,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
+  if (["register-web-push-subscription", "revoke-web-push-subscription"].includes(verb)) await client.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
@@ -9229,6 +9231,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "web-push-subscriptions": "mcp-server/src/web-push-subscriptions.ts",
   "home-inbox": "mcp-server/src/home-inbox.js",
   "session-identity": "mcp-server/src/session-identity.ts",
   "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
@@ -10866,6 +10869,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // WR-000113: the R03 notification feed and its acknowledgement receipt.
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
+registerTools(webPushTools({ withEnvelope, ToolError, config: () => ({ WEB_PUSH_VAPID_PUBLIC_KEY: process.env.WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_KEY_GENERATION: process.env.WEB_PUSH_KEY_GENERATION }) }), "web-push-subscriptions");
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 

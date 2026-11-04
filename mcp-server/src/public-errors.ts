@@ -15,6 +15,11 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["feature_unavailable", "Browser push configuration is unavailable."],
+  ["web_push_invalid_input", "Invalid browser subscription."],
+  ["web_push_unavailable", "Browser subscription could not be changed."],
+  ["web_push_limit", "Disable an installation before adding another. Three active installations are allowed."],
+  ["web_push_rate_limit", "Wait a minute before changing browser subscriptions again."],
   ["research_evidence_required", "Research is required before creating this person or assigning a business role. Supply the documented research_evidence."],
   ["research_source_invalid", "Each research source needs an HTTPS URL and a valid non-future observed_at timestamp."],
   ["research_evidence_incomplete", "Link every required research field to source indexes and supply discrepancies, including an empty array when none exist."],
