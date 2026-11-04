@@ -7,10 +7,10 @@
   "assertions": [
     {
       "id": "producer-observation-holds-are-not-filing",
-      "predicate": "After source delivery observe a fresh-copy producer projection and one natural outlook-triage receipt at the full merged runtime SHA. Require nonzero observed, planned=0, held=observed, moved=0 and explicit unavailable provider binding, message revision and read state. Separately verify copy/decoder hashes and per-item holds. The pinned observer must report BLOCKED for the skipped receipt. No mailbox coverage or filing success follows.",
+      "predicate": "After source delivery observe a fresh-copy producer projection and one actual outlook-triage receipt at the full merged runtime SHA. Require nonzero observed, planned=0, held=observed, moved=0 and explicit unavailable provider binding, message revision and read state. Separately verify copy/decoder hashes and per-item holds. The pinned observer must report BLOCKED for the skipped receipt. No mailbox coverage or filing success follows.",
       "runner": "studio-run-receipt.v1",
       "expected_result": "BLOCKED by the pinned observer on a skipped receipt. Source admission is not production proof. Actual filing additionally requires independent mover qualification and a positive destination-confirmed count.",
-      "input_class": "one supplied natural-run outlook-triage receipt; read-only, no job launch or runtime refresh",
+      "input_class": "one supplied actual-run outlook-triage receipt; the coordinator may execute the already authorized bounded run immediately, while the observer itself remains read-only and never launches jobs or refreshes runtimes",
       "deadline_seconds": 30
     }
   ],

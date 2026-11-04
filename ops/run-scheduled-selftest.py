@@ -142,7 +142,8 @@ class ScheduledRunTests(unittest.TestCase):
 
     def test_triage_holds_preserve_durable_reason_and_runtime(self):
         reasons = ('snapshot_unavailable', 'capability_not_verified', 'executor_unavailable',
-                   'reconciliation_required', 'snapshot_invalid', 'snapshot_stale')
+                   'reconciliation_required', 'snapshot_invalid', 'snapshot_stale',
+                   'snapshot_producer_unavailable')
         for reason in reasons:
             with self.subTest(reason=reason):
                 receipt = {'state': 'skipped', 'reason': reason, 'counts': {},

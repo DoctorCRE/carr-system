@@ -23,7 +23,9 @@ verified executor exists. Unverified metadata returns `capability_not_verified`.
 The bounded research-copy producer is documented in
 `docs/outlook-triage-producer.md`. It publishes local observations with explicit
 unavailable mover semantics. It is not installed or invoked by this runner.
-Without supplied input the runner reports `snapshot_unavailable`. With the
+Without supplied input the runner reports `snapshot_unavailable`. A prior
+projection invalidated by a new producer attempt reports
+`snapshot_producer_unavailable` and yields no planned moves. With the
 producer subset it reports per-item holds and zero moves. Decoder read state,
 message revision and local-to-mover binding remain unverified. The adapter
 validates shape; it does not attest external truth.

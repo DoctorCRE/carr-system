@@ -109,6 +109,88 @@ class ProducerTest(unittest.TestCase):
         self.assertEqual(value['provenance']['decoder_binary_sha256'],value['decoder_pin'])
         self.assertEqual(value['availability']['provider_identity'],'unavailable')
 
+    def test_refused_cli_invalidates_eligible_snapshot_for_real_runner(self):
+        import copy
+        import io
+        from contextlib import redirect_stdout
+        from lib import outlook_triage as triage, outlook_triage_producer as producer
+        from lib.outlook_ui import Window
+        source, unused = self.prepare_copy()
+        repo = self.root / 'runner'
+        output = repo / triage.OUT / 'snapshot.json'
+        output.parent.mkdir(mode=0o700, parents=True)
+        produce(source, output, self.settings)
+        original = json.loads(output.read_text())
+        eligible = copy.deepcopy(original)
+        route = json.loads((Path(__file__).resolve().parent /
+                            'fixtures/outlook-triage/routing.json').read_text())
+        row = eligible['observations'][0]
+        row.update(message_id='provider-synthetic-1', revision='revision-synthetic-1',
+                   read_state='unread', content_complete=True,
+                   sender='client-001 folder-A', recipients=['synthetic@example.test'])
+        eligible['observations'] = [row]
+        eligible['routing'].update(guide=route['guide'], find_results=route['find'], complete=True)
+        eligible['catalog']['folders'] = [dict(account=self.settings.account,
+            folder_id='destination-synthetic-' + str(i), path=path)
+            for i, path in enumerate(route['paths'])]
+        output.write_text(json.dumps(eligible)); output.chmod(0o600)
+        observations, routing, catalog, policy, _ = read_snapshot(output, self.settings, 150)
+        self.assertEqual(len(plan_triage(observations, routing, catalog, policy).moves), 1)
+        contract = repo / 'spec/outlook/triage-executor-contract.v1.json'
+        contract.parent.mkdir(parents=True)
+        contract.write_bytes((Path(__file__).resolve().parents[1] /
+                              'spec/outlook/triage-executor-contract.v1.json').read_bytes())
+        good_source = (source / 'HxStore.hxd').read_bytes()
+        (source / 'HxStore.hxd').write_bytes(b'invalid')
+        with patch.object(producer, 'load_settings', return_value=self.settings), \
+                redirect_stdout(io.StringIO()) as captured:
+            result = producer.main(['--copy', str(source), '--output', str(output)])
+        self.assertEqual(result, 78)
+        self.assertEqual(json.loads(captured.getvalue())['state'], 'refused')
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(Window, 'move', side_effect=AssertionError('mailbox effect')), \
+                patch('lib.outlook_ui.prepare_outlook', side_effect=AssertionError('desktop')):
+            outcome, report = triage.triage(repo, self.root, triage.Waits(),
+                                            triage.Limits(), lambda: False)
+        self.assertEqual(report.planning['snapshot'], 'snapshot_producer_unavailable')
+        self.assertEqual(report.planning['planned'], 0)
+        self.assertEqual(report.planning['moved'], 0)
+        retained = json.loads(output.read_text())
+        self.assertEqual(retained['observations'], eligible['observations'])
+        self.assertEqual(retained['effect_state'], eligible['effect_state'])
+        (source / 'HxStore.hxd').write_bytes(good_source)
+        produce(source, output, self.settings)
+        self.assertEqual(len(read_snapshot(output, self.settings, 150)[0]), 2)
+
+    def test_configuration_refusal_retires_previous_snapshot(self):
+        import io
+        from contextlib import redirect_stdout
+        from lib import outlook_triage_producer as producer
+        source, output = self.prepare_copy()
+        produce(source, output, self.settings)
+        prior = json.loads(output.read_text())
+        with patch.object(producer, 'load_settings', side_effect=ValueError('fixture')), \
+                redirect_stdout(io.StringIO()) as captured:
+            self.assertEqual(producer.main(['--copy', str(source), '--output', str(output)]), 78)
+        self.assertEqual(json.loads(captured.getvalue())['state'], 'refused')
+        self.assertEqual(json.loads(output.read_text()),
+                         prior | {'publication_state': 'invalidated'})
+        with self.assertRaisesRegex(ValueError, 'snapshot_producer_unavailable'):
+            read_snapshot(output, self.settings, 150)
+
+    def test_interrupted_attempt_preserves_data_but_blocks_planning(self):
+        source, output = self.prepare_copy()
+        produce(source, output, self.settings)
+        prior = json.loads(output.read_text())
+        with patch('lib.outlook_triage_producer.subprocess.run', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                produce(source, output, self.settings)
+        self.assertEqual(json.loads(output.read_text()),
+                         prior | {'publication_state': 'invalidated'})
+        with self.assertRaisesRegex(ValueError, 'snapshot_producer_unavailable'):
+            read_snapshot(output, self.settings, 150)
+        self.assertEqual(list(output.parent.iterdir()), [output])
+
     def test_source_race_preserves_previous_output(self):
         source, output = self.prepare_copy()
         produce(source,output,self.settings)
@@ -123,7 +205,10 @@ class ProducerTest(unittest.TestCase):
         with patch('lib.outlook_triage_producer.subprocess.run',side_effect=change_source):
             with self.assertRaises(ProducerError):
                 produce(source,output,self.settings)
-        self.assertEqual(output.read_bytes(),old)
+        retained = json.loads(output.read_text())
+        self.assertEqual(retained, json.loads(old) | {'publication_state': 'invalidated'})
+        with self.assertRaisesRegex(ValueError, 'snapshot_producer_unavailable'):
+            read_snapshot(output, self.settings, 150)
         self.assertEqual(list(output.parent.iterdir()),[output])
 
     def test_wrong_pin_and_manifest_traversal_refuse(self):

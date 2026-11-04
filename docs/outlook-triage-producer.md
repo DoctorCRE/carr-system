@@ -21,8 +21,12 @@ timestamp records decoding, not mailbox freshness. A dated copy cannot prove
 current source placement or server coverage.
 
 Capacity is bounded by source bytes, file count, decoded bytes, message count,
-output bytes and a monotonic deadline. At 10x, limits refuse without replacing
-prior output. Sequential local reads have no fan-out, N+1 transport, network,
+output bytes and a monotonic deadline. Before each attempt, a prior snapshot
+with no uncertain effect is atomically marked ineligible while its data remains
+available for inspection. Refusal or interruption keeps it ineligible. A fully
+verified publication alone restores planning eligibility. Existing uncertain
+effect evidence remains unchanged and requires reconciliation. At 10x, limits
+refuse without replacing the retained observations. Sequential local reads have no fan-out, N+1 transport, network,
 queue, retries or external circuit breaker. Private staging is removed on every
 exit. There is no cache. Manifest bytes, every listed source and the decoder are
 checked before publication; source change refuses. Publication is atomic 0600
@@ -31,12 +35,14 @@ No mailbox, production record or send writes occur. Counts and fixed codes alone
 are printed; content and local identities stay in the private snapshot.
 
 Throughput checkpoint. One worker owns the coupled producer and regression
-fixture. Source and decoder validation precede decoding; consumer verification
-follows publication. No independent work stream or child is needed.
+fixture. Source and decoder validation precede decoding; consumer validation
+precedes atomic publication. No independent work stream or child is needed.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Verifying
+    [*] --> Invalidating
+    Invalidating --> Refused: Existing uncertain effect requires reconciliation
+    Invalidating --> Verifying: Prior observations retained but ineligible
     Verifying --> Refused: Invalid copy, decoder or limits
     Verifying --> Decoding: Verified private staging copy
     Decoding --> Refused: Deadline, byte cap or decoder failure

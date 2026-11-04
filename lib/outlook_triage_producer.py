@@ -196,8 +196,48 @@ def _decoder_limits():
     resource.setrlimit(resource.RLIMIT_FSIZE, (DECODED_BYTES, DECODED_BYTES))
 
 
+def _publish(output, raw, settings=None):
+    fd, temporary = tempfile.mkstemp(prefix='.snapshot-', dir=output.parent)
+    temporary = Path(temporary)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(raw); handle.flush(); os.fsync(handle.fileno())
+        if settings is not None:
+            read_snapshot(temporary, settings, 150)
+        os.replace(temporary, output)
+        directory_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _retire_snapshot(source, output):
+    source, output = Path(source).absolute(), Path(output).absolute()
+    if (output.is_relative_to(source) or
+            output.parent.resolve().is_relative_to(source.resolve())):
+        return
+    try:
+        parent, previous = output.parent.lstat(), output.lstat()
+    except FileNotFoundError:
+        return
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
+            or not stat.S_ISREG(previous.st_mode) or previous.st_uid != os.getuid()
+            or stat.S_IMODE(previous.st_mode) != 0o600):
+        return
+    prior = json.loads(_read(output, MAX_BYTES, time.monotonic() + 5))
+    if (not isinstance(prior, dict) or prior.get('effect_state') != 'none'
+            or prior.get('publication_state') == 'invalidated'):
+        return
+    prior['publication_state'] = 'invalidated'
+    _publish(output, (json.dumps(prior, sort_keys=True) + '\n').encode())
+
+
 def produce(source, output, settings):
     """Decode an existing research copy and atomically publish private planning input."""
+    _retire_snapshot(source, output)
     deadline = time.monotonic() + DEADLINE_SECONDS
     source, output = Path(source).absolute(), Path(output).absolute()
     if source.is_symlink() or not source.is_dir():
@@ -248,14 +288,10 @@ def produce(source, output, settings):
             source_files_sha256=_hash(json.dumps(original,sort_keys=True).encode()),
             decoder_binary_sha256=pin,decoder_source_digest=receipt['source_digest'],
             decoded_sha256=_hash(_read(db,DECODED_BYTES,deadline)))
+        value['publication_state'] = 'ready'
         raw = (json.dumps(value,sort_keys=True) + '\n').encode()
         if len(raw) > MAX_BYTES:
             raise ProducerError('output_byte_cap')
-        staged = stage / 'snapshot.json'
-        with staged.open('xb') as handle:
-            os.fchmod(handle.fileno(),0o600)
-            handle.write(raw); handle.flush(); os.fsync(handle.fileno())
-        read_snapshot(staged,settings,150)
         if (_copy_files(source,manifest,None,deadline) != original
                 or _read(source/'manifest.json',MAX_BYTES,deadline) != manifest_raw
                 or _read(settings.vendor/'.carr-build.json',MAX_BYTES,deadline) != receipt_raw
@@ -263,12 +299,7 @@ def produce(source, output, settings):
                 or _read(settings.folder_guide,MAX_BYTES,deadline).decode() != guide):
             raise ProducerError('source_changed')
         _check(deadline)
-        os.replace(staged,output)
-        directory_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _publish(output, raw, settings)
         return counts
 
 
@@ -278,6 +309,7 @@ def main(argv=None):
     parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args(argv)
     try:
+        _retire_snapshot(args.copy, args.output)
         counts = produce(args.copy,args.output,load_settings())
         print(json.dumps(dict(state='observed_held',reason='mover_semantics_unavailable',counts=counts),sort_keys=True))
         return 78

@@ -36,6 +36,8 @@ def read_snapshot(path, settings, max_intents, *, now=None):
             if len(raw) > MAX_BYTES:
                 raise ValueError
         value = json.loads(raw)
+        if value.get('publication_state', 'ready') != 'ready':
+            raise SnapshotError('snapshot_producer_unavailable')
         if value['schema'] != 'outlook-triage-snapshot/v1' or value['account'] != settings.account:
             raise ValueError
         if any(not isinstance(value[key], str) or not value[key]
