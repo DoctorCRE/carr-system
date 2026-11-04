@@ -20,7 +20,9 @@ class SystemDependencies(unittest.TestCase):
              patch('pathlib.Path.is_file', return_value=installed), \
              patch('shutil.which', return_value='/usr/bin/tool' if installed else None), \
              patch('subprocess.run', run):
-            runpy.run_path(str(ROOT / 'ops/ci-apt.py'), run_name='__main__')
+            with self.assertRaises(SystemExit) as result:
+                runpy.run_path(str(ROOT / 'ops/ci-apt.py'), run_name='__main__')
+            self.assertEqual(result.exception.code, 0)
 
     def test_existing_runner_packages_skip_apt_and_publish_postgres_path(self):
         with tempfile.TemporaryDirectory() as temporary:
