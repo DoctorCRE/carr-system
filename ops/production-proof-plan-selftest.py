@@ -88,13 +88,13 @@ class AdmissionTest(unittest.TestCase):
 
     def test_ci_implementation_declarations(self):
         for path in ['ops/ci-evidence.py', 'ops/ci-unit.py', 'ops/ci-secret.py',
-                     'ops/ci-secret-scan.py', 'ops/ci-pushfloor.py', 'ops/ci-dep-check.py',
+                     'ops/ci.py', 'ops/ci-pushfloor.py', 'ops/ci-dep-check.py',
                      'ops/ci-migration.py', 'ops/ci-migration-gates.py', 'ops/ci-node-file.mjs',
                      'ops/ci-apt.py', 'ops/ci-postgres.sh', 'ops/ci-zsh.sh']:
             with self.subTest(path=path):
                 result = self.run_plan('## Production proof\nn/a: CI checks only; no deployed runtime changes', [path])
                 self.assertEqual(result.returncode, 0, result.stdout)
-        for path in ['ops/ci-dispatch.py', 'lib/outlook_runtime.py', 'ops/runtime.py']:
+        for path in ['ops/ci-dispatch.py', 'ops/ci-secret-scan.py', 'lib/outlook_runtime.py', 'ops/runtime.py']:
             self.assertNotEqual(self.run_plan('## Production proof\nn/a: CI checks only', [path]).returncode, 0)
 
     def test_studio_declaration_and_worker_mismatch(self):
