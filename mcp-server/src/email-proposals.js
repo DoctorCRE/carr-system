@@ -474,10 +474,23 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'outbox-for-sender': {
       write: false,
-      description: 'Return only approved_to_send drafts owned by the authenticated partner’s Mac, oldest submission first. Text and recipients are the exact frozen submission including the mandatory partner copy. Does not send mail or claim a draft.',
-      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async (c, actor) => {
+      description: 'Return approved_to_send drafts, or mode=reconcile pages of at most 100 failed uncertain identities for read-only Sent reconciliation. Reconciliation never authorizes dispatch. Drafts are owned by the authenticated partner’s Mac, oldest submission first. Text and recipients are the exact frozen submission including the mandatory partner copy. Does not send mail or claim a draft.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {
+        mode: { type: 'string', enum: ['reconcile'] }, after: { type: 'string', format: 'uuid' } } },
+      handler: async (c, actor, args) => {
         const owner = senderOwner(actor);
+        if (args.mode === 'reconcile') {
+          const { rows } = await c.query(`select id as proposal_id,version-1 as version,submitted_email
+            from email_proposal where kind='reply_draft' and owner=$1 and status='failed'
+            and send_result->>'reason' ~ '^unconfirmed_after_[0-9]+$'
+            and ($2::uuid is null or id>$2::uuid)
+            and exists (select 1 from activity a where a.id=activity_id
+              and coalesce(a.email_context#>>'{lifecycle,state}','live')='live')
+            order by id limit 101`, [owner, args.after ?? null]);
+          return { schema_version: 'email-outbox.v1', owner,
+            mode: 'reconcile', next_cursor: rows.length > 100 ? rows[99].proposal_id : null,
+            drafts: rows.slice(0,100).map(({ submitted_email, ...row }) => ({ ...row, ...submitted_email })) };
+        }
         const { rows } = await c.query(`select id as proposal_id,version,deal_id as deal,activity_id,
             submitted_at,submitted_email from email_proposal where exists (select 1 from activity a where a.id=activity_id and coalesce(a.email_context#>>'{lifecycle,state}','live')='live') and kind='reply_draft'
           and status='approved_to_send' and owner=$1 order by submitted_at,id`, [owner]);
@@ -502,14 +515,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [args.idempotency_key]);
         return withEnvelope(c, actor, 'record-email-sent', args, async () => {
           const row = await draftRow(c, args.proposal_id, owner);
-          if (row.status === 'sent' && args.status === 'sent' && row.version === args.base_version + 1
+          if (row.status === 'sent' && args.status === 'sent' && row.version === args.base_version + (row.send_result.reconciled_from_uncertainty ? 2 : 1)
               && args.sha256 === row.submitted_email.sha256
               && args.sent_item_id === row.send_result.sent_item_id
               && args.sender_account === row.send_result.sender_account
               && args.sent_at === row.send_result.sent_at)
             return { ok: true, replayed: true, proposal_id: row.id, version: row.version, ...row.send_result };
-          if (row.status !== 'approved_to_send') fail('email_draft_not_approved');
-          checkVersion(row, args.base_version);
+          const reconciling = row.status === 'failed' && args.status === 'sent'
+            && /^unconfirmed_after_[0-9]+$/.test(row.send_result?.reason ?? '');
+          if (row.status !== 'approved_to_send' && !reconciling) fail('email_draft_not_approved');
+          checkVersion(row, args.base_version + (reconciling ? 1 : 0));
           if (args.sha256 !== row.submitted_email.sha256) fail('email_draft_submission_mismatch');
           if (args.status === 'failed' && !args.reason?.trim()) fail('email_draft_failure_reason_required');
           if (args.status === 'sent' && !args.sent_item_id?.trim()) fail('email_draft_sent_confirmation_required');
@@ -549,6 +564,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             }
           }
           const result = args.status === 'sent' ? { status: 'sent', sent_item_id: args.sent_item_id, sender_account: args.sender_account, sent_at: args.sent_at,
+            ...(reconciling ? { reconciled_from_uncertainty: true } : {}),
             ...(['body_unverified', 'body_mismatch'].includes(args.reason) ? { reason: args.reason } : {}) }
             : { status: 'failed', reason: args.reason };
           await c.query(`update email_proposal set status=$2,version=version+1,send_result=$3::jsonb,result_recorded_at=now()
