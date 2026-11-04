@@ -73,6 +73,10 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     await assert.rejects(call('record-email-lifecycle',{...args,idempotency_key:randomUUID(),observation_id:randomUUID()}),e=>e.payload?.error==='version_conflict');
     await assert.rejects(call('record-email-lifecycle',{...args,idempotency_key:randomUUID(),base_version:1,observation_id:randomUUID()}),e=>e.payload?.error==='email_lifecycle_terminal');
     await assert.rejects(call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Retry',email_identity:identity}),e=>e.payload?.error==='email_not_live');
+    await st.test(`${state}: terminal identity refuses capture under another subject`, async () => {
+      await assert.rejects(call('log-activity', {idempotency_key:randomUUID(), ref:'Lifecycle deal', kind:'email_in', summary:'Moved retry', email_identity:identity}), e=>e.payload?.error==='email_not_live');
+      assert.deepEqual(await snapshot(), before);
+    });
     await assert.rejects(call('preview-email-next-step',{deal:randomUUID(),evidence_quote:'Please call.',activity_id:source.activity_id,text:'Call',next_date:'2026-01-02',owner:'joe'}),e=>e.payload?.error==='email_not_live');
     const stored=(await c.query('select email_context from activity where id=$1',[source.activity_id])).rows[0].email_context.lifecycle;
     assert.equal(stored.state,state);

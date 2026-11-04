@@ -57,8 +57,9 @@ email_observation_conflict, and compares full activity, proposal and audit rows.
 original receipt and unchanged stored rows with another fresh key.
 These tests refine Replay and RefuseStaleOrForeign; payload comparison and
 observation IDs are outside the TLC state space. No model transition changed.
-The terminal-state tests still exercise stale-version refusal and terminal
-recapture refusal; the six sent-confirmation tests cover ConfirmSent and
+`<state>: terminal identity refuses capture under another subject` checks
+identity-wide preservation across filing targets. The terminal-state tests still
+exercise stale-version refusal and same-subject terminal recapture refusal; the six sent-confirmation tests cover ConfirmSent and
 ReplaySent in both observation orderings.
 
 The model treats transactions as atomic. It leaves authentication, identity
