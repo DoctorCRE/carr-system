@@ -158,6 +158,7 @@ export const PROFILES = {
   // Native lifecycle credentials are purpose-bound server-side. They expose
   // only their own record surface even if a caller asks for ?profile=full.
   "codex-continuity": new Set(),
+  "session-checkpoint-v1": new Set(["write-session-checkpoint-v1", "read-session-checkpoint-v1", "archive-session-checkpoint-v1"]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
   // additive, carries an idempotency key, and cannot destroy or re-point an
@@ -454,6 +455,7 @@ function profileFor(request) {
  * voluntary limiter for everyone else and a no-op for these three.
  */
 export function profileForActor(actor, request) {
+  if (actor?.via === "session-checkpoint-token") return "session-checkpoint-v1";
   if (new URL(request.url).pathname === "/doc/mcp") return "doc";
   if (actor?.continuity_surface === "codex" && actor?.via === "codex-continuity-token")
     return "codex-continuity";

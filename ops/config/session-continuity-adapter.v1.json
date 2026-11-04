@@ -1,0 +1,16 @@
+{
+  "schema": "carr-session-continuity-adapter.v1",
+  "contract": "session-continuity.v1",
+  "authority_contract": "session-checkpoint.v1",
+  "revision": "ae95b0b41a29750004fa347e79bba9b942eb7f42",
+  "artifacts": {
+    "contracts/session-continuity.v1.json": "484f49d3eb00deb668cb8ea84d71b335ed5604b20f8e375b183513e484c37af3",
+    "tools/session-continuity.py": "ac4197d70a04b5fda1572e7e71b43083be0289781ee4e5c11aae28ff79a108ed",
+    "lib/session_continuity.py": "ded438956d0198eb089ab2a50a19aed37da21c420addb10d687687ee11ad6f5b",
+    "lib/session_adapters/claude.py": "56d0006e1491534924f3c4524af34259e76bef8e941ae739f9e0ea9c79579151",
+    "lib/session_adapters/codex.py": "63c4c9f174348f38214dd2d04b647f101ddb3a709b67a09b7414a28bbff9f419",
+    "lib/session_adapters/grok.py": "65ef4064d46aead87600af12cfda4bbe573495be936e296aa1434848d21757dc"
+  },
+  "native_installation": "pending",
+  "production_proof": "pending"
+}
