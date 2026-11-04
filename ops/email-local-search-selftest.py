@@ -492,17 +492,24 @@ class PublicationTests(unittest.TestCase):
             result = self.cli()
             self.assertEqual(result.returncode, 2)
             self.assertEqual(old, self.digest())
+        for _ in range(3):
+            self.crash_build()
+        self.assertEqual(old, self.digest())
+        self.assertLessEqual(len(list(self.home.glob('.email-search-*'))), 1)
+        for path in self.home.rglob('*'):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else 0o600)
+        self.build()
+        self.assertEqual(old, self.digest())
+        self.assertFalse(list(self.home.glob('.email-search-*')))
+        self.assertEqual(self.query()['match_count'], 2)
+
+    def crash_build(self):
         child = subprocess.run([sys.executable, '-c',
             'import os,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); '
             'import lib.email_local_search as m; m.os.replace=lambda *a,**k: os._exit(77); '
             'm.build_index(Path(sys.argv[2]),Path(sys.argv[3]),mailbox="m",account_id=42,source_revision="r")',
             str(ROOT), str(self.source), str(self.target)], capture_output=True)
         self.assertEqual(child.returncode, 77)
-        self.assertEqual(old, self.digest())
-        for path in self.home.rglob('*'):
-            self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else 0o600)
-        self.build()
-        self.assertEqual(old, self.digest())
 
     def cli(self, destination=None, *options):
         return subprocess.run([sys.executable, str(ROOT / 'tools/email-local-search.py'), 'build',

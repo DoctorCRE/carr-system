@@ -336,8 +336,11 @@ class IntakeTest(unittest.TestCase):
         from lib.email_local_search import query_index
         outcome = self.search_run()
         self.assertEqual(outcome.state, 'succeeded', outcome)
-        target = (self.out() / 'email-search-7.db').resolve()
+        target = (self.home / '.local/share/carr/email-search/email-search-7.db').resolve()
         self.assertTrue(target.exists())
+        self.assertNotIn(self.repo.resolve(), target.parents)
+        self.assertEqual(stat.S_IMODE(target.parent.stat().st_mode), 0o700)
+        self.assertFalse(list(self.repo.rglob('email-search-*.db')))
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
         result = query_index(target, account_id=7, query='orchard', published_snapshot=True)
         self.assertEqual(result['match_count'], 1)
@@ -361,11 +364,11 @@ class IntakeTest(unittest.TestCase):
         outcome = self.search_run()
         self.assertEqual(outcome.state, 'succeeded', outcome)
         self.assertEqual(outcome.counts['email_index_published'], 1)
-        self.assertTrue((self.out() / 'email-search-7.db').exists())
+        self.assertTrue((self.home / '.local/share/carr/email-search/email-search-7.db').exists())
 
     def test_index_replay_reuses_generation(self):
         self.assertEqual(self.search_run().state, 'succeeded')
-        target = self.out() / 'email-search-7.db'
+        target = self.home / '.local/share/carr/email-search/email-search-7.db'
         before = (target.read_bytes(), target.stat().st_mtime_ns)
         self.store.write_bytes(self.store.read_bytes() + b'.')
         self.assertEqual(self.search_run().state, 'succeeded')
