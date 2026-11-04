@@ -99,7 +99,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "add-doc-conversation-turn": {
     "ingress_key": "mcp-tool:add-doc-conversation-turn",
     "source_locator": "mcp-server/src/doc-conversation.js",
-    "schema_digest": "5ecd7782c4e8d01e7e7e8131274c3bdbdc60a5fd25ca70cfe320ccdcd13df13c",
+    "schema_digest": "d720b8906bd484f678b3c2f2fa99691b24dd67af038a45fb0c57b8e866b90356",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

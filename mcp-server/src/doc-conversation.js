@@ -34,9 +34,14 @@
 // nothing to record. Its schema has no `required` key at all and exactly three
 // optional fields, none of which names an actor, an offset or a sort.
 
-import { validateAnswerBlocks, recordedCompsTable } from './answer-blocks.js';
+import { validateAnswerBlocks, recordedCompsTable, recordedMarketTermsTable, answerChart } from './answer-blocks.js';
+import { readMarketTerms } from './market-terms.ts';
+import { Validator } from '@cfworker/json-schema';
+import answerInput from '../contracts/doc-answer-input.v1.json' with { type: 'json' };
 import docRequestContract from '../contracts/doc-request.v1.json' with { type: 'json' };
 import docRequestLinks from '../contracts/doc-request-links.v1.json' with { type: 'json' };
+
+const answerInputValidator = new Validator(answerInput.$defs.request, '2020-12', false);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -153,16 +158,7 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
       // Its append function is granted to carr_authority ONLY.
       authorityOnly: true,
       description: "Append one turn to a Doc conversation. Sequence, origin channel and origin actor are derived server-side; a caller may not name any of them.",
-      inputSchema: { type: "object", additionalProperties: false, properties: {
-        idempotency_key: { type: "string" },
-        conversation_id: { type: "string" },
-        role: { type: "string", enum: ["human", "assistant", "system"] },
-        body: { type: "string" },
-        msg_id: { type: "string" },
-        comps_deals: { type: "array", minItems: 1, maxItems: 20,
-          items: { type: "string" },
-          description: "Build a sourced proposed-rent table from these recorded deals." },
-      }, required: ["idempotency_key", "conversation_id", "role", "body"] },
+      inputSchema: answerInput.$defs.request,
       handler: async (c, actor, args) =>
         withEnvelope(c, actor, "add-doc-conversation-turn", args, async () => {
           if (!UUID.test(String(args.conversation_id || ""))) {
@@ -176,16 +172,27 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
           if (args.msg_id !== undefined && !UUID.test(String(args.msg_id))) {
             throw new ToolError({ error: "doc_conversation_msg_id_invalid" });
           }
+          if (!answerInputValidator.validate(Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined))).valid) throw new ToolError({ error: 'answer_blocks_invalid' });
+          const selected = args.comps_deals !== undefined || args.market_terms !== undefined;
+          if ((selected && args.role !== 'assistant') || (!selected && args.chart_view && args.chart_view !== 'none')) {
+            throw new ToolError({ error: 'answer_blocks_invalid' });
+          }
           let blocks;
+          let body = args.body;
           if (args.comps_deals !== undefined) {
-            if (!Array.isArray(args.comps_deals) || !args.comps_deals.length
-              || args.comps_deals.length > 20 || args.comps_deals.some(id => !UUID.test(id))) {
+            if (args.comps_deals.some(id => !UUID.test(id))
+              || new Set(args.comps_deals.map(id => id.toLowerCase())).size !== args.comps_deals.length) {
               throw new ToolError({ error: 'answer_blocks_invalid' });
             }
             blocks = [await recordedCompsTable(c, args.comps_deals, ToolError)];
+          } else if (args.market_terms !== undefined) {
+            const study = await readMarketTerms(c, actor, args.market_terms);
+            blocks = [recordedMarketTermsTable(study, ToolError)];
+            body += '\n\nRecorded firm-history market terms. Archive size and history coverage are unknown; this is not complete external market coverage.';
+            if (body.length > 20000) throw new ToolError({ error: 'answer_blocks_invalid', hint: 'Shorten the body to leave room for the firm-history coverage caveat.' });
           }
           if (blocks !== undefined) {
-            if (args.role !== 'assistant') throw new ToolError({ error: 'answer_blocks_invalid' });
+            if (args.chart_view && args.chart_view !== 'none') blocks.push(answerChart(blocks[0], args.chart_view, ToolError));
             validateAnswerBlocks(blocks, ToolError);
           }
           // Minted here when absent, exactly as add-room-turn mints one: the
@@ -195,7 +202,7 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
             blocks === undefined
               ? "select ops.append_doc_conversation_turn($1::uuid,$2::text,$3::text,$4::uuid,$5::uuid) as appended"
               : "select ops.append_doc_conversation_turn($1::uuid,$2::text,$3::text,$4::uuid,$5::uuid,$6::jsonb) as appended",
-            [args.conversation_id, args.role, args.body, msgId, args.idempotency_key,
+            [args.conversation_id, args.role, body, msgId, args.idempotency_key,
               ...(blocks === undefined ? [] : [JSON.stringify(blocks)])]);
           const result = appended.rows[0]?.appended;
           if (!result || result.ok !== true) {

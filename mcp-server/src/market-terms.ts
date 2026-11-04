@@ -1,5 +1,6 @@
 // Compare confirmed firm history without implying complete archive or market coverage.
 import { organizationTenantForActor } from './identity.js';
+import answerInput from '../contracts/doc-answer-input.v1.json' with { type: 'json' };
 import { Validator, type Schema } from '@cfworker/json-schema';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs } from './verb-contract.ts';
@@ -20,11 +21,7 @@ type Snapshot = { receipts: TermReceipt[]; coverage: {
   quarantined_extractor_versions: string[];
 } };
 type Query = VerbInputs['read-market-terms'];
-const inputSchema = { type: 'object', additionalProperties: false, properties: {
-  submarket: { type: 'string', minLength: 1, maxLength: 200 },
-  use_type: { type: 'string', minLength: 1, maxLength: 200 },
-  as_of: { type: 'string', format: 'date' },
-} } satisfies Schema;
+const inputSchema = answerInput.$defs.request.properties.market_terms as Schema;
 const validator = new Validator(inputSchema, '2020-12', false);
 
 /** Rebuild from one database snapshot. Never persist a stale copy of quarantined evidence. */
@@ -64,17 +61,19 @@ export function rebuildMarketTerms(snapshot: Snapshot, query: Query = {}) {
   };
 }
 
+export async function readMarketTerms(c: Db, actor: Actor, query: Query = {}) {
+  if (!validator.validate(query).valid) throw new ToolError({ error: 'validation_error' });
+  const { rows } = await c.query('select ops.market_terms_snapshot($1) snapshot', [organizationTenantForActor(actor)]);
+  return rebuildMarketTerms(rows[0].snapshot, query);
+}
+
 export function marketTermsTools() {
   return {
     'read-market-terms': {
       write: false,
       description: 'Compare confirmed economic terms from recorded firm history, filtered by exact submarket and use_type. Optional as_of selects half-open business effective periods. Returns rows with canonical receipt, counter/executed classification, term date, confidence basis, expense basis and source evidence. Amendments close the prior field period and comparable_deals counts distinct entities, not terms. Tenant-wide source coverage remains explicit even for empty results; archive size and history coverage are unknown. Unclassified receipts lack context; classified receipts are partitioned into eligible, unsupported, and superseded_without_context counts across the tenant, independent of filters and period deduplication. Contextless facts are never guessed into comparables. Quarantine is recomputed on every read; human-reviewed facts survive and rule-promoted facts require an unaffected independent pair. This is firm history, not external market comps.',
       inputSchema,
-      handler: async (c: Db, actor: Actor, args: Query) => {
-        if (!validator.validate(args).valid) throw new ToolError({ error: 'validation_error' });
-        const { rows } = await c.query('select ops.market_terms_snapshot($1) snapshot', [organizationTenantForActor(actor)]);
-        return rebuildMarketTerms(rows[0].snapshot, args);
-      },
+      handler: readMarketTerms,
     },
   };
 }

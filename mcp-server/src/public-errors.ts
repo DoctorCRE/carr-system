@@ -23,7 +23,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["field_required", "Supply the required field using the documented operation shape."],
   ["calendar_event_key_invalid", "Use the meeting review key: exactly 16 lowercase hexadecimal characters."],
   ["calendar_event_key_requires_deal_meeting", "Confirm the calendar meeting on a deal with kind meeting."],
-  ["answer_blocks_invalid", "Use table.v1 or chart.v1 answer blocks with typed columns and sourced numbers. Limit each answer to 8 blocks, each table to 200 rows and 20 columns, and the payload to 128 KiB. Charts must reference a table in the answer."],
+  ["answer_blocks_invalid", "Use table.v1 or chart.v1 answer blocks with typed columns and sourced numbers. Limit each answer to 8 blocks, each table to 200 rows and 20 columns, and the payload to 128 KiB. Charts must reference a table in the answer with comparable units and expense bases. For more than 200 rows, narrow the submarket/use_type/as_of filter or select fewer deals."],
   ["comparison_fact_blocked", "Confirm the named deal field and refresh its canonical version before preparing the comparison."],
   ["comparison_template_unavailable", "Register a reviewed LOI grid template matching the generation snapshot."],
   ["invalid_snapshot", "Prepare a new confirmed-fact comparison draft."],

@@ -6,6 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
+import { docConversationTools } from '../src/doc-conversation.js';
+import { ToolError } from '../src/tool-error.ts';
 import { rebuildMarketTerms } from '../src/market-terms.ts';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
@@ -195,6 +197,58 @@ test('market terms project confirmed history with explicit coverage', async t =>
           null,o.document_ref,$2 from ops.canonical_fact f join ops.fact_observation o on o.id=any(f.observation_ids)
           where f.id=$1`, [unclassified.id, actor.id]), { code: '23514' });
       await assert.rejects(c.query("update ops.market_term_context set use_type='dental'"), { code: '23514' });
+    });
+
+    await t.test('firm-history answer persists and replays sourced blocks atomically', async () => {
+      const schema = await readFile(new URL('../../db/schema.sql', import.meta.url), 'utf8');
+      for (const name of ['ops.doc_conversation', 'ops.doc_conversation_turn', 'ops.doc_conversation_grant']) {
+        const ddl = schema.match(new RegExp(`CREATE TABLE ${name.replace('.', '\\.')} \\([\\s\\S]*?\\n\\);`))?.[0];
+        assert.ok(ddl, name);
+        await c.query(ddl);
+      }
+      await c.query(`alter table ops.doc_conversation add primary key (id);
+        alter table ops.doc_conversation_turn add unique (msg_id);
+        alter table ops.doc_conversation_turn alter column id add generated always as identity;
+        alter table ops.doc_conversation_turn drop column if exists answer_blocks;
+        create function ops.portfolio_writer_actor_id() returns uuid language sql as
+          $$ select '${actor.id}'::uuid $$;`);
+      const old = readMigration('0520_doc_conversation_store.sql');
+      await c.query(old.slice(old.indexOf('create or replace function ops.append_doc_conversation_turn('),
+        old.indexOf('comment on function ops.append_doc_conversation_turn(')));
+      await c.query(`create role carr_jobs; create view public.v_deal_room_negotiation as select null::uuid id, null::uuid deal_id where false`);
+      await c.query(readMigration('1124_doc_answer_blocks.sql').split('do $answer_grants$')[0]);
+      await c.query(readMigration('1145_market_answer_snapshot_access.sql'));
+      await c.query(readMigration('1145_market_answer_snapshot_access.sql'));
+      const grants = (await c.query('select ops.scac_current_grant_contract() c')).rows[0].c;
+      assert.equal(grants.secdef_execute.filter(e => e.ingress_key ===
+        'db-function-acl:ops.market_terms_snapshot(p_tenant text):carr_authority:execute').length, 1);
+      const conversation = randomUUID();
+      await c.query('insert into ops.doc_conversation(id,title,created_by_actor) values($1,$2,$3)',
+        [conversation, 'Synthetic market study', actor.id]);
+      const submarket = 'Synthetic Answer';
+      await term({ submarket, value: '26' });
+      const tools = docConversationTools({ ToolError, writeEvent: async () => {},
+        withEnvelope: async (client, _actor, _verb, _args, fn) => {
+          await client.query('begin');
+          try { const result = await fn(); await client.query('commit'); return result; }
+          catch (error) { await client.query('rollback'); throw error; }
+        } });
+      const args = { conversation_id: conversation, idempotency_key: randomUUID(), msg_id: randomUUID(),
+        role: 'assistant', body: 'Synthetic recorded history', market_terms: { submarket }, chart_view: 'line' };
+      const append = patch => tools['add-doc-conversation-turn'].handler(c, actor, { ...args, ...patch });
+      await c.query('grant usage on schema ops to carr_authority; set role carr_authority');
+      try {
+        assert.equal((await append()).deduplicated, false);
+        assert.equal((await append()).deduplicated, true);
+        await assert.rejects(append({ chart_view: 'bar' }), /doc_conversation_msg_id_reuse/);
+      } finally { await c.query('reset role'); }
+      const before = (await c.query('select answer_blocks from ops.doc_conversation_turn where conversation_id=$1', [conversation])).rows;
+      assert.equal(before.length, 1);
+      assert.equal(before[0].answer_blocks[0].rows[0].value.value, 26);
+      await term({ submarket, value: '28' });
+      assert.deepEqual((await c.query('select answer_blocks from ops.doc_conversation_turn where conversation_id=$1', [conversation])).rows, before);
+      const originalSnapshot = await c.query('select ops.market_terms_snapshot($1) snapshot', ['carr-internal']);
+      assert.ok(originalSnapshot.rows[0].snapshot.receipts.length);
     });
 
     await t.test('rollback disables the reader and preserves confirmed facts and classification receipts', async () => {
