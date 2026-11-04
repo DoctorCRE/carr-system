@@ -164,7 +164,7 @@ def test_main_retains_migration_shadow_coverage():
     y = CANARY.read_text()
     check('main installs PG18 for the migration shadow',
           'run: bash ops/ci-postgres.sh' in y
-          and 'postgresql-18-pgvector' in (REPO / 'ops/ci-postgres.sh').read_text())
+          and 'postgresql-18-pgvector' in (REPO / 'ops/ci-apt.py').read_text())
     check('main collects migration shadow artifacts',
           'CARR_SHADOW_ARTIFACT_DIR:' in y and 'shadow-schema' in y)
 
@@ -183,12 +183,12 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
     for path in (CANARY, CI_YML):
         y = path.read_text(encoding="utf-8")
         installer = 'run: bash ops/ci-postgres.sh'
-        install_text = (REPO / 'ops/ci-postgres.sh').read_text() if installer in y else y
+        install_text = (REPO / 'ops/ci-apt.py').read_text() if installer in y else y
         install = y.find(installer if installer in y else "sudo apt-get install -y -qq postgresql-17")
         check(f"{path.name} installs PG17 for owned role-migration fixtures",
-              install >= 0 and re.search(r"(?m)^\s*sudo apt-get\b[^\n]*\binstall\b[^\n]*\bpostgresql-17(?=\s|$)", install_text) is not None)
+              install >= 0 and 'postgresql-17' in install_text)
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
-              'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in install_text)
+              "output.write('/usr/lib/postgresql/17/bin\\n')" in install_text)
         check(f"{path.name} provisions PG17 before check execution",
               0 <= install < y.find("- name: Run this group's check classes"))
 
