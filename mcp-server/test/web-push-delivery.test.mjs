@@ -85,7 +85,7 @@ test('rfc8291_sender_encrypts_synthetic_payload_and_refuses_redirects_without_se
   assert.equal(requests,1);assert.deepEqual(logs,[]);
   assert.equal(captured.url,row(1).endpoint);assert.equal(captured.request.redirect,'error');assert.ok(captured.request.signal);
   assert.equal(captured.request.headers['content-encoding'],'aes128gcm');assert.ok(captured.request.headers.authorization.startsWith('vapid '));
-  assert.equal(Buffer.from(captured.request.body).includes(Buffer.from('Synthetic private content')),false);
+  assert.equal(Buffer.from(captured.request.body).includes(Buffer.from(row(1).event_id)),false);
   assert.equal((await runWebPush({WEB_PUSH_ENABLED:'false',DATABASE_URL_JOBS:'invalid-synthetic-url'})).state,'disabled');
 });
 
