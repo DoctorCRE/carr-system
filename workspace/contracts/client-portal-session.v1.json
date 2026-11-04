@@ -1,0 +1,64 @@
+{
+  "schema_version": "client-portal-session.v1",
+  "transport": "PostgreSQL functions returning jsonb; authenticated carr_writer connection only",
+  "inputs": {
+    "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"},
+    "password": {"type": "string", "minLength": 1, "maxLength": 1024, "sensitive": true},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$", "meaning": "lowercase SHA-256 hex of an adapter-generated cryptographically random 256-bit token"}
+  },
+  "operations": {
+    "exchange": {
+      "sql": "select ops.exchange_client_portal_session($1::text,$2::text,$3::text)",
+      "arguments": ["slug", "password", "digest"],
+      "write": true,
+      "idempotency_key": "digest",
+      "results": {
+        "success": {"status": "success", "expires_at": "RFC3339 timestamp"},
+        "denied": {"status": "denied", "error": "portal_access_denied"},
+        "locked": {"status": "locked", "error": "portal_locked", "retry_at": "RFC3339 timestamp"}
+      },
+      "rules": [
+        "Uses the existing bcrypt(SHA-256(password)) verifier and the existing shared five-failures-per-fifteen-minutes allowance.",
+        "The fifth failed password returns locked. Correct passwords cannot bypass the window. A correct password before lockout resets failures.",
+        "A retained digest retries with the same expiry after password verification; revoked or expired rows refuse. Replay never extends expiry.",
+        "A digest already bound to another slug refuses even with that other slug's valid password.",
+        "At most ten unexpired rows per slug, including revoked rows. Capacity returns denied without evicting browsers.",
+        "A successful new exchange removes expired rows for its slug. Replay protection lasts while a row is retained. Never reuse a digest for a new login."
+      ]
+    },
+    "read": {
+      "sql": "select ops.read_client_portal_session($1::text,$2::text)",
+      "arguments": ["slug", "digest"],
+      "write": false,
+      "requires_transaction_mode": "read-write transaction because authorization takes a row lock",
+      "results": {
+        "success": {"status": "success", "schema_version": "client-portal.v1", "portal": "existing canonical client-portal.v1 projection"},
+        "denied": {"status": "denied", "error": "portal_access_denied"}
+      },
+      "rules": ["Always checks live slug, digest, expiry, revocation, portal enablement and canonical client binding. No stale cache.", "No client, deal or material selectors. No internal notes. Refuses libraries above the canonical 100-material cap."]
+    },
+    "revoke": {
+      "sql": "select ops.revoke_client_portal_session($1::text,$2::text)",
+      "arguments": ["slug", "digest"],
+      "write": true,
+      "idempotency_key": "slug and digest",
+      "results": {"success": {"status": "success"}, "denied": {"status": "denied", "error": "portal_access_denied"}},
+      "rules": ["Repeated revocation of a retained row succeeds without changing its first revocation timestamp.", "Unknown or cross-slug digest refuses. Revocation also works for disabled portals."]
+    }
+  },
+  "states": ["anonymous", "locked", "active", "expired", "revoked", "portal_disabled", "replay"],
+  "expiry_seconds": 604800,
+  "errors": {
+    "portal_access_denied": "Invalid input, credentials, binding, capacity or unavailable projection; return no content.",
+    "portal_locked": "Password allowance exhausted; respect retry_at.",
+    "database_unavailable": "Adapter-owned transport error. SQL errors propagate. Refuse access and return no content; never serve a cached success."
+  },
+  "adapter_requirements": [
+    "Commit denial results so shared lockout counters persist. Do not throw and roll back on denied or locked.",
+    "Generate tokens and SHA-256 digests outside Postgres. Store only digest in Postgres. Do not log passwords or tokens.",
+    "Keep existing slug URL and password. Set a separate __Host-portal-<slug> cookie, HttpOnly, Secure, SameSite=Lax, Path=/, no longer than expires_at.",
+    "Parameterize SQL. Never accept caller-provided client/deal selectors or choose a slug from token content.",
+    "Use finite database timeouts, bounded connection concurrency, no automatic password retry loop, and alert on database errors.",
+    "All content, packages and files must pass this slug's live session check. Public HTTP wiring and production proof belong to unit B and host wiring."
+  ]
+}
