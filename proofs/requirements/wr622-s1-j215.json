@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "wr622-s1-j215",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "trusted-status-receipt",
+      "predicate": "A registered signed-out status runner writes a bound receipt and immutable provenance reads back exactly.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Trusted signed receipt persists; builder forgery and binding mismatch refuse.",
+      "input_class": "signed-out-status",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 10,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

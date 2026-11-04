@@ -76,6 +76,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "acquire-production-proof-attempt": {
+    "ingress_key": "mcp-tool:acquire-production-proof-attempt",
+    "source_locator": "mcp-server/src/production-proof.js",
+    "schema_digest": "d4eff75de11d064b3a367e35e482901a2bd7b06dd3773714a832ed54dea3d86e",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "add-critical-date": {
     "ingress_key": "mcp-tool:add-critical-date",
     "source_locator": "mcp-server/src/tools.js",
@@ -2454,6 +2464,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-production-proof-status": {
+    "ingress_key": "mcp-tool:read-production-proof-status",
+    "source_locator": "mcp-server/src/production-proof.js",
+    "schema_digest": "4b42d965fc119a1766ceb0874caccbb6b5ff386739ba2d614ffe39780f4278a6",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-profiles": {
     "ingress_key": "mcp-tool:read-profiles",
     "source_locator": "mcp-server/src/agent-profiles.js",
@@ -2978,6 +2998,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:record-practice-origination-feed",
     "source_locator": "mcp-server/src/practice-origination.ts",
     "schema_digest": "4aa51536d87e38c8145d529bb8d1128d58e058366c33544f5e1da15c89c670c5",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-production-deployment": {
+    "ingress_key": "mcp-tool:record-production-deployment",
+    "source_locator": "mcp-server/src/production-proof.js",
+    "schema_digest": "5cc1a7c5d6933f0c07cc3d3137b35fcbd71666d29ffd959a99f1167c451a1175",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-production-proof-attempt": {
+    "ingress_key": "mcp-tool:record-production-proof-attempt",
+    "source_locator": "mcp-server/src/production-proof.js",
+    "schema_digest": "4310fe171ab802fad2d051cc99113aad67a85206088cba1d45e9845a14f73060",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

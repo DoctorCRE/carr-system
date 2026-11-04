@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { productionProofTools } from "./production-proof.js";
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
@@ -11097,5 +11098,7 @@ for (const family of toolFamilies) {
   registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,
     versionGuard, executeRegisteredTool, canExercisePartnerAuthority, partnerAuthoritySlugForActor }), family.source);
 }
+
+registerTools(productionProofTools({ ToolError }), "mcp-server/src/production-proof.js");
 
 Object.freeze(TOOLS);

@@ -1,0 +1,16 @@
+stateDiagram-v2
+    [*] --> Unproven
+    Unproven --> Deployed: Trusted deployment collector records release
+    Deployed --> Proving: Registered runner reserves attempt
+    Proving --> Proven: Bound signed pass persists
+    Proving --> Failed: Bound signed failure persists
+    Proving --> Blocked: Bound signed prerequisite block persists
+    Failed --> Proving: Runner reserves retry
+    Blocked --> Proving: Runner reserves retry
+    Proven --> Proving: Runner reserves revalidation
+    Proven --> Deployed: Collector records another release or rollback
+    Proving --> Deployed: Collector records another release or rollback
+    Deployed --> Unproven: Latest release does not contain required merge
+    %% never A builder can produce a trusted pass
+    %% never A delayed prior attempt overrides a newer attempt
+    %% never A receipt can be changed or deleted
