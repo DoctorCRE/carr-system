@@ -110,14 +110,15 @@ test('Home review lifecycle uses exact current domain owners on PostgreSQL', asy
     [id, source, actors.joe.id]);
     const find = async () => (await read()).items.find(i => i.source_id === id);
     const original = await find();
+    const future = (await c.query("select now()+interval '1 day' as deadline")).rows[0].deadline.toISOString();
     if (state.defer) {
       await call('snooze-email-proposal', { proposal_id: id, base_version: 1,
-        deferred_until: new Date(Date.now() + 86400000).toISOString(), idempotency_key: randomUUID() });
+        deferred_until: future, idempotency_key: randomUUID() });
       await refuses(load(original), 'home_review_stale');
       if (state.due) await c.query("update email_proposal set deferred_until=now()-interval '1 second' where id=$1", [id]);
     }
     if (state.command) await call(state.command, { items: [{ item_id: original.item_id, base_version: original.base_version }],
-      ...(state.command === 'snooze-home-inbox' ? { until: new Date(Date.now() + 86400000).toISOString() } : {}),
+      ...(state.command === 'snooze-home-inbox' ? { until: future } : {}),
       idempotency_key: randomUUID() });
     if (state.status !== 'pending') await c.query(`update email_proposal set status=$2,version=version+1,
       resolved_by=$3,resolved_at=now(),resolution_reason=case when $2='dismissed' then 'Synthetic dismissal' end,
