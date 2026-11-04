@@ -96,7 +96,7 @@ class FileAttachmentTest(unittest.TestCase):
 
     def test_oversize_is_refused_before_upload(self):
         fake = Fakes()
-        big = PDF + b'0' * att.CAP
+        big = PDF + b'0' * att.CAP + b'%%EOF'
         self.assertEqual(fake.file(big), {'status': 'too_large'})
         self.assertEqual(fake.puts, [])
 
