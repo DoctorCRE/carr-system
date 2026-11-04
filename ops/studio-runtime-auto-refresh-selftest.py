@@ -109,6 +109,13 @@ class AutoRefreshTests(unittest.TestCase):
         self.host.release.assert_not_called()
 
 
+    def test_slow_discovery_does_not_shorten_attempt_cooldown(self):
+        self.host.refresh.side_effect = RuntimeError('failure')
+        with patch('lib.studio_runtime_auto_refresh.time.time', side_effect=[10000, 10080]):
+            self.assertEqual(tick(self.root, self.host), 'failed')
+        self.assertEqual(self.run_tick(10600), 'cooldown')
+        self.assertEqual(self.host.refresh.call_count, 1)
+
 
 class ReleaseTests(unittest.TestCase):
     def release(self, live=None, runs=None):

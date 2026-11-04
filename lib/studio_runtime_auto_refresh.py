@@ -57,7 +57,8 @@ def save(path, state):
 
 
 def tick(root, host, *, now=None):
-    now = time.time() if now is None else now
+    live_clock = now is None
+    now = time.time() if live_clock else now
     root.mkdir(parents=True, exist_ok=True)
     with locked(root / 'lock', blocking=False):
         path = root / 'state.json'
@@ -82,6 +83,8 @@ def tick(root, host, *, now=None):
         if state['failures'].get(sha, 0) >= 2:
             host.alert(sha, now)
             return receipt('open', sha)
+        if live_clock:
+            now = time.time()
         if now - state.get('attempted_at', 0) < 600:
             return receipt('cooldown', sha)
         state['attempted_at'] = now
