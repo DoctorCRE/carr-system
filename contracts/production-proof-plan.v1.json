@@ -46,7 +46,7 @@
       "revision": "8bdabfe3275668cd10401a8e58244b953d3d2428",
       "targets": ["worker"]
     },
-    "studio-run-receipt.v1": {"path": "ops/studio-proof-observe.py", "revision": "e105804540f17afba50dd45f78b84b50698a3ffc", "targets": ["studio"]}
+    "studio-run-receipt.v1": {"path": "ops/studio-proof-observe.py", "revision": "f699e1859dc87e4122501bbaba35a312607452a7", "targets": ["studio"]}
   },
   "x-required-targets": {"worker": ["mcp-server/**", "migrations/**"], "studio": ["lib/outlook*.py", "bin/install-outlook-*", "bin/refresh-outlook-runtime", "ops/launchd/com.carr.outlook-*.plist"]},
   "x-non-product-paths": [

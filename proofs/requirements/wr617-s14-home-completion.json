@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617.S14-home-completion",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "worker-completion-read-deployed",
+      "predicate": "The deployed Worker serves the merged release SHA and its verb registry includes read-home-inbox-v4. This smoke does not prove a completed test task appears in Home.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity matches the merged SHA and verb-registry journey passes with read-home-inbox-v4 present.",
+      "input_class": "read-only release identity and verb registry",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
