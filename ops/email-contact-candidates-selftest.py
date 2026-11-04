@@ -50,7 +50,7 @@ class CandidatesTest(unittest.TestCase):
             self.assertIn(item['evidence'], body.splitlines())
             self.assertEqual(item['source_ref'], 'synthetic-source')
             self.assertEqual(item['sender'], 'a@example.test')
-            self.assertEqual(item['extraction_version'], 'email-contact-candidates/v2')
+            self.assertEqual(item['extraction_version'], 'email-contact-candidates/v3')
             self.assertEqual(result['version'], item['extraction_version'])
             self.assertIs(item['verified'], False)
 
@@ -380,6 +380,28 @@ class CandidatesTest(unittest.TestCase):
                                 '<div>alice@example.test</div></blockquote>')
         self.assertTrue(extract_candidates(quoted, 'alice@example.test', 'ref', complete=True)['ambiguity'])
         self.assertEqual(signature_text('x' * 1_000_001), '')
+
+    def test_role_ownership_in_prose_headings_and_delimited_signatures(self):
+        for context in ('For scheduling contact my assistant Bob.', 'Assistant Bob',
+                        'Assistant contact', 'Delegate Bob', 'On behalf of Bob',
+                        'Please contact my delegate Bob for scheduling.'):
+            for delimiter in ('', '-- \n'):
+                body = context + '\n' + delimiter + 'Phone: 555-0199\nEmail: alice@example.test'
+                with self.subTest(context=context, delimiter=delimiter):
+                    result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+                    self.assertEqual(result['ambiguity'], 'competing_identity')
+                    self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_multiple_phone_ownership_and_quoted_assistant(self):
+        for block, accepted in (
+            ('Phone: 555-0101\nMobile: 555-0102\nalice@example.test', True),
+            ('555-0101\n555-0102\nalice@example.test', False),
+            ('555-0101\nalice@example.test\nBob Synthetic\n555-0199\nalice@example.test', False),
+            ('555-0101\nalice@example.test\n> Assistant Bob\n> 555-0199', True),
+        ):
+            result = extract_candidates(block, 'alice@example.test', 'ref', complete=True)
+            self.assertEqual(result['ambiguity'] is None, accepted)
+            self.assertFalse(any(x['value'] == '555-0199' for x in result['contact_facts']))
 
     def test_html_to_text_and_forwarded(self):
         from html.parser import HTMLParser

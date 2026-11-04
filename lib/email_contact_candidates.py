@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
-VERSION = 'email-contact-candidates/v2'
+VERSION = 'email-contact-candidates/v3'
 LABEL = re.compile(r'^(name|company|title|phone|mobile|email)\s*:\s*(\S.*?)\s*$', re.I)
 ATOM = r"[a-z0-9!#$%&'*+/=?^_`{|}~-]+"
 DOMAIN_LABEL = r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?'
@@ -15,6 +15,16 @@ HISTORY = re.compile(
 ADDRESS = re.compile(r"(?<![\w.!#$%&'*+/=?^_`{|}~@-])" + EMAIL.pattern
                      + r"(?![\w.!#$%&'*+/=?^_`{|}~@-])", re.I)
 DISPLAY_ADDRESS = re.compile(r'([^<>]+)\s*<([^<>]+)>')
+
+
+def evidence_input(mail):
+    """Versioned raw inputs shared by extraction proof and retry binding.
+
+    Preserve HTML tags: quotation/layout can change without changing plain text.
+    Both views are provenance even when HTML supplies the extraction layout.
+    """
+    return {'version': VERSION, 'body': mail.get('body', mail['text']),
+            'html': mail.get('signature_html'), 'complete': mail['full']}
 
 
 class _SignatureHTML(HTMLParser):
@@ -87,8 +97,6 @@ def _contact_line(line):
 
 def _undelimited_fields(lines, sender):
     text = '\n'.join(lines)
-    if re.search(r'^\s*assistant(?: contact)?\s*:', text, re.I | re.M):
-        return {}, 'competing_identity'
     if text.count('@') != len(ADDRESS.findall(text)):
         return {}, 'invalid_identity'
     if any(address.casefold() != sender.casefold()
@@ -192,6 +200,11 @@ def extract_candidates(body, sender, source_ref, *, complete):
         return reject('missing_sender_or_source')
     message = MessageSections.parse(body)
     lines = message.current
+    # An address binds a sender, not the ownership of nearby people's numbers.
+    # Refuse explicit delegated ownership before discarding prose or headings.
+    if re.search(r'\b(?:assistant|delegate)\b|\bon behalf of\b',
+                 '\n'.join(lines), re.I):
+        return reject('competing_identity')
     delimiters = [i for i, line in enumerate(lines) if line == '-- ' or line == '--']
     if not delimiters:
         fields, ambiguity = _undelimited_fields(lines, sender)

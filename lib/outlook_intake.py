@@ -1145,7 +1145,7 @@ class Run:
                 continue
             observation = observations.get(source)
             binding_keys = observation.get('binding_keys', mail['local_keys']) if observation else mail['local_keys']
-            binding = email_contact_review.digest([mail['sender'].lower(), mail.get('body', mail['text']),
+            binding = email_contact_review.digest([mail['sender'].lower(), email_contact_review.evidence_input(mail),
                                                     snapshot['party_id'], contact.ref,
                                                     binding_keys, mail.get('message_id'),
                                                     (snapshot['provenance'].get('company') or {}).get('party_id')])

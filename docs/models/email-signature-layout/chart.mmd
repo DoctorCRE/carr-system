@@ -2,11 +2,13 @@ stateDiagram-v2
  [*] --> Captured
  Captured --> Held: Incomplete body or invalid sender
  Captured --> Current: Restore HTML lines and exclude quoted history
- Current --> Held: No unique bounded sender contact run
+ Current --> Held: No unique bounded sender contact run or explicit delegated ownership
  Current --> Proposed: Sender-bound contact lines
  Proposed --> Held: Missing contact snapshot or changed binding
  Proposed --> Pending: Versioned proposed finding
- Pending --> Pending: Lost response replays frozen request
+ Pending --> Held: Text, HTML or extraction policy changed
+ Held --> Pending: Exact frozen evidence restored
+ Pending --> Pending: Unchanged evidence replays frozen request
  Pending --> Recorded: Record layer acknowledges
  Recorded --> Recorded: Same source returns
  %% never Extract facts from quoted history or a competing identity.

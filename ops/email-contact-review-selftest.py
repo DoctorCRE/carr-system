@@ -71,7 +71,7 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(args['value']['evidence'], 'Phone: 555-0199')
         self.assertFalse(args['value']['verified'])
         self.assertEqual(args['value']['verification'], 'unverified_signature_observation')
-        self.assertEqual(args['value']['extraction_version'], 'email-contact-candidates/v2')
+        self.assertEqual(args['value']['extraction_version'], 'email-contact-candidates/v3')
         self.assertIn('outlook-signature/', args['source'])
         self.assertEqual(self.snapshot, prior)
         self.assertFalse({'update-party-contact', 'correct-party-identity'} & {v for v, _ in self.calls})
@@ -98,6 +98,82 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(args['proposes_correction']['proposed'], '555-0199')
         self.assertEqual(args['epistemic_status'], 'proposed')
         self.assertEqual({verb for verb, _ in self.calls}, {'record-finding'})
+
+    def test_html_only_changed_then_restored_evidence_holds_retry(self):
+        self.message['text'] = 'Thanks 555-0199 pat@example.test'
+        original = '<p>Thanks</p><div>555-0199</div><div>pat@example.test</div>'
+        self.message['signature_html'] = original
+        self.error = 'transient'
+        self.run_review()
+        frozen = copy.deepcopy(self.calls[0])
+        self.state = json.loads(json.dumps(self.state))
+        self.message['signature_html'] = ('<p>Thanks</p><blockquote><div>555-0199</div>'
+                                          '<div>pat@example.test</div></blockquote>')
+        self.error = None
+        self.now += timedelta(minutes=2)
+        work = self.run_review()
+        self.assertEqual(len(self.calls), 1)
+        self.assertFalse(self.receipts)
+        self.assertEqual(work.counts['signature_held'], 1)
+        self.message['signature_html'] = original
+        self.run_review()
+        self.run_review()
+        self.assertEqual(self.calls, [frozen, frozen])
+        self.assertEqual(len(self.receipts), 1)
+
+    def test_plain_only_change_with_html_also_holds_retry(self):
+        self.message['signature_html'] = '<div>555-0199</div><div>pat@example.test</div>'
+        self.error = 'transient'
+        self.run_review()
+        self.message['text'] += '\nnew provenance'
+        self.error = None
+        self.now += timedelta(minutes=2)
+        self.run_review()
+        self.assertEqual(len(self.calls), 1)
+        self.assertFalse(self.receipts)
+
+    def test_policy_change_holds_pending_but_preserves_acknowledgements(self):
+        from unittest.mock import patch
+        for error in ('transient', None):
+            with self.subTest(error=error):
+                self.setUp()
+                self.error = error
+                self.run_review()
+                self.error = None
+                self.now += timedelta(minutes=2)
+                with patch('lib.email_contact_candidates.VERSION', 'future-policy'):
+                    self.run_review()
+                self.assertEqual(len(self.calls), 1)
+                self.assertEqual(len(self.receipts), int(error is None))
+
+    def test_html_alias_requires_same_evidence_proof(self):
+        from lib.email_contact_review import resolve_sources
+        mailbox = {}
+        original = {**self.message, 'signature_html': '<div>555-0199</div><div>pat@example.test</div>'}
+        key = lambda ident: 'source/' + ident
+        first = resolve_sources(mailbox, [original], key, 300)[original['ident']]
+        alias = {**original, 'ident': 'new-alias', 'local_keys': []}
+        alias['signature_html'] = '<blockquote>' + original['signature_html'] + '</blockquote>'
+        self.assertIsNone(resolve_sources(mailbox, [alias], key, 300)[alias['ident']])
+        alias['signature_html'] = original['signature_html']
+        self.assertEqual(resolve_sources(mailbox, [alias], key, 300)[alias['ident']], first)
+
+    def test_assistant_context_never_contaminates_sender_even_empty_fields(self):
+        for context in ('For scheduling contact my assistant Bob.', 'Assistant Bob',
+                        'Assistant contact', 'Delegate contact Bob',
+                        'Please contact my delegate Bob for scheduling.'):
+            for numbers in (['555-0199'], ['Phone: 555-0199', 'Mobile: 555-0188']):
+                for empty in (False, True):
+                    with self.subTest(context=context, numbers=numbers, empty=empty):
+                        self.setUp()
+                        if empty:
+                            self.snapshot['values']['phone'] = None
+                        lines = [context, 'Bob Synthetic', *numbers, 'pat@example.test']
+                        self.message['text'] = ' '.join(lines)
+                        self.message['signature_html'] = ''.join('<div>' + x + '</div>' for x in lines)
+                        work = self.run_review()
+                        self.assertFalse(self.calls)
+                        self.assertEqual(work.counts['signature_held'], 1)
 
     def test_missing_fields_and_identity_observations_require_review(self):
         self.message['text'] += '\nTitle: Director\nName: Pat New\nCompany: New Org'

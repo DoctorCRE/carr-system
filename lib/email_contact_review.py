@@ -3,7 +3,7 @@ import hashlib
 import json
 import uuid
 
-from lib.email_contact_candidates import extract_candidates, signature_text
+from lib.email_contact_candidates import extract_candidates, signature_text, evidence_input
 
 KIND = 'email_signature_observation'
 FIELDS = {'phone': 'phone', 'mobile': 'cell', 'email': 'email', 'title': 'title',
@@ -67,7 +67,7 @@ def resolve_sources(mailbox, mails, source_key, copy_window):
         groups.setdefault(mid, []).append(mail)
     def content_proof(mail):
         return digest([mail['sender'].lower(), mail.get('subject'), mail['sent_unix'],
-                       mail.get('body', mail['text']), mail.get('copy_key')])
+                       evidence_input(mail), mail.get('copy_key')])
 
     for mid, rows in groups.items():
         proofs = evidence.setdefault(mid, {})
