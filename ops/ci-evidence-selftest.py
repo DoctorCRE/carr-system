@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from ci_unit_shards import COUNT
 from git_env import fixture_env
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -126,8 +127,8 @@ class Reuse(unittest.TestCase):
                      {'name': 'ops/ci.sh --strict --only gates', 'conclusion': 'success'},
                      {'name': 'ops/ci.sh --strict --only migration', 'conclusion': 'success'},
                      {'name': 'unit-coverage', 'conclusion': 'success'},
-                     *[{'name': f'unit / MCP unit shard {n} of 4', 'conclusion': 'success'}
-                       for n in range(1, 5)]]
+                     *[{'name': f'unit / MCP unit shard {n} of {COUNT}', 'conclusion': 'success'}
+                       for n in range(1, COUNT + 1)]]
     def eligible(self):
         return evidence.can_reuse(self.run, self.jobs, self.receipt,
                                   tree=self.tree, head_tree=self.tree,
@@ -137,7 +138,7 @@ class Reuse(unittest.TestCase):
         self.assertTrue(self.eligible())
 
     def test_reuse_requires_every_mcp_shard_and_coverage(self):
-        proof_jobs = ['unit-coverage', *[f'unit / MCP unit shard {n} of 4' for n in range(1, 5)]]
+        proof_jobs = ['unit-coverage', *[f'unit / MCP unit shard {n} of {COUNT}' for n in range(1, COUNT + 1)]]
         self.assertTrue(self.eligible())
         for name in proof_jobs:
             for state in ('failure', 'cancelled', 'skipped', None):

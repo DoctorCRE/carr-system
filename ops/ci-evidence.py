@@ -13,6 +13,8 @@ import re
 import subprocess
 import zipfile
 
+from ci_unit_shards import COUNT
+
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = 'ci-tree-evidence'
 
@@ -101,7 +103,7 @@ def contract_digest(root=ROOT):
 
 def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
     required = {'ops/ci.sh --strict', 'unit-coverage',
-                *(f'unit / MCP unit shard {n} of 4' for n in range(1, 5)),
+                *(f'unit / MCP unit shard {n} of {COUNT}' for n in range(1, COUNT + 1)),
                 *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
     return (run.get('name') == 'CI' and run.get('event') == 'merge_group'
