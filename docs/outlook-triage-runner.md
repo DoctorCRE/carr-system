@@ -14,21 +14,19 @@ planned with their state preserved. Unknown read state remains a hold.
 
 ## System design
 
-One local adapter reads a private supplied snapshot. The existing planner owns
-eligibility, routing precedence and exact destination resolution. The existing
-selector owns qualification. Qualification alone cannot install an executor.
-Even sanctioned metadata returns `executor_unavailable` until a concrete,
-verified executor exists. Unverified metadata returns `capability_not_verified`.
+One current observation invocation owns admission. The producer verifies,
+decodes, rechecks and publishes evidence, then returns its exact parsed value
+to the planner. The runner never opens a retained pathname for planning. The
+existing planner owns eligibility and destination resolution. Qualification
+alone cannot install an executor. Even sanctioned metadata returns
+`executor_unavailable` until a verified executor exists.
 
-The bounded research-copy producer is documented in
-`docs/outlook-triage-producer.md`. It publishes local observations with explicit
-unavailable mover semantics. It is not installed or invoked by this runner.
-Without supplied input the runner reports `snapshot_unavailable`. A prior
-projection invalidated by a new producer attempt reports
-`snapshot_producer_unavailable` and yields no planned moves. With the
-producer subset it reports per-item holds and zero moves. Decoder read state,
-message revision and local-to-mover binding remain unverified. The adapter
-validates shape; it does not attest external truth.
+The bounded producer and lifecycle are documented in
+[Research-copy observation and planning](outlook-triage-producer.md).
+The combined runner main accepts an explicit `--copy` directory. An independent
+runner, including the current launchd entry without a copy argument, truthfully
+holds with `snapshot_producer_unavailable`. Standalone export, JSON flags, old
+bytes and exit codes never grant admission. There is no ambient fallback.
 
 The local file limit is 8 MiB with at most 10,000 observations and folders.
 The planner considers at most 1,000 observations and produces at most 150
@@ -45,9 +43,9 @@ This is a hold, not an implementation of effect reconciliation or a ledger.
 A future executor must own durable intent, independent destination confirmation,
 identity revalidation and read-state preservation before any effect is enabled.
 
-## Supplied snapshot interface
+## Retained evidence interface
 
-The runner reads `out/outlook-triage/snapshot.json`, an owned regular 0600 file.
+Evidence inspection reads `out/outlook-triage/snapshot.json`, an owned regular 0600 file.
 The output directory uses 0700. Symlink files, oversized input and malformed
 data refuse. Snapshot JSON uses schema `outlook-triage-snapshot/v1` and contains:
 
@@ -62,7 +60,7 @@ data refuse. Snapshot JSON uses schema `outlook-triage-snapshot/v1` and contains
 - `effect_state`, exactly `none`, `uncertain` or `interrupted`.
 
 The synthetic runner tests construct the complete interface. This file is
-private planning input, never execution authority or an operational log.
+private observation evidence. Planning consumes only the current producer result.
 Reports retain counts and fixed codes only, without subjects, folders or IDs.
 
 ## Transitions and verification
@@ -72,28 +70,26 @@ stateDiagram-v2
     [*] --> Waiting
     Waiting --> OutsideWindow: Outside evening
     Waiting --> Observing: Evening run
-    Observing --> Held: Missing invalid or stale snapshot
-    Observing --> Planned: Valid supplied observations
+    Observing --> Held: No current successful producer attempt
+    Observing --> Planned: Current verified publication returns parsed observations
     Planned --> Held: Capability unverified
     Planned --> Held: Executor unavailable
-    Planned --> ReconciliationHeld: Prior uncertain or interrupted effect
+    Observing --> ReconciliationHeld: Prior uncertain or interrupted effect
     Observing --> TimedOut: Evening closes
 ```
 
-`python3 ops/outlook-triage-runner-selftest.py` exercises those transitions,
-the real main receipt, fire scheduling, duplicate identities, missing routing,
-unresolved destinations, ambiguity, policy mismatch and cap overflow. It traps
-UI moves and verifies unchanged snapshot bytes and repeated-run results.
-Planner and executor qualification selftests retain their independent matrices.
-Shared UI preflight and installer tests remain in `outlook-triage-selftest.py`.
-Tests of the retired screen filing route were removed with that route.
+`python3 ops/outlook-triage-runner-selftest.py` checks independent admission
+refusal, effect reconciliation, evidence parsing, caps, real receipts and fire
+scheduling. `python3 ops/outlook-triage-producer-selftest.py` checks the actual
+combined CLI and runner, unsafe paths, failure, republication and held
+observations. Planner and executor suites retain their separate matrices.
 
 ## Production proof owned by the parent
 
 After ordinary source delivery, compare the installed runtime and release to
-the merged revision. Observe a natural evening firing. Require an exit-78 hold,
+the merged revision. Observe the bounded canonical launchd triage invocation. Require an exit-78 hold,
 aggregate observed/planned/held/moved counts, zero moves and no desktop control.
-Without a supplied snapshot require `snapshot_unavailable`; never claim mailbox
+Without a current producer attempt require `snapshot_producer_unavailable`; never claim mailbox
 coverage from zero input. With verified observations require planner decisions
 and `capability_not_verified` until the executor contract is satisfied.
 
@@ -106,5 +102,5 @@ with the existing pinned `studio-run-receipt.v1` reader. This reader requires a
 successful receipt with counts. The current triage receipt is skipped and has
 no structured planning counts, so the reader must report BLOCKED. Admission
 acceptance does not verify the natural-run hold above. Preserve that remaining
-proof dependency alongside the missing producer and mover; never replace the
+proof dependency alongside the missing operational proof and mover; never replace the
 skipped state with success to satisfy the reader.

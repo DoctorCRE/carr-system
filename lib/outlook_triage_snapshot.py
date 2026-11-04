@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import os
 import stat
+from typing import NamedTuple
 
 from lib.outlook_triage_plan import (Observation, ReadState, RoutingContext,
                                     Folder, FolderCatalog, Policy)
@@ -19,7 +20,15 @@ class SnapshotError(ValueError):
     pass
 
 
-def read_snapshot(path, settings, max_intents, *, now=None):
+class ValidatedSnapshot(NamedTuple):
+    observations: tuple[Observation, ...]
+    routing: RoutingContext
+    catalog: FolderCatalog
+    policy: Policy
+    effect: str
+
+
+def read_snapshot(path, settings, max_intents, *, now=None, evidence=False):
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -35,8 +44,21 @@ def read_snapshot(path, settings, max_intents, *, now=None):
             raw = handle.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
                 raise ValueError
+        return parse_snapshot(raw, settings, max_intents, now=now,
+                              require_ready=not evidence, check_age=not evidence)
+    except SnapshotError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
+        raise SnapshotError('snapshot_invalid') from None
+
+
+def parse_snapshot(raw, settings, max_intents, *, now=None, require_ready=True, check_age=True):
+    """Validate bounded snapshot bytes once, without deriving planning authority."""
+    try:
+        if len(raw) > MAX_BYTES:
+            raise ValueError
         value = json.loads(raw)
-        if value.get('publication_state', 'ready') != 'ready':
+        if require_ready and value.get('publication_state', 'ready') != 'ready':
             raise SnapshotError('snapshot_producer_unavailable')
         if value['schema'] != 'outlook-triage-snapshot/v1' or value['account'] != settings.account:
             raise ValueError
@@ -45,7 +67,7 @@ def read_snapshot(path, settings, max_intents, *, now=None):
             raise ValueError
         observed = datetime.fromisoformat(value['observed_at'])
         age = ((now or datetime.now(timezone.utc)) - observed).total_seconds()
-        if not 0 <= age <= MAX_AGE:
+        if check_age and not 0 <= age <= MAX_AGE:
             raise SnapshotError('snapshot_stale')
         if not all(isinstance(value[key], str) and value[key] for key in ('snapshot_digest', 'decoder_pin')):
             raise ValueError
@@ -89,7 +111,7 @@ def read_snapshot(path, settings, max_intents, *, now=None):
         effect = value['effect_state']
         if effect not in ('none', 'uncertain', 'interrupted'):
             raise ValueError
-        return tuple(observations), context, catalog, policy, effect
+        return ValidatedSnapshot(tuple(observations), context, catalog, policy, effect)
     except SnapshotError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):

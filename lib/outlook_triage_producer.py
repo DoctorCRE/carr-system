@@ -1,6 +1,8 @@
 """Bounded research-copy projection. Local observations never authorize moves."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+import uuid
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -15,7 +17,7 @@ import tempfile
 import time
 
 from lib.outlook_settings import load_settings
-from lib.outlook_triage_snapshot import MAX_BYTES, MAX_ROWS, read_snapshot
+from lib.outlook_triage_snapshot import MAX_BYTES, MAX_ROWS, ValidatedSnapshot, parse_snapshot
 
 SOURCE_BYTES = 256 * 1024 * 1024
 DECODED_BYTES = 256 * 1024 * 1024
@@ -196,70 +198,82 @@ def _decoder_limits():
     resource.setrlimit(resource.RLIMIT_FSIZE, (DECODED_BYTES, DECODED_BYTES))
 
 
-def _publish(output, raw, settings=None):
-    fd, temporary = tempfile.mkstemp(prefix='.snapshot-', dir=output.parent)
-    temporary = Path(temporary)
-    try:
-        with os.fdopen(fd, 'wb') as handle:
-            handle.write(raw); handle.flush(); os.fsync(handle.fileno())
-        if settings is not None:
-            read_snapshot(temporary, settings, 150)
-        os.replace(temporary, output)
-        directory_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        temporary.unlink(missing_ok=True)
+@dataclass(frozen=True)
+class PublishedObservations:
+    parsed: ValidatedSnapshot
+    counts: dict
 
 
-def _retire_snapshot(source, output):
-    source, output = Path(source).absolute(), Path(output).absolute()
-    if (output.is_relative_to(source) or
-            output.parent.resolve().is_relative_to(source.resolve())):
-        return
+def _directory_identity(output, directory_fd):
+    info = output.parent.stat(follow_symlinks=False)
+    admitted = os.fstat(directory_fd)
+    if (any(parent.is_symlink() for parent in (output.parent, *output.parent.parents))
+            or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700
+            or _identity(info)[:2] != _identity(admitted)[:2]):
+        raise ProducerError('output_directory_changed')
+
+
+def _previous(output, directory_fd, settings):
     try:
-        parent, previous = output.parent.lstat(), output.lstat()
+        fd = os.open(output.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
     except FileNotFoundError:
         return
-    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.getuid()
-            or not stat.S_ISREG(previous.st_mode) or previous.st_uid != os.getuid()
-            or stat.S_IMODE(previous.st_mode) != 0o600):
-        return
-    prior = json.loads(_read(output, MAX_BYTES, time.monotonic() + 5))
-    if (not isinstance(prior, dict) or prior.get('effect_state') != 'none'
-            or prior.get('publication_state') == 'invalidated'):
-        return
-    prior['publication_state'] = 'invalidated'
-    _publish(output, (json.dumps(prior, sort_keys=True) + '\n').encode())
+    with os.fdopen(fd, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > MAX_BYTES):
+            raise ProducerError('previous_output_invalid')
+        raw = handle.read(MAX_BYTES + 1)
+    parsed = parse_snapshot(raw, settings, 150, require_ready=False, check_age=False)
+    if parsed[-1] != 'none':
+        raise ProducerError('reconciliation_required')
 
 
-def produce(source, output, settings):
-    """Decode an existing research copy and atomically publish private planning input."""
-    _retire_snapshot(source, output)
-    deadline = time.monotonic() + DEADLINE_SECONDS
+def _publish(output, raw, directory_fd):
+    temporary = '.snapshot-' + uuid.uuid4().hex
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o600, dir_fd=directory_fd)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _directory_identity(output, directory_fd)
+        os.replace(temporary, output.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        os.fsync(directory_fd)
+        _directory_identity(output, directory_fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+
+
+def produce(source, output, settings, *, max_intents=150):
+    """Publish evidence and return this attempt's exact parsed observations."""
     source, output = Path(source).absolute(), Path(output).absolute()
     if source.is_symlink() or not source.is_dir():
         raise ProducerError('source_invalid')
-    source = source.resolve()
-    if output.is_relative_to(source):
+    if (output.is_relative_to(source) or
+            output.parent.resolve().is_relative_to(source.resolve())):
         raise ProducerError('output_inside_source')
-    output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info = output.parent.lstat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o700):
+    if any(parent.is_symlink() for parent in (output.parent, *output.parent.parents)):
         raise ProducerError('output_directory_invalid')
-    if output.parent.resolve().is_relative_to(source):
-        raise ProducerError('output_inside_source')
-    if output.exists() or output.is_symlink():
-        previous = output.lstat()
-        if (not stat.S_ISREG(previous.st_mode) or previous.st_uid != os.getuid()
-                or stat.S_IMODE(previous.st_mode) != 0o600):
-            raise ProducerError('previous_output_invalid')
-        prior = json.loads(_read(output, MAX_BYTES, deadline))
-        if prior.get('effect_state') != 'none':
-            raise ProducerError('reconciliation_required')
+    output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_fd = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(directory_fd)
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise ProducerError('output_directory_invalid')
+        _directory_identity(output, directory_fd)
+        _previous(output, directory_fd, settings)
+        return _produce(source.resolve(), output, settings, directory_fd, max_intents)
+    finally:
+        os.close(directory_fd)
+
+
+def _produce(source, output, settings, directory_fd, max_intents):
+    deadline = time.monotonic() + DEADLINE_SECONDS
     manifest_raw = _read(source / 'manifest.json', MAX_BYTES, deadline)
     manifest = json.loads(manifest_raw)
     if manifest['schema'] != 'outlook-research-snapshot/v1':
@@ -272,7 +286,7 @@ def produce(source, output, settings):
             or len(receipt['source_digest']) != 64):
         raise ProducerError('decoder_pin_mismatch')
     guide = _read(settings.folder_guide, MAX_BYTES, deadline).decode()
-    with tempfile.TemporaryDirectory(prefix='.triage-', dir=output.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix='.triage-') as temporary:
         stage = Path(temporary)
         original = _copy_files(source, manifest, stage, deadline)
         decoder = stage / 'decoder'
@@ -299,8 +313,10 @@ def produce(source, output, settings):
                 or _read(settings.folder_guide,MAX_BYTES,deadline).decode() != guide):
             raise ProducerError('source_changed')
         _check(deadline)
-        _publish(output, raw, settings)
-        return counts
+        parsed = parse_snapshot(raw, settings, max_intents)
+        _previous(output, directory_fd, settings)
+        _publish(output, raw, directory_fd)
+        return PublishedObservations(parsed, counts)
 
 
 def main(argv=None):
@@ -309,9 +325,8 @@ def main(argv=None):
     parser.add_argument('--output',type=Path,required=True)
     args = parser.parse_args(argv)
     try:
-        _retire_snapshot(args.copy, args.output)
-        counts = produce(args.copy,args.output,load_settings())
-        print(json.dumps(dict(state='observed_held',reason='mover_semantics_unavailable',counts=counts),sort_keys=True))
+        result = produce(args.copy,args.output,load_settings())
+        print(json.dumps(dict(state='observed_held',reason='mover_semantics_unavailable',counts=result.counts),sort_keys=True))
         return 78
     except ProducerError as exc:
         print(json.dumps(dict(state='refused',reason=str(exc),moved=0)))

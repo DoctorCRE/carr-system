@@ -70,44 +70,23 @@ class RunnerTest(unittest.TestCase):
         first = self.execute()
         second = self.execute()
         self.assertEqual(first, second)
-        self.assertEqual(first[0].reason, 'capability_not_verified')
-        self.assertEqual(first[1].planning['planned'], 1)
-        self.assertEqual(first[1].planning['held'], 1)
+        self.assertEqual(first[0].reason, 'snapshot_producer_unavailable')
+        self.assertEqual(first[1].planning['planned'], 0)
+        self.assertEqual(first[1].planning['held'], 0)
         self.assertEqual(self.row['read_state'], 'unread')
 
-    def test_planner_holds_from_real_runner(self):
-        for change, reason in [('duplicate', 'duplicate_identity'), ('folder', 'destination_unresolved'),
-                               ('routing', 'routing_unavailable'), ('policy', 'stale_policy'),
-                               ('ambiguous', 'deal_ambiguous')]:
-            with self.subTest(change=change):
-                old = json.loads(json.dumps(self.value))
-                if change == 'duplicate':
-                    self.value['observations'] *= 2
-                elif change == 'folder':
-                    self.value['catalog']['folders'] = []
-                elif change == 'routing':
-                    self.value['routing']['complete'] = False
-                elif change == 'policy':
-                    self.value['routing_version'] = 'new-route'
-                else:
-                    self.value['routing']['find_results']['client-001 folder-A']['parties'][0]['org_name'] = 'folder-B'
-                _, report = self.execute()
-                self.assertGreater(report.left[reason], 0)
-                self.assertEqual(report.planning['planned'], 0)
-                self.value = old
-
-    def test_cap_is_enforced_by_runner(self):
+    def test_evidence_parser_and_planner_contracts(self):
+        from lib.outlook_triage_snapshot import parse_snapshot, SnapshotError
+        from lib.outlook_triage_plan import plan_triage
         self.value['observations'] = [self.row | {'message_id': f'message-{n}'} for n in range(151)]
-        _, report = self.execute()
-        self.assertEqual(report.planning['planned'], 150)
-        self.assertEqual(report.left['intent_cap_reached'], 1)
-
-    def test_stale_future_and_inconsistent_provenance_refuse(self):
+        parsed = parse_snapshot(json.dumps(self.value).encode(), self.settings, 150)
+        plan = plan_triage(*parsed[:4])
+        self.assertEqual(len(plan.moves), 150)
+        self.assertEqual(plan.leaves[0].reason, 'intent_cap_reached')
         for stamp in ('2000-01-01T00:00:00+00:00', '2099-01-01T00:00:00+00:00'):
             self.value['observed_at'] = stamp
-            self.assertEqual(self.execute()[0].reason, 'snapshot_stale')
-        self.value['observed_at'] = datetime.now(timezone.utc).isoformat()
-        self.assertEqual(self.execute()[0].reason, 'snapshot_invalid')
+            with self.assertRaisesRegex(SnapshotError, 'snapshot_stale'):
+                parse_snapshot(json.dumps(self.value).encode(), self.settings, 150)
 
     def test_uncertain_and_interrupted_never_retry(self):
         for state in ('uncertain', 'interrupted'):
@@ -122,7 +101,7 @@ class RunnerTest(unittest.TestCase):
                          evidence={key: 'synthetic-receipt' for key in REQUIRED_EVIDENCE},
                          verified_read_policy=value['read_state_policy'])
         self.contract.write_text(json.dumps(value))
-        self.assertEqual(self.execute()[0].reason, 'executor_unavailable')
+        self.assertEqual(self.execute()[0].reason, 'snapshot_producer_unavailable')
 
     def test_closed_window_is_timed_out(self):
         self.assertEqual(self.execute(closed=True)[0].state, 'timed_out')
@@ -133,19 +112,19 @@ class RunnerTest(unittest.TestCase):
                          json.dumps(self.value | {'observations': [self.row] * 10001})):
             self.path.write_text(contents)
             outcome, report = triage.triage(self.repo, self.home, triage.Waits(), triage.Limits(), lambda: False)
-            self.assertEqual(outcome.reason, 'snapshot_invalid')
+            self.assertEqual(outcome.reason, 'snapshot_producer_unavailable')
             self.assertEqual(report.planning['planned'], 0)
         self.save()
         self.path.chmod(0o644)
         self.assertEqual(triage.triage(self.repo, self.home, triage.Waits(), triage.Limits(),
-                                     lambda: False)[0].reason, 'snapshot_invalid')
+                                     lambda: False)[0].reason, 'snapshot_producer_unavailable')
         self.path.unlink()
         target = self.path.parent / 'target.json'
         target.write_text(json.dumps(self.value))
         target.chmod(0o600)
         self.path.symlink_to(target)
         self.assertEqual(triage.triage(self.repo, self.home, triage.Waits(), triage.Limits(),
-                                     lambda: False)[0].reason, 'snapshot_invalid')
+                                     lambda: False)[0].reason, 'snapshot_producer_unavailable')
 
     def test_fire_runs_main_despite_legacy_settlement_marker(self):
         self.save()
@@ -171,9 +150,9 @@ class RunnerTest(unittest.TestCase):
                 patch('lib.outlook_runtime.stamp', return_value={'runtime_sha': 'a' * 40}), \
                 patch.object(triage, 'datetime', wraps=datetime) as clock, redirect_stdout(capture):
             clock.now.return_value = moment
-            self.assertEqual(triage.main(), 78)
+            self.assertEqual(triage.main([]), 78)
         output = capture.getvalue()
-        self.assertIn('planned=1 held=1 moved=0', output)
+        self.assertIn('planned=0 held=0 moved=0', output)
         self.assertNotIn('client-001', output)
         receipt = self.path.parent / 'receipt.txt'
         receipt.write_text(next(line for line in output.splitlines()
@@ -201,7 +180,7 @@ class RunnerTest(unittest.TestCase):
             write_settings(home, repo)
             with patch('lib.outlook_ui.prepare_outlook', side_effect=AssertionError('desktop touched')):
                 outcome, report = triage.triage(repo, home, triage.Waits(), triage.Limits(), lambda: False)
-            self.assertEqual(outcome.reason, 'snapshot_unavailable')
+            self.assertEqual(outcome.reason, 'snapshot_producer_unavailable')
             self.assertEqual(report.planning['planned'], 0)
             self.assertEqual(report.planning['capability'], 'capability_not_verified')
 
