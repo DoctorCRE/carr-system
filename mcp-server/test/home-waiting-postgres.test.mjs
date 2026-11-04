@@ -52,6 +52,94 @@ test('waiting transitions preserve ownership, resolve identity and audit writes 
   const refuses = (promise,error) => assert.rejects(promise,e => e.payload?.error===error);
   const first = await item();
   assert.equal(first.waiting_on,null); assert.equal(first.waiting_version,0);
+  await t.test('Unknown refuses merged, deleted and unknown identities without changing state',async()=>{
+    const merged=randomUUID(), deleted=randomUUID();
+    await c.query(`insert into party(id,kind,name,created_by,updated_by,merged_into,deleted_at) values
+      ($1,'person','Synthetic merged identity',$3,$3,$4,null),
+      ($2,'person','Synthetic deleted identity',$3,$3,null,now())`,[merged,deleted,actor.id,survivor]);
+    const receipts=(await c.query('select count(*) n from ops.home_waiting_write')).rows[0].n;
+    for(const id of [merged,deleted,randomUUID()]) {
+      const before=await item();
+      assert.equal(before.waiting_on,null);
+      assert.equal(before.waiting_version,0);
+      await refuses(set(before,{kind:'party',id}),'invalid_waiting_identity');
+      assert.deepEqual(await item(),before);
+    }
+    assert.equal((await c.query('select count(*) n from ops.home_waiting_write')).rows[0].n,receipts);
+  });
+  for(const ordering of ['lower UUID','higher UUID','newer timestamp','hidden newer action']) {
+    await t.test(`notification completion uses canonical ordering with ${ordering}`,async()=>{
+      const subject=randomUUID();
+      const created=(await c.query('select now()::text ts')).rows[0].ts;
+      const high='ffffffff'+randomUUID().slice(8), low='00000000'+randomUUID().slice(8);
+      const insert=(id,severity,offset)=>c.query(`insert into ops.notification
+        (id,recipient_actor,subject_type,subject_ref,event_ref,event_source,deep_link,dedupe_key,severity,reason,created_at)
+        values($1,$2,'email',$3,gen_random_uuid(),'event','/home',gen_random_uuid()::text,$4,'Synthetic ordered notification',$5::timestamptz+$6::interval)`,
+        [id,actor.id,subject,severity,created,offset]);
+      const find=async()=> (await read()).items.find(i=>i.source_type==='notification' && i.source_id.includes(subject));
+      await insert(ordering==='higher UUID'?low:high,'action_required','0 seconds');
+      await set(await find(),{kind:'actor',id:other.id});
+      const before=await find();
+      const receipts=async()=> (await c.query("select count(*) n from ops.home_waiting_write where request->>'command'='complete' and request->>'item_id'=$1",[before.item_id])).rows[0].n;
+      assert.equal(await receipts(),'0');
+      if(ordering==='hidden newer action') {
+        const hidden=randomUUID();
+        await insert(hidden,'action_required','2 seconds');
+        await c.query("insert into ops.notification_delivery(notification_id,channel,state,settled_at) values($1,'in_app','suppressed_fulfilled',now())",[hidden]);
+      }
+      await insert(ordering==='higher UUID'?high:low,'completion',['newer timestamp','hidden newer action'].includes(ordering)?'1 second':'0 seconds');
+      const after=await find();
+      if(ordering==='lower UUID') {
+        assert.equal(after.source_state,'needs_attention');
+        assert.deepEqual(after.waiting_on,before.waiting_on,'older completion preserves the named wait');
+        assert.equal(after.waiting_version,before.waiting_version);
+        assert.equal(await receipts(),'0');
+      } else {
+        assert.equal(after.source_state,'done');
+        assert.equal(after.waiting_on,null);
+        assert.equal(after.waiting_version,before.waiting_version+1);
+        assert.equal(await receipts(),'1');
+      }
+    });
+  }
+  await t.test('completion rechecks canonical state after waiting for the item lock',async()=>{
+    const subject=randomUUID(), completion=randomUUID();
+    const find=async()=> (await read()).items.find(i=>i.source_type==='notification' && i.source_id.includes(subject));
+    const insert=(client,id,severity,offset)=>client.query(`insert into ops.notification
+      (id,recipient_actor,subject_type,subject_ref,event_ref,event_source,deep_link,dedupe_key,severity,reason,created_at)
+      values($1,$2,'email',$3,gen_random_uuid(),'event','/home',gen_random_uuid()::text,$4,'Synthetic concurrent notification',now()+$5::interval)`,
+      [id,actor.id,subject,severity,offset]);
+    await insert(c,randomUUID(),'action_required','0 seconds');
+    await set(await find(),{kind:'actor',id:other.id});
+    const before=await find();
+    const writer=new pg.Client({connectionString:dsn});
+    await writer.connect();
+    let pending;
+    try {
+      const pid=(await writer.query('select pg_backend_pid() pid')).rows[0].pid;
+      await c.query('begin');
+      await c.query("select pg_advisory_xact_lock(hashtextextended('home-waiting:'||$1,0))",[before.item_id]);
+      pending=insert(writer,completion,'completion','1 second');
+      let blocked=false;
+      for(let attempt=0;attempt<100 && !blocked;attempt++) {
+        blocked=(await c.query("select pg_backend_pid()=any(pg_blocking_pids($1)) blocked",[pid])).rows[0].blocked;
+        if(!blocked) await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      assert.equal(blocked,true,'completion insert reaches the held item lock');
+      await insert(c,randomUUID(),'action_required','2 seconds');
+      await c.query('commit');
+      await pending;
+      const after=await find();
+      assert.equal(after.source_state,'needs_attention');
+      assert.deepEqual(after.waiting_on,before.waiting_on);
+      assert.equal(after.waiting_version,before.waiting_version);
+      assert.equal((await c.query("select count(*) n from ops.home_waiting_write where request->>'command'='complete' and request->>'item_id'=$1",[before.item_id])).rows[0].n,'0');
+    } finally {
+      await c.query('rollback');
+      await pending;
+      await writer.end();
+    }
+  });
   await t.test('v5 hydrates pending reply review references after the main merge',async()=>{
     const activity=randomUUID(), proposal=randomUUID();
     await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source)
