@@ -1,0 +1,188 @@
+{
+  "schema_version": "people-directory.v1",
+  "tenant": "Server-bound carr-internal; foreign session tenants refuse.",
+  "authorization": "Existing partner authority including verified sponsored native sessions.",
+  "consistency": "Current committed data per request; renamed records may move between pages. Reset cursor when query changes.",
+  "verbs": {
+    "read-actor-roster-v1": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "schema_version": {
+            "const": "actor-roster.v1"
+          },
+          "actors": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "human",
+                    "automation",
+                    "system"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "slug",
+                "display_name",
+                "kind"
+              ]
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "schema_version",
+          "actors"
+        ]
+      }
+    },
+    "search-parties-v1": {
+      "request": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25
+          },
+          "cursor": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "query",
+              "name",
+              "id"
+            ]
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true
+          },
+          "schema_version": {
+            "const": "party-search.v1"
+          },
+          "parties": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "person",
+                    "org"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "display_name",
+                "kind"
+              ]
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "query",
+                  "name",
+                  "id"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "schema_version",
+          "parties",
+          "next_cursor"
+        ]
+      }
+    }
+  }
+}

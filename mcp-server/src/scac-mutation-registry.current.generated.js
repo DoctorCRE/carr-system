@@ -2184,6 +2184,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-actor-roster-v1": {
+    "ingress_key": "mcp-tool:read-actor-roster-v1",
+    "source_locator": "mcp-server/src/people-directory.ts",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-assurance-health": {
     "ingress_key": "mcp-tool:read-assurance-health",
     "source_locator": "mcp-server/src/assurance-health-store.v5.ts",
@@ -3533,6 +3543,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:search-doctrine",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "a7eeef5debe516a7ece6d07869b189cca7e2c0cc2feb4812941af8bdc3de253c",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "search-parties-v1": {
+    "ingress_key": "mcp-tool:search-parties-v1",
+    "source_locator": "mcp-server/src/people-directory.ts",
+    "schema_digest": "6c7dc49505694188b8c7d751a127e1bea431e2b416f11d247848516573c3d31f",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

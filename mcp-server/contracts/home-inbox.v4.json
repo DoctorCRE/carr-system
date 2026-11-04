@@ -11,6 +11,7 @@
     "action_version": "integer|null; canonical action version, sent as complete-one-action base_version",
     "deal_id": "UUID|null; owning deal for completion readback, null for non-deal work",
     "auto_settled": "boolean; canonical resolution placed this item in Settled without a disposition write",
+    "review_reference": "home-review.v1 reference|null; exact item and source version with candidate domain operations; load read-home-review for current detail and available operations",
     "waiting_on": "null|{identity:{kind:party|actor,id:UUID,display_name:string|null,available:boolean},reason:string,evidence:string[],version:integer}; explicit canonical identity only, null for unknown or completed work",
     "waiting_version": "integer; independent relationship version, 0 before the first command; pass as waiting command base_version"
   },

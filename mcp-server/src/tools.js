@@ -8,6 +8,7 @@ import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
+import { peopleDirectoryTools } from "./people-directory.ts";
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { homeReviewTools } from "./home-review.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
@@ -10936,6 +10937,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
+registerTools(peopleDirectoryTools(), "mcp-server/src/people-directory.ts");
 registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 registerTools(homeReviewTools({ ToolError, readTool: executeRegisteredTool }), "home-review");
 

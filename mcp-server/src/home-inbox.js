@@ -59,12 +59,20 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
     if (result?.ok !== true) throw new ToolError({ error: result?.error || 'inbox_unavailable' });
     return result;
   };
+  async function readSettledSnapshot(c, version) {
+    const source = version === 4 ? 'ops.read_home_inbox_v4()' : 'ops.read_home_inbox_v3()';
+    const row = (await c.query(`with snapshot as materialized (select ${source} as result)
+      select result,array(select p.id::text from jsonb_array_elements(result->'items') i
+        join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
+        where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
+    return { ...withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids)), schema_version: `home-inbox.v${version}` };
+  }
   const tools = {
     'read-home-inbox-v4': {
       writerConnection: true,
       description: 'Read Home with nullable verified waiting identity, reason, evidence and independent waiting_version. Unknown is null. Merged parties resolve to survivors; deleted identities are unavailable. Completed items have no wait. Reads do not change records. Uses home-inbox.v4 with v3 automatic settlement.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => ({ ...withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v4() as result')).rows[0]?.result)), schema_version: 'home-inbox.v4' }),
+      handler: async c => readSettledSnapshot(c, 4),
     },
     'read-home-inbox': {
       writerConnection: true,
@@ -76,13 +84,7 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
       writerConnection: true,
       description: 'Read the Home inbox with automatic settlement of canonical done tasks, sent replies, resolved fact reviews and received tour feedback. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => {
-        const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_v3() as result)
-          select result,array(select p.id::text from jsonb_array_elements(result->'items') i
-            join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
-            where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
-        return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
-      },
+      handler: async c => readSettledSnapshot(c, 3),
     },
     'read-home-inbox-v2': {
       writerConnection: true,
