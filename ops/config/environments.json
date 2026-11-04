@@ -120,6 +120,10 @@
   ],
   "intentional_differences": [
     {
+      "difference": "production alone declares the disabled carr-web-push Worker",
+      "why": "Synthetic local tests own no deployed push service. The production worker ships without a cron or endpoint; VAPID configuration and a deliberate source activation precede any recurring delivery."
+    },
+    {
       "difference": "local and rehearsal deploy no Worker at all",
       "why": "Neither is a serving environment. Local is a workstation; rehearsal is a database branch with a lifetime measured in minutes."
     },
