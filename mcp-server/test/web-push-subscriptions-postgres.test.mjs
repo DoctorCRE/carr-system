@@ -14,6 +14,7 @@ test('subscription lifecycle enforces ownership quota replay expiry grants and n
   const pool = new pg.Pool(f.connection);
   const c = await pool.connect();
   t.after(async () => {c.release(); await pool.end(); await f.close();});
+  assert.equal((await c.query('select ops.scac_mutation_catalog_v118_current() as current')).rows[0].current,true);
   const actors = (await c.query("select id,slug from actor where slug in ('joe','dell') order by slug")).rows;
   assert.equal(actors.length,2);
   const prefs = (await c.query('select * from ops.notification_preference order by actor')).rows;

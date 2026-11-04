@@ -98,3 +98,12 @@ begin
 end $$;
 revoke all on function ops.web_push_lifecycle(jsonb,uuid,text) from public,carr_reader,carr_writer,carr_jobs,carr_authority;
 grant execute on function ops.web_push_lifecycle(jsonb,uuid,text) to carr_writer;
+
+do $append_grant$
+declare contract jsonb;
+begin
+  contract:=ops.scac_current_grant_contract();
+  contract:=jsonb_set(contract,'{secdef_execute}',coalesce(contract->'secdef_execute','[]'::jsonb)||
+    '[{"grantee":"carr_writer","signature":"ops.web_push_lifecycle(p_request jsonb, p_key uuid, p_operation text)","grantable":false,"privilege":"execute","ingress_key":"db-function-acl:ops.web_push_lifecycle(p_request jsonb, p_key uuid, p_operation text):carr_writer:execute","ingress_kind":"db_function_acl","function_kind":"f","security_definer":true,"volatility":"v","parallel":"u","config":["search_path=pg_catalog, ops, public, pg_temp","lock_timeout=2s","statement_timeout=5s"]}]'::jsonb);
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+end $append_grant$;
