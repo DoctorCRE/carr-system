@@ -313,6 +313,76 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
+    def search_decode(self, source, files, target):
+        self.fake.decode(source, files, target)
+        with closing(sqlite3.connect(target)) as db, db:
+            db.executescript("""
+                CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER PRIMARY KEY);
+                CREATE TABLE message_objects(local_key INTEGER PRIMARY KEY, account_id INTEGER,
+                    subject TEXT, conversation_id TEXT, recipients_status TEXT);
+                CREATE INDEX keys_message ON message_keys(message_id);
+                INSERT INTO message_keys SELECT id,id FROM messages WHERE id>0;
+                INSERT INTO message_objects(local_key,account_id) SELECT id,7 FROM messages WHERE id>0;
+            """)
+
+    def search_run(self):
+        self.fake.fixture.unlink(missing_ok=True)
+        write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), body='orchard fixture')])
+        ports = self.fake.ports()
+        ports.decode = self.search_decode
+        return intake.run(self.repo, self.home, ports)
+
+    def test_intake_run_publishes_index_then_lookup_finds_fixture_message(self):
+        from lib.email_local_search import query_index
+        outcome = self.search_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        target = (self.out() / 'email-search-7.db').resolve()
+        self.assertTrue(target.exists())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        result = query_index(target, account_id=7, query='orchard', published_snapshot=True)
+        self.assertEqual(result['match_count'], 1)
+        self.assertEqual(result['coverage']['freshness'], 'published_snapshot_capture_recency_unverified')
+        self.assertEqual(outcome.counts['email_index_rows'], 1)
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
+    def test_index_publish_failure_preserves_success_and_receipt_and_cleanup(self):
+        with patch('lib.email_local_search.build_index', side_effect=OSError('PRIVATE-SENTINEL')):
+            outcome = self.search_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        receipt = intake.receipt_line(outcome, self.repo)
+        self.assertIn('"email_index_failed": 1', receipt)
+        self.assertNotIn('PRIVATE-SENTINEL', receipt)
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
+    def test_failed_index_retries_on_next_decode(self):
+        with patch('lib.email_local_search.build_index', side_effect=OSError('synthetic')):
+            self.assertEqual(self.search_run().state, 'succeeded')
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        outcome = self.search_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        self.assertEqual(outcome.counts['email_index_published'], 1)
+        self.assertTrue((self.out() / 'email-search-7.db').exists())
+
+    def test_index_replay_reuses_generation(self):
+        self.assertEqual(self.search_run().state, 'succeeded')
+        target = self.out() / 'email-search-7.db'
+        before = (target.read_bytes(), target.stat().st_mtime_ns)
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        self.assertEqual(self.search_run().state, 'succeeded')
+        self.assertEqual(before, (target.read_bytes(), target.stat().st_mtime_ns))
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
+    def test_decode_failure_never_publishes_index(self):
+        write_db(self.fake.fixture)
+        ports = self.fake.ports()
+        def fail(*args):
+            raise intake.DecodeError('synthetic')
+        ports.decode = fail
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'decode_failed'))
+        self.assertFalse(list(self.out().glob('email-search*')))
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
     def test_census_request_runs_on_fresh_copy_once_and_keeps_only_counts(self):
         self.out().mkdir(parents=True)
         request = self.out() / 'coverage-census.request'

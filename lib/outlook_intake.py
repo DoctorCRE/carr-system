@@ -772,7 +772,22 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], a
         _coverage_census(home, out, copy, files, account_id)
         db = work / 'store.db'
         decode(copy, files, db)
-        yield (*_load(db, account_id=account_id, account_address=account_address), db, files)
+        loaded = _load(db, account_id=account_id, account_address=account_address)
+        from lib.email_local_search import build_index
+        index = out.resolve() / f'email-search-{account_id}.db'
+        try:
+            os.chmod(db, 0o600)
+            with db.open('rb') as reader:
+                revision = hashlib.file_digest(reader, 'sha256').hexdigest()
+            result = build_index(db.resolve(), index, mailbox=account_address,
+                                 account_id=account_id, source_revision=revision, select_account=True)
+            counts = dict(email_index_published=1, email_index_failed=0,
+                          email_index_rows=result['message_count'], email_index_bytes=index.stat().st_size)
+        except Exception:
+            counts = dict(email_index_published=0, email_index_failed=1)
+        loaded[0]['email_index_receipt'] = counts
+        print('email-index-receipt ' + json.dumps(counts, sort_keys=True))
+        yield (*loaded, db, files)
     finally:
         _remove(work)
 
@@ -2170,18 +2185,24 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state), 'legacy_unmatched': _legacy_unmatched(state),
                   'emails': 0, 'skipped_automated': 0,
+                  'email_index_failed': int(not state.get('email_index_published')),
                   'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
                   **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (meta, mails, events, db, files):
-            return _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
+            outcome = _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
+        publication = meta.get('email_index_receipt', {})
+        outcome.counts.update(publication)
+        state['email_index_published'] = bool(publication.get('email_index_published'))
+        _save(out, state)
+        return outcome
     except FullDiskAccessRequired as error:
         return Outcome('failed', str(error), detail=error.detail)
     except DecodeError as error:

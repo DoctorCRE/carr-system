@@ -36,6 +36,42 @@ class PublicationTests(unittest.TestCase):
     def digest(self):
         return hashlib.sha256(self.target.read_bytes()).hexdigest()
 
+    def test_selected_account_publication_excludes_other_unknown_and_conflicting_rows(self):
+        from lib.email_local_search import query_index
+        with closing(sqlite3.connect(self.source)) as db, db:
+            db.execute('UPDATE message_objects SET account_id=99 WHERE local_key=1002')
+            db.execute('INSERT INTO message_keys VALUES(1,1003)')
+            db.execute('INSERT INTO message_objects VALUES(1003,NULL)')
+        self.build(select_account=True)
+        self.source.unlink()
+        result = query_index(self.target, account_id=42, query='orchard', published_snapshot=True)
+        self.assertEqual(result['match_count'], 0)
+        self.assertEqual(result['coverage']['message_count'], 0)
+        with self.assertRaises(PublicationError):
+            query_index(self.target, account_id=99, query='orchard', published_snapshot=True)
+
+    def test_size_cap_preserves_previous_generation(self):
+        self.build()
+        before = self.target.read_bytes()
+        with closing(sqlite3.connect(self.source)) as db, db:
+            db.execute("UPDATE messages SET body=? WHERE id=1", ('oversized ' * 10000,))
+        with patch('lib.email_local_search.MAX_INDEX_BYTES', 4096):
+            with self.assertRaises(PublicationError):
+                self.build(select_account=True)
+        self.assertEqual(before, self.target.read_bytes())
+        self.assertFalse(list(self.home.glob('.email-search-*')))
+
+    def test_published_snapshot_cli_after_source_cleanup_is_readonly(self):
+        self.build()
+        self.source.unlink()
+        before = self.target.read_bytes()
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/email-local-search.py'),
+            'query', '--published-snapshot', '--index', str(self.target), '--account-id', '42',
+            '--query', 'orchard'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['match_count'], 2)
+        self.assertEqual(before, self.target.read_bytes())
+
     def test_history_lookup_returns_exact_account_results_without_network_calls(self):
         from lib.email_local_search import query_index
         self.build()
