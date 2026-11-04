@@ -2234,6 +2234,66 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((result.counts['mail_ids_reset'], result.counts['mail_rekeyed'], result.counts['logged']),
                          (1, 0, 1))
 
+    def test_runtime_proof_uses_retained_mail_ids_from_real_intake(self):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr823-runtime-identity.json').read_text())
+        self.assertIn('run.mail_ids minimum 1', requirement['assertions'][0]['input_class'])
+        messages = [mail(CLIENT.email, -timedelta(hours=1), message_id='<a@example.test>'),
+                    mail(LEAD.email, -timedelta(minutes=30), message_id='<b@example.test>')]
+        self.run_intake(messages[:1])
+        initial = self.run_intake(messages)
+        again = self.run_intake(messages)
+        unchanged = self.run_intake(messages, touch=False)
+        self.assertEqual(unchanged.reason, 'store_unchanged')
+        path = self.out() / intake.STATE
+        saved = json.loads(path.read_text())
+        self.assertEqual(len(saved['mail_ids']), 2)
+        del saved['mail_ids']
+        path.write_text(json.dumps(saved))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True, exist_ok=True)
+        decoder.touch(mode=0o700)
+        self.fake.calls.clear()
+        reconciled = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(reconciled.reason, 'reconciled')
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(initial.counts['emails'], 1)
+        self.assertEqual(again.counts['emails'], 0)
+        for outcome in (initial, again, unchanged, reconciled):
+            with self.subTest(reason=outcome.reason):
+                receipt = intake.receipt_line(outcome, ROOT)
+                value = json.loads(receipt.split(' ', 1)[1])
+                self.assertEqual(value['counts']['run'].get('mail_ids'), 2)
+                self.assertEqual(self.observe_runtime_receipt(receipt, value['runtime_sha']), 0)
+        receipt = intake.receipt_line(initial, ROOT)
+        value = json.loads(receipt.split(' ', 1)[1])
+        for changes in ({'state': 'failed'}, {'state': 'skipped'},
+                        {'runtime_sha': '0' * 40}, {'runtime_sha': value['runtime_sha'][:9]},
+                        {'counts': {'run': {'mail_ids': True}}},
+                        {'counts': {'run': {'mail_ids': 0}}}, {'counts': {'run': {'emails': 1}}}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.observe_runtime_receipt(
+                    'outlook-intake-receipt ' + json.dumps({**value, **changes}), value['runtime_sha']), 1)
+        self.assertEqual(self.observe_runtime_receipt(receipt.replace('outlook-intake-receipt ',
+                         'email-router-receipt ', 1), value['runtime_sha']), 1)
+        no_ids = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        self.assertEqual(no_ids.counts['mail_ids'], 2, 'retained IDs survive a later snapshot')
+        empty_state = json.loads(path.read_text())
+        empty_state['mail_ids'] = {}
+        path.write_text(json.dumps(empty_state))
+        no_ids = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        self.assertEqual(no_ids.counts['mail_ids'], 0)
+        zero = intake.receipt_line(no_ids, ROOT)
+        self.assertEqual(self.observe_runtime_receipt(zero, value['runtime_sha']), 1)
+
+    def observe_runtime_receipt(self, receipt, runtime_sha):
+        path = self.tmp / 'runtime-receipt.txt'
+        path.write_text(receipt)
+        result = REAL_RUN([sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
+                          '--receipt-file', str(path), '--service', 'outlook-intake',
+                          '--runtime-sha', runtime_sha, '--count', 'run.mail_ids', '--minimum', '1'],
+                         capture_output=True, text=True, timeout=10)
+        return result.returncode
+
     def test_unchanged_store_receipts_still_count_legacy_entries(self):
         old = mail('pat@example.test', -timedelta(hours=1), kind='preview')
         self.assertEqual(self.run_intake([old]).counts['legacy_unmatched'], 1)
