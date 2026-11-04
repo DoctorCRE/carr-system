@@ -63,18 +63,29 @@ class AuthorityStore:
     def save(self, envelope, event, decision, fault=None):
         if fault is not None:
             raise ValueError('unsupported_fault')
-        if decision['status'] != 'persist':
-            return decision
         binding = envelope['binding']
         previous = self.read(binding)
         if previous:
             old = previous['envelope']
             if previous['archived']:
                 return {'status': 'degraded', 'reason': 'checkpoint_archived'}
+            if old and (envelope['epoch'] < old['epoch'] or envelope['cursor'] < old['cursor']):
+                return {'status': 'degraded', 'reason': 'old_replay'}
+            if old and envelope['cursor'] == old['cursor']:
+                def event_fields(value):
+                    return {k: v for k, v in value.items() if k not in ('now', 'expected_generation')}
+                if self.policy.digest(event_fields(envelope)) != self.policy.digest(event_fields(old)):
+                    return {'status': 'degraded', 'reason': 'changed_replay'}
+                if decision['status'] != 'persist':
+                    return decision
             if old and envelope['epoch'] == old['epoch'] and envelope['cursor'] > old['cursor']:
                 old_event = self.policy.normalize(old)
                 if envelope['model_fingerprint'] == old['model_fingerprint'] and event.window == old_event.window and event.telemetry == 'fresh' and old_event.used is not None and event.used is not None and event.used < old_event.used:
                     return {'status': 'unknown', 'reason': 'counter_reset_without_new_epoch'}
+        if decision['status'] != 'persist':
+            if envelope['expected_generation'] != (previous['generation'] if previous else 0):
+                return {'status': 'degraded', 'reason': 'cas_conflict', 'generation': previous['generation'] if previous else 0}
+            return decision
         key = str(uuid.uuid5(uuid.NAMESPACE_URL, self.policy.digest(binding) + ':' + str(envelope['epoch']) + ':' + str(envelope['cursor'])))
         args = {'binding': binding, 'envelope': envelope, 'idempotency_key': key}
         ambiguous = False
@@ -177,6 +188,9 @@ class McpTransport:
                         break
                     data.extend(chunk)
         except urllib.error.HTTPError as error:
+            error.close()
+            if error.code >= 500 and verb == 'write-session-checkpoint-v1':
+                raise OSError('authority_write_ambiguous') from error
             raise ValueError('authority_http_refusal') from error
         if len(data) > MAX_BYTES:
             raise ValueError('authority_response_too_large')

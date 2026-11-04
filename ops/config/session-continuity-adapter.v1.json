@@ -12,5 +12,10 @@
     "lib/session_adapters/grok.py": "65ef4064d46aead87600af12cfda4bbe573495be936e296aa1434848d21757dc"
   },
   "native_installation": "pending",
-  "production_proof": "pending"
+  "production_proof": "pending",
+  "policy_limits": {
+    "comparison_basis": "last durable checkpoint only",
+    "non_persist_observations": "read and validate authority; never advance metadata or generation",
+    "parity": "partial: v1 has no observation operation; resets and replays after unpersisted observations cannot be detected"
+  }
 }

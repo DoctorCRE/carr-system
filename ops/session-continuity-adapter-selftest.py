@@ -3,6 +3,10 @@ import copy
 import hashlib
 import importlib.util
 import json
+import io
+import urllib.error
+from email.message import Message
+from unittest.mock import patch
 from pathlib import Path
 import sys
 import tempfile
@@ -31,6 +35,40 @@ class Pins(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'request_budget'):
             transport('read-session-checkpoint-v1', {})
 
+    def test_redirect_never_forwards_credential(self):
+        for code in (307, 303):
+            requests = []
+            def open_request(opener, request, timeout=None):
+                requests.append(request)
+                request.timeout = timeout
+                if len(requests) > 1:
+                    return io.BytesIO(b'{}')
+                # urllib already refuses POST 307. Probe GET as well to ensure
+                # this policy survives any method without forwarding headers.
+                if code == 307:
+                    request.method = 'GET'
+                headers = Message()
+                headers['Location'] = 'https://redirect.invalid/target'
+                return opener.error('http', request, io.BytesIO(), code, 'redirect', headers)
+            with patch.object(bridge.urllib.request.OpenerDirector, 'open', new=open_request):
+                with self.assertRaises(ValueError):
+                    bridge.McpTransport('https://api.doctorcre.com/mcp', 'synthetic')('read-session-checkpoint-v1', {})
+            self.assertEqual(len(requests), 1, 'credential forwarded to redirect host')
+            self.assertEqual(requests[0].get_header('Authorization'), 'Bearer synthetic')
+
+    def test_socket_and_slow_drip_deadlines(self):
+        clock = [0]
+        class SlowResponse(io.BytesIO):
+            def read1(self, size):
+                clock[0] += 3
+                return super().read1(1)
+        def open_request(request, timeout):
+            self.assertEqual(timeout, 8)
+            return SlowResponse(bridge.encoded({'result': {'structuredContent': {'ok': True}}}))
+        with patch.object(bridge.urllib.request.OpenerDirector, 'open', side_effect=open_request), patch.object(bridge.time, 'monotonic', side_effect=lambda: clock[0]):
+            with self.assertRaises(TimeoutError):
+                bridge.McpTransport('https://api.doctorcre.com/mcp', 'synthetic')('read-session-checkpoint-v1', {})
+
 
 @unittest.skipUnless(ROOT, 'supply --artifact-root for pinned factory executable proof; no download')
 class Artifact(unittest.TestCase):
@@ -49,7 +87,7 @@ class Artifact(unittest.TestCase):
                         raise ValueError('changed_checkpoint_replay')
                 elif self.record['generation'] != args['envelope']['expected_generation']:
                     raise ValueError('checkpoint_cas_conflict')
-            self.record = dict(binding=args['binding'], envelope=args['envelope'], generation=args['envelope']['expected_generation'] + 1,
+            self.record = dict(binding=copy.deepcopy(args['binding']), envelope=copy.deepcopy(args['envelope']), generation=args['envelope']['expected_generation'] + 1,
                                archived=False, last_write_key=args['idempotency_key'], sponsor='synthetic', authority_session='synthetic')
             if self.timeout:
                 raise TimeoutError('synthetic ambiguous response')
@@ -74,8 +112,7 @@ class Artifact(unittest.TestCase):
         self.timeout = False
         changed = copy.deepcopy(self.event)
         changed['checkpoint']['next_action'] = 'changed'
-        with self.assertRaisesRegex(ValueError, 'changed_checkpoint_replay'):
-            self.run_event(changed)
+        self.assertEqual(self.run_event(changed), {'status': 'degraded', 'reason': 'changed_replay'})
         stale = copy.deepcopy(self.event)
         stale['cursor'] += 1
         with self.assertRaisesRegex(ValueError, 'cas_conflict'):
@@ -83,8 +120,7 @@ class Artifact(unittest.TestCase):
         with self.assertRaises(OSError):
             self.run_event(call=lambda *_: (_ for _ in ()).throw(OSError('synthetic outage')))
         self.record['envelope']['cursor'] = 9
-        with self.assertRaises(ValueError):
-            self.run_event(call=lambda verb, args: (_ for _ in ()).throw(TimeoutError()) if verb.startswith('write-') else self.call(verb, args))
+        self.assertEqual(self.run_event()['reason'], 'old_replay')
 
     def test_countermodel_contexts(self):
         for mutate, expected in [
@@ -101,8 +137,63 @@ class Artifact(unittest.TestCase):
         reset = copy.deepcopy(self.event)
         reset.update(cursor=2, expected_generation=1)
         reset['payload']['tokenUsage']['last']['totalTokens'] = 424999
-        # Below threshold produces no authority effect and claims no protection.
-        self.assertEqual(self.run_event(reset)['status'], 'continue')
+        before = copy.deepcopy(self.record)
+        self.calls.clear()
+        self.assertEqual(self.run_event(reset), {'status': 'unknown', 'reason': 'counter_reset_without_new_epoch'})
+        self.assertEqual(self.record, before)
+        self.assertEqual([v for v, _ in self.calls], ['read-session-checkpoint-v1'])
+
+    def test_old_and_changed_events_do_not_write(self):
+        self.run_event()
+        newer = copy.deepcopy(self.event)
+        newer.update(cursor=2, expected_generation=1)
+        self.run_event(newer)
+        before = copy.deepcopy(self.record)
+        for event, reason in [(self.event, 'old_replay'),
+                              (dict(newer, checkpoint=dict(newer['checkpoint'], next_action='changed')), 'changed_replay')]:
+            self.calls.clear()
+            self.assertEqual(self.run_event(event), {'status': 'degraded', 'reason': reason})
+            self.assertEqual(self.record, before)
+            self.assertEqual([v for v, _ in self.calls], ['read-session-checkpoint-v1'])
+
+    def test_below_threshold_reads_without_advancing_and_checks_generation(self):
+        self.run_event()
+        event = copy.deepcopy(self.event)
+        event.update(cursor=2, epoch=2, expected_generation=1)
+        event['payload']['tokenUsage']['last']['totalTokens'] = 100
+        before = copy.deepcopy(self.record)
+        self.calls.clear()
+        self.assertEqual(self.run_event(event)['status'], 'continue')
+        self.assertEqual(self.record, before)
+        event['expected_generation'] = 0
+        self.assertEqual(self.run_event(event), {'status': 'degraded', 'reason': 'cas_conflict', 'generation': 1})
+        self.assertEqual([v for v, _ in self.calls], ['read-session-checkpoint-v1'] * 2)
+
+    def test_http_refusals_do_not_retry(self):
+        for verb, code in [('read-session-checkpoint-v1', 502), ('write-session-checkpoint-v1', 400)]:
+            transport = bridge.McpTransport('https://api.doctorcre.com/mcp', 'synthetic')
+            error = urllib.error.HTTPError(transport.endpoint, code, 'synthetic', {}, None)
+            with patch.object(bridge.urllib.request.OpenerDirector, 'open', side_effect=error) as opener:
+                with self.assertRaisesRegex(ValueError, 'authority_http_refusal'):
+                    transport(verb, {})
+            self.assertEqual(opener.call_count, 1)
+
+    def test_5xx_write_uses_single_exact_readback(self):
+        transport = bridge.McpTransport('https://api.doctorcre.com/mcp', 'synthetic')
+        verbs = []
+        def open_request(request, timeout):
+            self.assertEqual(timeout, 8)
+            payload = json.loads(request.data)['params']
+            verb, args = payload['name'], payload['arguments']
+            verbs.append(verb)
+            result = self.call(verb, args)
+            if verb.startswith('write-'):
+                raise urllib.error.HTTPError(request.full_url, 502, 'synthetic', {}, None)
+            return io.BytesIO(bridge.encoded({'result': {'structuredContent': result}}))
+        with patch.object(bridge.urllib.request.OpenerDirector, 'open', side_effect=open_request):
+            self.assertEqual(self.run_event(call=transport)['status'], 'saved')
+        self.assertEqual(verbs, ['read-session-checkpoint-v1', 'write-session-checkpoint-v1', 'read-session-checkpoint-v1'])
+        self.assertEqual(transport.requests, 3)
 
     def test_pin_inventory_and_changed_bytes(self):
         manifest = json.loads(bridge.MANIFEST.read_text())

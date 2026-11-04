@@ -29,3 +29,23 @@ Source registration. J3 merges main after holder 2972, registers the neutral mod
 CI accounting. Both new suites lacked measured entries and each inherited the 251409 ms conservative serial fallback. Hosted run 41895297349 measured session-checkpoints-auth.test.mjs at 805 ms and session-checkpoints.test.mjs at 1256 ms. The profile adds those observations and preserves cold setup, watchdog, headroom, discovery and exact coverage assertions. Source logs are retained with the J3 report.
 
 Operational proof obligation. After ordinary delivery, the coordinator must bind exact CARR release, this adapter revision and every factory digest, provision the dedicated authority session through the supported credential path, and perform one authenticated synthetic checkpoint/readback through the supported v1 verbs. Verify server-derived sponsor/session, immutable native task ownership, exact generation, replay, archive custody and recovery output. The current admitted worker release smoke runner proves release identity only. It cannot execute or attest this write/readback. Operational proof remains separate and pending. S4-S6 native installation, callback ordering and recovery delivery remain pending.
+
+J6 bridge comparison contract. Before returning an admitted below-threshold decision, the bridge reads the current authority checkpoint. Older epoch or cursor returns degraded old_replay. The same cursor with changed event fields returns degraded changed_replay. A fresh same-epoch, same-model, same-window counter decrease returns unknown counter_reset_without_new_epoch. These refusals never write or advance CARR. The factory excludes now and expected_generation from event identity; the bridge does too.
+
+Parity is partial. The pinned factory Store durably advances observation metadata even below threshold without advancing generation. CARR v1 exposes checkpoint write, read and archive only. The bridge does not advance metadata on non-persist observations. Comparisons use the last durable checkpoint; resets or replays relative only to intervening non-persist observations cannot be detected. No new v1 operation is implied. Generation conflicts on below-threshold observations refuse explicitly. The bridge promises no saved receipt for those observations.
+
+```mermaid
+stateDiagram-v2
+ [*] --> ReadCheckpoint: admitted observation
+ ReadCheckpoint --> Degraded: archived or old or changed event
+ ReadCheckpoint --> Unknown: same-epoch counter reset
+ ReadCheckpoint --> Continue: below threshold and matching generation
+ ReadCheckpoint --> Degraded: below threshold and stale generation
+ ReadCheckpoint --> WriteOnce: persist decision
+ WriteOnce --> Readback: success or timeout or HTTP 5xx
+ WriteOnce --> Refused: HTTP 4xx
+ Readback --> Saved: exact key and envelope and generation
+ Readback --> Refused: missing or unequal checkpoint
+```
+
+The selftest exercises counter resets, old and changed events, archive, below-threshold observations, CAS, outage, ambiguous timeout and HTTP 502. Transport tests use a stub opener with real urllib redirect handlers for cross-host 307 and 303. A deterministic slow-drip response advances a fake monotonic clock; the elapsed deadline raises TimeoutError. The opener assertion separately requires the eight-second socket timeout. These tests use no network or live credential. A write HTTP status at least 500 is ambiguous and gets one exact-key readback within the existing three-request budget. HTTP 4xx and read HTTP errors refuse immediately.
