@@ -22,7 +22,7 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     try { if(role) await c.query(`set local role ${role}`); const result=await executeRegisteredTool(c,who,verb,args); await c.query('commit'); return result; }
     catch(e) { await c.query('rollback'); throw e; }
   };
-  for (const state of ['deleted','recalled','superseded']) await t.test(state,async () => {
+  for (const state of ['deleted','recalled','superseded']) await t.test(state,async st => {
     const identity={mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()};
     const source=await call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Synthetic mail',detail:'Please call.',email_source:{sender_email:'sender@example.test',mailbox_owner:'joe'},email_identity:identity});
     await c.query('update activity set deal_id=$2 where id=$1',[source.activity_id,deal]);
@@ -47,6 +47,29 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     assert.ok(result.action_notes.some(n=>n.proposal_id===proposal));
     assert.equal((await call('record-email-lifecycle',args)).replayed,true);
     assert.equal((await call('record-email-lifecycle',{...args,idempotency_key:randomUUID()})).replayed,true);
+    const snapshot = async () => ({
+      activities: (await c.query('select * from activity where id=$1', [source.activity_id])).rows,
+      proposals: (await c.query('select * from email_proposal where activity_id=$1 order by id', [source.activity_id])).rows,
+      events: (await c.query('select * from event where subject_id=$1 order by id', [source.activity_id])).rows,
+    });
+    const before = await snapshot();
+    const changedEvidence = [
+      ['state', state === 'deleted' ? 'recalled' : 'deleted'],
+      ['method', 'outlook_revision'],
+      ['observed_at', '2026-01-01T12:01:00Z'],
+      ['base_version', 1],
+    ];
+    for (const [field, value] of changedEvidence) await st.test(`${state}: same observation rejects changed ${field}`, async () => {
+      await assert.rejects(call('record-email-lifecycle', {
+        ...args, [field]: value, idempotency_key: randomUUID(),
+      }, actor, 'carr_writer'), e => e.payload?.error === 'email_observation_conflict');
+      assert.deepEqual(await snapshot(), before);
+    });
+    await st.test(`${state}: identical observation replay preserves rows and events`, async () => {
+      const replay = await call('record-email-lifecycle', {...args, idempotency_key: randomUUID()}, actor, 'carr_writer');
+      assert.deepEqual(replay, {...result, replayed: true});
+      assert.deepEqual(await snapshot(), before);
+    });
     await assert.rejects(call('record-email-lifecycle',{...args,idempotency_key:randomUUID(),observation_id:randomUUID()}),e=>e.payload?.error==='version_conflict');
     await assert.rejects(call('record-email-lifecycle',{...args,idempotency_key:randomUUID(),base_version:1,observation_id:randomUUID()}),e=>e.payload?.error==='email_lifecycle_terminal');
     await assert.rejects(call('log-activity',{idempotency_key:randomUUID(),ref:'C-999442',kind:'email_in',summary:'Retry',email_identity:identity}),e=>e.payload?.error==='email_not_live');

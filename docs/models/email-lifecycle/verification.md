@@ -48,6 +48,19 @@ Every transition has an executable named test:
   independent source becomes terminal and receipt calls refuse, including
   previously completed receipt replay. Existing source guards stay in force.
 
+Round-3 guard coverage supplements the atomic model with executable refusals.
+`<state>: same observation rejects changed <field>` covers independent changes to
+state, method, observed_at and base_version under the original observation ID.
+Each call uses a fresh envelope key and carr_writer, expects
+email_observation_conflict, and compares full activity, proposal and audit rows.
+`<state>: identical observation replay preserves rows and events` checks the
+original receipt and unchanged stored rows with another fresh key.
+These tests refine Replay and RefuseStaleOrForeign; payload comparison and
+observation IDs are outside the TLC state space. No model transition changed.
+The terminal-state tests still exercise stale-version refusal and terminal
+recapture refusal; the six sent-confirmation tests cover ConfirmSent and
+ReplaySent in both observation orderings.
+
 The model treats transactions as atomic. It leaves authentication, identity
 selection, PostgreSQL advisory and row locks to the integration tests. It does
 not model Outlook detection, real mail contents, lock timing, deadlocks, or
