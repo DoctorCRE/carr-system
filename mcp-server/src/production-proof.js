@@ -151,7 +151,7 @@ export function productionProofTools({ToolError}) {
       }
       const contains=deployed.payload.merge_membership.includes(args.merge_sha) && matchesRelease(deployed,await currentRelease(c,args));
       const state=!contains || !coverage.length ? 'unproven' : coverage.some(a=>a.result==='fail') ? 'failed'
-        : coverage.some(a=>a.result==='blocked') ? 'blocked' : coverage.every(a=>a.result==='pass') ? 'proven' : 'proving';
+        : coverage.some(a=>a.result==='blocked') ? 'blocked' : coverage.every(a=>a.result==='pass') ? 'proven' : coverage.some(a=>a.attempt_id) ? 'proving' : 'deployed';
       return {ok:true,state,deployment:deployed,assertions:coverage};
     }};
   return tools;

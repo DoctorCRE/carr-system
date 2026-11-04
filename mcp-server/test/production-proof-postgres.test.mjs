@@ -148,7 +148,7 @@ test('production proof trust and immutable lifecycle', async t => {
     const pending=await acquire();
     const next=(await call('record-production-deployment',signed('deployment',{...deployPayload,released_sha:'b'.repeat(40),provider_version:'fixture-v2'}))).receipt;
     assert.notEqual(next.id,dep.id);
-    assert.equal((await status()).state,'proving');
+    assert.equal((await status()).state,'deployed');
     await assert.rejects(call('record-production-proof-attempt',signed('receipt',receiptPayload(pending))),e=>e.payload?.error==='production_proof_deployment_not_current');
     await call('record-production-deployment',signed('deployment',{...deployPayload,released_sha:'c'.repeat(40),provider_version:'rollback',merge_membership:[]}));
     assert.equal((await status()).state,'unproven');
@@ -157,7 +157,7 @@ test('production proof trust and immutable lifecycle', async t => {
   });
   await t.test('one target release change invalidates older requirements and status queries stay bounded',async()=>{
     await call('record-production-deployment',signed('deployment',deployPayload));
-    assert.equal((await status()).state,'proving');
+    assert.equal((await status()).state,'deployed');
     const other={...binding,merge_sha:'d'.repeat(40)};
     const assertions=Array.from({length:100},(_,i)=>({...requirement.assertions[0],id:'status-'+i}));
     const req={...requirement,assertions};
@@ -195,8 +195,8 @@ test('production proof trust and immutable lifecycle', async t => {
     await c.query('set local role carr_writer');
     await c.query(`insert into production_proof_record
       (kind,repo,merge_sha,target,requirement_digest,payload,payload_digest,runner_id,actor_id,public_key,runner_revision,signature,idempotency_key)
-      select kind,repo,merge_sha,target,requirement_digest,jsonb_set(payload,'{provider_version}','"tampered"'),payload_digest,
-        runner_id,actor_id,public_key,runner_revision,signature,$2 from production_proof_record where id=$1`,[dep.id,randomUUID()]);
+      select kind,repo,merge_sha,target,requirement_digest,jsonb_set(payload,'{provider_version}','"tampered"'),$3,
+        runner_id,actor_id,public_key,runner_revision,signature,$2 from production_proof_record where id=$1`,[dep.id,randomUUID(),productionProofDigest({kind:'deployment',payload:{...dep.payload,provider_version:'tampered'}})]);
     await c.query('commit');
     await assert.rejects(status(),e=>e.payload?.error==='production_proof_stored_provenance_invalid');
   });
