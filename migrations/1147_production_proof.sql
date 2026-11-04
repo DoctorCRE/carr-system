@@ -56,3 +56,17 @@ revoke all on public.production_proof_runner,public.production_proof_record from
 grant select on public.production_proof_runner,public.production_proof_record to carr_reader,carr_writer;
 grant insert on public.production_proof_record to carr_writer;
 grant usage on sequence public.production_proof_record_sequence_seq to carr_writer;
+
+do $proof_grants$
+declare contract jsonb := ops.scac_current_grant_contract();
+begin
+  contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
+    'ingress_key','db-relation-acl:public.production_proof_record:carr_writer:insert',
+    'ingress_kind','db_relation_acl','relation','public.production_proof_record',
+    'relation_kind','r','grantee','carr_writer','privilege','insert','grantable',false)));
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+  if ops.scac_mutation_catalog_v118_current() is not true then
+    raise exception 'Production proof grant catalog is invalid';
+  end if;
+end $proof_grants$;

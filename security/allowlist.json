@@ -835,6 +835,12 @@
       "sha256": "2b8d04776efba4dad7d49ba63832ff4a0a493d8fa50664a503a590eeaa16d1df",
       "rule": "pii-email",
       "reason": "WR622.S1.J215 canonical schema regeneration includes only the existing partner work-address seed from repository migrations. Exact generated blob exception; no runtime or client data was exported."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "e43b4bfbc6b567a4a8b3f1be0c600cdb89bc26c44a438a3d3418f3272b3c0a96",
+      "rule": "pii-email",
+      "reason": "WR622.S1.J215 corrected production-proof grant-contract snapshot retains the existing canonical partner work-address seed. Exact generated blob only; no production data was exported."
     }
   ]
 }

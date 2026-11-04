@@ -13,6 +13,7 @@ test('production proof trust and immutable lifecycle', async t => {
   const c = new pg.Client(fixture.connection);
   await c.connect();
   t.after(async()=>{await c.end(); await fixture.close();});
+  assert.equal((await c.query('select ops.scac_mutation_catalog_v118_current() as current')).rows[0].current,true);
   const actor = {...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:false};
   const call = async (verb,args,who=actor,role='carr_writer',db=c) => {
     await db.query('begin');
