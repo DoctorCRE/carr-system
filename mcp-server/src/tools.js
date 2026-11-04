@@ -67,7 +67,7 @@ import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
-import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail } from "./email-identity.js";
+import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.js";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
@@ -394,7 +394,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -413,6 +413,8 @@ async function withEnvelope(client, actor, verb, args, fn) {
       return { replayed: true, ...response, event: industryEventRecord(response.event) };
     return { replayed: true, ...response };                          // A1: replay, no second write
   }
+  if (verb !== 'record-email-lifecycle' && (verb.includes('email') || args.email_context?.source_activity_id))
+    await guardEmailAction(client, args, ToolError);
   const result = await fn();                                        // inside the open transaction
   if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
   await client.query(
@@ -4436,6 +4438,65 @@ export const TOOLS = {
       }),
   },
 
+  "record-email-lifecycle": {
+    write: true,
+    description: "Record a deleted, recalled or superseded captured email by stable mailbox identity. Requires lifecycle base_version (zero for live mail), observation ID, time and method. Terminal states refuse actions and recapture. Records permanent notes on earlier actions without overwriting subsequent human decisions. Exact observation retries replay.",
+    inputSchema: { type: 'object', additionalProperties: false, required: ['idempotency_key','email_identity','base_version','state','observation_id','observed_at','method'], properties: {
+      idempotency_key: { type: 'string', format: 'uuid' }, email_identity: EMAIL_IDENTITY_SCHEMA,
+      base_version: { type: 'integer', minimum: 0 }, state: { enum: ['deleted','recalled','superseded'] },
+      observation_id: { type: 'string', minLength: 1, maxLength: 200 },
+      observed_at: { type: 'string', format: 'date-time' },
+      method: { type: 'string', enum: ['outlook_tombstone','outlook_recall','outlook_revision'] },
+    } },
+    handler: (c, actor, args) => withEnvelope(c, actor, 'record-email-lifecycle', args, async () => {
+      const input = args.email_identity;
+      if (input.mailbox_owner !== partnerAuthoritySlugForActor(actor))
+        throw new ToolError({ error: 'email_identity_owner_mismatch' });
+      const account = input.mailbox_account;
+      if (Date.parse(args.observed_at) > Date.now() + 300000)
+        throw new ToolError({ error: 'email_observation_in_future' });
+      const identity = await lockEmailIdentity(c,input.mailbox_owner,account,input.item_id);
+      const rows = (await c.query(`select id,email_context from activity where email_identity->>'mailbox_owner'=$1
+        and email_identity->>'mailbox_account'=$2 and email_identity->>'item_id'=$3 order by id for update`,
+        [identity.mailbox_owner,account,identity.item_id])).rows;
+      if (!rows.length) {
+        const known = (await c.query(`select 1 from activity where email_identity->>'mailbox_owner'=$1
+          and email_identity->>'item_id'=$2 limit 1`, [identity.mailbox_owner,identity.item_id])).rows.length;
+        if (known) throw new ToolError({ error: 'email_identity_account_mismatch' });
+        throw new ToolError({ error: 'email_identity_not_found' });
+      }
+      const prior = rows.find(row => row.email_context?.lifecycle)?.email_context.lifecycle;
+      const observation = { observation_id: args.observation_id, state: args.state,
+        observed_at: new Date(args.observed_at).toISOString(), method: args.method };
+      if (prior?.observation_id === args.observation_id) {
+        if (Object.entries(observation).some(([key,value]) => prior[key] !== value) || prior.base_version !== args.base_version)
+          throw new ToolError({ error: 'email_observation_conflict' });
+        return { ok: true, replayed: true, state: prior.state, version: prior.version, action_notes: prior.action_notes };
+      }
+      if ((prior?.version ?? 0) !== args.base_version)
+        throw new ToolError({ error: 'version_conflict', current_version: prior?.version ?? 0 });
+      if (prior) throw new ToolError({ error: 'email_lifecycle_terminal' });
+      const ids = rows.map(row => row.id);
+      const proposals = (await c.query('select id,status,kind from email_proposal where activity_id=any($1::uuid[]) order by id for update', [ids])).rows;
+      const action_notes = proposals.map(row => ({ proposal_id: row.id, kind: row.kind, prior_status: row.status,
+        note: `Source email ${args.state}; earlier action retained for review, further source actions refused.` }));
+      const events = (await c.query(`select id,verb from v_email_lifecycle_action_event
+        where activity_id=any($1::text[]) order by id`, [ids])).rows;
+      action_notes.push(...events.map(row => ({ event_id: row.id, verb: row.verb,
+        note: `Source email ${args.state}; earlier action retained for review.` })));
+      const lifecycle = { ...observation, version: 1, base_version: args.base_version, actor_id: actor.id,
+        organization_tenant_id: organizationTenantForActor(actor), recorded_at: new Date().toISOString(), action_notes };
+      await c.query(`update email_proposal set status='dismissed',resolved_by=$2,resolved_at=now(),
+        resolution_reason=$3,version=version+1 where activity_id=any($1::uuid[]) and status='pending'`,
+        [ids,actor.id,`Source email ${args.state}`]);
+      await c.query(`update activity set email_context=coalesce(email_context,'{}'::jsonb)||jsonb_build_object('lifecycle',$2::jsonb),
+        version=version+1,updated_by=$3,updated_at=now() where id=any($1::uuid[])`, [ids,JSON.stringify(lifecycle),actor.id]);
+      for (const row of rows) await writeEvent(c,actor,'record-email-lifecycle','activity',row.id,
+        { new: { activity_id: row.id, ...lifecycle }, idempotency_key: args.idempotency_key, cause: 'ingest_email' });
+      return { ok: true, state: args.state, version: 1, action_notes };
+    }),
+  },
+
   "log-activity": {
     write: true,
     description: "Log a business touch (call, email, meeting, tour, text, note, LOI...) against a deal/client/lead/vendor. THE default verb after any real-world contact. occurred_at = when it happened (defaults now); anything missing goes in 'owed', never invented. Writes an activity row; contact-kind rows are what move last_touch and lift capture coverage.",
@@ -4534,8 +4595,11 @@ export const TOOLS = {
         if (args.email_identity.mailbox_account !== account)
           throw new ToolError({ error: 'email_identity_account_mismatch' });
         emailIdentity = await lockEmailIdentity(c, args.email_identity.mailbox_owner, account, args.email_identity.item_id);
+        const anyCapture = await capturedEmail(c, emailIdentity);
+        if (anyCapture?.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
         const existing = await capturedEmail(c, emailIdentity, s.id);
         if (existing) {
+          if (existing.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
           if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
           return { ok: true, activity_id: existing.id, subject: s };
         }
@@ -9203,6 +9267,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
+    if (!tool.write && name.includes('email')) await guardEmailAction(client,args,ToolError,false);
     const result = await tool.handler(client, actor, args);
     return await linkFutureWork(client, actor, name, args, result, writeEvent);
   } catch (e) {
