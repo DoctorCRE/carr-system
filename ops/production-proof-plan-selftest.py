@@ -78,7 +78,7 @@ class AdmissionTest(unittest.TestCase):
 
     def test_non_product_allowlist_and_mixed_diff(self):
         for paths in [['docs/guide.md'], ['mcp-server/test/example.test.mjs'],
-                      ['ops/example-selftest.py'], ['.github/workflows/ci.yml']]:
+                      ['ops/example-selftest.py'], ['ops/app-proof-observe.py'], ['.github/workflows/ci.yml']]:
             result = self.run_plan('## Production proof\nn/a: source-only verification', paths)
             self.assertEqual(result.returncode, 0, result.stdout)
         for path in ['mcp-server/src/prompt.md', 'tools/agent.md', 'ops/runtime.py',
@@ -267,6 +267,115 @@ class AdmissionTest(unittest.TestCase):
         git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'rename')
         paths = git('diff', '--name-only', '--no-renames', base, 'HEAD').splitlines()
         self.assertEqual(plan.product_paths(paths, json.loads((ROOT / plan.CONTRACT_PATH).read_text())), ['runtime.py'])
+
+
+class AppObserverTest(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('app_observer', ROOT / 'ops/app-proof-observe.py')
+        self.observer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.observer)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        self.env = fixture_env()
+        self.env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.invalid',
+                        GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.invalid')
+        self.git('init', '-q')
+        self.git('-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '-qm', 'first')
+        self.merge = self.git('rev-parse', 'HEAD')
+        self.git('-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '-qm', 'served')
+        self.served = self.git('rev-parse', 'HEAD')
+        self.identity = json.dumps({'service': 'doctorcre-app', 'environment': 'production',
+                                    'source_commit': self.served}).encode()
+
+    def git(self, *args):
+        return subprocess.check_output(['git', '-C', str(self.repo), *args], env=self.env,
+                                       text=True, stderr=subprocess.PIPE, timeout=10).strip()
+
+    def observe(self, assertions=(), human_steps=(), fetch=None, merge=None):
+        return self.observer.observe(self.repo, merge or self.merge, assertions, human_steps,
+                                     fetch=fetch or (lambda path, timeout, limit: self.identity))
+
+    def test_release_ancestry_and_public_marker(self):
+        def fetch(path, timeout, limit):
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, 15)
+            return self.identity if path == '/app-release' else b'export const Documents = true;'
+        receipt = self.observe([('/js/documents.js', 'Documents')], ['Open the signed-in Documents tab'], fetch)
+        self.assertEqual(receipt['source_commit'], self.served)
+        self.assertEqual(receipt['merge_commit'], self.merge)
+        self.assertEqual(receipt['status'], 'human_pending')
+        self.assertEqual(receipt['human_steps'], ['Open the signed-in Documents tab'])
+        self.assertEqual(receipt['assertions'][0]['path'], '/js/documents.js')
+        self.assertEqual(self.observe()['status'], 'passed')
+
+    def test_unknown_or_unreleased_commit_refuses(self):
+        with self.assertRaisesRegex(ValueError, 'unknown|unavailable'):
+            self.observe(merge='f' * 40)
+        self.identity = json.dumps({'service': 'doctorcre-app', 'environment': 'production',
+                                   'source_commit': self.merge}).encode()
+        with self.assertRaisesRegex(ValueError, 'ancestor'):
+            self.observe(merge=self.served)
+
+    def test_network_identity_and_marker_fail_closed(self):
+        def offline(*args):
+            raise OSError('network unavailable')
+        with self.assertRaises(OSError):
+            self.observe(fetch=offline)
+        for identity in [b'{}', b'not JSON', json.dumps({'service': 'wrong',
+                'environment': 'production', 'source_commit': self.served}).encode()]:
+            self.identity = identity
+            with self.assertRaises(ValueError):
+                self.observe()
+        self.identity = json.dumps({'service': 'doctorcre-app', 'environment': 'production',
+                                    'source_commit': self.served}).encode()
+        with self.assertRaisesRegex(ValueError, 'marker'):
+            self.observe([('/js/example.js', 'absent')])
+
+    def test_input_and_execution_budgets(self):
+        for path in ['https://other.test/', '//other.test', '/../secret', '/%2e%2e/a', '/a?token=x']:
+            with self.assertRaisesRegex(ValueError, 'path'):
+                self.observe([(path, 'marker')])
+        with self.assertRaisesRegex(ValueError, 'requests'):
+            self.observe([('/a', 'x')] * 20)
+        with self.assertRaisesRegex(ValueError, 'SHA'):
+            self.observe(merge='HEAD')
+        with self.assertRaisesRegex(ValueError, 'bytes'):
+            self.observe(fetch=lambda *args: b'x' * 1048577)
+        with patch.object(self.observer.time, 'monotonic', side_effect=[0, 301]):
+            with self.assertRaisesRegex(ValueError, 'deadline'):
+                self.observe()
+
+    def test_curl_is_bounded_and_has_no_redirect_or_retry(self):
+        with patch.object(self.observer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'{}', b'')) as run:
+            self.observer.public_get('/app-release', 4, 1234)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ['curl', '-q'])
+        self.assertIn('--max-time', command)
+        self.assertIn('--max-filesize', command)
+        self.assertNotIn('--location', command)
+        self.assertNotIn('--retry', command)
+        self.assertLessEqual(run.call_args.kwargs['timeout'], 5)
+        with patch.object(self.observer.subprocess, 'run', return_value=subprocess.CompletedProcess([], 7, b'', b'offline')):
+            with self.assertRaisesRegex(ValueError, 'GET failed'):
+                self.observer.public_get('/app-release', 4, 1234)
+
+    def test_cli_network_failure_and_timeout_are_nonzero(self):
+        for failure in [ValueError('public GET failed'), subprocess.TimeoutExpired('curl', 4)]:
+            with patch.object(self.observer, 'observe', side_effect=failure), \
+                    patch.object(sys, 'argv', ['observer', '--app-repo', str(self.repo), '--merge-sha', self.merge]):
+                self.assertEqual(self.observer.main(), 1)
+
+        curl = self.repo / 'curl'
+        curl.write_text('#!' + sys.executable + '\nimport sys\nsys.exit(7)\n')
+        curl.chmod(0o700)
+        settings = dict(self.env, PATH=str(self.repo) + os.pathsep + self.env.get('PATH', os.defpath))
+        result = subprocess.run([sys.executable, str(ROOT / 'ops/app-proof-observe.py'),
+            '--app-repo', str(self.repo), '--merge-sha', self.merge], env=settings,
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('public GET failed for /app-release (curl 7)', result.stderr)
+        self.assertEqual(result.stdout, '')
 
 
 if __name__ == '__main__':
