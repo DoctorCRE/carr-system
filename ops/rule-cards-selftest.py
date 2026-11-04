@@ -128,6 +128,33 @@ class CardTests(unittest.TestCase):
             self.assertIn('settings.json', checker.missing_paths(
                 text.replace('<!-- carr-native-rules:end -->', '')))
 
+    def test_from_store_refuses_when_projection_drops_cards(self):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        document = json.loads((REPO / 'ops/config/rule-cards.v1.json').read_text())
+        adopted = [card for card in document['cards'] if card['id'] != 'K01']
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = ('ops/config/rule-cards.v1.json', 'AGENTS.md', 'CLAUDE.md')
+            before = {name: (REPO / name).read_bytes() for name in names}
+            for name, content in before.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            cards = root / names[0]
+            with mock.patch.object(sync, 'ROOT', root), mock.patch.object(
+                    sync, 'CARDS', cards), mock.patch.object(
+                    sync, 'load_cards', side_effect=lambda: load_cards(cards)), mock.patch.object(
+                    sync, 'missing_paths', return_value=[]), mock.patch.object(
+                    sync, 'store_cards', return_value=adopted), mock.patch(
+                    'sys.argv', ['sync', '--from-store']), mock.patch(
+                    'sys.stderr', new_callable=io.StringIO) as output:
+                self.assertNotEqual(sync.main(), 0)
+            self.assertIn('K01', output.getvalue())
+            for name, content in before.items():
+                self.assertEqual((root / name).read_bytes(), content)
+
     def test_cards_file_renders_from_the_store(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
         sync = importlib.util.module_from_spec(spec)
