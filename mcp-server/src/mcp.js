@@ -507,7 +507,7 @@ export function serverInstructions(profile) {
 }
 
 export function allowedIn(profile, name, tool) {
-  if (profile === "doc") return PROFILES.doc.has(name);
+  if (profile === "doc" || profile === "session-checkpoint-v1") return PROFILES[profile].has(name);
   if (profile === "full") return true;
   if (tool.fullOnly) return false;            // sensitive operational reads stay off probe/reviewer/read
   if (!tool.write) return true;              // reads are allowed in every profile
@@ -683,6 +683,7 @@ export async function executeWithTrustedPrincipal(actor, readback, requiredBundl
 // Exported for deterministic no-network identity-gate tests. It remains the
 // single normal dispatcher path; callers receive no additional route or grant.
 export async function callTool(env, actor, name, args, profile = "full") {
+  if (actor?.via === "session-checkpoint-token") profile = "session-checkpoint-v1";
   const personalScope = personalScopeForActor(actor);
   if (personalScope.status === "error") {
     throw new ToolError({ error: personalScope.error,

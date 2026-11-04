@@ -1,3 +1,4 @@
+// Store provider-neutral checkpoints under immutable credential and native session bindings.
 import { Validator } from '@cfworker/json-schema';
 import { ToolError } from './tool-error.ts';
 import { canonicalJson } from './artifact-trust.js';
@@ -36,7 +37,7 @@ export function sessionCheckpointTools() {
   description:`Provider-neutral scoped continuity ${operation}, contract session-checkpoint.v1. Native task execution and delivery remain with T3.`,
   inputSchema, ...(write?{write:true}:{}), writerConnection:true,
   handler:async(c,actor,args)=>{
-   if(!new Validator(inputSchema).validate(args).valid || Buffer.byteLength(JSON.stringify(args))>70000)
+   if(!new Validator(structuredClone(inputSchema)).validate(args).valid || Buffer.byteLength(JSON.stringify(args))>70000)
     throw new ToolError({error:'invalid_session_checkpoint'});
    const binding=args.binding;
    const harnesses={claude:['hooks'],codex:['hooks','app-server'],grok:['hooks','acp']};

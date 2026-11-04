@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { profileForActor, PROFILES } from '../src/mcp.js';
@@ -24,4 +25,34 @@ assert.equal(sessionCheckpointActorForToken(null,raw),null);
 console.log('verified server-held scoped identity');`;
  const output=execFileSync(process.execPath,['--input-type=module','-e',script],{cwd:new URL('../',import.meta.url),env:{...process.env,SESSION_CHECKPOINT_TOKENS:map},encoding:'utf8'});
  assert.match(output,/verified server-held/);
+});
+
+import { dispatch, callTool } from '../src/mcp.js';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
+import { SESSION_CHECKPOINT_VERBS, sessionCheckpointTools } from '../src/session-checkpoints.js';
+
+test('registered dispatcher discovers exactly the neutral credential contract', async()=>{
+ const request=new Request('https://example.invalid/doc/mcp?profile=full',{
+  method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'}),
+ });
+ const body=await (await dispatch(request,{}, {},{slug:'joe-local',via:'session-checkpoint-token'})).json();
+ assert.deepEqual(body.result.tools.map(t=>t.name).sort(),[...SESSION_CHECKPOINT_VERBS].sort());
+ const direct=sessionCheckpointTools();
+ for(const tool of body.result.tools){
+  assert.deepEqual(tool.inputSchema,direct[tool.name].inputSchema);
+  assert.equal(tool.annotations.readOnlyHint,tool.name==='read-session-checkpoint-v1');
+  assert.equal(TOOLS[tool.name].writerConnection,true);
+ }
+});
+
+test('neutral credential refuses business reads and writes before any connection',async()=>{
+ for(const name of ['find','add-loop']) {
+  const args=name==='find'?{query:'synthetic'}:{title:'synthetic',idempotency_key:randomUUID()};
+  for(const profile of ['full','session-checkpoint-v1'])
+   await assert.rejects(callTool({}, {slug:'joe-local',via:'session-checkpoint-token'},name,args,profile),
+    e=>e.payload?.error==='not_in_profile');
+  await assert.rejects(executeRegisteredTool({}, {slug:'joe-local',via:'session-checkpoint-token'},name,args),
+   e=>e.payload?.error==='not_in_profile');
+ }
 });
