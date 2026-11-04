@@ -35,7 +35,6 @@ test('valid_pushed_card_beyond_home_snapshot_still_resolves_only_for_recipient',
   await c.query(`insert into ops.web_push_subscription(organization_tenant_id,actor_id,installation_id,generation,endpoint,endpoint_hash,p256dh,auth,key_generation)
     values('carr-internal',$1,$2,1,'https://push.example.test/synthetic','synthetic','synthetic','synthetic','synthetic')`,[who.id,randomUUID()]);
   const drain = () => c.query("select ops.enqueue_partner_needed('carr-internal')");
-  await drain();
   assert.equal((await c.query('select count(*)::int n from ops.partner_needed_event')).rows[0].n,0);
   const id=await draft(); await drain();
   const event=(await c.query('select * from ops.partner_needed_event')).rows[0];

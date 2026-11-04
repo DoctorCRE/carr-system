@@ -103,6 +103,21 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
 $$;
 revoke all on function ops.partner_needed_events(text,uuid) from public,carr_reader,carr_writer,carr_jobs,carr_authority;
 
+create function ops.activate_partner_needed_subscription() returns trigger
+language plpgsql set search_path=pg_catalog,pg_temp as $$
+begin
+  if new.revoked_at is null and (new.expires_at is null or new.expires_at>now()) then
+    insert into ops.partner_needed_activation(subscription_id) values(new.subscription_id);
+    insert into ops.partner_needed_seen(subscription_id,identity)
+      select new.subscription_id,concat_ws(':',e.topic,e.source_id,e.source_revision)
+      from ops.partner_needed_sources(new.organization_tenant_id,new.actor_id) e on conflict do nothing;
+  end if;
+  return new;
+end $$;
+revoke all on function ops.activate_partner_needed_subscription() from public,carr_reader,carr_writer,carr_jobs,carr_authority;
+create trigger partner_needed_subscription_activation after insert on ops.web_push_subscription
+  for each row execute function ops.activate_partner_needed_subscription();
+
 create function ops.enqueue_partner_needed(p_tenant text) returns jsonb
 language plpgsql set search_path=pg_catalog,pg_temp set statement_timeout='5s' as $$
 declare inserted integer;
