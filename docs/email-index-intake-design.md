@@ -115,7 +115,9 @@ residual generation, zero after restart and usable prior results.
 source retention and recovery before reuse without changing bytes or mtime.
 `test_recovery_lock_excludes_other_index_writer` covers cross-index exclusion.
 `test_recovery_refuses_symlink_generation_and_preserves_index` covers recovery
-refusal. Intake's existing publication-failure test covers the nonfatal receipt. This is
+refusal. `test_recovery_never_removes_supplied_source_in_abandoned_directory`
+protects explicit research sources supplied through an alternate absolute spelling.
+Intake's existing publication-failure test covers the nonfatal receipt. This is
 an executable-test-backed behavior chart, not a formal model-checking claim.
 
 Production proof (coordinator, after runtime refresh): after the next natural

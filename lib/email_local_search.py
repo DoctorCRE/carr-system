@@ -222,7 +222,7 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
             info = abandoned.lstat()
             if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
                     or stat.S_IMODE(info.st_mode) != 0o700
-                    or abandoned in source.parents):
+                    or abandoned.resolve() in source.resolve().parents):
                 raise IndexError('unsafe_abandoned_generation')
             shutil.rmtree(abandoned)
         with tempfile.TemporaryDirectory(prefix='.email-search-', dir=index.parent) as generation:

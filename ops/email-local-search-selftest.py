@@ -53,6 +53,18 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(PublicationError, 'publication_inside_checkout'):
             published_index_path(42, home=self.home)
 
+    def test_recovery_never_removes_supplied_source_in_abandoned_directory(self):
+        abandoned = self.home / '.email-search-abcdefgh'
+        abandoned.mkdir(mode=0o700)
+        source = abandoned / 'source.db'
+        source.write_bytes(self.source.read_bytes())
+        source.chmod(0o600)
+        before = source.read_bytes()
+        with self.assertRaisesRegex(PublicationError, 'unsafe_abandoned_generation'):
+            build_index(Path('/' + str(source)), self.target, mailbox='synthetic',
+                        account_id=42, source_revision='r')
+        self.assertEqual(source.read_bytes(), before)
+
     def test_recovery_lock_cannot_be_used_as_index(self):
         with self.assertRaisesRegex(PublicationError, 'destination_is_recovery_lock'):
             build_index(self.source, self.home / '.email-search.lock', mailbox='synthetic',
