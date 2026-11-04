@@ -158,19 +158,27 @@ assert result == 0 and not reads, 'selftest read a credential file'
         health = load('test_health_store', 'tools/health_store.py')
         health._tap = self.tap
         os.environ['NEON_API_KEY'] = 'synthetic-key'
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, Mock
+        health._tap = types.SimpleNamespace(dsn=Mock(wraps=self.tap.dsn))
         connection = MagicMock()
         cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cursor.fetchall.return_value = [(1, None, 'fixture')]
+        def execute(sql):
+            rows = {'select 1': [(1, None, 'fixture')],
+                    'select 2': [(2, None, 'fixture')]}
+            cursor.fetchall.return_value = rows[sql]
+
+        cursor.execute.side_effect = execute
         cursor.nextset.return_value = False
         with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
             for attempt in range(60):
-                result = health.query('select 1')
-                self.assertEqual((result.returncode, result.stdout), (0, '1||fixture'))
+                value = 1 + attempt % 2
+                result = health.query(f'select {value}')
+                self.assertEqual((result.returncode, result.stdout), (0, f'{value}||fixture'))
                 if attempt == 0:
                     os.environ.pop('NEON_API_KEY')
         self.assertEqual(self.marker.read_text().splitlines(), ['call'])
         self.assertEqual(connection.call_count, 60)
+        health._tap.dsn.assert_called_once_with()
         self.assertIn('default_transaction_read_only=on', connection.call_args.kwargs['options'])
         self.assertEqual(connection.call_args.kwargs['connect_timeout'], 15)
         self.assertIn('statement_timeout=120000', connection.call_args.kwargs['options'])
@@ -272,7 +280,23 @@ raise SystemExit(7)
         from unittest.mock import MagicMock, Mock
         connection = MagicMock()
         cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
-        cursor.fetchall.return_value = []
+        def execute(sql):
+            statement = ' '.join(sql.split())
+            if statement.startswith("select 'DEF',d.key,"):
+                self.assertIn('from ops.job_definition d', statement)
+                self.assertIn('from ops.v_job_control v join ops.job j', statement)
+                cursor.fetchall.return_value = [
+                    ('DEF', 'fixture-job', 2, '{}', '2026-01-01', None)]
+            elif statement.startswith('select (select count(*) from doctrine_gate_run'):
+                self.assertIn('from ops.v_rule_enforcement_status', statement)
+                cursor.fetchall.return_value = [(1, 2, 3, 4, 5)]
+            elif statement == ("select value::text from public.v_integrity_digest "
+                               "where line = 'verb_usage_30d';"):
+                cursor.fetchall.return_value = [('{"registered": 17}',)]
+            else:
+                self.fail(f'unexpected snapshot SQL: {statement}')
+
+        cursor.execute.side_effect = execute
         cursor.nextset.return_value = False
         tree = ast.parse((ROOT / 'tools/health-check.py').read_text())
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
@@ -287,9 +311,19 @@ raise SystemExit(7)
         exec(compile(ast.Module(body=[function], type_ignores=[]),
                      'health-check.py', 'exec'), namespace)
         with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
-            namespace['_canonical_snapshot']()
+            snapshot = namespace['_canonical_snapshot']()
         self.assertEqual(self.marker.read_text().splitlines(), ['call'])
         self.assertEqual(connection.call_count, 3)
+        self.assertEqual(snapshot['errors'], [])
+        self.assertEqual(snapshot['job_definitions'], [{
+            'key': 'fixture-job', 'version': 2, 'recurrence': {},
+            'registered_at': '2026-01-01', 'legacy_disabled_at': None,
+            'legacy_live': True}])
+        self.assertEqual(snapshot['controls'], {
+            'doctrine_gate_failures_24h': 1, 'doctrine_never_reviewed': 2,
+            'doctrine_stale_sections': 3, 'active_rules_not_hard_enforced': 4,
+            'active_rules_accepted_unenforceable': 5})
+        self.assertEqual(snapshot['verb_usage'], {'registered': 17})
 
 
 if __name__ == '__main__':
