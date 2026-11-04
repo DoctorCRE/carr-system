@@ -1,3 +1,4 @@
+// Resolve and acknowledge current partner-needed review cards.
 import type { Actor, Db, WithEnvelope } from './verb-contract.ts';
 import type { ToolError as ErrorType } from './tool-error.ts';
 import { homeReviewReference } from './home-review.js';

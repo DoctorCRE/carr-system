@@ -1,3 +1,4 @@
+// Deliver bounded partner-needed pushes from the durable outbox.
 import { buildPushPayload } from '@block65/webcrypto-web-push';
 import type { Db } from './verb-contract.ts';
 

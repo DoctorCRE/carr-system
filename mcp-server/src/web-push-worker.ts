@@ -1,3 +1,4 @@
+// Drain partner-needed deliveries under the jobs principal.
 import { Pool } from '@neondatabase/serverless';
 import { drainWebPush, postgresDeliveryStore, pushConfiguration } from './web-push-delivery.ts';
 import type { PushConfig } from './web-push-delivery.ts';

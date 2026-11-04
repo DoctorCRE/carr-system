@@ -34,6 +34,7 @@ test('durable_delivery_statechart',async t=>{
     await db.query('update ops.notification_preference set device_opt_in=true,quiet_hours_start=null,quiet_hours_end=null');
   };
   const due=async e=>db.query("update ops.partner_needed_delivery set next_attempt_at=now()-interval '1 minute' where event_id=$1",[e.event_id]);
+  const secondsUntil=async instant=>(await db.query('select extract(epoch from $1::timestamptz-clock_timestamp())::float8 seconds',[instant])).rows[0].seconds;
   await t.test('quiet_or_resolved_card_is_never_sent_even_when_outbox_row_is_pending',async()=>{
     const e=await make();
     await db.query("update ops.notification_preference set quiet_hours_start=(now() at time zone 'UTC'-interval '1 hour')::time,quiet_hours_end=(now() at time zone 'UTC'+interval '1 hour')::time,timezone='UTC'");
@@ -68,7 +69,7 @@ test('durable_delivery_statechart',async t=>{
       const [claim]=await store.claim();assert.ok(claim);assert.equal(await store.authorize(claim,'test'),true);
       await store.finish(claim,500,0);const d=await delivery(e);
       assert.equal(d.attempt_count,n);assert.equal(d.state,n===3?'failed':'retry_due');
-      const wait=Date.parse(d.next_attempt_at)-Date.now();assert.ok(wait>=(n===1?59000:299000));await due(e);
+      assert.ok(await secondsUntil(d.next_attempt_at)>=(n===1?59:299));await due(e);
     }
     assert.equal((await store.claim()).length,0);
   });
@@ -83,7 +84,7 @@ test('durable_delivery_statechart',async t=>{
   await reset();
   await t.test('429_honors_retry_after_within_expiry',async()=>{
     const e=await make();const [claim]=await store.claim();assert.equal(await store.authorize(claim,'test'),true);
-    await store.finish(claim,429,600);assert.ok(Date.parse((await delivery(e)).next_attempt_at)-Date.now()>599000);
+    await store.finish(claim,429,600);assert.ok(await secondsUntil((await delivery(e)).next_attempt_at)>599);
     await due(e);const [again]=await store.claim();assert.equal(await store.authorize(again,'test'),true);
     await store.finish(again,429,86400);assert.equal((await delivery(e)).state,'expired');
   });
@@ -108,7 +109,7 @@ test('durable_delivery_statechart',async t=>{
       assert.equal(await store.authorize(claim,'test'),true);await store.finish(claim,500,0);
       await db.query("update ops.partner_needed_delivery set state='queued' where state='claimed'");
     }
-    const b=(await db.query('select * from ops.web_push_breaker')).rows[0];assert.equal(b.failures,5);assert.ok(Date.parse(b.open_until)-Date.now()>299000);
+    const b=(await db.query('select * from ops.web_push_breaker')).rows[0];assert.equal(b.failures,5);assert.ok(await secondsUntil(b.open_until)>299);
     let claims=await store.claim();assert.equal(await store.authorize(claims[0],'test'),false);
     await db.query("update ops.web_push_breaker set open_until=now()-interval '1 second'");
     await db.query("update ops.partner_needed_delivery set next_attempt_at=now() where terminal_reason='deferred'");
