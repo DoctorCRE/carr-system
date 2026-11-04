@@ -1529,7 +1529,7 @@ class IntakeTest(unittest.TestCase):
             CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
             INSERT INTO message_keys VALUES(1,100);
         """)
-        self.pdf = b'%PDF-1.7 synthetic attachment'
+        self.pdf = b'%PDF-1.7 synthetic attachment\n%%EOF\n'
         self.cache_path = '~/Files/S0/845/Attachments/1/Lease.pdf'
         con.execute('INSERT INTO attachments VALUES(7,100,?,1,?,?,?)',
                     ('Lease.pdf', 'image/png', len(self.pdf), self.cache_path))

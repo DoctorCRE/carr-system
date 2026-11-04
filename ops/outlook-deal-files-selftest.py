@@ -76,6 +76,16 @@ class FileAttachmentTest(unittest.TestCase):
             fake.carr = lambda verb, args: reply
             self.assertEqual(fake.file()['status'], 'verb_failed')
 
+    def test_retry_after_archive_without_acknowledgement_keeps_identity(self):
+        fake = Fakes(verb_error=TimeoutError())
+        self.assertEqual(fake.file()['status'], 'verb_failed')
+        self.assertEqual(len(fake.puts), 1)
+        first = fake.calls[0]
+        fake.verb_error, fake.existing = None, True
+        self.assertEqual(fake.file(), {'status': 'existing', 'sha256': SHA, 'attachment_id': 'att-1'})
+        self.assertEqual(fake.calls[1], first)
+        self.assertEqual(fake.puts[1], fake.puts[0])
+
     def test_rerun_sends_the_same_idempotency_key(self):
         a, b = Fakes(), Fakes(existing=True)
         a.file(), b.file()
