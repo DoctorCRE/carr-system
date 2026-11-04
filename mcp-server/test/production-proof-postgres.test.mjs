@@ -116,6 +116,12 @@ test('production proof trust and immutable lifecycle', async t => {
     const blocked=await acquire();
     await call('record-production-proof-attempt',signed('receipt',receiptPayload(blocked,'blocked')));
     assert.equal((await status()).state,'blocked');
+    for (const reason of ['awaiting_authorized_event','incompatible_release','missing_tool','artifact_unavailable']) {
+      const next=await acquire();
+      const stored=await call('record-production-proof-attempt',signed('receipt',{...receiptPayload(next,'blocked'),reason}));
+      assert.equal(stored.receipt.payload.reason,reason);
+      assert.equal((await status()).state,'blocked');
+    }
     const retry=await acquire();
     await call('record-production-proof-attempt',signed('receipt',receiptPayload(retry)));
     assert.equal((await status()).state,'proven');

@@ -3017,7 +3017,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-production-proof-attempt": {
     "ingress_key": "mcp-tool:record-production-proof-attempt",
     "source_locator": "mcp-server/src/production-proof.js",
-    "schema_digest": "4310fe171ab802fad2d051cc99113aad67a85206088cba1d45e9845a14f73060",
+    "schema_digest": "cc5d02dea00aa41110b6ce0eb0e116eaa1819d1558b3250db7f12077c3c7d75a",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

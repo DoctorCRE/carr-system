@@ -20,7 +20,7 @@ const deployment = object({...binding,released_sha:revision,provider_version:tex
   requirement:planSchema});
 const reservation = object({...binding,deployment_id:uuid,assertion_id:text});
 const receipt = object({...reservation.properties,attempt_id:uuid,released_sha_before:revision,released_sha_after:revision,
-  result:{enum:['pass','fail','blocked']},reason:{enum:['observed','assertion_failed','missing_login','missing_runtime','dependency_unavailable','budget_exceeded']},
+  result:{enum:['pass','fail','blocked']},reason:{enum:['observed','assertion_failed','missing_login','missing_runtime','dependency_unavailable','budget_exceeded','awaiting_authorized_event','incompatible_release','missing_tool','artifact_unavailable']},
   started_at:{type:'string',format:'date-time'},finished_at:{type:'string',format:'date-time'},
   artifacts:{type:'array',minItems:1,maxItems:10,items:artifact},
   metrics:object({requests:{type:'integer',minimum:0,maximum:100},records:{type:'integer',minimum:0,maximum:1000}})});
