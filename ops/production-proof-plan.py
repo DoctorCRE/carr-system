@@ -91,7 +91,14 @@ def admission(body, paths, root, contract):
         raise ValueError('duplicate assertion IDs')
     covered = set()
     for assertion in requirement['assertions']:
-        covered.update(contract['x-runners'][assertion['runner']]['targets'])
+        runner = contract['x-runners'].get(assertion['runner'])
+        if runner is None:
+            raise ValueError('unregistered runner')
+        covered.update(runner['targets'])
+    required_targets = {target for target, patterns in contract['x-required-targets'].items()
+                        if any(fnmatch.fnmatchcase(path, pattern) for path in product for pattern in patterns)}
+    if required_targets - set(requirement['targets']):
+        raise ValueError('changed runtime target missing from declaration')
     if set(requirement['targets']) - covered:
         raise ValueError('target has no registered runner')
     return 'proof declaration accepted (admission only; execution unproven)'

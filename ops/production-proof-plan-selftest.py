@@ -87,7 +87,10 @@ class AdmissionTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, path)
 
     def test_ci_implementation_declarations(self):
-        for path in ['ops/ci-evidence.py', 'ops/ci-unit.py', 'ops/ci-secret.py']:
+        for path in ['ops/ci-evidence.py', 'ops/ci-unit.py', 'ops/ci-secret.py',
+                     'ops/ci-secret-scan.py', 'ops/ci-pushfloor.py', 'ops/ci-dep-check.py',
+                     'ops/ci-migration.py', 'ops/ci-migration-gates.py', 'ops/ci-node-file.mjs',
+                     'ops/ci-apt.py', 'ops/ci-postgres.sh', 'ops/ci-zsh.sh']:
             with self.subTest(path=path):
                 result = self.run_plan('## Production proof\nn/a: CI checks only; no deployed runtime changes', [path])
                 self.assertEqual(result.returncode, 0, result.stdout)
@@ -109,6 +112,23 @@ class AdmissionTest(unittest.TestCase):
         self.requirement['targets'] = ['worker']
         self.manifest.write_text(json.dumps(self.requirement))
         self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
+
+    def test_runner_registry_pins_and_studio_observer(self):
+        contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
+        runner = contract['x-runners']['studio-run-receipt.v1']
+        source = subprocess.check_output(['git', 'show', runner['revision'] + ':' + runner['path']],
+                                         cwd=ROOT, env=fixture_env())
+        self.assertEqual(source, (ROOT / runner['path']).read_bytes())
+        observer = self.root / 'observer.py'
+        observer.write_bytes(source)
+        receipt = self.root / 'receipt.txt'
+        receipt.write_text('outlook-intake-receipt ' + json.dumps({
+            'state': 'succeeded', 'runtime_sha': 'a' * 40, 'counts': {'run': {'processed': 1}}}))
+        result = subprocess.run([sys.executable, str(observer), '--receipt-file', str(receipt),
+            '--runtime-sha', 'a' * 40, '--service', 'outlook-intake',
+            '--count', 'run.processed', '--minimum', '1'],
+            capture_output=True, text=True, timeout=10, env=fixture_env())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_placeholder_and_duplicate_sections(self):
         for body in ['## Production proof\nn/a:', '## Production proof\nn/a: TODO',
