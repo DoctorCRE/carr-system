@@ -608,7 +608,7 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     const batch=async(command,items,extra={})=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
       idempotency_key:id(batchSeq++),reversible:true,...(items?{items:items.map(({item_id,base_version})=>({item_id,base_version}))}:{}),...extra});
     for(const state of ['working','done','auto-settled','set-aside','snoozed','override']) {
-      for(const command of ['settle','snooze']) await bulk.test(`bulk statechart ${state} ${command} and exact undo`,async()=>{
+      for(const command of ['settle','snooze']) for(const mode of ['whole','subset']) await bulk.test(`bulk statechart ${state} ${command} ${mode} exact undo`,async()=>{
         await c.query('begin');
         try {
           await c.query('update email_proposal set status=$1,version=version+1,result_recorded_at=now() where id=$2',[state==='working'?'approved_to_send':state==='auto-settled'?'sent':'pending',id(701)]);
@@ -618,8 +618,9 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
           const before=await current();
           const rows=async()=>(await c.query('select to_jsonb(d) row from ops.home_inbox_disposition d where actor_id=$1 and item_id=$2',[joe.id,before.item_id])).rows;
           const saved=await rows();
+          const neighbor=mode==='subset'?await item(702):null;
           const key=id(batchSeq++);
-          const args={idempotency_key:key,reversible:true,items:[{item_id:before.item_id,base_version:before.base_version}],...(command==='snooze'?{until:'2099-01-01T00:00:00Z'}:{})};
+          const args={idempotency_key:key,reversible:true,items:[before,...(neighbor?[neighbor]:[])].map(({item_id,base_version})=>({item_id,base_version})),...(command==='snooze'?{until:'2099-01-01T00:00:00Z'}:{})};
           const applied=await executeRegisteredTool(c,joe,`${command}-home-inbox`,args);
           const noop=(command==='settle'&&['set-aside','auto-settled'].includes(state))||(command==='snooze'&&state==='snoozed');
           assert.equal(applied.results[0].status,noop?'already':'applied');
@@ -627,14 +628,45 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
           assert.deepEqual((await executeRegisteredTool(c,joe,`${command}-home-inbox`,args)).results,applied.results);
           await c.query('delete from tool_call where idempotency_key=$1',[key]);
           assert.deepEqual((await executeRegisteredTool(c,joe,`${command}-home-inbox`,args)).results,applied.results,'durable receipt survives envelope expiry');
-          const undo=await batch(command,null,{undo_of:key});
+          const neighborAfter=neighbor?await item(702):null;
+          const undo=await batch(command,neighbor?[before]:null,{undo_of:key});
           assert.equal(undo.results[0].status,noop?'already':'applied');
           assert.deepEqual(await rows(),saved,'undo restores every saved column or absence');
           assert.deepEqual(await current(),before);
-          assert.equal((await batch(command,null,{undo_of:key})).results[0].status,'already');
+          assert.equal((await batch(command,neighbor?[before]:null,{undo_of:key})).results[0].status,'already');
+          if(neighbor) {
+            assert.equal(applied.results[1].status,'applied');
+            assert.deepEqual(await item(702),neighborAfter,'subset undo leaves the other selected item changed');
+            const rest=await batch(command,null,{undo_of:key});
+            assert.deepEqual(rest.results.map(r=>r.status),['already','applied']);
+            assert.deepEqual(await item(702),neighbor);
+          }
         } finally {await c.query('rollback');}
       });
     }
+    for(const command of ['settle','snooze']) await bulk.test(`${command} projection queries stay constant across 1, 10 and 100 items`,async()=>{
+      await c.query("set track_functions='all'");
+      const counts=[];
+      for(const size of [1,10,100]) {
+        await c.query('begin');
+        try {
+          await c.query(`insert into next_action(id,owner_id,description,status,version,created_at,updated_at)
+            select ('ae000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,$1,'Synthetic batch task '||n,'open',1,now(),now()
+            from generate_series(20000,20000+$2::integer-1) n`,[joe.id,size]);
+          const selected=(await read()).items.filter(i=>i.source_type==='next_action'&&Number(i.source_id.slice(-12))>=20000);
+          assert.equal(selected.length,size);
+          const calls=async()=>(await c.query(`select coalesce(sum(pg_stat_get_xact_function_calls(oid)),0)::int calls
+            from pg_proc where pronamespace='ops'::regnamespace and proname in
+            ('home_inbox_items','home_inbox_items_v3','home_inbox_project_items','home_inbox_sources','home_inbox_sources_v3')`)).rows[0].calls;
+          const before=await calls();
+          const result=await batch(command,selected,command==='snooze'?{until:'2099-01-01T00:00:00Z'}:{});
+          assert.equal(result.results.filter(r=>r.status==='applied').length,size);
+          counts.push(await calls()-before);
+        } finally {await c.query('rollback');}
+      }
+      assert.ok(counts[0]>0,'PostgreSQL must record projection calls');
+      assert.deepEqual(counts,[counts[0],counts[0],counts[0]],'projection SELECT count must not grow with batch size');
+    });
     await bulk.test('mixed batch isolates hidden, stale and forbidden items; subset then whole undo',async()=>{
       await c.query('begin');
       try {
