@@ -93,6 +93,9 @@ class RunReadTest(unittest.TestCase):
                       ended_at=NOW, detail='failed before receipt')
         failed = self.evidence([row(observed_at=NOW+timedelta(hours=1)), failure])
         self.assertEqual(observe(self.req, self.source, failed, NOW).state, 'failed')
+        for state in ('timed_out', 'cancelled'):
+            newest = {**failure, 'state': state}
+            self.assertEqual(observe(self.req, self.source, self.evidence([row(), newest]), NOW).state, 'failed')
         self.assertEqual(observe(self.req, self.source, good, NOW).state, 'live-proven')
         self.assertEqual(observe(self.req, self.source, self.evidence([row(state='skipped')]), NOW).state, 'held')
 
