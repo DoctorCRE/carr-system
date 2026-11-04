@@ -4,6 +4,7 @@ import hashlib
 import json
 import importlib.util
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -24,14 +25,40 @@ def module():
 
 
 def runner_source(runner, root=ROOT):
+    if 'sources' in runner:
+        sources, path = runner['sources'], runner.get('path')
+        if ('revision' in runner or not isinstance(sources, dict) or not 1 <= len(sources) <= 16
+                or not isinstance(path, str) or path not in sources):
+            raise ValueError('runner requires exactly one complete source binding')
+        entry = None
+        for name, digest in sources.items():
+            if (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]*', name)
+                    or any(p in {'', '.', '..'} for p in name.split('/'))
+                    or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)):
+                raise ValueError('runner source path or SHA256 invalid')
+            metadata = subprocess.run(['git', 'ls-tree', '-l', 'HEAD', '--', name],
+                                      cwd=root, env=fixture_env(), capture_output=True, timeout=15)
+            fields = metadata.stdout.split()
+            if (metadata.returncode or len(fields) != 5 or fields[0] not in {b'100644', b'100755'}
+                    or fields[1] != b'blob' or not fields[3].isdigit()):
+                raise ValueError(f'runner source {name}: missing or not a regular file')
+            if int(fields[3]) > 1048576:
+                raise ValueError(f'runner source {name}: exceeds 1 MiB')
+            source = subprocess.run(['git', 'show', 'HEAD:' + name], cwd=root,
+                                    env=fixture_env(), capture_output=True, timeout=15)
+            if source.returncode or hashlib.sha256(source.stdout).hexdigest() != digest:
+                raise ValueError(f'runner source digest mismatch: {name}')
+            if name == path:
+                entry = source.stdout
+        return entry
     revision, path = runner['revision'], runner['path']
     ancestry = subprocess.run(['git', 'merge-base', '--is-ancestor', revision, 'HEAD'],
-                              cwd=root, env=fixture_env(), capture_output=True)
+                              cwd=root, env=fixture_env(), capture_output=True, timeout=15)
     if ancestry.returncode:
         reason = 'not an ancestor of tested HEAD' if ancestry.returncode == 1 else 'unresolvable revision or tested HEAD'
         raise ValueError(f"runner pin {revision}: {reason}")
     source = subprocess.run(['git', 'show', revision + ':' + path],
-                            cwd=root, env=fixture_env(), capture_output=True)
+                            cwd=root, env=fixture_env(), capture_output=True, timeout=15)
     if source.returncode:
         raise ValueError(f"runner pin {revision}: {path}: unresolvable path")
     return source.stdout
@@ -199,6 +226,57 @@ class AdmissionTest(unittest.TestCase):
             runner_source({'revision': ancestor, 'path': 'missing.py'}, self.root)
         self.assertEqual(runner_source({'revision': ancestor, 'path': 'runner.py'}, self.root), b'pass\n')
 
+    def test_content_runner_survives_squash_and_refuses_stale_or_forged_source(self):
+        env = fixture_env()
+        env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.com',
+                   GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.com')
+        def git(*args, input=None):
+            return subprocess.check_output(['git', *args], cwd=self.root, env=env,
+                                           input=input, text=True).strip()
+        git('init', '-q')
+        (self.root / 'runner.py').write_text('pass\n')
+        git('add', 'runner.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'base')
+        base = git('rev-parse', 'HEAD')
+        (self.root / 'runner.py').write_text('import helper\n')
+        (self.root / 'helper.py').write_text('VALUE = 1\n')
+        git('add', 'runner.py', 'helper.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'implementation')
+        branch = git('rev-parse', 'HEAD')
+        tree = git('rev-parse', 'HEAD^{tree}')
+        candidate = git('commit-tree', tree, '-p', base, input='squash candidate\n')
+        git('checkout', '--detach', candidate)
+        self.assertEqual(git('rev-parse', 'HEAD^{tree}'), tree)
+        self.assertEqual(git('rev-parse', 'HEAD^'), base)
+        with self.assertRaisesRegex(ValueError, 'not an ancestor'):
+            runner_source({'revision': branch, 'path': 'runner.py'}, self.root)
+        runner = {'path': 'runner.py', 'sources': {
+            name: hashlib.sha256((self.root / name).read_bytes()).hexdigest()
+            for name in ('runner.py', 'helper.py')}}
+        self.assertEqual(runner_source(runner, self.root), b'import helper\n')
+        for name in ('runner.py', 'helper.py'):
+            (self.root / name).write_text('forged = True\n')
+            git('add', name)
+            git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'changed source')
+            with self.assertRaisesRegex(ValueError, 'source digest mismatch'):
+                runner_source(runner, self.root)
+            git('checkout', '--detach', candidate)
+        for sources in ({**runner['sources'], 'runner.py': '0' * 64},
+                        {**runner['sources'], 'missing.py': 'a' * 64},
+                        {'../runner.py': 'a' * 64}, {},
+                        {'runner.py': 'not-a-digest'}, {'helper.py': runner['sources']['helper.py']},
+                        {**runner['sources'], **{f'extra{i}.py': 'a' * 64 for i in range(16)}}):
+            with self.subTest(sources=sources), self.assertRaises(ValueError):
+                runner_source({**runner, 'sources': sources}, self.root)
+        with self.assertRaises(ValueError):
+            runner_source({**runner, 'revision': base}, self.root)
+        (self.root / 'runner.py').unlink()
+        (self.root / 'runner.py').symlink_to('helper.py')
+        git('add', 'runner.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'symlink source')
+        with self.assertRaisesRegex(ValueError, 'regular file'):
+            runner_source(runner, self.root)
+
     def test_runner_registry_pins_and_studio_observer(self):
         contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
         sources = {name: runner_source(runner) for name, runner in contract['x-runners'].items()}
@@ -206,6 +284,9 @@ class AdmissionTest(unittest.TestCase):
         source = sources['studio-run-receipt.v1']
         self.assertEqual(hashlib.sha256(source).hexdigest(), '8bfffa61e72f0cf7c551d10f17e4cc6c158e625efa616c84db56808e5e844068')
         canonical = contract['x-runners']['studio-canonical-run.v1']
+        self.assertEqual(set(canonical['sources']), {
+            'ops/studio-proof-observe.py', 'lib/studio_proof.py',
+            'tools/ops-record.py', 'lib/credential_file.py'})
         self.assertEqual(sources['studio-canonical-run.v1'], (ROOT / canonical['path']).read_bytes())
         observer = self.root / 'observer.py'
         observer.write_bytes(source)
