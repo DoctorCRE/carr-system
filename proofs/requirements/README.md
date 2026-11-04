@@ -11,6 +11,9 @@ registration. Runner IDs come only from the contract registry.
 For paths on the contract's explicit non-product allowlist, the section may instead
 contain `n/a: <specific reason>`. Everything outside that allowlist is product,
 including runtime Markdown and installed scripts. Mixed diffs require a declaration.
+Product changes under `mcp-server/**` or `migrations/**` require `worker` and a
+Worker assertion. Installed Outlook paths require `studio` and a Studio assertion.
+Mixed Worker and Studio changes require both targets and their matching runners.
 Rename sources and destinations are both classified. Review remains responsible
 for the declared predicate's relevance; admission cannot establish that relevance
 or prove a feature works.
