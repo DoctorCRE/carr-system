@@ -1,0 +1,23 @@
+stateDiagram-v2
+ state ClientView {
+  state Publication {
+   [*] --> Unpublished
+   Unpublished --> Published: Partner publishes
+   Published --> Unpublished: Partner unpublishes
+   Published --> Unpublished: Partner makes file private
+   Published --> Published: Partner replaces content
+   Unpublished --> Unpublished: Partner edits draft
+  }
+  --
+  state Client {
+   [*] --> Hidden
+   Hidden --> Visible: Partner publishes
+   Visible --> Hidden: Partner unpublishes
+   Visible --> Hidden: Partner makes file private
+   Visible --> Visible: Partner replaces content
+   Hidden --> Hidden: Partner edits draft
+   Hidden --> Hidden: Client reads
+   Visible --> Visible: Client reads
+  }
+ }
+ %% never OnlyPublished: Unpublished & Visible -- Unpublished items never appear to the client

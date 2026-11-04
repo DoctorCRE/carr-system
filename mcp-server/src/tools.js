@@ -58,6 +58,7 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
+import { clientPublicationTools } from "./client-publications.js";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
@@ -9248,6 +9249,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
+  "client-publications": "mcp-server/src/client-publications.js",
   "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "action-links": "mcp-server/src/action-links.js",
@@ -10932,6 +10934,7 @@ registerTools(dealExtractionTools(), "deal-extraction");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
+registerTools(clientPublicationTools({ withEnvelope, writeEvent }), "client-publications");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
