@@ -128,6 +128,68 @@ class CardTests(unittest.TestCase):
             self.assertIn('settings.json', checker.missing_paths(
                 text.replace('<!-- carr-native-rules:end -->', '')))
 
+    def assert_from_store_result(self, adopted, *, valid=False):
+        spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
+        sync = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sync)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = ('ops/config/rule-cards.v1.json', 'AGENTS.md', 'CLAUDE.md')
+            before = {name: (REPO / name).read_bytes() for name in names}
+            for name, content in before.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+            mtimes = {name: (root / name).stat().st_mtime_ns for name in names}
+            cards = root / names[0]
+            with mock.patch.object(sync, 'ROOT', root), mock.patch.object(
+                    sync, 'CARDS', cards), mock.patch.object(
+                    sync, 'load_cards', side_effect=lambda: load_cards(cards)), mock.patch.object(
+                    sync, 'missing_paths', return_value=[]), mock.patch.object(
+                    sync, 'store_cards', return_value=adopted), mock.patch.object(
+                    sync, 'read_retirements', return_value=[]), mock.patch(
+                    'sys.argv', ['sync', '--from-store']), mock.patch(
+                    'sys.stderr', new_callable=io.StringIO) as output:
+                result = sync.main()
+            for name, content in before.items():
+                self.assertEqual((root / name).read_bytes(), content, name)
+                if not valid:
+                    self.assertEqual((root / name).stat().st_mtime_ns, mtimes[name], name)
+            if valid:
+                self.assertEqual(result, 0, output.getvalue())
+            else:
+                self.assertNotEqual(result, 0)
+                self.assertIn('nothing written', output.getvalue())
+            return output.getvalue()
+
+    def test_from_store_refuses_when_projection_drops_cards(self):
+        adopted = [card for card in self.cards if card['id'] != 'K01']
+        self.assertIn('K01', self.assert_from_store_result(adopted))
+
+    def test_from_store_refuses_null_matcher_event_without_writes(self):
+        adopted = [{**card, 'triggers': {'matchers': [{'event': None}]}}
+                   if card['id'] == 'R01' else card for card in self.cards]
+        self.assertIn('R01', self.assert_from_store_result(adopted))
+
+    def test_from_store_refuses_unknown_regex_without_writes(self):
+        adopted = [{**card, 'triggers': {'matchers': [
+            {'event': 'UserPromptSubmit', 'unknown_regex': '.*'}]}}
+                   if card['id'] == 'R01' else card for card in self.cards]
+        self.assertIn('R01', self.assert_from_store_result(adopted))
+
+    def test_from_store_refuses_other_unsupported_matchers_without_writes(self):
+        for matcher in ({'event': ''}, {'event': 'Unknown'}, {'event': []},
+                        {'event': 'UserPromptSubmit', 'unknown': True},
+                        {'event': 'UserPromptSubmit', 'prompt_regex': '['},
+                        {'event': 'UserPromptSubmit', 'router_state': 'unknown'}):
+            with self.subTest(matcher=matcher):
+                adopted = [{**card, 'triggers': {'matchers': [matcher]}}
+                           if card['id'] == 'R01' else card for card in self.cards]
+                self.assertIn('R01', self.assert_from_store_result(adopted))
+
+    def test_from_store_complete_projection_regenerates_byte_identically(self):
+        self.assert_from_store_result(self.cards, valid=True)
+
     def test_cards_file_renders_from_the_store(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
         sync = importlib.util.module_from_spec(spec)
@@ -139,20 +201,35 @@ class CardTests(unittest.TestCase):
         self.assertEqual(json.dumps(rendered, indent=2, ensure_ascii=False) + '\n', text,
                          'the store form of every card round-trips to the committed cards file')
         active = [card for card in adopted if card['id'] != 'K01']
-        self.assertNotIn('K01', [card['id'] for card in sync.cards_from_store(document, active)['cards']],
-                         'a retired card omitted by rule-cards is removed from the generated source')
+        with self.assertRaisesRegex(ValueError, 'K01: omitted without retirement receipts'):
+            sync.cards_from_store(document, active)
+        with self.assertRaisesRegex(ValueError, 'omitted without retirement receipts'):
+            sync.cards_from_store(document, [])
+        source_ids = document['cards'][0]['source_rule_ids']
+        records = [{'id': rid + '-0000-0000-0000-000000000000', 'status': 'retired',
+                    'retirement': {'receipt_id': 'synthetic-retirement-receipt'}} for rid in source_ids]
+        rendered = sync.cards_from_store(document, active, lambda card: records)
+        self.assertNotIn('K01', [card['id'] for card in rendered['cards']])
+        for bad in (records[:-1], [{**row, 'status': 'active'} for row in records],
+                    [{**row, 'retirement': {}} for row in records]):
+            with self.assertRaisesRegex(ValueError, 'K01: omitted without retirement receipts'):
+                sync.cards_from_store(document, active, lambda card: bad)
 
-    def test_authoritative_empty_store_removes_all_cards(self):
+    def test_from_store_refuses_missing_hook_fields(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
         sync = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sync)
         document = json.loads((REPO / 'ops/config/rule-cards.v1.json').read_text())
-        emptied = sync.cards_from_store(document, [])
-        self.assertEqual(emptied['cards'], [])
-        with mock.patch.object(sync, 'load_cards', return_value=emptied['cards']):
-            rendered = sync.render((REPO / 'AGENTS.md').read_text())
-            self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
-            self.assertEqual(sync.render(rendered), rendered)
+        card = next(card for card in document['cards'] if card['placement'] != 'CORE')
+        for field in ('source_rule_ids', 'acknowledgement', 'scope', 'delivery_priority', 'triggers'):
+            for value in (None, '', [], {}):
+                with self.subTest(field=field, value=value):
+                    adopted = [{**row, field: value} if row['id'] == card['id'] else row
+                               for row in document['cards']]
+                    with self.assertRaisesRegex(ValueError, field):
+                        sync.cards_from_store(document, adopted)
+        with self.assertRaisesRegex(ValueError, 'duplicate card id'):
+            sync.cards_from_store(document, [*document['cards'], document['cards'][0]])
 
     def test_retiring_last_core_card_preserves_other_sections_and_renders_twice(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
