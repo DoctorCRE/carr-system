@@ -82,6 +82,8 @@
     "ops.work_request": "CARRIED IN PART, SIEP program rows only: the ops.work_request rows with program_key 'carr-system-integrity-elimination-v1', restored by the SIEP program block in bin/schema-snapshot.sh with the insert guards disabled for the restore. Those rows are internal program configuration created by 0324's own literal package list: requester and owner 'joe', no client, party, deal, event, doctrine or credential reference, and their only outbound foreign key is public.actor, which this snapshot already carries. NEVER the sourced captures (WR-000001 onward) - those are operational history."
   },
   "excluded": {
+    "ops.partner_needed_activation": "Per-subscription activation timestamps, created only when runtime installations activate. A schema-only rebuild contains no subscriptions and must start with no activation cursor; business-data backups retain these rows with their subscriptions.",
+    "ops.partner_needed_seen": "Per-installation canonical event identities used to suppress historical delivery. These are runtime subscription state, not configuration seeds; retain them with subscription data backups, never in a schema-only snapshot.",
     "ops.siep_component_alias": "dropped by 0988_drop_siep_program_leftovers (WR-SIEP-26); the table no longer exists after the ledger's last migration",
     "ops.siep_package_contract": "dropped by 0988_drop_siep_program_leftovers (WR-SIEP-26); the table no longer exists after the ledger's last migration",
     "ops.siep_program_dependency": "dropped by 0988_drop_siep_program_leftovers (WR-SIEP-26); the table no longer exists after the ledger's last migration",
