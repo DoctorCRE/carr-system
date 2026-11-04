@@ -177,6 +177,16 @@ class CardTests(unittest.TestCase):
                    if card['id'] == 'R01' else card for card in self.cards]
         self.assertIn('R01', self.assert_from_store_result(adopted))
 
+    def test_from_store_refuses_other_unsupported_matchers_without_writes(self):
+        for matcher in ({'event': ''}, {'event': 'Unknown'}, {'event': []},
+                        {'event': 'UserPromptSubmit', 'unknown': True},
+                        {'event': 'UserPromptSubmit', 'prompt_regex': '['},
+                        {'event': 'UserPromptSubmit', 'router_state': 'unknown'}):
+            with self.subTest(matcher=matcher):
+                adopted = [{**card, 'triggers': {'matchers': [matcher]}}
+                           if card['id'] == 'R01' else card for card in self.cards]
+                self.assertIn('R01', self.assert_from_store_result(adopted))
+
     def test_from_store_complete_projection_regenerates_byte_identically(self):
         self.assert_from_store_result(self.cards, valid=True)
 
