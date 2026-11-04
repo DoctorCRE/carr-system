@@ -66,7 +66,8 @@
     "retryable_unknown",
     "rejected",
     "cancelled",
-    "expired"
+    "expired",
+    "filed"
   ],
   "policy": {
     "file_bytes": 26214400,
@@ -80,6 +81,15 @@
     "breaker_failures": 3,
     "breaker_seconds": 300
   },
-  "filing": false,
+  "filing": {
+    "verb": "commit-deal-document-upload",
+    "input": {
+      "upload_id": "uuid",
+      "idempotency_key": "uuid"
+    },
+    "result": "receipt with state=filed, filed=true, attachment_id, deal_id and sha256",
+    "replay": "same key and upload returns same attachment, changed key refuses",
+    "canonical_storage": "public.attachment; immutable verified staging key pinned as canonical"
+  },
   "uncertain": "Unknown or receiving outcomes remain charged. Unknown objects reconcile by exact stored hash and byte count; absent objects wait for P6b expiry cleanup. Expiry never refunds potentially stored bytes."
 }

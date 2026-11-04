@@ -13,9 +13,10 @@ export const uploadMetadata = object({ idempotency_key: uuid, action_id: uuid, d
   bytes: { type: 'integer', minimum: 1, maximum: UPLOAD_MAX_BYTES },
   sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' } });
 export type UploadInput = VerbInputs['begin-deal-document-upload'];
-export type UploadActor = Actor & { documentUploadSession?: string };
+export type UploadActor = Actor & { documentUploadSession?: string; documentUploadSessionActive?:()=>Promise<boolean>; documentUploadBucket?: { head(key:string):Promise<{size:number;customMetadata?:Record<string,string>}|null> } };
 export type UploadRow = UploadInput & { id: string; actor_slug: string; session_digest: string; organization_tenant_id: string;
-  object_key: string; state: 'reserved'|'receiving'|'staged'|'rejected'|'retryable_unknown'|'cancelled'; expires_at: string; charged: boolean; cancel_key: string|null };
+  object_key: string; state: 'reserved'|'receiving'|'staged'|'rejected'|'retryable_unknown'|'cancelled'|'filed'|'expired'; expires_at: string; charged: boolean; cancel_key: string|null;
+  attachment_id?: string|null; commit_key?: string|null };
 export const uploadFail = (error: string): never => { throw new ToolError({ error }); };
 export const uploadDigest = async (bytes: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2,'0')).join('');
 export const uploadSessionDigest = (key: string) => uploadDigest(new TextEncoder().encode(key));
@@ -68,7 +69,8 @@ export async function uploadRow(c: Db, actor: UploadActor, id: string,lock=true)
 }
 export const uploadReceipt = (row: UploadRow) => ({ ok:true, schema_version:'deal-document-upload.v1', upload_id:row.id,
   deal_id:row.deal_id, filename:row.filename, declared_mime:row.declared_mime, bytes:Number(row.bytes), sha256:row.sha256,
-  state:row.state !== 'cancelled' && Date.parse(row.expires_at) <= Date.now() ? 'expired' : row.state, expires_at:row.expires_at, filed:false });
+  state:!['cancelled','filed'].includes(row.state) && Date.parse(row.expires_at) <= Date.now() ? 'expired' : row.state,
+  expires_at:row.expires_at, filed:row.state==='filed', ...(row.attachment_id ? {attachment_id:row.attachment_id} : {}) });
 export async function refundUpload(c: Db,row: UploadRow) {
   if (row.charged) {
     await c.query('update ops.deal_document_upload_quota set reserved_bytes=reserved_bytes-$1 where singleton',[row.bytes]);

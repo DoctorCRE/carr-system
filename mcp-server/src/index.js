@@ -1,6 +1,7 @@
 // Serve the CARR MCP Worker and its authentication routes.
 import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 import { executeRegisteredTool } from "./tools.js";
+import { cleanupDealDocumentUploads } from "./deal-document-filing.ts";
 
 // CARR MCP server — Worker entrypoint.
 //
@@ -631,9 +632,12 @@ const program6RoutineController = createProgram6RoutineController({ authorizeAct
 const tourInternalHandler = createTourInternalWebHandler(createTourRuntimeAdapters());
 const reportsHandler = createReportsWebHandler(createReportsRuntimeAdapters());
 const dealroomHandler = createDealroomHandler({
-  documentUploadHandler: (request, env, actor, sessionActive) => createDealDocumentHandler({
-    transaction: captureWriter(env), bucket: env.carr_documents, callTool: executeRegisteredTool,
-  })(request, actor, sessionActive),
+  documentUploadHandler: async (request, env, actor, sessionActive, ctx) => {
+    const response=await createDealDocumentHandler({transaction:captureWriter(env),bucket:env.carr_documents,callTool:executeRegisteredTool})(request,actor,sessionActive);
+    if(request.method==='POST' && new URL(request.url).pathname==='/api/v1/deal-documents/uploads' && env.carr_documents)
+      ctx.waitUntil(cleanupDealDocumentUploads({transaction:captureWriter(env),bucket:env.carr_documents}));
+    return response;
+  },
   phoneCallHandler: (request, env, actor) => phoneCallHandler(env).fetch(request, env, actor),
   mcpHandler: (request, env, ctx, actor, sessionKey) => dispatch(request, env, ctx, actor, sessionKey),
   pipelineHandler: (request, env, _ctx, actor) => pipelineApi(request, env, actor),

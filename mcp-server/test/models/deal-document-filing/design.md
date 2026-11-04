@@ -1,0 +1,15 @@
+# P6b pre-code design
+
+Size: one coupled filing unit, one migration. No agents or PR creation.
+
+Architecture: temporary receipts own upload identity, selected deal, verified hash and staging quota. public.attachment remains the sole canonical document store. The existing list view already admits all MIME types. Its wire fields stay id/content_hash, requiring app adapter re-pinning. Extract canonical insert/dedupe from deal-files for email and partner callers. Observed Deliverables branch uses ops.deal_deliverable with its own private/shared lifecycle and does not insert public.attachment on finalize. It needs later reconciliation with canonical documents; this unit does not introduce another store. Neither gets a second document store.
+
+Design twice: (1) copy staged bytes into a new canonical object then reconcile two objects; (2) retain the immutable staged object and atomically pin its key from public.attachment. Choose (2), removing cross-store copy failure windows. The prefix is not deletion authority. Cleanup checks receipts AND attachment references before deleting any key.
+
+Commit interface: upload_id plus idempotency_key only. Browser-auth adapter supplies current session and bucket verification, never caller arguments. Lock order quota then receipt then deal/hash advisory lock. Insert/audit/filed receipt/refund commit together. Replays check session, current deal visibility and key binding, return stored attachment, and do not require R2 availability. Verification checks size, upload ID and hash against the immutable receipt. No inference, extraction or send.
+
+Capacity/load/scaling: existing 100 MiB staging, 25 MiB file and P6a admission limits remain. Two partners or twenty use indexed UUID receipt reads and one bounded list query. Commits hold the quota/receipt lock across a bounded HEAD verification (two attempts, five seconds each); this is the first bottleneck at higher concurrency. No fan-out, cache or business queue. No stale canonical readback. Cleanup is an explicit background maintenance function invoked by waitUntil after a begin request, max 20 rows, max two durable deletion attempts, 20-second work deadline, no bucket listing. There is no new scheduled service or cron. Receiving claims cannot safely refund while an old producer can write; retain charge on these tombstones.
+
+Availability/breakers: SQL failure rolls back canonical state. R2 HEAD gets at most two attempts with backoff, refuses missing or mismatched metadata, and logs exhausted failures. P6a persistent breaker continues guarding new intake. Cleanup keeps failure receipts. No network call other than bucket HEAD/delete; no external delivery. Idempotency binds commit keys to uploads and canonical dedupe binds deal/hash, including email callers.
+
+Throughput: blocking first steps are statechart, current refs/overlaps and contract check. Independent streams n/a: coupled transaction and fixture. Shared state serializes for quota/canonical invariants. One worker owns the smallest verifiable unit. No TLA+ proof is claimed.

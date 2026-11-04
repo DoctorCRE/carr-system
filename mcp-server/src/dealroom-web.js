@@ -1156,7 +1156,7 @@ async function handleRequest(request, env, ctx, dependencies) {
           ? await dependencies.documentUploadHandler(request,env,uploadActor,async()=> {
             const current=await sessionFor(request,env,dependencies);
             return !!current && current.key===session.key && current.actor.slug===session.actor.slug;
-          }) : json({error:'upload_storage_unavailable'},503);
+          },ctx) : json({error:'upload_storage_unavailable'},503);
       } else if (url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/')) {
         if (!['GET', 'POST', 'PUT'].includes(request.method)) return json({ error: 'method_not_allowed' }, 405);
         if (request.method !== 'GET') {
@@ -1199,6 +1199,11 @@ async function handleRequest(request, env, ctx, dependencies) {
         }
         if(equalStrings(request.headers.get('x-carr-csrf'),session.csrfToken) && request.headers.get('sec-fetch-site')==='same-origin') {
           session.actor.documentUploadSession=await uploadSessionDigest(session.key);
+          session.actor.documentUploadBucket=env.carr_documents;
+          session.actor.documentUploadSessionActive=async()=>{
+            const current=await sessionFor(request,env,dependencies);
+            return !!current && current.key===session.key && current.actor.slug===session.actor.slug;
+          };
         }
         response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }

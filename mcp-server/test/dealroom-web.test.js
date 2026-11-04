@@ -120,13 +120,15 @@ test('partner document bytes require current session, same origin and CSRF', asy
 
 test('upload metadata MCP context requires both CSRF and same-origin fetch metadata',async()=> {
  const environment=env();
- const handler=createDealroomHandler({...identityOverrides(TEST_PARTNER_EMAIL),mcpHandler:async(_r,_e,_c,actor)=>Response.json({bound:!!actor.documentUploadSession})});
+ environment.carr_documents={head:async()=>null};
+ const handler=createDealroomHandler({...identityOverrides(TEST_PARTNER_EMAIL),mcpHandler:async(_r,_e,_c,actor)=>Response.json({bound:!!actor.documentUploadSession,bucket:actor.documentUploadBucket===environment.carr_documents})});
  const cookie=namedCookie(await login(handler,environment,TEST_PARTNER_EMAIL),'__Host-dealroom_session');
  const bootstrap=await(await handler.fetch(new Request(`https://${PRODUCTION_HOST}/auth/session`,{headers:{cookie}}),environment,{})).json();
  const send=extra=>handler.fetch(new Request(`https://${PRODUCTION_HOST}/mcp`,{method:'POST',headers:{cookie,origin:`https://${PRODUCTION_HOST}`,...extra},body:'{}'}),environment,{});
  assert.equal((await(await send({})).json()).bound,false);
  assert.equal((await(await send({'x-carr-csrf':bootstrap.csrf_token})).json()).bound,false);
  assert.equal((await(await send({'x-carr-csrf':bootstrap.csrf_token,'sec-fetch-site':'same-origin'})).json()).bound,true);
+ assert.equal((await(await send({'x-carr-csrf':bootstrap.csrf_token,'sec-fetch-site':'same-origin'})).json()).bucket,true);
 });
 
 test("comparison app routes require authentication and CSRF and name a blocked field", async () => {

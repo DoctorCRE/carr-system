@@ -1,0 +1,14 @@
+stateDiagram-v2
+    [*] --> Staged: phone finishes sending verified bytes
+    Staged --> Filed: partner saves to selected deal
+    Staged --> Staged: storage check fails or database rolls back
+    Filed --> Filed: retry save or read receipt
+    Staged --> Cancelled: partner discards before save
+    Staged --> Expired: staging deadline passes
+    Expired --> Cleaned: cleanup confirms orphan deletion
+    Expired --> Expired: deletion fails, retain charge and failure receipt
+    Cancelled --> Cancelled: save refuses
+    Cleaned --> Cleaned: save refuses
+    %% never File a document under a different deal
+    %% never Delete a filed document during expiry or cancellation
+    %% never Return two attachment IDs for one upload

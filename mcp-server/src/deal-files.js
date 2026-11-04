@@ -15,6 +15,19 @@ const MIME = new Set(["application/pdf", "application/vnd.openxmlformats-officed
   "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/x-ole-storage"]);
 const KEY = /^documents\/([A-Za-z0-9._-]+)\/([0-9a-f]{16})\/([A-Za-z0-9._-]+)$/;
 
+export async function fileCanonicalDealAttachment(c, actor, { deal_id, r2_key, filename, mime, sha256, bytes }) {
+  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [`deal-document:${deal_id}:${sha256}`]);
+  const same = (await c.query(
+    "select id,subject_type,subject_id,r2_key from attachment where deleted_at is null and (r2_key=$1 or (subject_type='deal' and subject_id=$2 and sha256=$3)) order by created_at,id limit 2",
+    [r2_key,deal_id,sha256])).rows;
+  if (same.some(row=>row.r2_key===r2_key && (row.subject_type!=='deal' || row.subject_id!==deal_id)))
+    throw new ToolError({error:'r2_key_on_other_record'});
+  if(same.length) return {ok:true,attachment_id:same[0].id,existing:true};
+  const saved=(await c.query("insert into attachment (subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values ('deal',$1,$2,$3,$4,$5,$6,$7) returning id",
+    [deal_id,r2_key,filename.trim(),mime,sha256,bytes,actor.id])).rows[0];
+  return {ok:true,attachment_id:saved.id,existing:false};
+}
+
 export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
   return {
     "list-deal-documents": {
@@ -73,23 +86,12 @@ export function dealFileTools({ withEnvelope, writeEvent, resolveSubject }) {
         if (args.source !== undefined && (typeof args.source !== "string" || args.source.length > 200)) refuse("invalid_source");
         const deal = await resolveSubject(c, args.deal);
         if (deal.type !== "deal") refuse("not_a_deal");
-        const same = await c.query(
-          "select id, subject_type, subject_id, r2_key from attachment where deleted_at is null and (r2_key=$1 or (subject_type='deal' and subject_id=$2 and sha256=$3)) order by created_at limit 2",
-          [args.r2_key, deal.id, args.sha256]);
-        const other = same.rows.find(row => row.r2_key === args.r2_key && (row.subject_type !== "deal" || row.subject_id !== deal.id));
-        if (other) refuse("r2_key_on_other_record");
-        if (same.rows.length) {
-          const skipped = args.activity_id && await recordRequirementReply(c, actor, args.activity_id, same.rows[0].id, deal.id);
-          return { ok: true, attachment_id: same.rows[0].id, existing: true, ...(skipped ? { reply_proposal_skipped: skipped } : {}) };
-        }
-        const saved = (await c.query(
-          "insert into attachment (subject_type, subject_id, r2_key, filename, mime, sha256, bytes, created_by) values ('deal',$1,$2,$3,$4,$5,$6,$7) returning id",
-          [deal.id, args.r2_key, args.filename.trim(), args.mime, args.sha256, args.bytes, actor.id])).rows[0];
-        const skipped = args.activity_id && await recordRequirementReply(c, actor, args.activity_id, saved.id, deal.id);
-        await writeEvent(c, actor, "attach-deal-file", "deal", deal.id, {
-          field: "attachment", new: { attachment_id: saved.id, sha256: args.sha256, bytes: args.bytes },
+        const saved=await fileCanonicalDealAttachment(c,actor,{...args,deal_id:deal.id});
+        const skipped = args.activity_id && await recordRequirementReply(c, actor, args.activity_id, saved.attachment_id, deal.id);
+        if(!saved.existing) await writeEvent(c, actor, "attach-deal-file", "deal", deal.id, {
+          field: "attachment", new: { attachment_id: saved.attachment_id, sha256: args.sha256, bytes: args.bytes },
           cause: "ingest_email", ...(args.source ? { agent_rationale: `email attachment ${args.source}` } : {}), idempotency_key: args.idempotency_key });
-        return { ok: true, attachment_id: saved.id, existing: false, ...(skipped ? { reply_proposal_skipped: skipped } : {}) };
+        return { ...saved, ...(skipped ? { reply_proposal_skipped: skipped } : {}) };
       }),
     },
   };

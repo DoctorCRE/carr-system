@@ -670,6 +670,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
       "complete-work-request"
     ]
   },
+  "commit-deal-document-upload": {
+    "ingress_key": "mcp-tool:commit-deal-document-upload",
+    "source_locator": "mcp-server/src/deal-document-filing.ts",
+    "schema_digest": "86c85c61afcdba3850e0fd682c30d7b775d13707d1b334ee2f893c83598c0f20",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "commit-winning-property": {
     "ingress_key": "mcp-tool:commit-winning-property",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
