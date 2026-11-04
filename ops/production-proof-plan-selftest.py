@@ -97,6 +97,43 @@ class AdmissionTest(unittest.TestCase):
         for path in ['ops/ci-dispatch.py', 'ops/ci-secret-scan.py', 'lib/outlook_runtime.py', 'ops/runtime.py']:
             self.assertNotEqual(self.run_plan('## Production proof\nn/a: CI checks only', [path]).returncode, 0)
 
+    def test_ci_only_helpers_and_mixed_runtime(self):
+        body = '## Production proof\nn/a: CI checks only; no deployed runtime changes'
+        for path in ['ops/ci_unit_shards.py', 'ops/node_test_summary.py']:
+            with self.subTest(path=path):
+                result = self.run_plan(body, [path])
+                self.assertEqual(result.returncode, 0, result.stdout)
+                result = self.run_plan(body, [path, 'mcp-server/src/work-queue.js'])
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_worker_and_mixed_changes_require_worker_coverage(self):
+        body = '## Production proof\nproofs/requirements/synthetic.json'
+        worker_assertion = dict(self.requirement['assertions'][0])
+        studio_assertion = {**worker_assertion, 'id': 'studio-receipt',
+                            'runner': 'studio-run-receipt.v1',
+                            'predicate': 'Installed Studio receipt matches expected runtime and counts'}
+        for paths in [['mcp-server/src/work-queue.js'],
+                      ['mcp-server/src/work-queue.js', 'lib/outlook_runtime.py'],
+                      ['mcp-server/wrangler.toml'], ['mcp-server/package-lock.json'],
+                      ['migrations/0001.sql']]:
+            with self.subTest(paths=paths):
+                self.requirement['targets'] = ['studio']
+                self.requirement['assertions'] = [studio_assertion]
+                self.manifest.write_text(json.dumps(self.requirement))
+                result = self.run_plan(body, paths)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('changed runtime target missing', result.stdout)
+                mixed = 'lib/outlook_runtime.py' in paths
+                self.requirement['targets'] = ['worker', 'studio'] if mixed else ['worker']
+                self.manifest.write_text(json.dumps(self.requirement))
+                result = self.run_plan(body, paths)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('target has no registered runner', result.stdout)
+                self.requirement['assertions'] = [worker_assertion, studio_assertion] if mixed else [worker_assertion]
+                self.manifest.write_text(json.dumps(self.requirement))
+                result = self.run_plan(body, paths)
+                self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_studio_declaration_and_worker_mismatch(self):
         body = '## Production proof\nproofs/requirements/synthetic.json'
         paths = ['lib/outlook_runtime.py']
