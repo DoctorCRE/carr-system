@@ -2,6 +2,7 @@
 """Synthetic contract checks. No Microsoft transport or mailbox access."""
 import copy
 import json
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -29,6 +30,11 @@ class ExecutorContractTests(unittest.TestCase):
 
     def qualified_fixture(self):
         contract = copy.deepcopy(self.contract)
+        contract["read_state_policy"] = {
+            "source_decision": "fba2c07d",
+            "preserve_read_state": True,
+            "move_eligibility": "any_read_state",
+        }
         candidate = contract["candidates"][0]
         candidate.update(status="sanctioned", lifecycle="verified")
         candidate["verified_read_policy"] = copy.deepcopy(contract["read_state_policy"])
@@ -48,14 +54,14 @@ class ExecutorContractTests(unittest.TestCase):
 
     def test_read_state_not_required_under_current_policy(self):
         contract, candidate = self.qualified_fixture()
-        self.assertFalse(contract["read_state_policy"]["require_read_before_move"])
-        self.assertTrue(contract["read_state_policy"]["unread_may_move"])
+        self.assertEqual(self.contract["read_state_policy"], contract["read_state_policy"])
+        self.assertEqual(contract["read_state_policy"]["move_eligibility"], "any_read_state")
         self.assertNotIn("atomic_read_condition", candidate["evidence"])
         self.assertEqual(self.select(contract, candidate), candidate["id"])
 
     def test_required_read_refuses_without_atomic_condition(self):
         contract, candidate = self.qualified_fixture()
-        contract["read_state_policy"].update(require_read_before_move=True, read_condition="required")
+        contract["read_state_policy"]["move_eligibility"] = "read_only"
         candidate["verified_read_policy"] = copy.deepcopy(contract["read_state_policy"])
         with self.assertRaisesRegex(ValueError, "missing_capability_evidence"):
             self.select(contract, candidate)
@@ -78,40 +84,94 @@ class ExecutorContractTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "missing_capability_evidence"):
                         self.select(broken, candidate)
 
-    def test_lifecycle_transitions_and_disable_do_not_auto_reenable(self):
+    def lifecycle_edge(self, source, target, event):
+        edge = [source, target, event]
+        self.assertIn(edge, self.contract["lifecycle"]["transitions"])
         contract, candidate = self.qualified_fixture()
-        for state in ("unverified", "disabled", "refused"):
+        for state in (source, target):
             candidate["lifecycle"] = state
-            with self.subTest(state=state), self.assertRaises(ValueError):
-                self.select(contract, candidate)
-        candidate["lifecycle"] = "verified"
-        self.assertEqual(self.select(contract, candidate), candidate["id"])
-        candidate["lifecycle"] = "unverified"
-        with self.assertRaises(ValueError):
-            self.select(contract, candidate)
+            if state == "verified":
+                self.assertEqual(self.select(contract, candidate), candidate["id"])
+            else:
+                with self.assertRaisesRegex(ValueError, "^capability_not_verified$"):
+                    self.select(contract, candidate)
 
-    def test_unknown_duplicate_and_unsupported_contract_refuse(self):
+    def test_lifecycle_all_required_evidence(self):
+        self.lifecycle_edge("unverified", "verified", "all_required_evidence")
+
+    def test_lifecycle_prohibited(self):
+        self.lifecycle_edge("unverified", "refused", "prohibited")
+
+    def test_lifecycle_disable_or_policy_change(self):
+        self.lifecycle_edge("verified", "disabled", "disable_or_policy_change")
+
+    def test_lifecycle_evidence_invalidated(self):
+        self.lifecycle_edge("verified", "unverified", "evidence_invalidated")
+
+    def test_lifecycle_reverify_requested(self):
+        self.lifecycle_edge("disabled", "unverified", "reverify_requested")
+
+    def test_lifecycle_refused_selection_attempt(self):
+        self.lifecycle_edge("refused", "refused", "selection_attempt")
+
+    def test_lifecycle_chart_matches_future_contract(self):
+        lifecycle = self.contract["lifecycle"]
+        chart = (ROOT / "spec/outlook/triage-executor-lifecycle.mmd").read_text()
+        edges = re.findall(r"^\s*(\w+) --> (\w+): (\w+)\s*$", chart, re.MULTILINE)
+        self.assertCountEqual(edges, map(tuple, lifecycle["transitions"]))
+        self.assertEqual(set(lifecycle["states"]), {state for edge in edges for state in edge[:2]})
+        self.assertIn("Future lifecycle specification", lifecycle["scope"])
+        self.assertIn("Future lifecycle specification", chart)
+
+    def test_unknown_candidate_refuses(self):
         from outlook_triage_capability import select_candidate
-        contract, candidate = self.qualified_fixture()
-        with self.assertRaises(ValueError):
+        contract, _ = self.qualified_fixture()
+        with self.assertRaisesRegex(ValueError, "^unknown_or_duplicate_candidate$"):
             select_candidate(contract, "unknown")
+
+    def test_duplicate_candidate_refuses(self):
+        contract, candidate = self.qualified_fixture()
         contract["candidates"].append(copy.deepcopy(candidate))
-        with self.assertRaises(ValueError):
-            self.select(contract, candidate)
-        contract["schema"] = "outlook-triage-executor-contract/v2"
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "^unknown_or_duplicate_candidate$"):
             self.select(contract, candidate)
 
-    def test_malformed_or_inconsistent_read_policy_refuses(self):
-        for value in (None, "false", 0, 1):
+    def test_unsupported_contract_refuses(self):
+        contract, candidate = self.qualified_fixture()
+        contract["schema"] = "outlook-triage-executor-contract/v2"
+        with self.assertRaisesRegex(ValueError, "^unsupported_contract$"):
+            self.select(contract, candidate)
+
+    def test_preserve_read_state_is_mandatory(self):
+        for value in (None, False, "true", 0, 1):
             contract, candidate = self.qualified_fixture()
-            contract["read_state_policy"]["require_read_before_move"] = value
-            with self.subTest(value=value), self.assertRaises(ValueError):
+            contract["read_state_policy"]["preserve_read_state"] = value
+            candidate["verified_read_policy"] = copy.deepcopy(contract["read_state_policy"])
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "^invalid_read_policy$"):
                 self.select(contract, candidate)
-        for key, value in (("preserve_read_state", False), ("read_condition", "required")):
+
+    def test_invalid_move_eligibility_refuses(self):
+        for value in (None, "required", False, 0, 1, [], {}):
+            contract, candidate = self.qualified_fixture()
+            contract["read_state_policy"]["move_eligibility"] = value
+            candidate["verified_read_policy"] = copy.deepcopy(contract["read_state_policy"])
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "^invalid_read_policy$"):
+                self.select(contract, candidate)
+
+    def test_missing_policy_fields_refuse(self):
+        for key in ("move_eligibility", "preserve_read_state", "source_decision"):
+            contract, candidate = self.qualified_fixture()
+            del contract["read_state_policy"][key]
+            candidate["verified_read_policy"] = copy.deepcopy(contract["read_state_policy"])
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "^invalid_read_policy$"):
+                self.select(contract, candidate)
+
+    def test_legacy_contradictory_read_controls_refuse(self):
+        for key, value in (("unread_may_move", False), ("unread_may_move", True),
+                           ("require_read_before_move", True), ("read_condition", "required")):
             contract, candidate = self.qualified_fixture()
             contract["read_state_policy"][key] = value
-            with self.subTest(key=key), self.assertRaises(ValueError):
+            candidate["verified_read_policy"] = copy.deepcopy(contract["read_state_policy"])
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, "^invalid_read_policy$"):
                 self.select(contract, candidate)
 
     def test_committed_contract_keeps_every_transport_unavailable(self):
