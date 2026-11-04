@@ -74,6 +74,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
 
     "accept-ready-plan",
     "accept-ready-plan-amendment",
+    "acknowledge-partner-review",
     // WR-000562 S4: the one door from a convention proposal to an active rule.
     "adopt-rule",
 
@@ -106,6 +107,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "link-lead-client",
     "propose-doc-correction",
     "read-home-review",
+    "read-partner-needed-card",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
     "record-artifact-preservation-hold",
