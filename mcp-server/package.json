@@ -27,6 +27,7 @@
     "wrangler": "^4.115.0"
   },
   "dependencies": {
+    "@block65/webcrypto-web-push": "2.0.0",
     "@cfworker/json-schema": "4.1.1",
     "@cloudflare/workers-oauth-provider": "^0.8.3",
     "@neondatabase/serverless": "^1.1.0",

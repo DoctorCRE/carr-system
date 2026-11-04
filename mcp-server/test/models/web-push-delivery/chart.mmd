@@ -1,0 +1,22 @@
+stateDiagram-v2
+  [*] --> queued
+  queued --> claimed: Due and lease available
+  retry_due --> claimed: Backoff ends
+  claimed --> claimed: Lease expires and new token replaces old token
+  claimed --> accepted_by_provider: Provider accepts and token still matches
+  claimed --> retry_due: Transient failure within attempt and expiry budget
+  claimed --> retry_due: Quiet hours or capacity or breaker or daily budget defers without send
+  claimed --> suppressed: Opt out or resolved card or revoked installation
+  claimed --> expired: Event reaches 24 hours
+  claimed --> failed: Permanent failure or third attempt
+  state Provider {
+    [*] --> closed
+    closed --> open: Five consecutive transient failures
+    open --> half_open: Five minutes pass and one probe leases
+    half_open --> closed: Probe accepted
+    half_open --> open: Probe fails or crashes
+  }
+  %% never Send a quiet, resolved, opted-out or expired card.
+  %% never Allow a stale claim token to acknowledge another attempt.
+  %% never Treat provider acceptance as a human read.
+  %% never Allow more than one half-open probe.

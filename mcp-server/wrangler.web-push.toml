@@ -1,0 +1,23 @@
+name = "carr-web-push"
+main = "src/web-push-worker.ts"
+compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
+
+[vars]
+WEB_PUSH_ENABLED = "false"
+
+[triggers]
+crons = []
+
+[limits]
+cpu_ms = 5000
+
+[observability]
+enabled = true
+head_sampling_rate = 0.1
+
+# Bind DATABASE_URL_JOBS and WEB_PUSH_VAPID_PRIVATE_KEY as Worker secrets.
+# Activation also requires WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_VAPID_SUBJECT,
+# WEB_PUSH_KEY_GENERATION, WEB_PUSH_ENABLED=true and crons=["* * * * *"].
+# No fetch handler, route or partner impersonation is admitted.

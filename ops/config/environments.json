@@ -108,7 +108,14 @@
       "telemetry": {
         "destination": "Cloudflare observability, healthchecks.io dead-man switch, the ops ledger"
       },
-      "who_may_write": "human-gated paths only; tools/db-tap.py is read-only here without break-glass"
+      "who_may_write": "human-gated paths only; tools/db-tap.py is read-only here without break-glass",
+      "web_push_worker": {
+        "name": "carr-web-push",
+        "config": "mcp-server/wrangler.web-push.toml",
+        "enabled": false,
+        "cron": null,
+        "purpose": "Partner-needed outbox delivery. Disabled without configured VAPID and jobs binding; activation uses one minute cron."
+      }
     }
   ],
   "intentional_differences": [

@@ -147,7 +147,9 @@
     "tool_call": "the verb call ledger — runtime history",
     "tool_read_count": "daily read-verb call counters backfilled from tool_read_call — usage data",
     "tool_read_count_backfill": "tool_read_call grouped at 1041 for the contract top-up — usage data",
-    "ops.studio_leader": "Current host ownership, epoch, fence evidence and change time are runtime failover authority, not reference configuration. A schema-only rebuild deliberately has no owner and guarded jobs and transfers refuse until the runtime row is restored from a verified backup; never seed Studio ownership from a stale snapshot while MacBook may be active."
+    "ops.studio_leader": "Current host ownership, epoch, fence evidence and change time are runtime failover authority, not reference configuration. A schema-only rebuild deliberately has no owner and guarded jobs and transfers refuse until the runtime row is restored from a verified backup; never seed Studio ownership from a stale snapshot while MacBook may be active.",
+    "ops.web_push_budget": "Runtime per-actor daily delivery counters; reconstruct empty, never carry actor attempt history.",
+    "ops.web_push_breaker": "Runtime provider-origin failure and probe leases; reconstruct closed, never carry transient outage state."
   },
   "carried_subset_must_not_contain": {
     "ops.work_request": {

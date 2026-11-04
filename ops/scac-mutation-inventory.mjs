@@ -73,6 +73,7 @@ export function mcpInventory(tools = defaultTools) {
 }
 
 const APPLICATION_INGRESSES = [
+  ["worker-sidewrite:web-push-delivery", "worker_sidewrite", "mcp-server/src/web-push-delivery.ts", "record_mutation"],
   ["worker-route:ingest", "worker_route", "mcp-server/src/index.js", "record_mutation"],
   ["worker-route:capture", "worker_route", "mcp-server/src/capture.js", "record_mutation"],
   ["worker-route:deal-room-turn", "worker_route", "mcp-server/src/index.js", "record_mutation"],

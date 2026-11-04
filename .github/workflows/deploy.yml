@@ -202,6 +202,16 @@ jobs:
             versions deploy ${{ steps.version.outputs.id }}@100 --yes
             --message "github-actions ${{ github.run_id }} ${{ env.SHA }}"
 
+      - name: Deploy the disabled web push transport
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.ACCOUNT_ID }}
+          workingDirectory: mcp-server
+          command: >-
+            deploy --config wrangler.web-push.toml --tag ${{ env.SHA }}
+            --message "github-actions ${{ github.run_id }}" --var GIT_SHA:${{ env.SHA }}
+
       - name: Verify production serves this commit
         env:
           VERSION_ID: ${{ steps.version.outputs.id }}
