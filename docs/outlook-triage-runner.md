@@ -95,3 +95,12 @@ and `capability_not_verified` until the executor contract is satisfied.
 
 The employer-permitted server-rule maintenance interface remains an unresolved
 external fact. Graph remains prohibited. No filing completion is claimed here.
+
+The machine-readable admission declaration is
+`proofs/requirements/wr634-triage-runner.json`. It declares Studio observation
+with the existing pinned `studio-run-receipt.v1` reader. This reader requires a
+successful receipt with counts. The current triage receipt is skipped and has
+no structured planning counts, so the reader must report BLOCKED. Admission
+acceptance does not verify the natural-run hold above. Preserve that remaining
+proof dependency alongside the missing producer and mover; never replace the
+skipped state with success to satisfy the reader.

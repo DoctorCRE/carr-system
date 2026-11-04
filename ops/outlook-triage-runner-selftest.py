@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import shutil
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -167,12 +168,26 @@ class RunnerTest(unittest.TestCase):
         with patch.object(triage, 'load_settings', return_value=self.settings), \
                 patch.object(triage.Path, 'home', return_value=self.home), \
                 patch.object(triage, '__file__', str(self.repo / 'lib/outlook_triage.py')), \
+                patch('lib.outlook_runtime.stamp', return_value={'runtime_sha': 'a' * 40}), \
                 patch.object(triage, 'datetime', wraps=datetime) as clock, redirect_stdout(capture):
             clock.now.return_value = moment
             self.assertEqual(triage.main(), 78)
         output = capture.getvalue()
         self.assertIn('planned=1 held=1 moved=0', output)
         self.assertNotIn('client-001', output)
+        receipt = self.path.parent / 'receipt.txt'
+        receipt.write_text(next(line for line in output.splitlines()
+                                if line.startswith('outlook-triage-receipt ')))
+        payload = json.loads(receipt.read_text().split(' ', 1)[1])
+        self.assertEqual(payload['state'], 'skipped')
+        self.assertEqual(payload['runtime_sha'], 'a' * 40)
+        self.assertEqual(payload['counts'], {})
+        observer = subprocess.run([sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
+                                   '--receipt-file', str(receipt), '--service', 'outlook-triage',
+                                   '--runtime-sha', 'a' * 40, '--count', 'run.planned', '--minimum', '1'],
+                                  capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(observer.returncode, 0, observer.stdout + observer.stderr)
+        self.assertIn('successful receipt for expected full runtime SHA required', observer.stdout)
         reports = list(self.path.parent.glob('*.report.md'))
         self.assertEqual(len(reports), 1)
         self.assertIn('capability_not_verified', reports[0].read_text())
@@ -189,6 +204,21 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(outcome.reason, 'snapshot_unavailable')
             self.assertEqual(report.planning['planned'], 0)
             self.assertEqual(report.planning['capability'], 'capability_not_verified')
+
+
+class ProofDeclarationTest(unittest.TestCase):
+    def test_checked_in_studio_requirement_passes_real_admission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            body = Path(tmp) / 'body.md'
+            files = Path(tmp) / 'files.json'
+            body.write_text('## Production proof\nproofs/requirements/wr634-triage-runner.json\n')
+            files.write_text(json.dumps(['lib/outlook_triage.py', 'lib/outlook_triage_snapshot.py',
+                                         'lib/outlook_triage_capability.py']))
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/production-proof-plan.py'),
+                                     '--body-file', str(body), '--files-file', str(files)],
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('execution unproven', result.stdout)
 
 
 if __name__ == '__main__':
