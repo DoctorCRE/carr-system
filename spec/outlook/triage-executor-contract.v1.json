@@ -1,0 +1,234 @@
+{
+  "schema": "outlook-triage-executor-contract/v1",
+  "version": 1,
+  "scope": "Contract and synthetic selector only. No runtime executor, rule compiler, authentication or mailbox mutations.",
+  "server": {
+    "product": "Microsoft 365",
+    "type": "Exchange Online",
+    "source_decision": "fba2c07d",
+    "source_words": "Yes and it is 365",
+    "evidence_kind": "partner ruling supplied by builder brief"
+  },
+  "read_state_policy": {
+    "source_decision": "fba2c07d",
+    "unread_may_move": true,
+    "preserve_read_state": true,
+    "read_condition": "not_required",
+    "require_read_before_move": false
+  },
+  "open_fact": {
+    "id": "employer_permitted_interface",
+    "question": "Does your employer permit Outlook server-side inbox rules maintained from CARR routing, or which other filing interface does it permit?"
+  },
+  "selection": {
+    "default": "refuse",
+    "required_evidence": [
+      "employer_permission",
+      "mailbox_binding",
+      "stable_identity",
+      "same_mailbox_destination",
+      "preserve_read_state",
+      "routing_equivalence",
+      "idempotency_reconciliation",
+      "operating_policy"
+    ],
+    "evidence_format": "Nonempty receipt reference for each guarantee, bound to the current policy and mailbox. Public docs alone cannot verify a tenant capability.",
+    "atomic_read_evidence": "atomic_read_condition",
+    "active_status": "sanctioned",
+    "active_lifecycle": "verified",
+    "policy_change": "Invalidate verification and reverify before selecting; no automatic revival of disabled or refused candidates."
+  },
+  "identity": {
+    "message": "Mailbox-scoped identity stable across same-mailbox moves and restarts, independently bound to intake observation. Content, subject, Message-ID header alone and AX row labels are not identity.",
+    "folder": "Exact mailbox plus full folder path resolved to provider folder identity. Duplicate leaves, missing or cross-mailbox targets refuse; no folder creation.",
+    "rules": "Owned rule ID and manifest revision; preserve unrelated employer and user rules."
+  },
+  "guarantees": {
+    "actions": [
+      "same_mailbox_move_only"
+    ],
+    "forbidden_actions": [
+      "send",
+      "delete",
+      "expunge",
+      "copy_then_delete",
+      "mark_read",
+      "mark_unread",
+      "raw_hxstore_write",
+      "ui_message_move_fallback"
+    ],
+    "idempotency_key": [
+      "mailbox_identity",
+      "routing_manifest_hash",
+      "owned_rule_id",
+      "owned_rule_version"
+    ],
+    "reconciliation": "Persist intended rule publication before effect. After uncertain publication read back owned rules before any repeat. For each claimed move independently observe stable message identity at exact destination in intake. Delayed sync stays pending, never success. Human relocation holds instead of overriding.",
+    "consistency": "Canonical routing revision must equal verified published manifest. Missing proof or stale policy refuses maintenance. Server rules can continue on stale state during CARR downtime; immediate withdrawal cannot be guaranteed without an authorized disable path.",
+    "circuit_breaker": {
+      "consecutive_maintenance_failures": 2,
+      "uncertain_effect": "hold_and_reconcile_before_retry",
+      "unsafe_rule": "disable_owned_rules_through_permitted_interface",
+      "fallback": "none",
+      "alert": "counts_and_fixed_codes_only"
+    },
+    "limits": {
+      "max_manifest_publications_per_evening": 1,
+      "maintenance_concurrency": 1,
+      "max_maintenance_attempts": 2
+    }
+  },
+  "recommendation": {
+    "candidate": "exchange_inbox_rules",
+    "status": "conditional_unverified",
+    "reason": "Server execution removes desktop and per-message CARR API dependence. Unread permission removes the former read-at-move disqualifier, but not routing, identity or operating-policy requirements.",
+    "proof_boundary": "Employer permission is the single external fact. Routing equivalence, identity binding, read-state preservation and publication readback remain engineering verification obligations. No candidate is sanctioned in this contract."
+  },
+  "candidates": [
+    {
+      "id": "exchange_inbox_rules",
+      "architecture": "B",
+      "status": "unverified",
+      "lifecycle": "unverified",
+      "reason": "Lead candidate, subject to employer permission and semantic qualification.",
+      "evidence": {},
+      "needs_evidence": [
+        "employer-permitted rule maintenance interface",
+        "fixture proof of exact sender/domain/subject matching and full-path binding",
+        "routing equivalence including precedence, ambiguous relationships and complete-content holds",
+        "stable message identity binding across rule moves in intake",
+        "read-state preservation, publication/readback and uncertain-outcome reconciliation",
+        "operating-policy ruling for arrival timing versus evening window and 150-per-run cap"
+      ],
+      "sources": [
+        "mac_rules",
+        "rule_conditions",
+        "quota",
+        "import_export"
+      ]
+    },
+    {
+      "id": "graph_api",
+      "architecture": "A",
+      "status": "refused",
+      "lifecycle": "refused",
+      "reason": "Recorded lane prohibition, not an observed tenant denial. No registration, sign-in or API call authorized.",
+      "evidence": {},
+      "needs_evidence": [
+        "explicit superseding policy and employer-permitted interface",
+        "approved authentication and stable immutable-ID fixture tests",
+        "move reconciliation and routing verification"
+      ],
+      "sources": [
+        "graph_move",
+        "immutable_ids"
+      ]
+    },
+    {
+      "id": "power_automate",
+      "architecture": "F",
+      "status": "unverified",
+      "lifecycle": "unverified",
+      "reason": "No tenant permission, connection or licensing evidence. Connector docs identify Graph use for some operations; cannot bypass recorded prohibition.",
+      "evidence": {},
+      "needs_evidence": [
+        "explicit employer and lane permission for underlying connector APIs",
+        "license and DLP policy",
+        "stable identity and durable intent/result reconciliation"
+      ],
+      "sources": [
+        "connector"
+      ]
+    },
+    {
+      "id": "local_reader_supported_mover",
+      "architecture": "D",
+      "status": "unverified",
+      "lifecycle": "unverified",
+      "reason": "HxStore intake is an observation source, not a supported writer. AppleScript send evidence does not prove moves of existing mail.",
+      "evidence": {},
+      "needs_evidence": [
+        "employer-permitted documented local mutation interface",
+        "stable local-to-provider identity binding",
+        "supported move semantics and reconciliation"
+      ],
+      "sources": []
+    },
+    {
+      "id": "ui_or_hxstore_writer",
+      "architecture": "E",
+      "status": "refused",
+      "lifecycle": "refused",
+      "reason": "AX labels do not provide stable message transaction identity; direct HxStore edits are unsupported. Neither is a fallback.",
+      "evidence": {},
+      "needs_evidence": [
+        "a replacement documented sanctioned mover, not another AX parser patch"
+      ],
+      "sources": []
+    }
+  ],
+  "arrival_rules": {
+    "matches": "Exchange documents From, FromAddressContainsWords and SubjectContainsWords. Address substring matching is not exact domain equality. Compiler must prove equivalence with CARR routing or hold that route.",
+    "destination": "Exchange documents mailbox-qualified parent/subfolder destinations. UI selection must be verified against the full path and same mailbox, not a unique-looking leaf.",
+    "quota": {
+      "max_enabled_rule_bytes": 262144,
+      "configurable_min_bytes": 32768,
+      "max_rule_count": null,
+      "note": "No fixed count ceiling. Enabled-rule byte usage controls capacity; migrated mailboxes may have a lower quota. Manifest JSON byte size is not server rule storage usage."
+    },
+    "maintenance": "Proposed CARR-generated reviewable manifest and diff, applied through Outlook Settings > Rules at low frequency by Joe or a separately authorized UI workflow. Compare ordered conditions, exceptions, stop-processing and exact destinations on readback. No Graph, EWS, PowerShell or connector calls from CARR. This slice generates no importable rules file.",
+    "import_export": "Microsoft documents .rwz import/export only for classic Outlook. Do not promise new Outlook for Mac can import a generated file.",
+    "existing_inbox": "Current Mac support documents rule-menu Run rule now. Arrival alone does not process existing Inbox mail. Availability and exact scope in installed client remain unverified; any backlog run needs separate bounds and reconciliation.",
+    "proof": "Intake must observe each stable message identity at intended destination, with unchanged read flag attributable to the system. Source disappearance, rule creation and proposal filing do not prove mailbox filing.",
+    "timing": "Arrival rules run at delivery. They do not preserve the evening schedule, global 150-move run cap, fresh relationship lookups or automatic stale-rule shutdown. These are unresolved design differences, not waived by unread permission."
+  },
+  "lifecycle": {
+    "states": [
+      "unverified",
+      "verified",
+      "disabled",
+      "refused"
+    ],
+    "transitions": [
+      [
+        "unverified",
+        "verified",
+        "all_required_evidence"
+      ],
+      [
+        "unverified",
+        "refused",
+        "prohibited"
+      ],
+      [
+        "verified",
+        "disabled",
+        "disable_or_policy_change"
+      ],
+      [
+        "verified",
+        "unverified",
+        "evidence_invalidated"
+      ],
+      [
+        "disabled",
+        "unverified",
+        "reverify_requested"
+      ],
+      [
+        "refused",
+        "refused",
+        "selection_attempt"
+      ]
+    ]
+  },
+  "sources": {
+    "mac_rules": "https://support.microsoft.com/en-us/outlook/create-a-rule-in-outlook-for-mac",
+    "rule_conditions": "https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/new-inboxrule?view=exchange-ps",
+    "quota": "https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/outlook-on-the-web/increase-the-space-used-by-inbox-rules",
+    "import_export": "https://support.microsoft.com/en-us/outlook/mail/import-or-export-a-set-of-rules-in-classic-outlook",
+    "graph_move": "https://learn.microsoft.com/en-us/graph/api/message-move?view=graph-rest-1.0",
+    "immutable_ids": "https://learn.microsoft.com/en-us/graph/outlook-immutable-id",
+    "connector": "https://learn.microsoft.com/en-us/connectors/office365/"
+  }
+}
