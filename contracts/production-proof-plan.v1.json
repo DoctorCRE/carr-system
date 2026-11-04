@@ -41,6 +41,11 @@
     }
   },
   "x-runners": {
+    "app-release-live-walk.v1": {
+      "path": "ops/app-proof-observe.py",
+      "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
+      "targets": ["app"]
+    },
     "worker-release-smoke.v1": {
       "path": "ops/release-smoke.py",
       "revision": "8bdabfe3275668cd10401a8e58244b953d3d2428",

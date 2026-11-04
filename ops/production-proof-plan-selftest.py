@@ -170,6 +170,68 @@ class AdmissionTest(unittest.TestCase):
         self.manifest.write_text(json.dumps(self.requirement))
         self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
 
+    def app_policy(self):
+        plan = module()
+        contract = json.loads((ROOT / plan.CONTRACT_PATH).read_text())
+        contract['x-required-targets'] = dict(contract['x-required-targets'], app=['*'])
+        self.requirement['targets'] = ['app']
+        self.requirement['assertions'][0].update(
+            runner='app-release-live-walk.v1',
+            predicate='Read deployed app release identity; Joe performs the signed-in Home walk',
+            expected_result='Release ancestry passes; signed-in Home walk remains human pending',
+            input_class='read-only release identity and named human signed-in walk evidence')
+        self.manifest.write_text(json.dumps(self.requirement))
+        return plan, contract
+
+    def test_app_product_admission_and_borrowed_target_refusals(self):
+        plan, contract = self.app_policy()
+        body = '## Production proof\nproofs/requirements/synthetic.json'
+        paths = ['src/ui/home/bulk-controls.tsx']
+        result = plan.admission(body, paths, self.root, contract)
+        self.assertIn('admission only; execution unproven', result)
+        for target, runner in [('worker', 'worker-release-smoke.v1'),
+                               ('studio', 'studio-run-receipt.v1')]:
+            with self.subTest(target=target):
+                self.requirement['targets'] = [target]
+                self.requirement['assertions'][0]['runner'] = runner
+                self.manifest.write_text(json.dumps(self.requirement))
+                with self.assertRaisesRegex(ValueError, 'changed runtime target missing'):
+                    plan.admission(body, paths, self.root, contract)
+                self.requirement['targets'] = ['app']
+                self.manifest.write_text(json.dumps(self.requirement))
+                with self.assertRaisesRegex(ValueError, 'target has no registered runner'):
+                    plan.admission(body, paths, self.root, contract)
+
+    def test_app_missing_invalid_and_unsafe_declarations_refused(self):
+        plan, contract = self.app_policy()
+        paths = ['src/ui/home/bulk-controls.tsx']
+        for body in ['', '## Production proof\n', '## Production proof\nn/a: app change']:
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                plan.admission(body, paths, self.root, contract)
+        body = '## Production proof\nproofs/requirements/synthetic.json'
+        self.manifest.unlink()
+        with self.assertRaises(FileNotFoundError):
+            plan.admission(body, paths, self.root, contract)
+        self.manifest.write_text('{')
+        with self.assertRaises(ValueError):
+            plan.admission(body, paths, self.root, contract)
+        for field, value in [('read_only', False), ('no_sends', False), ('max_requests', 101)]:
+            with self.subTest(field=field):
+                invalid = {**self.requirement, 'safety': {**self.requirement['safety'], field: value}}
+                self.manifest.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError):
+                    plan.admission(body, paths, self.root, contract)
+
+    def test_app_runner_pin_and_drift_refusals(self):
+        _, contract = self.app_policy()
+        runner = contract['x-runners']['app-release-live-walk.v1']
+        self.assertEqual(runner['targets'], ['app'])
+        self.assertEqual(runner['path'], 'ops/app-proof-observe.py')
+        self.assertEqual(runner_source(runner), (ROOT / runner['path']).read_bytes())
+        for drift in [{'revision': '0' * 40}, {'path': 'ops/missing-app-observer.py'}]:
+            with self.subTest(drift=drift), self.assertRaisesRegex(ValueError, 'runner pin'):
+                runner_source({**runner, **drift})
+
     def test_runner_revision_ancestry(self):
         path = 'ops/studio-proof-observe.py'
         with self.assertRaisesRegex(ValueError, 'e105804540f17afba50dd45f78b84b50698a3ffc.*(not an ancestor|unresolvable revision)'):
@@ -356,6 +418,21 @@ class AppObserverTest(unittest.TestCase):
         self.assertEqual(receipt['human_steps'], ['Open the signed-in Documents tab'])
         self.assertEqual(receipt['assertions'][0]['path'], '/js/documents.js')
         self.assertEqual(self.observe()['status'], 'passed')
+
+    def test_registered_app_runner_preserves_human_pending(self):
+        contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
+        source = runner_source(contract['x-runners']['app-release-live-walk.v1'])
+        path = self.repo / 'pinned-observer.py'
+        path.write_bytes(source)
+        spec = importlib.util.spec_from_file_location('pinned_app_observer', path)
+        observer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(observer)
+        receipt = observer.observe(self.repo, self.merge,
+            human_steps=['Joe performs the signed-in Home bulk-settle and undo walk'],
+            fetch=lambda path, timeout, limit: self.identity)
+        self.assertEqual(receipt['status'], 'human_pending')
+        self.assertEqual(receipt['assertions'], [])
+        self.assertEqual(receipt['human_steps'], ['Joe performs the signed-in Home bulk-settle and undo walk'])
 
     def test_unknown_or_unreleased_commit_refuses(self):
         with self.assertRaisesRegex(ValueError, 'unknown|unavailable'):
