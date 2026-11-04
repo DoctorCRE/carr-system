@@ -147,7 +147,8 @@ class CardTests(unittest.TestCase):
                     sync, 'CARDS', cards), mock.patch.object(
                     sync, 'load_cards', side_effect=lambda: load_cards(cards)), mock.patch.object(
                     sync, 'missing_paths', return_value=[]), mock.patch.object(
-                    sync, 'store_cards', return_value=adopted), mock.patch(
+                    sync, 'store_cards', return_value=adopted), mock.patch.object(
+                    sync, 'read_retirements', return_value=[]), mock.patch(
                     'sys.argv', ['sync', '--from-store']), mock.patch(
                     'sys.stderr', new_callable=io.StringIO) as output:
                 self.assertNotEqual(sync.main(), 0)
@@ -166,20 +167,35 @@ class CardTests(unittest.TestCase):
         self.assertEqual(json.dumps(rendered, indent=2, ensure_ascii=False) + '\n', text,
                          'the store form of every card round-trips to the committed cards file')
         active = [card for card in adopted if card['id'] != 'K01']
-        self.assertNotIn('K01', [card['id'] for card in sync.cards_from_store(document, active)['cards']],
-                         'a retired card omitted by rule-cards is removed from the generated source')
+        with self.assertRaisesRegex(ValueError, 'K01: omitted without retirement receipts'):
+            sync.cards_from_store(document, active)
+        with self.assertRaisesRegex(ValueError, 'omitted without retirement receipts'):
+            sync.cards_from_store(document, [])
+        source_ids = document['cards'][0]['source_rule_ids']
+        records = [{'id': rid + '-0000-0000-0000-000000000000', 'status': 'retired',
+                    'retirement': {'receipt_id': 'synthetic-retirement-receipt'}} for rid in source_ids]
+        rendered = sync.cards_from_store(document, active, lambda card: records)
+        self.assertNotIn('K01', [card['id'] for card in rendered['cards']])
+        for bad in (records[:-1], [{**row, 'status': 'active'} for row in records],
+                    [{**row, 'retirement': {}} for row in records]):
+            with self.assertRaisesRegex(ValueError, 'K01: omitted without retirement receipts'):
+                sync.cards_from_store(document, active, lambda card: bad)
 
-    def test_authoritative_empty_store_removes_all_cards(self):
+    def test_from_store_refuses_missing_hook_fields(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
         sync = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sync)
         document = json.loads((REPO / 'ops/config/rule-cards.v1.json').read_text())
-        emptied = sync.cards_from_store(document, [])
-        self.assertEqual(emptied['cards'], [])
-        with mock.patch.object(sync, 'load_cards', return_value=emptied['cards']):
-            rendered = sync.render((REPO / 'AGENTS.md').read_text())
-            self.assertNotRegex(rendered, r'(?m)^\[K\d+\]')
-            self.assertEqual(sync.render(rendered), rendered)
+        card = next(card for card in document['cards'] if card['placement'] != 'CORE')
+        for field in ('source_rule_ids', 'acknowledgement', 'scope', 'delivery_priority', 'triggers'):
+            for value in (None, '', [], {}):
+                with self.subTest(field=field, value=value):
+                    adopted = [{**row, field: value} if row['id'] == card['id'] else row
+                               for row in document['cards']]
+                    with self.assertRaisesRegex(ValueError, field):
+                        sync.cards_from_store(document, adopted)
+        with self.assertRaisesRegex(ValueError, 'duplicate card id'):
+            sync.cards_from_store(document, [*document['cards'], document['cards'][0]])
 
     def test_retiring_last_core_card_preserves_other_sections_and_renders_twice(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
