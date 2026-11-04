@@ -773,9 +773,10 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], a
         db = work / 'store.db'
         decode(copy, files, db)
         loaded = _load(db, account_id=account_id, account_address=account_address)
-        from lib.email_local_search import build_index
-        index = out.resolve() / f'email-search-{account_id}.db'
+        from lib.email_local_search import build_index, published_index_path
         try:
+            index = published_index_path(account_id, home=home)
+            index.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(db, 0o600)
             with db.open('rb') as reader:
                 revision = hashlib.file_digest(reader, 'sha256').hexdigest()

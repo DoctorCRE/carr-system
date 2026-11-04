@@ -40,8 +40,8 @@ mailbox completeness, real mail capture, or adversarial modification of FTS data
 
 ## Retained intake snapshot lookup
 
-Intake publishes `out/outlook-intake/email-search-<account-id>.db` before removing
-its decoded working copy. Query with `--published-snapshot --index <absolute-index>
+Intake publishes `~/.local/share/carr/email-search/email-search-<account-id>.db` before removing
+its decoded working copy. Query with `--published-snapshot
 --account-id <configured-account-id> --query <literal-phrase>` without a source.
 This explicit mode reports `published_snapshot_capture_recency_unverified`,
 publication time and unknown completeness. It can serve the previous generation
@@ -51,3 +51,5 @@ The default source-bound mode and its exact-source refusal contract remain intac
 The intake transitions and capacity contract are in
 [email-index-intake-design.md](email-index-intake-design.md). The snapshot CLI
 cleanup/lookup test and selected-account tests exercise the retained artifact.
+The default CLI and library lookup share the intake path resolver. Explicit
+research indexes still accept an absolute `--index` path.

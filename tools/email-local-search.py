@@ -25,7 +25,7 @@ def main():
     query.add_argument('--source-revision', help='Current capture or decoder revision; must match the index')
     query.add_argument('--published-snapshot', action='store_true',
                        help='Search retained publication; capture recency remains unverified')
-    query.add_argument('--index', type=Path, required=True)
+    query.add_argument('--index', type=Path, help='Defaults to the per-user intake publication')
     query.add_argument('--account-id', type=int, required=True)
     query.add_argument('--query', required=True, help='Literal person, email address or property phrase; no FTS operators')
     query.add_argument('--limit', type=int, default=20, help='Page size, 1 to 100')

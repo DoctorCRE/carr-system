@@ -9,6 +9,12 @@ module owns account selection, validation, FTS storage, private publication and
 lookup. Usage: `build_index(db, index, mailbox=account, account_id=id,
 source_revision=digest, select_account=True)` followed by
 `query_index(index, account_id=id, query=phrase, published_snapshot=True)`.
+The shared `published_index_path(account_id, home=...)` resolves
+`~/.local/share/carr/email-search/email-search-<account-id>.db`, following the
+Studio per-user data root recorded by `ops/studio-inventory.py`. Intake, library
+lookup and CLI defaults use this resolver. Explicit research index paths remain
+caller-selected. The resolver refuses a Git checkout ancestor, and publication
+validates symlink-free parents, a 0700 immediate directory and 0600 files.
 The index retains sender, recipients, subject, decoded body, dates and source
 references. These are authorized local history for Joe and Dell, not an invented
 knowledge fence. Nothing in publication or lookup leaves the Studio.
@@ -34,6 +40,16 @@ publisher supports complete replacement, not incremental mutation. Identical
 source/revision/account skips replacement. Streaming rows avoids Python mailbox
 materialization. Temporary generation also contains one decoded snapshot; peak
 storage is source size plus old and new index (at most 1 GiB of indexes).
+A directory-wide nonblocking writer lock serializes recovery and builds across
+accounts. While holding it and the existing index lock, the publisher removes
+its abandoned private `.email-search-<8-character-token>` directories before
+creating a new generation, including before an identical-source reuse. An
+interruption retains at most one generation in that parent. The next writer
+removes it first. Recovery refuses symlinks or non-private directories and fails
+the publication without replacing the prior index. There is no retained generation
+history after a successful run. The hard generation-count cap is one, not a cap
+on decoded-source bytes. Recovery only needs directory enumeration and deletion;
+there is no queue, scan of mailbox rows or remote N+1.
 Today's production mailbox size/count is unavailable under this synthetic-only
 job; no production size is fabricated. The receipt exposes actual index bytes
 and rows. Synthetic measurement with ~2 KiB repeated body text: 10,000 rows use
@@ -66,7 +82,11 @@ its visible failure receipt remains the evidence until then. No tight retry loop
 stateDiagram-v2
     [*] --> Decode
     Decode --> Cleanup: Decode or load fails
-    Decode --> Publish: Decoded source validated
+    Decode --> Recover: Decoded source validated
+    Recover --> Publish: Writer locks held, abandoned generation removed
+    Recover --> FailureReceipt: Busy writer or recovery failure
+    Publish --> Interrupted: Process stops before atomic replacement
+    Interrupted --> Recover: Next natural build
     Publish --> Receipt: Publish or reuse succeeds
     Publish --> FailureReceipt: Publish fails, preserve intake behavior
     Receipt --> Intake
@@ -78,7 +98,18 @@ stateDiagram-v2
 ```
 
 Synthetic entry-point tests cover publish/lookup, decode refusal, publish failure,
-replay and cleanup. Existing publisher tests cover atomicity and privacy. This is
+replay and cleanup. Existing publisher tests cover atomicity and privacy.
+`test_intake_run_publishes_index_then_lookup_finds_fixture_message` proves the
+publication leaves a synthetic checkout and retains private modes.
+`test_default_consumers_use_per_user_publication` exercises both default lookup
+consumers and checkout refusal. `test_cli_excludes_concurrent_writer_and_recovers_after_crash`
+executes three interrupted children and a successful restart, checks at most one
+residual generation, zero after restart and usable prior results.
+`test_crash_before_population_recovers_before_identical_replay` covers interrupted
+source retention and recovery before reuse without changing bytes or mtime.
+`test_recovery_lock_excludes_other_index_writer` covers cross-index exclusion.
+`test_recovery_refuses_symlink_generation_and_preserves_index` covers recovery
+refusal. Intake's existing publication-failure test covers the nonfatal receipt. This is
 an executable-test-backed behavior chart, not a formal model-checking claim.
 
 Production proof (coordinator, after runtime refresh): after the next natural

@@ -334,6 +334,7 @@ class IntakeTest(unittest.TestCase):
 
     def test_intake_run_publishes_index_then_lookup_finds_fixture_message(self):
         from lib.email_local_search import query_index
+        (self.repo / '.git').mkdir(parents=True)
         outcome = self.search_run()
         self.assertEqual(outcome.state, 'succeeded', outcome)
         target = (self.home / '.local/share/carr/email-search/email-search-7.db').resolve()

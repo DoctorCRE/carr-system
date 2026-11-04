@@ -36,6 +36,49 @@ class PublicationTests(unittest.TestCase):
     def digest(self):
         return hashlib.sha256(self.target.read_bytes()).hexdigest()
 
+    def test_default_consumers_use_per_user_publication(self):
+        from lib.email_local_search import published_index_path, query_index
+        target = published_index_path(42, home=self.home)
+        self.assertEqual(target, self.home / '.local/share/carr/email-search/email-search-42.db')
+        target.parent.mkdir(parents=True, mode=0o700)
+        build_index(self.source, target, mailbox='synthetic', account_id=42, source_revision='r')
+        with patch('pathlib.Path.home', return_value=self.home):
+            self.assertEqual(query_index(account_id=42, query='orchard', published_snapshot=True)['match_count'], 2)
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/email-local-search.py'),
+            'query', '--published-snapshot', '--account-id', '42', '--query', 'orchard'],
+            capture_output=True, text=True, env={**os.environ, 'HOME': str(self.home)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['match_count'], 2)
+        (self.home / '.git').mkdir()
+        with self.assertRaisesRegex(PublicationError, 'publication_inside_checkout'):
+            published_index_path(42, home=self.home)
+
+    def test_recovery_lock_cannot_be_used_as_index(self):
+        with self.assertRaisesRegex(PublicationError, 'destination_is_recovery_lock'):
+            build_index(self.source, self.home / '.email-search.lock', mailbox='synthetic',
+                        account_id=42, source_revision='r')
+        self.assertFalse((self.home / '.email-search.lock').exists())
+
+    def test_recovery_lock_excludes_other_index_writer(self):
+        self.build()
+        before = self.target.read_bytes()
+        with (self.home / '.email-search.lock').open('r+b') as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.cli(self.home / 'other.db')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(before, self.target.read_bytes())
+        self.assertFalse((self.home / 'other.db').exists())
+
+    def test_recovery_refuses_symlink_generation_and_preserves_index(self):
+        self.build()
+        before = self.target.read_bytes()
+        abandoned = self.home / '.email-search-abcdefgh'
+        abandoned.symlink_to(self.home, target_is_directory=True)
+        with self.assertRaisesRegex(PublicationError, 'unsafe_abandoned_generation'):
+            self.build()
+        self.assertEqual(before, self.target.read_bytes())
+        self.assertTrue(self.source.exists())
+
     def test_selected_account_publication_excludes_other_unknown_and_conflicting_rows(self):
         from lib.email_local_search import query_index
         with closing(sqlite3.connect(self.source)) as db, db:
@@ -503,12 +546,22 @@ class PublicationTests(unittest.TestCase):
         self.assertFalse(list(self.home.glob('.email-search-*')))
         self.assertEqual(self.query()['match_count'], 2)
 
-    def crash_build(self):
+    def test_crash_before_population_recovers_before_identical_replay(self):
+        self.build(select_account=True)
+        before = (self.target.read_bytes(), self.target.stat().st_mtime_ns)
+        self.crash_build(boundary='_populate')
+        self.assertEqual(len(list(self.home.glob('.email-search-*'))), 1)
+        self.build(select_account=True)
+        self.assertFalse(list(self.home.glob('.email-search-*')))
+        self.assertEqual(before, (self.target.read_bytes(), self.target.stat().st_mtime_ns))
+        self.assertEqual(self.query()['match_count'], 2)
+
+    def crash_build(self, boundary='os.replace'):
         child = subprocess.run([sys.executable, '-c',
             'import os,sys; from pathlib import Path; sys.path.insert(0,sys.argv[1]); '
-            'import lib.email_local_search as m; m.os.replace=lambda *a,**k: os._exit(77); '
+            'import lib.email_local_search as m; exec(sys.argv[4]+"=lambda *a,**k: os._exit(77)"); '
             'm.build_index(Path(sys.argv[2]),Path(sys.argv[3]),mailbox="m",account_id=42,source_revision="r")',
-            str(ROOT), str(self.source), str(self.target)], capture_output=True)
+            str(ROOT), str(self.source), str(self.target), 'm.' + boundary], capture_output=True)
         self.assertEqual(child.returncode, 77)
 
     def cli(self, destination=None, *options):

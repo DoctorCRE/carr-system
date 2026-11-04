@@ -38,6 +38,18 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 """
 
 
+def published_index_path(account_id, *, home=None):
+    """Resolve the per-user retained index, outside any Git checkout."""
+    if type(account_id) is not int or not 0 <= account_id <= 2**63 - 1:
+        raise IndexError('invalid_binding')
+    root = (Path(home) if home is not None else Path.home()).resolve()
+    path = root / '.local/share/carr/email-search' / f'email-search-{account_id}.db'
+    for parent in path.parents:
+        if (parent / '.git').exists():
+            raise IndexError('publication_inside_checkout')
+    return path
+
+
 def _private_file(info):
     if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
             or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
@@ -164,7 +176,8 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
     ancestors are allowed, but both immediate parents must be owned 0700 directories.
     The caller supplies the mailbox label; every message must independently bind to
     account_id in the decoder tables. This does not attest source completeness.
-    A killed build may leave an owner-only generation for manual removal.
+    A killed build leaves at most one generation, removed under the writer lock
+    before the next build. All indexes in one parent share the recovery lock.
     Replacing an existing index with zero messages requires allow_empty=True.
     select_account projects positively bound, non-conflicting rows from a multi-account
     decode. Such intake builds reuse an identical source/revision generation.
@@ -179,22 +192,39 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
         raise IndexError('invalid_binding')
     source, index = Path(source), Path(index)
     lock = index.with_name('.' + index.name + '.lock')
+    recovery_lock = index.parent / '.email-search.lock'
+    if index == recovery_lock:
+        raise IndexError('destination_is_recovery_lock')
     _reject_source_alias(source, index)
     _reject_source_alias(source, lock)
+    _reject_source_alias(source, recovery_lock)
     _parent(source)
     _parent(index)
     _check_file(source)
     _check_file(index, optional=True)
     built_at = clock() if clock else datetime.now(timezone.utc).isoformat()
     lock_fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    recovery_fd = None
     try:
+        recovery_fd = os.open(recovery_lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        _private_file(os.fstat(recovery_fd))
         _private_file(os.fstat(lock_fd))
         try:
+            fcntl.flock(recovery_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise IndexError('writer_busy') from error
         _check_file(index, optional=True)
         _reject_source_alias(source, index)
+        for abandoned in index.parent.glob('.email-search-*'):
+            if not re.fullmatch(r'\.email-search-[a-z0-9_]{8}', abandoned.name):
+                continue
+            info = abandoned.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o700
+                    or abandoned in source.parents):
+                raise IndexError('unsafe_abandoned_generation')
+            shutil.rmtree(abandoned)
         with tempfile.TemporaryDirectory(prefix='.email-search-', dir=index.parent) as generation:
             snapshot = Path(generation) / 'source.db'
             target = Path(generation) / 'index.db'
@@ -244,6 +274,8 @@ def build_index(source, index, *, mailbox, account_id, source_revision, clock=No
                 os.close(directory_fd)
             return result
     finally:
+        if recovery_fd is not None:
+            os.close(recovery_fd)
         os.close(lock_fd)
 
 
@@ -303,7 +335,7 @@ def _index_metadata(db, account_id, source_revision, source_digest):
                            else 'published_snapshot_capture_recency_unverified'))
 
 
-def query_index(index, *, source=None, source_revision=None, account_id, query, limit=20, cursor=None, excerpts=False, published_snapshot=False):
+def query_index(index=None, *, source=None, source_revision=None, account_id, query, limit=20, cursor=None, excerpts=False, published_snapshot=False):
     """Read one completed private index using a literal FTS phrase.
 
     All words form one phrase, including quoted names and email addresses. FTS
@@ -343,7 +375,7 @@ def query_index(index, *, source=None, source_revision=None, account_id, query, 
                     (after_source.st_size, after_source.st_mtime_ns, after_source.st_ctime_ns)
                     or not os.path.samestat(after_source, source.stat())):
                 raise IndexError('stale_index')
-        path = Path(index)
+        path = Path(index) if index is not None else published_index_path(account_id)
         _parent(path)
         _check_file(path)
         with path.open('rb') as reader:
