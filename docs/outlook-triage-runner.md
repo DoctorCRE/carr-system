@@ -20,11 +20,13 @@ selector owns qualification. Qualification alone cannot install an executor.
 Even sanctioned metadata returns `executor_unavailable` until a concrete,
 verified executor exists. Unverified metadata returns `capability_not_verified`.
 
-No production snapshot producer is supplied or claimed. The current decoder's
-read flag and local-to-mover identity binding must be proved before publication.
-Until then the scheduled runner reports `snapshot_unavailable`, calls the
-planner with no observations and reports zero planned and moved messages.
-The adapter validates supplied data; it does not independently attest its truth.
+The bounded research-copy producer is documented in
+`docs/outlook-triage-producer.md`. It publishes local observations with explicit
+unavailable mover semantics. It is not installed or invoked by this runner.
+Without supplied input the runner reports `snapshot_unavailable`. With the
+producer subset it reports per-item holds and zero moves. Decoder read state,
+message revision and local-to-mover binding remain unverified. The adapter
+validates shape; it does not attest external truth.
 
 The local file limit is 8 MiB with at most 10,000 observations and folders.
 The planner considers at most 1,000 observations and produces at most 150
