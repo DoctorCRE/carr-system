@@ -187,6 +187,9 @@ class Fake:
         if verb == 'record-finding':
             if args['idempotency_key'] in self.findings:
                 return {'ok': True}
+            if args.get('kind') == 'email_signature_observation':
+                self.findings[args['idempotency_key']] = args
+                return {'ok': True}
             ids = args['value']['source_activity_ids']
             versions = args['value'].get('source_activity_versions', {})
             rows = {m['activity_id']: m for m in self.email_queue}
@@ -309,6 +312,80 @@ class IntakeTest(unittest.TestCase):
         copier = patch('subprocess.run', side_effect=self.copy_snapshot)
         copier.start()
         self.addCleanup(copier.stop)
+
+    def search_decode(self, source, files, target):
+        self.fake.decode(source, files, target)
+        with closing(sqlite3.connect(target)) as db, db:
+            db.executescript("""
+                CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER PRIMARY KEY);
+                CREATE TABLE message_objects(local_key INTEGER PRIMARY KEY, account_id INTEGER,
+                    subject TEXT, conversation_id TEXT, recipients_status TEXT);
+                CREATE INDEX keys_message ON message_keys(message_id);
+                INSERT INTO message_keys SELECT id,id FROM messages WHERE id>0;
+                INSERT INTO message_objects(local_key,account_id) SELECT id,7 FROM messages WHERE id>0;
+            """)
+
+    def search_run(self):
+        self.fake.fixture.unlink(missing_ok=True)
+        write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), body='orchard fixture')])
+        ports = self.fake.ports()
+        ports.decode = self.search_decode
+        return intake.run(self.repo, self.home, ports)
+
+    def test_intake_run_publishes_index_then_lookup_finds_fixture_message(self):
+        from lib.email_local_search import query_index
+        (self.repo / '.git').mkdir(parents=True)
+        outcome = self.search_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        target = (self.home / '.local/share/carr/email-search/email-search-7.db').resolve()
+        self.assertTrue(target.exists())
+        self.assertNotIn(self.repo.resolve(), target.parents)
+        self.assertEqual(stat.S_IMODE(target.parent.stat().st_mode), 0o700)
+        self.assertFalse(list(self.repo.rglob('email-search-*.db')))
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        result = query_index(target, account_id=7, query='orchard', published_snapshot=True)
+        self.assertEqual(result['match_count'], 1)
+        self.assertEqual(result['coverage']['freshness'], 'published_snapshot_capture_recency_unverified')
+        self.assertEqual(outcome.counts['email_index_rows'], 1)
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
+    def test_index_publish_failure_preserves_success_and_receipt_and_cleanup(self):
+        with patch('lib.email_local_search.build_index', side_effect=OSError('PRIVATE-SENTINEL')):
+            outcome = self.search_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        receipt = intake.receipt_line(outcome, self.repo)
+        self.assertIn('"email_index_failed": 1', receipt)
+        self.assertNotIn('PRIVATE-SENTINEL', receipt)
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
+    def test_failed_index_retries_on_next_decode(self):
+        with patch('lib.email_local_search.build_index', side_effect=OSError('synthetic')):
+            self.assertEqual(self.search_run().state, 'succeeded')
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        outcome = self.search_run()
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        self.assertEqual(outcome.counts['email_index_published'], 1)
+        self.assertTrue((self.home / '.local/share/carr/email-search/email-search-7.db').exists())
+
+    def test_index_replay_reuses_generation(self):
+        self.assertEqual(self.search_run().state, 'succeeded')
+        target = self.home / '.local/share/carr/email-search/email-search-7.db'
+        before = (target.read_bytes(), target.stat().st_mtime_ns)
+        self.store.write_bytes(self.store.read_bytes() + b'.')
+        self.assertEqual(self.search_run().state, 'succeeded')
+        self.assertEqual(before, (target.read_bytes(), target.stat().st_mtime_ns))
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
+
+    def test_decode_failure_never_publishes_index(self):
+        write_db(self.fake.fixture)
+        ports = self.fake.ports()
+        def fail(*args):
+            raise intake.DecodeError('synthetic')
+        ports.decode = fail
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'decode_failed'))
+        self.assertFalse(list((self.home / '.local/share/carr/email-search').glob('email-search*')))
+        self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
 
     def test_census_request_runs_on_fresh_copy_once_and_keeps_only_counts(self):
         self.out().mkdir(parents=True)
@@ -451,6 +528,357 @@ class IntakeTest(unittest.TestCase):
 
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
+
+    def test_signature_stage_runs_for_filed_mail_and_keeps_retry_guard(self):
+        snapshot = {'party_id': 101, 'party_version': 7,
+                    'values': {'phone': '555-0100', 'email': CLIENT.email},
+                    'provenance': {'source': 'party', 'party_id': 101, 'party_version': 7},
+                    'unread_fields': []}
+        self.fake.contacts_rows = [intake.Contact(CLIENT.email, CLIENT.ref, CLIENT.name,
+                                                 contact_snapshot=snapshot)]
+        message = mail(CLIENT.email, -timedelta(hours=1), local_keys='77',
+                       body='-- \nEmail: pat@example.test\nPhone: 555-0199')
+        self.fake.fail_verbs.add('record-finding')
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=2)
+        changed = {**message, 'body': message['body'] + '\nTitle: Director'}
+        self.run_intake([changed])
+        self.assertEqual(len(self.fake.writes('record-finding')), 1,
+                         'generic journal replay cannot bypass changed-source guard')
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.writes('record-finding')), 2)
+        self.run_intake([message])
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertFalse(self.fake.writes('update-party-contact'))
+        self.assertFalse(self.fake.writes('correct-party-identity'))
+
+    def signature_alias_fixture(self):
+        snapshot = {'party_id': 101, 'party_version': 7,
+                    'values': {'phone': '555-0100', 'email': CLIENT.email},
+                    'provenance': {'source': 'party', 'party_id': 101, 'party_version': 7},
+                    'unread_fields': []}
+        self.fake.contacts_rows = [intake.Contact(CLIENT.email, CLIENT.ref, CLIENT.name,
+                                                 contact_snapshot=snapshot)]
+        return mail(CLIENT.email, -timedelta(hours=1), message_id='<alias@example.test>',
+                    body='-- \nEmail: pat@example.test\nPhone: 555-0199')
+
+    def signature_alias_scans(self, *, reverse=False, lost=False, restart=False):
+        old = self.signature_alias_fixture()
+        new = {**old, 'local_keys': '77'}
+        if reverse:
+            old, new = new, old
+        carr = self.fake.carr
+        def lose_receipt(verb, args):
+            reply = carr(verb, args)
+            if verb == 'record-finding':
+                raise intake.CarrError(code='unavailable')
+            return reply
+        with patch.object(self.fake, 'carr', lose_receipt if lost else carr):
+            first = self.run_intake([old])
+        frozen = self.fake.writes('record-finding')[0][1]
+        if restart:
+            state_path = self.out() / intake.STATE
+            state_path.write_text(json.dumps(json.loads(state_path.read_text())))
+        self.fake.now += timedelta(minutes=2)
+        second = self.run_intake([new])
+        third = self.run_intake([new])
+        self.assertEqual(len(self.fake.findings), 1,
+                         'same Message-ID acquired store key and duplicated signature finding')
+        self.assertEqual([a for _, a in self.fake.writes('record-finding')],
+                         [frozen, frozen] if lost else [frozen])
+        self.assertEqual([r.counts['logged'] for r in (first, second, third)], [1, 0, 0])
+
+    def test_signature_keyless_keyed_repeat_preserves_observation(self):
+        self.signature_alias_scans()
+
+    def test_signature_lost_response_keyless_keyed_repeat_preserves_request(self):
+        self.signature_alias_scans(lost=True)
+
+    def test_signature_keyed_keyless_repeat_preserves_observation(self):
+        self.signature_alias_scans(reverse=True)
+
+    def test_signature_alias_restart_preserves_receipt(self):
+        self.signature_alias_scans(restart=True)
+
+    def test_signature_alias_restart_preserves_uncertain_request(self):
+        self.signature_alias_scans(lost=True, restart=True)
+
+    def unresolved_signature_alias_scans(self, change='version', lost=False, reverse=False):
+        old = self.signature_alias_fixture()
+        new = {**old, 'local_keys': '77'}
+        if reverse:
+            old, new = new, old
+        self.fake.fail_verbs.add('log-activity')
+        carr = self.fake.carr
+        def lose_receipt(verb, args):
+            reply = carr(verb, args)
+            if verb == 'record-finding':
+                raise intake.CarrError(code='unavailable')
+            return reply
+        with patch.object(self.fake, 'carr', lose_receipt if lost else carr):
+            self.run_intake([old])
+        frozen = self.fake.writes('record-finding')[0][1]
+        self.run_intake([new])
+        self.assertEqual(len(self.fake.findings), 1)
+        snapshot = self.fake.contacts_rows[0].contact_snapshot
+        if change == 'version':
+            snapshot['party_version'] = snapshot['provenance']['party_version'] = 8
+        elif change == 'party':
+            snapshot['party_id'] = snapshot['provenance']['party_id'] = 102
+        else:
+            old = {**old, 'body': old['body'] + '\nTitle: Director'}
+            new = {**new, 'body': new['body'] + '\nTitle: Director'}
+        self.fake.now += timedelta(minutes=2)
+        for message in (old, new, old, new, old):
+            result = self.run_intake([message])
+            self.assertEqual(len(self.fake.findings), 1,
+                             'repeated alias lost frozen signature while activity was unresolved')
+            if change != 'version':
+                self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual([a for _, a in self.fake.writes('record-finding')],
+                         [frozen, frozen] if lost and change == 'version' else [frozen])
+        self.assertFalse(self.fake.writes('update-party-contact'))
+
+    def test_signature_unresolved_activity_alias_reversal_freezes_snapshot(self):
+        self.unresolved_signature_alias_scans()
+
+    def test_signature_unresolved_activity_alias_reversal_holds_party(self):
+        self.unresolved_signature_alias_scans(change='party')
+
+    def test_signature_unresolved_activity_alias_reversal_holds_source(self):
+        self.unresolved_signature_alias_scans(change='body')
+
+    def test_signature_unresolved_activity_alias_reversal_retries_lost_response(self):
+        self.unresolved_signature_alias_scans(lost=True)
+
+    def test_signature_unresolved_activity_reverse_alias_reversal(self):
+        self.unresolved_signature_alias_scans(reverse=True)
+
+    def test_signature_unresolved_activity_alias_reversal_holds_uncertain_party(self):
+        self.unresolved_signature_alias_scans(change='party', lost=True)
+
+    def test_signature_unresolved_activity_migrates_pre_index_observation(self):
+        old = self.signature_alias_fixture()
+        self.fake.fail_verbs.add('log-activity')
+        self.run_intake([old])
+        self.run_intake([{**old, 'local_keys': '77'}])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state.pop('signature_sources')
+        state_path.write_text(json.dumps(state))
+        self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
+        result = self.run_intake([old])
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+
+    def test_signature_ambiguous_message_ids_stay_separate(self):
+        old = self.signature_alias_fixture()
+        self.run_intake([old])
+        one, two = ({**old, 'local_keys': k} for k in ('77', '78'))
+        result = self.run_intake([one, two])
+        self.assertEqual(result.counts['message_id_ambiguous'], 1)
+        self.assertEqual(result.counts['signature_held'], 2)
+        self.assertEqual(len(self.fake.findings), 1)
+        self.run_intake([one, two])
+        self.assertEqual(len(self.fake.findings), 1)
+
+    def unresolved_competing_signatures(self, change=None):
+        a = self.signature_alias_fixture()
+        self.fake.fail_verbs.add('log-activity')
+        self.run_intake([a])
+        frozen = self.fake.writes('record-finding')[0][1]
+        one, two = ({**a, 'local_keys': k} for k in ('77', '88'))
+        result = self.run_intake([one, two])
+        self.assertEqual(result.counts['signature_held'], 2)
+        # Every run reloads JSON. Absence of a competitor is not new proof.
+        result = self.run_intake([two])
+        if change is None:
+            self.assertEqual(result.counts['signature_held'], 1,
+                             'previously competing candidate merged without unique proof')
+        elif change == 'party':
+            snapshot = self.fake.contacts_rows[0].contact_snapshot
+            snapshot['party_id'] = snapshot['provenance']['party_id'] = 102
+        else:
+            one = {**one, 'body': one['body'] + '\nTitle: Director'}
+        result = self.run_intake([one])
+        self.assertEqual(len(self.fake.findings), 1,
+                         'forgotten competing evidence bypassed frozen source binding')
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual([args for _, args in self.fake.writes('record-finding')], [frozen])
+        self.assertFalse(self.fake.writes('update-party-contact'))
+        self.assertFalse(self.fake.writes('correct-party-identity'))
+        if change is None:
+            for rows in ([two], [one], [a], [one, two]):
+                result = self.run_intake(rows)
+                self.assertEqual(result.counts['signature_held'], 0 if rows == [a] else len(rows))
+                self.assertEqual(len(self.fake.findings), 1)
+
+    def test_signature_competing_evidence_survives_lone_candidate_and_restart(self):
+        self.unresolved_competing_signatures()
+
+    def test_signature_competing_evidence_holds_changed_party(self):
+        self.unresolved_competing_signatures('party')
+
+    def test_signature_competing_evidence_holds_changed_body(self):
+        self.unresolved_competing_signatures('body')
+
+    def test_signature_competing_evidence_resolves_with_distinguishing_proof(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        one, two = ({**a, 'local_keys': k} for k in ('77', '88'))
+        self.assertEqual(self.run_intake([one, two]).counts['signature_held'], 2)
+        # Key 88 now supplies B's distinct frozen proof, excluding it from A.
+        self.assertEqual(self.run_intake([{**b, 'local_keys': '88'}]).counts['signature_held'], 0)
+        self.assertEqual(self.run_intake([one]).counts['signature_held'], 0)
+        self.assertEqual(len(self.fake.findings), 2)
+        self.assertEqual(len(self.fake.writes('record-finding')), 2)
+
+    def test_signature_simultaneous_aliases_share_frozen_request(self):
+        old = self.signature_alias_fixture()
+        self.run_intake([old])
+        new = {**old, 'local_keys': '77'}
+        self.run_intake([old, new])
+        self.run_intake([new, old])
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+
+    def test_signature_reverse_alias_keeps_store_key_conflict_guard(self):
+        old = {**self.signature_alias_fixture(), 'local_keys': '77'}
+        self.run_intake([old])
+        self.run_intake([{**old, 'local_keys': None}])
+        result = self.run_intake([{**old, 'local_keys': '78'}])
+        self.assertEqual(result.counts['message_id_ambiguous'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_ambiguous_keyless_message_ids_stay_separate(self):
+        old = self.signature_alias_fixture()
+        other = {**old, 'subject': 'Different source', 'copy_key': 'different-source'}
+        result = self.run_intake([old, other])
+        self.assertEqual(result.counts['message_id_ambiguous'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+        self.run_intake([old, other])
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_alias_preserves_reviewed_head_observation_format(self):
+        old = self.signature_alias_fixture()
+        self.run_intake([old])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        observation = next(iter(state['signature_observations'].values()))
+        observation.pop('ident', None)
+        observation.pop('binding_keys', None)
+        state_path.write_text(json.dumps(state))
+        self.run_intake([{**old, 'local_keys': '77'}])
+        self.assertEqual(len(self.fake.findings), 1)
+        self.assertEqual(len(self.fake.writes('record-finding')), 1)
+
+    def test_signature_alias_changed_source_or_party_stays_held(self):
+        for change in ('body', 'party'):
+            with self.subTest(change=change):
+                self.setUp()
+                old = self.signature_alias_fixture()
+                self.fake.fail_verbs.add('record-finding')
+                self.run_intake([old])
+                self.fake.fail_verbs.clear()
+                self.fake.now += timedelta(minutes=2)
+                new = {**old, 'local_keys': '77'}
+                if change == 'body':
+                    new['body'] += '\nTitle: Director'
+                else:
+                    self.fake.contacts_rows[0].contact_snapshot['party_id'] = 102
+                result = self.run_intake([new])
+                self.assertEqual(len(self.fake.writes('record-finding')), 1)
+                self.assertEqual(result.counts['signature_held'], 1)
+
+    def signature_competing_history(self, *, party=False, lost=False, resolved=False):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        if not resolved:
+            self.fake.fail_verbs.add('log-activity')
+        carr = self.fake.carr
+        def transport(verb, args):
+            reply = carr(verb, args)
+            if lost and verb == 'record-finding':
+                raise intake.CarrError(code='unavailable')
+            return reply
+        with patch.object(self.fake, 'carr', transport):
+            self.run_intake([a, b])
+        frozen = {args['idempotency_key']: args for _, args in self.fake.writes('record-finding')}
+        for n, rows in enumerate(([a], [{**a, 'local_keys': '77'}], [b],
+                                  [{**b, 'local_keys': '88'}], [a, b],
+                                  [{**a, 'local_keys': '77'}, {**b, 'local_keys': '88'}])):
+            if party and n == 3:
+                snapshot = self.fake.contacts_rows[0].contact_snapshot
+                snapshot['party_id'] = snapshot['provenance']['party_id'] = 102
+            self.fake.now += timedelta(minutes=2)
+            result = self.run_intake(rows)
+            self.assertEqual(len(self.fake.findings), 2, 'competing MID history duplicated a source')
+            for _, args in self.fake.writes('record-finding'):
+                self.assertEqual(args, frozen[args['idempotency_key']])
+            if party and n >= 3:
+                self.assertEqual(result.counts['signature_held'], len(rows))
+        self.assertFalse(self.fake.writes('update-party-contact'))
+        self.assertFalse(self.fake.writes('correct-party-identity'))
+
+    def test_signature_competing_history_preserves_both_sources(self):
+        self.signature_competing_history()
+
+    def test_signature_competing_history_holds_changed_party(self):
+        self.signature_competing_history(party=True)
+
+    def test_signature_competing_history_resolved_activity(self):
+        self.signature_competing_history(resolved=True)
+
+    def test_signature_competing_history_lost_responses(self):
+        self.signature_competing_history(lost=True)
+
+    def test_signature_competing_history_lost_response_changed_party(self):
+        self.signature_competing_history(lost=True, party=True)
+
+    def test_signature_competing_batch_holds_changed_new_alias(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        changed = {**b, 'local_keys': '88', 'body': b['body'] + '\nTitle: Director'}
+        result = self.run_intake([{**a, 'local_keys': '77'}, changed])
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_competing_sources_upgrade_together(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        self.run_intake([{**a, 'local_keys': '77'}, {**b, 'local_keys': '88'}])
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_signature_ambiguous_new_representation_waits_for_proof(self):
+        a = self.signature_alias_fixture()
+        b = {**a, 'subject': 'Second real source', 'copy_key': 'second-source',
+             'body': a['body'].replace('0199', '0188')}
+        self.run_intake([a, b])
+        unknown = {**a, 'copy_key': 'unknown-representation', 'subject': 'Unknown',
+                   'local_keys': '77'}
+        result = self.run_intake([unknown])
+        self.assertEqual(result.counts['signature_held'], 1)
+        self.assertEqual(len(self.fake.findings), 2)
+        self.run_intake([{**a, 'local_keys': '77'}])
+        self.assertEqual(len(self.fake.findings), 2)
+
+    def test_contact_adapter_preserves_snapshot_without_changing_mail_matching(self):
+        snapshot = {'party_id': 101, 'party_version': 7, 'values': {}, 'provenance': {}}
+        rows = intake._contacts(lambda *_: {'contacts': [
+            {'address': CLIENT.email, 'ref': CLIENT.ref, 'name': CLIENT.name,
+             'exact': True, 'contact_snapshot': snapshot}]})()
+        self.assertEqual(rows[0].contact_snapshot, snapshot)
+        self.assertEqual(intake.Matcher(rows, 'internal.test').ref(CLIENT.email), CLIENT.ref)
 
     def delivery_pair(self, recipients=CLIENT.email):
         source = mail(OWNER, -timedelta(hours=2), recipients=recipients,

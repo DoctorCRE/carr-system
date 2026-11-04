@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -66,6 +68,12 @@ def refusal(fn, *args) -> str:
 
 
 def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="staging-jobs-selftest-") as home:
+        with patch.dict(os.environ, HOME=home, NEON_API_KEY="synthetic-staging-key"):
+            return run_checks()
+
+
+def run_checks() -> int:
     print("staging-jobs-dsn-selftest — an ephemeral carr_jobs identity, and only "
           "ever against isolated staging\n")
 

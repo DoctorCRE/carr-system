@@ -13,11 +13,10 @@ import re
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 
-SOURCE_BYTES = Path(__file__).read_bytes()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+SOURCE_BYTES = Path(__file__).read_bytes() + (Path(__file__).resolve().parents[1] / "lib/release_reader.py").read_bytes()
 
 DEFAULT_API = "https://api.doctorcre.com"
 DEFAULT_APP = "https://app.doctorcre.com"
@@ -35,33 +34,7 @@ DEFAULT_MIN_VERBS = 140
 # rather than hardcoded so the floor moves only when someone deliberately
 # re-pins it (ops/config/doctorcre-artifact.v1.json, most recently PR #1149).
 DEFAULT_ARTIFACT_PIN = "ops/config/doctorcre-artifact.v1.json"
-USER_AGENT = "doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)"
-
-
-@dataclass
-class Reply:
-    status: int
-    headers: dict[str, str]
-    body: bytes
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-_OPENER = urllib.request.build_opener(NoRedirect)
-
-
-def read(url: str, opener=_OPENER.open, timeout: int = 15) -> Reply:
-    request = urllib.request.Request(url, method="GET", headers={"User-Agent": USER_AGENT})
-    try:
-        with opener(request, timeout=timeout) as response:
-            return Reply(response.status, dict(response.headers.items()), response.read())
-    except urllib.error.HTTPError as error:
-        # Redirects are disabled by the caller for the auth probe, but HTTP
-        # errors still carry useful status/headers and should be judged.
-        return Reply(error.code, dict(error.headers.items()), error.read())
+from lib.release_reader import Reply, read
 
 
 def release_result(reply: Reply, expected_env: str, minimum_verbs: int) -> list[str]:

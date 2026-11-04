@@ -36,36 +36,11 @@ if (( APPLY )); then
   fi
 fi
 
-# Same non-interactive auth and same project pin as the GitHub production deployment workflow.
-if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
-  . "$REPO"/bin/routine-credential-env.sh
-  carr_require_sourceable_db_env "sync-rule-admission-prod" || exit $?
-  set -a; . "$HOME/.config/carr/db.env"; set +a
-fi
-if [ -z "${NEON_API_KEY:-}" ]; then
-  stamp "WARN no NEON_API_KEY — falling back to interactive neonctl auth"
-  print -u2 "note: NEON_API_KEY is not set, so this needs a browser login if the"
-  print -u2 "      saved neonctl session has expired."
-fi
-
-NEON_PROJECT_PRODUCTION="steep-field-48688294"
-NEONCTL="$REPO/mcp-server/node_modules/.bin/neonctl"
-[[ -x "$NEONCTL" ]] || NEONCTL="neonctl"
-
-DSN="$("$NEONCTL" connection-string production \
-        --project-id "$NEON_PROJECT_PRODUCTION" \
-        --role-name neondb_owner 2>/tmp/sync-rule-admission-neonctl.err)"
-if [[ -z "$DSN" ]]; then
-  reason="$(head -1 /tmp/sync-rule-admission-neonctl.err 2>/dev/null)"
-  rm -f /tmp/sync-rule-admission-neonctl.err
-  stamp "FAIL no DSN from neonctl: ${reason:-no error text}"
-  print -u2 "could not derive the production owner DSN from neonctl (logged)."
-  print -u2 "neonctl said: ${reason:-nothing at all}"
-  exit 1
-fi
-rm -f /tmp/sync-rule-admission-neonctl.err
-
 PY="$REPO/.venv/bin/python"
+[[ -x "$PY" ]] || PY=python3
+DSN="$("$PY" "$REPO/tools/neon-cli.py" connection-string production \
+        --project-id steep-field-48688294 --role-name neondb_owner)" || exit $?
+[[ -n "$DSN" ]] || { print -u2 "sync-rule-admission-prod: no connection string"; exit 1; }
 
 if (( EXPORT )); then
   print "== exporting production's rule-admission classification =="

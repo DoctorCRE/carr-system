@@ -1516,7 +1516,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-email-proposals": {
     "ingress_key": "mcp-tool:list-email-proposals",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "f754b45461d4807dc5e62ac534490a434b92daf905275746dff5415f176db2ca",
+    "schema_digest": "d7fed6589f2127a1df61b9190d67ed60e05816d59898458487f9d1aedb476d6e",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2394,6 +2394,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-home-review": {
+    "ingress_key": "mcp-tool:read-home-review",
+    "source_locator": "mcp-server/src/home-review.js",
+    "schema_digest": "ecbb41a5144b8e7b8af118734773b53accc8e2728df96efe2f0cbc92d42571ca",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-invoice-tracker": {
     "ingress_key": "mcp-tool:read-invoice-tracker",
     "source_locator": "mcp-server/src/invoice-tracker.ts",
@@ -2808,6 +2818,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:record-document-identity",
     "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
     "schema_digest": "c78df4fb3f0cdb1a423e53002c9c36649f96c93803a37c24a36e12597d216f47",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-email-lifecycle": {
+    "ingress_key": "mcp-tool:record-email-lifecycle",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "b70dd722142a27939f3526a8f763134bc58a49ef0ea20f017ed3ced5bf5ec9a1",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3738,6 +3758,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": false,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "submit-doc-request": {
+    "ingress_key": "mcp-tool:submit-doc-request",
+    "source_locator": "mcp-server/src/doc-conversation.js",
+    "schema_digest": "71037449485e39874ba21d7f596581689cab6a643ccf73e58f460205fbd5b257",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
