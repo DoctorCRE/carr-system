@@ -512,5 +512,176 @@ class AppObserverTest(unittest.TestCase):
         self.assertEqual(result.stdout, '')
 
 
+class EventScopeTest(unittest.TestCase):
+    """Real Git and CLI; only the remote metadata response is synthetic."""
+
+    def setUp(self):
+        AdmissionTest.setUp(self)
+        self.env = fixture_env()
+        self.env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.com',
+                        GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.com')
+        self.git('init', '-q')
+        (self.root / 'contracts').mkdir()
+        (self.root / module().CONTRACT_PATH).write_text('{}')
+        self.commit('rollout', [module().CONTRACT_PATH])
+        self.base = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-qb', 'studio')
+        self.paths = [
+            'docs/models/email-signature-layout/README.md',
+            'docs/models/email-signature-layout/chart.mmd',
+            'docs/models/email-signature-layout/design.md',
+            'lib/calendar_agenda.py', 'lib/email_contact_candidates.py',
+            'lib/email_contact_review.py', 'lib/outlook_intake.py',
+            'ops/calendar-agenda-selftest.py', 'ops/email-contact-candidates-selftest.py',
+            'ops/email-contact-review-selftest.py', 'ops/outlook-intake-selftest.py',
+            'proofs/requirements/wr442-s2-signature-layout.json']
+        for name in self.paths:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('synthetic\n')
+        self.requirement['targets'] = ['studio']
+        self.requirement['assertions'][0]['runner'] = 'studio-run-receipt.v1'
+        self.manifest = self.root / self.paths[-1]
+        self.manifest.write_text(json.dumps(self.requirement))
+        self.commit('Studio source', self.paths)
+        self.head = self.git('rev-parse', 'HEAD')
+        self.event = {'repository': {'full_name': 'Synthetic/fixture'}, 'pull_request': {
+            'number': 1, 'base': {'sha': self.base}, 'head': {'sha': self.head},
+            'body': '## Production proof\n' + self.paths[-1]}}
+        self.metadata = {'createdAt': '2099-01-01T00:00:00Z', 'lastEditedAt': None,
+                         'body': self.event['pull_request']['body'], 'headRefOid': self.head}
+        binary = self.root / 'bin'
+        binary.mkdir()
+        gh = binary / 'gh'
+        gh.write_text('#!' + sys.executable + '\nimport os\nfrom pathlib import Path\n'
+                      'print(Path(os.environ["FIXTURE_METADATA"]).read_text())\n')
+        gh.chmod(0o755)
+        self.env.update(PATH=str(binary) + os.pathsep + self.env.get('PATH', os.defpath),
+                        FIXTURE_METADATA=str(self.root / 'metadata.json'))
+
+    def git(self, *args):
+        return subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', *args],
+            cwd=self.root, env=self.env, text=True, stderr=subprocess.PIPE, timeout=15).strip()
+
+    def commit(self, message, paths):
+        self.git('add', '--', *paths)
+        self.git('commit', '-qm', message)
+
+    def advance_and_merge(self):
+        self.git('checkout', '-qb', 'advanced', self.base)
+        names = [f'mcp-server/src/unrelated-{i}.js' for i in range(25)]
+        for name in names:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('synthetic\n')
+        self.commit('unrelated Worker changes', names)
+        self.git('merge', '--no-ff', '-m', 'candidate merge', self.head)
+        self.assertEqual(len(self.git('rev-list', '--parents', '-n', '1', 'HEAD').split()), 3)
+        self.assertEqual(len(self.git('diff', '--name-only', self.base + '...HEAD').splitlines()),
+                         25 + len(self.git('diff', '--name-only', self.base + '...' + self.head).splitlines()))
+
+    def cli(self, event=True, *args):
+        event_path = self.root / 'event.json'
+        event_path.write_text(json.dumps(self.event))
+        (self.root / 'metadata.json').write_text(json.dumps({
+            'data': {'repository': {'pullRequest': self.metadata}}}))
+        env = dict(self.env, GITHUB_EVENT_NAME='pull_request' if event else 'push',
+                   GITHUB_EVENT_PATH=str(event_path))
+        return subprocess.run([sys.executable, str(PROGRAM), '--root', str(self.root), *args],
+            cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+
+    def test_divergent_merge_uses_twelve_pr_paths(self):
+        self.advance_and_merge()
+        self.assertEqual(self.git('diff', '--name-only', self.base + '...' + self.head).splitlines(), self.paths)
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('proof declaration accepted', result.stdout)
+
+    def test_bootstrap_non_product_scope(self):
+        self.git('checkout', '--detach', self.base)
+        name = 'ops/production-proof-plan.py'
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('synthetic\n')
+        self.commit('proof tooling only', [name])
+        self.head = self.git('rev-parse', 'HEAD')
+        self.event['pull_request']['head']['sha'] = self.head
+        self.metadata['headRefOid'] = self.head
+        body = '## Production proof\nn/a: proof tooling only'
+        self.event['pull_request']['body'] = body
+        self.metadata['body'] = body
+        self.advance_and_merge()
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('non-product declaration accepted', result.stdout)
+
+    def test_actual_worker_change_still_refuses(self):
+        self.git('checkout', '--detach', self.head)
+        name = 'mcp-server/src/actual-worker.js'
+        path = self.root / name
+        path.parent.mkdir(parents=True)
+        path.write_text('synthetic\n')
+        self.commit('actual Worker edit', [name])
+        self.head = self.git('rev-parse', 'HEAD')
+        self.event['pull_request']['head']['sha'] = self.head
+        self.metadata['headRefOid'] = self.head
+        self.advance_and_merge()
+        result = self.cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('changed runtime target missing', result.stdout)
+
+    def test_source_and_no_main_advance_merge(self):
+        for merge in [False, True]:
+            with self.subTest(merge=merge):
+                if merge:
+                    self.git('checkout', '-qb', 'candidate', self.base)
+                    self.git('merge', '--no-ff', '-m', 'candidate', self.head)
+                result = self.cli()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_unknown_event_objects_refuse(self):
+        for field in ['base', 'head']:
+            with self.subTest(field=field):
+                original = self.event['pull_request'][field]['sha']
+                self.event['pull_request'][field]['sha'] = 'f' * 40
+                if field == 'head':
+                    self.metadata['headRefOid'] = 'f' * 40
+                result = self.cli()
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn('REFUSED', result.stdout)
+                self.event['pull_request'][field]['sha'] = original
+
+    def test_unrelated_event_topology_refuses(self):
+        self.git('checkout', '--orphan', 'disconnected')
+        self.git('rm', '-rf', '--cached', '.')
+        name = 'orphan.txt'
+        (self.root / name).write_text('synthetic\n')
+        self.commit('orphan', [name])
+        head = self.git('rev-parse', 'HEAD')
+        self.event['pull_request']['head']['sha'] = head
+        self.metadata['headRefOid'] = head
+        self.assertEqual(self.cli().returncode, 1)
+
+    def test_local_explicit_body_and_non_pr(self):
+        self.advance_and_merge()
+        self.body.write_text(self.event['pull_request']['body'])
+        result = self.cli(True, '--body-file', str(self.body), '--base', self.base)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('changed runtime target missing', result.stdout)
+        self.git('checkout', '--detach', self.head)
+        result = self.cli(True, '--body-file', str(self.body), '--base', self.base)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('not evaluated', self.cli(False).stdout)
+
+    def test_real_cli_stale_metadata_refuses(self):
+        for field, stale in [('body', 'old body'), ('headRefOid', 'f' * 40)]:
+            original = self.metadata[field]
+            self.metadata[field] = stale
+            result = self.cli()
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn('stale PR event', result.stdout)
+            self.metadata[field] = original
+
+
 if __name__ == '__main__':
     unittest.main()
