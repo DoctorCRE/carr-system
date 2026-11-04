@@ -22,6 +22,20 @@ def module():
     return result
 
 
+def runner_source(runner, root=ROOT):
+    revision, path = runner['revision'], runner['path']
+    ancestry = subprocess.run(['git', 'merge-base', '--is-ancestor', revision, 'HEAD'],
+                              cwd=root, env=fixture_env(), capture_output=True)
+    if ancestry.returncode:
+        reason = 'not an ancestor of tested HEAD' if ancestry.returncode == 1 else 'unresolvable revision or tested HEAD'
+        raise ValueError(f"runner pin {revision}: {reason}")
+    source = subprocess.run(['git', 'show', revision + ':' + path],
+                            cwd=root, env=fixture_env(), capture_output=True)
+    if source.returncode:
+        raise ValueError(f"runner pin {revision}: {path}: unresolvable path")
+    return source.stdout
+
+
 class AdmissionTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -150,11 +164,39 @@ class AdmissionTest(unittest.TestCase):
         self.manifest.write_text(json.dumps(self.requirement))
         self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
 
+    def test_runner_revision_ancestry(self):
+        path = 'ops/studio-proof-observe.py'
+        with self.assertRaisesRegex(ValueError, 'e105804540f17afba50dd45f78b84b50698a3ffc.*(not an ancestor|unresolvable revision)'):
+            runner_source({'revision': 'e105804540f17afba50dd45f78b84b50698a3ffc', 'path': path})
+        self.assertEqual(
+            runner_source({'revision': 'f699e1859dc87e4122501bbaba35a312607452a7', 'path': path}),
+            (ROOT / path).read_bytes())
+
+    def test_runner_rejects_resolvable_nonancestor_and_missing_path(self):
+        env = fixture_env()
+        env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.com',
+                   GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.com')
+        def git(*args):
+            return subprocess.check_output(['git', *args], cwd=self.root, env=env, text=True).strip()
+        git('init', '-q')
+        (self.root / 'runner.py').write_text('pass\n')
+        git('add', 'runner.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'initial')
+        ancestor = git('rev-parse', 'HEAD')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '-qm', 'unmerged')
+        unmerged = git('rev-parse', 'HEAD')
+        git('checkout', '--detach', ancestor)
+        with self.assertRaisesRegex(ValueError, unmerged + '.*not an ancestor'):
+            runner_source({'revision': unmerged, 'path': 'runner.py'}, self.root)
+        with self.assertRaisesRegex(ValueError, ancestor + '.*missing.py.*unresolvable path'):
+            runner_source({'revision': ancestor, 'path': 'missing.py'}, self.root)
+        self.assertEqual(runner_source({'revision': ancestor, 'path': 'runner.py'}, self.root), b'pass\n')
+
     def test_runner_registry_pins_and_studio_observer(self):
         contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
+        sources = {name: runner_source(runner) for name, runner in contract['x-runners'].items()}
         runner = contract['x-runners']['studio-run-receipt.v1']
-        source = subprocess.check_output(['git', 'show', runner['revision'] + ':' + runner['path']],
-                                         cwd=ROOT, env=fixture_env())
+        source = sources['studio-run-receipt.v1']
         self.assertEqual(source, (ROOT / runner['path']).read_bytes())
         observer = self.root / 'observer.py'
         observer.write_bytes(source)
