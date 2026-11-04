@@ -1,3 +1,4 @@
+// Expose canonical actor and party identities for partner-authorized pickers.
 import type { Actor, Db, VerbInputs } from './verb-contract.ts';
 import { ToolError } from './tool-error.ts';
 import { canExercisePartnerAuthority } from './partner-authority.js';
