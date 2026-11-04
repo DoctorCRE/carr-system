@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617.S15-home-waiting",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "worker-waiting-read-deployed",
+      "predicate": "The deployed Worker serves the merged release SHA and its verb registry includes read-home-inbox-v5, read-actor-roster-v1 and search-parties-v1. This smoke does not prove the signed-in waiting journey.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity matches the merged SHA and the verb registry includes read-home-inbox-v5, read-actor-roster-v1 and search-parties-v1.",
+      "input_class": "read-only release identity and verb registry",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
