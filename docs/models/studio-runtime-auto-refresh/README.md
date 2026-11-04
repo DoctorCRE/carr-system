@@ -1,17 +1,24 @@
 # Studio runtime auto refresh
 
-Before-code statechart for WR634.S1.J80.
+Statechart for WR634.S1.J80, corrected before the WR634.S1.J87 fix.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Observe
-    Observe --> Current: installed SHA matches verified release
+    [*] --> Recover
+    Recover --> Restore: interrupted transaction, even if SHA matches
+    Restore --> Observe: rollback artifacts and restore prior jobs under runtime lock
+    Restore --> Refuse: recovery fails, retain journal
+    Recover --> Refuse: another transaction holds runtime lock
+    Recover --> Observe: no interrupted transaction
+    Observe --> Current: verified release matches, artifacts valid and jobs enabled
+    Observe --> Refuse: matching SHA with missing artifacts or disabled jobs
     Observe --> Wait: checked less than five minutes ago
     Observe --> Refuse: release identity or successful main deploy unavailable
     Observe --> Open: two attempts failed for this SHA
     Observe --> Cooldown: last attempt less than ten minutes ago
     Observe --> Attempt: persist attempt before any refresh effects
-    Attempt --> Current: drained wrapper succeeds and SHA readback matches
+    Attempt --> Current: wrapper succeeds, SHA and artifacts match, jobs enabled
+    Attempt --> Restore: process dies after checkout before job restoration
     Attempt --> RetryLater: first failure or crash
     RetryLater --> Attempt: same release after ten minutes
     Attempt --> Open: second failure or crash
@@ -21,9 +28,13 @@ stateDiagram-v2
 
 Never refresh an unverified release. Never attempt a SHA a third time after two
 failures. Never attempt twice within ten minutes, even across release changes or
-process crashes. Never interrupt a send. Same installed SHA is a no-op.
-A persisted attempt counts as a failure until verified success. A crash after
-installation is reconciled by installed SHA on the next observation.
+process crashes. Never interrupt a send. Same installed SHA is a no-op only after recovery and artifact/job verification.
+A persisted attempt counts as a failure until verified success. A crash after checkout can leave the released SHA installed while jobs remain
+disabled and artifacts incomplete. Every tick first acquires the existing runtime
+transaction lock and rolls back a pending journal through the existing wrapper.
+Recovery runs before discovery throttling, network refusal, cooldown and breaker
+checks and consumes no new attempt. Only verified artifacts and loaded, enabled
+jobs allow a matching SHA to report current. Otherwise the tick refuses success.
 
 ## System design
 
@@ -33,7 +44,8 @@ for a successful `deploy.yml` run on main at that exact SHA through GitHub CLI. 
 which can differ from the workflow_run event’s own default-branch head SHA.
 The existing drained wrapper owns send locks, runtime installation and recovery.
 A temporary local source clone at the released commit supplies the installers;
-shared main is never checked out or pulled by this job. It is deleted on exit.
+shared main is never checked out or pulled by this job. The fetched remote-main
+SHA is copied into the clone before verification, independent of local main. It is deleted on exit.
 The alternative of running from current main fails when main is ahead of release.
 A T3 task adds an agent session where a bounded deterministic job suffices.
 
@@ -65,3 +77,25 @@ installed runtime SHA equals the production /release SHA within 15 minutes of th
 The builder does not merge or invoke production. After merge, install only this
 job through `./run.sh config install-launchd com.carr.studio-runtime-auto-refresh --apply`.
 Watch its first run and the next main release. Do not run a full config install.
+
+## Transition tests
+
+`ops/studio-runtime-auto-refresh-selftest.py` keeps named executable transitions.
+
+| Transition | Test |
+| --- | --- |
+| Recover / Restore before Current, Wait, Refuse, Cooldown and Open | `test_crash_recovery_precedes_every_short_circuit` |
+| Attempt interrupted after checkout to Restore | `test_crash_recovery_precedes_every_short_circuit` |
+| Restore failure to Refuse with journal retained | `test_recovery_failure_keeps_journal_and_never_reports_current` |
+| Concurrent runtime transaction to Refuse | `test_recovery_respects_runtime_transaction_lock` |
+| Matching SHA with incomplete artifacts or disabled/unloaded jobs to Refuse | `test_current_requires_installed_artifacts_and_enabled_jobs` |
+| Observe / Attempt to Current | `test_success_then_same_sha_noop`, `test_success_requires_runtime_readback` |
+| Observe to Wait / Refuse | `test_unknown_release_never_refreshes_and_discovery_is_bounded` |
+| Observe to Cooldown | `test_rate_limit_survives_release_change`, `test_slow_discovery_does_not_shorten_attempt_cooldown` |
+| Attempt to RetryLater / Open and Open to Open | `test_two_failures_open_breaker_no_third_attempt`, `test_attempt_reservation_survives_crash` |
+| Open to Observe on a different release | `test_release_change_gets_new_budget_without_resetting_old_breaker` |
+
+The combined recovery tests use the wrapper's filesystem snapshot, drain locks,
+swap and restoration with synthetic launchctl/installer ports. They reproduce
+process death by releasing only the fixture's held locks. No live mailbox or
+launchd state is touched. No formal proof is claimed.

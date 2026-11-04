@@ -12,7 +12,7 @@ import tempfile
 import time
 from urllib.request import urlopen
 
-from git_env import scrubbed_env
+from ops.git_env import scrubbed_env
 from lib.local_jobs import append, locked, read_latest, stamp
 from lib.outlook_settings import load_settings
 
@@ -66,6 +66,10 @@ def tick(root, host, *, now=None):
         def receipt(status, sha=None):
             append(root / 'runs.jsonl', {'at': stamp(now), 'status': status, 'sha': sha})
             return status
+        try:
+            host.recover()
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return receipt('refused')
         if now - state.get('checked_at', 0) < 300:
             return receipt('wait')
         state['checked_at'] = now
@@ -75,6 +79,7 @@ def tick(root, host, *, now=None):
             if not isinstance(sha, str) or not SHA.fullmatch(sha):
                 raise ValueError('invalid release SHA')
             if host.installed() == sha:
+                host.verify_current(sha)
                 state['failures'].pop(sha, None)
                 save(path, state)
                 return receipt('current', sha)
@@ -95,6 +100,7 @@ def tick(root, host, *, now=None):
             host.refresh(sha)
             if host.installed() != sha:
                 raise ValueError('runtime SHA readback mismatch')
+            host.verify_current(sha)
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
             if state['failures'][sha] >= 2:
                 host.alert(sha, now)
@@ -110,19 +116,51 @@ class Host:
 
     def __init__(self, source):
         self.source = source.resolve()
-        self.runtime = load_settings().repo
+        self.settings = load_settings()
+        self.runtime = self.settings.repo
+
+    def recover(self):
+        from lib.outlook_runtime_refresh import Host as RefreshHost
+        host = RefreshHost(self.source, '', self.settings)
+        lock = self.runtime.parent / ('.' + self.runtime.name + '-refresh.lock')
+        with locked(lock, blocking=False):
+            try:
+                if host.recovery_pending():
+                    host.recover()
+            finally:
+                host.locks.close()
+
+    def verify_current(self, sha):
+        from lib.outlook_runtime_refresh import Host as RefreshHost, LABELS
+        from lib.scheduled_jobs import disabled, listed
+        host = RefreshHost(self.source, '', self.settings)
+        lock = self.runtime.parent / ('.' + self.runtime.name + '-refresh.lock')
+        with locked(lock, blocking=False):
+            if host.recovery_pending():
+                raise ValueError('runtime recovery pending')
+            if self.installed() != sha:
+                raise ValueError('runtime SHA changed during readback')
+            if not self.settings.decoder.is_file():
+                raise ValueError('runtime decoder missing')
+            self.settings.verify_helper()
+            live = listed(host.command('launchctl', 'list').stdout)
+            overrides = disabled(host.command('launchctl', 'print-disabled', host.domain).stdout)
+            if any(label not in live or overrides.get(label, False) for label in LABELS):
+                raise ValueError('Outlook jobs are not all registered and enabled')
 
     def installed(self):
         return command('git', '-C', self.runtime, 'rev-parse', 'HEAD')
 
     def refresh(self, sha):
         command('git', '-C', self.source, 'fetch', 'origin', 'main', timeout=120)
-        command('git', '-C', self.source, 'merge-base', '--is-ancestor', sha, 'origin/main')
+        main = command('git', '-C', self.source, 'rev-parse', 'origin/main')
+        command('git', '-C', self.source, 'merge-base', '--is-ancestor', sha, main)
         with tempfile.TemporaryDirectory(prefix='carr-released-outlook-') as temporary:
             source = Path(temporary) / 'source'
             command('git', 'clone', '--shared', '--no-checkout', self.source, source)
             command('git', '-C', source, 'remote', 'set-url', 'origin',
                     'https://github.com/DoctorCRE/carr-system.git')
+            command('git', '-C', source, 'update-ref', 'refs/remotes/origin/main', main)
             command('git', '-C', source, 'checkout', '--detach', sha)
             for item in ('.venv', 'out', 'mcp-server/node_modules'):
                 target = self.source / item

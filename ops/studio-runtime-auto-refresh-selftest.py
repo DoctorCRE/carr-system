@@ -1,7 +1,6 @@
 """Offline acceptance for release-bound Studio runtime refresh."""
 import json
 import importlib.util
-import os
 import io
 import subprocess
 from types import SimpleNamespace
@@ -164,6 +163,27 @@ class RecoveryTests(unittest.TestCase):
                 auto.refresh.assert_not_called()
                 if expected == 'current':
                     auto.verify_current.assert_called_once()
+
+    def test_recovery_failure_keeps_journal_and_never_reports_current(self):
+        case, fixture, auto = self.fixture()
+        fixture[-1][0] = True
+        auto.release = Mock()
+        auto.refresh = Mock()
+        with patch('lib.outlook_runtime_refresh.Host', return_value=case.host):
+            self.assertEqual(tick(case.root / 'auto', auto, now=10000), 'refused')
+        self.assertTrue(case.host.recovery_pending())
+        auto.release.assert_not_called()
+        auto.refresh.assert_not_called()
+
+    def test_recovery_respects_runtime_transaction_lock(self):
+        from lib.local_jobs import locked
+        case, fixture, auto = self.fixture()
+        lock = auto.runtime.parent / ('.' + auto.runtime.name + '-refresh.lock')
+        auto.release = Mock()
+        with locked(lock), patch('lib.outlook_runtime_refresh.Host', return_value=case.host):
+            self.assertEqual(tick(case.root / 'auto', auto, now=10000), 'refused')
+        self.assertTrue(case.host.recovery_pending())
+        auto.release.assert_not_called()
 
     def test_current_requires_installed_artifacts_and_enabled_jobs(self):
         case, fixture, auto = self.fixture()

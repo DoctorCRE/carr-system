@@ -15,7 +15,7 @@ import time
 
 from lib.outlook_settings import load_settings
 from lib.scheduled_jobs import disabled, listed
-from git_env import scrubbed_env
+from ops.git_env import scrubbed_env
 
 LABELS = tuple('com.carr.outlook-' + service for service in ('intake', 'triage', 'outbox'))
 
