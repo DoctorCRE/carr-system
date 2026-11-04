@@ -2,6 +2,9 @@
 """Create an exact Outlook draft and claim persistence only after private store readback."""
 
 import argparse
+from contextlib import closing
+from email.utils import getaddresses
+import sqlite3
 import json
 import subprocess
 import os
@@ -52,16 +55,35 @@ def draft_observations(settings):
         os.close(fd)
         _decoder(Path.home())(work / 'store.hxd', work / 'Files', db)
         _, mails, _ = _load(db, settings.folder_account_id, settings.account)
-        return [m for m in mails if any(p.lower() == 'drafts' for p in m.get('folders', []))]
+        with closing(sqlite3.connect(db)) as con:
+            raw_bodies = dict(con.execute('SELECT id, body FROM messages'))
+        return [dict(m, body=raw_bodies[m['row_ids'][0]]) for m in mails
+                if any(p.lower() == 'drafts' for p in m.get('folders', []))]
+
+
+def _recipient_addresses(value):
+    if not value:
+        return set()
+    try:
+        pairs = getaddresses([value], strict=True)
+        addresses = [address for _, address in pairs]
+        if not addresses or any(not address for address in addresses):
+            return None
+        return set(send._addresses(addresses))
+    except (ValueError, TypeError):
+        return None
 
 
 def matching_draft_ids(rows, mail):
-    import re
+    # The decoder does not observe Bcc. It cannot prove a requested hidden recipient.
+    if mail.bcc:
+        return set()
     return {str(m['local_keys']) for m in rows
             if str(m.get('local_keys') or '').isdigit()
             and m.get('subject') == mail.subject and m.get('body_kind') == 'full'
             and m.get('body') == mail.body
-            and set(re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", (m.get('recipients') or '').lower())) == set(mail.recipients)}
+            and _recipient_addresses(m.get('recipients')) == set(mail.to)
+            and _recipient_addresses(m.get('cc')) == set(mail.cc)}
 
 
 def save_draft(payload, settings, leave_open=False):

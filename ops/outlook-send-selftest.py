@@ -1304,6 +1304,36 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(self.sent, [])
         self.assertEqual(corrupt.read_text(), '{')
 
+    def test_corrupt_receipt_invalid_payload_stays_fenced_across_recovery(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        root = self.ports.out / 'outbox'
+        root.mkdir(parents=True)
+        corrupt = root / f'{draft.key}.json'
+        evidence = b'{original-corrupt-evidence\x00'
+        corrupt.write_bytes(evidence)
+        invalid = dict(self.draft, attachments=[dict(path=str(Path(self.tmp) / 'missing.pdf'),
+                                                   sha256='a' * 64, size=10)])
+        unrelated = dict(self.draft, proposal_id='22222222-2222-4333-8444-555555555555')
+        original = self.carr
+        def carr(verb, args):
+            if verb == 'outbox-for-sender':
+                return dict(schema_version='email-outbox.v1', owner='joe', mode=args.get('mode'),
+                            drafts=[invalid] if args.get('mode') else [invalid, unrelated])
+            return original(verb, args)
+        self.ports.carr = carr
+        for attempt in range(3):
+            if attempt == 2:
+                invalid.pop('attachments')
+            result = self.worker.run(self.settings, self.ports)
+            self.assertEqual(result['recovery_blocked'], 1)
+            self.assertTrue(corrupt.exists(), 'corrupt recovery evidence was removed')
+            self.assertEqual(corrupt.read_bytes(), evidence)
+            self.assertEqual(corrupt.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(len(self.sent), 1)
+        receipts = [a for v, a in self.calls if v == 'record-email-sent']
+        self.assertTrue(receipts)
+        self.assertTrue(all(r['proposal_id'] == unrelated['proposal_id'] for r in receipts))
+
     def test_reconciliation_without_ledger_cannot_send_even_with_sent_match(self):
         draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
         self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(draft.mail.recipients),

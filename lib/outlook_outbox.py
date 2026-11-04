@@ -158,19 +158,30 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
             if isinstance(row, dict) and isinstance(row.get('proposal_id'), str) and row['proposal_id'] in pending:
                 continue
             try:
+                ident = str(uuid.UUID(row['proposal_id']))
+                version = row['version']
+                if type(version) is not int or version < 1:
+                    raise ValueError('invalid_identity')
+            except (ValueError, KeyError, TypeError, AttributeError):
+                counts['failed'] += 1
+                _save(quarantined, dict(row_sha256=row_hash, reason='invalid_submission'))
+                counts['quarantined'] += 1
+                continue
+            key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-outbox|{ident}|{version}'))
+            if key in fenced_keys:
+                continue
+            try:
                 draft = SubmittedDraft.parse(row, settings)
             except (ValueError, KeyError, TypeError, AttributeError) as exc:
                 counts['failed'] += 1
                 try:
-                    ident = str(uuid.UUID(row['proposal_id']))
-                    version, digest = row['version'], row['sha256']
-                    if type(version) is not int or version < 1 or not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest):
+                    digest = row['sha256']
+                    if not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest):
                         raise ValueError('invalid_identity')
                 except (ValueError, KeyError, TypeError, AttributeError):
                     _save(quarantined, dict(row_sha256=row_hash, reason='invalid_submission'))
                     counts['quarantined'] += 1
                     continue
-                key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'outlook-outbox|{ident}|{version}'))
                 reason = str(exc) if str(exc) in (
                     'invalid_submission', 'submission_hash_mismatch', 'submission_recipients_invalid',
                     'submission_attachment_mismatch', 'attachment_settings_missing', 'attachment_root_missing',
@@ -179,8 +190,6 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
-                if draft.key in fenced_keys:
-                    continue
                 result = send.send_submitted(draft, ports=ports)
                 if result.state in (send.State.PRESSED_UNCONFIRMED, send.State.WINDOW_NOT_CLOSED):
                     counts['failed'] += 1
