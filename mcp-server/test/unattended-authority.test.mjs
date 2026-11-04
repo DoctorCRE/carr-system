@@ -189,7 +189,7 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
     "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "handle-email-proposal",
     "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "reject-requirement-reply", "retire-retrieval-curation", "snooze-email-proposal", "submit-email-draft", "undo-email-thread-filing"]);
+    "register-record-source-authority-policy", "reject-requirement-reply", "retire-retrieval-curation", "snooze-email-proposal", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {

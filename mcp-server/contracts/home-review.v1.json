@@ -1,0 +1,32 @@
+{
+  "schema_version": "home-review.v1",
+  "read_verb": "read-home-review",
+  "reference": [
+    "kind",
+    "item_id",
+    "source_version",
+    "operations"
+  ],
+  "kinds": {
+    "action": [
+      "complete-one-action"
+    ],
+    "reply_draft": [
+      "edit-email-draft",
+      "dismiss-email-proposal",
+      "submit-email-draft"
+    ],
+    "fact_review": [
+      "resolve-fact-review"
+    ]
+  },
+  "refusals": [
+    "home_review_not_found",
+    "home_review_stale",
+    "home_review_resolved",
+    "home_review_unsupported",
+    "human_only_verb_requires_verified_partner"
+  ],
+  "submission": "Call the named existing domain verb with the displayed arguments, a fresh idempotency key and its required human input. Owners revalidate authority, current versions and semantics. Home has no approval or mutation verb. Refresh Home after a receipt. Retain completion_event_id and version from complete-one-action for reopen-one-action Undo.",
+  "coverage": "Only projected open actions, pending reply drafts and pending fact reviews. Processing, notifications, tour feedback and reply recovery are unsupported. Pending call candidates, email next steps, overdue assessments and lead drafts are outside this projection."
+}
