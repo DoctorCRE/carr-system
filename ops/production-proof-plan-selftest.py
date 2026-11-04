@@ -359,6 +359,98 @@ class AppObserverTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'ancestor'):
             self.observe(merge=self.served)
 
+    def ancestry_cli(self, source, settings=None):
+        curl = self.repo / 'curl'
+        identity = json.dumps({'service': 'doctorcre-app', 'environment': 'production',
+                               'source_commit': source})
+        curl.write_text('#!' + sys.executable + '\nprint(' + repr(identity) + ')\n')
+        curl.chmod(0o700)
+        env = dict(self.env, PATH=str(self.repo) + os.pathsep + self.env.get('PATH', os.defpath))
+        env.update(settings or {})
+        return subprocess.run([sys.executable, str(ROOT / 'ops/app-proof-observe.py'),
+            '--app-repo', str(self.repo), '--merge-sha', self.merge], env=env,
+            capture_output=True, text=True, timeout=10)
+
+    def unrelated_commit(self):
+        self.git('checkout', '--orphan', 'unrelated')
+        self.git('-c', 'core.hooksPath=/dev/null', 'commit', '--allow-empty', '-qm', 'unrelated')
+        return self.git('rev-parse', 'HEAD')
+
+    def assert_ancestry_refused(self, source, settings=None):
+        result = self.ancestry_cli(source, settings)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('not a proven ancestor', result.stderr)
+
+    def test_replacement_cannot_forge_cli_ancestry(self):
+        unrelated = self.unrelated_commit()
+        self.assert_ancestry_refused(unrelated)
+        for namespace, settings in [('refs/replace/', {}), ('refs/custom/', {
+                'GIT_REPLACE_REF_BASE': 'refs/custom/',
+                'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'core.useReplaceRefs',
+                'GIT_CONFIG_VALUE_0': 'true'})]:
+            with self.subTest(namespace=namespace):
+                ref = namespace + unrelated
+                self.git('update-ref', ref, self.served)
+                if not settings:
+                    self.assertEqual(self.git('merge-base', '--is-ancestor', self.merge, unrelated), '')
+                before = self.git('show-ref')
+                self.assert_ancestry_refused(unrelated, settings)
+                result = self.ancestry_cli(self.served, settings)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['status'], 'passed')
+                self.assertEqual(self.git('show-ref'), before)
+                self.git('update-ref', '-d', ref)
+        self.assert_ancestry_refused(unrelated)
+
+    def test_grafts_cannot_forge_cli_ancestry(self):
+        unrelated = self.unrelated_commit()
+        for graft in [self.repo / '.git/info/grafts', self.repo / 'custom-grafts']:
+            graft.parent.mkdir(exist_ok=True)
+            data = unrelated + ' ' + self.merge + '\n'
+            graft.write_text(data)
+            settings = {} if graft.name == 'grafts' else {'GIT_GRAFT_FILE': str(graft)}
+            with self.subTest(graft=graft.name):
+                self.assert_ancestry_refused(unrelated, settings)
+                result = self.ancestry_cli(self.served, settings)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(graft.read_text(), data)
+            graft.unlink()
+
+    def test_object_type_replacements_and_inherited_state(self):
+        blob = subprocess.check_output(['git', '-C', str(self.repo), 'hash-object', '-w', '--stdin'],
+            input=b'not a commit', env=self.env, timeout=10).decode().strip()
+        self.git('replace', '-f', blob, self.served)
+        self.identity = json.dumps({'service': 'doctorcre-app', 'environment': 'production',
+                                    'source_commit': blob}).encode()
+        with patch.dict(os.environ, self.env, clear=True):
+            before = dict(os.environ)
+            config = (self.repo / '.git/config').read_bytes()
+            refs = self.git('show-ref')
+            with self.assertRaisesRegex(ValueError, 'unknown|unavailable'):
+                self.observe()
+            self.assertEqual(dict(os.environ), before)
+            self.assertEqual((self.repo / '.git/config').read_bytes(), config)
+            self.assertEqual(self.git('show-ref'), refs)
+        self.git('replace', '-d', blob)
+
+    def test_real_history_ignores_overlays_and_caller_routing(self):
+        unrelated = self.unrelated_commit()
+        self.git('replace', self.served, unrelated)
+        self.git('config', 'core.useReplaceRefs', 'true')
+        with patch.dict(os.environ, {**self.env,
+                'GIT_DIR': str(self.repo / 'nonexistent.git'),
+                'GIT_OBJECT_DIRECTORY': str(self.repo / 'nonexistent-objects'),
+                'GIT_NO_REPLACE_OBJECTS': '0',
+                'GIT_CONFIG_PARAMETERS': "'core.useReplaceRefs=true'"}, clear=True):
+            before = dict(os.environ)
+            config = (self.repo / '.git/config').read_bytes()
+            refs = self.git('show-ref')
+            self.assertEqual(self.observe()['status'], 'passed')
+            self.assertEqual(dict(os.environ), before)
+            self.assertEqual((self.repo / '.git/config').read_bytes(), config)
+            self.assertEqual(self.git('show-ref'), refs)
+
     def test_network_identity_and_marker_fail_closed(self):
         def offline(*args):
             raise OSError('network unavailable')

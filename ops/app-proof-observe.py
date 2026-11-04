@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -62,13 +63,18 @@ def observe(repo, merge_sha, assertions=(), human_steps=(), *, fetch=public_get)
     served = identity.get('source_commit')
     if not isinstance(served, str) or not re.fullmatch('[0-9a-f]{40}', served):
         raise ValueError('app release source_commit must be a full commit SHA')
+    # Proofs use stored objects, independent of caller Git routing and history overlays.
+    git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    git_env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                   GIT_GRAFT_FILE=os.devnull, GIT_NO_LAZY_FETCH='1')
+    git = ['git', '--no-replace-objects', '-C', str(repo)]
     for sha in (merge_sha, served):
-        result = subprocess.run(['git', '-C', str(repo), 'cat-file', '-t', sha],
-                                capture_output=True, timeout=timeout())
+        result = subprocess.run([*git, 'cat-file', '-t', sha],
+                                env=git_env, capture_output=True, timeout=timeout())
         if result.returncode or result.stdout.strip() != b'commit':
             raise ValueError('unknown or unavailable app commit; fetch app main before observing')
-    result = subprocess.run(['git', '-C', str(repo), 'merge-base', '--is-ancestor', merge_sha, served],
-                            capture_output=True, timeout=timeout())
+    result = subprocess.run([*git, 'merge-base', '--is-ancestor', merge_sha, served],
+                            env=git_env, capture_output=True, timeout=timeout())
     if result.returncode:
         raise ValueError('requested merge commit is not a proven ancestor of the served app release')
     checked = []
