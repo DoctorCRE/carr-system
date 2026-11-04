@@ -52,6 +52,17 @@ test('waiting transitions preserve ownership, resolve identity and audit writes 
   const refuses = (promise,error) => assert.rejects(promise,e => e.payload?.error===error);
   const first = await item();
   assert.equal(first.waiting_on,null); assert.equal(first.waiting_version,0);
+  await t.test('v4 hydrates pending reply review references after the main merge',async()=>{
+    const activity=randomUUID(), proposal=randomUUID();
+    await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source)
+      values($1,now(),$2,'email_in','Synthetic reply','Synthetic evidence',
+      '{"mailbox_owner":"joe","sender_email":"sender@example.test"}')`,[activity,actor.id]);
+    await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,draft_subject,draft_body)
+      values($1,'reply_draft',$2,'Synthetic evidence','joe',0.95,$3,'Synthetic subject','Synthetic body')`,[proposal,activity,actor.id]);
+    const reply=(await read()).items.find(i=>i.source_id===proposal);
+    assert.equal(reply.review_reference.kind,'reply_draft');
+    assert.equal(reply.waiting_on,null);
+  });
   const key=randomUUID();
   const named = await set(first,undefined,actor,key);
   assert.equal(named.waiting_on.identity.display_name,'Synthetic Waiting Person');
