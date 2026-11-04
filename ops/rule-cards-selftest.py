@@ -175,9 +175,20 @@ class CardTests(unittest.TestCase):
         return {c['id'] for c in selector.select(event, now=now)}
 
     def test_approved_inventory(self):
-        self.assertEqual(len(self.cards), 60)
+        self.assertEqual(len(self.cards), 59)
         self.assertEqual(len(self.core), 12)
-        self.assertEqual(len({c['id'] for c in self.cards}), 60)
+        self.assertEqual(len({c['id'] for c in self.cards}), 59)
+
+    def test_retired_copilot_rule_is_not_delivered(self):
+        retired = '8aefcdce'
+        self.assertFalse(any(retired in card['source_rule_ids'] for card in self.cards))
+        for prompt in ('Triage Outlook email', 'Summarize my calendar and Teams'):
+            event = {'hook_event_name': 'UserPromptSubmit', 'prompt': prompt}
+            self.assertNotIn('R08', self.ids(CardSelector(self.cards), event))
+        selector = CardSelector(self.cards)
+        self.assertNotIn('R08', {card['id'] for card in selector.select(
+            {'hook_event_name': 'UserPromptSubmit', 'prompt': ''},
+            inherited_rule_ids=[retired])})
 
     def test_core_always_available(self):
         selector = CardSelector(self.cards)
