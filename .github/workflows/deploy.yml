@@ -3,6 +3,7 @@
 # --strict classes on main) succeeded. ci.yml does not run on pushes to main,
 # so the canary is that commit's CI.
 name: deploy
+run-name: Production release ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
 on:
   workflow_run:

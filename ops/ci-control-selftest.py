@@ -144,7 +144,7 @@ class Controls(unittest.TestCase):
     def test_ready_transition_runs_required_check(self):
         wf = workflow()
         triggers = wf['on']['pull_request']['types']
-        self.assertEqual(triggers, ['opened', 'synchronize', 'reopened',
+        self.assertEqual(triggers, ['opened', 'edited', 'synchronize', 'reopened',
                                     'converted_to_draft', 'ready_for_review'])
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
 

@@ -2814,6 +2814,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "record-email-lifecycle": {
+    "ingress_key": "mcp-tool:record-email-lifecycle",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "b70dd722142a27939f3526a8f763134bc58a49ef0ea20f017ed3ced5bf5ec9a1",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
@@ -3622,7 +3632,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "settle-home-inbox": {
     "ingress_key": "mcp-tool:settle-home-inbox",
     "source_locator": "mcp-server/src/home-inbox.js",
-    "schema_digest": "901e2b1be80531b1549d9f691024c25e6cd586518eee2a81cd55651237e57688",
+    "schema_digest": "9a4d5d7ae9cbb19c7d0d71370c575e26880ac96499e5c5deee5d62b67b040b8f",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -3652,7 +3662,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "snooze-home-inbox": {
     "ingress_key": "mcp-tool:snooze-home-inbox",
     "source_locator": "mcp-server/src/home-inbox.js",
-    "schema_digest": "46a4b8a3edb5aa1dc6d8c780df2e762c7765a6e8b81d9a45957047f0e4ad18f6",
+    "schema_digest": "adde3d4b1d061a6712ad93270f40ecdf82ff08bb60592f713b7fdbf9ee3cd794",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

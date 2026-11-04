@@ -63,10 +63,6 @@ The vendor network is the TEAM's ("our vendor network"), never Dell's alone; Del
 
 A different Vertical inside the same category is NOT an exception to the same-category hard block. Two vendors in one category stay un-introducible however far apart their verticals are.
 
-### 8aefcdce
-
-Copilot: Microsoft-native (Outlook triage, calendar, Teams summaries). Claude: everything else — lead gen, outreach, research, automation, documents, pipeline.
-
 ### 909b50d4
 
 Route build, fix and review jobs to Codex and Grok, and conserve Claude for orchestration until its weekly reset; use a Claude subagent only when nothing else qualifies, and say why.

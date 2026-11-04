@@ -88,6 +88,9 @@ carr_load_routine_db_env NEON_API_KEY CARR_DB_JOBS_URL || exit $?
 PROJECT_ID="steep-field-48688294"
 PROD_BRANCH="production"
 NEONCTL="$REPO/mcp-server/node_modules/.bin/neonctl"
+neon() {
+  "${PY:-python3}" "$REPO/tools/neon-cli.py" "$@"
+}
 IDENTITY="${CARR_AGE_IDENTITY:-$HOME/.config/carr/age-key.txt}"
 RESTORE_DB="restore_rehearse"
 # Interpreter for the platform-metering-gate call in phase 0, the one place this
@@ -251,14 +254,14 @@ cleanup() {
     if [ "$KEEP_BRANCH" -eq 1 ]; then
       say "  teardown: KEEPING branch $BRANCH_ID (--keep-branch)."
       say "            It holds a copy of production. Delete it when you are done:"
-      say "            $NEONCTL branches delete $BRANCH_ID --project-id $PROJECT_ID"
-    elif "$NEONCTL" branches delete "$BRANCH_ID" --project-id "$PROJECT_ID" >/dev/null 2>&1; then
+      say "            ${PY:-python3} $REPO/tools/neon-cli.py branches delete $BRANCH_ID --project-id $PROJECT_ID"
+    elif neon branches delete "$BRANCH_ID" --project-id "$PROJECT_ID" >/dev/null 2>&1; then
       say "  teardown: branch $BRANCH_ID deleted"
     else
       # Loud, and deliberately not a silent success: an orphaned branch is a
       # copy of production sitting in the vendor account, and it is also a bill.
       say "  teardown: COULD NOT DELETE branch $BRANCH_ID — delete it by hand:" >&2
-      say "            $NEONCTL branches delete $BRANCH_ID --project-id $PROJECT_ID" >&2
+      say "            ${PY:-python3} $REPO/tools/neon-cli.py branches delete $BRANCH_ID --project-id $PROJECT_ID" >&2
     fi
   fi
 
@@ -604,10 +607,10 @@ if [ "$VERIFY_ONLY" -eq 1 ]; then
 fi
 
 # Production reachability + the default branch id, which teardown checks against.
-BRANCH_LIST_JSON="$("$NEONCTL" branches list --project-id "$PROJECT_ID" --output json 2>/dev/null)"
+BRANCH_LIST_JSON="$(neon branches list --project-id "$PROJECT_ID" --output json)" || exit $?
 PROD_DEFAULT_ID="$(print -r -- "$BRANCH_LIST_JSON" \
   | python3 -c 'import json,sys; print(next((b["id"] for b in json.load(sys.stdin) if b.get("default")), ""))' 2>/dev/null)"
-[ -n "$PROD_DEFAULT_ID" ] || die "cannot list Neon branches — is neonctl authenticated? ($NEONCTL auth)"
+[ -n "$PROD_DEFAULT_ID" ] || die "cannot list Neon branches; check the stored NEON_API_KEY in ~/.config/carr/db.env"
 ACTIVE_NONDEFAULT_BRANCHES="$(print -r -- "$BRANCH_LIST_JSON" \
   | python3 -c 'import json,sys; print(sum(1 for b in json.load(sys.stdin) if not b.get("default")))' 2>/dev/null)"
 "$PY" "$REPO/ops/platform-metering-gate.py" --gate neon-disposable-branch \
@@ -620,7 +623,7 @@ say "  ok    Neon reachable; default branch is $PROD_DEFAULT_ID"
 # backup-dump.sh and tools/db-tap.py, and for the same two reasons: the harness
 # classifier refuses a Bash command containing $(...), and a DSN that never
 # reaches a shell argument never reaches a shell history either. Never printed.
-PROD_URL="$("$NEONCTL" connection-string "$PROD_BRANCH" --project-id "$PROJECT_ID" \
+PROD_URL="$(neon connection-string "$PROD_BRANCH" --project-id "$PROJECT_ID" \
             --role-name neondb_owner 2>/dev/null)"
 [ -n "$PROD_URL" ] || die "could not obtain the production connection string"
 PROD_HOST="${${PROD_URL#*@}%%/*}"; PROD_HOST="${PROD_HOST%%\?*}"
@@ -759,7 +762,7 @@ fi
 
 step "phase 2: throwaway branch"
 BRANCH_NAME="restore-rehearse-$(date -u +%Y%m%dT%H%M%SZ)"
-BRANCH_JSON="$("$NEONCTL" branches create --project-id "$PROJECT_ID" --name "$BRANCH_NAME" \
+BRANCH_JSON="$(neon branches create --project-id "$PROJECT_ID" --name "$BRANCH_NAME" \
                --output json 2>"$WORKDIR/branch.err")"
 BRANCH_ID="$(print -r -- "$BRANCH_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); b=d.get("branch",d); print(b.get("id",""))' 2>/dev/null)"
 if [ -z "$BRANCH_ID" ]; then
@@ -776,7 +779,7 @@ say "  ok    created $BRANCH_NAME ($BRANCH_ID)"
 # collide with existing objects and prove nothing. A fresh database is a genuine
 # empty target and costs one statement.
 step "phase 3: restore"
-BRANCH_ADMIN_URL="$("$NEONCTL" connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
+BRANCH_ADMIN_URL="$(neon connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
                     --role-name neondb_owner 2>/dev/null)"
 [ -n "$BRANCH_ADMIN_URL" ] || die "could not obtain the branch connection string"
 BRANCH_HOST="${${BRANCH_ADMIN_URL#*@}%%/*}"; BRANCH_HOST="${BRANCH_HOST%%\?*}"
@@ -804,7 +807,7 @@ if [ -n "$BACKUP_RUN_ID" ]; then
     || die "security parity failed"
   say "  SECURITY PARITY: PASS"
   say "  ok    verify-restore restored the artifact into $RESTORE_DB and the piped verdict passed: $EXERCISE_VERDICT"
-  RESTORE_URL="$("$NEONCTL" connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
+  RESTORE_URL="$(neon connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
                  --role-name neondb_owner --database-name "$RESTORE_DB" 2>/dev/null)"
   [ -n "$RESTORE_URL" ] || die "could not obtain the $RESTORE_DB connection string"
 fi
