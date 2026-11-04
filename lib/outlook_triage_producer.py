@@ -32,6 +32,11 @@ def _check(deadline):
         raise ProducerError('deadline_exceeded')
 
 
+def _identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
 def _read(path, cap, deadline):
     _check(deadline)
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -46,7 +51,8 @@ def _read(path, cap, deadline):
             size += len(chunk)
             if size > cap:
                 raise ProducerError('byte_cap_or_invalid_file')
-        if before != os.fstat(handle.fileno()) or before != path.stat(follow_symlinks=False):
+        if (_identity(before) != _identity(os.fstat(handle.fileno()))
+                or _identity(before) != _identity(path.stat(follow_symlinks=False))):
             raise ProducerError('source_changed')
     return b''.join(chunks)
 
