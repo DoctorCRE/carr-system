@@ -9,6 +9,7 @@ import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { homeReviewTools } from "./home-review.js";
+import { partnerNeededTools } from "./partner-needed.ts";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
@@ -9233,6 +9234,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
   "web-push-subscriptions": "mcp-server/src/web-push-subscriptions.ts",
+  "partner-needed": "mcp-server/src/partner-needed.ts",
   "home-inbox": "mcp-server/src/home-inbox.js",
   "home-review": "mcp-server/src/home-review.js",
   "session-identity": "mcp-server/src/session-identity.ts",
@@ -10874,6 +10876,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 registerTools(webPushTools({ withEnvelope, ToolError, config: () => ({ WEB_PUSH_VAPID_PUBLIC_KEY: process.env.WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_KEY_GENERATION: process.env.WEB_PUSH_KEY_GENERATION }) }), "web-push-subscriptions");
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
+registerTools(partnerNeededTools({ withEnvelope, ToolError }), "partner-needed");
 registerTools(homeReviewTools({ ToolError, readTool: executeRegisteredTool }), "home-review");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer

@@ -1,0 +1,13 @@
+{
+  "schema_version": "home-inbox.v4",
+  "read_verb": "read-home-inbox-v4",
+  "extends": "home-inbox.v3",
+  "added_source_types": ["post_call_review", "tour_feedback_review"],
+  "added_kind_labels": ["Call review", "Tour feedback review"],
+  "limit": 1000,
+  "exact_pushed_target": "read-partner-needed-card {event_id}",
+  "review_reference": "home-review.v1 for reply drafts; call and feedback cards open their domain review destination",
+  "post_call_completion": "review-call-outcome",
+  "feedback_completion": "acknowledge-partner-review",
+  "compatibility": "Versions 1 through 3 retain their previous source kind vocabulary. Consumers must explicitly select version 4."
+}

@@ -49,7 +49,20 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
     if (result?.ok !== true) throw new ToolError({ error: result?.error || 'inbox_unavailable' });
     return result;
   };
+  const readCurrent = async (c, version) => {
+    const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_v${version}() as result)
+      select result,array(select p.id::text from jsonb_array_elements(result->'items') i
+        join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
+        where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
+    return { ...withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids)), schema_version: `home-inbox.v${version}` };
+  };
   const tools = {
+    'read-home-inbox-v4': {
+      writerConnection: true,
+      description: 'Read Home with partner-needed post-call and feedback review sources. Version 4 adds source kinds; older readers retain their existing contract and caps.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: c => readCurrent(c, 4),
+    },
     'read-home-inbox': {
       writerConnection: true,
       description: 'Read the stable home-inbox.v1 snapshot. Refuses above 1000 items or 10000 notifications.',
@@ -60,13 +73,7 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
       writerConnection: true,
       description: 'Read the Home inbox with automatic settlement of canonical done tasks, sent replies, resolved fact reviews and received tour feedback. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => {
-        const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_v3() as result)
-          select result,array(select p.id::text from jsonb_array_elements(result->'items') i
-            join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
-            where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
-        return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
-      },
+      handler: c => readCurrent(c, 3),
     },
     'read-home-inbox-v2': {
       writerConnection: true,

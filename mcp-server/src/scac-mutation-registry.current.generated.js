@@ -76,6 +76,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "acknowledge-partner-review": {
+    "ingress_key": "mcp-tool:acknowledge-partner-review",
+    "source_locator": "mcp-server/src/partner-needed.ts",
+    "schema_digest": "32ffdd26af59a8080ffa9bde6d8a916c0a7fa1fc73865d51a7ba6d426680fb4f",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "add-critical-date": {
     "ingress_key": "mcp-tool:add-critical-date",
     "source_locator": "mcp-server/src/tools.js",
@@ -2374,6 +2384,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-home-inbox-v4": {
+    "ingress_key": "mcp-tool:read-home-inbox-v4",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-home-review": {
     "ingress_key": "mcp-tool:read-home-review",
     "source_locator": "mcp-server/src/home-review.js",
@@ -2430,6 +2450,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
     "write": false,
     "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-partner-needed-card": {
+    "ingress_key": "mcp-tool:read-partner-needed-card",
+    "source_locator": "mcp-server/src/partner-needed.ts",
+    "schema_digest": "363d1d8e5858de098dabb8f6ca06ea42633b281618cee4ce2e1392d6404dfc4b",
+    "write": false,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []

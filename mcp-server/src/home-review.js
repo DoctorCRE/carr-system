@@ -39,7 +39,10 @@ export function homeReviewTools({ ToolError, readTool }) {
         if (authorizationClassForActor(actor) !== 'verified_partner') fail('human_only_verb_requires_verified_partner');
         const current = async () => {
           const snapshot = await readTool(c, actor, 'read-home-inbox-v3', {});
-          return snapshot.items.find(item => item.item_id === args.item_id) ?? fail('home_review_not_found');
+          const projected = snapshot.items.find(item => item.item_id === args.item_id);
+          if (projected) return projected;
+          const exact = (await c.query('select ops.partner_needed_exact_item($1::text) item', [args.item_id])).rows[0]?.item;
+          return exact ? { ...exact, review_reference: homeReviewReference(exact) } : fail('home_review_not_found');
         };
         const item = await current();
         if (item.source_version !== args.source_version) fail('home_review_stale');

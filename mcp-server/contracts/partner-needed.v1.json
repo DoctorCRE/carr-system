@@ -1,0 +1,19 @@
+{
+  "schema_version": "partner-needed-event.v1",
+  "topics": ["reply_draft_ready", "post_call_review_waiting", "tour_feedback_received"],
+  "event_fields": ["event_id", "organization_tenant_id", "recipient_actor", "topic", "source_id", "source_revision", "card_item_id", "created_at", "expires_at", "dedupe_key"],
+  "push_payload_fields": ["schema_version", "event_id", "card_item_id", "path"],
+  "title": "DoctorCRE needs your review",
+  "path": "/inbox/card/<encoded card_item_id>",
+  "read_verb": "read-partner-needed-card",
+  "read_input": ["event_id"],
+  "read_states": ["actionable", "resolved", "unavailable"],
+  "acknowledge_verb": "acknowledge-partner-review",
+  "acknowledge_input": ["event_id", "idempotency_key"],
+  "acknowledge_topic": "tour_feedback_received",
+  "delivery_states": ["queued", "claimed", "accepted_by_provider", "retry_due", "suppressed", "expired", "failed"],
+  "delivery_identity": ["event_id", "subscription_id"],
+  "expiry_hours": 24,
+  "producer_batch_limit": 20,
+  "transport": "P4b; this contract does not send notifications. Provider acceptance never means seen or read."
+}

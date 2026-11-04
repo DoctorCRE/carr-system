@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Disabled
+  Disabled --> Watching: installation enabled, baseline current sources
+  Watching --> Queued: new actionable source revision
+  Watching --> Watching: historic source or duplicate notification
+  Queued --> Resolved: source reviewed, deleted, snoozed or settled
+  Queued --> Unavailable: another actor opens link
+  Queued --> CardOpen: recipient opens exact current card
+  CardOpen --> Resolved: domain review or feedback acknowledgement
+  Resolved --> Queued: new feedback revision
+  Queued --> Expired: 24 hours pass
