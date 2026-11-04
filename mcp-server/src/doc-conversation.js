@@ -35,6 +35,7 @@
 // optional fields, none of which names an actor, an offset or a sort.
 
 import { validateAnswerBlocks, recordedCompsTable } from './answer-blocks.js';
+import docRequestContract from '../contracts/doc-request.v1.json' with { type: 'json' };
 import docRequestLinks from '../contracts/doc-request-links.v1.json' with { type: 'json' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -124,6 +125,29 @@ const DOC_REQUEST_OUTCOMES = {
 
 export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
   return {
+    "submit-doc-request": {
+      write: true,
+      writerConnection: true,
+      humanOnly: true,
+      humanCallerOnly: true,
+      description: "Submit one queued partner ask. An immutable actor/key receipt commits with one human turn. Identical retries replay; changed requests and unavailable access refuse before writing.",
+      inputSchema: docRequestContract.$defs.request,
+      handler: async (c, actor, args) => {
+        const refuse = reason => ({ ok: true, contract: "doc-request.v1", status: "refused",
+          conversation_id: args.conversation_id, idempotency_key: args.idempotency_key,
+          request_msg_id: args.idempotency_key, reason });
+        if (!actor.human || !DOC_REQUEST_PARTNERS.includes(actor.slug)) return refuse("doc_request_partner_required");
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(args.idempotency_key)) return refuse("doc_request_key_invalid");
+        if (!UUID.test(args.conversation_id)) return refuse("doc_conversation_id_invalid");
+        if (typeof args.body !== "string" || !args.body.trim() || args.body.length > 20000) return refuse("doc_conversation_body_invalid");
+        const result = (await c.query("select ops.submit_doc_request($1::text,$2::text,$3::text) as result",
+          [args.idempotency_key, args.conversation_id, args.body])).rows[0]?.result;
+        if (!result || result.contract !== "doc-request.v1" || result.ok !== true
+          || !["accepted", "refused"].includes(result.status)) throw new ToolError({ error: "doc_request_result_unknown" });
+        return result;
+      },
+    },
+
     "add-doc-conversation-turn": {
       write: true,
       // Its append function is granted to carr_authority ONLY.

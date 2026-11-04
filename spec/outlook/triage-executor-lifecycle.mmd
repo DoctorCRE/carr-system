@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> unverified
+    unverified --> verified: Sanctioned and every required proof present
+    unverified --> refused: Interface prohibited
+    verified --> disabled: Operator disables or policy changes
+    verified --> unverified: Evidence invalidated
+    disabled --> unverified: Reverification requested
+    refused --> refused: Selection attempted
+%% Future lifecycle specification. No transition engine in this slice.
+%% Tests check chart parity and selector snapshots at each edge endpoint.
+%% never select unverified, disabled or refused capabilities
+%% never select without atomic read condition when policy requires read

@@ -6,7 +6,7 @@ import pg from 'pg';
 import { dealFileTools } from '../src/deal-files.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 
-const migration = new URL('../../migrations/1143_deal_line_quotes.sql', import.meta.url);
+const migration = new URL('../../migrations/1147_deal_line_quotes.sql', import.meta.url);
 
 test('line quotes preserve exact versions, ranges and access across retries', async () => {
   const db = await postgresDatabase('line-quotes-');

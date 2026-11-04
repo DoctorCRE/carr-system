@@ -21,9 +21,11 @@ def main():
     build.add_argument('--allow-empty', action='store_true',
                        help='Allow zero supplied messages to replace an existing index')
     query = commands.add_parser('query', help='Look up a literal phrase in one private local index')
-    query.add_argument('--source', type=Path, required=True, help='Current closed private decoded copy')
-    query.add_argument('--source-revision', required=True, help='Current capture or decoder revision; must match the index')
-    query.add_argument('--index', type=Path, required=True)
+    query.add_argument('--source', type=Path, help='Current closed private decoded copy')
+    query.add_argument('--source-revision', help='Current capture or decoder revision; must match the index')
+    query.add_argument('--published-snapshot', action='store_true',
+                       help='Search retained publication; capture recency remains unverified')
+    query.add_argument('--index', type=Path, help='Defaults to the per-user intake publication')
     query.add_argument('--account-id', type=int, required=True)
     query.add_argument('--query', required=True, help='Literal person, email address or property phrase; no FTS operators')
     query.add_argument('--limit', type=int, default=20, help='Page size, 1 to 100')
@@ -34,7 +36,8 @@ def main():
         if args.command == 'query':
             result = query_index(args.index, source=args.source, source_revision=args.source_revision,
                                  account_id=args.account_id, query=args.query,
-                                 limit=args.limit, cursor=args.cursor, excerpts=args.local_excerpts)
+                                 limit=args.limit, cursor=args.cursor, excerpts=args.local_excerpts,
+                                 published_snapshot=args.published_snapshot)
         else:
             result = build_index(args.source, args.index, mailbox=args.mailbox,
                                  account_id=args.account_id, source_revision=args.source_revision,

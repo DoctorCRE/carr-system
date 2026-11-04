@@ -8,6 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from secret_redaction import redact_text, sensitive_env_values
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.neon_cli import run as run_neon, api_key
 
 DETAIL_MAX = 2000
 
@@ -15,14 +17,17 @@ DETAIL_MAX = 2000
 def cmd_neon_dsn(args: argparse.Namespace) -> int:
     """Keep raw provider stderr in memory; emit only redacted diagnostics."""
     try:
-        result = subprocess.run(['neonctl', 'connection-string', 'production',
+        result = run_neon(['connection-string', 'production',
             '--project-id', args.project_id, '--role-name', 'neondb_owner'],
-            capture_output=True, text=True, timeout=90)
+            timeout=90)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"neonctl unavailable ({type(exc).__name__})", file=sys.stderr)
         return 1
     if result.stderr:
-        safe = redact_text(result.stderr, known_secrets=sensitive_env_values(os.environ))
+        safe = redact_text(result.stderr, known_secrets=sensitive_env_values(os.environ) + [api_key()])
         print(safe[:DETAIL_MAX].replace('\n', ' · '), file=sys.stderr)
     if result.returncode == 0:
         print(result.stdout.strip())

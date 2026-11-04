@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+"""Neon authentication regressions using a local provider executable only."""
+import importlib.util
+import os
+import ast
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class NeonTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        original_open = Path.open
+
+        def fixture_open(path, *args, **kwargs):
+            if path.name == 'db.env':
+                self.assertTrue(path.resolve().is_relative_to(self.home.resolve()),
+                                'selftest attempted a non-fixture credential read')
+            return original_open(path, *args, **kwargs)
+
+        guard = patch.object(Path, 'open', fixture_open)
+        guard.start()
+        self.addCleanup(guard.stop)
+        self.marker = self.home / 'calls'
+        self.browser = self.home / 'browser'
+        self.fake = self.home / 'neonctl'
+        self.fake.write_text('#!' + sys.executable + '''
+import os
+from pathlib import Path
+Path(os.environ['CALLS']).open('a').write('call\\n')
+if not os.environ.get('NEON_API_KEY', '').strip():
+    Path(os.environ['BROWSER']).touch()
+    raise SystemExit(1)
+print('fixture-dsn')
+''')
+        self.fake.chmod(0o755)
+        self.env = dict(HOME=str(self.home), PATH=str(self.home) + os.pathsep + os.defpath,
+                        CALLS=str(self.marker), BROWSER=str(self.browser))
+        self.patch = patch.dict(os.environ, self.env, clear=True)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.tap = load('test_neon_db_tap', 'tools/db-tap.py')
+        self.tap.NEONCTL = str(self.fake)
+
+    def test_harness_rejects_non_fixture_credential_reads(self):
+        with tempfile.TemporaryDirectory() as outside:
+            with self.assertRaisesRegex(AssertionError, 'non-fixture credential read'):
+                (Path(outside) / 'db.env').read_text()
+
+    def test_staging_selftest_never_reads_ambient_credentials(self):
+        config = self.home / '.config/carr/db.env'
+        config.parent.mkdir(parents=True)
+        config.write_text('NEON_API_KEY=synthetic-review-canary\n')
+        code = '''
+import os, runpy, sys
+reads = []
+def audit(event, args):
+    if event == 'open' and isinstance(args[0], str) and args[0].endswith('/.config/carr/db.env'):
+        reads.append(args[0])
+sys.addaudithook(audit)
+result = runpy.run_path(sys.argv[1])['main']()
+print(f'REPRO test exit={result}; ambient db.env reads={len(reads)}')
+assert result == 0 and not reads, 'selftest read a credential file'
+'''
+        result = subprocess.run([sys.executable, '-c', code,
+                                 str(ROOT / 'ops/staging-jobs-dsn-selftest.py')],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_missing_key_never_starts_provider(self):
+        for invoke in (lambda: self.tap.dsn(),
+                       lambda: self.tap._project_id_by_name('fixture', dict(os.environ)),
+                       lambda: self.tap._staging_runtime_target(dict(os.environ))):
+            with self.subTest(invoke=invoke):
+                with self.assertRaises(SystemExit) as error:
+                    invoke()
+                self.assertIn('~/.config/carr/db.env', str(error.exception))
+                self.assertFalse(self.marker.exists())
+                self.assertFalse(self.browser.exists())
+
+    def test_present_key_preserves_output_and_cache(self):
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        self.assertEqual(self.tap.dsn(), 'fixture-dsn')
+        self.assertEqual(self.tap.dsn(), 'fixture-dsn')
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+        self.assertFalse(self.browser.exists())
+
+    def test_stored_key_is_used(self):
+        config = self.home / '.config/carr'
+        config.mkdir(parents=True)
+        (config / 'db.env').write_text('NEON_API_KEY=synthetic-stored-key\n')
+        self.assertEqual(self.tap.dsn(), 'fixture-dsn')
+        self.assertFalse(self.browser.exists())
+
+    def test_command_launcher_refuses_without_key(self):
+        for command in ('connection-string', 'projects', 'branches', 'api'):
+            result = subprocess.run([sys.executable, str(ROOT / 'tools/neon-cli.py'), command],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('~/.config/carr/db.env', result.stderr)
+        self.assertFalse(self.marker.exists())
+
+    def test_command_launcher_passes_key_without_argv(self):
+        from lib.neon_cli import run
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        result = run(['connection-string', 'fixture'], executable=str(self.fake))
+        self.assertEqual((result.returncode, result.stdout), (0, 'fixture-dsn\n'))
+        self.assertFalse(self.browser.exists())
+
+    def test_auth_commands_are_refused_even_with_key(self):
+        from lib.neon_cli import run
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        for command in ('auth', 'login', 'init'):
+            with self.assertRaises(SystemExit):
+                run([command], executable=str(self.fake))
+        self.assertFalse(self.marker.exists())
+
+    def test_production_proof_and_migration_helper_share_guard(self):
+        from lib import neon_cli
+        proof = load('test_neon_production_proof', 'ops/migration-production-proof.py')
+        support = load('test_neon_migration_support', 'tools/migrate-prod-support.py')
+        from contextlib import redirect_stderr, redirect_stdout
+        import io
+        args = types.SimpleNamespace(project_id='fixture-project')
+        with patch.object(neon_cli, 'ROOT', self.home):
+            with self.assertRaises(SystemExit) as error:
+                proof.production_dsn()
+            self.assertIn('~/.config/carr/db.env', str(error.exception))
+            with redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(support.cmd_neon_dsn(args), 1)
+            self.assertIn('~/.config/carr/db.env', error.getvalue())
+            self.assertFalse(self.marker.exists())
+            os.environ['NEON_API_KEY'] = 'synthetic-key'
+            self.assertEqual(proof.production_dsn(), 'fixture-dsn')
+            with redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(support.cmd_neon_dsn(args), 0)
+            self.assertEqual(output.getvalue(), 'fixture-dsn\n')
+
+    def test_health_resolves_once_and_reads_with_server_read_only(self):
+        health = load('test_health_store', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        from unittest.mock import MagicMock, Mock
+        health._tap = types.SimpleNamespace(dsn=Mock(wraps=self.tap.dsn))
+        connection = MagicMock()
+        cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        def execute(sql):
+            rows = {'select 1': [(1, None, 'fixture')],
+                    'select 2': [(2, None, 'fixture')]}
+            cursor.fetchall.return_value = rows[sql]
+
+        cursor.execute.side_effect = execute
+        cursor.nextset.return_value = False
+        with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
+            for attempt in range(60):
+                value = 1 + attempt % 2
+                result = health.query(f'select {value}')
+                self.assertEqual((result.returncode, result.stdout), (0, f'{value}||fixture'))
+                if attempt == 0:
+                    os.environ.pop('NEON_API_KEY')
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+        self.assertEqual(connection.call_count, 60)
+        health._tap.dsn.assert_called_once_with()
+        self.assertIn('default_transaction_read_only=on', connection.call_args.kwargs['options'])
+        self.assertEqual(connection.call_args.kwargs['connect_timeout'], 15)
+        self.assertIn('statement_timeout=120000', connection.call_args.kwargs['options'])
+
+    def test_health_timeout_opens_process_lifetime_breaker(self):
+        from lib import neon_cli
+        health = load('test_health_store_timeout', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        with patch.object(neon_cli.subprocess, 'run', side_effect=
+                          subprocess.TimeoutExpired('fixture', 60)) as provider:
+            for _ in range(60):
+                result = health.query('select 1')
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('timed out', result.stderr)
+            provider.assert_called_once()
+            self.assertEqual(provider.call_args.kwargs['timeout'], 60)
+            self.assertEqual(provider.call_args.kwargs['stdin'], subprocess.DEVNULL)
+            self.assertEqual(provider.call_args.kwargs['env']['NEON_API_KEY'], 'synthetic-key')
+            self.assertNotIn('synthetic-key', provider.call_args.args[0])
+
+    def test_health_refusal_requires_fresh_reader_to_recover(self):
+        health = load('test_health_store_refusal_lifetime', 'tools/health_store.py')
+        health._tap = self.tap
+        self.assertEqual(health.query('select 1').returncode, 1)
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        self.assertEqual(health.query('select 1').returncode, 1)
+        self.assertFalse(self.marker.exists())
+        fresh = load('test_health_store_fresh', 'tools/health_store.py')
+        fresh._tap = self.tap
+        from unittest.mock import MagicMock
+        connection = MagicMock()
+        cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cursor.nextset.return_value = False
+        with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
+            self.assertEqual(fresh.query('select 1').returncode, 0)
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+
+    def test_health_caches_failed_resolution(self):
+        health = load('test_health_store_failure', 'tools/health_store.py')
+        health._tap = self.tap
+        for _ in range(6):
+            result = health.query('select 1')
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('~/.config/carr/db.env', result.stderr)
+        self.assertFalse(self.marker.exists())
+
+    def test_health_database_failure_refuses_without_caching_rows(self):
+        health = load('test_health_store_database_failure', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        from unittest.mock import Mock
+        connection = Mock(side_effect=RuntimeError('synthetic-private-detail'))
+        with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
+            for _ in range(2):
+                result = health.query('select 1')
+                self.assertEqual((result.returncode, result.stdout), (1, ''))
+                self.assertIn('RuntimeError', result.stderr)
+                self.assertNotIn('synthetic-private-detail', result.stderr)
+        self.assertEqual(connection.call_count, 2)
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+
+    def test_health_provider_failure_is_not_retried(self):
+        health = load('test_health_store_provider_failure', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        self.fake.write_text('#!' + sys.executable + '''
+import os
+from pathlib import Path
+Path(os.environ['CALLS']).open('a').write('call\\n')
+raise SystemExit(7)
+''')
+        for _ in range(6):
+            self.assertEqual(health.query('select 1').returncode, 1)
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+
+    def test_health_entry_points_use_shared_reader(self):
+        source = (ROOT / 'tools/health-check.py').read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess':
+                    self.assertNotIn('tools/db-tap.py', ast.get_source_segment(source, node))
+
+    def test_blank_key_never_launches(self):
+        os.environ['NEON_API_KEY'] = '   '
+        with self.assertRaises(SystemExit):
+            self.tap.dsn()
+        self.assertFalse(self.marker.exists())
+
+    def test_missing_home_cannot_read_machine_credentials(self):
+        from lib.neon_cli import api_key
+        self.assertEqual(api_key({}), '')
+
+    def test_real_health_snapshot_shares_resolution(self):
+        health = load('test_health_snapshot_store', 'tools/health_store.py')
+        health._tap = self.tap
+        os.environ['NEON_API_KEY'] = 'synthetic-key'
+        from unittest.mock import MagicMock, Mock
+        connection = MagicMock()
+        cursor = connection.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
+        def execute(sql):
+            statement = ' '.join(sql.split())
+            if statement.startswith("select 'DEF',d.key,"):
+                self.assertIn('from ops.job_definition d', statement)
+                self.assertIn('from ops.v_job_control v join ops.job j', statement)
+                cursor.fetchall.return_value = [
+                    ('DEF', 'fixture-job', 2, '{}', '2026-01-01', None)]
+            elif statement.startswith('select (select count(*) from doctrine_gate_run'):
+                self.assertIn('from ops.v_rule_enforcement_status', statement)
+                cursor.fetchall.return_value = [(1, 2, 3, 4, 5)]
+            elif statement == ("select value::text from public.v_integrity_digest "
+                               "where line = 'verb_usage_30d';"):
+                cursor.fetchall.return_value = [('{"registered": 17}',)]
+            else:
+                self.fail(f'unexpected snapshot SQL: {statement}')
+
+        cursor.execute.side_effect = execute
+        cursor.nextset.return_value = False
+        tree = ast.parse((ROOT / 'tools/health-check.py').read_text())
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                        and n.name == '_canonical_snapshot')
+        namespace = dict(CANONICAL_FIXTURE=None, CANONICAL_SECTION='all',
+                         REPO_ROOT=str(ROOT), os=os, sys=sys, json=__import__('json'),
+                         RULE_ENFORCED_STATES=('hard_enforced', 'authority_enforced'),
+                         RULE_UNENFORCEABLE_CLASS='judgment_advisory',
+                         _store_query=health.query,
+                         subprocess=types.SimpleNamespace(run=Mock(return_value=
+                             subprocess.CompletedProcess([], 0, '{}', ''))))
+        exec(compile(ast.Module(body=[function], type_ignores=[]),
+                     'health-check.py', 'exec'), namespace)
+        with patch.dict(sys.modules, {'psycopg': types.SimpleNamespace(connect=connection)}):
+            snapshot = namespace['_canonical_snapshot']()
+        self.assertEqual(self.marker.read_text().splitlines(), ['call'])
+        self.assertEqual(connection.call_count, 3)
+        self.assertEqual(snapshot['errors'], [])
+        self.assertEqual(snapshot['job_definitions'], [{
+            'key': 'fixture-job', 'version': 2, 'recurrence': {},
+            'registered_at': '2026-01-01', 'legacy_disabled_at': None,
+            'legacy_live': True}])
+        self.assertEqual(snapshot['controls'], {
+            'doctrine_gate_failures_24h': 1, 'doctrine_never_reviewed': 2,
+            'doctrine_stale_sections': 3, 'active_rules_not_hard_enforced': 4,
+            'active_rules_accepted_unenforceable': 5})
+        self.assertEqual(snapshot['verb_usage'], {'registered': 17})
+
+
+if __name__ == '__main__':
+    unittest.main()

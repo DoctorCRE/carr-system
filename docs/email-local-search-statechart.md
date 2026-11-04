@@ -37,3 +37,19 @@ This chart is a behavior specification backed by synthetic entry-point tests.
 It is not a TLC model and makes no formal model-checking claim. It leaves
 publication crash recovery to the existing publication tests and does not model
 mailbox completeness, real mail capture, or adversarial modification of FTS data.
+
+## Retained intake snapshot lookup
+
+Intake publishes `~/.local/share/carr/email-search/email-search-<account-id>.db` before removing
+its decoded working copy. Query with `--published-snapshot
+--account-id <configured-account-id> --query <literal-phrase>` without a source.
+This explicit mode reports `published_snapshot_capture_recency_unverified`,
+publication time and unknown completeness. It can serve the previous generation
+after a failed intake publication; it does not establish current mailbox freshness.
+The default source-bound mode and its exact-source refusal contract remain intact.
+
+The intake transitions and capacity contract are in
+[email-index-intake-design.md](email-index-intake-design.md). The snapshot CLI
+cleanup/lookup test and selected-account tests exercise the retained artifact.
+The default CLI and library lookup share the intake path resolver. Explicit
+research indexes still accept an absolute `--index` path.

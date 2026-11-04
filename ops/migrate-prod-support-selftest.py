@@ -33,13 +33,16 @@ class NeonDsnTests(unittest.TestCase):
         return code, output.getvalue(), error.getvalue(), provider
 
     def test_connection_string_is_returned_only_on_success(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {'NEON_API_KEY': 'synthetic-key'}, clear=True):
             code, output, error, provider = self.invoke([
                 subprocess.CompletedProcess([], 0, "fixture-connection\n", "")])
         self.assertEqual((code, output, error), (0, "fixture-connection\n", ""))
-        provider.assert_called_once_with(
-            ["neonctl", "connection-string", "production", "--project-id", "fixture-project",
-             "--role-name", "neondb_owner"], capture_output=True, text=True, timeout=90)
+        provider.assert_called_once()
+        self.assertEqual(provider.call_args.args[0][1:],
+                         ["connection-string", "production", "--project-id", "fixture-project",
+                          "--role-name", "neondb_owner"])
+        self.assertEqual(provider.call_args.kwargs['env'], {'NEON_API_KEY': 'synthetic-key'})
+        self.assertEqual(provider.call_args.kwargs['stdin'], subprocess.DEVNULL)
 
     def test_provider_failure_preserves_exit_code_and_redacts_diagnostics(self):
         canary = uuid.uuid4().hex
@@ -54,7 +57,7 @@ class NeonDsnTests(unittest.TestCase):
         self.assertLessEqual(len(error), support.DETAIL_MAX + 1)
 
     def test_unavailable_provider_returns_safe_error(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {'NEON_API_KEY': 'synthetic-key'}, clear=True):
             code, output, error, _ = self.invoke(FileNotFoundError("fixture provider absent"))
         self.assertEqual((code, output), (1, ""))
         self.assertIn("neonctl unavailable (FileNotFoundError)", error)

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "doc-request.v1",
+  "title": "Queued partner ask",
+  "description": "Accepted means one canonical human turn and immutable actor/key receipt committed atomically. Refused means verified pre-acceptance refusal. Transport errors and other results are unknown. A new key is a new request. Existing completion handles answers.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "conversation_id",
+        "body"
+      ],
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        },
+        "conversation_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ok",
+            "contract",
+            "conversation_id",
+            "idempotency_key",
+            "request_msg_id",
+            "status"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "contract": {
+              "const": "doc-request.v1"
+            },
+            "conversation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "idempotency_key": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            },
+            "request_msg_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            },
+            "status": {
+              "const": "accepted"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ok",
+            "contract",
+            "conversation_id",
+            "idempotency_key",
+            "request_msg_id",
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "contract": {
+              "const": "doc-request.v1"
+            },
+            "conversation_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "idempotency_key": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            },
+            "request_msg_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+            },
+            "status": {
+              "const": "refused"
+            },
+            "reason": {
+              "enum": [
+                "doc_request_partner_required",
+                "doc_request_key_invalid",
+                "doc_conversation_id_invalid",
+                "doc_conversation_body_invalid",
+                "doc_conversation_not_found",
+                "doc_request_key_reuse"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

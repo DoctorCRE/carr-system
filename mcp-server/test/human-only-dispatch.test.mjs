@@ -107,6 +107,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "link-lead-client",
     "list-deal-line-quotes",
     "propose-doc-correction",
+    "read-home-review",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
     "read-deal-quote-text",
@@ -142,6 +143,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "save-deal-line-quote",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
+    "submit-doc-request",
     "submit-email-draft",
     "undo-call",
     "undo-email-thread-filing",
