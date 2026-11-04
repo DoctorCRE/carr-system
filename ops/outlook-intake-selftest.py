@@ -2266,7 +2266,7 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(self.observe_runtime_receipt(receipt, value['runtime_sha']), 0)
         receipt = intake.receipt_line(initial, ROOT)
         value = json.loads(receipt.split(' ', 1)[1])
-        for changes in ({'state': 'failed'}, {'state': 'skipped'},
+        for changes in ({'state': 'failed'}, {'state': 'skipped'}, {'state': 'degraded'},
                         {'runtime_sha': '0' * 40}, {'runtime_sha': value['runtime_sha'][:9]},
                         {'counts': {'run': {'mail_ids': True}}},
                         {'counts': {'run': {'mail_ids': 0}}}, {'counts': {'run': {'emails': 1}}}):
@@ -2278,7 +2278,7 @@ class IntakeTest(unittest.TestCase):
         no_ids = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
         self.assertEqual(no_ids.counts['mail_ids'], 2, 'retained IDs survive a later snapshot')
         empty_state = json.loads(path.read_text())
-        empty_state['mail_ids'] = {}
+        empty_state['mail_ids'] = {'expired@example.test': f'expired:{ts(-timedelta(days=400))}'}
         path.write_text(json.dumps(empty_state))
         no_ids = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
         self.assertEqual(no_ids.counts['mail_ids'], 0)
