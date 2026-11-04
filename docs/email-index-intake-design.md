@@ -39,7 +39,13 @@ atomic replacement; a failed generation preserves the old index. The shipped
 publisher supports complete replacement, not incremental mutation. Identical
 source/revision/account skips replacement. Streaming rows avoids Python mailbox
 materialization. Temporary generation also contains one decoded snapshot; peak
-storage is source size plus old and new index (at most 1 GiB of indexes).
+publisher-only storage is its decoded snapshot plus old and new index (at most
+1 GiB of indexes). Intake additionally holds the HxStore snapshot, copied Files
+sidecars and original decoded database until its existing early cleanup. Those
+input sizes are additional and have no new byte cap. A crashed publisher leaves
+only its private generation; intake work directories retain their separate
+existing startup cleanup. Published indexes for other accounts also remain
+until explicitly retired; the 512 MiB cap applies to each account, not their sum.
 A directory-wide nonblocking writer lock serializes recovery and builds across
 accounts. While holding it and the existing index lock, the publisher removes
 its abandoned private `.email-search-<8-character-token>` directories before
