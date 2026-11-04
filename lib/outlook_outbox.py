@@ -23,7 +23,7 @@ class SubmittedDraft:
     mail: send.Mail
 
     @classmethod
-    def parse(cls, row: dict, settings: OutlookSettings):
+    def parse(cls, row: dict, settings: OutlookSettings, *, reconciliation=False):
         ident = str(uuid.UUID(row['proposal_id']))
         version = row['version']
         subject, body = row['subject'], row['body']
@@ -39,7 +39,8 @@ class SubmittedDraft:
         approved = row.get('attachments', [])
         if not isinstance(approved, list) or any(not isinstance(a, dict) or set(a) != {'path', 'sha256', 'size'} for a in approved):
             raise ValueError('invalid_submission')
-        attached = send.attachments([a['path'] for a in approved])
+        attached = (tuple(send.Attachment(Path(a['path']), a['sha256'], a['size']) for a in approved)
+                    if reconciliation else send.attachments([a['path'] for a in approved]))
         if any(a.sha256 != expected['sha256'] or str(a.path) != expected['path']
                or type(expected['size']) is not int or a.size != expected['size']
                for a, expected in zip(attached, approved)):
@@ -57,6 +58,7 @@ class SubmittedDraft:
         args = dict(idempotency_key=self.key, proposal_id=self.proposal_id,
                     base_version=self.version, sha256=self.sha256)
         if result.state is send.State.DONE and result.sent_item_id and result.sent_at:
+            args['idempotency_key'] = str(uuid.uuid5(uuid.UUID(self.key), 'sent:' + result.sent_item_id))
             return dict(args, status='sent', sent_item_id=result.sent_item_id,
                         sent_at=result.sent_at, sender_account=send.account(),
                         **({'reason': result.reason} if result.reason in ('body_unverified', 'body_mismatch') else {}))
@@ -86,7 +88,7 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
     if (send._addresses([settings.partner_cc]) != (settings.partner_cc,)
             or not settings.partner_cc or settings.partner_cc == settings.account):
         raise ValueError('partner_copy_required')
-    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0, quarantined=0, daily_cap_reached=0, daily_cap_escalated=0)
+    counts = dict(sent=0, failed=0, deferred=0, receipt_failed=0, compose_window_open=0, sent_unrecorded=0, quarantined=0, daily_cap_reached=0, daily_cap_escalated=0, recovery_blocked=0)
     ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ports.out, 0o700)
     root = ports.out / 'outbox'
@@ -100,8 +102,29 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
             counts['deferred'] += 1
             return counts
         pending = set()
+        fenced_keys = set()
         for path in sorted(root.glob('*.json')):
-            receipt = json.loads(path.read_text())
+            fenced_keys.add(path.stem)
+            try:
+                os.chmod(path, 0o600)
+                receipt = json.loads(path.read_text())
+                if (not isinstance(receipt, dict) or not isinstance(receipt.get('proposal_id'), str)
+                        or receipt.get('status') not in ('sent', 'failed')
+                        or type(receipt.get('base_version')) is not int or receipt['base_version'] < 1
+                        or not isinstance(receipt.get('sha256'), str)
+                        or not isinstance(receipt.get('idempotency_key'), str)):
+                    raise ValueError('invalid_receipt')
+                ident = str(uuid.UUID(receipt['proposal_id']))
+                uuid.UUID(receipt['idempotency_key'])
+                expected_key = str(uuid.uuid5(uuid.NAMESPACE_URL,
+                    f"outlook-outbox|{ident}|{receipt['base_version']}"))
+                if path.stem != expected_key or not re.fullmatch(r'[a-f0-9]{64}', receipt['sha256']):
+                    raise ValueError('invalid_receipt_identity')
+            except (ValueError, OSError, TypeError):
+                counts['recovery_blocked'] += 1
+                counts['receipt_failed'] += 1
+                logging.getLogger(__name__).error('outlook-outbox corrupt_receipt_recovery_required')
+                continue
             pending.add(receipt['proposal_id'])
             try:
                 if receipt.get('status') == 'sent' and not receipt.get('sent_at'):
@@ -156,6 +179,8 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 receipt = dict(idempotency_key=key, proposal_id=ident, base_version=version,
                                sha256=digest, status='failed', reason=reason)
             else:
+                if draft.key in fenced_keys:
+                    continue
                 result = send.send_submitted(draft, ports=ports)
                 if result.state in (send.State.PRESSED_UNCONFIRMED, send.State.WINDOW_NOT_CLOSED):
                     counts['failed'] += 1
@@ -184,6 +209,29 @@ def run(settings: OutlookSettings, ports: send.Ports) -> dict[str, int]:
                 counts['receipt_failed'] += 1
             else:
                 path.unlink()
+        cursor_path = root / 'reconcile-cursor'
+        cursor = json.loads(cursor_path.read_text()) if cursor_path.exists() else {}
+        late = ports.carr('outbox-for-sender', dict(mode='reconcile', **cursor))
+        if (late.get('schema_version') != 'email-outbox.v1' or late.get('owner') != settings.owner
+                or not isinstance(late.get('drafts'), list) or len(late['drafts']) > 100):
+            raise ValueError('reconciliation_identity_or_schema_mismatch')
+        for row in late['drafts'] if late.get('mode') == 'reconcile' else []:
+            try:
+                draft = SubmittedDraft.parse(row, settings, reconciliation=True)
+                if draft.key in fenced_keys or draft.proposal_id in pending:
+                    continue
+                result = send.reconcile_submitted(draft, ports=ports)
+                if result.state is not send.State.DONE:
+                    continue
+                receipt = draft.receipt(result)
+                path = root / f'{draft.key}.json'
+                _save(path, receipt)
+                if ports.carr('record-email-sent', receipt).get('ok') is not True:
+                    raise ValueError('receipt_refused')
+                path.unlink()
+            except Exception:
+                counts['receipt_failed'] += 1
+        _save(cursor_path, dict(after=late['next_cursor']) if late.get('next_cursor') else {})
         cap_path = root / 'daily-cap-state'
         today = datetime.fromtimestamp(ports.now(), settings.timezone).date().isoformat()
         previous = json.loads(cap_path.read_text()) if cap_path.exists() else {}

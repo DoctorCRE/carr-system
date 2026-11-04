@@ -1095,6 +1095,8 @@ class OutboxTests(unittest.TestCase):
                            now=self.clock.now, sleep=self.clock.sleep, out=self.settings.send_state)
 
     def carr(self, verb, args):
+        if verb == 'outbox-for-sender' and args.get('mode') == 'reconcile':
+            return dict(schema_version='email-outbox.v1', owner='joe', mode='reconcile', drafts=[])
         self.calls.append((verb, dict(args)))
         if verb == 'outbox-for-sender':
             return dict(schema_version='email-outbox.v1', owner='joe', drafts=[self.draft])
@@ -1219,14 +1221,26 @@ class OutboxTests(unittest.TestCase):
         receipt = self.calls[-1][1]
         row = dict(proposal_id=self.draft['proposal_id'], version=3, status='sent',
                    partner_submitted=True, account=ACCOUNT, partner_cc=self.settings.partner_cc,
-                   subject=self.draft['subject'], to=self.draft['to'], cc=self.draft['cc'],
+                   subject=self.draft['subject'], body=self.draft['body'], to=self.draft['to'], cc=self.draft['cc'],
                    send_result=receipt, correspondence=[dict(send_id=self.draft['proposal_id'],
                    sent_item_id='sent-42', sent_at=receipt['sent_at'], sender=dict(email=ACCOUNT),
                    recipients=[dict(email=self.draft['to'][0], kind='to'),
                                dict(email=self.settings.partner_cc, kind='cc')])])
         ledger = [json.loads(line) for line in (self.ports.out / send_mod.LEDGER).read_text().splitlines()]
         result = proof.prove(row, ledger, self.mailbox.snapshot(), self.settings)
+        self.assertFalse(result['ok'], result)
+        self.assertTrue(result['dispatch_verified'])
+        row['send_result'] = dict(receipt, reason='body_verified')
+        for body in ('Different text', self.draft['body'] + '\n'):
+            snapshot = Snapshot((replace(self.mailbox.sent[0], body_fingerprint=send_mod.body_fingerprint(body)),), ())
+            self.assertFalse(proof.prove(row, ledger, snapshot, self.settings)['ok'])
+        self.mailbox.sent[0] = replace(self.mailbox.sent[0], body_fingerprint=send_mod.body_fingerprint(self.draft['body']))
+        row['send_result'] = dict(receipt, reason='body_verified')
+        result = proof.prove(row, ledger, self.mailbox.snapshot(), self.settings)
         self.assertTrue(result['ok'], result)
+        self.assertTrue(proof.prove(dict(row, version=4, send_result=dict(row['send_result'], reconciled_from_uncertainty=True)), ledger, self.mailbox.snapshot(), self.settings)['ok'])
+        for reason in ('body_unverified', 'body_mismatch'):
+            self.assertFalse(proof.prove(dict(row, send_result=dict(receipt, reason=reason)), ledger, self.mailbox.snapshot(), self.settings)['ok'])
         for value in (self.draft['subject'], self.draft['body'], *self.draft['to'], *self.draft['cc']):
             self.assertNotIn(value, json.dumps(result))
         for change in (dict(status='approved_to_send'), dict(partner_submitted=False),
@@ -1237,6 +1251,67 @@ class OutboxTests(unittest.TestCase):
         self.mailbox.sent.append(replace(self.mailbox.sent[0], item_id='duplicate-send'))
         self.assertFalse(proof.prove(row, ledger, self.mailbox.snapshot(), self.settings)['ok'])
         self.assertFalse(proof.prove(None, [], Snapshot((), ()), self.settings)['ok'])
+
+    def test_corrupt_receipt_does_not_block_unrelated_submission(self):
+        root = self.ports.out / 'outbox'
+        root.mkdir(parents=True)
+        corrupt = root / 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json'
+        corrupt.write_text('{')
+        result = self.worker.run(self.settings, self.ports)
+        self.assertEqual(result['sent'], 1)
+        self.assertEqual(result['recovery_blocked'], 1)
+        self.assertEqual(corrupt.read_text(), '{')
+        self.assertEqual(corrupt.stat().st_mode & 0o777, 0o600)
+
+    def test_late_reconciliation_with_empty_send_queue_never_presses(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        ledger = send_mod.Ledger(self.ports.out / send_mod.LEDGER)
+        self.ports.out.mkdir(parents=True)
+        ledger.append(draft.key, 'send', 'pressing', send_mod.fingerprint(draft.mail), NOW)
+        self.clock.t = NOW + send_mod.DUPLICATE_WINDOW + 1
+        self.assertEqual(self.worker.run(self.settings, self.ports)['failed'], 1)
+        original = self.carr
+        lost_ack = []
+        def carr(verb, args):
+            if verb == 'record-email-sent' and args.get('status') == 'sent' and not lost_ack:
+                lost_ack.append(original(verb, args))
+                raise OSError('synthetic_lost_ack')
+            if verb == 'outbox-for-sender':
+                return dict(schema_version='email-outbox.v1', owner='joe',
+                            mode=args.get('mode'), drafts=[self.draft] if args.get('mode') == 'reconcile' else [])
+            return original(verb, args)
+        self.ports.carr = carr
+        self.mailbox.broken = True
+        self.worker.run(self.settings, self.ports)
+        self.mailbox.broken = False
+        self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(draft.mail.recipients),
+                                        draft.mail.subject, int(NOW), 'late-sent'))
+        self.worker.run(self.settings, self.ports)
+        self.worker.run(self.settings, self.ports)
+        self.assertEqual(self.calls[-1][1]['status'], 'sent')
+        self.assertEqual(self.calls[-1][1]['sent_item_id'], 'late-sent')
+        self.assertNotEqual(self.calls[-1][1]['idempotency_key'], draft.key)
+        self.assertEqual(len(lost_ack), 1)
+        self.assertEqual(self.sent, [])
+
+    def test_corrupt_receipt_fences_its_key_and_preserves_other_press_fences(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        root = self.ports.out / 'outbox'
+        root.mkdir(parents=True)
+        corrupt = root / f'{draft.key}.json'
+        corrupt.write_text('{')
+        self.assertEqual(self.worker.run(self.settings, self.ports)['recovery_blocked'], 1)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(corrupt.read_text(), '{')
+
+    def test_reconciliation_without_ledger_cannot_send_even_with_sent_match(self):
+        draft = self.worker.SubmittedDraft.parse(self.draft, self.settings)
+        self.mailbox.sent.append(SentRow(ACCOUNT, '; '.join(draft.mail.recipients),
+                                        draft.mail.subject, int(NOW), 'observed-only'))
+        result = send_mod.reconcile_submitted(draft, ports=self.ports)
+        self.assertEqual(result.reason, 'reconciliation_ledger_missing')
+        self.assertEqual(self.sent, [])
+        self.assertFalse((self.ports.out / send_mod.LEDGER).exists())
 
     def test_every_send_outcome_is_classified(self):
         outcomes = {
@@ -1773,14 +1848,14 @@ class OutboxTests(unittest.TestCase):
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
         self.assertEqual(receipt['sent_item_id'], 'sent-42')
 
-    def test_matching_sent_body_confirms_after_whitespace_normalization(self):
+    def test_whitespace_changed_body_is_metadata_only(self):
         self.sent_body_fingerprint = send_mod.body_fingerprint('  Submitted\n final\ttext.  ')
         self.assertEqual(self.worker.run(self.settings, self.ports)['sent'], 1)
         [receipt] = [args for verb, args in self.calls if verb == 'record-email-sent']
         self.assertEqual(receipt['status'], 'sent')
-        self.assertNotIn('reason', receipt)
+        self.assertEqual(receipt['reason'], 'body_mismatch')
         ledger = (self.settings.send_state / send_mod.LEDGER).read_text()
-        self.assertIn('body_verified', ledger)
+        self.assertIn('body_mismatch', ledger)
         self.assertNotIn(self.draft['body'], ledger)
 
     def test_preview_only_confirmation_receipt_survives_reconciliation(self):

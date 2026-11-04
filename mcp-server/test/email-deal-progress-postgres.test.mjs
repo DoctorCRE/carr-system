@@ -3100,3 +3100,74 @@ test('summary provenance can cite captured headers but cannot invent them', asyn
   await refuses(result('Re: Cancel the purchase?'), 'email_summary_evidence_invalid');
   assert.equal((await result('Re: Approve the purchase?')).status, 'available');
 });
+
+
+test('late Sent corrects a failed uncertain identity without reapproving or duplicating correspondence', async () => {
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const submitted = await submitDraft(proposal);
+  const base = { proposal_id: proposal.proposal_id, base_version: 2, sha256: submitted.sha256 };
+  await command('record-email-sent', { ...base, idempotency_key: randomUUID(),
+    status: 'failed', reason: 'unconfirmed_after_86400' }, machineFor('joe'), 'carr_writer');
+  assert.ok(!(await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts
+    .some(p => p.proposal_id === proposal.proposal_id));
+  const late = await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader');
+  const frozen = late.drafts.find(p => p.proposal_id === proposal.proposal_id);
+  assert.equal(frozen.version, 2);
+  assert.equal(frozen.sha256, submitted.sha256);
+  assert.ok(late.drafts.length <= 100);
+  assert.ok(!(await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('dell'), 'carr_reader')).drafts
+    .some(p => p.proposal_id === proposal.proposal_id));
+  await refuses(submitDraft(proposal, { base_version: 3 }), 'email_draft_failure_not_resubmittable');
+  const sent = { ...base, status: 'sent', sent_item_id: 'late-synthetic-' + randomUUID() };
+  const result = await command('record-email-sent', { ...sent, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer');
+  assert.equal(result.status, 'sent');
+  assert.equal((await command('record-email-sent', { ...sent, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer')).replayed, true);
+  assert.ok(!(await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader')).drafts
+    .some(p => p.proposal_id === proposal.proposal_id));
+  const recorded = (await command('get-deal-room', { deal: sentDeal })).activities
+    .filter(a => a.email_context?.send_id === proposal.proposal_id);
+  assert.equal(recorded.length, 1);
+});
+
+
+test('uncertain reconciliation pages are bounded and never contain safe pre-dispatch failures', async () => {
+  const { proposal } = await sentDraftFixture();
+  const submitted = await submitDraft(proposal);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'failed', reason: 'aborted_before_dispatch' },
+    machineFor('joe'), 'carr_writer');
+  const page = await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader');
+  assert.ok(!page.drafts.some(p => p.proposal_id === proposal.proposal_id));
+  await refuses(command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: 'not-dispatched' },
+    machineFor('joe'), 'carr_writer'), 'email_draft_not_approved');
+});
+
+test('reconciliation keyset pages reach identities beyond the first hundred', async () => {
+  const ids = new Set();
+  for (let i=0; i<101; i++) {
+    const { proposal } = await sentDraftFixture();
+    const submitted = await submitDraft(proposal);
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: 2, sha256: submitted.sha256, status: 'failed', reason: 'unconfirmed_after_86400' },
+      machineFor('joe'), 'carr_writer');
+    ids.add(proposal.proposal_id);
+  }
+  const first = await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader');
+  assert.equal(first.drafts.length, 100);
+  assert.ok(first.next_cursor);
+  const seen = new Set(first.drafts.map(p => p.proposal_id));
+  let cursor = first.next_cursor;
+  for (let pageNumber=0; cursor && pageNumber<4; pageNumber++) {
+    const page = await command('outbox-for-sender', { mode: 'reconcile', after: cursor }, machineFor('joe'), 'carr_reader');
+    assert.ok(page.drafts.length <= 100);
+    for (const row of page.drafts) {
+      assert.ok(row.proposal_id > cursor);
+      assert.ok(!seen.has(row.proposal_id));
+      seen.add(row.proposal_id);
+    }
+    cursor = page.next_cursor;
+  }
+  assert.equal(cursor, null);
+  assert.ok([...ids].every(id => seen.has(id)));
+});
