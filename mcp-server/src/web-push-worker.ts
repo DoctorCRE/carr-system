@@ -6,7 +6,7 @@ import type { PushConfig } from './web-push-delivery.ts';
 type Environment = PushConfig & { DATABASE_URL_JOBS?: string };
 export async function runWebPush(env: Environment) {
   if (!pushConfiguration(env) || !env.DATABASE_URL_JOBS) return {state:'disabled',attempted:0,accepted:0};
-  const pool = new Pool({connectionString:env.DATABASE_URL_JOBS,connectionTimeoutMillis:5000});
+  const pool = new Pool({connectionString:env.DATABASE_URL_JOBS,connectionTimeoutMillis:5000,query_timeout:5000});
   try {
     const c = await pool.connect();
     try {

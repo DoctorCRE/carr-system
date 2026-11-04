@@ -193,6 +193,14 @@ test('durable_delivery_statechart',async t=>{
     assert.equal(await store.authorize(claim,'test'),false);assert.equal((await delivery(e)).state,'suppressed');
   });
   await reset();
+  await t.test('authorization_renews_near_expiry_lease_before_provider_send',async()=>{
+    await make();const [claim]=await store.claim();
+    await db.query("update ops.partner_needed_delivery set claim_until=clock_timestamp()+interval '10 seconds' where event_id=$1",[claim.event_id]);
+    assert.equal(await store.authorize(claim,'test'),true);
+    const lease=(await db.query("select claim_until>clock_timestamp()+interval '4 minutes' protected from ops.partner_needed_delivery where event_id=$1",[claim.event_id])).rows[0];
+    assert.equal(lease.protected,true);await store.finish(claim,201,0);
+  });
+  await reset();
   await t.test('overlapping_workers_share_two_durable_provider_slots',async()=>{
     for(let i=0;i<3;i++)await make();const claims=await store.claim();
     const results=await Promise.all(claims.map((claim,i)=>(i%2?second:store).authorize(claim,'test')));

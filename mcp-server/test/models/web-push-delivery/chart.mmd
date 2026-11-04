@@ -3,6 +3,7 @@ stateDiagram-v2
   queued --> claimed: Due and lease available
   retry_due --> claimed: Backoff ends
   claimed --> claimed: Lease expires and new token replaces old token
+  claimed --> claimed: Attempt reservation renews the send lease
   claimed --> accepted_by_provider: Provider accepts and token still matches
   claimed --> retry_due: Transient failure within attempt and expiry budget
   claimed --> retry_due: Quiet hours or capacity or breaker or daily budget defers without send

@@ -103,7 +103,7 @@ begin
     update ops.web_push_breaker set probe_token=p_token,probe_until=instant+interval '5 minutes' where web_push_breaker.origin=v_origin;
   end if;
   update ops.web_push_budget set attempts=attempts+1 where actor_id=e.recipient_actor and day=(instant at time zone 'UTC')::date;
-  update ops.partner_needed_delivery set attempt_count=attempt_count+1,attempted_token=p_token where event_id=p_event and subscription_id=p_subscription;
+  update ops.partner_needed_delivery set attempt_count=attempt_count+1,attempted_token=p_token,claim_until=instant+interval '5 minutes' where event_id=p_event and subscription_id=p_subscription;
   return true;
 end $$;
 
