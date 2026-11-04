@@ -22,12 +22,13 @@
     "worktree-self-plumb.py": "f7eac9fc2956f932787211d4fd638350ffb4df5a251f7d49afbd1bf707d3bc33",
     "orchestrator-rotation.py": "591412339c2556b5a6e3db3ce91cefef698a58b2215c10c2288aeeed27b14599",
     "orchestrator-question.py": "c782bbb0cca69556be5a4ccb4bd053c9d499c80b5937702f8e0ea2063cc2cefe",
-    "orchestrator_session.py": "1d7026773bf355d6dfe0d9ad5bc6746a2966c113e0f8b3b9cd0e53d7b0bb12eb"
+    "orchestrator_session.py": "1d7026773bf355d6dfe0d9ad5bc6746a2966c113e0f8b3b9cd0e53d7b0bb12eb",
+    "session-continuity-codex.py": "63bfe236500a222343dd80f9e88068fa78bf7646dc6f357dfcb2d02d0afb62e0"
   },
   "contracts": {
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",
     "hooks.json": "b0b57fca08bae3059e746f870dc8b5f2ae4d88b162b33f7f922531bd4c1b19cf",
-    "codex-hooks.json": "3631799714d7dbdd10a0a83d4c08e99af96226ed4487dd6661e15e449337579f",
+    "codex-hooks.json": "add91013ba868f82af26a42a9a14039013b571db4e9ecc231b7598110ee4d9c2",
     "rule-enforcement-map.json": "7fd3df5915191d622359be00c4ea96c05a29cb99ea3da394a01217824984062b",
     "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",
     "claude-managed-settings.json": "15f4eefef5d8a9362633ad45f44db1b7e946f4539c537e4dc19aff394dd91a11",

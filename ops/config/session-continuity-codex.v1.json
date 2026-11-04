@@ -1,0 +1,11 @@
+{
+  "schema": "carr-codex-native-gap.v1",
+  "status": "partial-source-only",
+  "bridge_revision": "dfd9e1120a07fac7d402ff7852f7ebb39bfe6a8f",
+  "bridge_artifacts": {
+    "ops/session-continuity-adapter.py": "64c8f36c9a27a533e63fd49a7cd9c2edf4f5ab9706619ecc7ea1e8e6ccac739e",
+    "ops/config/session-continuity-adapter.v1.json": "b0e3ccb1d2b03e776f072bac19939081f89a29be9b8d4f21548f7a87e6229f0c"
+  },
+  "native_installation": "pending",
+  "native_recovery": "unproven"
+}
