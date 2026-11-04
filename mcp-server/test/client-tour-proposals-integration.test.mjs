@@ -175,13 +175,16 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.equal((await summary()).state,'empty','former owner cannot see proposals');
     assert.equal((await summary('dell')).items.length,1,'new owner sees the deal');
     await c.query('reset session authorization');
-    for (let i=0;i<21;i++) {
+    for (let i=0;i<22;i++) {
       const id=randomUUID(),tid=randomUUID(),slug=`cap-${i}`;
       await c.query("insert into deal(id,client_id,name,deal_type,phase,created_by,updated_by,owner) values($1,$2,$3,'lease','research',$4,$4,'joe')",[id,client,`Cap ${i.toString().padStart(2,'0')}`,actor]);
       await c.query("select ops.register_client_portal($1,$2,'test')",[id,slug]);
       await c.query("insert into ops.tour values($1,'carr-internal',$2)",[tid,id]);
       await c.query("insert into ops.client_tour_proposal(portal_slug,deal_id,tour_id,portal_revision,property_ids,base_property_ids) values($1,$2,$3,1,'[]','[]')",[slug,id,tid]);
     }
+    await c.query('set session authorization carr_reader; begin read only');
+    assert.equal((await c.query("select * from ops.pending_client_tour_proposals('joe')")).rows.length,21,'database source is bounded before formatting');
+    await c.query('commit; reset session authorization');
     const capped=await summary();
     assert.equal(capped.items.length,20);
     assert.equal(capped.truncated,true);

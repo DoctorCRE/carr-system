@@ -49,4 +49,11 @@ Run the focused tests with `node --experimental-strip-types --test
 mcp-server/test/client-tour-proposals-postgres.test.mjs
 mcp-server/test/client-tour-proposals-integration.test.mjs`. To replay the
 pre-migration failure, run the integration test directly with `--baseline`.
-That replay omits migration 1147; it is not an isolated origin/main run.
+That replay omits migration 1148; it is not an isolated origin/main run.
+
+The morning brief reads stored pending and partially accepted proposals through
+`ops.pending_client_tour_proposals`. It returns at most 20 owned deals, with one
+extra database row used to detect truncation. Each line counts distinct additions
+and removals against the current cart. Disabled portals and merged clients are
+excluded. Reads do not fetch the portal, import proposals, or change cart rows.
+Source failures remain unavailable; a successful zero-row read says none.
