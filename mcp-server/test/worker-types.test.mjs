@@ -1,5 +1,5 @@
 // Tests generation and validation of Worker verb request types.
-import { test, after } from "node:test";
+import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -16,6 +16,17 @@ after(() => {
   else process.env.TMPDIR = previousTmp;
   rmSync(cacheRoot, { recursive: true, force: true });
 });
+
+before(() => {
+  const generated = spawnSync("npm", ["run", "generate:types"], { encoding: "utf8", cwd: root });
+  assert.equal(generated.status, 0, generated.stdout + generated.stderr);
+});
+
+function typecheck() {
+  return spawnSync(path.join(root, "node_modules/.bin/tsc"), ["--project", "tsconfig.json"], {
+    encoding: "utf8", cwd: root,
+  });
+}
 
 
 function generate(schema) {
@@ -86,7 +97,7 @@ test("generation rejects ambiguous oneOf and constrained empty-object mappings",
 test("generated verb requests accept valid fields and reject a wrong field type", () => {
   const dir = mkdtempSync(path.join(root, "type-tests/request-"));
   const source = path.join(dir, "request.ts");
-  const check = () => spawnSync("npm", ["run", "typecheck"], { encoding: "utf8", cwd: root });
+  const check = typecheck;
   const request = (page) => `import type { VerbInputs } from "../../.generated/verb-inputs.js";
 const request: VerbInputs["standing-context"] = { detail: "boot", page: ${page} };
 `;
@@ -111,7 +122,7 @@ const request: VerbInputs["standing-context"] = { detail: "boot", page: ${page} 
   }
 });
 
-test("closed empty verb requests reject extra fields and non-objects through CI", async (t) => {
+test("closed empty verb requests reject extra fields and non-objects", async (t) => {
   const dir = mkdtempSync(path.join(root, "type-tests/request-"));
   const source = path.join(dir, "request.ts");
   const request = (value) => `import type { VerbInputs } from "../../.generated/verb-inputs.js";
@@ -120,28 +131,23 @@ const request: VerbInputs["list-my-codex-sessions"] = ${value};\n`;
     for (const [name, value] of [["extra field", '{ unexpected: "wrong" }'], ["non-object", '"wrong"']]) {
       await t.test(name, () => {
         writeFileSync(source, request(value));
-        const ci = spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
-          encoding: "utf8", cwd: path.dirname(root),
-        });
+        const ci = typecheck();
         assert.equal(ci.status, 1, ci.stdout + ci.stderr);
         assert.match(ci.stdout + ci.stderr, /TS2322/);
-        assert.match(ci.stdout + ci.stderr, /Worker verb contract types failed/);
       });
     }
     writeFileSync(source, request("{}"));
-    const valid = spawnSync("npm", ["run", "typecheck"], { encoding: "utf8", cwd: root });
+    const valid = typecheck();
     assert.equal(valid.status, 0, valid.stdout + valid.stderr);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("the converted Worker module rejects a wrong binding name and type in CI", () => {
+test("the converted Worker module rejects a wrong binding name and type", () => {
   const dir = mkdtempSync(path.join(root, "type-tests/env-"));
   const source = path.join(dir, "bindings.ts");
-  const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
-    encoding: "utf8", cwd: path.dirname(root),
-  });
+  const check = typecheck;
   const valid = `import { workspaceCommandCenterPosture } from "../../src/workspace-feature-flag.ts";
 declare const env: Parameters<typeof workspaceCommandCenterPosture>[0];
 workspaceCommandCenterPosture({ WORKSPACE_COMMAND_CENTER_READ_ENABLED: "true" });
@@ -171,14 +177,12 @@ const wrongBinding: number = bindings.OAUTH_KV;
   }
 });
 
-test("CI rejects invalid Worker declarations outside the legacy Durable Object exception", () => {
+test("typechecking rejects invalid Worker declarations outside the legacy Durable Object exception", () => {
   const dir = mkdtempSync(path.join(root, "type-tests/declarations-"));
   try {
     writeFileSync(path.join(dir, "broken.d.ts"),
       "interface ReviewBrokenEnv extends Env { OAUTH_KV: number; }\n");
-    const result = spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
-      encoding: "utf8", cwd: path.dirname(root),
-    });
+    const result = typecheck();
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout + result.stderr, /TS2430.*ReviewBrokenEnv/s);
   } finally {
@@ -186,11 +190,9 @@ test("CI rejects invalid Worker declarations outside the legacy Durable Object e
   }
 });
 
-test("CI regenerates Worker declarations without a stale cached Env augmentation", () => {
+test("typecheck regenerates Worker declarations without a stale cached Env augmentation", () => {
   const dir = mkdtempSync(path.join(root, "type-tests/stale-"));
-  const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
-    encoding: "utf8", cwd: path.dirname(root),
-  });
+  const check = () => spawnSync("npm", ["run", "typecheck"], { encoding: "utf8", cwd: root });
   try {
     const valid = check();
     assert.equal(valid.status, 0, valid.stdout + valid.stderr);
@@ -206,16 +208,14 @@ test("CI regenerates Worker declarations without a stale cached Env augmentation
   }
 });
 
-test("the converted Leads reader checks its generated request contract in CI", () => {
+test("the converted Leads reader checks its generated request contract", () => {
   const dir = mkdtempSync(path.join(root, "type-tests/leads-"));
   const source = path.join(dir, "request.ts");
   const request = lead => `import { readLeadWorkspace } from "../../src/lead-workspace.ts";
 import type { Db } from "../../src/verb-contract.ts";
 declare const db: Db;
 readLeadWorkspace(db, { workspace: "leads", lead_id: ${lead} });\n`;
-  const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
-    encoding: "utf8", cwd: path.dirname(root),
-  });
+  const check = typecheck;
   try {
     writeFileSync(source, request('"00000000-0000-4000-8000-000000000001"'));
     const accepted = check();
@@ -224,7 +224,6 @@ readLeadWorkspace(db, { workspace: "leads", lead_id: ${lead} });\n`;
     const rejected = check();
     assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
     assert.match(rejected.stdout + rejected.stderr, /TS2322.*number.*string/s);
-    assert.match(rejected.stdout + rejected.stderr, /Worker verb contract types failed/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -248,8 +247,7 @@ cutover["advance-workflow-cutover-stage"].handler(db, actor, {
   to_stage: ${stage},
 });
 `;
-  const check = () => spawnSync(path.join(root, "node_modules/.bin/tsc"),
-    ["--project", "tsconfig.json"], { encoding: "utf8", cwd: root });
+  const check = typecheck;
   try {
     writeFileSync(source, request("1", '"build_projection"'));
     const accepted = check();

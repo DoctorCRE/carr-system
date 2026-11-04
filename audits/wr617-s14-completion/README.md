@@ -34,3 +34,7 @@ Zero-tech-debt reuses the existing v3 projection and settlement implementation. 
 The safety fact is that v4 adds completion evidence without changing old reads, disposition versions or settlement behavior. The PostgreSQL test compares v1, v2 and v3 snapshots before and after the migration, then compares v4 with v3 after removing only the new field and schema version. It runs with carr_writer and denies carr_reader.
 
 The new read depends on existing source retention and snapshot caps. It does not recover completed items already excluded from v3. Unrecorded historical completion or reopening cannot be reconstructed; unsupported or unproven evidence remains unknown. No app behavior or production deployment is claimed by this builder.
+
+## Main integration
+
+The merge of inline review PR 2948 keeps pending-reply eligibility in the shared v3 and v4 settlement read. Both versions use one materialized snapshot and one bounded query for pending reply IDs. The projection preserves the incoming schema version. The completion test checks that sent replies cannot offer inline review, pending replies retain their exact review reference, and pending replies have no completion timestamp. Both the inbox and review PostgreSQL suites remain intact. Migration 1145 follows main's 1144 and avoids PR 2947's 1143.

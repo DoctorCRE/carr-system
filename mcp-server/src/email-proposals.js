@@ -780,6 +780,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       write: false,
       description: 'With mode=lead_proposals, return pending outlook-intake lead candidates only for the authenticated partner mailbox, with sender name, domain and address, stored structured reading, current deal/contact names, pool and party versions, and evidence_quote_untrusted=true. limit defaults to 25; cursor pages oldest first and remains valid after resolution. Rejects status/deal arguments. not_business rows never appear; not_business_count counts distinct recorded exclusions over the mailbox recorded lifetime, without reconstructing older local-only exclusions. Ownerless legacy candidates are excluded. With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals. include_non_deal=true also returns next steps without a deal; legacy callers omit it until their review UI supports contact subjects. List all supported proposals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Pending matching items additionally return current suggested_deals and nullable stored match_evidence regardless of age. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
+        proposal_id: { type: 'string', format: 'uuid', description: 'Exact mailbox-owned reply draft for Home review; cannot combine with filters or paging.' },
         deal: { type: 'string', format: 'uuid' },
         mode: { type: 'string', enum: ['recent_outcomes', 'lead_proposals'] },
         include_non_deal: { type: 'boolean', default: false },
@@ -787,6 +788,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         limit: { type: 'integer', minimum: 1, maximum: LIMIT },
         cursor: { type: 'string', format: 'uuid' } } },
       handler: async (c, actor, args) => {
+        if (args.proposal_id && Object.keys(args).some(key => key !== 'proposal_id')) fail('email_proposals_arguments_invalid');
         if (args.mode === 'lead_proposals') {
           const owner = senderOwner(actor);
           if (args.deal !== undefined || args.status !== undefined) fail('email_leads_arguments_invalid');
@@ -848,10 +850,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             ($6::text is not null and (a.email_source->>'mailbox_owner'=$6 or
               (a.email_source is null and a.actor_id=$7::uuid))) as summary_owned
           from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
-          where p.status=$4 and (p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
+          where p.status=$4 and ($8::uuid is null or (p.id=$8 and p.kind='reply_draft' and p.owner=$6 and a.email_source->>'mailbox_owner'=$6))
+            and ($8::uuid is not null or p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
             and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
             (select created_at,id from email_proposal where id=$1))
-          order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false,partnerAuthoritySlugForActor(actor),actor.id]);
+          order by p.created_at,p.id limit $2`, [args.cursor ?? null, limit + 1, args.deal ?? null, args.status ?? 'pending',args.include_non_deal ?? false,partnerAuthoritySlugForActor(actor),actor.id,args.proposal_id ?? null]);
         if (!args.limit && rows.length > LIMIT) fail('email_proposals_limit_exceeded', { limit: LIMIT });
         const more = rows.length > limit;
         const proposals = [];

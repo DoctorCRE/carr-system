@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Decide database proof applicability
         id: scope
         run: python3 ops/db-acceptance-scope.py --receipt db-scope.json
@@ -327,12 +327,10 @@ jobs:
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
 
-      - name: Install document export dependencies
+      - uses: ./.github/actions/ci-apt
         if: contains(matrix.classes, 'unit') || matrix.classes == 'gates'
-        timeout-minutes: 5
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-calc poppler-utils
+        with:
+          packages: --documents
 
       - name: Verify edge incident delivery
         # Gate shard 1 owns it, like the other repository-wide invariants.
@@ -478,6 +476,8 @@ jobs:
     needs: [fast, gates, secret, unit-coverage, scope, classes, migration-fixtures, launchd-python39]
     permissions:
       contents: read
+      statuses: write
+      pull-requests: read
     if: ${{ always() }}
     timeout-minutes: 5
     steps:
@@ -503,6 +503,12 @@ jobs:
           path: ci-evidence.json
           if-no-files-found: error
           overwrite: true
+      - name: Expose merge queue result on the PR head
+        if: ${{ always() && github.event_name == 'merge_group' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_QUEUE_RESULT: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: python3 ops/merge-queue-signal.py
       # Check last: cancellation can arrive during checkout, verdict or upload.
       - name: Reject a cancelled run
         if: ${{ cancelled() }}

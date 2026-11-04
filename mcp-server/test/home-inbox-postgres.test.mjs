@@ -6,6 +6,7 @@ import { setTimeout } from 'node:timers/promises';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { HOME_INBOX_CONTRACT, HOME_INBOX_SETTLEMENT_CONTRACT, HOME_INBOX_COMPLETION_CONTRACT } from '../src/home-inbox.js';
+import { homeReviewReference } from '../src/home-review.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
 const id = n => `ae000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -320,6 +321,8 @@ test('Home inbox v2 projects current partner work with context', async t => {
     assert.equal(task.action_id,id(71));
     assert.equal(task.action_version,2);
     assert.equal(task.deal_id,id(60));
+    assert.deepEqual(homeReviewReference(task),{kind:'action',item_id:task.item_id,
+      source_version:task.source_version,operations:['complete-one-action']});
   });
   await t.test('future hold belongs to Held',()=>{
     assert.equal(snapshot.items.find(i=>i.source_id===id(75)).section,'held');
@@ -550,7 +553,7 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     create table ops.deal_extraction_job(id uuid,organization_tenant_id text,entity_ref text,recorded_at timestamptz,receipt jsonb);
     create table ops.fact_key_contract(fact_key text,canonical_unit text);
     insert into ops.fact_key_contract values('base_rent_per_sf','USD/SF/year');`);
-  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','resolve_fact_review'],['1109_deal_schedules.sql','promote_fact']]) {
+  for(const [file,name] of [['1109_deal_schedules.sql','fact_observation_json'],['1109_deal_schedules.sql','fact_review_field'],['1103_deal_extraction.sql','list_fact_review'],['1103_deal_extraction.sql','resolve_fact_review'],['1109_deal_schedules.sql','promote_fact']]) {
     const sql=readFileSync(new URL(`../../migrations/${file}`,import.meta.url),'utf8');
     await c.query(sql.match(new RegExp(`create or replace function ops\\.${name}\\([\\s\\S]*?\\$\\$;`))[0]);
   }
@@ -558,11 +561,44 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
   const v2Before=(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}));
   await c.query(readFileSync(new URL('../../migrations/1140_home_inbox_resolution_adapters.sql',import.meta.url),'utf8'));
   assert.deepEqual(await executeRegisteredTool(c,joe,'read-home-inbox-v2',{}),v2Before,'shared placement preserves the v2 snapshot');
+  await c.query('grant select on email_proposal to carr_writer');
   await c.query('set role carr_writer');
   assert.equal((await executeRegisteredTool(c,joe,'read-home-inbox-v3',{})).ok,true);
   await c.query('reset role');
   const read=()=>executeRegisteredTool(c,joe,'read-home-inbox-v3',{});
   const item=async n=>(await read()).items.find(i=>i.source_id===id(n));
+  const detail=current=>executeRegisteredTool(c,joe,'read-home-review',{
+    item_id:current.item_id,source_version:current.source_version});
+  await t.test('review statechart: projected to detail loaded reads no domain state',async()=>{
+    const current=await item(702);
+    assert.equal(current.review_reference.kind,'action');
+    assert.deepEqual(current.review_reference.operations,['complete-one-action']);
+    const before=(await c.query('select to_jsonb(t) row from next_action t order by id')).rows;
+    const loaded=await detail(current);
+    assert.equal(loaded.schema_version,'home-review.v1');
+    assert.deepEqual(loaded.operations,[{verb:'complete-one-action',args:{action_id:id(702),base_version:1}}]);
+    assert.deepEqual((await c.query('select to_jsonb(t) row from next_action t order by id')).rows,before);
+    assert.deepEqual(await detail(current),loaded);
+  });
+  await t.test('review statechart: projected to refused on stale source',async()=>{
+    const current=await item(702);
+    await c.query('update next_action set version=version+1 where id=$1',[id(702)]);
+    await assert.rejects(detail(current),e=>e.payload?.error==='home_review_stale');
+  });
+  await t.test('review statechart: another actor cannot load the card',async()=>{
+    const current=await item(702);
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    try {
+      await assert.rejects(executeRegisteredTool(c,dell,'read-home-review',{
+        item_id:current.item_id,source_version:current.source_version}),e=>e.payload?.error==='home_review_not_found');
+    } finally {
+      await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    }
+  });
+  await t.test('review statechart: refused to projected after refresh',async()=>{
+    const current=await item(702);
+    assert.equal((await detail(current)).operations[0].args.base_version,2);
+  });
   let seq=800;
   const change=async(command,current,until=null)=>executeRegisteredTool(c,joe,`${command}-home-inbox`,{
     idempotency_key:id(seq++),items:[{item_id:current.item_id,base_version:current.base_version}],...(until?{until}:{})});
@@ -705,6 +741,16 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
       assert.equal((await find(type))?.section,'inbox',`${type} unresolved stays visible`);
       assert.equal((await find(type)).auto_settled,false);
     }
+    await adapters.test('fact review detail names exact field evidence and owner decisions',async()=>{
+      const current=await find('fact_review');
+      const loaded=await detail(current);
+      assert.equal(loaded.detail.fact_key,'base_rent_per_sf');
+      assert.deepEqual(loaded.operations,[{verb:'resolve-fact-review',decisions:['approve','correct','reject'],args:{
+        entity_ref:id(2000),fact_key:'base_rent_per_sf',base_version:loaded.detail.canonical_version,
+        review_version:loaded.detail.review_version}}]);
+      assert.deepEqual(await detail(current),loaded);
+      await assert.rejects(detail(await find('tour_feedback')),e=>e.payload?.error==='home_review_unsupported');
+    });
     await c.query(`insert into ops.tour_share_grant(id,organization_tenant_id,projection_id,grant_version,token_digest,audience,
       permission_scopes,expires_at,status,created_by_actor_id)
       select '${id(2020)}',organization_tenant_id,projection_id,2,'sha256:'||repeat('b',64),audience,
@@ -854,7 +900,7 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
       insert into next_action(id,owner_id,description,status,version,created_at,updated_at,subject_id)
         values('${id(3000)}','${joe.id}','Completion statechart','open',1,now(),now(),'${id(3001)}');`);
     const previous=await Promise.all(['read-home-inbox','read-home-inbox-v2','read-home-inbox-v3'].map(v=>executeRegisteredTool(c,joe,v,{})));
-    await c.query(readFileSync(new URL('../../migrations/1144_home_inbox_completion.sql',import.meta.url),'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1145_home_inbox_completion.sql',import.meta.url),'utf8'));
     assert.deepEqual(await Promise.all(['read-home-inbox','read-home-inbox-v2','read-home-inbox-v3'].map(v=>executeRegisteredTool(c,joe,v,{}))),previous);
     assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v4.json',import.meta.url),'utf8')),HOME_INBOX_COMPLETION_CONTRACT);
     const v4=()=>executeRegisteredTool(c,joe,'read-home-inbox-v4',{});
@@ -895,6 +941,12 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     await c.query(`update email_proposal set status='sent',send_result='{"sent_at":"2026-11-02T23:30:00-06:00"}',result_recorded_at=now() where id=$1`,[id(701)]);
     assert.equal(await completed(3010),(await c.query("select to_char(completed_at at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') at from capture_post_call_action where id=$1",[id(3010)])).rows[0].at);
     assert.equal(await completed(701),'2026-11-03T05:30:00.000000Z','delayed Sent Items reporting uses the observed send');
+    assert.equal((await v4()).items.find(i=>i.source_id===id(701)).review_reference,null,'sent replies cannot offer inline review in v4');
+    await c.query("update email_proposal set status='pending' where id=$1",[id(701)]);
+    const pendingReply=(await v4()).items.find(i=>i.source_id===id(701));
+    assert.deepEqual(pendingReply.review_reference,homeReviewReference(pendingReply),'pending replies retain inline review in v4');
+    assert.equal(pendingReply.completed_at,null,'pending replies cannot retain sent completion evidence');
+    await c.query("update email_proposal set status='sent' where id=$1",[id(701)]);
     await c.query("update email_proposal set result_recorded_at=now()+interval '1 day' where id=$1",[id(701)]);
     assert.equal(await completed(701),'2026-11-03T05:30:00.000000Z','result ingestion cannot move completion');
     await c.query("update email_proposal set send_result=null where id=$1",[id(701)]);

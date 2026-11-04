@@ -1,4 +1,5 @@
 // Project canonical work without changing its domain state.
+import { homeReviewReference } from './home-review.js';
 export const HOME_INBOX_CONTRACT = Object.freeze({
   schema_version: 'home-inbox.v2',
   read_verb: 'read-home-inbox-v2',
@@ -24,7 +25,8 @@ export const HOME_INBOX_SETTLEMENT_CONTRACT = Object.freeze({
   ...HOME_INBOX_CONTRACT,
   schema_version: 'home-inbox.v3',
   read_verb: 'read-home-inbox-v3',
-  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, kind_label: 'Task|Call follow-up|Call|Reply draft|Update|Fact review|Tour feedback', auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write' },
+  item_fields: { ...HOME_INBOX_CONTRACT.item_fields, kind_label: 'Task|Call follow-up|Call|Reply draft|Update|Fact review|Tour feedback', auto_settled: 'boolean; canonical resolution placed this item in Settled without a disposition write',
+    review_reference: 'home-review.v1 reference|null; exact item and source version with candidate domain operations; load read-home-review for current detail and available operations' },
   auto_settle_source_types: ['next_action', 'capture_post_call_action', 'email_proposal', 'fact_review', 'tour_feedback'],
   settlement: 'Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
 });
@@ -38,13 +40,14 @@ export const HOME_INBOX_COMPLETION_CONTRACT = Object.freeze({
   completion_time: 'Done ordinary tasks use the exact complete-one-action, complete-action or complete-deal-item event, superseded by reopen-one-action. Done call actions use completed_at. Sent replies use send_result.sent_at. Open work, unsupported sources and unproven legacy completions return null. Later notifications never move completion. Clients group by America/Chicago.',
 });
 
-function withAutomaticSettlement(snapshot) {
+function withAutomaticSettlement(snapshot, pendingReplyIds) {
   return { ...snapshot, auto_settle_enabled: true,
     items: snapshot.items.map(item => {
       const auto_settled = item.source_state === 'done' && item.disposition === 'inbox' &&
         !item.explicit_unsettle && HOME_INBOX_SETTLEMENT_CONTRACT.auto_settle_source_types.includes(item.source_type);
       const section = item.disposition !== 'inbox' ? item.disposition : item.explicit_unsettle ? 'inbox' : auto_settled ? 'settled' : item.section;
-      return { ...item, section, disposition: auto_settled ? 'settled' : item.disposition, auto_settled };
+      return { ...item, section, disposition: auto_settled ? 'settled' : item.disposition, auto_settled,
+        review_reference: item.source_type === 'email_proposal' && !pendingReplyIds.has(item.source_id) ? null : homeReviewReference(item) };
     }),
   };
 }
@@ -54,6 +57,13 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
   const unwrap = result => {
     if (result?.ok !== true) throw new ToolError({ error: result?.error || 'inbox_unavailable' });
     return result;
+  };
+  const readWithSettlement = async (c, version) => {
+    const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_${version}() as result)
+      select result,array(select p.id::text from jsonb_array_elements(result->'items') i
+        join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
+        where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
+    return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
   };
   const tools = {
     'read-home-inbox': {
@@ -66,13 +76,13 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
       writerConnection: true,
       description: 'Read Home inbox with v3 automatic settlement and nullable source-backed completed_at UTC instants for Done today. Unknown completion times remain null. Clients group by America/Chicago. Uses home-inbox.v4; v1 through v3 remain unchanged.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v4() as result')).rows[0]?.result)),
+      handler: c => readWithSettlement(c, 'v4'),
     },
     'read-home-inbox-v3': {
       writerConnection: true,
       description: 'Read the Home inbox with automatic settlement of canonical done tasks, sent replies, resolved fact reviews and received tour feedback. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => withAutomaticSettlement(unwrap((await c.query('select ops.read_home_inbox_v3() as result')).rows[0]?.result)),
+      handler: c => readWithSettlement(c, 'v3'),
     },
     'read-home-inbox-v2': {
       writerConnection: true,
