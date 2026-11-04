@@ -8,6 +8,7 @@ import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
+import { homeReviewTools } from "./home-review.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
 import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.ts";
 import { canonicalJson } from "./artifact-trust.js";
@@ -9295,6 +9296,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
   "home-inbox": "mcp-server/src/home-inbox.js",
+  "home-review": "mcp-server/src/home-review.js",
   "session-identity": "mcp-server/src/session-identity.ts",
   "dispatch-spine": "mcp-server/src/dispatch-spine.ts",
   "doc-outcome-cards": "mcp-server/src/tools.js",
@@ -10933,6 +10935,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
+registerTools(homeReviewTools({ ToolError, readTool: executeRegisteredTool }), "home-review");
 
 // WR-000117: the session-identity read pair. Both verbs are READS on the writer
 // connection -- ops.session_identity_facts and ops.session_dispatch_history

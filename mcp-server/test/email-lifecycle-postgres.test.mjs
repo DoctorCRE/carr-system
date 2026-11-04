@@ -29,6 +29,8 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     assert.ok((await call('email-router-queue',{purpose:'links'})).emails.some(e=>e.activity_id===source.activity_id));
     const draft=(await c.query("insert into email_proposal(kind,activity_id,owner,draft_subject,draft_body,status,evidence_quote,confidence,created_by) values('reply_draft',$1,'joe','Reply','Please call.','pending','Please call.',1,$2) returning id",[source.activity_id,actor.id])).rows[0].id;
     assert.ok((await call('read-home-inbox-v3',{})).items.some(i=>i.source_id===draft));
+    await c.query("update email_proposal set deferred_until=now()+interval '1 day' where id=$1",[draft]);
+    assert.equal((await call('list-email-proposals',{proposal_id:draft})).proposals[0]?.id,draft);
     assert.ok((await call('email-router-queue',{purpose:'summaries',pending_only:false})).emails.some(e=>e.activity_id===source.activity_id));
     if (state==='superseded') {
       await c.query(`update email_proposal set status='approved_to_send',resolved_by=$2,resolved_at=now(),
@@ -58,6 +60,7 @@ test('terminal mail transitions, replay, action refusal, scope and notes', async
     await assert.rejects(call('record-email-lifecycle',{...args,idempotency_key:randomUUID()}, {...actor,slug:'dell'}),e=>e.payload?.error==='email_identity_owner_mismatch');
     await assert.rejects(call('record-email-lifecycle',{...args,idempotency_key:randomUUID(),email_identity:{...identity,mailbox_account:'other@example.test'}}),e=>e.payload?.error==='email_identity_account_mismatch');
     for (const version of ['','-v2','-v3']) assert.ok(!(await call('read-home-inbox'+version,{})).items.some(i=>i.source_id===draft));
+    await assert.rejects(call('list-email-proposals',{proposal_id:draft}),e=>e.payload?.error==='email_not_live');
     assert.ok(!(await call('outbox-for-sender',{})).drafts.some(p=>p.proposal_id===draft));
     assert.ok(!(await call('email-router-queue',{purpose:'summaries',pending_only:false})).emails.some(e=>e.activity_id===source.activity_id));
     assert.ok(!(await call('list-email-proposals',{status:'confirmed',include_non_deal:true})).proposals.some(p=>p.activity_id===source.activity_id));
