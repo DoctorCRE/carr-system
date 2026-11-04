@@ -21,7 +21,10 @@ test("macOS test Chromium has no Dock icon or menu bar", {
   assert.equal(active, false);
 });
 
-test("a failed test closes its browser without caller cleanup", { timeout: 30000 }, async () => {
+// Playwright permits 180s to launch and 30s to close. Include child startup and reporting.
+const probeTimeout = 180000 + 30000 + 15000;
+
+test("a failed test closes its browser without caller cleanup", { timeout: probeTimeout + 15000 }, async () => {
   const source = `
     import test from 'node:test';
     import { testBrowser } from ${JSON.stringify(new URL("./browser.mjs", import.meta.url).href)};
@@ -34,9 +37,12 @@ test("a failed test closes its browser without caller cleanup", { timeout: 30000
     });`;
   const { NODE_TEST_CONTEXT, ...childEnv } = process.env;
   let result;
-  try { await run(process.execPath, ["--test-reporter=tap", "--input-type=module", "--eval", source], { timeout: 20000, env: childEnv }); }
+  try { await run(process.execPath, ["--test-reporter=tap", "--input-type=module", "--eval", source], { timeout: probeTimeout, env: childEnv }); }
   catch (error) { result = error; }
-  assert.equal(result?.code, 1, result?.stdout);
+  assert.equal(result?.code, 1, JSON.stringify({
+    code: result?.code, signal: result?.signal, killed: result?.killed,
+    stdout: result?.stdout, stderr: result?.stderr,
+  }));
   assert.match(result.stdout, /not ok 1 - intentional failure/);
   assert.match(result.stdout, /intentional teardown probe/);
   const pid = Number(result.stdout.match(/browser-pid=(\d+)/)?.[1]);
