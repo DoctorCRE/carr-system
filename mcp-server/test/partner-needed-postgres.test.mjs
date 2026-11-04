@@ -83,6 +83,13 @@ test('valid_pushed_card_beyond_home_snapshot_still_resolves_only_for_recipient',
     const current=(await run('select ops.read_home_inbox_v4() result')).items;
     assert.equal(current.some(i=>i.item_id===callEvent.card_item_id),true);
     assert.equal((await run('select ops.read_partner_needed_card($1) result',[callEvent.event_id])).item.review_target.session_id,session);
+    const callItem=current.find(i=>i.item_id===callEvent.card_item_id);
+    const settled=await run("select ops.change_home_inbox($1,'settle',$2::jsonb,null) result",[randomUUID(),JSON.stringify([{item_id:callItem.item_id,base_version:callItem.base_version}])]);
+    assert.equal(settled.results[0].ok,true,JSON.stringify(settled));
+    assert.equal((await run('select ops.read_partner_needed_card($1) result',[callEvent.event_id])).state,'resolved');
+    const hidden=(await run('select ops.read_home_inbox_v4() result')).items.find(i=>i.item_id===callItem.item_id);
+    assert.equal(hidden.section,'settled');
+    assert.equal((await run("select ops.change_home_inbox($1,'unsettle',$2::jsonb,null) result",[randomUUID(),JSON.stringify([{item_id:hidden.item_id,base_version:hidden.base_version}])])).results[0].ok,true);
     assert.equal((await run('select ops.read_partner_needed_card($1) result',[callEvent.event_id])).state,'actionable');
     assert.equal((await run('select ops.acknowledge_partner_review($1,$2) result',[callEvent.event_id,randomUUID()])).ok,false);
     await c.query('update capture_session set outcome_reviewed_at=now(),outcome_reviewed_by=$2 where id=$1',[session,who.id]);

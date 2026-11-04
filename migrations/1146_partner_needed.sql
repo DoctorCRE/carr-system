@@ -173,6 +173,13 @@ begin
     'item',jsonb_build_object('item_id',s.item_id,'source_id',s.source_id,'source_version',s.source_version,
       'source_type',case s.topic when 'reply_draft_ready' then 'email_proposal' when 'post_call_review_waiting' then 'post_call_review' else 'tour_feedback_review' end,
       'source_state','needs_attention','open_url',s.open_url,'deal_id',s.deal_id,
+      'title',case s.topic when 'reply_draft_ready' then 'Reply draft ready' when 'post_call_review_waiting' then 'Review call outcome' else 'Review tour feedback' end,
+      'activity_at',s.activity_at,'hold_until',null,'unseen',false,'context_label',null,'due_on',null,
+      'kind_label',case s.topic when 'reply_draft_ready' then 'Reply draft' when 'post_call_review_waiting' then 'Call review' else 'Tour feedback review' end,
+      'merged_source_ids',jsonb_build_array(s.source_id),'action_id',null,'action_version',null,
+      'disposition','inbox','section','inbox','snoozed_until',null,'auto_settled',false,
+      'explicit_unsettle',coalesce((select d.explicit_unsettle from ops.home_inbox_disposition d where d.actor_id=who and d.item_id=s.item_id),false),
+      'base_version',md5(jsonb_build_array(s.source_version,coalesce((select d.version from ops.home_inbox_disposition d where d.actor_id=who and d.item_id=s.item_id),0),'inbox')::text),
       'review_target',case s.topic when 'post_call_review_waiting' then jsonb_build_object('kind','call_outcome','session_id',s.source_id)
         when 'tour_feedback_received' then jsonb_build_object('kind','tour_feedback','deal_id',s.deal_id,'grant_id',s.source_id,'revision',s.source_revision)
         else null end));
@@ -267,7 +274,9 @@ do $extend_disposition$
 declare definition text;
 begin
   select pg_get_functiondef('ops.change_home_inbox(uuid,text,jsonb,timestamptz)'::regprocedure) into definition;
-  definition:=replace(definition,'ops.home_inbox_items_v3(a)','ops.home_inbox_items_v4(a)');
+  definition:=replace(definition,'ops.home_inbox_items_v3(a)',
+    'ops.home_inbox_project_items(a,case when entry->>''item_id'' like ''post_call_review:%'' or entry->>''item_id'' like ''tour_feedback_review:%'' then 4 else 3 end)');
+  definition:=replace(definition,'ops.home_inbox_sources_v3(a)','ops.home_inbox_sources_v4(a)');
   execute replace(definition, 'entry->>''item_id'' like ''fact_review:%'' or entry->>''item_id'' like ''tour_feedback:%''',
     'entry->>''item_id'' like ''fact_review:%'' or entry->>''item_id'' like ''tour_feedback:%'' or entry->>''item_id'' like ''post_call_review:%'' or entry->>''item_id'' like ''tour_feedback_review:%''');
 end $extend_disposition$;
