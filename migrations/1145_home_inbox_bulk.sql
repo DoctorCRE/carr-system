@@ -1,3 +1,4 @@
+-- rollback: restore ops.change_home_inbox from migration 1140 in a forward migration; retain private batch receipts for audit.
 -- Exact undo receipts remain private to the actor and never complete domain work.
 create table ops.home_inbox_batch (
   actor_id uuid not null references public.actor(id),
