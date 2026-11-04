@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise admission through the same CLI used by CI."""
+import hashlib
 import json
 import importlib.util
 import os
@@ -175,8 +176,8 @@ class AdmissionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'e105804540f17afba50dd45f78b84b50698a3ffc.*(not an ancestor|unresolvable revision)'):
             runner_source({'revision': 'e105804540f17afba50dd45f78b84b50698a3ffc', 'path': path})
         self.assertEqual(
-            runner_source({'revision': 'f699e1859dc87e4122501bbaba35a312607452a7', 'path': path}),
-            (ROOT / path).read_bytes())
+            hashlib.sha256(runner_source({'revision': 'f699e1859dc87e4122501bbaba35a312607452a7', 'path': path})).hexdigest(),
+            '8bfffa61e72f0cf7c551d10f17e4cc6c158e625efa616c84db56808e5e844068')
 
     def test_runner_rejects_resolvable_nonancestor_and_missing_path(self):
         env = fixture_env()
@@ -203,7 +204,9 @@ class AdmissionTest(unittest.TestCase):
         sources = {name: runner_source(runner) for name, runner in contract['x-runners'].items()}
         runner = contract['x-runners']['studio-run-receipt.v1']
         source = sources['studio-run-receipt.v1']
-        self.assertEqual(source, (ROOT / runner['path']).read_bytes())
+        self.assertEqual(hashlib.sha256(source).hexdigest(), '8bfffa61e72f0cf7c551d10f17e4cc6c158e625efa616c84db56808e5e844068')
+        canonical = contract['x-runners']['studio-canonical-run.v1']
+        self.assertEqual(sources['studio-canonical-run.v1'], (ROOT / canonical['path']).read_bytes())
         observer = self.root / 'observer.py'
         observer.write_bytes(source)
         receipt = self.root / 'receipt.txt'
