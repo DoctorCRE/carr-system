@@ -72,7 +72,8 @@ stateDiagram-v2
   Active --> Active: read canonical projection
   Active --> Active: exchange replay / unchanged expiry
   Active --> Revoked: revoke
-  Revoked --> Revoked: repeat revoke or exchange replay / denied
+  Revoked --> Revoked: repeat revoke / success
+  Revoked --> Revoked: exchange replay / denied
   Active --> Expired: seven days elapsed
   Expired --> Expired: read or exchange replay after cleanup / denied
   Active --> Disabled: portal disabled
