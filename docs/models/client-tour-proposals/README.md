@@ -49,7 +49,7 @@ Run the focused tests with `node --experimental-strip-types --test
 mcp-server/test/client-tour-proposals-postgres.test.mjs
 mcp-server/test/client-tour-proposals-integration.test.mjs`. To replay the
 pre-migration failure, run the integration test directly with `--baseline`.
-That replay omits migration 1148; it is not an isolated origin/main run.
+That replay omits migration 1149; it is not an isolated origin/main run.
 
 The morning brief reads stored pending and partially accepted proposals through
 `ops.pending_client_tour_proposals`. It returns at most 20 owned deals, with one

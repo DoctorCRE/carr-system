@@ -20,11 +20,11 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       "0976_client_portal_binding.sql",
       "0981_client_portal_writer_denials.sql",
       "1013_register_client_portal.sql",
-      "1145_deal_deliverables.sql",
+      "1147_deal_deliverables.sql",
     ])
       await c.query(readMigration(n));
     if (!process.argv.includes("--baseline"))
-      await c.query(readMigration("1147_client_publications.sql"));
+      await c.query(readMigration("1148_client_publications.sql"));
     const actor = randomUUID();
     await c.query(
       "insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')",

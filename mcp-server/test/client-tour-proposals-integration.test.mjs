@@ -27,7 +27,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     await c.query(definition('0429_tour_domain_route_cheat_sheet.sql','tour_server_actor_id'));
     await c.query(definition('0430_tour_delivery_data_plane.sql','append_tour_selection_cart_version'));
     await c.query(definition('1142_tour_deal_access.sql','tour_deal_visible'));
-    if (!process.argv.includes('--baseline')) await c.query(readMigration('1148_client_tour_proposals.sql'));
+    if (!process.argv.includes('--baseline')) await c.query(readMigration('1149_client_tour_proposals.sql'));
     const actor=randomUUID(),party=randomUUID(),client=randomUUID(),deal=randomUUID(),tour=randomUUID();
     const a=randomUUID(),b=randomUUID(),x=randomUUID();
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')",[actor]);
