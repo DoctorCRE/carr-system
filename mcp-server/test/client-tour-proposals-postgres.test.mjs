@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clientTourProposalTools } from '../src/client-tour-proposals.js';
+import { readFileSync } from 'node:fs';
+import { clientTourProposalTools, pendingClientTourProposals } from '../src/client-tour-proposals.js';
 
 function client() {
   return {query:async sql=>({rows:sql.includes('select d.owner')||sql.includes('select owner,version')?[{owner:'joe',version:1}]:sql.includes('proposal_source')?[{source:{portal_slug:'synthetic'}}]:sql.includes('pull_client')?[{proposal:{id:'one'}}]:[]})};
@@ -75,4 +76,24 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist', async () => 
   writes.length=0;
   await tools['accept-client-tour-proposal'].handler(c,who,{deal_id:'deal',proposal_id:'proposal',expected_selection_version_id:null,mode:'use_theirs',idempotency_key:'accept'});
   assert(writes.some(w=>w.sql.includes('accept_client_tour_proposal')));
+});
+
+
+test('morning brief source obeys its published local read contract', async () => {
+  const contract = JSON.parse(readFileSync(new URL('../../workspace/contracts/client-tour-proposals.v1.json', import.meta.url))).morning_brief;
+  const queries = [];
+  const c = { query: async (sql, params) => {
+    queries.push({ sql, params });
+    return { rows: Array.from({ length: contract.query_deal_limit }, (_, i) => ({
+      deal_id: `deal-${i}`, deal_name: `Synthetic deal ${i}`, properties_changed: 2,
+    })) };
+  } };
+  const result = await pendingClientTourProposals(c, 'joe');
+  assert.equal(result.items.length, contract.deal_limit);
+  assert.equal(result.limit, contract.deal_limit);
+  assert.equal(result.truncated, true);
+  assert.ok(contract.states.includes(result.state));
+  assert.equal(queries.length, 1);
+  assert.equal(queries[0].sql, `select * from ${contract.source.replace('(text)', '($1)')}`);
+  assert.deepEqual(queries[0].params, ['joe']);
 });

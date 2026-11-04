@@ -33,5 +33,6 @@
     "Lists and badge counts perform no remote pull. Counts include pending and partially accepted states.",
     "No route, public share, send, financial fields or hosting deployment is created by these verbs."
   ],
+  "morning_brief": {"section": "tour_proposals","source": "ops.pending_client_tour_proposals(text)","read_role": "carr_reader","deal_limit": 20,"query_deal_limit": 21,"scope": "authenticated partner owns the deal; active portal and matching deal/client/Tour binding","states": ["ready","empty","partial","unavailable"],"changed_properties": "distinct symmetric difference of proposal IDs and current cart IDs per deal, including partially_accepted proposals","read_effects": "none; local stored pending proposals only; no portal GET, proposal import or cart mutation"},
   "activation_dependencies": ["Portal hosting supports and authorizes the source contract", "S3 and S4 registry queue lands", "App WR586.S5.J5", "Morning brief WR586.S5.J3", "Synthetic full-schema CI then production proof under a separately authorized job"]
 }

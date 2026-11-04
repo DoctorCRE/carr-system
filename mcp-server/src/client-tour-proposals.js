@@ -1,3 +1,4 @@
+// Read pending client Tour changes and resolve proposals against the existing cart.
 import { authorizeDeliverable } from './deal-deliverables.js';
 import { ToolError } from './tool-error.ts';
 
@@ -18,6 +19,19 @@ function selection(value, slug) {
   });
   if (new Set(ids).size !== ids.length) fail('proposal_source_invalid');
   return {revision:value.revision,ids:ids.sort()};
+}
+
+export async function pendingClientTourProposals(c, sponsor) {
+  const limit = 20;
+  const { rows } = await c.query('select * from ops.pending_client_tour_proposals($1)', [sponsor]);
+  const items = rows.slice(0, limit).map(row => ({
+    ...row,
+    line: `${row.deal_name}: client proposed tour list changes (${row.properties_changed} ${row.properties_changed === 1 ? 'property' : 'properties'} changed).`,
+  }));
+  return { state: rows.length > limit ? 'partial' : items.length ? 'ready' : 'empty',
+    items, limit, truncated: rows.length > limit,
+    message: rows.length > limit ? 'Showing the first 20 deals with pending client tour proposals.'
+      : items.length ? 'Pending client tour proposals.' : 'Pending client tour proposals: none.' };
 }
 
 export function clientTourProposalTools({withEnvelope,writeEvent,fetchFn=fetch,now=Date.now}) {

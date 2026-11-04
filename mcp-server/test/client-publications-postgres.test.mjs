@@ -24,7 +24,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     ])
       await c.query(readMigration(n));
     if (!process.argv.includes("--baseline"))
-      await c.query(readMigration("1146_client_publications.sql"));
+      await c.query(readMigration("1147_client_publications.sql"));
     const actor = randomUUID();
     await c.query(
       "insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')",

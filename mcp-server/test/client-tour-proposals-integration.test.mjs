@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { readMigration } from './migration-source.testhelper.mjs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { clientTourProposalTools } from '../src/client-tour-proposals.js';
+import { clientTourProposalTools, pendingClientTourProposals } from '../src/client-tour-proposals.js';
 
 function definition(file,name) {
   const sql=readMigration(file);
@@ -27,7 +27,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     await c.query(definition('0429_tour_domain_route_cheat_sheet.sql','tour_server_actor_id'));
     await c.query(definition('0430_tour_delivery_data_plane.sql','append_tour_selection_cart_version'));
     await c.query(definition('1142_tour_deal_access.sql','tour_deal_visible'));
-    if (!process.argv.includes('--baseline')) await c.query(readMigration('1147_client_tour_proposals.sql'));
+    if (!process.argv.includes('--baseline')) await c.query(readMigration('1148_client_tour_proposals.sql'));
     const actor=randomUUID(),party=randomUUID(),client=randomUUID(),deal=randomUUID(),tour=randomUUID();
     const a=randomUUID(),b=randomUUID(),x=randomUUID();
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')",[actor]);
@@ -57,8 +57,33 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     const pull=()=>invoke('pull-client-tour-proposal',{deal_id:deal,tour_id:tour,idempotency_key:randomUUID()});
     const list=()=>invoke('list-deal-tour-proposals',{deal_id:deal});
     const cart=async ()=>(await c.query('select * from ops.tour_selection_cart_version order by selection_version desc limit 1')).rows[0];
+    const snapshot = async () => {
+      await c.query('reset session authorization');
+      const rows = [];
+      for (const table of ['client_tour_proposal', 'client_tour_proposal_receipt', 'tour_selection_cart_version']) {
+        rows.push((await c.query(`select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),'[]') data from ops.${table} t`)).rows[0].data);
+      }
+      await c.query('set session authorization carr_writer');
+      return rows;
+    };
+    const summary = async (sponsor='joe') => {
+      const before = await snapshot();
+      await c.query('reset session authorization; set session authorization carr_reader; begin read only');
+      let result;
+      try {
+        result = await pendingClientTourProposals(c, sponsor);
+        await c.query('commit');
+      } catch (error) { await c.query('rollback'); throw error; }
+      finally { await c.query('reset session authorization; set session authorization carr_writer'); }
+      assert.deepEqual(await snapshot(), before, 'summary reads change no proposal, receipt or cart rows');
+      return result;
+    };
+    assert.equal((await summary()).state,'empty');
     const first=await pull();
     assert.equal((await cart()).id,before);
+    assert.equal((await summary()).items[0].properties_changed,2);
+    assert.equal((await summary('dell')).items.length,0);
+    assert.equal((await summary('portal')).items.length,0);
     assert.equal((await list()).pending_count,1);
     assert.deepEqual((await list()).proposals[0].difference,{add:[b],remove:[a]});
     assert.equal((await pull()).proposal.id,first.proposal.id);
@@ -77,6 +102,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.equal((await cart()).id,before);
     const partial=await accept();
     assert.equal(partial.receipt.state,'partially_accepted');
+    assert.equal((await summary()).items[0].properties_changed,2);
     assert.deepEqual(new Set((await cart()).property_ids),new Set([a,b]));
     const remoteReads=requests.length;
     await assert.rejects(invoke('pull-client-tour-proposal',{deal_id:randomUUID(),tour_id:tour,idempotency_key:randomUUID()}));
@@ -90,6 +116,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.equal(full.receipt.state,'accepted');
     assert.deepEqual(new Set((await cart()).property_ids),new Set([b,x]));
     assert.equal((await list()).pending_count,0);
+    assert.equal((await summary()).state,'empty');
     revision=3; items=[]; const third=await pull();
     await invoke('dismiss-client-tour-proposal',{deal_id:deal,proposal_id:third.proposal.id,idempotency_key:randomUUID()});
     assert.equal((await cart()).selection_version,3);
@@ -142,6 +169,31 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     revision=9999;await assert.rejects(pull(),e=>e.payload?.error==='proposal_capacity');
     await c.query("update ops.client_portal set disabled_at=now() where slug='synthetic'");
     await assert.rejects(pull());
+    assert.equal((await summary()).state,'empty','disabled portals do not produce brief lines');
+    await c.query("reset session authorization; update ops.client_portal set disabled_at=null where slug='synthetic'");
+    await c.query("update deal set owner='dell' where id=$1",[deal]);
+    assert.equal((await summary()).state,'empty','former owner cannot see proposals');
+    assert.equal((await summary('dell')).items.length,1,'new owner sees the deal');
+    await c.query('reset session authorization');
+    for (let i=0;i<21;i++) {
+      const id=randomUUID(),tid=randomUUID(),slug=`cap-${i}`;
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,created_by,updated_by,owner) values($1,$2,$3,'lease','research',$4,$4,'joe')",[id,client,`Cap ${i.toString().padStart(2,'0')}`,actor]);
+      await c.query("select ops.register_client_portal($1,$2,'test')",[id,slug]);
+      await c.query("insert into ops.tour values($1,'carr-internal',$2)",[tid,id]);
+      await c.query("insert into ops.client_tour_proposal(portal_slug,deal_id,tour_id,portal_revision,property_ids,base_property_ids) values($1,$2,$3,1,'[]','[]')",[slug,id,tid]);
+    }
+    const capped=await summary();
+    assert.equal(capped.items.length,20);
+    assert.equal(capped.truncated,true);
+    assert.equal(capped.state,'partial');
+    assert.equal(capped.items[0].deal_name,'Cap 00');
+    assert.equal(capped.items[19].deal_name,'Cap 19');
+    assert.equal(capped.items[0].properties_changed,0);
+    await c.query('reset session authorization');
+    const targetClient=randomUUID();
+    await c.query("insert into client(id,party_id,status,created_by,updated_by) values($1,$2,'active',$3,$3)",[targetClient,party,actor]);
+    await c.query('update client set merged_into=$1 where id=$2',[targetClient,client]);
+    assert.equal((await summary()).state,'empty','merged client tombstones stay out of counts');
     assert(events.length>0);
   } finally {await db.close();}
 });

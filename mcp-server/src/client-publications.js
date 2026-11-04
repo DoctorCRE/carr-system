@@ -1,3 +1,4 @@
+// Publish and read versioned client documents through registered portal bindings.
 import { authorizeDeliverable } from "./deal-deliverables.js";
 import { ToolError } from "./tool-error.ts";
 const uuid = { type: "string", format: "uuid" };

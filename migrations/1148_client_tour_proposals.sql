@@ -128,17 +128,53 @@ begin
  return result;
 end $$;
 
+create function ops.pending_client_tour_proposals(p_actor text)
+returns table(deal_id uuid,deal_name text,properties_changed integer)
+language sql stable security definer set search_path=pg_catalog,pg_temp as $$
+ with bounded_deals as materialized (
+   select d.id,d.name from public.deal d
+   join public.client client on client.id=d.client_id and client.merged_into is null
+   where p_actor in ('joe','dell') and d.owner=p_actor and exists (
+     select 1 from ops.client_tour_proposal p
+     join ops.client_portal portal on portal.slug=p.portal_slug and portal.deal_id=d.id
+       and portal.client_id=d.client_id and portal.disabled_at is null
+     join ops.tour t on t.id=p.tour_id and t.deal_id=d.id and t.organization_tenant_id='carr-internal'
+     where p.deal_id=d.id and p.state in ('pending','partially_accepted'))
+   order by d.name,d.id limit 21
+ )
+ select d.id,d.name,count(distinct changed.id)::integer
+ from bounded_deals d
+ join public.deal current_deal on current_deal.id=d.id
+ join ops.client_tour_proposal p on p.deal_id=d.id and p.state in ('pending','partially_accepted')
+ join ops.client_portal portal on portal.slug=p.portal_slug and portal.deal_id=d.id
+   and portal.client_id=current_deal.client_id and portal.disabled_at is null
+ join ops.tour t on t.id=p.tour_id and t.deal_id=d.id and t.organization_tenant_id='carr-internal'
+ left join lateral (
+   select property_ids from ops.tour_selection_cart_version
+   where organization_tenant_id='carr-internal' and tour_id=p.tour_id order by selection_version desc limit 1
+ ) cart on true
+ left join lateral (
+   select value id from jsonb_array_elements_text(p.property_ids)
+   where not coalesce(cart.property_ids,'[]') @> jsonb_build_array(value)
+   union
+   select value id from jsonb_array_elements_text(coalesce(cart.property_ids,'[]'))
+   where not p.property_ids @> jsonb_build_array(value)
+ ) changed on true
+ group by d.id,d.name order by d.name,d.id
+$$;
+
 do $acl$
-declare f record; contract jsonb:=ops.scac_current_grant_contract(); signature text;
+declare f record; contract jsonb:=ops.scac_current_grant_contract(); signature text; grantee text;
 begin
  for f in select p.oid,p.provolatile from pg_proc p join pg_namespace n on n.oid=p.pronamespace
- where n.nspname='ops' and p.proname in ('client_tour_proposal_source','pull_client_tour_proposal','list_client_tour_proposals','accept_client_tour_proposal') loop
+ where n.nspname='ops' and p.proname in ('client_tour_proposal_source','pull_client_tour_proposal','list_client_tour_proposals','accept_client_tour_proposal','pending_client_tour_proposals') loop
    signature:='ops.'||(select proname from pg_proc where oid=f.oid)||'('||pg_get_function_identity_arguments(f.oid)||')';
    execute format('revoke all on function %s from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader',signature);
-   execute format('grant execute on function %s to carr_writer',signature);
+   grantee:=case when (select proname from pg_proc where oid=f.oid)='pending_client_tour_proposals' then 'carr_reader' else 'carr_writer' end;
+   execute format('grant execute on function %s to %I',signature,grantee);
    contract:=jsonb_set(contract,'{secdef_execute}',contract->'secdef_execute'||jsonb_build_array(jsonb_build_object(
-    'config',jsonb_build_array('search_path=pg_catalog, pg_temp'),'grantee','carr_writer','parallel','u','grantable',false,'privilege','execute',
-    'signature',signature,'volatility',f.provolatile,'ingress_key','db-function-acl:'||signature||':carr_writer:execute',
+    'config',jsonb_build_array('search_path=pg_catalog, pg_temp'),'grantee',grantee,'parallel','u','grantable',false,'privilege','execute',
+    'signature',signature,'volatility',f.provolatile,'ingress_key','db-function-acl:'||signature||':'||grantee||':execute',
     'ingress_kind','db_function_acl','function_kind','f','security_definer',true)));
  end loop;
  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
