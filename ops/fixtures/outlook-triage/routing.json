@@ -1,0 +1,50 @@
+{
+  "paths": [
+    "Deals/folder-A",
+    "Deals/folder-B",
+    "Vendors/client-001 folder-A",
+    "Vendors/vendor-001",
+    "Reference/folder-A",
+    "Reference/map-001",
+    "Other/map-001"
+  ],
+  "guide": "Deals/folder-A\nDeals/folder-B\nVendors/client-001 folder-A\nVendors/vendor-001\nReference/folder-A\nReference/map-001\nOther/map-001\nmap: client-001 folder-A -> Reference/map-001\nmap: vendor-001 -> Reference/map-001\nmap: @example.test -> Reference/map-001",
+  "find": {
+    "client-001 folder-A": {
+      "parties": [
+        {
+          "name": "client-001 folder-A",
+          "kind": "client",
+          "ref": "C-001",
+          "org_name": null,
+          "merged": false
+        }
+      ],
+      "deals": []
+    },
+    "vendor-001": {
+      "parties": [],
+      "deals": []
+    },
+    "sender-map <sender@example.test>": {
+      "parties": [],
+      "deals": []
+    },
+    "sender-none": {
+      "parties": [],
+      "deals": []
+    },
+    "client-002 folder-B": {
+      "parties": [
+        {
+          "name": "client-002 folder-B",
+          "kind": "lead",
+          "ref": "L-001",
+          "org_name": null,
+          "merged": false
+        }
+      ],
+      "deals": []
+    }
+  }
+}
