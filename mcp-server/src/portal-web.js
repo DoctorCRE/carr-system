@@ -60,7 +60,8 @@ class HttpError extends Error {
   constructor(status, code) { super(code); this.status = status; }
 }
 
-async function passwordBody(request, deadlineMs) {
+async function formBody(request, deadlineMs, needsPassword) {
+  if (!needsPassword && !request.body) return null;
   if (!/^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) throw new HttpError(415, 'unsupported_media_type');
   const length = request.headers.get('content-length');
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > 8192)) throw new HttpError(413, 'body_too_large');
@@ -82,6 +83,10 @@ async function passwordBody(request, deadlineMs) {
       }
       text += decoder.decode();
       const params = new URLSearchParams(text), keys = [...params.keys()];
+      if (!needsPassword) {
+        if (keys.length) throw new HttpError(400, 'invalid_logout');
+        return null;
+      }
       const password = params.get('password');
       if (keys.length !== 1 || keys[0] !== 'password' || !password || [...password].length > 1024 || password.includes('\0'))
         throw new HttpError(400, 'invalid_password');
@@ -161,7 +166,7 @@ export function createPortalWebHandler(options = {}) {
     if (request.method !== method) return response({error:'method_not_allowed'},405,{allow:method});
     if (url.pathname === `/${slug}`) return response({},308,{location:`/${slug}/`});
     if (action === 'login') {
-      let password = await passwordBody(request, config.deadlineMs);
+      let password = await formBody(request, config.deadlineMs, true);
       const token = newToken(), sessionDigest = await digest(token);
       let result;
       try {
@@ -182,6 +187,7 @@ export function createPortalWebHandler(options = {}) {
     const token = readCookie(request, slug);
     const clear = {'set-cookie':cookie(slug,'',0)};
     if (action === 'logout') {
+      await formBody(request, config.deadlineMs, false);
       if (token) await call('revoke', async signal => {
         const result = await config.revoke({slug,digest:await digest(token),signal});
         if (!['success','denied'].includes(result?.status)) throw new Error('invalid_revoke_result');

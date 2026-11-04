@@ -105,7 +105,7 @@ for(const name of ['exchange','read','revoke','safeProjection']) test(`${name} f
   const good={exchange:{status:'success',expires_at:'2026-01-08T00:00:00Z'},read:{status:'success',schema_version:'client-portal.v1',portal:{slug:'alpha',roadmap:{phases:[]},materials:[]}},revoke:{status:'success'},safeProjection:{slug:'alpha',roadmap:{phases:[]},materials:[]}};
   const f=fixture({[name]:async()=>{if(fail)throw Error('private sentinel');return good[name];}}),c=await f.login(); fail=true;
   const mutation=name==='exchange'||name==='revoke';
-  const r=await f.request(name==='exchange'?'/alpha/login':name==='revoke'?'/alpha/logout':'/alpha/',mutation?'POST':'GET',c,mutation?'password=existing':undefined);
+  const r=await f.request(name==='exchange'?'/alpha/login':name==='revoke'?'/alpha/logout':'/alpha/',mutation?'POST':'GET',c,name==='exchange'?'password=existing':undefined);
   assert.equal(r.status,503); assert.doesNotMatch(await r.text(),/private sentinel|retained/); assert.ok(f.signals.length);
 });
 test('no cached content after authorization changes',async()=>{
@@ -183,4 +183,11 @@ test('successful authorization cannot reset the failing projection breaker',asyn
   const f=fixture({safeProjection:()=>{calls++;throw Error();}}),c=await f.login();
   for(let i=0;i<4;i++) assert.equal((await f.request('/alpha/','GET',c)).status,503);
   assert.equal(calls,3);
+});
+test('logout bounds its body and accepts the empty browser form',async()=>{
+  const f=fixture(),c=await f.login();
+  assert.equal((await f.request('/alpha/logout','POST',c,'x'.repeat(8193))).status,413);
+  assert.equal((await f.request('/alpha/logout','POST',c,'client=beta')).status,400);
+  assert.equal(f.calls.filter(([op])=>op==='revoke').length,0);
+  assert.equal((await f.request('/alpha/logout','POST',c,'')).status,303);
 });
