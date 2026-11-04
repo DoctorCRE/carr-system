@@ -159,12 +159,17 @@ begin
       key:='tour_feedback:'||(row_data->>'share_grant_id'); done:=row_data->>'organization_tenant_id'='carr-internal';
     when 'notification' then
       key:='notification:'||jsonb_build_array(row_data->>'subject_type',row_data->>'subject_ref')::text;
-      done:=row_data->>'severity'='completion' and not exists(select 1 from ops.notification n
-        where n.recipient_actor=(row_data->>'recipient_actor')::uuid and n.subject_type=row_data->>'subject_type'
-          and n.subject_ref=row_data->>'subject_ref' and n.created_at>(row_data->>'created_at')::timestamptz);
+      done:=row_data->>'severity'='completion';
   end case;
   if done then
     perform pg_advisory_xact_lock(hashtextextended('home-waiting:'||key,0));
+    if tg_table_name='notification' then
+      -- Read after the lock so concurrent notifications use Home's current visibility and ordering.
+      if not exists(select 1 from ops.home_inbox_sources_v2((row_data->>'recipient_actor')::uuid) s
+        where s.item_id=key and s.source_state='done') then
+        return new;
+      end if;
+    end if;
     for changed in update ops.home_waiting set identity_kind=null,identity_id=null,version=version+1,updated_at=now()
       where item_id=key and identity_id is not null
         and (tg_table_name<>'notification' or actor_id::text=row_data->>'recipient_actor')
