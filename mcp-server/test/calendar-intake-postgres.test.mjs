@@ -3,6 +3,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { execFileSync } from 'node:child_process';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { addCalendarConfirmations } from '../src/brief-calendar.js';
@@ -34,6 +35,67 @@ test('find resolves an exact attendee email under carr_reader without exposing c
   assert.equal(partial.parties.some(row => row.ref === 'C-999636'), false);
   const name = await call('find', { query: 'Synthetic attendee' }, 'carr_reader');
   assert.ok(name.parties.some(row => row.ref === 'C-999636'));
+});
+
+test('null display refs retain canonical identities through registered lookup and intake matching', async () => {
+  const ids = [];
+  for (let i = 0; i < 4; i++) {
+    ids.push((await c.query(`insert into party(kind,name,email,created_by,updated_by)
+      values('person',$1,$2,$3,$3) returning id`,
+      [`Synthetic Null Contact ${i}`, `null-${i}@example.test`, actor.id])).rows[0].id);
+  }
+  const roles = [];
+  for (const table of ['client', 'lead', 'vendor']) {
+    const p = (await c.query(`insert into party(kind,name,email,created_by,updated_by)
+      values('person',$1,$2,$3,$3) returning id`,
+      [`Synthetic Null ${table}`, `null-${table}@example.test`, actor.id])).rows[0].id;
+    const stage = table === 'lead' ? ',stage' : table === 'vendor' ? ',category' : '';
+    const value = table === 'lead' ? ',(select slug from lead_stage order by slug limit 1)' : table === 'vendor' ? ", 'Synthetic'" : '';
+    roles.push((await c.query(`insert into ${table}(party_id,created_by,updated_by${stage}) values($1,$2,$2${value}) returning id`,
+      [p, actor.id])).rows[0].id);
+  }
+  const contacts = (await call('email-match-contacts', {}, 'carr_reader')).contacts;
+  const expected = [...ids, ...roles];
+  const addresses = [...ids.map((_, i) => `null-${i}@example.test`),
+    ...['client','lead','vendor'].map(role => `null-${role}@example.test`)];
+  for (let i = 0; i < addresses.length; i++) {
+    const row = contacts.find(row => row.address === addresses[i]);
+    assert.equal(row?.ref, expected[i], 'lookup must return the existing canonical ID');
+    assert.ok(row.contact_snapshot.party_id);
+    const found = await call('find', { query: addresses[i] }, 'carr_reader');
+    const refs = [...found.parties.map(row => row.ref), ...found.organizations.flatMap(row => row.refs)];
+    assert.ok(refs.includes(expected[i]), 'find must return the same usable identity');
+    const resolved = await call('catch-me-up', { ref: row.ref });
+    assert.ok(resolved);
+  }
+  assert.deepEqual((await call('email-match-contacts', {}, 'carr_reader')).contacts, contacts);
+  const shared = (await c.query(`insert into party(kind,name,email,created_by,updated_by)
+    values('person','Synthetic Shared Contact','null-0@example.test',$1,$1) returning id`, [actor.id])).rows[0].id;
+  const ambiguous = (await call('email-match-contacts', {}, 'carr_reader')).contacts;
+  assert.ok(ambiguous.filter(row => row.address === addresses[0]).every(row => !row.contact_snapshot));
+  const proof = JSON.parse(execFileSync('python3', ['-c', `
+import json, sys
+from lib.outlook_intake import _contacts, Matcher
+unique, shared, addresses, ids = json.load(sys.stdin)
+def matcher(rows):
+    return Matcher(_contacts(lambda *_: {'contacts': rows})(), 'internal.test')
+a, b = matcher(unique), matcher(shared)
+for address, ident in zip(addresses, ids):
+    assert a.reason(address) is None
+    assert a.ref(address) == ident
+assert b.reason(addresses[0]) == 'ambiguous'
+assert b.ref(addresses[0]) is None
+assert a.reason('foreign@unknown.test') == 'missing'
+assert a.ref('foreign@unknown.test') is None
+print(json.dumps({'matched': len(addresses), 'ambiguous': True, 'unknown': True}))
+`], { cwd: new URL('../..', import.meta.url), encoding: 'utf8',
+    input: JSON.stringify([contacts, ambiguous, addresses, expected]) }));
+  assert.deepEqual(proof, { matched: 7, ambiguous: true, unknown: true });
+  await c.query('update party set deleted_at=now() where id=$1', [ids[1]]);
+  await c.query('update party set merged_into=$1 where id=$2', [ids[0], shared]);
+  const retired = (await call('email-match-contacts', {}, 'carr_reader')).contacts;
+  assert.equal(retired.some(row => row.ref === ids[1] || row.ref === shared), false);
+  assert.equal(retired.find(row => row.address === addresses[0]).contact_snapshot.party_id, ids[0]);
 });
 
 test('calendar dismissals are durable board answers scoped to the partner and tenant', async () => {
