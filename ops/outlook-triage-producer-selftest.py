@@ -425,7 +425,15 @@ class InvocationTest(unittest.TestCase):
         self.combined(source, repo)
         output = repo / runner.OUT / 'snapshot.json'
         before = output.read_bytes()
-        with patch.object(producer.os, 'replace', side_effect=OSError('synthetic first write')):
+        open_file = producer.os.open
+        def fail_first_write(path, *args, **kwargs):
+            if str(path).startswith('.snapshot-'):
+                raise OSError('synthetic first write')
+            return open_file(path, *args, **kwargs)
+        with patch.object(producer.os, 'open', side_effect=fail_first_write):
+            self.assertEqual(self.combined(source, repo)[1].planning['observed'], 0)
+        self.assertEqual(output.read_bytes(), before)
+        with patch.object(producer.os, 'replace', side_effect=OSError('synthetic atomic replace')):
             self.assertEqual(self.combined(source, repo)[1].planning['observed'], 0)
         self.assertEqual(output.read_bytes(), before)
         with patch.object(runner, 'load_settings', side_effect=ValueError('settings')):
@@ -452,6 +460,23 @@ class InvocationTest(unittest.TestCase):
         with patch.object(producer, '_publish', side_effect=substitute):
             self.assertEqual(self.combined(source, repo)[1].planning['observed'], 2)
         self.assertEqual(json.loads((repo / runner.OUT / 'snapshot.json').read_text())['observations'], [])
+
+    def test_crash_after_publication_does_not_admit_next_invocation(self):
+        from lib import outlook_triage_producer as producer, outlook_triage as runner
+        source, _ = self.prepare_copy()
+        repo = self.root / 'runner'
+        publish = producer._publish
+        def crash(*args):
+            publish(*args)
+            raise KeyboardInterrupt
+        with patch.object(producer, '_publish', side_effect=crash):
+            with self.assertRaises(KeyboardInterrupt):
+                self.combined(source, repo)
+        self.assertTrue((repo / runner.OUT / 'snapshot.json').exists())
+        with patch.object(runner, 'load_settings', return_value=self.settings):
+            outcome, report = runner.triage(repo,self.root,runner.Waits(),runner.Limits(),lambda:False)
+        self.assertEqual(outcome.reason,'snapshot_producer_unavailable')
+        self.assertEqual(report.planning['observed'],0)
 
     def test_directory_identity_change_refuses_publication(self):
         from lib import outlook_triage_producer as producer, outlook_triage as runner
