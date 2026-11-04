@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 SPEC = importlib.util.spec_from_file_location('postgres', Path(__file__).with_name('ci-apt.py'))
+assert SPEC is not None and SPEC.loader is not None
 pg = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(pg)
 
