@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR636-S1-canonical-contact-lookup",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "worker-release-and-registry",
+      "predicate": "After deployment, use worker-release-smoke.v1 with lane worker, phase post, the merged full SHA, the released mcp-server source and only release-identity,verb-registry. This proves release identity and registry availability only. It does not exercise email-match-contacts, find or installed calendar intake. Separately mandatory after deployment and installation: observe all four original admitted canonical contacts returned by installed lookup and visible through installed intake, with ambiguity refusal and mailbox account binding retained.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "PASS only for the selected release and registry smoke checks. Full semantic production proof remains pending until all four original contacts and the refusal and account-binding obligations are observed through the installed flow.",
+      "input_class": "deployed Worker read-only release identity and verb registry, pinned runner and released source; no contact mutations",
+      "deadline_seconds": 120
+    },
+    {
+      "id": "installed-intake-nonempty-receipt",
+      "predicate": "Read one explicitly supplied actual outlook-intake service receipt using studio-run-receipt.v1, with runtime_sha matching the full installed runtime SHA containing the merged change, count run.mail_ids and minimum 1. This observes only a succeeded receipt with matching identity and a nonempty mail-ID count. It does not prove contact lookup, the four original contacts, ambiguity refusal, account binding, freshness or trusted receipt ingestion. Those semantic obligations remain mandatory independent post-deploy evidence.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "OBSERVED only when the supported runtime, success and count predicate matches. Missing receipt, abbreviated or mismatched SHA, failed state or insufficient count is BLOCKED. Neither OBSERVED nor admission establishes the four-contact production proof.",
+      "input_class": "one supplied actual outlook-intake receipt, run.mail_ids minimum 1; read-only observer, no discovery, job launch, installation or runtime refresh",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 100,
+    "max_runtime_seconds": 150,
+    "max_artifact_bytes": 1048576
+  }
+}
