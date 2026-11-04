@@ -384,7 +384,7 @@ class IntakeTest(unittest.TestCase):
         ports.decode = fail
         outcome = intake.run(self.repo, self.home, ports)
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'decode_failed'))
-        self.assertFalse(list(self.out().glob('email-search*')))
+        self.assertFalse(list((self.home / '.local/share/carr/email-search').glob('email-search*')))
         self.assertFalse(list(self.out().glob(intake.WORK_PREFIX + '*')))
 
     def test_census_request_runs_on_fresh_copy_once_and_keeps_only_counts(self):
