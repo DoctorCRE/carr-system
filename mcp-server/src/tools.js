@@ -25,6 +25,7 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementReplyTools } from "./requirement-replies.js";
 import { requirementRequestTools } from "./requirement-requests.js";
+import { dealDeliverableTools } from "./deal-deliverables.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -10840,6 +10841,7 @@ registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
 registerTools(requirementReplyTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-replies");
 registerTools(requirementRequestTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-requests");
+registerTools(dealDeliverableTools({ withEnvelope, writeEvent }), "mcp-server/src/deal-deliverables.js");
 registerTools(dealFileTools({ withEnvelope, writeEvent, resolveSubject }), "deal-files");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement

@@ -98,6 +98,8 @@ import { pipelineChanges } from "./dealroom.ts";
 import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
 import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomLatest, readRoomQueue, readRoomTurns } from "./partner-room.js";
+import { createDealDeliverablesHandler } from "./deal-deliverables-web.js";
+import { executeRegisteredTool } from "./tools.js";
 import { createCaptureHandler } from "./capture.js";
 import { createPhoneCallHandler, PHONE_STUDIO_PREFIX } from "./phone-call-sessions.js";
 import { TOOLS } from "./tools.js";
@@ -629,6 +631,17 @@ const program6RoutineController = createProgram6RoutineController({ authorizeAct
 const tourInternalHandler = createTourInternalWebHandler(createTourRuntimeAdapters());
 const reportsHandler = createReportsWebHandler(createReportsRuntimeAdapters());
 const dealroomHandler = createDealroomHandler({
+  deliverablesHandler: (request, env, actor, active) => createDealDeliverablesHandler({
+    transaction: captureWriter(env), bucket: env.carr_documents,
+    callTool: (who, verb, args, recheck) => captureWriter(env)(async c => {
+      const provisioned = (await c.query("select id from actor where slug=$1 and active", [who.slug])).rows[0];
+      if (!provisioned) throw new Error('actor_not_provisioned');
+      await recheck();
+      const result = await executeRegisteredTool(c, {...who, id:provisioned.id}, verb, args);
+      await recheck();
+      return result;
+    }),
+  })(request, actor, active),
   phoneCallHandler: (request, env, actor) => phoneCallHandler(env).fetch(request, env, actor),
   mcpHandler: (request, env, ctx, actor, sessionKey) => dispatch(request, env, ctx, actor, sessionKey),
   pipelineHandler: (request, env, _ctx, actor) => pipelineApi(request, env, actor),

@@ -1150,6 +1150,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "finalize-deal-deliverable": {
+    "ingress_key": "mcp-tool:finalize-deal-deliverable",
+    "source_locator": "mcp-server/src/deal-deliverables.js",
+    "schema_digest": "f9781a880e4474c1100230d5855def0489e9201b0c1f62f4207aabd7c1b6ffdd",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "find": {
     "ingress_key": "mcp-tool:find",
     "source_locator": "mcp-server/src/tools.js",
@@ -1467,6 +1477,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:list-client-portals",
     "source_locator": "mcp-server/src/client-portal.ts",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "list-deal-deliverables": {
+    "ingress_key": "mcp-tool:list-deal-deliverables",
+    "source_locator": "mcp-server/src/deal-deliverables.js",
+    "schema_digest": "d5c6332e1024dece1ee21059f15f19f48b836b5080bb51fd3592197b1400ffa1",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -3519,6 +3539,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "set-deal-deliverable-visibility": {
+    "ingress_key": "mcp-tool:set-deal-deliverable-visibility",
+    "source_locator": "mcp-server/src/deal-deliverables.js",
+    "schema_digest": "0f7b7f356c115ce624d636e42ec27c3f886c57d483f7bef85c3faeb0c7853102",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "set-doctrine-refs": {
     "ingress_key": "mcp-tool:set-doctrine-refs",
     "source_locator": "mcp-server/src/doctrine.js",
@@ -3688,6 +3718,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": false,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "start-deal-deliverable": {
+    "ingress_key": "mcp-tool:start-deal-deliverable",
+    "source_locator": "mcp-server/src/deal-deliverables.js",
+    "schema_digest": "e9bd5d08abd7fb711ac75d37eae9c1f12b5d32d2b510fe1ac1e2e1fd59448df3",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
