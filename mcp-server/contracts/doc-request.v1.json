@@ -27,6 +27,19 @@
           "minLength": 1,
           "maxLength": 20000,
           "pattern": "\\S"
+        },
+        "deal_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "quote_ids": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
         }
       }
     },
@@ -66,6 +79,37 @@
             },
             "status": {
               "const": "accepted"
+            },
+            "deal_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "line_quotes": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "quote_id",
+                  "quoted_text",
+                  "comment"
+                ],
+                "properties": {
+                  "quote_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "quoted_text": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "comment": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                }
+              }
             }
           }
         },
@@ -112,7 +156,9 @@
                 "doc_conversation_id_invalid",
                 "doc_conversation_body_invalid",
                 "doc_conversation_not_found",
-                "doc_request_key_reuse"
+                "doc_request_key_reuse",
+                "doc_request_deal_not_found",
+                "doc_request_quotes_invalid"
               ]
             }
           }

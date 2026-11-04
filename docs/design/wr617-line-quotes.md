@@ -111,3 +111,70 @@ counterparty-facing ask are explicitly unverified in this first unit.
 
 The storage tools are internal CARR verbs. No browser route or document-byte
 extractor is shipped in this first unit. No app source changed.
+
+## Unit 2 System design
+
+- Architecture. The submission definer owns the atomic accepted turn and receipt.
+  Optional deal_id and ordered quote_ids select at most 20 saved quotes. The turn
+  owns frozen quote IDs, clause text and comments. Read projection exposes those facts.
+- Capacity. Current and 10x requests use one bounded indexed quote query, never
+  N+1. The existing all-deal access installer remains the first scaling constraint.
+- Load spread. Independent asks own independent snapshots. Only actor/key replay
+  and conversation sequence allocation serialize; no shared per-deal pending set.
+- Cache. n/a: no cache. Each submit, replay and read installs current deal access.
+- Availability. One transaction freezes and accepts. Any failure or cancellation
+  before commit rolls everything back. There is no external send in this unit.
+- Scaling. Indexed deal/id lookups and a 20-quote cap bound per-request storage.
+- Storage. Immutable turn JSON carries ordered snapshots. Receipt request JSON
+  binds selection and deal; existing turn and receipt immutability applies.
+- Consistency. Historical clauses remain exact. Current deal and conversation
+  access must pass even for replay and reads; revoked access refuses.
+- Async. n/a: the client owns the queued draft. Submission and acceptance are one
+  atomic server transition. Consumers read only accepted turn snapshots.
+- Circuit breakers. n/a: no external API calls. PostgreSQL errors propagate and
+  rollback; there is no retry loop or fallback to live quotes.
+- Rate limits. At most 20 unique quote IDs, 4,000 characters each for text and
+  comment and a 20,000-character rendered body; existing ingress limits apply. No fan-out or polling is introduced.
+- Idempotency. Existing UUID key binds body, conversation, deal and ordered IDs.
+  Same request replays the original receipt and frozen quotes. Changed input refuses.
+
+### Unit 2 lifecycle and test mapping
+
+```mermaid
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Cancelled: discard without submission
+  Draft --> Submitted: select saved quote IDs
+  Submitted --> Cancelled: rollback before commit
+  Submitted --> Accepted: atomic freeze and commit
+  Accepted --> Replay: identical key and input, current access
+  Replay --> Accepted: return original frozen receipt
+  Accepted --> Accepted: later quote changes never change the ask
+  Accepted --> Refused: changed key input or revoked access
+```
+
+Draft cancellation is client-owned and performs no server write. A submitted
+transaction may roll back. Once committed the ask is accepted and immutable.
+Tests exercise freeze/read, later edits and detach, changed input, replay,
+revocation, bounded invalid selections, concurrent asks, and rollback/retry.
+No counterparty send or production claim belongs to this unit.
+
+Unit 2 tests map the design to observable behavior.
+
+| Rule or transition | PostgreSQL test |
+| --- | --- |
+| Draft discard and submitted rollback | cancelled submission rolls back frozen quotes and retry accepts once |
+| Freeze, commit, ordered read, one-query selection | quote ask freezes ordered exact clauses and comments in acceptance and read |
+| Immutable snapshots and replay | quote ask immutable replay never consumes later edits saves or detaches |
+| Current visibility, no stale cache | quote ask reads submissions and replays refuse revoked deal access |
+| Independent asks, no shared deal state | concurrent asks on one deal own independent frozen selections |
+| Bounded selection, deal binding | quote selections refuse foreign detached missing duplicate and oversized IDs |
+| Rendered storage bound | combined ask and frozen quote body refuses overflow without partial writes |
+| SQL ingress checks, no fallback without decisions | direct SQL quote entry validates selection shape and requires current deal decision |
+| Atomic failure recovery | receipt insert failure rolls back ask and receipt together |
+
+The no-queue, no-cache and no-external-call answers introduce no separate runtime
+transition. The acceptance, replay, current-access and rollback tests cover their
+observable consequences. The capacity statements describe query bounds, not a
+measured throughput claim. External delivery and post-acceptance cancellation
+remain outside this store's lifecycle.

@@ -34,6 +34,7 @@
 // nothing to record. Its schema has no `required` key at all and exactly three
 // optional fields, none of which names an actor, an offset or a sort.
 
+import { installTourDealAccess } from './tour-deal-access.js';
 import { validateAnswerBlocks, recordedCompsTable } from './answer-blocks.js';
 import docRequestContract from '../contracts/doc-request.v1.json' with { type: 'json' };
 import docRequestLinks from '../contracts/doc-request-links.v1.json' with { type: 'json' };
@@ -69,6 +70,7 @@ export function docConversationProjection(facts, ToolError) {
       origin_channel: turn.origin_channel,
       origin_actor: turn.origin_actor,
       at: turn.at,
+      ...(turn.deal_id ? { deal_id: turn.deal_id, line_quotes: turn.line_quotes } : {}),
       ...(turn.answer_blocks?.length ? { answer_blocks: turn.answer_blocks } : {}),
     })),
     latest_sequence: facts.latest_sequence,
@@ -140,8 +142,15 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(args.idempotency_key)) return refuse("doc_request_key_invalid");
         if (!UUID.test(args.conversation_id)) return refuse("doc_conversation_id_invalid");
         if (typeof args.body !== "string" || !args.body.trim() || args.body.length > 20000) return refuse("doc_conversation_body_invalid");
-        const result = (await c.query("select ops.submit_doc_request($1::text,$2::text,$3::text) as result",
-          [args.idempotency_key, args.conversation_id, args.body])).rows[0]?.result;
+        if ((args.deal_id !== undefined && !UUID.test(args.deal_id))
+          || (args.quote_ids !== undefined && (!Array.isArray(args.quote_ids) || args.quote_ids.length > 20
+            || args.quote_ids.some(id => typeof id !== 'string' || !UUID.test(id))
+            || new Set(args.quote_ids.map(id => id.toLowerCase())).size !== args.quote_ids.length))
+          || (args.quote_ids?.length && !args.deal_id)) return refuse("doc_request_quotes_invalid");
+        await installTourDealAccess(c, actor);
+        const result = (await c.query("select ops.submit_doc_request($1::text,$2::text,$3::text,$4::uuid,$5::jsonb) as result",
+          [args.idempotency_key, args.conversation_id, args.body, args.deal_id ?? null,
+            JSON.stringify(args.quote_ids ?? [])])).rows[0]?.result;
         if (!result || result.contract !== "doc-request.v1" || result.ok !== true
           || !["accepted", "refused"].includes(result.status)) throw new ToolError({ error: "doc_request_result_unknown" });
         return result;
@@ -467,6 +476,7 @@ export function docConversationTools({ withEnvelope, writeEvent, ToolError }) {
         if (!UUID.test(String(args.conversation_id || ""))) {
           throw new ToolError({ error: "doc_conversation_not_found" });
         }
+        await installTourDealAccess(c, a);
         const r = await c.query(
           "select ops.doc_conversation_facts($1::uuid,$2::text,$3::integer,$4::integer) as facts",
           [args.conversation_id, a.id, args.after_sequence ?? 0, args.limit ?? 200]);
