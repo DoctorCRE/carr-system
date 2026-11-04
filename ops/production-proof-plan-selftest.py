@@ -113,12 +113,18 @@ class AdmissionTest(unittest.TestCase):
 
     def test_ci_only_helpers_and_mixed_runtime(self):
         body = '## Production proof\nn/a: CI checks only; no deployed runtime changes'
-        for path in ['ops/ci_unit_shards.py', 'ops/node_test_summary.py']:
+        for path in ['ops/ci_unit_shards.py', 'ops/node_test_summary.py',
+                     'ops/config/ci-unit-durations.json']:
             with self.subTest(path=path):
                 result = self.run_plan(body, [path])
                 self.assertEqual(result.returncode, 0, result.stdout)
                 result = self.run_plan(body, [path, 'mcp-server/src/work-queue.js'])
                 self.assertNotEqual(result.returncode, 0, result.stdout)
+
+    def test_other_ci_configs_still_require_proof(self):
+        body = '## Production proof\nn/a: CI checks only; no deployed runtime changes'
+        result = self.run_plan(body, ['ops/config/runtime.json'])
+        self.assertNotEqual(result.returncode, 0, result.stdout)
 
     def test_worker_and_mixed_changes_require_worker_coverage(self):
         body = '## Production proof\nproofs/requirements/synthetic.json'
