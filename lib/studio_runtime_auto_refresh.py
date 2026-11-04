@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import urlopen
+from lib.release_reader import read
 
 from ops.git_env import scrubbed_env
 from lib.local_jobs import append, locked, read_latest, stamp
@@ -27,8 +27,10 @@ def command(*args, timeout=60):
 
 
 def released_sha():
-    with urlopen(RELEASE_URL, timeout=20) as response:
-        live = json.loads(response.read(65537))
+    response = read(RELEASE_URL, timeout=20)
+    if response.status != 200:
+        raise ValueError(f"production release HTTP {response.status}")
+    live = json.loads(response.body)
     sha = live['git_sha']['value']
     if not isinstance(sha, str) or not SHA.fullmatch(sha) or live.get('env', {}).get('value') != 'production':
         raise ValueError('production release identity unavailable')
@@ -72,12 +74,24 @@ def tick(root, host, *, now=None):
             return receipt('refused')
         if now - state.get('checked_at', 0) < 300:
             return receipt('wait')
+        if state.get('discovery_failures', 0) >= 2:
+            host.alert(None, now)
+            return receipt('open')
         state['checked_at'] = now
+        state['discovery_failures'] = state.get('discovery_failures', 0) + 1
         save(path, state)
         try:
             sha = host.release()
             if not isinstance(sha, str) or not SHA.fullmatch(sha):
                 raise ValueError('invalid release SHA')
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            if state['discovery_failures'] >= 2:
+                host.alert(None, now)
+                return receipt('open')
+            return receipt('refused')
+        state['discovery_failures'] = 0
+        save(path, state)
+        try:
             if host.installed() == sha:
                 host.verify_current(sha)
                 state['failures'].pop(sha, None)
@@ -174,11 +188,12 @@ class Host:
     def alert(self, sha, now):
         key = f'job_failed:{LABEL}:exit_1'
         previous = read_latest(self.source / 'out/watchdog/findings.jsonl').get(key, {})
-        if previous.get('release_sha') == sha and not previous.get('cleared_at'):
+        if previous and previous.get('release_sha') == sha and not previous.get('cleared_at'):
             return
+        target = f'for {sha}' if sha else 'discovery'
         finding = {'key': key, 'kind': 'job_failed', 'subject': LABEL, 'exit_code': 1,
                    'release_sha': sha,
-                   'reason': f'Runtime refresh breaker open for {sha}; two failures; retries stopped.',
+                   'reason': f'Runtime refresh {target} breaker open; two failures; retries stopped.',
                    'first_seen': stamp(now), 'cleared_at': None}
         append(self.source / 'out/watchdog/findings.jsonl', finding)
         inbox = self.source / 'out/watchdog/orchestrator-inbox.jsonl'

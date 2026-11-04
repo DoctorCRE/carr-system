@@ -296,7 +296,7 @@ class ReleaseTests(unittest.TestCase):
         live = live if live is not None else {'git_sha': {'value': A}, 'env': {'value': 'production'}}
         runs = runs if runs is not None else [{'displayTitle': f'Production release {A}',
                    'headBranch': 'main', 'event': 'workflow_run', 'conclusion': 'success'}]
-        with patch('lib.studio_runtime_auto_refresh.urlopen', return_value=io.BytesIO(json.dumps(live).encode())), \
+        with patch('lib.studio_runtime_auto_refresh.read', return_value=SimpleNamespace(status=200, body=json.dumps(live).encode())), \
                 patch('lib.studio_runtime_auto_refresh.command', return_value=json.dumps(runs)):
             return released_sha()
 
@@ -318,7 +318,7 @@ class ReleaseTests(unittest.TestCase):
             self.release(runs=[])
 
     def test_network_failure_refuses(self):
-        with patch('lib.studio_runtime_auto_refresh.urlopen', side_effect=TimeoutError()):
+        with patch('lib.studio_runtime_auto_refresh.read', side_effect=TimeoutError()):
             with self.assertRaises(TimeoutError):
                 released_sha()
 
