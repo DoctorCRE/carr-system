@@ -86,6 +86,30 @@ class AdmissionTest(unittest.TestCase):
             result = self.run_plan('## Production proof\nn/a: documentation', ['docs/a.md', path])
             self.assertNotEqual(result.returncode, 0, path)
 
+    def test_ci_implementation_declarations(self):
+        for path in ['ops/ci-evidence.py', 'ops/ci-unit.py', 'ops/ci-secret.py']:
+            with self.subTest(path=path):
+                result = self.run_plan('## Production proof\nn/a: CI checks only; no deployed runtime changes', [path])
+                self.assertEqual(result.returncode, 0, result.stdout)
+        for path in ['ops/ci-dispatch.py', 'lib/outlook_runtime.py', 'ops/runtime.py']:
+            self.assertNotEqual(self.run_plan('## Production proof\nn/a: CI checks only', [path]).returncode, 0)
+
+    def test_studio_declaration_and_worker_mismatch(self):
+        body = '## Production proof\nproofs/requirements/synthetic.json'
+        paths = ['lib/outlook_runtime.py']
+        self.requirement['targets'] = ['studio']
+        self.requirement['assertions'][0]['runner'] = 'studio-run-receipt.v1'
+        self.requirement['assertions'][0]['predicate'] = 'After the installed Studio run, read the receipt and check processed counts'
+        self.manifest.write_text(json.dumps(self.requirement))
+        result = self.run_plan(body, paths)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.requirement['assertions'][0]['runner'] = 'worker-release-smoke.v1'
+        self.manifest.write_text(json.dumps(self.requirement))
+        self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
+        self.requirement['targets'] = ['worker']
+        self.manifest.write_text(json.dumps(self.requirement))
+        self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
+
     def test_placeholder_and_duplicate_sections(self):
         for body in ['## Production proof\nn/a:', '## Production proof\nn/a: TODO',
                      '## Production proof\n<!-- n/a: docs -->',
