@@ -23,7 +23,7 @@
         "A retained digest retries with the same expiry after password verification; revoked or expired rows refuse. Replay never extends expiry.",
         "A digest already bound to another slug refuses even with that other slug's valid password.",
         "At most ten unexpired rows per slug, including revoked rows. Capacity returns denied without evicting browsers.",
-        "A successful new exchange removes expired rows for its slug. Replay protection lasts while a row is retained. Never reuse a digest for a new login."
+        "A successful new exchange removes expired rows for its slug. A permanent digest-only ownership tombstone prevents reissuance after expiry cleanup. Never reuse a digest for a new login."
       ]
     },
     "read": {

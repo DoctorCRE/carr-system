@@ -120,6 +120,8 @@ test('slug-bound portal session statechart', async t => {
       await c.query("update ops.client_portal_session set created_at=now()-interval '192 hours',expires_at=now()-interval '24 hours' where portal_slug='a'");
       assert.equal((await exchange('a', 'after-cleanup')).status, 'success');
       assert.equal((await c.query("select count(*)::int n from ops.client_portal_session where portal_slug='a'")).rows[0].n, 1);
+      assert.deepEqual(await exchange('a', 'cap-0'), denied);
+      assert.deepEqual(await exchange('b', 'cap-0'), denied);
       assert.equal((await c.query("select bool_and(extract(epoch from expires_at-created_at)=604800) ok from ops.client_portal_session")).rows[0].ok, true);
     });
     await t.test('boundary validation, digest-only storage, private tables and function-only grants', async () => {
@@ -128,6 +130,7 @@ test('slug-bound portal session statechart', async t => {
         await c.query(`set role ${role}`);
         try {
           await assert.rejects(c.query('select * from ops.client_portal_session'), { code: '42501' });
+          await assert.rejects(c.query('select * from ops.client_portal_session_digest'), { code: '42501' });
           await assert.rejects(c.query("select ops.client_portal_projection('a')"), { code: '42501' });
           if (role === 'carr_writer') {
             assert.equal((await read('a', 'after-cleanup')).status, 'success');

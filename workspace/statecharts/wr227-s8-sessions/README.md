@@ -19,9 +19,15 @@ and the original revocation timestamp.
 Capacity is a design bound, not a measured traffic claim. At current load and
 10x, ten unexpired sessions per portal and seven-day fixed expiry bound each
 slug's storage and exchange work. Expired rows are removed on that slug's next
-successful new exchange. Idle slugs retain at most ten rows. Revoked rows remain
-until expiry so a retry cannot resurrect them. Replay is guaranteed while its
-row is retained; adapters must never reuse a digest for a new login. Capacity
+successful new exchange. Idle slugs retain at most ten authorization rows. A private digest/slug
+tombstone remains for every issued digest, preventing reissuance after cleanup.
+Tombstone storage grows linearly with successful distinct logins. At 10x logins
+it grows 10x; indexed single-key lookups remain the access pattern. There is no
+measured production load in this synthetic build. Storage monitoring and normal
+database capacity planning apply; tombstones must not be pruned while this
+contract promises indefinite replay safety. Revoked rows remain
+until expiry so a retry cannot resurrect them. Replay never reissues a digest, including after expiry cleanup; adapters must
+never reuse a digest for a new login. Capacity
 returns denied rather than evicting another browser. Bcrypt CPU breaks first at
 10x; apply adapter admission limits before increasing database capacity.
 
@@ -68,7 +74,7 @@ stateDiagram-v2
   Active --> Revoked: revoke
   Revoked --> Revoked: repeat revoke or exchange replay / denied
   Active --> Expired: seven days elapsed
-  Expired --> Expired: read or retained exchange replay / denied
+  Expired --> Expired: read or exchange replay after cleanup / denied
   Active --> Disabled: portal disabled
   Disabled --> Disabled: read or exchange / denied
   Active --> Active: wrong slug / denied without content

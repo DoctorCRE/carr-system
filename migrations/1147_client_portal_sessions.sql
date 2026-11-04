@@ -77,6 +77,13 @@ create table ops.client_portal_session (
 create index client_portal_session_slug_expiry on ops.client_portal_session(portal_slug,expires_at);
 revoke all on ops.client_portal_session from public,carr_reader,carr_writer,carr_authority,dot_reader;
 
+-- Retain digest ownership after expiry cleanup so a retry can never reissue it.
+create table ops.client_portal_session_digest (
+  digest text primary key check (digest ~ '^[0-9a-f]{64}$'),
+  portal_slug text not null references ops.client_portal(slug)
+);
+revoke all on ops.client_portal_session_digest from public,carr_reader,carr_writer,carr_authority,dot_reader;
+
 create function ops.exchange_client_portal_session(p_slug text,p_password text,p_digest text) returns jsonb
 language plpgsql volatile security definer set search_path=pg_catalog,pg_temp as $$
 declare
@@ -109,6 +116,9 @@ begin
   end if;
   delete from ops.client_portal_session where portal_slug=p_slug and expires_at<=issued_at;
   if (select count(*) from ops.client_portal_session where portal_slug=p_slug)>=10 then return denied; end if;
+  insert into ops.client_portal_session_digest(digest,portal_slug) values(p_digest,p_slug)
+    on conflict (digest) do nothing;
+  if not found then return denied; end if;
   insert into ops.client_portal_session(digest,portal_slug,created_at,expires_at)
     values(p_digest,p_slug,issued_at,issued_at + interval '168 hours') on conflict (digest) do nothing;
   if not found then return denied; end if;
