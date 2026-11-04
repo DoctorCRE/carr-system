@@ -140,13 +140,22 @@ test("only unit fixtures provision the shared PostgreSQL service", () => {
   }
 });
 
-test("metadata edits start no validation workflow, so no skipped suite replaces the required verdict", () => {
-  for (const file of files) {
-    const edited = policy(read(file), context("pull_request", "edited"));
-    assert.equal(edited.triggers, false, `${file}: an edit must start no workflow`);
-    assert.deepEqual(edited.runnable, []);
-  }
-  assert.ok(read("ci.yml").jobs.classes.strategy.matrix.classes.includes("gates"));
+test("same-head proof edits rerun the complete PR lane without scheduling doc drift", () => {
+  const ci = read("ci.yml");
+  const previous = policy(ci, context());
+  const edited = policy(ci, context("pull_request", "edited"));
+  assert.equal(edited.triggers, true);
+  assert.deepEqual(edited.runnable, CI_PR_JOBS);
+  assert.equal(edited.group, previous.group);
+  assert.equal(edited.cancel, true);
+  const draftEvent = context("pull_request", "edited");
+  draftEvent.event.pull_request.draft = true;
+  assert.deepEqual(policy(ci, draftEvent).runnable, ["checks"]);
+  assert.deepEqual(policy(ci, context("pull_request", "edited"), true,
+    { shard_trial: false }, true).runnable, ["checks"]);
+  const drift = policy(read("doc-drift.yml"), context("pull_request", "edited"));
+  assert.equal(drift.triggers, false);
+  assert.deepEqual(drift.runnable, []);
 });
 
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
