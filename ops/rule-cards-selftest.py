@@ -128,12 +128,10 @@ class CardTests(unittest.TestCase):
             self.assertIn('settings.json', checker.missing_paths(
                 text.replace('<!-- carr-native-rules:end -->', '')))
 
-    def test_from_store_refuses_when_projection_drops_cards(self):
+    def assert_from_store_result(self, adopted, *, valid=False):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
         sync = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(sync)
-        document = json.loads((REPO / 'ops/config/rule-cards.v1.json').read_text())
-        adopted = [card for card in document['cards'] if card['id'] != 'K01']
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             names = ('ops/config/rule-cards.v1.json', 'AGENTS.md', 'CLAUDE.md')
@@ -142,6 +140,7 @@ class CardTests(unittest.TestCase):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(content)
+            mtimes = {name: (root / name).stat().st_mtime_ns for name in names}
             cards = root / names[0]
             with mock.patch.object(sync, 'ROOT', root), mock.patch.object(
                     sync, 'CARDS', cards), mock.patch.object(
@@ -151,10 +150,35 @@ class CardTests(unittest.TestCase):
                     sync, 'read_retirements', return_value=[]), mock.patch(
                     'sys.argv', ['sync', '--from-store']), mock.patch(
                     'sys.stderr', new_callable=io.StringIO) as output:
-                self.assertNotEqual(sync.main(), 0)
-            self.assertIn('K01', output.getvalue())
+                result = sync.main()
             for name, content in before.items():
-                self.assertEqual((root / name).read_bytes(), content)
+                self.assertEqual((root / name).read_bytes(), content, name)
+                if not valid:
+                    self.assertEqual((root / name).stat().st_mtime_ns, mtimes[name], name)
+            if valid:
+                self.assertEqual(result, 0, output.getvalue())
+            else:
+                self.assertNotEqual(result, 0)
+                self.assertIn('nothing written', output.getvalue())
+            return output.getvalue()
+
+    def test_from_store_refuses_when_projection_drops_cards(self):
+        adopted = [card for card in self.cards if card['id'] != 'K01']
+        self.assertIn('K01', self.assert_from_store_result(adopted))
+
+    def test_from_store_refuses_null_matcher_event_without_writes(self):
+        adopted = [{**card, 'triggers': {'matchers': [{'event': None}]}}
+                   if card['id'] == 'R01' else card for card in self.cards]
+        self.assertIn('R01', self.assert_from_store_result(adopted))
+
+    def test_from_store_refuses_unknown_regex_without_writes(self):
+        adopted = [{**card, 'triggers': {'matchers': [
+            {'event': 'UserPromptSubmit', 'unknown_regex': '.*'}]}}
+                   if card['id'] == 'R01' else card for card in self.cards]
+        self.assertIn('R01', self.assert_from_store_result(adopted))
+
+    def test_from_store_complete_projection_regenerates_byte_identically(self):
+        self.assert_from_store_result(self.cards, valid=True)
 
     def test_cards_file_renders_from_the_store(self):
         spec = importlib.util.spec_from_file_location('sync', REPO / 'ops/sync-core-rule-cards.py')
