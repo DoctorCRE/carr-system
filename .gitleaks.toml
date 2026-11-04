@@ -438,6 +438,6 @@ regexes = [
 [[allowlists]]
 description = "SHA256 of the reviewed canonical runner credential parser source, not a credential"
 condition = "AND"
-regexTarget = "line"
+regexTarget = "secret"
 paths = ['''(?:^|/)contracts/production-proof-plan\.v1\.json$''']
-regexes = ['''^        "lib/credential_file\.py": "68c27169405b12a9a41b94d3de6aa94b66eec324b8971e12c0ebc9228456919b"$''']
+regexes = ['''^68c27169405b12a9a41b94d3de6aa94b66eec324b8971e12c0ebc9228456919b$''']
