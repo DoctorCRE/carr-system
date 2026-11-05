@@ -57,6 +57,13 @@
       "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
       "targets": ["app"]
     },
+    "worker-email-link-marker.v1": {
+      "path": "ops/email-link-marker-proof.py",
+      "targets": ["worker"],
+      "sources": {
+        "ops/email-link-marker-proof.py": "eceef3abaa2eb898c368094f3b3e707e70f05491d60e5d637bcd0019e22ba94b"
+      }
+    },
     "worker-release-smoke.v1": {
       "path": "ops/release-smoke.py",
       "revision": "8bdabfe3275668cd10401a8e58244b953d3d2428",

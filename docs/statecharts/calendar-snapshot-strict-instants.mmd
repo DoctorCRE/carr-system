@@ -1,0 +1,16 @@
+stateDiagram-v2
+    [*] --> snapshot_unavailable: Missing snapshot or invalid observation
+    [*] --> current_ready: Current valid meetings
+    [*] --> current_partial_malformed: Rejected meeting, alternate time or review
+    [*] --> stale_partial: Observation older than eighteen hours
+    [*] --> future_partial: Observation is in the future
+    [*] --> empty_current: Current snapshot without meetings
+    snapshot_unavailable --> current_ready: Refresh with valid meetings
+    current_partial_malformed --> current_ready: Refresh with valid times
+    stale_partial --> current_ready: Refresh with current observation
+    future_partial --> current_ready: Refresh with current observation
+    empty_current --> current_ready: Refresh includes a meeting
+    current_ready --> current_partial_malformed: Refresh includes an impossible instant
+    %% never A rejected instant becomes another scheduled date.
+    %% never An invalid observation certifies calendar coverage.
+    %% never Rejected alternate times silently certify complete coverage.
