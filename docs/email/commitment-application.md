@@ -58,13 +58,20 @@ with cohort as (
     public.email_filing_source_hash(a) as current_hash,
     coalesce(a.email_context#>>'{lifecycle,state}','live') as lifecycle,
     d.id as linked_deal,d.phase,cl.id as linked_client,
-    (cl.merged_into is not null or cp.merged_into is not null or cp.deleted_at is not null) as inactive,
+    (cl.merged_into is not null or cp.merged_into is not null or cp.deleted_at is not null
+      or (p.deal_id is null and (lp.merged_into is not null or lp.deleted_at is not null
+        or av.merged_into is not null or vp.merged_into is not null or vp.deleted_at is not null))) as inactive,
+    (p.deal_id is null and a.client_id is null and a.lead_id is null and a.vendor_id is null) as missing_contact,
+    (p.deal_id is null and ((a.client_id is not null and cl.id is null)
+      or (a.lead_id is not null and al.id is null) or (a.vendor_id is not null and av.id is null))) as dangling_contact,
     p.correction_provenance->'email_application' as receipt
   from email_proposal p join activity a on a.id=p.activity_id
   left join actor owner on owner.id=a.actor_id
   left join deal d on d.id=p.deal_id
   left join client cl on cl.id=coalesce(d.client_id,a.client_id)
   left join party cp on cp.id=cl.party_id
+  left join lead al on al.id=a.lead_id left join party lp on lp.id=al.party_id
+  left join vendor av on av.id=a.vendor_id left join party vp on vp.id=av.party_id
   where p.kind='next_step' and p.created_at >= $1 and p.created_at < $2
     and a.occurred_at <= $2 and coalesce(a.email_source->>'mailbox_owner',owner.slug)=$3
 ), evidence as (
@@ -81,6 +88,8 @@ select count(*) as extracted_proposals,
   count(*) filter(where receipt is not null and receipt->>'source_hash'<>current_hash) as source_changed,
   count(*) filter(where lifecycle<>'live') as terminal,
   count(*) filter(where deal_id is null) as non_deal,
+  count(*) filter(where missing_contact) as missing_contact,
+  count(*) filter(where dangling_contact) as dangling_contact,
   count(*) filter(where deal_id is not null and linked_deal is null) as dangling_deal,
   count(*) filter(where inactive or phase='closed') as inactive_target,
   count(*) filter(where receipt->>'state'='applied' and action_id is null) as dangling_action,
