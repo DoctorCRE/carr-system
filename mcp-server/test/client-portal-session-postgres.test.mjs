@@ -27,7 +27,7 @@ test('slug-bound portal session statechart', async t => {
       await c.query("insert into ops.client_portal_material(portal_slug,kind,title,content,shared_at) values($1,'report','Shared',$2,now()),($1,'report','Draft','INTERNAL_SENTINEL',null)", [slug, `CLIENT_${slug}_ONLY`]);
     }
     const canonical = (await c.query("select ops.read_client_portal('a','password-a') value")).rows[0].value;
-    await c.query(readMigration('1147_client_portal_sessions.sql'));
+    await c.query(readMigration('1152_client_portal_sessions.sql'));
     assert.deepEqual((await c.query("select ops.read_client_portal('a','password-a') value")).rows[0].value, canonical);
     const call = async (fn, args, client = c) => (await client.query(`select ops.${fn}(${args.map((_, i) => `$${i + 1}::text`).join(',')}) value`, args)).rows[0].value;
     const exchange = (slug = 'a', token = 'one', password = `password-${slug}`, client = c) => call('exchange_client_portal_session', [slug, password, digest(token)], client);
@@ -83,7 +83,8 @@ test('slug-bound portal session statechart', async t => {
       for (let i = 0; i < 4; i++) assert.deepEqual(await exchange('a', `bad-${i}`, 'wrong'), denied);
       const locked = await exchange('a', 'bad-last', 'wrong');
       assert.equal(locked.status, 'locked');
-      assert.ok(Date.parse(locked.retry_at) > Date.now());
+      const databaseNow = (await c.query('select clock_timestamp() value')).rows[0].value;
+      assert.ok(Date.parse(locked.retry_at) > databaseNow.getTime());
       assert.deepEqual(await exchange('a', 'locked'), locked);
       assert.equal((await read('a', 'live')).status, 'success');
       assert.equal((await exchange('b', 'b-two')).status, 'success');
