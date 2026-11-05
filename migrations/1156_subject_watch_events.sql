@@ -63,7 +63,8 @@ declare cursor_id uuid; last_id uuid; s record; l record; scanned integer:=0;
 begin
   if p_limit is null or p_limit<1 or p_limit>50 then raise exception 'watch_batch_limit'; end if;
   if not exists(select 1 from public.event where id=p_event) then raise exception 'watch_event_required'; end if;
-  select watch_id into cursor_id from ops.subject_watch_scan_cursor where singleton for update;
+  select watch_id into cursor_id from ops.subject_watch_scan_cursor where singleton for update skip locked;
+  if not found then return 0; end if;
   for s in select sw.*,a.slug from ops.subject_watch sw join public.actor a on a.id=sw.actor_id
     where sw.subject_type='lease' and (cursor_id is null or sw.id>cursor_id)
     order by sw.id limit p_limit for update of sw

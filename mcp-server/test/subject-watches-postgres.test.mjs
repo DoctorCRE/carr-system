@@ -234,6 +234,13 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
       proof('capture','--database',dsn,'--watched',deal,'--unwatched',control,'--actor','joe','--output',file);
       return file;
     };
+    let deferredLease;
+    const leaseWakes=async()=>Number((await c.query("select count(*) from ops.notification where subject_type='lease' and subject_ref=$1 and dedupe_key like 'subject-watch:%'",[deferredLease])).rows[0].count);
+    if(who.slug==='joe'){
+      deferredLease=(await c.query("insert into lease(client_id,created_by,updated_by,expiration_on) values($1,$2,$2,current_date+interval '30 months') returning id",[client,joe.id])).rows[0].id;
+      await call(joe,'watch-subject-v1',{subject_type:'lease',subject_id:deferredLease,idempotency_key:randomUUID()});
+      await c.query("update lease set expiration_on=current_date+interval '6 months' where id=$1",[deferredLease]);
+    }
     const before=snapshot('before');
     const args={deal,base_version:1,fields:{city:'Synthetic changed city'},idempotency_key:randomUUID()};
     if(who.slug==='joe'){
@@ -248,6 +255,7 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
         await busy.query('rollback');await busy.end();
       }
     } else await call(who,'update-deal',args);
+    if(deferredLease)assert.equal(await leaseWakes(),0,'busy cursor defers lease work');
     const event=(await c.query("select id,personal_scope from event where subject_id=$1 and verb='update-deal'",[deal])).rows[0];
     assert.equal(event.personal_scope,`${who.sponsoring_human_slug??who.slug}-personal`);
     const counts=async()=> (await c.query("select recipient_actor,count(*)::integer n from ops.notification where subject_ref=$1 and dedupe_key like 'subject-watch:%' group by recipient_actor order by recipient_actor",[deal])).rows;
@@ -255,6 +263,7 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
     assert.deepEqual(await counts(),expected,'shared deal changes wake both partners despite personal audit attribution');
     const controlArgs={...args,deal:control,idempotency_key:randomUUID()};
     await call(who,'update-deal',controlArgs);
+    if(deferredLease)assert.equal(await leaseWakes(),1,'next event processes deferred lease work');
     const after=snapshot('after');
     assert.throws(()=>proof('verify','--before',before,'--after',before,'--replay',before),/Command failed/,'zero watched changes fail proof');
     await call(who,'update-deal',args);

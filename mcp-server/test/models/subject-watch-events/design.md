@@ -38,7 +38,7 @@ All new tables and functions are owner-only. Callers cannot name another actor
 or drive a scan. Exact app destinations are `/deals?deal=<uuid>` and `/clients?record=<uuid>`,
 using the existing business record routes. No cache or external circuit breaker
 is needed. The indexed subscription scan and single-row source lookups bound
-work. Lease cursor updates serialize concurrent batches. Notification uniqueness
+work. A scanner skips a busy lease cursor, so it never waits on another event transaction. The next event resumes the durable cursor. Notification uniqueness
 is the durable delivery receipt. Tests cover the statechart transitions and the
 shared radar policy before implementation.
 
@@ -130,3 +130,19 @@ nor notifications. A watched change producing zero notifications fails. A missin
 source, wrong watch selection, duplicate wake or changed control also fails.
 The PostgreSQL suite runs the exact CLI against the registered Joe, Dell and
 sponsored writer paths, including zero-change and duplicate-wake refusals.
+
+
+# Cursor contention regression
+
+Admitting real human events exposed a lock cycle in unrelated registered record
+writes. The prior blocking singleton cursor serialized every event transaction,
+including one holding vendor locks while another needed them. The migration
+acceptance relationship suite failed its verification-first ordering case.
+Removing the trigger in a disposable control made all 13 relationship tests pass;
+replacing the blocking cursor lock with SKIP LOCKED also made all 13 pass.
+The watch regression now holds the scan cursor on a second connection while a
+registered update-deal commits. It failed first with SQLSTATE 57014 at the cursor
+lock. A busy scanner now returns zero without moving the cursor. A later event
+retries lease scanning from that durable cursor, while direct deal notifications
+remain in the source transaction. Existing bounded-batch and rollback tests
+prove later scans neither skip leases nor commit failed progress.
