@@ -110,7 +110,6 @@ for (const [name, mutate, stage, path] of [
   ['private property field', i => { i.reviewed.properties[0].data.internal_notes = 'private'; }, 'composed', '/properties/0/internal_notes'],
   ['stored financials', i => { i.reviewed.properties[0].data.deal_financials = {}; }, 'composed', '/properties/0/deal_financials'],
   ['client uploads', i => { i.reviewed.client.data.client_uploads = []; }, 'composed', '/client/client_uploads'],
-  ['private GeoJSON metadata', i => { i.research.developments[0].overlay.features[0].properties.internal_notes = 'private'; }, 'research', '/developments/0/overlay/features/0/properties/internal_notes'],
   ['invalid full data', i => { i.reviewed.prepared.data.on = 'invalid'; }, 'composed', '/prepared/on'],
 ]) {
   test(`returns deterministic errors for ${name}`, () => {
@@ -162,3 +161,117 @@ for (const [label, path, mutate] of [
   });
 }
 const foreignAsset = { sha256: 'b'.repeat(64), name: 'deal-b-report.pdf', type: 'application/pdf' };
+
+const schema = JSON.parse(readFileSync(new URL('../../client-portal/market-study.v1.schema.json', import.meta.url)));
+
+test('hostile overlay drops private fields at every nesting level without mutating frozen inputs', () => {
+  const input = inputs();
+  input.research.developments[0].overlay = JSON.parse(readFileSync(new URL('../../client-portal/fixtures/hostile-composer-overlay.json', import.meta.url)));
+  input.membership = evidence();
+  const before = JSON.stringify(input);
+  function freeze(value) {
+    if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); }
+  }
+  freeze(input);
+  const result = compose(input);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.package, fixture);
+  assert.equal(JSON.stringify(input), before);
+});
+
+function assertAllowedFields(value, shape) {
+  if (shape.$ref === '#/$defs/GeoJSON') {
+    function geo(value) {
+      const fields = value.type === 'FeatureCollection' ? ['type', 'features']
+        : value.type === 'GeometryCollection' ? ['type', 'geometries']
+        : value.type === 'Feature' ? ['type', 'properties', 'geometry'] : ['type', 'coordinates'];
+      assert.deepEqual(Object.keys(value).filter(key => !fields.includes(key)), []);
+      if (value.features) value.features.forEach(geo);
+      if (value.geometries) value.geometries.forEach(geo);
+      if (value.geometry) geo(value.geometry);
+      if (value.properties) assert.deepEqual(Object.keys(value.properties), []);
+    }
+    assert.deepEqual(Object.keys(value).filter(key => !Object.hasOwn(schema.$defs.GeoJSON.properties, key)), []);
+    geo(value);
+    return;
+  }
+  if (shape.$ref) shape = schema.$defs[shape.$ref.split('/').at(-1)];
+  if (Array.isArray(value)) return value.forEach((child, index) => assertAllowedFields(child, shape.prefixItems?.[index] || shape.items || {}));
+  if (!value || typeof value !== 'object') return;
+  const fields = Object.assign({}, shape.properties, ...(shape.oneOf || []).map(branch => branch.properties),
+    ...(shape.allOf || []).map(branch => branch.then?.properties));
+  assert.deepEqual(Object.keys(value).filter(key => !Object.hasOwn(fields, key) && !shape.additionalProperties), []);
+  for (const [key, child] of Object.entries(value)) assertAllowedFields(child, fields[key] || shape.additionalProperties);
+}
+
+test('composed fields are a subset of schema fields with metadata-free GeoJSON structures', () => {
+  assertAllowedFields(compose(inputs()).package, schema);
+});
+
+for (const field of ['deal_id', 'client_id']) {
+  test(`refuses research with another ${field}`, () => {
+    const input = inputs();
+    input.membership = evidence();
+    input.membership.research[field] = 'another-record';
+    const result = compose(input);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(e => e.reason === 'research_identity_mismatch'));
+  });
+}
+
+test('requires membership evidence without a compatibility bypass', () => {
+  const input = inputs();
+  const result = composeMarketStudyPackage(input.research, input.reviewed, target);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors[0].reason, 'membership_required');
+});
+
+function assetPaths(value, path = '') {
+  if (!value || typeof value !== 'object') return [];
+  if (value.sha256 && value.name && value.type) return [{ path, data: value }];
+  return Object.entries(value).flatMap(([key, child]) => assetPaths(child, `${path}/${key}`));
+}
+for (const { path, data } of assetPaths(fixture)) {
+  for (const field of ['deal_id', 'client_id']) {
+    test(`checks ${field} for asset ${path}`, () => {
+      const input = inputs();
+      input.membership = evidence();
+      for (const row of input.membership.assets) if (row.data.sha256 === data.sha256) row[field] = 'another-record';
+      const result = compose(input);
+      assert.equal(result.ok, false);
+      assert.ok(result.errors.some(e => e.path === path && e.reason === 'asset_identity_mismatch'));
+      assert.equal(Object.hasOwn(result, 'package'), false);
+    });
+  }
+  test(`requires exact membership for asset ${path}`, () => {
+    const input = inputs();
+    input.membership = evidence();
+    input.membership.assets = input.membership.assets.filter(row => row.data.sha256 !== data.sha256);
+    const result = compose(input);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(e => e.path === path && e.reason === 'asset_membership_missing'));
+  });
+}
+
+test('rejects conflicting ownership assertions even with a matching envelope', () => {
+  const input = inputs();
+  input.membership = evidence();
+  input.membership.assets.push({ ...input.membership.assets[0], deal_id: 'another-deal' });
+  assert.equal(compose(input).ok, false);
+});
+
+test('rejects an asset name substituted under an approved hash', () => {
+  const input = inputs();
+  input.research.demographics.micro_zones.zones[0].study_pdf.name = 'another-report.pdf';
+  const result = compose(input);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(e => e.reason === 'asset_membership_missing'));
+});
+
+test('refuses nonnumeric values hidden inside geometry coordinates', () => {
+  const input = inputs();
+  input.research.developments[0].overlay.features[0].geometry.coordinates = [[{ private: 'secret' }]];
+  const result = compose(input);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.some(e => e.reason === 'invalid_public_geometry'));
+});
