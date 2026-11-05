@@ -76,6 +76,7 @@ import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
+import { candidateSignatureLifecycle } from "./email-candidate-signatures.js";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
@@ -4462,6 +4463,8 @@ export const TOOLS = {
         and email_identity->>'mailbox_account'=$2 and email_identity->>'item_id'=$3 order by id for update`,
         [identity.mailbox_owner,account,identity.item_id])).rows;
       if (!rows.length) {
+        const candidate = await candidateSignatureLifecycle(c,identity,args,actor,writeEvent);
+        if (candidate) return candidate;
         const known = (await c.query(`select 1 from activity where email_identity->>'mailbox_owner'=$1
           and email_identity->>'item_id'=$2 limit 1`, [identity.mailbox_owner,identity.item_id])).rows.length;
         if (known) throw new ToolError({ error: 'email_identity_account_mismatch' });
@@ -4493,6 +4496,7 @@ export const TOOLS = {
         [ids,actor.id,`Source email ${args.state}`]);
       await c.query(`update activity set email_context=coalesce(email_context,'{}'::jsonb)||jsonb_build_object('lifecycle',$2::jsonb),
         version=version+1,updated_by=$3,updated_at=now() where id=any($1::uuid[])`, [ids,JSON.stringify(lifecycle),actor.id]);
+      await candidateSignatureLifecycle(c,identity,args,actor,writeEvent);
       for (const row of rows) await writeEvent(c,actor,'record-email-lifecycle','activity',row.id,
         { new: { activity_id: row.id, ...lifecycle }, idempotency_key: args.idempotency_key, cause: 'ingest_email' });
       return { ok: true, state: args.state, version: 1, action_notes };

@@ -4145,6 +4145,40 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(result.counts['mapping_ambiguous'], 1)
         self.assertIn('ambiguous', self.report_text())
 
+    def test_candidate_signatures_survive_queued_sender_model_suppression(self):
+        self.fake.intent_reply = read('new_matter', 'Synthetic clinic request.')
+        address = 'candidate@synthetic.test'
+        body = '--\nName: Synthetic Sender\nEmail: candidate@synthetic.test\nPhone: 555-010-1234'
+        first = mail(address, -timedelta(hours=2), body=body)
+        self.run_intake([first])
+        writes = self.fake.writes('observe-email-candidate-signatures')
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(len(writes[0][1]['observations']), 1)
+        second = mail(address, -timedelta(hours=1), subject='Synthetic followup', body=body.replace('1234', '5678'))
+        self.run_intake([first, second])
+        self.assertEqual(len(self.fake.intent_calls), 1)
+        observations = self.fake.writes('observe-email-candidate-signatures')[-1][1]['observations']
+        self.assertEqual(len(observations), 2)
+        self.assertEqual(len({o['source_id'] for o in observations}), 2)
+        count = len(self.fake.writes('observe-email-candidate-signatures'))
+        self.run_intake([first, second])
+        self.assertEqual(len(self.fake.writes('observe-email-candidate-signatures')), count)
+
+    def test_candidate_signature_failed_request_yields_to_changed_source(self):
+        self.fake.intent_reply = read('new_matter', 'Synthetic clinic request.')
+        body = '--\nName: Synthetic Sender\nEmail: candidate@synthetic.test\nPhone: 555-010-1234'
+        first = mail('candidate@synthetic.test', -timedelta(hours=2), body=body)
+        self.fake.fail_verbs.add('observe-email-candidate-signatures')
+        self.run_intake([first])
+        original = self.fake.writes('observe-email-candidate-signatures')[0][1]
+        self.fake.fail_verbs.clear()
+        changed = {**first, 'body': body.replace('1234', '5678')}
+        self.run_intake([changed])
+        latest = self.fake.writes('observe-email-candidate-signatures')[-1][1]
+        self.assertNotEqual(original['observations'][0]['raw_digest'], latest['observations'][0]['raw_digest'])
+        requests = json.loads((self.repo / 'out/outlook-intake/state.json').read_text())['requests']
+        self.assertEqual(requests[original['idempotency_key']]['disposition'], 'superseded')
+
     def test_an_unknown_sender_with_business_intent_is_queued_once_for_review(self):
         self.fake.intent_reply = read('new_matter', 'Wants a clinic suite near the hospital.', quote='Can we meet Thursday?')
         first = mail('new.doctor@practice.test', -timedelta(hours=2), name='Dana Doctor')

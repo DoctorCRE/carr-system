@@ -1871,6 +1871,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "observe-email-candidate-signatures": {
+    "ingress_key": "mcp-tool:observe-email-candidate-signatures",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
+    "schema_digest": "418c0b763b4c3d1fdec59ed70a1932f7d042f0f28caf27fcbbb714fdca31784e",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "open-campaign": {
     "ingress_key": "mcp-tool:open-campaign",
     "source_locator": "mcp-server/src/tools.js",
@@ -2348,6 +2358,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-doctrine",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "92ae529a7e47be0d8ac99fdef3b3b79c8588128418c5b5606f3f2ad1563f2757",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-email-candidate-signature-counts": {
+    "ingress_key": "mcp-tool:read-email-candidate-signature-counts",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
+    "schema_digest": "47183a4196eb9543b5c7b5a046f42cbd3970aecd49d47c2e44bd78a93d5c3a46",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-email-candidate-signatures": {
+    "ingress_key": "mcp-tool:read-email-candidate-signatures",
+    "source_locator": "mcp-server/src/email-lead-proposal.ts",
+    "schema_digest": "b6df93e8115035e4a9311bf057f6b7155115d4484585aedc672e9c3e6ecd29d0",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

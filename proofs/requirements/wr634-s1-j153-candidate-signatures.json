@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "wr634-s1-j153-candidate-signatures",
+  "targets": ["worker", "studio"],
+  "assertions": [{
+    "id": "ordinary-candidate-observations",
+    "predicate": "After deployment and Studio installation, ordinary intake retains at least two distinct source observations for one candidate. Counts-only readback reports duplicate_observations zero, and ordinary repeat intake reports candidate_signature_duplicates_suppressed without duplicate growth. A natural lifecycle invalidation increases invalidated_observations and holds pending promotion.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "Positive natural intake evidence and matching counts. No naturally invalidated source means that transition remains unproven.",
+    "input_class": "read-only ordinary intake receipt and candidate signature count reader",
+    "deadline_seconds": 300
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 4, "max_records": 100, "max_runtime_seconds": 300, "max_artifact_bytes": 65536}
+}

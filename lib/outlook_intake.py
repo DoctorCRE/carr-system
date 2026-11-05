@@ -113,7 +113,7 @@ WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
 COVERAGE_HELD_RECIPIENTS_LIMIT = 20  # More held Sent items require human attention.
 COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
-WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
+WRITE_VERBS = frozenset({'observe-email-candidate-signatures', 'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
                          'record-deal-item', 'complete-deal-item', 'drop-action', 'record-finding'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
@@ -1046,6 +1046,9 @@ class Run:
                 request['item_id'] = (reply.get('item') or {}).get('id')
             if verb == 'propose-email-lead':
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
+            if verb == 'observe-email-candidate-signatures':
+                for field in ('inserted', 'duplicates_suppressed'):
+                    self.counts['candidate_signature_' + field] = self.counts.get('candidate_signature_' + field, 0) + reply.get(field, 0)
             if verb == 'log-activity':
                 request['activity_id'] = reply.get('activity_id')
                 if args.get('kind') == 'email_in':
@@ -1109,6 +1112,64 @@ class Run:
     def signature_source(self, ident: str) -> str:
         return email_contact_review.digest([self.settings.owner, self.settings.account.lower(),
                                             self.settings.folder_account_id, ident])
+
+    def candidate_signatures(self, mails: list[dict], matcher: Matcher) -> None:
+        from lib.email_candidate_signatures import observations
+        mailbox = self.state.setdefault('candidate_signature_sources', {}).setdefault(self.signature_source('mailbox'), {})
+        eligible = []
+        queued = {p.get('sender') for p in self.state.get('mail_unresolved', {}).values() if p.get('sender')}
+        for mail in mails:
+            if (mail['metadata_incomplete'] or _internal(mail['sender'], self.settings.internal_domain)
+                    or mail['sent_unix'] > self.now.timestamp() + 300
+                    or matcher.signature_contact(mail['sender']) is not None
+                    or _hash(mail['sender'].lower()) not in queued):
+                continue
+            eligible.append({**mail, 'ident': mail.get('signature_ident', mail['ident']),
+                             'occurred_at': _iso(mail['sent_unix'])})
+        batches = observations(eligible, mailbox, self.signature_source, COPY_WINDOW)
+        _save(self.out, self.state)
+        attempts, failures = 0, 0
+        current = {(address, record['source_id'], record['raw_digest'])
+                   for address, records in batches.items() for record in records}
+        for request in list(self.state.get('requests', {}).values()):
+            if request['verb'] != 'observe-email-candidate-signatures' or request['acknowledged']:
+                continue
+            args = json.loads(request['payload'])
+            if any((args['address'], record['source_id'], record['raw_digest']) not in current
+                   for record in args['observations']):
+                request.update(acknowledged=True, disposition='superseded', retry_at=None)
+                _save(self.out, self.state)
+                continue
+            if attempts >= 20 or failures >= 2:
+                self.state['reads_due'] = True
+                return
+            attempts += 1
+            if self.write('observe-email-candidate-signatures', args, 'candidate signature retry'):
+                failures = 0
+            else:
+                failures += 1
+                self.state['reads_due'] = True
+        for address, records in batches.items():
+            for start in range(0, len(records), 50):
+                batch = records[start:start + 50]
+                identity = [self.settings.owner, self.settings.account.lower(), address, batch]
+                args = {'idempotency_key': key('candidate-signatures', address, email_contact_review.digest(identity)),
+                        'address': address, 'mailbox_account': self.settings.account.lower(), 'observations': batch}
+                prior = self.state.get('requests', {}).get(args['idempotency_key'], {})
+                if prior.get('acknowledged'):
+                    self.counts['candidate_signature_duplicates_suppressed'] = self.counts.get('candidate_signature_duplicates_suppressed', 0) + len(batch)
+                    continue
+                if args['idempotency_key'] in self.attempted:
+                    continue
+                if attempts >= 20 or failures >= 2:
+                    self.state['reads_due'] = True
+                    return
+                attempts += 1
+                if self.write('observe-email-candidate-signatures', args, 'candidate signature evidence'):
+                    failures = 0
+                else:
+                    failures += 1
+                    self.state['reads_due'] = True
 
     def signature_findings(self, mails: list[dict], matcher: Matcher) -> None:
         observations = self.state.setdefault('signature_observations', {})
@@ -2077,7 +2138,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('candidate_signature_policy') == 1 and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -2160,7 +2221,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _quarantine_calendar_requests(state)
         _save(out, state)
         for request in list(state.get('requests', {}).values()):
-            if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
+            if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action', 'observe-email-candidate-signatures'):
                 continue
             if (request['verb'] == 'record-finding'
                     and json.loads(request['payload']).get('kind') == email_contact_review.KIND):
@@ -2174,6 +2235,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         work.counts['legacy_unmatched'] = _legacy_unmatched(state)
         work.observe_flags(complete_mails, matcher)
         work.leads(matcher)
+        work.candidate_signatures(mails, matcher)
         work.full_text(complete_mails)
         mail_processed = bool(work.written or any(value for key, value in work.counts.items()
                                                   if key not in (*MAIL_STORE_COUNTERS, 'mail_rows_reusing_prior_identity',
@@ -2211,7 +2273,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=2, signature_policy=SIGNATURE_POLICY,
+    state.update(store=signature, high_water=int(now.timestamp()), contact_map=matcher.fingerprint(), attachment_policy=2, signature_policy=SIGNATURE_POLICY, candidate_signature_policy=1,
                  **{name: meta[name] for name in MAIL_STORE_COUNTERS},
                  folder_account_id=settings.folder_account_id, account_binding=_hash(settings.account.strip().lower()),
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])

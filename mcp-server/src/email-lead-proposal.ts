@@ -10,6 +10,7 @@
 // path, and decline-candidate says no. An email quote is not research, so a
 // confirmation never passes through promote-pool's research gate or claims it.
 import { derivedIdempotencyKey } from './derived-key.ts';
+import { candidateSignatureTools } from './email-candidate-signatures.js';
 import { sha256 } from './sha256.ts';
 import { ToolError } from './tool-error.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
@@ -59,6 +60,7 @@ export function emailLeadProposalTools({ withEnvelope, writeEvent, updatePartyCo
       evidence_quote: quote ?? null, confidence } };
   }
   return {
+    ...candidateSignatureTools({withEnvelope,writeEvent}),
     'propose-email-lead': {
       write: true,
       description: 'Queue an unknown email sender with business intent for partner review on the claim card (candidate_pool lane outlook-intake). Mailbox ownership derives from authenticated partner authority; ownerless legacy callers remain outside the mailbox read. A not_business reading records only a mailbox-scoped message hash for exclusion counts and creates no candidate. Exact address only. Optional applies_to records the intake model read of what the email applies to (existing_deal with an open deal UUID, existing_party with a client, lead or vendor ref, or new_matter), with confidence and an optional evidence_quote; it is spelled out in score_basis and files nothing. The server never sees the email, so it checks only the length of the quote: the intake drops any quote that is not literal, and a quote from another caller is unverified. Returns known_party, without writing, when any party already carries the address; returns the existing row when the address was proposed before, whatever a partner decided, adding a first reading (reasoned true) only to a row still in the pool without one. Never creates a party or lead; promote-pool or decline-candidate is the human decision.',
