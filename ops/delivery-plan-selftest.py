@@ -57,7 +57,9 @@ class DeliveryTest(unittest.TestCase):
                'targets': targets or ['worker', 'studio'], 'assertions': [{
                    'id': 'example', 'predicate': 'Observe the exact bound release', 'runner': 'fixture.v1',
                    'expected_result': 'matching release identity', 'input_class': 'synthetic only',
-                   'deadline_seconds': 30}],
+                   'deadline_seconds': 30,
+                   'deferred': {'blocking_unit': 'Synthetic receipt producer',
+                                'reason': 'Binding fixture has no executable receipt evaluator'}}],
                'safety': {'read_only': True, 'no_sends': True, 'max_requests': 1,
                           'max_records': 1, 'max_runtime_seconds': 30, 'max_artifact_bytes': 1024}}
         self.write(path, json.dumps(req))
