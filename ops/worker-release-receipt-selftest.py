@@ -138,6 +138,110 @@ class ReceiptTests(unittest.TestCase):
                 seal(LIVE, sha, version, count, 42, 1)
 
 
+class DiscoveryRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        ReceiptTests.setUp(self)
+        from lib.studio_runtime_auto_refresh import Host
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.host = object.__new__(Host)
+        self.host.worker_receipt = None
+        self.host.recover = Mock()
+        self.host.alert = Mock()
+        self.host.installed = Mock(return_value='b' * 40)
+        self.host.verify_current = Mock()
+        self.host.refresh = Mock(side_effect=lambda sha: setattr(self.host.installed, 'return_value', sha))
+        self.live = LIVE
+        self.payload = None
+
+    def transport(self, path, *, binary=False):
+        self.calls.append(path)
+        base = f'repos/{REPOSITORY}/actions'
+        if path == f'{base}/artifacts?name=worker-release-{SHA}&per_page=2':
+            untrusted = {**self.artifact, 'id': 8, 'workflow_run': {'id': 99}}
+            return {'total_count': 3, 'artifacts': [untrusted, untrusted]}
+        if path == f'{base}/workflows/deploy.yml/runs?branch=main&per_page=2':
+            return {'workflow_runs': [self.run]}
+        if path == f'{base}/runs/42/artifacts?name=worker-release-{SHA}&per_page=2':
+            return {'artifacts': [self.artifact]}
+        if path == f'{base}/runs/42':
+            return self.run
+        if path == f'{base}/runs/99':
+            return {**RUN, 'id': 99, 'event': 'pull_request', 'head_repository': {'full_name': 'fork/repo'}}
+        if path == f'{base}/artifacts/7/zip' and binary:
+            return self.payload if self.payload is not None else archive(self.receipt)
+        raise AssertionError(f'unexpected GitHub request {path}')
+
+    def tick(self, now):
+        from types import SimpleNamespace
+        from lib.studio_runtime_auto_refresh import tick
+        with patch('lib.studio_runtime_auto_refresh.read', return_value=SimpleNamespace(
+                status=200, body=json.dumps(self.live).encode())), patch(
+                'lib.studio_runtime_auto_refresh.discover', side_effect=lambda live: discover(live, api=self.transport)):
+            return tick(self.root, self.host, now=now)
+
+    def test_untrusted_artifacts_cannot_shadow_valid_receipt_or_open_tick(self):
+        self.assertEqual(self.tick(10000), 'refreshed')
+        self.assertEqual(self.tick(10300), 'current')
+        self.assertEqual(self.tick(10600), 'current')
+        self.host.alert.assert_not_called()
+        self.host.refresh.assert_called_once_with(SHA)
+        self.assertEqual(json.loads((self.root / 'state.json').read_text())['discovery_failures'], 0)
+
+    def test_requested_refresh_while_parent_is_in_progress(self):
+        self.assertEqual(self.run['status'], 'in_progress')
+        self.assertEqual(self.tick(10000), 'refreshed')
+        row = json.loads((self.root / 'runs.jsonl').read_text().splitlines()[-1])
+        self.assertEqual(row['installed_sha'], SHA)
+        self.assertEqual(row['worker_receipt']['run_id'], 42)
+        self.assertEqual(self.run['status'], 'in_progress')
+
+    def test_unavailable_identity_names_reason_and_retries_without_blind_refresh(self):
+        self.live = {}
+        self.assertEqual(self.tick(10000), 'refused')
+        self.host.refresh.assert_not_called()
+        self.assertEqual(self.calls, [])
+        row = json.loads((self.root / 'runs.jsonl').read_text().splitlines()[-1])
+        self.assertEqual(row['reason'], 'production identity unavailable')
+        self.assertEqual(self.tick(10001), 'wait')
+        self.live = LIVE
+        self.assertEqual(self.tick(10300), 'refreshed')
+
+    def test_two_same_cause_failures_open_and_next_valid_receipt_recovers(self):
+        self.payload = b'broken archive'
+        self.assertEqual(self.tick(10000), 'refused')
+        self.assertEqual(self.tick(10300), 'open')
+        self.host.refresh.assert_not_called()
+        self.host.alert.assert_called_once_with(None, 10300)
+        calls = len(self.calls)
+        self.assertEqual(self.tick(10301), 'wait')
+        self.assertEqual(len(self.calls), calls)
+        self.payload = None
+        self.assertEqual(self.tick(10600), 'refreshed')
+        self.assertEqual(json.loads((self.root / 'state.json').read_text())['discovery_failures'], 0)
+
+    def test_reader_never_consults_overall_success_or_title(self):
+        class LaneMetadata(dict):
+            def get(self, key, *args):
+                if key in {'status', 'conclusion', 'display_title', 'displayTitle', 'name'}:
+                    raise AssertionError(f'aggregate metadata read {key}')
+                return super().get(key, *args)
+            def __getitem__(self, key):
+                if key in {'status', 'conclusion', 'display_title', 'displayTitle', 'name'}:
+                    raise AssertionError(f'aggregate metadata read {key}')
+                return super().__getitem__(key)
+        self.run = LaneMetadata(self.run)
+        self.assertEqual(self.tick(10000), 'refreshed')
+
+    def test_half_open_failed_probe_remains_open_and_rate_limited(self):
+        self.live = {}
+        self.assertEqual([self.tick(n) for n in (10000, 10300, 10600, 10601)],
+                         ['refused', 'open', 'open', 'wait'])
+        self.host.refresh.assert_not_called()
+        self.assertEqual(json.loads((self.root / 'state.json').read_text())['discovery_failures'], 2)
+
+
 class ReadbackTests(unittest.TestCase):
     def setUp(self):
         path = Path(__file__).resolve().parents[1] / 'tools/studio-release-readback.py'
