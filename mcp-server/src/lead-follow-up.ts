@@ -1,6 +1,7 @@
 // Read lead guidance, quiet follow-up proposals, and sourced practice and market context.
 import type { Db } from './verb-contract.ts';
 import { ToolError } from './tool-error.ts';
+import { isCalendarDate } from './calendar-date.ts';
 
 const CONTACTABLE_STATES = ['active', 'nurture'];
 const contactable = (state: string) => CONTACTABLE_STATES.includes(state);
@@ -45,9 +46,10 @@ export function leadAdvice<T extends Lead>(lead: T) {
 
 type Finding = { flag_id: string; kind: string; found: boolean; expired: boolean; proposes_correction: boolean;
   source: string; observed_at: string; expires_on: string | null; value: unknown };
-export function researchSummary(evidence: Finding[] = []) {
+export function researchSummary(evidence: Finding[] = [], now = Date.now()) {
   if (evidence.length > 500) throw new ToolError({ error: 'research_evidence_limit_exceeded' });
-  const current = evidence.filter(e => !e.expired);
+  const current = evidence.filter(e => !e.expired && isCalendarDate(e.observed_at.slice(0, 10)) &&
+    Date.parse(e.observed_at) <= now);
   const conflict = current.some(e => e.found && (e.kind === 'discrepancy' || e.proposes_correction));
   const verified = current.some(e => e.kind === 'verified' && e.found && e.source.trim());
   return { state: conflict ? 'needs_review' : verified ? 'verified' : 'needs_research', evidence,
