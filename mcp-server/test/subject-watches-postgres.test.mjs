@@ -179,6 +179,14 @@ test('watch statechart on canonical event ingress', async t => {
   await watch('lease',leases[0],'joe',false);
   await c.query("update lease set expiration_on=current_date+interval '6 months' where id=any($1::uuid[])",[leases]);
   await event();assert.equal(await count(joe,'lease'),9,'unsubscribed lease stays quiet');
+  for(const [table,id] of [['party',party],['client',client]]){
+    await c.query('begin');
+    try {
+      await c.query(`update ${table} set merged_into=$1 where id=$1`,[id]);
+      await c.query("update lease set expiration_on=current_date+interval '4 months' where id=any($1::uuid[])",[leases]);
+      await event();assert.equal(await count(joe,'lease'),9,'merged '+table+' lease stays quiet');
+    } finally { await c.query('rollback'); }
+  }
   await c.query("update lease set status='superseded',expiration_on=current_date+interval '4 months' where id=$1",[leases[1]]);await event();assert.equal(await count(joe,'lease'),9,'superseded lease stays quiet');
   await c.query('delete from lease where id=$1',[leases[1]]);await event();assert.equal(await count(joe,'lease'),9,'deleted lease');
   await c.query('begin');
@@ -274,38 +282,54 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
     await call(who,'update-deal',controlArgs);
     if(deferredLease)assert.equal(await leaseWakes(),1,'next event processes deferred lease work');
     const after=snapshot('after');
-    assert.throws(()=>proof('verify','--before',before,'--after',before,'--replay',before),/Command failed/,'zero watched changes fail proof');
     await call(who,'update-deal',args);
     await call(who,'update-deal',controlArgs);
     await c.query('select ops.consume_subject_watch_event($1)',[event.id]);
     assert.deepEqual(await counts(),expected,'writer and consumer replay remain quiet');
     const replay=snapshot('replay');
-    assert.deepEqual(JSON.parse(proof('verify','--before',before,'--after',after,'--replay',replay)),{watched:1,unwatched:0,replay:0});
-    await wt.test('proof captures suppression after unwatch',async()=>{
+    const finish=async(prefix,version)=>{
       await call(joe,'unwatch-subject-v1',{subject_type:'deal',subject_id:deal,idempotency_key:randomUUID()});
-      try { snapshot('removed'); } finally {
+      try {
+        const removed=snapshot(prefix+'-removed');
+        await call(who,'update-deal',{...args,base_version:version,fields:{city:prefix+' suppressed change'},idempotency_key:randomUUID()});
+        return ['--removed',removed,'--suppressed',snapshot(prefix+'-suppressed')];
+      } finally {
         await call(joe,'watch-subject-v1',{subject_type:'deal',subject_id:deal,idempotency_key:randomUUID()});
+      }
+    };
+    const suffix=await finish('valid',2);
+    const verify=(first,next,last,...rest)=>proof('verify','--before',first,'--after',next,'--replay',last,...rest);
+    await wt.test('proof captures suppression after unwatch',()=>{
+      assert.deepEqual(JSON.parse(verify(before,after,replay,...suffix)),{watched:1,unwatched:0,replay:0,suppressed:0});
+      assert.throws(()=>verify(before,before,before,...suffix),/Command failed/,'zero watched changes fail proof');
+      assert.throws(()=>verify(before,after,replay),/Command failed/,'missing unwatch evidence fails proof');
+      for(const [name,file,mutate] of [
+        ['duplicate',replay,sample=>sample.watched[0]++],
+        ['still-subscribed',suffix[1],sample=>sample.subscribed=true],
+        ['wake-after-unwatch',suffix[3],sample=>{sample.watched[0]++;sample.watched[2]++;}],
+        ['no-post-unwatch-event',suffix[3],sample=>sample.watched[1]--],
+      ]){
+        const sample=JSON.parse(readFileSync(file,'utf8'));mutate(sample);
+        const changed=path.join(directory,who.slug+'-'+name+'.json');writeFileSync(changed,JSON.stringify(sample));
+        const inputs=[before,after,replay,...suffix].map(value=>value===file?changed:value);
+        assert.throws(()=>verify(...inputs),/Command failed/,name+' fails proof');
       }
     });
     await wt.test('proof refuses a wrong destination',async()=>{
-    const badBefore=snapshot('bad-before');
-    await c.query("create function ops.watch_test_wrong_destination() returns trigger language plpgsql as $$ begin if new.dedupe_key like 'subject-watch:%' then new.deep_link='/'; end if; return new; end $$");
-    await c.query('create trigger watch_test_wrong_destination before insert on ops.notification for each row execute function ops.watch_test_wrong_destination()');
-    try {
-      await call(who,'update-deal',{...args,base_version:2,fields:{city:'Wrong destination probe'},idempotency_key:randomUUID()});
-      await call(who,'update-deal',{...controlArgs,base_version:2,fields:{city:'Wrong destination control'},idempotency_key:randomUUID()});
-      assert.equal((await c.query("select deep_link from ops.notification where subject_ref=$1 and deep_link='/'",[deal])).rowCount,2);
-      const badAfter=snapshot('bad-after');
-      assert.throws(()=>proof('verify','--before',badBefore,'--after',badAfter,'--replay',badAfter),/Command failed/,'wrong destinations fail proof');
-    } finally {
-      await c.query('drop trigger watch_test_wrong_destination on ops.notification');
-      await c.query('drop function ops.watch_test_wrong_destination()');
-    }
+      const badBefore=snapshot('bad-before');
+      await c.query("create function ops.watch_test_wrong_destination() returns trigger language plpgsql as $$ begin if new.dedupe_key like 'subject-watch:%' then new.deep_link='/'; end if; return new; end $$");
+      await c.query('create trigger watch_test_wrong_destination before insert on ops.notification for each row execute function ops.watch_test_wrong_destination()');
+      try {
+        await call(who,'update-deal',{...args,base_version:3,fields:{city:'Wrong destination probe'},idempotency_key:randomUUID()});
+        await call(who,'update-deal',{...controlArgs,base_version:2,fields:{city:'Wrong destination control'},idempotency_key:randomUUID()});
+        assert.equal((await c.query("select deep_link from ops.notification where subject_ref=$1 and deep_link='/'",[deal])).rowCount,2);
+        const badAfter=snapshot('bad-after');
+        const badSuffix=await finish('wrong-destination',4);
+        assert.throws(()=>verify(badBefore,badAfter,badAfter,...badSuffix),error=>error.status===1 && error.stdout.includes('watch proof failed'),'wrong destinations fail proof');
+      } finally {
+        await c.query('drop trigger watch_test_wrong_destination on ops.notification');
+        await c.query('drop function ops.watch_test_wrong_destination()');
+      }
     });
-    const invalid=JSON.parse(readFileSync(replay,'utf8'));
-    invalid.watched[0]++;
-    const repeated=path.join(directory,who.slug+'-duplicate.json');
-    writeFileSync(repeated,JSON.stringify(invalid));
-    assert.throws(()=>proof('verify','--before',before,'--after',after,'--replay',repeated),/Command failed/,'duplicate notifications fail proof');
   });
 });
