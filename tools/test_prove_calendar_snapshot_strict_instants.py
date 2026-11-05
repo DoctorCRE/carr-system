@@ -34,6 +34,13 @@ class ProofCLI(unittest.TestCase):
         self.assertEqual([counts[k] for k in ('meetings', 'reviews', 'alternate_times', 'calendar_reads')], [1, 1, 1, 1])
         self.assertEqual(counts['mode'], 'fixture')
 
+    def test_recorded_production_release_shape(self):
+        value = copy.deepcopy(PROOF.FIXTURE)
+        value['release'] = json.loads(RUNNER.with_name('fixtures').joinpath('proof-release-production.json').read_text())
+        value['expected_revision'] = value['release']['git_sha']['value']
+        result = self.fixture(value)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_invalid_contracts_fail(self):
         for target in ('observed_at', 'start', 'end', 'alternate', 'review_start', 'review_end'):
             value = copy.deepcopy(PROOF.FIXTURE)
