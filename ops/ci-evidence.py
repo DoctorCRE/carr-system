@@ -55,7 +55,7 @@ def hosted_verdict(*, drift=False):
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
     fast = not drift and os.environ.get('CI_EVENT') == 'pull_request'
-    lanes = ('check',) if drift else (('fast', 'gates', 'secret', 'unit-coverage') if fast else ('scope', 'classes', 'migration-fixtures', 'unit-coverage'))
+    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'unit-coverage')
     if fast:
         from ci import CLASS_DESCRIPTIONS
         from ci_scope import required_jobs
