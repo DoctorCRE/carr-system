@@ -11,7 +11,7 @@ export function calendarScheduling(snapshot, section, now) {
   const allowedWarnings = new Set(['responses_unverified', 'group_invites_not_shown', 'recurring_unverified', 'follow_up_trimmed', 'canceled_hidden']);
   const observed = Date.parse(section.observed_at);
   if (section.sources.outlook_calendar.state === 'stale' || observed > now.getTime() || section.malformed_items ||
-      section.items.length >= 100 || section.items.some(item => item.time_changed || item.conflict || (item.all_day && item.end <= item.start)) ||
+      section.items.length >= 100 || section.items.some(item => item.time_changed || item.conflict || item.end <= item.start) ||
       !Array.isArray(warnings) || warnings.some(warning => !warning || !allowedWarnings.has(warning.code) ||
         (warning.count !== undefined && (!Number.isSafeInteger(warning.count) || warning.count < 1))))
     return { ...unavailable, reason: 'calendar_coverage_insufficient' };
