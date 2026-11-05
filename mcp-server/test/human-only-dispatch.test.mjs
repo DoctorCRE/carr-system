@@ -101,6 +101,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "drop-action",
     "edit-email-draft",
     "edit-lead-draft",
+    "finalize-deal-deliverable",
     "handle-email-proposal",
     "instruct-deal-item",
     "link-lead-client",
@@ -137,8 +138,10 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
+    "set-deal-deliverable-visibility",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
+    "start-deal-deliverable",
     "submit-doc-request",
     "submit-email-draft",
     "undo-call",

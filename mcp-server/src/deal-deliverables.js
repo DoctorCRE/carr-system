@@ -132,7 +132,7 @@ export async function authorizeDeliverable(c, actor, deal) {
       `select d.owner from public.deal d join public.client c on c.id=d.client_id
     join public.party p on p.id=c.party_id where d.id=$1 and c.merged_into is null
     and p.merged_into is null and p.deleted_at is null
-    and exists(select 1 from public.actor where slug=$2 and active)`,
+    and public.retrieval_visibility_actor_id($2) is not null`,
       [deal, actor.slug],
     )
   ).rows[0];

@@ -117,18 +117,41 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
   try {
     await c.query(`create schema ops; create role carr_writer; create role carr_reader;
       create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"relation_dml":[]}'::jsonb$$;
-      create table actor(slug text,active boolean); insert into actor values('joe',true),('dell',true);
+      create table actor(id uuid default gen_random_uuid(),slug text,kind text default 'human',active boolean); insert into actor(slug,active) values('joe',true),('dell',true);
       create table party(id uuid primary key,merged_into uuid,deleted_at timestamptz);
       create table client(id uuid primary key,party_id uuid,merged_into uuid);
       create table deal(id uuid primary key,client_id uuid,owner text);
       insert into party(id) values('${deal}');insert into client(id,party_id) values('${deal}','${deal}');
       insert into deal values('${deal}','${deal}','joe'),('${otherDeal}','${deal}','dell')`);
+    const schema = await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8");
+    const resolver = schema.match(/CREATE FUNCTION public\.retrieval_visibility_actor_id\(p_sponsor_slug text\)[\s\S]*?\$\$;/);
+    assert.ok(resolver);
+    await c.query(resolver[0]);
+    await c.query("grant usage on schema public,ops to carr_reader; grant select on deal,client,party to carr_reader; grant select(id,slug) on actor to carr_reader");
     await c.query(
       await readFile(
         new URL("../../migrations/1158_deal_deliverables.sql", import.meta.url),
         "utf8",
       ),
     );
+    await t.test("reader authorization works without access to actor.active and refuses inactive partners", async () => {
+      try {
+        await c.query("set role carr_reader");
+        const result = await tools["list-deal-deliverables"].handler(c, actor, {deal_id: deal});
+        assert.equal(result.ok, true);
+        assert.deepEqual(result.deliverables, []);
+      } finally {
+        await c.query("reset role");
+      }
+      await c.query("update actor set active=false where slug='joe'");
+      try {
+        await c.query("set role carr_reader");
+        await reject(tools["list-deal-deliverables"].handler(c, actor, {deal_id: deal}), "deliverable_denied");
+      } finally {
+        await c.query("reset role");
+        await c.query("update actor set active=true where slug='joe'");
+      }
+    });
     await t.test(
       "migration registers its exact writer grants in the current capability contract",
       async () => {
