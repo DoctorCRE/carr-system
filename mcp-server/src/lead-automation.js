@@ -212,7 +212,8 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
         if (!l) fail("lead_not_found");
         const address=String(args.counterparty_address||"").trim().toLowerCase();
         const validAddress=/^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
-        if (!validAddress.test(address)) fail("invalid_counterparty_address");
+        if (!validAddress.test(address) || address.length>254 || address.split("@")[0].length>64 ||
+          address.split("@")[1].split(".").some(label=>label.length>63)) fail("invalid_counterparty_address");
         const known=String(l.email||"").split(";").map(token=>token.trim().toLowerCase());
         const match=known.includes(address) ? "exact" : "unconfirmed";
         const detail={match,party_id:l.party_id,evidence_ref:args.native_ref,
