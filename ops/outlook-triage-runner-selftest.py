@@ -156,6 +156,42 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(triage.run(self.repo, self.home, moment, now_fn=lambda: moment).reason, 'outside_window')
         attempt.assert_not_called()
 
+    def test_relative_copy_refuses_before_proof_output(self):
+        moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage, '_triage', side_effect=AssertionError('producer started')):
+            outcome = triage.run(self.repo, self.home, moment, now_fn=lambda: moment,
+                                 research_copy=Path('copy'), proof_window=True)
+        self.assertEqual(outcome.reason, 'research_copy_not_absolute')
+        self.assertFalse(self.path.exists())
+        self.assertEqual(list(self.path.parent.glob('*.report.md')), [])
+
+    def test_relative_copy_fire_refuses_before_directory_change_or_wrapper(self):
+        moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
+        capture = io.StringIO()
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage.os, 'chdir') as chdir, \
+                patch.object(triage.os, 'execv') as execute, redirect_stdout(capture):
+            result = triage.fire(self.repo, moment, proof_window=True, research_copy=Path('copy'))
+        chdir.assert_not_called()
+        execute.assert_not_called()
+        self.assertEqual(result, 78)
+        self.assertIn('research_copy_not_absolute', capture.getvalue())
+
+    def test_relative_copy_main_emits_named_refusal_without_output_files(self):
+        capture = io.StringIO()
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage, '__file__', str(self.repo / 'lib/outlook_triage.py')), \
+                patch('lib.outlook_runtime.stamp', return_value={'runtime_sha': 'a' * 40}), \
+                patch.object(triage, '_triage', side_effect=AssertionError('producer started')), \
+                redirect_stdout(capture):
+            self.assertEqual(triage.main(['--proof-window', '--copy', 'copy']), 78)
+        receipt = json.loads(next(line.split(' ', 1)[1] for line in capture.getvalue().splitlines()
+                                  if line.startswith('outlook-triage-receipt ')))
+        self.assertEqual(receipt['reason'], 'research_copy_not_absolute')
+        self.assertFalse(self.path.exists())
+        self.assertEqual(list(self.path.parent.glob('*.report.md')), [])
+
     def test_proof_deadline_refuses_planning_after_180_seconds(self):
         from datetime import timedelta
         moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
