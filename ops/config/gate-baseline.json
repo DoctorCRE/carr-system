@@ -3,7 +3,7 @@
   "hashes": {
     "agent-card-gate.py": "c709ecbc62f4d65bc9a0418ed8e1c5d14468e2eb1342723a9feedba38193f211",
     "cmd_text.py": "5728361042a5d019506ed67d6104d86eee0a40217f41cd768703e433eb9f78cf",
-    "corpus_renders.py": "c8d81a78831b4cc68c08ab5d759e1e115e7d4e61c0fce09ca9d6bf80e5d663ac",
+    "corpus_renders.py": "6ada2f991eefefd1747fba0f16bb87313be1662234b14a34eff38bdbfb03b704",
     "gate-integrity.py": "b451cd815143385d59f42cfb81a604d085b676e584663d807e6ba2ebaa0231b6",
     "gate_paths.py": "81f8ca48e4b70f5732c5dc769e5aa3876df4cde1c07e897335356086312ef7dd",
     "guard-unattended.py": "b6129dac836013d2c9170d5fe2a81e6c8ed3847d7ac9d6ec07faf6b747cb881f",

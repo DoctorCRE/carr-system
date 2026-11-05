@@ -223,14 +223,12 @@ def command_spellings():
     not — caught by the selftest, which is the whole reason that test spawns the
     real hooks instead of importing them."""
     out = {}
+    root_spellings = [(root, os.path.realpath(root)) for root in roots().values()]
     for real in render_map():
         out[real] = real
-        # The unresolved spelling: swap the resolved Drive root back for the
-        # CloudStorage one, when they differ.
-        rt = roots()
-        drive_real = os.path.realpath(rt["drive"])
-        if drive_real != rt["drive"] and real.startswith(drive_real + os.sep):
-            out[rt["drive"] + real[len(drive_real):]] = real
+        for root, resolved in root_spellings:
+            if resolved != root and real.startswith(resolved + os.sep):
+                out[root + real[len(resolved):]] = real
     return out
 
 
