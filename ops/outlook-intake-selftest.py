@@ -3917,7 +3917,6 @@ class IntakeTest(unittest.TestCase):
             result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
             self.assertEqual((result.state, result.reason), ('skipped', 'outside_window'), when)
             self.assertEqual(intake.EXIT[result.state], 78)
-        self.assertEqual(receipt.read_text(), 'active writer receipt')
         self.assertEqual((self.fake.decodes, self.fake.calls), (0, []))
         self.assertFalse((self.out() / intake.STATE).exists())
         self.fake.now = datetime(2026, 10, 20, 7, 0, tzinfo=local)
@@ -4595,6 +4594,7 @@ class IntakeTest(unittest.TestCase):
             result = intake.run(self.repo, self.home, self.fake.ports())
         self.assertEqual((result.state, result.reason), ('skipped', 'previous_run_active'))
         self.assertEqual(intake.EXIT[result.state], 78)
+        self.assertEqual(receipt.read_text(), 'active writer receipt')
 
     def test_the_status_line_carries_no_mail_content(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), name='Pat Example')])
