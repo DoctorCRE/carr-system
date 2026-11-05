@@ -461,3 +461,15 @@ test("loop input refusals preserve their names and safe hints", t => {
     assert.deepEqual(payload, { error: code, correlation_id: correlationId, hint });
   }
 });
+
+for (const sqlstate of ["42501", "22P02", "42703", "42P01", "42883", "23502", "23514"]) {
+  test(`database refusal retains safe SQLSTATE ${sqlstate}`, async t => {
+    const error = pgConstraintError(Object.assign(new Error(privateText), {
+      code: sqlstate, detail: privateText, hint: privateText,
+    }));
+    const payload = await failure(t, error);
+    assert.equal(payload.sqlstate, sqlstate);
+    assert.equal(payload.correlation_id, correlationId);
+    assert.doesNotMatch(payload.hint, /synthetic-private-row|SELECT/);
+  });
+}

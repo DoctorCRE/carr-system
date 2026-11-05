@@ -2838,6 +2838,46 @@ class IntakeTest(unittest.TestCase):
             self.assertIn(reason, self.report_text())
         self.assertNotIn('missing@example.test', self.report_text())
 
+    def test_refusal_diagnostic_excludes_raw_private_fields_and_untrusted_hints(self):
+        error = intake.CarrError(code='database_refused', reply={
+            'error': 'database_refused_the_statement', 'sqlstate': '42501',
+            'correlation_id': 'PRIVATE-SENTINEL', 'hint': 'PRIVATE-SENTINEL',
+            'detail': 'PRIVATE-SENTINEL', 'message': 'PRIVATE-SENTINEL'})
+        self.assertEqual(error.diagnostic, {
+            'server_error_code': 'database_refused_the_statement', 'sqlstate': '42501'})
+
+    def test_database_refusal_diagnostic_survives_transport_spool_and_receipt(self):
+        diagnostic = {'server_error_code': 'database_refused_the_statement',
+                      'sqlstate': '42501',
+                      'correlation_id': 'd170d000-0000-4000-8000-000000000031',
+                      'hint': 'The operation could not be completed. Quote the correlation_id when reporting it.'}
+        payload = {**diagnostic, 'error': diagnostic['server_error_code'],
+                   'message': 'PRIVATE-SENTINEL', 'detail': 'PRIVATE-SENTINEL'}
+        m = mail('pat@example.test', -timedelta(hours=1))
+        for returncode in (0, 1):
+            with self.subTest(returncode=returncode):
+                shutil.rmtree(self.out(), ignore_errors=True)
+                transport = intake._carr(self.repo)
+                def refused(verb, args):
+                    if verb not in intake.WRITE_VERBS:
+                        return {'timeline': []}
+                    response = subprocess.CompletedProcess([], returncode,
+                        json.dumps(payload) if not returncode else '',
+                        'TOOL ERROR ' + json.dumps(payload) if returncode else '')
+                    with patch('subprocess.run', return_value=response):
+                        return transport(verb, args)
+                self.fake.carr = refused
+                result = self.run_intake([m])
+                state = json.loads((self.out() / intake.STATE).read_text())
+                requests = [r for r in state['requests'].values() if r.get('error_code') == 'database_refused']
+                self.assertTrue(requests)
+                self.assertEqual(requests[0]['server_diagnostic'], diagnostic)
+                receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+                self.assertEqual(receipt['write_diagnostics'], [diagnostic])
+                self.assertNotIn('PRIVATE-SENTINEL', json.dumps(receipt))
+                again = self.run_intake([m], touch=False)
+                self.assertEqual(json.loads(intake.receipt_line(again).split(' ', 1)[1])['write_diagnostics'], [diagnostic])
+
     def test_write_failures_keep_only_safe_codes_attempts_and_retry_disposition(self):
         m = mail('pat@example.test', -timedelta(hours=1), body='PRIVATE-SENTINEL')
         cases = [

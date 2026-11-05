@@ -1,0 +1,23 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S2-refusal-diagnostics",
+  "targets": ["studio"],
+  "assertions": [
+    {
+      "id": "installed-refusal-local-diagnosis",
+      "predicate": "After normal deploy and Studio installation, independently read the next naturally occurring refused intake write without launching intake or replaying a request. Verify exact installed release identity. Its persisted request must retain database_refused plus server_error_code, correlation_id, safe public hint and SQLSTATE when the server classified a database fault. The corresponding actual scheduler receipt must carry the same diagnostic. Confirm no raw message, detail, SQL, personal data or credentials are copied into diagnostic fields. Existing eight refusals are historical evidence and must not be relabeled or replayed. No naturally occurring refusal means BLOCKED, never inferred success.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "Observer validates exact installed identity and a supplied failed receipt. Independent reviewer additionally compares write_diagnostics against its spool entry. A failed run is diagnostic evidence, never successful intake proof. Source and synthetic tests leave production unproven.",
+      "input_class": "one existing natural refusal receipt and matching local spool entry; read only; no mailbox or production write effects",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

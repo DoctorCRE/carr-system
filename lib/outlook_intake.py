@@ -173,11 +173,41 @@ def _reply_error(reply: dict) -> str:
     return 'no_acknowledgement'
 
 
+DATABASE_HINT = 'The operation could not be completed. Quote the correlation_id when reporting it.'
+
+
+def refusal_diagnostic(reply: dict) -> dict:
+    result = {}
+    code = reply.get('error')
+    if isinstance(code, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}', code):
+        result['server_error_code'] = code
+    sqlstate = reply.get('sqlstate')
+    if isinstance(sqlstate, str) and re.fullmatch(r'[0-9A-Z]{5}', sqlstate):
+        result['sqlstate'] = sqlstate
+    correlation = reply.get('correlation_id')
+    if isinstance(correlation, str) and re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', correlation):
+        result['correlation_id'] = correlation.lower()
+    # Only the closed public database hint is retained, never a driver hint.
+    if reply.get('hint') == DATABASE_HINT:
+        result['hint'] = DATABASE_HINT
+    return result
+
+
+def write_diagnostics(state: dict) -> list[dict]:
+    unique = {}
+    for request in state.get('requests', {}).values():
+        if not request.get('acknowledged') and request.get('server_diagnostic'):
+            diagnostic = request['server_diagnostic']
+            unique.setdefault(json.dumps(diagnostic, sort_keys=True), diagnostic)
+    return list(unique.values())
+
+
 class CarrError(RuntimeError):
     """A safe diagnostic code; never retain request content or raw process errors."""
 
-    def __init__(self, *, code: str = 'transport_error', tool_refusal: str | None = None):
+    def __init__(self, *, code: str = 'transport_error', tool_refusal: str | None = None, reply: dict | None = None):
         self.code = code if code in ERROR_CODES else 'transport_error'
+        self.diagnostic = refusal_diagnostic(reply or {})
         self.tool_refusal = tool_refusal
         super().__init__(self.code)
 
@@ -224,6 +254,7 @@ class Outcome:
     reason: str
     counts: dict = field(default_factory=dict)
     detail: str = ''
+    write_diagnostics: list[dict] = field(default_factory=list)
 
 
 FOLDER_CLASSES = {
@@ -297,6 +328,8 @@ def receipt_line(outcome: Outcome, repo: Path | None = None) -> str:
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
     receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts),
                **stamp(repo or Path(__file__).resolve().parents[1])}
+    if outcome.write_diagnostics:
+        receipt['write_diagnostics'] = outcome.write_diagnostics
     if outcome.detail:
         receipt['detail'] = outcome.detail
     return 'outlook-intake-receipt ' + json.dumps(receipt)
@@ -1007,8 +1040,13 @@ class Run:
             try:
                 reply = self.ports.carr(request['verb'], json.loads(request['payload']))
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
-                    raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
+                    if isinstance(reply, dict):
+                        raise CarrError(code=_reply_error(reply), reply=reply)
+                    raise CarrError(code='reply_unreadable')
             except CarrError as error:
+                request.pop('server_diagnostic', None)
+                if error.diagnostic:
+                    request['server_diagnostic'] = error.diagnostic
                 if (verb == 'propose-email-lead' or (verb == 'log-activity' and args.get('summary') == 'Links from matched email')) and error.code in BLOCKED_ERRORS:
                     request.update(acknowledged=True, disposition='refused', outcome='refused',
                                    retry_at=None, error_code=error.code)
@@ -1039,6 +1077,7 @@ class Run:
                 request['activity_id'] = reply.get('activity_id')
                 if args.get('kind') == 'email_in':
                     self.state['last_email_in_filed_at'] = int(self.now.timestamp())
+            request.pop('server_diagnostic', None)
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
             _save(self.out, self.state)
         self.written.append((who, args.get('ref', 'claim card'), verb, note))
@@ -1965,6 +2004,7 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                     state.pop(name, None)
                 state['filing_account'] = filing_account
             outcome = _run(out, home, ports, state)
+            outcome.write_diagnostics = write_diagnostics(state)
             if outcome.state != 'succeeded':
                 if outcome.state == 'degraded':
                     return _filing_outcome(out, state, outcome, ports.now(), settings)
@@ -1983,12 +2023,13 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
                 outcome.counts['error_' + code] = sum(
                     not r['acknowledged'] and r.get('error_code') == code for r in state.get('requests', {}).values())
             _save(out, state)
+            outcome.write_diagnostics = write_diagnostics(state)
             if not linked:
-                return Outcome('failed', 'email_links_pending', outcome.counts)
+                return Outcome('failed', 'email_links_pending', outcome.counts, write_diagnostics=outcome.write_diagnostics)
             if not delivery:
-                return Outcome('failed', 'delivery_failures_pending', outcome.counts)
+                return Outcome('failed', 'delivery_failures_pending', outcome.counts, write_diagnostics=outcome.write_diagnostics)
             if not flagged:
-                return Outcome('failed', 'flags_pending', outcome.counts)
+                return Outcome('failed', 'flags_pending', outcome.counts, write_diagnostics=outcome.write_diagnostics)
             if work.counts['links_filed']:
                 outcome.reason = 'processed'
             local = ports.now().astimezone(settings.timezone)
@@ -2226,6 +2267,7 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
         except OSError as error:
             raise CarrError(code='transport_oversized' if error.errno == errno.E2BIG else 'transport_error') from None
         if done.returncode:
+            payload = {}
             code, refusal = 'setup_failed' if done.returncode == 2 else 'transport_error', None
             for prefix in ('TOOL ERROR ', 'RPC ERROR '):
                 if prefix in (done.stderr or ''):
@@ -2239,7 +2281,7 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
                     except ValueError:
                         pass
                     break
-            raise CarrError(code=code, tool_refusal=refusal)
+            raise CarrError(code=code, tool_refusal=refusal, reply=payload if isinstance(payload, dict) else None)
         try:
             reply = json.loads(done.stdout)
         except ValueError:
@@ -2247,7 +2289,7 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
         if not isinstance(reply, dict):
             raise CarrError(code='reply_unreadable')
         if verb in WRITE_VERBS and reply.get('ok') is not True:
-            raise CarrError(code=_reply_error(reply))
+            raise CarrError(code=_reply_error(reply), reply=reply)
         return reply
     return call
 

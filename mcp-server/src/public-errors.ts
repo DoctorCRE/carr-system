@@ -5,6 +5,7 @@ import { isValidCorrelationId, logLine } from "./correlation.js";
 /** The public JSON-RPC/HTTP refusal shape. Every optional field is opt-in per code. */
 type PublicError = {
   error: string; correlation_id: string; hint: string;
+  sqlstate?: string;
   candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
   current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
   field_errors?: { field: string; value: unknown; code: string; pattern?: string; allowed_values?: string[] }[];
@@ -336,5 +337,9 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
         ...(Array.isArray(item.allowed_values) && item.allowed_values.every(v => typeof v === "string")
           ? { allowed_values: item.allowed_values } : {}) }));
   }
+  if (["database_refused_the_statement", "invalid_field_value"].includes(result.error)
+      && typeof payload?.sqlstate === "string"
+      && ["42501", "22P02", "42703", "42P01", "42883", "23502", "23503", "23505", "23514", "23P01"].includes(payload.sqlstate))
+    result.sqlstate = payload.sqlstate;
   return result;
 }

@@ -284,7 +284,7 @@ export function pgConstraintError(e) {
   const code = e && e.code;
   if (typeof code !== "string") return null;
   if (PG_VIOLATION_KIND[code]) {
-    return new ToolError({ error: "invalid_field_value", violation: PG_VIOLATION_KIND[code],
+    return new ToolError({ error: "invalid_field_value", sqlstate: code, violation: PG_VIOLATION_KIND[code],
       constraint: e.constraint || null, table: e.table || null, column: e.column || null,
       detail: redact(e.detail) || null,
       hint: "a value failed a database constraint — check it against this verb's documented " +
