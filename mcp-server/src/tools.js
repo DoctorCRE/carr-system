@@ -61,6 +61,7 @@ import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
+import { sessionCheckpointTools, SESSION_CHECKPOINT_VERBS } from './session-checkpoints.js';
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.ts";
@@ -4515,6 +4516,8 @@ export const TOOLS = {
       email_context: { type: 'object', additionalProperties: false,
         required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
           source_activity_id: { type: 'string', format: 'uuid' },
+          body_kind: { type: 'string' }, body_completeness: { type: 'string' },
+          body_outcome: { type: 'string' }, body_truncated: { type: 'boolean' },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
@@ -9166,6 +9169,8 @@ function isUnattendedActor(actor) {
 }
 
 export async function executeRegisteredTool(client, actor, name, args = {}) {
+  if (actor?.via === "session-checkpoint-token" && !SESSION_CHECKPOINT_VERBS.includes(name))
+    throw new ToolError({ error: "not_in_profile", verb: name, profile: "session-checkpoint-v1" });
   const tool = TOOLS[name];
   if (!tool) throw new ToolError({ error: "unknown_tool", name });
   assertNoCallerAuthorityFields(args);
@@ -9326,6 +9331,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
+  "session-checkpoints": "mcp-server/src/session-checkpoints.js",
   "incident": "mcp-server/src/incident.js",
   "engineering-runtime": "mcp-server/src/engineering-runtime.js",
   "work-portfolio": "mcp-server/src/work-portfolio.js",
@@ -11029,6 +11035,8 @@ registerTools(workflowCutoverTools({ withEnvelope, ToolError }), "workflow-cutov
 // candidate/promotion/correction/forgetting lifecycle. Memory never grants
 // authority; actor and sponsor scope are resolved by the server.
 registerTools(memoryTools({ ToolError, assertNoCallerAuthorityFields }), "memory");
+registerTools(sessionCheckpointTools(), "session-checkpoints");
+
 // Native Codex continuity is a separate, bounded surface.  It stores semantic
 // checkpoint revisions and lifecycle receipts; transcript bodies stay local to
 // the Codex adapter and Claude never reaches these verbs through its config.

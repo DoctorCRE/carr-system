@@ -277,6 +277,8 @@ def coverage_verdict(counts: dict) -> dict:
 def receipt_counts(counts: dict) -> dict:
     """Split run deltas from standing totals, including the current mail snapshot.
 
+    mail_ids is the retained mailbox-scoped RFC Message-ID association count, not
+    a processing delta. It stays in run to match the decoder reconciliation receipt.
     stored/admitted/subject_decoded/body_complete count decoder message rows, never
     folder links. A folder's class is its top-level folder's. The per-class totals count
     a message once in each class of the selected account; stored_multi_class counts the
@@ -360,7 +362,11 @@ def email_context(mail: dict, domain: str) -> dict:
         for address in dict.fromkeys(_addresses(mail.get(field))):
             recipients.append({'email': address, 'name': None, 'kind': kind,
                                'internal': _internal(address, domain)})
-    return {'subject': mail.get('subject') or '',
+    return {'body_kind': mail.get('body_kind') or 'unknown',
+            'body_completeness': mail.get('body_completeness') or 'unknown',
+            'body_outcome': mail.get('body_outcome') or 'unknown',
+            'body_truncated': bool(mail.get('body_truncated')),
+            'subject': mail.get('subject') or '',
             'conversation_id': mail.get('conversation_id') or None,
             'sender': {'email': mail['sender'].lower(), 'name': mail.get('sender_name'),
                        'internal': _internal(mail['sender'], domain)},
@@ -499,12 +505,17 @@ def _folder_kind(path: str | None) -> str:
     return next((kind for kind, names in FOLDER_CLASSES.items() if top in names), 'user' if top else 'unknown')
 
 
+def _body_complete(mail: dict) -> bool:
+    return (mail.get('body_completeness') == 'complete' and mail.get('body_kind') == 'full'
+            and bool((mail.get('body') or '').strip()))
+
+
 def _coverage_counts(mails: list[dict], classes: dict[int, set[str]]) -> dict:
     """Field coverage over every admitted message; a message counts once per class."""
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
                             *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
-    counts['body_complete'] = sum(m['body_kind'] == 'full' and bool((m['body'] or '').strip()) for m in mails)
+    counts['body_complete'] = sum(_body_complete(m) for m in mails)
     counts['sender_decoded'] = sum(bool((m['sender'] or '').strip()) for m in mails)
     counts['recipients_decoded'] = sum(bool(_addresses(m['recipients']) or _addresses(m.get('cc'))) for m in mails)
     for mail in mails:
@@ -532,7 +543,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         signature_html = 'html AS signature_html' if 'html' in columns else 'NULL AS signature_html'
         context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
                                     for name in ('message_id', 'conversation_id', 'cc', 'flag_status', 'flag_due_unix',
-                                                 'flag_completed_unix', 'folder_links_unresolved'))
+                                                 'flag_completed_unix', 'folder_links_unresolved', 'body_completeness', 'body_outcome'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys}, {signature_html}, {context_columns} FROM messages')]
@@ -843,7 +854,7 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
         m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'] or '', m['subject'] or '',
                                           m['sent_unix'], m['local_keys'])
         m['signature_ident'] = m['ident']
-        m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
+        m['full'] = _body_complete(m)
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
     claimed = set()
@@ -2071,7 +2082,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state), 'legacy_unmatched': _legacy_unmatched(state),
-                  'emails': 0, 'skipped_automated': 0,
+                  'emails': 0, 'skipped_automated': 0, 'mail_ids': len(state.get('mail_ids', {})),
                   'email_index_failed': int(not state.get('email_index_published')),
                   'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
                   **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
@@ -2206,7 +2217,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
     _prune(state, now)
     _save(out, state)
-    counts.update(mapping_counts(state))  # a run that expires items reports them itself
+    counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:
         state['decoder_alarm_delivered'] = True
         _save(out, state)

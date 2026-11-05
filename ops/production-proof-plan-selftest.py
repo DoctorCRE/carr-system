@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Exercise admission through the same CLI used by CI."""
+import hashlib
 import json
 import importlib.util
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -23,14 +25,40 @@ def module():
 
 
 def runner_source(runner, root=ROOT):
+    if 'sources' in runner:
+        sources, path = runner['sources'], runner.get('path')
+        if ('revision' in runner or not isinstance(sources, dict) or not 1 <= len(sources) <= 16
+                or not isinstance(path, str) or path not in sources):
+            raise ValueError('runner requires exactly one complete source binding')
+        entry = None
+        for name, digest in sources.items():
+            if (not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]*', name)
+                    or any(p in {'', '.', '..'} for p in name.split('/'))
+                    or not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)):
+                raise ValueError('runner source path or SHA256 invalid')
+            metadata = subprocess.run(['git', 'ls-tree', '-l', 'HEAD', '--', name],
+                                      cwd=root, env=fixture_env(), capture_output=True, timeout=15)
+            fields = metadata.stdout.split()
+            if (metadata.returncode or len(fields) != 5 or fields[0] not in {b'100644', b'100755'}
+                    or fields[1] != b'blob' or not fields[3].isdigit()):
+                raise ValueError(f'runner source {name}: missing or not a regular file')
+            if int(fields[3]) > 1048576:
+                raise ValueError(f'runner source {name}: exceeds 1 MiB')
+            source = subprocess.run(['git', 'show', 'HEAD:' + name], cwd=root,
+                                    env=fixture_env(), capture_output=True, timeout=15)
+            if source.returncode or hashlib.sha256(source.stdout).hexdigest() != digest:
+                raise ValueError(f'runner source digest mismatch: {name}')
+            if name == path:
+                entry = source.stdout
+        return entry
     revision, path = runner['revision'], runner['path']
     ancestry = subprocess.run(['git', 'merge-base', '--is-ancestor', revision, 'HEAD'],
-                              cwd=root, env=fixture_env(), capture_output=True)
+                              cwd=root, env=fixture_env(), capture_output=True, timeout=15)
     if ancestry.returncode:
         reason = 'not an ancestor of tested HEAD' if ancestry.returncode == 1 else 'unresolvable revision or tested HEAD'
         raise ValueError(f"runner pin {revision}: {reason}")
     source = subprocess.run(['git', 'show', revision + ':' + path],
-                            cwd=root, env=fixture_env(), capture_output=True)
+                            cwd=root, env=fixture_env(), capture_output=True, timeout=15)
     if source.returncode:
         raise ValueError(f"runner pin {revision}: {path}: unresolvable path")
     return source.stdout
@@ -170,13 +198,75 @@ class AdmissionTest(unittest.TestCase):
         self.manifest.write_text(json.dumps(self.requirement))
         self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
 
+    def app_policy(self):
+        plan = module()
+        contract = json.loads((ROOT / plan.CONTRACT_PATH).read_text())
+        contract['x-required-targets'] = dict(contract['x-required-targets'], app=['*'])
+        self.requirement['targets'] = ['app']
+        self.requirement['assertions'][0].update(
+            runner='app-release-live-walk.v1',
+            predicate='Read deployed app release identity; Joe performs the signed-in Home walk',
+            expected_result='Release ancestry passes; signed-in Home walk remains human pending',
+            input_class='read-only release identity and named human signed-in walk evidence')
+        self.manifest.write_text(json.dumps(self.requirement))
+        return plan, contract
+
+    def test_app_product_admission_and_borrowed_target_refusals(self):
+        plan, contract = self.app_policy()
+        body = '## Production proof\nproofs/requirements/synthetic.json'
+        paths = ['src/ui/home/bulk-controls.tsx']
+        result = plan.admission(body, paths, self.root, contract)
+        self.assertIn('admission only; execution unproven', result)
+        for target, runner in [('worker', 'worker-release-smoke.v1'),
+                               ('studio', 'studio-run-receipt.v1')]:
+            with self.subTest(target=target):
+                self.requirement['targets'] = [target]
+                self.requirement['assertions'][0]['runner'] = runner
+                self.manifest.write_text(json.dumps(self.requirement))
+                with self.assertRaisesRegex(ValueError, 'changed runtime target missing'):
+                    plan.admission(body, paths, self.root, contract)
+                self.requirement['targets'] = ['app']
+                self.manifest.write_text(json.dumps(self.requirement))
+                with self.assertRaisesRegex(ValueError, 'target has no registered runner'):
+                    plan.admission(body, paths, self.root, contract)
+
+    def test_app_missing_invalid_and_unsafe_declarations_refused(self):
+        plan, contract = self.app_policy()
+        paths = ['src/ui/home/bulk-controls.tsx']
+        for body in ['', '## Production proof\n', '## Production proof\nn/a: app change']:
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                plan.admission(body, paths, self.root, contract)
+        body = '## Production proof\nproofs/requirements/synthetic.json'
+        self.manifest.unlink()
+        with self.assertRaises(FileNotFoundError):
+            plan.admission(body, paths, self.root, contract)
+        self.manifest.write_text('{')
+        with self.assertRaises(ValueError):
+            plan.admission(body, paths, self.root, contract)
+        for field, value in [('read_only', False), ('no_sends', False), ('max_requests', 101)]:
+            with self.subTest(field=field):
+                invalid = {**self.requirement, 'safety': {**self.requirement['safety'], field: value}}
+                self.manifest.write_text(json.dumps(invalid))
+                with self.assertRaises(ValueError):
+                    plan.admission(body, paths, self.root, contract)
+
+    def test_app_runner_pin_and_drift_refusals(self):
+        _, contract = self.app_policy()
+        runner = contract['x-runners']['app-release-live-walk.v1']
+        self.assertEqual(runner['targets'], ['app'])
+        self.assertEqual(runner['path'], 'ops/app-proof-observe.py')
+        self.assertEqual(runner_source(runner), (ROOT / runner['path']).read_bytes())
+        for drift in [{'revision': '0' * 40}, {'path': 'ops/missing-app-observer.py'}]:
+            with self.subTest(drift=drift), self.assertRaisesRegex(ValueError, 'runner pin'):
+                runner_source({**runner, **drift})
+
     def test_runner_revision_ancestry(self):
         path = 'ops/studio-proof-observe.py'
         with self.assertRaisesRegex(ValueError, 'e105804540f17afba50dd45f78b84b50698a3ffc.*(not an ancestor|unresolvable revision)'):
             runner_source({'revision': 'e105804540f17afba50dd45f78b84b50698a3ffc', 'path': path})
         self.assertEqual(
-            runner_source({'revision': 'f699e1859dc87e4122501bbaba35a312607452a7', 'path': path}),
-            (ROOT / path).read_bytes())
+            hashlib.sha256(runner_source({'revision': 'f699e1859dc87e4122501bbaba35a312607452a7', 'path': path})).hexdigest(),
+            '8bfffa61e72f0cf7c551d10f17e4cc6c158e625efa616c84db56808e5e844068')
 
     def test_runner_rejects_resolvable_nonancestor_and_missing_path(self):
         env = fixture_env()
@@ -198,12 +288,68 @@ class AdmissionTest(unittest.TestCase):
             runner_source({'revision': ancestor, 'path': 'missing.py'}, self.root)
         self.assertEqual(runner_source({'revision': ancestor, 'path': 'runner.py'}, self.root), b'pass\n')
 
+    def test_content_runner_survives_squash_and_refuses_stale_or_forged_source(self):
+        env = fixture_env()
+        env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.com',
+                   GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.com')
+        def git(*args, input=None):
+            return subprocess.check_output(['git', *args], cwd=self.root, env=env,
+                                           input=input, text=True).strip()
+        git('init', '-q')
+        (self.root / 'runner.py').write_text('pass\n')
+        git('add', 'runner.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'base')
+        base = git('rev-parse', 'HEAD')
+        (self.root / 'runner.py').write_text('import helper\n')
+        (self.root / 'helper.py').write_text('VALUE = 1\n')
+        git('add', 'runner.py', 'helper.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'implementation')
+        branch = git('rev-parse', 'HEAD')
+        tree = git('rev-parse', 'HEAD^{tree}')
+        candidate = git('commit-tree', tree, '-p', base, input='squash candidate\n')
+        git('checkout', '--detach', candidate)
+        self.assertEqual(git('rev-parse', 'HEAD^{tree}'), tree)
+        self.assertEqual(git('rev-parse', 'HEAD^'), base)
+        with self.assertRaisesRegex(ValueError, 'not an ancestor'):
+            runner_source({'revision': branch, 'path': 'runner.py'}, self.root)
+        runner = {'path': 'runner.py', 'sources': {
+            name: hashlib.sha256((self.root / name).read_bytes()).hexdigest()
+            for name in ('runner.py', 'helper.py')}}
+        self.assertEqual(runner_source(runner, self.root), b'import helper\n')
+        for name in ('runner.py', 'helper.py'):
+            (self.root / name).write_text('forged = True\n')
+            git('add', name)
+            git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'changed source')
+            with self.assertRaisesRegex(ValueError, 'source digest mismatch'):
+                runner_source(runner, self.root)
+            git('checkout', '--detach', candidate)
+        for sources in ({**runner['sources'], 'runner.py': '0' * 64},
+                        {**runner['sources'], 'missing.py': 'a' * 64},
+                        {'../runner.py': 'a' * 64}, {},
+                        {'runner.py': 'not-a-digest'}, {'helper.py': runner['sources']['helper.py']},
+                        {**runner['sources'], **{f'extra{i}.py': 'a' * 64 for i in range(16)}}):
+            with self.subTest(sources=sources), self.assertRaises(ValueError):
+                runner_source({**runner, 'sources': sources}, self.root)
+        with self.assertRaises(ValueError):
+            runner_source({**runner, 'revision': base}, self.root)
+        (self.root / 'runner.py').unlink()
+        (self.root / 'runner.py').symlink_to('helper.py')
+        git('add', 'runner.py')
+        git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'symlink source')
+        with self.assertRaisesRegex(ValueError, 'regular file'):
+            runner_source(runner, self.root)
+
     def test_runner_registry_pins_and_studio_observer(self):
         contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
         sources = {name: runner_source(runner) for name, runner in contract['x-runners'].items()}
         runner = contract['x-runners']['studio-run-receipt.v1']
         source = sources['studio-run-receipt.v1']
-        self.assertEqual(source, (ROOT / runner['path']).read_bytes())
+        self.assertEqual(hashlib.sha256(source).hexdigest(), '8bfffa61e72f0cf7c551d10f17e4cc6c158e625efa616c84db56808e5e844068')
+        canonical = contract['x-runners']['studio-canonical-run.v1']
+        self.assertEqual(set(canonical['sources']), {
+            'ops/studio-proof-observe.py', 'lib/studio_proof.py',
+            'tools/ops-record.py', 'lib/credential_file.py'})
+        self.assertEqual(sources['studio-canonical-run.v1'], (ROOT / canonical['path']).read_bytes())
         observer = self.root / 'observer.py'
         observer.write_bytes(source)
         receipt = self.root / 'receipt.txt'
@@ -356,6 +502,21 @@ class AppObserverTest(unittest.TestCase):
         self.assertEqual(receipt['human_steps'], ['Open the signed-in Documents tab'])
         self.assertEqual(receipt['assertions'][0]['path'], '/js/documents.js')
         self.assertEqual(self.observe()['status'], 'passed')
+
+    def test_registered_app_runner_preserves_human_pending(self):
+        contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
+        source = runner_source(contract['x-runners']['app-release-live-walk.v1'])
+        path = self.repo / 'pinned-observer.py'
+        path.write_bytes(source)
+        spec = importlib.util.spec_from_file_location('pinned_app_observer', path)
+        observer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(observer)
+        receipt = observer.observe(self.repo, self.merge,
+            human_steps=['Joe performs the signed-in Home bulk-settle and undo walk'],
+            fetch=lambda path, timeout, limit: self.identity)
+        self.assertEqual(receipt['status'], 'human_pending')
+        self.assertEqual(receipt['assertions'], [])
+        self.assertEqual(receipt['human_steps'], ['Joe performs the signed-in Home bulk-settle and undo walk'])
 
     def test_unknown_or_unreleased_commit_refuses(self):
         with self.assertRaisesRegex(ValueError, 'unknown|unavailable'):

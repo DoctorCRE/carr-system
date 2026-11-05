@@ -119,7 +119,7 @@ pub struct Message {
     pub sender_name: Option<String>,
     /// `None` when revisions of one recipient object disagree.
     pub recipients: Option<Vec<Recipient>>,
-    /// Stored bodies, best first: the longest inline HTML, then sidecar paths.
+    /// Distinct stored candidates. Their order provides no revision authority.
     pub bodies: Vec<Body>,
     pub body_objects: usize,
     pub body_rejected: usize,
@@ -312,11 +312,7 @@ impl Index {
                         })
                         .collect(),
                 };
-                let mut bodies: Vec<Body> = self.bodies.get(&key).into_iter().flatten().cloned().collect();
-                bodies.sort_by_key(|b| match b {
-                    Body::Html(h) => (0, std::cmp::Reverse(h.len())),
-                    Body::Sidecar(_) => (1, std::cmp::Reverse(0)),
-                });
+                let bodies = self.bodies.get(&key).into_iter().flatten().cloned().collect();
                 let message = Message {
                     block: latest.block,
                     revisions: revs.len(),
