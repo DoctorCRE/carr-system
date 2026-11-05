@@ -136,7 +136,7 @@ def _find_vault():
 
 VAULT = _find_vault()
 
-SETTINGS = os.path.join(REPO_HERE, ".claude", "settings.json")
+SETTINGS = os.path.join(REPO, ".claude", "settings.json")
 TASKS_SRC = os.path.join(HOME, ".claude", "scheduled-tasks")
 TASKS_REPO = os.path.join(REPO, "ops", "scheduled-tasks")
 # A quarantined definition is deliberately outside Claude's active discovery

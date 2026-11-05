@@ -19,7 +19,7 @@ MIGRATION = runpy.run_path(str(ROOT / 'ops/scope-claude-config.py'))
 class Scope(unittest.TestCase):
     def test_installer_default_and_project_template_have_one_scope(self):
         installer = runpy.run_path(str(ROOT / 'ops/config-as-code.py'))
-        self.assertEqual(Path(installer['SETTINGS']), ROOT / '.claude/settings.json')
+        self.assertEqual(Path(installer['SETTINGS']), Path(installer['REPO']) / '.claude/settings.json')
         project = json.loads((ROOT / '.claude/settings.json').read_text())
         template = json.loads((ROOT / 'ops/config/hooks.json').read_text().replace(
             '{{REPO}}', '${CLAUDE_PROJECT_DIR}'))
