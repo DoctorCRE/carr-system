@@ -125,7 +125,8 @@ def test_changed_path_selection():
               scope.select_paths([path], all_classes) == {'lint'})
     for path in ('ops/example.py', '.github/workflows/ci.yml', 'contracts/a.json',
                  'migrations/123.sql', 'mcp-server/src/index.js', 'new/subsystem.py', 'package-lock.json',
-                 'practice-plugin/package-lock.json', 'practice-plugin/package.json', 'ops/README.md'):
+                 'practice-plugin/package-lock.json', 'practice-plugin/package.json', 'ops/README.md',
+                 'practice-plugin/bun.lock', 'practice-plugin/bun.lockb', 'practice-plugin/packages.lock.json'):
         check(f'unknown and infrastructure select everything: {path}',
               scope.select_paths([path], all_classes) == all_classes)
     check('product mapping selects affected classes',

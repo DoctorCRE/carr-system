@@ -34,9 +34,9 @@ def select_paths(paths, all_classes):
     if not paths:
         return all_classes
     for path in paths:
-        if (path.startswith(INFRA_PREFIXES) or Path(path).name in
-                ('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml',
-                 'Cargo.lock', 'requirements.lock', 'uv.lock', 'poetry.lock',
+        name = Path(path).name
+        if (path.startswith(INFRA_PREFIXES) or name.endswith(('.lock', '.lockb', '.lock.json')) or name in
+                ('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'go.sum',
                  'package.json', 'Cargo.toml', 'requirements.txt', 'pyproject.toml')):
             return all_classes
         if any(fnmatchcase(path, pattern) for pattern in DOC_PATHS):
