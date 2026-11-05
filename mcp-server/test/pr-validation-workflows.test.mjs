@@ -26,7 +26,7 @@ const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" +
 function expression(value, github, success = true, inputs = { shard_trial: false }, cancelled = false) {
   if (value === undefined) return success && !cancelled;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base(?:\.ref)?)|inputs\.shard_trial|needs\.scope\.outputs\.full|needs\.select\.outputs(?:\.[a-z_]+|\['[a-z0-9-]+'\])|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false|null)+$/, `unsupported expression: ${raw}`);
+  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base(?:\.ref)?)|inputs\.shard_trial|needs\.scope\.outputs\.full|needs\.select\.outputs(?:\.(?:full|lint|fast|gates|secret|unit)|\['(?:unit-coverage|launchd-python39)'\])|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false|null)+$/, `unsupported expression: ${raw}`);
   const safe = raw.replace(/github(?:\.[a-zA-Z_]+)+/g, path =>
     JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? null));
   const result = runInNewContext(safe, { inputs, needs: selectorNeeds(github.ciSelection), always: () => true, cancelled: () => cancelled }, { timeout: 1000 });
@@ -37,6 +37,16 @@ function context(event_name = "pull_request", action = "synchronize", number = 9
   return { event_name, run_id, ref: event_name === "pull_request" ? `refs/pull/${number}/merge` : "refs/heads/main",
     event: { action, changes: {}, pull_request: event_name === "pull_request" ? { number, base: { ref: "main" } } : {} } };
 }
+test("expression rejects repetitive unknown selector fields within a bounded process", () => {
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { runInNewContext } from "node:vm";
+    ${expression.toString()}
+    const input = "needs.select.outputs." + "_nullneeds.select.outputs.".repeat(40) + "!";
+    assert.throws(() => expression(input, {}), /unsupported expression/);
+  `], { encoding: "utf8", timeout: 2000 });
+  assert.equal(result.status, 0, result.stderr || String(result.error));
+});
 // Subscription and path applicability have separate interfaces.
 function subscribed(workflow, event) {
   if (!Object.hasOwn(workflow.on, event.event_name)) return false;
