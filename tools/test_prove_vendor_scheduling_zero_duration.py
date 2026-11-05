@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -16,7 +17,7 @@ SHA = 'a' * 40
 
 class ProofCLI(unittest.TestCase):
     @contextmanager
-    def fixture(self, state='unavailable', gaps=None, rows=None, change=None, fail=False, delay=0, release_change=False):
+    def fixture(self, state='unavailable', gaps=None, rows=None, change=None, fail=False, delay=0, release_change=False, registry_owner=None):
         now = datetime.now(timezone.utc)
         at = lambda hours: (now + timedelta(hours=hours)).isoformat()
         section = {'state': 'ready', 'observed_at': at(0), 'notes': [],
@@ -57,6 +58,25 @@ assert sys.argv[2] in {'read-vendor-meetings', 'morning-brief'}
 assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[2] == 'read-vendor-meetings' else {})
 ''' + f'time.sleep({delay})\n' + ('print("PRIVATE AUTH FAILURE", file=sys.stderr)\nsys.exit(1)\n' if fail else
                     "print(json.dumps(json.loads((root / 'data.json').read_text())[sys.argv[2]]))\n"))
+                if registry_owner:
+                    source = RUNNER.parent.parent / 'mcp-server' / 'src'
+                    registry = root / 'registry.mjs'
+                    registry.write_text(f"import {{ agentActorForToken }} from {json.dumps((source / 'identity.js').as_uri())};\n" +
+                        f"import {{ executeRegisteredTool }} from {json.dumps((source / 'tools.js').as_uri())};\n" +
+                        f"const owner = {json.dumps(registry_owner)};\n" +
+                        f"const data = {json.dumps({'vendor': vendor, 'agenda': agenda})};\n" +
+                        "const actor = agentActorForToken('Bearer synthetic-only-token', JSON.stringify({[owner + '-local']: 'synthetic-only-token'}), 'local-token');\n" +
+                        "const c = {async query(sql, params) {\n" +
+                        "  if (sql.includes('with candidates')) return {rows: [{total: 0, items: []}]};\n" +
+                        "  if (sql.includes('from board_snapshot')) {\n" +
+                        "    if (params[1] !== owner) throw Error('wrong sponsor');\n" +
+                        "    return {rows: [{snapshot_json: {schema: 'carr-calendar-agenda.v1', observed_at: data.agenda.calendar.observed_at, warnings: [], items: data.agenda.calendar.items}}]};\n" +
+                        "  } throw Error('unexpected query');\n" +
+                        "}};\n" +
+                        "const value = process.argv[3] === 'read-vendor-meetings' ? await executeRegisteredTool(c, actor, process.argv[3], JSON.parse(process.argv[4])) : data.agenda;\n" +
+                        "console.log(JSON.stringify(value));\n")
+                    wrapper.write_text('#!' + sys.executable + '\nimport os, sys\n' +
+                        f"os.execv({shutil.which('node')!r}, ['node', {str(registry)!r}, *sys.argv[1:]])\n")
                 wrapper.chmod(0o700)
                 yield root, wrapper, f'http://127.0.0.1:{server.server_port}', requests
         finally:
@@ -83,6 +103,13 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
         self.assertEqual(receipt['release_sha'], SHA)
         self.assertEqual(receipt['eligible_records'], 1)
         self.assertEqual(receipt['passed_assertions'], 2)
+
+    def test_real_local_identity_can_observe_zero_duration(self):
+        for owner in ('joe', 'dell'):
+            with self.subTest(owner=owner):
+                receipt = self.run_cli(0, registry_owner=owner)
+                self.assertEqual(receipt['eligible_records'], 1)
+                self.assertEqual(receipt['passed_assertions'], 2)
 
     def test_regression_is_a_contradiction(self):
         self.assertEqual(self.run_cli(1, state='ready', gaps=[{'start': 'private'}])['status'], 'contradiction')
