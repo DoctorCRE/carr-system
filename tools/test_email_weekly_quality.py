@@ -1,4 +1,7 @@
 """Exercise weekly quality through its actual PostgreSQL query."""
+import contextlib
+import io
+from unittest.mock import patch
 import importlib.util
 import json
 import os
@@ -166,17 +169,58 @@ insert into event values ('{ident}','deal','{verb}','{{"activity_id":"{ident}"}}
     def test_cli_actual_read_transaction(self):
         self.effect('cli-effect')
         with tempfile.TemporaryDirectory() as directory:
-            service = Path(directory) / 'services.conf'
-            service.write_text('[quality_fixture]\nhost=' + self.command[self.command.index('-h')+1] +
-                               '\nport=55473\ndbname=postgres\n')
             output = Path(directory) / 'private.json'
+            host = self.command[self.command.index('-h')+1]
             run = subprocess.run([sys.executable, str(ROOT / 'tools/email-weekly-quality.py'),
                                   '--start', self.window.start, '--end', self.window.end,
                                   '--undo-before', self.window.undo_before, '--partner', 'joe',
-                                  '--service', 'quality_fixture', '--output', str(output)],
-                                 capture_output=True, text=True, env={**os.environ, 'PGSERVICEFILE': str(service)})
+                                  '--database', '--output', str(output)],
+                                 capture_output=True, text=True,
+                                 env={**os.environ, 'DATABASE_URL': f'host={host} port=55473 dbname=postgres'})
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(json.loads(output.read_text())['actions'][0]['denominator'], 1)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+    def test_database_read_is_read_only(self):
+        self.sql('create sequence if not exists weekly_quality_readonly_probe')
+        host = self.command[self.command.index('-h')+1]
+        with patch.dict(os.environ, {'DATABASE_URL': f'host={host} port=55473 dbname=postgres'}):
+            rows = quality.database_read("select current_setting('transaction_read_only') as ro, "
+                                         "current_setting('transaction_isolation') as isolation, "
+                                         "current_setting('statement_timeout') as statement_timeout, "
+                                         "current_setting('lock_timeout') as lock_timeout")
+            self.assertEqual(rows, [dict(ro='on', isolation='repeatable read', statement_timeout='30s', lock_timeout='5s')])
+            with self.assertRaises(quality.ReportError) as caught:
+                quality.database_read("select nextval('weekly_quality_readonly_probe')")
+            self.assertEqual((caught.exception.step, caught.exception.category), ('database_query', 'read_only'))
+        self.assertEqual(self.sql('select count(*) from actor'), '3')
+
+    def test_declared_route_uses_supplied_database_without_service_lookup(self):
+        import psycopg
+        with patch.dict(os.environ, {'DATABASE_URL': 'synthetic-unavailable'}), \
+                patch.object(psycopg, 'connect', side_effect=psycopg.OperationalError('private detail')) as connect:
+            with self.assertRaises(quality.ReportError) as caught:
+                quality.database_read('select 1')
+            self.assertEqual(connect.call_args.args, ('synthetic-unavailable',))
+            self.assertEqual(caught.exception.step, 'database_connect')
+            self.assertEqual(caught.exception.category, 'connection')
+            self.assertNotIn('private detail', str(caught.exception))
+
+    def test_missing_database_is_categorized_without_leaking_input(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(quality.ReportError) as caught:
+                quality.database_read('select 1')
+        self.assertEqual((caught.exception.step, caught.exception.category), ('database_connect', 'configuration'))
+
+    def test_cli_failure_names_step_and_category(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args = ['--start', self.window.start, '--end', self.window.end,
+                    '--undo-before', self.window.undo_before, '--partner', 'joe',
+                    '--database', '--output', str(Path(directory) / 'private.json')]
+            error = io.StringIO()
+            with patch.dict(os.environ, {}, clear=True), contextlib.redirect_stderr(error):
+                self.assertEqual(quality.main(args), 1)
+            self.assertEqual(error.getvalue(), 'Weekly quality report failed step=database_connect category=configuration.\n')
 
     def test_invalid_input(self):
         for start, end, cutoff in [('2026-10-08Z','2026-10-01Z','2026-10-15Z'),
