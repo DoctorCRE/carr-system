@@ -58,6 +58,25 @@ test('optional storage failures do not abort the caller transaction', async t =>
         await c.query('select 1');
       } finally { await c.query('rollback'); c.inTransaction = false; }
     });
+    await t.test('stored requests retain received status and commission evidence', async () => {
+      await reset();
+      await c.query(`create table v_requirement_request(id text,row_key text,owner text,due_on date,
+        document_type text,satisfied boolean,receipts jsonb,status text,fulfilled_at text,fulfilled_by text,
+        evidence_attachment_id text,evidence_filename text,organization_tenant_id text,deal_id uuid)`);
+      await c.query(`insert into v_requirement_request values('request','requirements','joe','2026-01-01',
+        'requirements',false,'[]','fulfilled',null,null,'attachment','Synthetic.pdf','carr-internal',$1)`, [deal.id]);
+      await c.query("insert into v_deal_room_commission values($1,'paid','received','2026-01-01')", [deal.id]);
+      await c.query('begin'); c.inTransaction = true;
+      try {
+        const result = await readDealChecklist(c,deal);
+        assert.equal(result.requests_state,'current');
+        const items = result.phases.flatMap(phase => phase.items);
+        assert.equal(items.find(item => item.id === 'requirements').status,'received');
+        assert.equal(items.find(item => item.id === 'requirements').request.satisfied,false);
+        assert.equal(items.find(item => item.id === 'commission_received').evidence_ref,'commission:paid');
+        await c.query('select 1');
+      } finally { await c.query('rollback'); c.inTransaction = false; }
+    });
     for (const code of ['42501','XX000']) await t.test(`propagate ${code}`, async () => {
       await reset(); await c.query('begin');
       const client = { inTransaction: true, query: (sql,args) => sql.includes('checklist:') ? c.query(`do $$ begin raise exception using errcode='${code}', message='synthetic failure'; end $$`) : c.query(sql,args) };

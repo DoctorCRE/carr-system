@@ -41,6 +41,8 @@ def stub(scenario, verb, arguments):
             'deal_id': deal_id, 'next_actions': [], 'critical_dates': [],
             'checklist': {'schema_version': 'deal-checklist.v1', 'template_state': state,
                           'phases': [], 'due_items': [], 'requests_state': 'unavailable'}}
+    if state in {'current', 'deal_type_unknown'}:
+        result['checklist']['phases'] = [{'id': 'research', 'items': []}]
     if scenario == 'dishonest':
         result['checklist'].update(template_state='unavailable', phases=[{}])
     if scenario == 'bad-checklist':
@@ -114,7 +116,7 @@ def prove(args):
         if checklist['template_state'] in {'unavailable', 'source_changed'}:
             require(checklist['phases'] == [] and checklist['due_items'] == [], 'checklist_dishonest')
         else:
-            require(checklist.get('requests_state') in {'current', 'unavailable'}, 'requests_invalid')
+            require(bool(checklist['phases']) and checklist.get('requests_state') in {'current', 'unavailable'}, 'requests_invalid')
         states.append(checklist['template_state'])
     remaining()
     print(json.dumps({'deal_reads': len(states), 'record_reads': len(states) + 1, 'states': states}))
