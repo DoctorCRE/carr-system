@@ -350,6 +350,7 @@ class IntakeTest(unittest.TestCase):
         def admit_then_replace(out, settings, state):
             binding = original(out, settings, state)
             path.write_text(json.dumps({**values, 'owner': changed_owner, 'account': changed_account}))
+            self.settings = load_settings(self.home)
             return binding
 
         with patch.object(intake, '_ledger_binding', side_effect=admit_then_replace):
@@ -357,8 +358,8 @@ class IntakeTest(unittest.TestCase):
                                            recipients=changed_account, local_keys='42')])
         binding = json.loads((self.out() / 'binding.json').read_text())
         state_path = self.out() / intake.STATE
-        state = json.loads(state_path.read_text())
-        persisted = [json.loads(r['payload'])['email_identity'] for r in state['requests'].values()
+        state = json.loads(state_path.read_text()) if state_path.exists() else {}
+        persisted = [json.loads(r['payload'])['email_identity'] for r in state.get('requests', {}).values()
                      if r['verb'] == 'log-activity']
         sent = [args['email_identity'] for _, args in self.fake.writes('log-activity')]
         self.assertEqual(binding['mailbox_owner'], owner)
@@ -371,10 +372,12 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(receipt['mailbox_account'], account)
         self.assertTrue(receipt['binding_verified'])
         self.assertIn(result.state, ('succeeded', 'failed'))
-        before = state_path.read_bytes()
+        if not change_account:
+            self.assertTrue(persisted)
+        before = state_path.read_bytes() if state_path.exists() else None
         self.fake.calls.clear()
         self.assertEqual(self.run_intake(touch=False).reason, 'ledger_binding_mismatch')
-        self.assertEqual(state_path.read_bytes(), before)
+        self.assertEqual(state_path.read_bytes() if state_path.exists() else None, before)
         self.assertFalse(self.fake.calls)
 
     def test_settings_replaced_after_admission_joe_to_dell(self):
