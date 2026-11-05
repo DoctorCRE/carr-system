@@ -58,6 +58,53 @@ def runner_source(runner, root=ROOT):
     return source.stdout
 
 
+class RunnerRegistryTest(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def test_runner_registry_pins_and_studio_observer(self):
+        contract = json.loads(CONTRACT_PATH.read_text())
+        sources = {name: runner_source(runner) for name, runner in contract['x-runners'].items()}
+        source = sources['studio-run-receipt.v1']
+        self.assertEqual(hashlib.sha256(source).hexdigest(), '8bfffa61e72f0cf7c551d10f17e4cc6c158e625efa616c84db56808e5e844068')
+        canonical = contract['x-runners']['studio-canonical-run.v1']
+        self.assertEqual(set(canonical['sources']), {
+            'ops/studio-proof-observe.py', 'lib/studio_proof.py',
+            'tools/ops-record.py', 'lib/credential_file.py'})
+        self.assertEqual(sources['studio-canonical-run.v1'], (ROOT / canonical['path']).read_bytes())
+        observer = self.root / 'observer.py'
+        observer.write_bytes(source)
+        receipt = self.root / 'receipt.txt'
+        receipt.write_text('outlook-intake-receipt ' + json.dumps({
+            'state': 'succeeded', 'runtime_sha': 'a' * 40, 'counts': {'run': {'processed': 1}}}))
+        result = subprocess.run([sys.executable, str(observer), '--receipt-file', str(receipt),
+            '--runtime-sha', 'a' * 40, '--service', 'outlook-intake',
+            '--count', 'run.processed', '--minimum', '1'],
+            capture_output=True, text=True, timeout=10, env=fixture_env())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_wr823_canonical_proof_rejects_empty_mail_ids(self):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr823-s2-canonical-intake-run.json').read_text())
+        assertion = next(a for a in requirement['assertions'] if a['id'] == 'next-installed-intake-canonical-run')
+        match = re.search(r'run\.mail_ids minimum (\d+)', assertion['predicate'])
+        self.assertIsNotNone(match)
+        minimum = match.group(1)
+        contract = json.loads(CONTRACT_PATH.read_text())
+        observer = self.root / 'observer.py'
+        observer.write_bytes(runner_source(contract['x-runners']['studio-run-receipt.v1']))
+        receipt = self.root / 'receipt.txt'
+        receipt.write_text('outlook-intake-receipt ' + json.dumps({
+            'state': 'succeeded', 'runtime_sha': 'a' * 40, 'counts': {'run': {'mail_ids': 0}}}))
+        result = subprocess.run([sys.executable, str(observer), '--receipt-file', str(receipt),
+            '--runtime-sha', 'a' * 40, '--service', 'outlook-intake',
+            '--count', 'run.mail_ids', '--minimum', minimum],
+            capture_output=True, text=True, timeout=10, env=fixture_env())
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('receipt count does not meet declared minimum', result.stdout)
+
+
 class AppObserverTest(unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location('app_observer', ROOT / 'ops/app-proof-observe.py')
