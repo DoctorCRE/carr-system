@@ -181,6 +181,7 @@ test("registered upload rejects a caller-selected object key before database acc
 });
 
 test("storage circuit and rate admission fail closed", async (t) => {
+  t.mock.method(Date, "now", () => now);
   const { createDealDeliverablesHandler } =
     await import("../src/deal-deliverables-web.js");
   const id = "20000000-0000-4000-8000-000000000002";
@@ -227,7 +228,7 @@ test("storage circuit and rate admission fail closed", async (t) => {
   assert.equal(calls, 3, "fourth call must not reach open dependency");
   for (let i = 4; i < 60; i++) await get();
   assert.equal((await get()).status, 429);
-  const future = Date.now() + 61_000;
+  const future = now + 61_000;
   t.mock.method(Date, "now", () => future);
   healthy = true;
   assert.equal((await get()).status, 200, "half-open probe restores service");
