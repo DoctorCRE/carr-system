@@ -70,6 +70,52 @@ test("real Worker session gate refuses missing and revoked cookies", async () =>
   assert.equal(response.status, 401);
   assert.equal(f.count(), 0);
 });
+
+test("unsettled storage calls remain capped after their deadlines", async () => {
+  const { createDealDeliverablesHandler } =
+    await import("../src/deal-deliverables-web.js");
+  const id = "20000000-0000-4000-8000-000000000002";
+  const row = {
+    id,
+    deal_id: path.split("/").at(-1),
+    object_key: `deliverables/carr-internal/${path.split("/").at(-1)}/${id}`,
+    state: "finalized",
+  };
+  let calls = 0,
+    release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const bucket = {
+    get: () => {
+      calls++;
+      return pending;
+    },
+  };
+  const transaction = async (fn) =>
+    fn({
+      query: async (sql) => ({
+        rows: sql.includes("select d.owner") ? [{ owner: "joe" }] : [row],
+      }),
+    });
+  const handler = createDealDeliverablesHandler({
+    transaction,
+    bucket,
+    operationTimeoutMs: 10,
+  });
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      handler(
+        new Request(origin + path + `/${id}/download`),
+        { slug: "joe", human: true },
+        async () => true,
+      ),
+    ),
+  );
+  assert.equal(calls, 4);
+  assert.ok(results.every((r) => r.status === 503));
+  release(null);
+});
 test("real Worker gate refuses cross-origin and missing CSRF mutations", async () => {
   for (const headers of [
     {},
@@ -132,4 +178,44 @@ test("registered upload rejects a caller-selected object key before database acc
     ),
     (e) => e.payload?.error === "unregistered_operation_fields",
   );
+});
+
+test("storage circuit and rate admission fail closed", async () => {
+  const { createDealDeliverablesHandler } =
+    await import("../src/deal-deliverables-web.js");
+  const id = "20000000-0000-4000-8000-000000000002";
+  let calls = 0;
+  const row = {
+    id,
+    deal_id: path.split("/").at(-1),
+    object_key: `deliverables/carr-internal/${path.split("/").at(-1)}/${id}`,
+    state: "finalized",
+  };
+  const bucket = {
+    async get() {
+      calls++;
+      throw new Error("offline");
+    },
+  };
+  const transaction = async (fn) =>
+    fn({
+      query: async (sql) => ({
+        rows: sql.includes("select d.owner") ? [{ owner: "joe" }] : [row],
+      }),
+    });
+  const handler = createDealDeliverablesHandler({
+    transaction,
+    bucket,
+    operationTimeoutMs: 10,
+  });
+  const get = () =>
+    handler(
+      new Request(origin + path + `/${id}/download`),
+      { slug: "joe", human: true },
+      async () => true,
+    );
+  for (let i = 0; i < 4; i++) assert.equal((await get()).status, 503);
+  assert.equal(calls, 3, "fourth call must not reach open dependency");
+  for (let i = 4; i < 60; i++) await get();
+  assert.equal((await get()).status, 429);
 });

@@ -123,35 +123,54 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
       create table deal(id uuid primary key,client_id uuid,owner text);
       insert into party(id) values('${deal}');insert into client(id,party_id) values('${deal}','${deal}');
       insert into deal values('${deal}','${deal}','joe'),('${otherDeal}','${deal}','dell')`);
-    const schema = await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8");
-    const resolver = schema.match(/CREATE FUNCTION public\.retrieval_visibility_actor_id\(p_sponsor_slug text\)[\s\S]*?\$\$;/);
+    const schema = await readFile(
+      new URL("../../db/schema.sql", import.meta.url),
+      "utf8",
+    );
+    const resolver = schema.match(
+      /CREATE FUNCTION public\.retrieval_visibility_actor_id\(p_sponsor_slug text\)[\s\S]*?\$\$;/,
+    );
     assert.ok(resolver);
     await c.query(resolver[0]);
-    await c.query("grant usage on schema public,ops to carr_reader; grant select on deal,client,party to carr_reader; grant select(id,slug) on actor to carr_reader");
+    await c.query(
+      "grant usage on schema public,ops to carr_reader; grant select on deal,client,party to carr_reader; grant select(id,slug) on actor to carr_reader",
+    );
     await c.query(
       await readFile(
         new URL("../../migrations/1158_deal_deliverables.sql", import.meta.url),
         "utf8",
       ),
     );
-    await t.test("reader authorization works without access to actor.active and refuses inactive partners", async () => {
-      try {
-        await c.query("set role carr_reader");
-        const result = await tools["list-deal-deliverables"].handler(c, actor, {deal_id: deal});
-        assert.equal(result.ok, true);
-        assert.deepEqual(result.deliverables, []);
-      } finally {
-        await c.query("reset role");
-      }
-      await c.query("update actor set active=false where slug='joe'");
-      try {
-        await c.query("set role carr_reader");
-        await reject(tools["list-deal-deliverables"].handler(c, actor, {deal_id: deal}), "deliverable_denied");
-      } finally {
-        await c.query("reset role");
-        await c.query("update actor set active=true where slug='joe'");
-      }
-    });
+    await t.test(
+      "reader authorization works without access to actor.active and refuses inactive partners",
+      async () => {
+        try {
+          await c.query("set role carr_reader");
+          const result = await tools["list-deal-deliverables"].handler(
+            c,
+            actor,
+            { deal_id: deal },
+          );
+          assert.equal(result.ok, true);
+          assert.deepEqual(result.deliverables, []);
+        } finally {
+          await c.query("reset role");
+        }
+        await c.query("update actor set active=false where slug='joe'");
+        try {
+          await c.query("set role carr_reader");
+          await reject(
+            tools["list-deal-deliverables"].handler(c, actor, {
+              deal_id: deal,
+            }),
+            "deliverable_denied",
+          );
+        } finally {
+          await c.query("reset role");
+          await c.query("update actor set active=true where slug='joe'");
+        }
+      },
+    );
     await t.test(
       "migration registers its exact writer grants in the current capability contract",
       async () => {
@@ -256,6 +275,179 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
         assert.equal((await put(started.deliverable.id)).status, 201);
       },
     );
+    await t.test(
+      "dependency deadlines release row locks and late PUT cannot delete a retry",
+      async () => {
+        const pending = (await start()).deliverable.id;
+        let release;
+        const late = new Promise((resolve) => {
+          release = resolve;
+        });
+        const slow = createDealDeliverablesHandler({
+          transaction,
+          bucket: {
+            ...bucket,
+            put: async (...args) => {
+              await late;
+              return bucket.put(...args);
+            },
+          },
+          operationTimeoutMs: 20,
+        });
+        const response = await Promise.race([
+          slow(
+            request(
+              `${DELIVERABLE_PREFIX}/${deal}/${pending}/bytes`,
+              "PUT",
+              bytes,
+              { "content-type": "application/octet-stream" },
+            ),
+            actor,
+            async () => true,
+          ),
+          new Promise((resolve) => setTimeout(() => resolve(null), 300)),
+        ]);
+        if (!response) release();
+        assert.equal(response?.status, 503, "stalled PUT must time out");
+        assert.equal(
+          (
+            await c.query(
+              "select state from ops.deal_deliverable where id=$1",
+              [pending],
+            )
+          ).rows[0].state,
+          "started",
+        );
+        assert.equal((await put(pending)).status, 201);
+        release();
+        await late;
+        await finalize(pending);
+        assert.equal((await download(pending)).status, 200);
+      },
+    );
+    await t.test(
+      "revoked download refuses every observable lifecycle state",
+      async () => {
+        for (const state of [
+          "absent",
+          "started",
+          "expired",
+          "verified",
+          "private",
+          "private-downloaded",
+          "shared",
+          "shared-downloaded",
+        ]) {
+          const pending =
+            state === "absent" ? randomUUID() : (await start()).deliverable.id;
+          if (state === "expired") {
+            await c.query(
+              "update ops.deal_deliverable set expires_at=now()-interval '1 second' where id=$1",
+              [pending],
+            );
+            await start();
+          } else if (!["absent", "started"].includes(state)) {
+            assert.equal((await put(pending)).status, 201);
+            if (state !== "verified") {
+              await finalize(pending);
+              if (state.startsWith("shared")) await visibility(pending, 1);
+              if (state.endsWith("downloaded"))
+                assert.equal((await download(pending)).status, 200);
+            }
+          }
+          revoked = true;
+          assert.equal((await download(pending)).status, 401, state);
+          revoked = false;
+        }
+      },
+    );
+    await t.test(
+      "hash refusal rolls back and valid retry verifies",
+      async () => {
+        const pending = (await start({ sha256: "0".repeat(64) })).deliverable
+          .id;
+        assert.equal((await put(pending)).status, 422);
+        assert.equal(
+          (
+            await c.query(
+              "select state from ops.deal_deliverable where id=$1",
+              [pending],
+            )
+          ).rows[0].state,
+          "started",
+        );
+        await c.query("update ops.deal_deliverable set sha256=$2 where id=$1", [
+          pending,
+          sha256,
+        ]);
+        assert.equal((await put(pending)).status, 201);
+      },
+    );
+    await t.test(
+      "body and download stalls have deadlines without retaining lifecycle locks",
+      async () => {
+        const pending = (await start()).deliverable.id;
+        const limited = createDealDeliverablesHandler({
+          transaction,
+          bucket: { ...bucket },
+          operationTimeoutMs: 20,
+        });
+        const body = new ReadableStream({ start() {} });
+        const response = await limited(
+          new Request(
+            `https://example.test${DELIVERABLE_PREFIX}/${deal}/${pending}/bytes`,
+            {
+              method: "PUT",
+              body,
+              duplex: "half",
+              headers: { "content-type": "application/octet-stream" },
+            },
+          ),
+          actor,
+          async () => true,
+        );
+        assert.equal(response.status, 408);
+        assert.equal((await put(pending)).status, 201);
+        await finalize(pending);
+        let release;
+        const stalled = new Promise((resolve) => {
+          release = resolve;
+        });
+        const slow = createDealDeliverablesHandler({
+          transaction,
+          bucket: { get: () => stalled },
+          operationTimeoutMs: 20,
+        });
+        const reply = await slow(
+          request(`${DELIVERABLE_PREFIX}/${deal}/${pending}/download`),
+          actor,
+          async () => true,
+        );
+        assert.equal(reply.status, 503);
+        release(null);
+        assert.equal((await download(pending)).status, 200);
+      },
+    );
+    await t.test(
+      "visibility changes with and without prior downloads",
+      async () => {
+        for (const downloaded of [false, true]) {
+          const pending = (await start()).deliverable.id;
+          assert.equal((await put(pending)).status, 201);
+          await finalize(pending);
+          if (downloaded) assert.equal((await download(pending)).status, 200);
+          assert.equal(
+            (await visibility(pending, 1)).deliverable.visibility,
+            "shared",
+          );
+          if (downloaded) assert.equal((await download(pending)).status, 200);
+          assert.equal(
+            (await visibility(pending, 2, "private")).deliverable.visibility,
+            "private",
+          );
+        }
+      },
+    );
     let id;
     await t.test(
       "started -> verified -> finalized privately -> shared -> unshared -> download",
@@ -288,7 +480,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
         assert.equal(d.headers.get("cache-control"), "private, no-store");
         assert.equal(d.headers.get("x-content-type-options"), "nosniff");
         const listed = await call("list-deal-deliverables", { deal_id: deal });
-        assert.equal(listed.deliverables.length, 1);
+        assert.ok(listed.deliverables.some((row) => row.id === id));
         assert.equal("object_key" in listed.deliverables[0], false);
       },
     );
@@ -447,7 +639,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
         revoked = false;
         assert.equal(
           [...objects.keys()].some((k) => k.endsWith(pending)),
-          false,
+          true,
         );
         await reject(finalize(pending), "deliverable_not_verified");
         await c.query("update actor set active=false where slug='joe'");
@@ -517,6 +709,110 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
         );
         await c.query("update actor set active=false where slug='joe'");
         await reject(registered(), "deliverable_denied");
+      },
+    );
+    await t.test(
+      "production proof CLI accepts real handler receipts and rejects corrupt evidence",
+      async () => {
+        const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const { spawnSync } = await import("node:child_process");
+        const directory = await mkdtemp(`${tmpdir()}/J369-proof-`);
+        try {
+          await c.query("update actor set active=true where slug='joe'");
+          const registered = (verb, args) =>
+            transaction((c) =>
+              executeRegisteredTool(c, { ...actor, id: randomUUID() }, verb, {
+                idempotency_key: randomUUID(),
+                deal_id: deal,
+                ...args,
+              }),
+            );
+          const pending = await registered("start-deal-deliverable", input);
+          const upload = await (await put(pending.deliverable.id)).json();
+          const target = { deliverable_id: pending.deliverable.id };
+          const finalized = await registered(
+            "finalize-deal-deliverable",
+            target,
+          );
+          assert.equal((await download(target.deliverable_id)).status, 200);
+          const shared = await registered("set-deal-deliverable-visibility", {
+            ...target,
+            expected_version: 1,
+            visibility: "shared",
+          });
+          assert.equal((await download(target.deliverable_id)).status, 200);
+          const unshared = await registered("set-deal-deliverable-visibility", {
+            ...target,
+            expected_version: 2,
+            visibility: "private",
+          });
+          const data = await (
+            await download(target.deliverable_id)
+          ).arrayBuffer();
+          revoked = true;
+          const denied = await download(target.deliverable_id);
+          revoked = false;
+          const receipt = {
+            partner: "joe",
+            attestation:
+              "Synthetic actual-handler fixture; not production evidence",
+            upload,
+            finalize: finalized,
+            share: shared,
+            unshare: unshared,
+          };
+          const fixture = {
+            release: { source_commit: "1".repeat(40) },
+            list: await transaction((c) =>
+              executeRegisteredTool(c, actor, "list-deal-deliverables", {
+                deal_id: deal,
+              }),
+            ),
+            download: { base64: Buffer.from(data).toString("base64") },
+            revoked: { status: denied.status },
+          };
+          await writeFile(`${directory}/receipt.json`, JSON.stringify(receipt));
+          await writeFile(`${directory}/fixture.json`, JSON.stringify(fixture));
+          const command = [
+            "ops/deal-deliverables-proof.py",
+            "--receipt",
+            `${directory}/receipt.json`,
+            "--fixture",
+            `${directory}/fixture.json`,
+            "--sha",
+            "1".repeat(40),
+          ];
+          const pass = spawnSync("python3", command, { encoding: "utf8" });
+          assert.equal(pass.status, 0, pass.stdout + pass.stderr);
+          for (const mutation of [
+            () => {
+              fixture.revoked.status = 200;
+            },
+            () => {
+              fixture.revoked.status = 401;
+              fixture.download.base64 = "";
+            },
+            () => {
+              fixture.download.base64 = Buffer.from(data).toString("base64");
+              receipt.share.deliverable.version = 99;
+            },
+          ]) {
+            mutation();
+            await writeFile(
+              `${directory}/fixture.json`,
+              JSON.stringify(fixture),
+            );
+            await writeFile(
+              `${directory}/receipt.json`,
+              JSON.stringify(receipt),
+            );
+            const fail = spawnSync("python3", command, { encoding: "utf8" });
+            assert.equal(fail.status, 1, fail.stdout + fail.stderr);
+          }
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
       },
     );
   } finally {
