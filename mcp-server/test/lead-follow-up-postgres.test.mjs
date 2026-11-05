@@ -281,3 +281,24 @@ for (const kind of ['verified', 'discrepancy']) {
     }
   });
 }
+
+for (const kind of ['verified', 'discrepancy']) {
+  for (const zone of ['Z', '+01:00']) {
+    test(`research preserves submillisecond observation precision for ${kind} with ${zone}`, () => {
+      const now = Date.parse('2030-01-02T00:00:00.123Z');
+      const time = zone === 'Z' ? '00:00:00' : '01:00:00';
+      for (const [fraction, eligible] of [
+        ['122999', true], ['123000', true], ['123001', false],
+        ['123000000000000000001', false],
+      ]) {
+        const evidence = [{ flag_id: 'synthetic', kind, found: true, expired: false,
+          proposes_correction: false, source: 'https://example.test',
+          observed_at: `2030-01-02T${time}.${fraction}${zone}`, expires_on: null, value: {} }];
+        const result = researchSummary(evidence, now);
+        assert.equal(result.state, eligible ? kind === 'verified' ? 'verified' : 'needs_review' : 'needs_research',
+          evidence[0].observed_at);
+        assert.deepEqual(result.evidence, evidence);
+      }
+    });
+  }
+}
