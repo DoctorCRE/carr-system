@@ -129,6 +129,11 @@ class ExtractTest(unittest.TestCase):
 
     def assert_provenance(self):
         report = json.loads((self.output / 'manifest.json').read_text())
+        ids = next(row for row in report['rows'] if row['id'] == 'A-G11')
+        self.assertTrue(ids['sources'], 'property IDs need effective source provenance')
+        center = next(row for row in report['rows'] if row['id'] == 'A-A03')['sources']['/map/center']
+        origins = center if isinstance(center, list) else [center]
+        self.assertTrue(all(entry.get('binding') == 'MAP_CENTER' for entry in origins), origins)
         package = json.loads((self.output / 'market-study.json').read_text())
         data = json.loads((self.source / 'data.js').read_text().removeprefix(
             'window.referenceData = ').removesuffix(';\n'))
