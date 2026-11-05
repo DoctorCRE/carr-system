@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "targets": [
+    "worker"
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 500,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  },
+  "requirement_id": "WR622-S1-registry-split",
+  "assertions": [
+    {
+      "id": "release-and-natural-proof",
+      "predicate": "After deployment bind predecessor and candidate release identities and Worker versions. Through the same full-profile actor compare the complete canonical existing-verb list-verbs response and command_contract seal. Require identical contracts for the baseline 410 tools. Any separately landed additions need an explicit additions manifest. Release identity alone does not prove parity.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release and registry smoke PASS plus separate predecessor/candidate existing-tool parity proof; otherwise landed-unproven.",
+      "input_class": "read-only release identity and registry, with separate natural counts-only runtime evidence; no writes",
+      "deadline_seconds": 120
+    }
+  ]
+}

@@ -6,7 +6,12 @@ import { suspected } from './untrusted-text.js';
 const LIMIT = 200;
 const SUMMARY_VERSION = 'email-summary.v1';
 const summaryHash = row => 'sha256:' + sha256(JSON.stringify([row.summary, row.detail ?? row.body, row.email_context]));
-const summaryMetadata = (row, saved) => saved?.source_hash === summaryHash(row) && saved.generator_version === SUMMARY_VERSION
+// Sources predating capture metadata retain their legacy policy; partial verdicts fail closed.
+const completeSummaryCapture = (context = {}) =>
+  !['body_kind', 'body_completeness', 'body_outcome', 'body_truncated'].some(key => key in (context ?? {}))
+  || (!context.body_truncated && context.body_kind === 'full'
+    && context.body_completeness === 'complete' && context.body_outcome === 'complete');
+const summaryMetadata = (row, saved) => completeSummaryCapture(row.email_context) && saved?.source_hash === summaryHash(row) && saved.generator_version === SUMMARY_VERSION
   ? { text: saved.text, source_hash: saved.source_hash, generator_version: saved.generator_version,
       status: saved.status, provenance: saved.provenance }
   : { text: null, source_hash: summaryHash(row), generator_version: SUMMARY_VERSION,
@@ -664,6 +669,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (!args.claim_id || saved.claim_id !== args.claim_id || !saved.claim_active)
             fail('email_summary_claim_stale');
           const available = args.summary_status === 'available';
+          if (available && !completeSummaryCapture(row.email_context)) fail('email_summary_incomplete_capture');
           if (!['available','unavailable'].includes(args.summary_status) || !args.summary_provenance ||
               (available ? !args.summary_text?.trim() || /[\r\n<>]/.test(args.summary_text)
                 : args.summary_text !== undefined)) fail('email_proposal_fields_invalid');
