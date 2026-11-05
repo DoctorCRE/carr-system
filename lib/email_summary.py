@@ -52,7 +52,12 @@ def generate(email: dict, model) -> dict:
     unavailable = lambda reason: {'text': None, 'status': 'unavailable', 'provenance': {'reason': reason}}
     body = email.get('body') or ''
     context = email.get('email_context') or {}
-    if context.get('body_truncated') or context.get('body_kind') in ('preview', 'absent') or len(body) > MAX_CHARS:
+    # Legacy non-decoder sources have no capture fields. Decoder captures need a full verdict.
+    capture_fields = ('body_kind', 'body_completeness', 'body_outcome', 'body_truncated')
+    has_capture = any(key in context for key in capture_fields)
+    if (len(body) > MAX_CHARS or (has_capture and (
+            context.get('body_truncated') or context.get('body_kind') != 'full'
+            or context.get('body_completeness') != 'complete' or context.get('body_outcome') != 'complete'))):
         return unavailable('incomplete_capture')
     text = substantive(body, context.get('subject') or '')
     if not text:

@@ -444,6 +444,8 @@
     "workspace-command-center-web.test.mjs": {"milliseconds": 543, "serial": false},
     "workspace-surface-inventory.test.mjs": {"milliseconds": 446, "serial": false},
     "write-event-call-shape.test.mjs": {"milliseconds": 210, "serial": false},
-    "write-reconciliation.test.mjs": {"milliseconds": 547, "serial": false}
+    "write-reconciliation.test.mjs": {"milliseconds": 547, "serial": false},
+    "session-checkpoints-auth.test.mjs": {"milliseconds": 805, "serial": false},
+    "session-checkpoints.test.mjs": {"milliseconds": 1256, "serial": true}
   }
 }

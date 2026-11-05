@@ -30,6 +30,8 @@
         "body",
         "html",
         "body_kind",
+        "body_completeness",
+        "body_outcome",
         "body_source",
         "copies",
         "flag_status",
