@@ -57,11 +57,12 @@ import uuid
 
 from lib import email_matching, email_summary, model_call
 from lib.fence import DATA_SENTENCE, fence
+from lib.outlook_runtime import stamp
 
 VERBS = frozenset({'email-router-queue', 'record-email-proposal', 'inherit-email-thread'})
 KINDS = frozenset({'phase_move', 'next_step', 'reply_draft'})
 OWNERS = frozenset({'joe', 'dell'})
-REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step|email_thread)_[a-z_]+$')
+REFUSAL = re.compile(r'^(?:email_proposal|email_deal|email_next_step|email_thread|email_application)_[a-z_]+$')
 MIN_CONFIDENCE = 0.6
 MAX_EMAILS = 25
 MAX_ATTEMPTS = 3
@@ -158,10 +159,69 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
     return kept
 
 
+def route_counts():
+    return {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
+                             'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
+
+
+def consume_applications(carr, classify, refusal_code, now, clock):
+    """Consume one durable page. Only the server owns retry and acknowledgement state."""
+    counts = dict(application_claimed=0, application_applied=0, application_failed=0)
+    failures = 0
+    try:
+        page = carr('email-router-queue', {'purpose': 'applications', 'limit': MAX_EMAILS})
+    except Exception:
+        counts['application_failed'] += 1
+        return counts
+    for source in page.get('emails', [])[:MAX_EMAILS]:
+        if clock() >= now + BUDGET or failures >= 2:
+            break
+        binding = {'activity_id': source['activity_id'], 'generation': source['generation']}
+        claim = None
+        def write(args):
+            digest = hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
+            return carr('record-email-proposal', {**args, 'idempotency_key': str(uuid.uuid5(
+                uuid.NAMESPACE_URL, 'filing-application|' + digest))})
+        try:
+            # Each lease acquisition is a new attempt, never replay a previous claim envelope.
+            claim = carr('record-email-proposal', {**binding, 'mode': 'application_claim',
+                                                  'idempotency_key': str(uuid.uuid4())})
+            if not claim.get('generate'):
+                if claim.get('status') == 'exhausted':
+                    counts['application_failed'] += 1
+                continue
+            counts['application_claimed'] += 1
+            claimed = {**binding, 'claim_id': claim['claim_id']}
+            reply = classify(source, now.date())
+            for args in proposals(reply, source, now.date()):
+                if source.get('kind') == 'email_out' and args['kind'] != 'next_step':
+                    continue
+                try:
+                    write({**args, **claimed})
+                except Exception as error:
+                    if refusal_code(error) is None or refusal_code(error) == 'email_application_stale':
+                        raise
+            write({**claimed, 'mode': 'application_result', 'application_status': 'applied'})
+            counts['application_applied'] += 1
+            failures = 0
+        except Exception as error:
+            counts['application_failed'] += 1
+            if refusal_code(error) is None:
+                failures += 1
+            if claim and claim.get('generate'):
+                try:
+                    write({**binding, 'claim_id': claim['claim_id'], 'mode': 'application_result',
+                           'application_status': 'retry'})
+                except Exception:
+                    pass  # A lost lease remains recoverable by the durable claim deadline.
+    counts['application_circuit_open'] = int(failures >= 2)
+    return counts
+
+
 def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], dict],
           refusal_code: Callable[[Exception], str | None], state: dict, now: datetime,
           clock: Callable[[], datetime] | None = None,
-          matching: Callable = email_matching.match, account: str = '') -> dict:
+          matching: Callable = email_matching.match, account: str = '', max_emails: int = MAX_EMAILS) -> dict:
     """One bounded pass over the queue. refusal_code names a server refusal, or None for any other failure.
 
     No new email is started once clock() passes now + BUDGET.
@@ -172,8 +232,7 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
         return carr(verb, args)
     started = time.monotonic()
     clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
-    counts = {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
-                             'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
+    counts = route_counts()
     codes: dict[str, int] = {}
     model_failed_types: dict[str, int] = {}
     if state.get('version') != STATE_VERSION:
@@ -195,12 +254,12 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             attempts.pop(activity)
             counts['abandoned'] += 1
     try:
-        queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': MAX_EMAILS, 'exclude': sorted(routed.keys() - reply_recheck.keys())})
+        queue = call('email-router-queue', {'days': WINDOW_DAYS, 'limit': max_emails, 'exclude': sorted(routed.keys() - reply_recheck.keys())})
     except Exception:
         counts['queue_failed'] = 1
         return {**counts, 'refusal_codes': codes, 'model_failed_types': model_failed_types}
     counts['more'] = int(bool(queue.get('more')))
-    for email in queue.get('emails', [])[:MAX_EMAILS]:
+    for email in queue.get('emails', [])[:max_emails]:
         if clock() >= now + BUDGET:
             counts['out_of_time'] = 1
             break
@@ -337,34 +396,41 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
             return 'skipped', {}
         state = _state(out)
         try:
-            counts = route(carr, classify, refusal_code, state, now, clock, account=account)
-            try:
-                maintenance = carr('record-email-proposal', {'mode': 'expire_blocked', 'idempotency_key': str(uuid.uuid4()),
-                    **({'cursor': state['expiry_cursor']} if state.get('expiry_cursor') else {})})
-                counts['expired_blocked'] = maintenance.get('expired_count', 0)
-                state['expiry_cursor'] = maintenance.get('next_cursor')
-            except Exception:
-                counts['maintenance_failed'] = 1
-            if summary_model is not None:
+            started = time.monotonic()
+            bounded_clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
+            application_counts = consume_applications(carr, classify, refusal_code, now, bounded_clock)
+            remaining = MAX_EMAILS - application_counts['application_claimed']
+            counts = route_counts() if application_counts.get('application_circuit_open') or remaining <= 0 else route(
+                carr, classify, refusal_code, state, now, bounded_clock, account=account, max_emails=remaining)
+            counts.update(application_counts)
+            if not application_counts.get('application_circuit_open'):
                 try:
-                    summary = email_summary.backfill(carr, summary_model, now=now, clock=clock,
-                                                     after=state.get('summary_cursor'), pending_only=False)
-                    state['summary_cursor'] = summary['next_cursor']
-                    counts['summaries_generated'] = summary['generated']
-                    counts['summaries_unavailable'] = summary['unavailable']
+                    maintenance = carr('record-email-proposal', {'mode': 'expire_blocked', 'idempotency_key': str(uuid.uuid4()),
+                        **({'cursor': state['expiry_cursor']} if state.get('expiry_cursor') else {})})
+                    counts['expired_blocked'] = maintenance.get('expired_count', 0)
+                    state['expiry_cursor'] = maintenance.get('next_cursor')
                 except Exception:
-                    counts['summary_failed'] = 1
+                    counts['maintenance_failed'] = 1
+                if summary_model is not None:
+                    try:
+                        summary = email_summary.backfill(carr, summary_model, now=now, clock=clock,
+                                                         after=state.get('summary_cursor'), pending_only=False)
+                        state['summary_cursor'] = summary['next_cursor']
+                        counts['summaries_generated'] = summary['generated']
+                        counts['summaries_unavailable'] = summary['unavailable']
+                    except Exception:
+                        counts['summary_failed'] = 1
         finally:
             _save(out, state)
-    failed = counts['model_failed'] or counts['write_failed'] or counts['queue_failed'] or counts.get('maintenance_failed')
+    failed = counts.get('application_failed') or counts['model_failed'] or counts['write_failed'] or counts['queue_failed'] or counts.get('maintenance_failed')
     return ('failed' if failed else 'succeeded'), counts
 
 
-def receipt(outcome: str, counts: dict) -> str:
+def receipt(outcome: str, counts: dict, repo: Path | None = None) -> str:
     counts = counts.copy()
     types = counts.pop('model_failed_types', {})
     codes = counts.pop('refusal_codes', {})
-    result = {'state': outcome, 'counts': counts}
+    result = {'state': outcome, 'counts': counts, **(stamp(repo) if repo is not None else {})}
     if types:
         result['model_failed_types'] = types
     if codes:
@@ -385,7 +451,7 @@ def step(repo: Path, settings) -> int:
                               summary_model=lambda text: email_summary.ask_model(text, settings.model))
     except Exception:
         outcome, counts = 'failed', {'error': 1}
-    print(receipt(outcome, counts))
+    print(receipt(outcome, counts, repo))
     return EXIT[outcome]
 
 
