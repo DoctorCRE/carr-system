@@ -5817,6 +5817,27 @@ class FieldCensusTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 census.validate(bad)
 
+    def test_proof_cli_refuses_inconsistent_population(self):
+        import copy
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, _ = self.fixture(directory)
+            target = Path(directory) / 'field-census-latest.json'
+            command = [sys.executable, str(ROOT / 'ops/outlook-field-census-proof.py'),
+                       str(target), '--after', '2026-11-04T00:00:00+00:00']
+            for population in (
+                    dict(decoded=10002, admitted=3, unadmitted=9999, rejected=777, observed=10779),
+                    dict(decoded=4, admitted=3, unadmitted=1, rejected=777, observed=781),
+                    dict(decoded=10002, admitted=3, unadmitted=9999, rejected=2, observed=10004),
+                    dict(decoded=3, admitted=3, unadmitted=0, rejected=2, observed=5)):
+                with self.subTest(population=population):
+                    bad = copy.deepcopy(bundle)
+                    bad['census']['population'] = population
+                    target.write_text(json.dumps(bad))
+                    result = REAL_RUN(command, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1, 'inconsistent population must fail proof')
+                    self.assertEqual(result.stdout, '')
+                    self.assertEqual(result.stderr, 'field_census_proof_failed\n')
+
     def test_atomic_publication_crash_and_proof_cli(self):
         from lib import outlook_field_census as census
         with tempfile.TemporaryDirectory() as directory:
