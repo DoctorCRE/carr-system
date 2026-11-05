@@ -102,6 +102,7 @@ class ExtractTest(unittest.TestCase):
         self.run_cli()
         package = json.loads((self.output / 'market-study.json').read_text())
         self.assertIsInstance(package['demographics']['income_bands']['areas'][0]['counts'], dict)
+        self.assert_provenance()
 
     def test_reconstruct_numeric_objects_from_leaves(self):
         data = json.loads((self.source / 'data.js').read_text().removeprefix(
@@ -122,13 +123,21 @@ class ExtractTest(unittest.TestCase):
         self.change_mapping(change)
         self.run_cli()
         package = json.loads((self.output / 'market-study.json').read_text())
-        # Assets are replaced with content hashes by the extractor.
         self.assertEqual(package['demographics']['income_bands'], data['demographics']['income_bands'])
         for actual, expected in zip(package['demographics']['micro_zones']['zones'], data['demographics']['micro_zones']['zones']):
             self.assertEqual(actual['population'], expected['population'])
 
     def assert_provenance(self):
         report = json.loads((self.output / 'manifest.json').read_text())
+        package = json.loads((self.output / 'market-study.json').read_text())
+        data = json.loads((self.source / 'data.js').read_text().removeprefix(
+            'window.referenceData = ').removesuffix(';\n'))
+        def select(value, pointer):
+            for key in pointer[1:].split('/') if pointer else []:
+                key = key.replace('~1', '/').replace('~0', '~')
+                value = value[int(key)] if isinstance(value, list) else value[key]
+            return value
+        bindings = {'window.referenceData': data, 'MAP_CENTER': [-100.5, 40.25], 'MAP_ZOOM': 11}
         for row in report['rows']:
             if row['status'] != 'mapped':
                 continue
@@ -139,8 +148,16 @@ class ExtractTest(unittest.TestCase):
                 self.assertIsInstance(entries, list)
                 self.assertTrue(entries, row['id'])
                 for entry in entries:
-                    if entry['file'] == 'data.js':
-                        self.assertNotIn('/map/center', entry['pointer'])
+                    actual = select(package, entry['target'])
+                    if 'asset_field' in entry:
+                        asset = select(package, entry['asset_field'])
+                        self.assertEqual(asset['sha256'], hashlib.sha256((self.source / entry['file']).read_bytes()).hexdigest())
+                    else:
+                        expected = select(bindings[entry['binding']], entry['pointer'])
+                        self.assertEqual(actual, expected, entry)
+        center = next(row for row in report['rows'] if row['id'] == 'A-A03')['sources']['/map/center']
+        self.assertEqual([entry['pointer'] for entry in center], ['/0', '/1'])
+        self.assertTrue(all(entry['binding'] == 'MAP_CENTER' for entry in center))
 
     def call_main(self, module):
         stdout = io.StringIO()
@@ -156,6 +173,7 @@ class ExtractTest(unittest.TestCase):
             with self.subTest(fault=fault):
                 actual_run = module.subprocess.run
                 def timeout(*args, **kwargs):
+                    self.assertEqual(kwargs.get('timeout'), 60)
                     action = json.loads(kwargs['input'])['action']
                     if action == fault.removesuffix('_timeout'):
                         raise subprocess.TimeoutExpired('node PRIVATE_VALUE', 60)

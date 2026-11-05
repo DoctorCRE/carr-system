@@ -13,6 +13,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBES = ROOT / 'client-portal/parity/probes.v1.json'
+SCHEMA = json.loads((ROOT / 'client-portal/market-study.v1.schema.json').read_text())
 NODE = r'''
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -160,6 +161,30 @@ def index_segment(key, pointer):
     return int(key)
 
 
+def schema_at(keys):
+    schema = SCHEMA
+    for key in [*keys, None]:
+        while '$ref' in schema:
+            schema = select(SCHEMA, schema['$ref'][1:])
+        if key is None:
+            return schema
+        if schema.get('type') == 'array':
+            schema = schema.get('items', {})
+        else:
+            schema = schema.get('properties', {}).get(key, schema.get('additionalProperties', {}))
+        if not isinstance(schema, dict):
+            schema = {}
+
+
+def container(keys, next_key, pointer):
+    kind = schema_at(keys).get('type')
+    if kind == 'array':
+        return []
+    if kind == 'object' or not next_key.isdigit():
+        return {}
+    fail(pointer, 'ambiguous container; map its parent object or array explicitly')
+
+
 def assign(package, pointer, value):
     keys = parts(pointer)
     if not keys:
@@ -172,19 +197,17 @@ def assign(package, pointer, value):
             if index > len(parent):
                 fail(pointer, 'sparse array index')
             if index == len(parent):
-                parent.append(copy.deepcopy(value) if last else ([] if keys[position + 1].isdigit() else {}))
+                parent.append(copy.deepcopy(value) if last else container(keys[:position + 1], keys[position + 1], pointer))
             elif last:
                 parent[index] = copy.deepcopy(value)
             if not last:
                 parent = parent[index]
         elif isinstance(parent, dict):
-            if key.isdigit():
-                fail(pointer, 'ambiguous numeric object key')
             if last:
                 parent[key] = copy.deepcopy(value)
             else:
                 if key not in parent:
-                    parent[key] = [] if keys[position + 1].isdigit() else {}
+                    parent[key] = container(keys[:position + 1], keys[position + 1], pointer)
                 parent = parent[key]
         else:
             fail(pointer, 'destination conflicts with existing value')
@@ -207,6 +230,49 @@ def matches(value, keys):
     except (KeyError, IndexError, TypeError, ValueError):
         return []
     return matches(child, rest)
+
+
+def children(value, pointer=''):
+    if isinstance(value, dict) and value:
+        for key, child in value.items():
+            yield from children(child, pointer + '/' + key.replace('~', '~0').replace('/', '~1'))
+    elif isinstance(value, list) and value:
+        for index, child in enumerate(value):
+            yield from children(child, pointer + '/' + str(index))
+    else:
+        yield pointer
+
+
+def record_provenance(provenance, target, value, source):
+    for previous in list(provenance):
+        if previous == target or previous.startswith(target + '/'):
+            del provenance[previous]
+    for suffix in children(value):
+        provenance[target + suffix] = {**source, **(
+            {'pointer': source['pointer'] + suffix} if 'pointer' in source else {})}
+
+
+def inventory_sources(package, row, provenance):
+    result = {}
+    if row['status'] == 'excluded':
+        return result
+    leaves = list(children(package))
+    for pointer in row['fields']:
+        if pointer in row['waived']:
+            continue
+        pattern = parts(pointer)
+        entries = []
+        for leaf in leaves:
+            keys = parts(leaf)
+            if len(keys) < len(pattern) or any(a != '*' and a != b for a, b in zip(pattern, keys)):
+                continue
+            if leaf not in provenance:
+                fail(pointer, 'inventory field has no effective source provenance')
+            entries.append({'target': leaf, **provenance[leaf]})
+        if not entries:
+            fail(pointer, 'inventory field has no effective source provenance')
+        result[pointer] = entries
+    return result
 
 
 def inventory(package, site, mode, groups):
@@ -284,12 +350,15 @@ def extract(source, output, mapping_name, mode):
         for binding in bindings['bindings']:
             if (file, binding) not in used and not ignored.get(file + ':' + binding, '').strip():
                 errors.append({'path': file + ':' + binding, 'message': 'unmapped constant'})
-    package = {}
+    package, provenance = {}, {}
     for target, spec in sorted(mapping['fields'].items(), key=destination_order):
         if spec is None:
             continue
         try:
-            assign(package, target, select(sources[spec['source']], spec['pointer']))
+            value = select(sources[spec['source']], spec['pointer'])
+            assign(package, target, value)
+            record_provenance(provenance, target, value,
+                              {**mapping['sources'][spec['source']], 'pointer': spec['pointer']})
         except ExtractError as exc:
             errors.extend({**error, 'source': mapping['sources'][spec['source']]['file'],
                            'target': target} for error in exc.errors)
@@ -306,6 +375,7 @@ def extract(source, output, mapping_name, mode):
         sha = digest(data)
         asset = {'sha256': sha, 'name': path.name, 'type': spec['type']}
         assign(package, target, asset)
+        record_provenance(provenance, target, asset, {'file': spec['file'], 'asset_field': target})
         assets.append({'field': target, 'source': spec['file'], 'output': 'files/' + sha, **asset})
         contents[sha] = data
         inputs[spec['file']] = sha
@@ -325,15 +395,7 @@ def extract(source, output, mapping_name, mode):
         raise ExtractError(validation['errors'])
     rows = inventory(package, mapping['site'], mode, validation['groups'])
     for row in rows:
-        row['sources'] = {}
-        for pointer in row['fields']:
-            candidates = [target for target, spec in mapping['fields'].items()
-                          if spec is not None and (pointer == target or pointer.startswith(target + '/'))]
-            if candidates:
-                target = max(candidates, key=len)
-                spec = mapping['fields'][target]
-                row['sources'][pointer] = {**mapping['sources'][spec['source']],
-                                           'pointer': spec['pointer'] + pointer[len(target):]}
+        row['sources'] = inventory_sources(package, row, provenance)
 
     counts = {'mapped_rows': sum(r['status'] == 'mapped' for r in rows),
               'waived_rows': sum(r['status'] == 'waived' for r in rows),
