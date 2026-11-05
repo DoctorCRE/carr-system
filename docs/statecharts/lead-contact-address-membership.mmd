@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> Capture
+    Capture --> CaptureRejected: Invalid address, source, time, or inactive party
+    Capture --> ContactUnconfirmed: Valid address is absent from complete stored tokens
+    Capture --> ContactExact: Valid address equals a complete normalized stored token
+    Capture --> CaptureFailed: Database or envelope fails
+    CaptureFailed --> [*]: Caller receives failure
+    CaptureRejected --> [*]: No activity is written
+    ContactUnconfirmed --> StageProposed: Eligible factual contact needs confirmation
+    ContactExact --> StageProposed: Other strong evidence is missing
+    ContactExact --> StageAppliedWithExistingStrongEvidence: Existing stage policy accepts all evidence
+    ContactExact --> NoStageChange: Automated, delayed future, unrelated, or stale evidence
+    ContactUnconfirmed --> NoStageChange: Evidence is ineligible
+    StageProposed --> [*]: Human approval remains required
+    StageAppliedWithExistingStrongEvidence --> [*]: Existing job records provenance and sends nothing
+    NoStageChange --> [*]
+    %% never exact-match a substring, shared domain, display name, or malformed token
+    %% never qualify from an exact contact alone without existing strong evidence
+    %% capture is synchronous; it introduces no background work or teardown

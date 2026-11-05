@@ -70,7 +70,7 @@ class Fake {
     if(sql==="select now() as now")return {rows:[{now:NOW}]};
     if(sql.startsWith("select id from lead order"))return {rows:[{id:lead.id}]};
     if(sql.startsWith("select l.*, (p.merged_into"))return {rows:[this.l]};
-    if(sql.startsWith("select a.* from activity"))return {rows:[contact]};
+    if(sql.startsWith("select a.* from activity"))return {rows:this.activities ?? [contact]};
     if(sql.startsWith("select * from lead_contact_draft"))return {rows:this.drafts};
     if(sql.startsWith("insert into lead_stage_move")){
       if(this.moves.length)return {rows:[]};this.moves.push(p);return {rows:[{id:"move-example"}]};
@@ -84,7 +84,7 @@ class Fake {
     if(sql.startsWith("select m.*,l.version as base_version,l.registry_ref"))return {rows:this.moves};
     if(sql.startsWith("select m.*,l.version"))return {rows:this.proposal?[this.proposal]:[]};
     if(sql.startsWith("update lead_stage_move"))return {rows:[]};
-    if(sql.startsWith("select l.id,l.party_id,p.email"))return {rows:[{...lead,email:"contact@example.test"}]};
+    if(sql.startsWith("select l.id,l.party_id,p.email"))return {rows:[{...lead,email:this.email ?? "contact@example.test"}]};
     if(sql.startsWith("insert into activity")){this.capture=p;return {rows:[{id:"captured-example"}]};}
     if(sql.startsWith("select s.key as search_key"))return {rows:this.search?[this.search]:[]};
     throw new Error(`unexpected fake query ${sql}`);
@@ -170,4 +170,74 @@ test("lead automation retains human-only party merges", async () => {
   assert.equal(registeredOperation("confirm-merge").human_only, true);
   for (const name of ["advance-leads", "approve-lead-draft", "approve-lead-move"])
     assert.ok(registeredOperation(name));
+});
+
+const membershipArgs={lead:"L-EXAMPLE",native_ref:"local-mail:synthetic-membership",counterparty_address:"second@example.test",
+  kind:"email_in",occurred_at:"2026-10-01T12:00:00Z",automated:false};
+
+test("registered capture recognizes first, middle and last complete normalized address tokens",async()=>{
+  for(const email of ["second@example.test; third@example.test", "first@example.test; SECOND@EXAMPLE.TEST ; third@example.test",
+    "first@example.test; second@example.test", " ; second@example.test ; "]){
+    const db=new Fake();db.email=email;
+    const result=await tools["record-lead-contact"].handler(db,human,{...membershipArgs,counterparty_address:" Second@Example.Test "});
+    assert.equal(result.match,"exact",email);
+    const detail=JSON.parse(db.capture[4]);
+    assert.equal(detail.party_id,lead.party_id);assert.equal(detail.evidence_ref,membershipArgs.native_ref);
+    assert.equal(db.capture[5],null);assert.equal(db.capture[7],"local_mail");
+    assert.equal(JSON.stringify([db.capture,db.events]).includes("@"),false);
+    const activity={...contact,id:result.activity_id,detail:db.capture[4],owed:db.capture[5]};
+    assert.equal(plan(lead,activity)[0].status,"applied");
+    const job=new Fake();job.activities=[activity];
+    assert.equal((await tools["lead-stage-preview"].handler(job)).moves[0].status,"applied");
+    const applied=await tools["advance-leads"].handler(job,human,{idempotency_key:"synthetic-membership-job"});
+    assert.equal(applied.moves[0].evidence_ref,membershipArgs.native_ref);assert.equal(applied.sent,false);
+    assert.equal(plan({...lead,event_confidence:"low"},activity)[0].status,"proposed");
+    assert.deepEqual(plan(lead,change(activity,{automated:true})),[]);
+    assert.deepEqual(plan({...lead,suppressed:true},activity),[]);
+    assert.deepEqual(plan(lead,{...activity,occurred_at:"2030-01-01"}),[]);
+  }
+});
+
+test("registered capture never extracts fragments or malformed stored tokens",async()=>{
+  for(const email of ["prefixsecond@example.test", "second@example.test.evil.test", "other@example.test",
+    "Second <second@example.test>", "second@example.test,other@example.test", "second@example.test>",
+    "second@example.test extra", "second@example.test@evil.test", "", ";;"]){
+    const db=new Fake();db.email=email;
+    const result=await tools["record-lead-contact"].handler(db,human,membershipArgs);
+    assert.equal(result.match,"unconfirmed",email);assert.equal(db.capture[5],"Confirm counterparty");
+    assert.equal(plan(lead,{...contact,detail:db.capture[4],owed:db.capture[5]})[0].status,"proposed");
+  }
+});
+
+test("registered capture rejects malformed counterparties before activity writes",async()=>{
+  for(const address of ["Second <second@example.test>","second@example.test;third@example.test", "a..b@example.test", ".a@example.test",
+    "a@-example.test", "a@example..test", "a@example.test>", "a@example.test,", "a@example.test@evil.test"]){
+    const db=new Fake();db.email=address;
+    await assert.rejects(()=>tools["record-lead-contact"].handler(db,human,{...membershipArgs,counterparty_address:address}),/invalid_counterparty_address/);
+    assert.equal(db.capture,undefined);assert.deepEqual(db.events,[]);
+  }
+});
+
+test("capture rejects invalid provenance and propagates database failure without writes",async()=>{
+  for(const override of [{native_ref:"remote:mail"},{occurred_at:"2030-01-01"},{kind:"meeting",native_ref:"local-calendar:fixture",attended:false}]){
+    const db=new Fake();await assert.rejects(()=>tools["record-lead-contact"].handler(db,human,{...membershipArgs,...override}));
+    assert.equal(db.capture,undefined);
+  }
+  const db=new Fake();db.query=async()=>{throw new Error("synthetic database failure");};
+  await assert.rejects(()=>tools["record-lead-contact"].handler(db,human,membershipArgs),/database failure/);
+  assert.equal(db.capture,undefined);
+});
+
+test("complete valid dot-atom addresses retain exact capture behavior",async()=>{
+  for(const address of ["first.last+tag@example.test", "o'connor@example.test", "a!#$%&'*+/=?^_`{|}~z@sub-domain.example.test"]){
+    const db=new Fake();db.email=`first@example.test; ${address}`;
+    assert.equal((await tools["record-lead-contact"].handler(db,human,{...membershipArgs,counterparty_address:address})).match,"exact");
+  }
+});
+
+test("capture refuses a lead filtered out by existing party contact-state checks",async()=>{
+  const db=new Fake();const query=db.query.bind(db);
+  db.query=async(sql,args)=>sql.startsWith("select l.id,l.party_id,p.email")?{rows:[]}:query(sql,args);
+  await assert.rejects(()=>tools["record-lead-contact"].handler(db,human,membershipArgs),/lead_not_found/);
+  assert.equal(db.capture,undefined);assert.deepEqual(db.events,[]);
 });
