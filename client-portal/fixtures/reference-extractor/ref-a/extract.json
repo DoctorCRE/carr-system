@@ -1,0 +1,243 @@
+{
+  "site": "REF-A",
+  "sources": {
+    "data": {
+      "file": "data.js",
+      "binding": "window.referenceData"
+    },
+    "center": {
+      "file": "app.js",
+      "binding": "MAP_CENTER"
+    },
+    "zoom": {
+      "file": "app.js",
+      "binding": "MAP_ZOOM"
+    }
+  },
+  "fields": {
+    "/schema": {
+      "source": "data",
+      "pointer": "/schema"
+    },
+    "/client": {
+      "source": "data",
+      "pointer": "/client"
+    },
+    "/prepared": {
+      "source": "data",
+      "pointer": "/prepared"
+    },
+    "/market": {
+      "source": "data",
+      "pointer": "/market"
+    },
+    "/map": {
+      "source": "data",
+      "pointer": "/map"
+    },
+    "/properties": {
+      "source": "data",
+      "pointer": "/properties"
+    },
+    "/purchases": {
+      "source": "data",
+      "pointer": "/purchases"
+    },
+    "/developments": {
+      "source": "data",
+      "pointer": "/developments"
+    },
+    "/context_anchors": {
+      "source": "data",
+      "pointer": "/context_anchors"
+    },
+    "/demographics": {
+      "source": "data",
+      "pointer": "/demographics"
+    },
+    "/ownership": {
+      "source": "data",
+      "pointer": "/ownership"
+    },
+    "/sources": {
+      "source": "data",
+      "pointer": "/sources"
+    },
+    "/map/center": {
+      "source": "center",
+      "pointer": ""
+    },
+    "/map/zoom": {
+      "source": "zoom",
+      "pointer": ""
+    }
+  },
+  "assets": [
+    {
+      "target": "/client/logo",
+      "file": "assets/example-logo.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/map/basemap/water",
+      "file": "assets/water.geojson",
+      "type": "application/geo+json"
+    },
+    {
+      "target": "/map/basemap/roads",
+      "file": "assets/roads.geojson",
+      "type": "application/geo+json"
+    },
+    {
+      "target": "/properties/0/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/0/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/1/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/1/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/2/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/2/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/3/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/3/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/4/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/4/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/5/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/5/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/6/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/6/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/properties/7/photo",
+      "file": "assets/photo-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/properties/7/floorplan",
+      "file": "assets/floorplan-1.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/developments/0/image/asset",
+      "file": "assets/development-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/developments/1/image/asset",
+      "file": "assets/development-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/developments/2/image/asset",
+      "file": "assets/development-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/developments/3/image/asset",
+      "file": "assets/development-1.jpg",
+      "type": "image/jpeg"
+    },
+    {
+      "target": "/demographics/micro_zones/zones/0/study_pdf",
+      "file": "assets/zone-1-mile.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/demographics/micro_zones/zones/1/study_pdf",
+      "file": "assets/zone-3-mile.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/demographics/micro_zones/zones/2/study_pdf",
+      "file": "assets/zone-1-mile.pdf",
+      "type": "application/pdf"
+    },
+    {
+      "target": "/demographics/competition/offices/0/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/demographics/competition/offices/1/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/demographics/competition/offices/2/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/demographics/competition/offices/3/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/demographics/competition/offices/4/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/demographics/competition/offices/5/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    },
+    {
+      "target": "/demographics/competition/offices/6/logo",
+      "file": "assets/example-dental.png",
+      "type": "image/png"
+    }
+  ],
+  "ignore": {}
+}
