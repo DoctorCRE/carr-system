@@ -6760,7 +6760,8 @@ export const TOOLS = {
            (select count(distinct rf.kind) from record_flag rf where rf.subject_type='party' and rf.subject_id=p.id
              and rf.kind in ('verified','address','phone','email','npi','specialty') and coalesce(rf.value->>'found','true') <> 'false') as verified_identity_fields,
            ((select count(*) from activity a
-               where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=p.id)
+               where a.party_id=p.id
+                  or exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=p.id)
                   or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=p.id)
                   or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=p.id)
                   or exists(select 1 from deal d join client cl on cl.id=d.client_id
@@ -6779,7 +6780,8 @@ export const TOOLS = {
         `/* merge_orphan_sweep */
          select 'party_link' as attachment, count(*)::int as count from party_link where from_party=$1 or to_party=$1 or via_party=$1
          union all select 'activity', count(*)::int from activity a
-           where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=$1)
+           where a.party_id=$1
+              or exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=$1)
               or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=$1)
               or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=$1)
               or exists(select 1 from deal d join client cl on cl.id=d.client_id
@@ -6862,6 +6864,11 @@ export const TOOLS = {
         if (r.rows.length) moved[t] = r.rows.length;
       }
 
+      const activities = await c.query(
+        `update activity set party_id=$1, updated_by=$2 where party_id=$3 returning id`,
+        [args.survivor_party, actor.id, args.merged_party]);
+      const activitiesMoved = activities.rows.length;
+
       await c.query("update party set merged_into=$1, updated_by=$2 where id=$3",
         [args.survivor_party, actor.id, args.merged_party]);
 
@@ -6877,14 +6884,14 @@ export const TOOLS = {
       // The stated basis rides the event: a merge is permanent, so the reason it
       // was allowed has to outlive the session that gave it.
       await writeEvent(c, actor, "confirm-merge", "party", args.merged_party,
-        { new: { merged_into: args.survivor_party, roles_moved: moved, match_basis: basis,
+        { new: { merged_into: args.survivor_party, roles_moved: moved, activities_moved: activitiesMoved, match_basis: basis,
                  survivorship: { business_ref: !!preferred.has_business_ref,
                    verified_identity_fields: Number(preferred.verified_identity_fields || 0),
                    linked_records: Number(preferred.linked_records || 0), created_at: preferred.created_at },
                  orphan_sweep: sweep.rows,
                  ...(args.same_person_because ? { same_person_because: args.same_person_because } : {}) },
           idempotency_key: args.idempotency_key });
-      return { ok: true, roles_moved: moved, match_basis: basis, orphan_sweep: sweep.rows,
+      return { ok: true, roles_moved: moved, activities_moved: activitiesMoved, match_basis: basis, orphan_sweep: sweep.rows,
                duplicate_roles_on_survivor: dup.rows.length ? dup.rows : undefined };
     }),
   },

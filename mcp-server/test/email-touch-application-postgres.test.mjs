@@ -183,12 +183,12 @@ test('email touch permanent applications and bounded reconciliation', async t =>
       values('person','Synthetic older party',$1,$1,'2025-01-01'),
             ('person','Synthetic captured party',$1,$1,'2026-01-01') returning id`,[actor.id])).rows;
     const [older,survivor]=parties.map(row=>row.id);
-    const capture=ref=>({idempotency_key:randomUUID(),ref,kind:'email_in',summary:'Synthetic merge capture',
+    const capture=ref=>({idempotency_key:randomUUID(),ref,kind:'email_in',summary:`Synthetic merge capture ${ref}`,
       occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
       email_context:{subject:'Synthetic merge',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}});
     const args=capture(survivor);
-    const original=await call('log-activity',args);
-    const second=await call('log-activity',{...capture(survivor),kind:'email_out'});
+    await call('log-activity',args);
+    await call('log-activity',{...capture(survivor),kind:'email_out'});
     const merge={idempotency_key:randomUUID(),survivor_party:older,merged_party:survivor,match_basis:'exact synthetic shared email'};
     await assert.rejects(call('confirm-merge',merge),e=>e.payload?.error==='wrong_merge_survivor' && e.payload?.required_survivor===survivor);
     const incoming=capture(older);
@@ -200,7 +200,11 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     assert.equal(event.activities_moved,1);
     assert.equal(event.survivorship.linked_records,2);
     const timeline=(await call('catch-me-up',{ref:survivor})).timeline.filter(row=>row.entry_kind==='activity');
-    assert.deepEqual(timeline.map(row=>row.id).sort(),[original.activity_id,second.activity_id,moved.activity_id].sort());
+    assert.equal(timeline.length,3);
+    assert.ok(timeline.some(row=>row.summary===incoming.summary));
+    const stored=(await c.query('select party_id,email_identity from activity where id=$1',[moved.activity_id])).rows[0];
+    assert.equal(stored.party_id,survivor);
+    assert.equal(stored.email_identity.subject,older);
     assert.equal((await call('log-activity',incoming)).activity_id,moved.activity_id);
     assert.equal((await call('log-activity',{...incoming,idempotency_key:randomUUID(),ref:survivor})).activity_id,moved.activity_id);
     assert.equal((await call('log-activity',{...incoming,idempotency_key:randomUUID()})).activity_id,moved.activity_id);

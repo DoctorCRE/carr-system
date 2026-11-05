@@ -13,6 +13,10 @@ stateDiagram-v2
     Pending --> Captured: transaction commits
     Captured --> Captured: same key or mailbox identity retried
     Captured --> Visible: read party timeline
+    Captured --> Captured: refuse a lower-ranked survivor
+    Captured --> CapturedOnSurvivor: confirm party merge
+    CapturedOnSurvivor --> CapturedOnSurvivor: retry same key or mailbox identity
+    CapturedOnSurvivor --> Visible: read survivor timeline
 ```
 
 Tests map Pending to Captured, Captured to Captured and Captured to Visible to
@@ -34,3 +38,16 @@ migration before the changed handler. Existing role activities remain unchanged.
 Alternative considered was removing bare parties from matching. That would discard a
 supported contact class and strand the retained requests. Party storage preserves the
 resolved subject instead of inventing a lead or client role.
+
+The test `party merge preserves captured mail and mailbox replay on the survivor`
+covers the lower-ranked survivor refusal, the merge transfer, replay with the old
+key and new keys using either party ref, and survivor timeline visibility. It
+asserts the moved activity count in the response and event, the attachment sweep,
+and direct activity survivorship precedence.
+
+Merge transfers direct activity in the existing transaction. Mailbox replay also
+checks the current party attachment, preserving immutable email identity and
+historical event and receipt evidence.
+Direct activities count alongside role activities in survivorship and attachment
+reporting. Refusing all party-mail merges was considered; moving these rows safely
+uses the existing locks and transaction without adding a resolution workflow.
