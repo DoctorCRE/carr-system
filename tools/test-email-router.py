@@ -62,6 +62,8 @@ class Server:
 
     def __call__(self, verb: str, args: dict) -> dict:
         self.calls.append((verb, args))
+        if verb == 'email-router-queue' and args.get('purpose') == 'applications':
+            return {'emails': []}
         if verb == 'email-router-queue':
             rows = [e for e in self.emails if e['activity_id'] not in args['exclude']]
             return {'emails': rows[:args['limit']], 'more': len(rows) > args['limit'], 'open_deals': []}
@@ -923,6 +925,97 @@ class SummaryIntegration(unittest.TestCase):
                 self.assertEqual(outcome, 'succeeded')
                 self.assertEqual(counts['summary_failed'], 1)
 
+
+
+class DurableApplications(unittest.TestCase):
+    def test_application_refusals_and_installed_receipts_keep_their_identity(self):
+        self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_application_stale'))
+        with patch.object(email_router, 'stamp', return_value={'runtime_sha': 'a' * 40}):
+            observed = json.loads(email_router.receipt('succeeded', {'application_applied': 1}, ROOT).split(' ', 1)[1])
+        self.assertEqual(observed['runtime_sha'], 'a' * 40)
+        self.assertEqual(observed['counts']['application_applied'], 1)
+
+    def test_generation_binding_and_crash_replay_keep_stable_proposal_keys(self):
+        source = {**email('durable', ASK), 'kind': 'email_in', 'generation': 'gen-one'}
+        calls = []
+        claims = iter(['claim-one', 'claim-two'])
+        def carr(verb, args):
+            calls.append((verb, args))
+            if verb == 'email-router-queue':
+                self.assertEqual(args, {'purpose': 'applications', 'limit': 25})
+                return {'emails': [source]}
+            if args.get('mode') == 'application_claim':
+                return {'generate': True, 'claim_id': next(claims)}
+            return {'ok': True}
+        reply = lambda *_: {'proposals': [{'kind': 'next_step', 'evidence_quote': ASK,
+            'confidence': 0.9, 'text': 'Send floor plan', 'owner': 'joe'}]}
+        for _ in range(2):
+            result = email_router.consume_applications(carr, reply, refusal_code, NOW, lambda: NOW)
+            self.assertEqual(result['application_applied'], 1)
+        writes = [a for _, a in calls if a.get('kind')]
+        self.assertEqual({a['generation'] for a in writes}, {'gen-one'})
+        self.assertEqual({a['claim_id'] for a in writes}, {'claim-one', 'claim-two'})
+        self.assertEqual(len({a['activity_id'] for a in writes}), 1)
+        results = [a for _, a in calls if a.get('mode') == 'application_result']
+        self.assertTrue(all(a['application_status'] == 'applied' for a in results))
+
+    def test_two_consecutive_failures_stop_external_work_and_preserve_retry(self):
+        sources = [{**email(str(i), ASK), 'generation': str(i)} for i in range(25)]
+        calls = []
+        def carr(verb, args):
+            calls.append(args)
+            if verb == 'email-router-queue':
+                return {'emails': sources}
+            if args.get('mode') == 'application_claim':
+                return {'generate': True, 'claim_id': 'claim'}
+            return {}
+        def unavailable(*_):
+            raise TimeoutError()
+        result = email_router.consume_applications(carr, unavailable, refusal_code, NOW, lambda: NOW)
+        self.assertEqual(result['application_failed'], 2)
+        self.assertEqual(len([a for a in calls if a.get('mode') == 'application_claim']), 2)
+        self.assertEqual(len([a for a in calls if a.get('application_status') == 'retry']), 2)
+        calls.clear()
+        email_router.consume_applications(carr, unavailable, refusal_code, NOW, lambda: NOW + email_router.BUDGET)
+        self.assertEqual(len(calls), 1)
+
+    def test_durable_and_ordinary_work_share_one_pass_budget(self):
+        sources = [{**email(str(i), ASK), 'generation': str(i)} for i in range(25)]
+        calls = []
+        def carr(verb, args):
+            calls.append(args)
+            if verb == 'email-router-queue':
+                self.assertEqual(args.get('purpose'), 'applications')
+                return {'emails': sources}
+            if args.get('mode') == 'application_claim':
+                return {'generate': True, 'claim_id': args['activity_id']}
+            return {}
+        with tempfile.TemporaryDirectory() as out:
+            outcome, counts = email_router.run(Path(out), carr, lambda *_: {'proposals': []},
+                                               refusal_code, NOW, clock=lambda: NOW)
+        self.assertEqual(outcome, 'succeeded')
+        self.assertEqual(counts['application_applied'], 25)
+        self.assertEqual(counts['emails'], 0)
+        calls.clear()
+        def unavailable(*_):
+            raise TimeoutError()
+        with tempfile.TemporaryDirectory() as out:
+            outcome, counts = email_router.run(Path(out), carr, unavailable,
+                                               refusal_code, NOW, clock=lambda: NOW)
+        self.assertEqual(outcome, 'failed')
+        self.assertEqual(counts['application_circuit_open'], 1)
+        self.assertFalse(any(a.get('mode') == 'expire_blocked' for a in calls))
+
+    def test_stale_generation_is_never_acknowledged(self):
+        calls = []
+        def carr(verb, args):
+            calls.append(args)
+            if verb == 'email-router-queue':
+                return {'emails': [{**email('stale', ASK), 'generation': 'stale'}]}
+            raise Refused('email_application_stale')
+        result = email_router.consume_applications(carr, lambda *_: self.fail('stale model call'), refusal_code, NOW, lambda: NOW)
+        self.assertEqual(result['application_failed'], 1)
+        self.assertFalse(any(a.get('mode') == 'application_result' for a in calls))
 
 if __name__ == '__main__':
     unittest.main()

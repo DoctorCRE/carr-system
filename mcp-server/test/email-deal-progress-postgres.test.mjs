@@ -2055,8 +2055,17 @@ test('filing list preserves ownership and reports legacy version as null', async
 });
 test('a partner can undo an automatic thread filing and the router cannot refile it', async () => {
   const { prior, reply, filing } = await automaticThreadFiling();
+  const work = (await c.query("select * from email_filing_application where activity_id=$1 and status='pending'",[reply.activity_id])).rows[0];
+  assert.ok(work);
+  const claim = await command('record-email-proposal',{mode:'application_claim',activity_id:reply.activity_id,
+    generation:work.generation,idempotency_key:randomUUID()},router(),'carr_writer');
+  assert.equal(claim.generate,true);
   await command('undo-email-thread-filing', { idempotency_key: randomUUID(), event_id: filing.event_id }, actor, 'carr_writer');
   assert.equal((await c.query('select deal_id from activity where id=$1', [reply.activity_id])).rows[0].deal_id, null);
+  assert.equal((await c.query('select status from email_filing_application where generation=$1',[work.generation])).rows[0].status,'suppressed');
+  await assert.rejects(command('record-email-proposal',{mode:'application_result',activity_id:reply.activity_id,
+    generation:work.generation,claim_id:claim.claim_id,application_status:'applied',idempotency_key:randomUUID()},router(),'carr_writer'),
+    e=>e.payload?.error==='email_application_stale');
   await assert.rejects(command('inherit-email-thread', { idempotency_key: randomUUID(), activity_id: reply.activity_id,
     thread_activity_id: prior.activity_id }, router(), 'carr_writer'), e => e.payload?.error === 'email_thread_filing_suppressed');
 });
