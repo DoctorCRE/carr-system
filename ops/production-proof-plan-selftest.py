@@ -460,7 +460,8 @@ class AdmissionTest(unittest.TestCase):
         git('mv', 'runtime.py', 'docs/runtime.md')
         git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'rename')
         paths = git('diff', '--name-only', '--no-renames', base, 'HEAD').splitlines()
-        self.assertEqual(plan.product_paths(paths, json.loads((ROOT / plan.CONTRACT_PATH).read_text())), ['runtime.py'])
+        with self.assertRaisesRegex(ValueError, 'unclassified'):
+            plan.product_paths(paths, json.loads((ROOT / plan.CONTRACT_PATH).read_text()))
 
 
 class AppObserverTest(unittest.TestCase):

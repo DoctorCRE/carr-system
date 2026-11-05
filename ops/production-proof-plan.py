@@ -2,13 +2,14 @@
 """Validate proof admission, without executing or attesting product behavior."""
 import argparse
 from datetime import datetime
-import fnmatch
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+
+from delivery_plan import classify_paths, validate
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = 'contracts/production-proof-plan.v1.json'
@@ -24,43 +25,8 @@ def command(*args):
     return subprocess.check_output(args, text=True, stderr=subprocess.PIPE, timeout=15).strip()
 
 
-def validate(value, schema, label='requirement'):
-    types = {'object': dict, 'array': list, 'string': str, 'integer': int}
-    kind = schema.get('type')
-    if kind and (not isinstance(value, types[kind]) or kind == 'integer' and isinstance(value, bool)):
-        raise ValueError(f'{label}: expected {kind}')
-    if 'enum' in schema and not any(type(value) is type(v) and value == v for v in schema['enum']):
-        raise ValueError(f'{label}: unregistered value')
-    if kind == 'object':
-        if set(schema['required']) - value.keys() or value.keys() - schema['properties'].keys():
-            raise ValueError(f'{label}: missing or unknown fields')
-        for key, child in value.items():
-            validate(child, schema['properties'][key], label + '.' + key)
-    if kind == 'array':
-        if not schema['minItems'] <= len(value) <= schema['maxItems']:
-            raise ValueError(f'{label}: array bounds')
-        for item in value:
-            validate(item, schema['items'], label)
-    if kind == 'string':
-        if len(value.strip()) < schema.get('minLength', 0) or value.strip().lower() in {'todo', 'tbd', 'placeholder'}:
-            raise ValueError(f'{label}: empty or placeholder')
-        if 'pattern' in schema and not re.fullmatch(schema['pattern'], value):
-            raise ValueError(f'{label}: invalid format')
-    if kind == 'integer' and not schema['minimum'] <= value <= schema['maximum']:
-        raise ValueError(f'{label}: budget bounds')
-
-
 def product_paths(paths, contract):
-    if not isinstance(paths, list) or not paths or len(paths) > 10000:
-        raise ValueError('changed paths missing or exceed 10000')
-    product = []
-    for name in paths:
-        if not isinstance(name, str) or not name or name.startswith('/') or '\\' in name or any(
-                p in {'.', '..', ''} for p in name.split('/')):
-            raise ValueError('invalid changed path')
-        if not any(fnmatch.fnmatchcase(name, pattern) for pattern in contract['x-non-product-paths']):
-            product.append(name)
-    return product
+    return classify_paths(paths, contract)['product_paths']
 
 
 def admission(body, paths, root, contract):
@@ -95,8 +61,7 @@ def admission(body, paths, root, contract):
         if runner is None:
             raise ValueError('unregistered runner')
         covered.update(runner['targets'])
-    required_targets = {target for target, patterns in contract['x-required-targets'].items()
-                        if any(fnmatch.fnmatchcase(path, pattern) for path in product for pattern in patterns)}
+    required_targets = set(classify_paths(paths, contract)['required_targets'])
     if required_targets - set(requirement['targets']):
         raise ValueError('changed runtime target missing from declaration')
     if set(requirement['targets']) - covered:
