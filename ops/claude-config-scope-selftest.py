@@ -140,7 +140,7 @@ class Scope(unittest.TestCase):
             (worktree / '.codex/hooks.json').write_text('{"hooks":{}}')
             (project / 'nested').mkdir()
             config = '[features]\nhooks = true\n'
-            for directory in (project, worktree):
+            for directory in (outside, project, worktree):
                 config += '[projects.' + json.dumps(str(directory.resolve())) + ']\ntrust_level = "trusted"\n'
             (home / 'config.toml').write_text(config)
             request = installer['codex_app_server_request']
