@@ -20,7 +20,8 @@ from git_env import fixture_env
 from outlook_test_support import write_settings
 
 CRATE = ROOT / 'vendor/hxprobe'
-SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
+SOURCES = ('vendor/hxprobe', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py',
+           'spec/outlook/contact-observation.v1.json')
 INSTALLER_FILES = ('ops/hxprobe-source-digest.py', 'ops/config-as-code.py', 'ops/git_env.py', 'ops/config/services.json', 'bin/install-outlook-intake.sh', 'bin/run-scheduled.sh', 'tools/outlook-intake-copy.c',
                    'ops/launchd/com.carr.outlook-intake.plist', 'tools/credential_env.py')
 
