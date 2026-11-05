@@ -1,3 +1,4 @@
+import { confirmCalendarCompletion } from './calendar-completion.js';
 // Expose progress board summaries and answer tools.
 import { CALENDAR_AGENDA_BOARD, calendarSection } from "./brief-calendar.js";
 import { observeBoardLinkage } from './work-linkage.ts';
@@ -101,7 +102,7 @@ function boardResponse(result) {
   return normalized;
 }
 
-export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
+export function boardAnswerTools({ withEnvelope: envelope, writeEvent, executeRegisteredTool }) {
   const withEnvelope = normalizedEnvelope(envelope, boardResponse);
   return {
     "publish-board-snapshot": {
@@ -258,10 +259,10 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
 
     "answer-board-question": {
       write: true, humanOnly: true, humanCallerOnly: true,
-      description: "Partner answers the current revision. For calendar-agenda, question_id is a current 16-character meeting review key, base_version is 1, and Dismiss records a durable dismissal. Sent means this answer row was durably written; answered_by comes from authenticated identity.",
+      description: "Partner answers the current revision. For calendar-agenda, question_id is a current 16-character meeting review key, base_version is 1, Dismiss records a durable dismissal. Confirm completed requires source_revision from the displayed review and atomically records resolved attendee role touches; no deal is required. Sent means this answer row was durably written; answered_by comes from authenticated identity.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" }, board_id: { type: "string" },
-        question_id: { type: "string" }, base_version: { type: "integer" }, answer_text: { type: "string" },
+        question_id: { type: "string" }, source_revision: { type: "string", pattern: "^[a-f0-9]{64}$" }, base_version: { type: "integer" }, answer_text: { type: "string" },
       }, required: ["idempotency_key", "board_id", "question_id", "base_version", "answer_text"] },
       handler: async (c, actor, args) => {
         const partner = actor.human === true ? partnerAuthoritySlugForActor(actor) : null;
@@ -272,6 +273,8 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
         return withEnvelope(c, actor, "answer-board-question", args, async () => {
           const tenant = organizationTenantForActor(actor);
           if (board === CALENDAR_AGENDA_BOARD) {
+            if (answer === "Confirm completed" && args.base_version === 1)
+              return { ok: true, completion: await confirmCalendarCompletion(c, actor, id, args.source_revision, executeRegisteredTool) };
             const snapshot = await c.query(`select snapshot_json from board_snapshot
               where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`, [tenant, partner, board]);
             const review = calendarSection(snapshot.rows[0]?.snapshot_json)?.follow_up_reviews?.find(row => row.key === id);

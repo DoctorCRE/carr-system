@@ -99,12 +99,14 @@ def agenda(events: list[dict], meta: dict, settings: OutlookSettings, now: datet
                       'attendees': attendees[:AGENDA_ATTENDEES], 'attendee_count': len(attendees),
                       'recurring': recurring, 'time_changed': len(starts) > 1,
                       'times': [_iso(t) for t in starts] if len(starts) > 1 else [],
-                      'candidates': len(group), 'conflict': conflict}
+                      'candidates': len(group), 'conflict': conflict,
+                      'source_revision': _hash(json.dumps(sorted({json.dumps(e, sort_keys=True) for e in group}))),
+                      'canonical_event_identity': _hash(goid)}
         if current and start + length > review_hi:
             items.append(item)
         if (review_lo < start + length <= review_hi and length > 0
                 and not item['all_day'] and not conflict and len(starts) == 1):
-            reviews.append({k: item[k] for k in ('key', 'title', 'start', 'end')} | {
+            reviews.append({k: item[k] for k in ('key', 'title', 'start', 'end', 'source_revision', 'canonical_event_identity', 'attendees', 'attendee_count', 'organizer')} | {
                 'state': 'needs_review',
                 'prompt': 'Confirm whether this meeting happened. If it did, record the outcome and decide the next step.'})
     reviews.sort(key=lambda i: (i['end'], i['key']), reverse=True)

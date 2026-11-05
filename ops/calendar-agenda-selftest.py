@@ -85,6 +85,19 @@ class CalendarAgendaTest(unittest.TestCase):
         snapshot, _ = self.project([event(hours=-2, lifecycle_status='unsupported')])
         self.assertEqual(len(snapshot['follow_up_reviews']), 1)
 
+    def test_review_revision_binds_attendees_and_is_stable_across_copy_order(self):
+        row = event(hours=-2)
+        row['attendees'] = [('Synthetic guest', 'guest@example.test')]
+        [review] = self.project([row])[0]['follow_up_reviews']
+        [retry] = self.project([dict(row), row])[0]['follow_up_reviews']
+        self.assertEqual(review['source_revision'], retry['source_revision'])
+        self.assertEqual(review['canonical_event_identity'][:16], review['key'])
+        self.assertEqual(review['attendees'], [{'name':'Synthetic guest','email':'guest@example.test'}])
+        changed = dict(row, attendees=[('Other guest', 'other@example.test')])
+        [new] = self.project([changed])[0]['follow_up_reviews']
+        self.assertNotEqual(new['source_revision'], review['source_revision'])
+        self.assertEqual(new['canonical_event_identity'], review['canonical_event_identity'])
+
     def test_other_accounts_and_outside_window_do_not_count_as_hidden_cancellations(self):
         other = event(lifecycle_status='canceled')
         other['organizer_email'] = 'other@example.test'

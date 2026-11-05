@@ -97,9 +97,12 @@ export function calendarSection(snapshot, now = new Date()) {
         || !text(row?.title) || !text(row?.prompt) || start === null || end === null || end <= start) {
       malformedReviews++; continue;
     }
+    if (row.conflict === true || row.time_changed === true || row.lifecycle_status === "canceled" || row.disposition === "canceled") continue;
     if (stale || future || end > observed || end > nowMs || end <= nowMs - 86_400_000) continue;
     reviews.push({ key: row.key, title: text(row.title), start: new Date(start).toISOString(),
-      end: new Date(end).toISOString(), state: "needs_review", prompt: text(row.prompt) });
+      end: new Date(end).toISOString(), state: "needs_review", prompt: text(row.prompt),
+      source_revision: row.source_revision, canonical_event_identity: row.canonical_event_identity,
+      attendees: row.attendees, attendee_count: row.attendee_count, organizer: row.organizer });
   }
   reviews.sort((a, b) => b.end.localeCompare(a.end) || a.key.localeCompare(b.key));
   if (reviews.length) notes.push("These are scheduled meetings, not confirmed attendance. Confirm each happened before recording an outcome or next step.");
@@ -205,8 +208,11 @@ export async function addCalendarConfirmations(c, section, actor) {
   const reviews = section.follow_up_reviews;
   if (c.inTransaction) await c.query("savepoint calendar_confirmations");
   try {
-    const { rows } = await c.query('select distinct calendar_event_key from activity where calendar_event_key = any($1::text[])', [reviews.map(row => row.key)]);
-    const confirmed = new Set(rows.map(row => row.calendar_event_key));
+    const completions = await c.query(`select event_key, source_revision from calendar_completion
+      where organization_tenant_id=$1 and sponsoring_human_slug=$2 and event_key=any($3::text[])`,
+      [organizationTenantForActor(actor),partnerAuthoritySlugForActor(actor),reviews.map(row=>row.key)]);
+    const confirmed = new Set(completions.rows.filter(row=>reviews.some(review=>review.key===row.event_key
+      && review.source_revision===row.source_revision)).map(row=>row.event_key));
     for (const review of reviews) review.confirmed = confirmed.has(review.key);
     const answers = await c.query(`select question_id from board_answer where organization_tenant_id=$1
         and sponsoring_human_slug=$2 and board_id=$3 and question_id=any($4::text[])

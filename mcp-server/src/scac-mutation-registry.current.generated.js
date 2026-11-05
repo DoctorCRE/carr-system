@@ -219,7 +219,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "answer-board-question": {
     "ingress_key": "mcp-tool:answer-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "schema_digest": "53f4e8b7367cd9f892f94cbf76ec53dab19e4de30a2e41789d6fd81a58e17a60",
+    "schema_digest": "8fa2f2c87e020021c05b7ccc778727e6e3f02140ba628156dcf4c59262962a18",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -1656,7 +1656,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "0074c0a9c651ad4ff3d2eee165e33f2fff421b7b04957c1e161960bc5c0d8d5c",
+    "schema_digest": "47a4ddae807d01254d074f9af75626c1fa05f9c95914743ddb95d79baebf8ed5",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

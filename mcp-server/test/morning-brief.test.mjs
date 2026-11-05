@@ -32,7 +32,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       queries.push({ sql, params });
       if (/^(savepoint|rollback to savepoint|release savepoint) calendar_contacts/.test(sql)) return { rows: [] };
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
-      if (sql.includes("select distinct calendar_event_key")) return { rows: confirmedCalendarKeys.map(calendar_event_key => ({ calendar_event_key })) };
+      if (sql.includes("from calendar_completion")) return { rows: confirmedCalendarKeys.map(event_key => ({ event_key, source_revision:"a".repeat(64) })) };
       if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
       if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
       if (sql.includes("from v_today_triage")) return { rows: (todayRows || [
@@ -448,7 +448,7 @@ test("morning-brief keeps meeting reviews when confirmations cannot be checked",
   calendar.items = [];
   calendar.follow_up_reviews = [{ key: "0000000000000000", title: "Synthetic outcome review",
     start: at(-2), end: at(-1), state: "needs_review", prompt: "Confirm whether this meeting happened." }];
-  const c = client({ calendar, unavailable: "select distinct calendar_event_key" });
+  const c = client({ calendar, unavailable: "from calendar_completion" });
   const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
   const section = result.sections.calendar;
   assert.equal(section.follow_up_reviews.length, 1);
@@ -463,7 +463,7 @@ test("morning-brief offers recent meeting outcomes for review without creating r
   const calendar = calendarFixture(now);
   calendar.items = [];
   calendar.follow_up_reviews = [{ key: "0000000000000000", title: "Synthetic outcome review",
-    start: at(-2), end: at(-1), state: "needs_review",
+    start: at(-2), end: at(-1), state: "needs_review", source_revision:"a".repeat(64),
     prompt: "Confirm whether this meeting happened. If it did, record the outcome and decide the next step." }];
   const c = client({ calendar, confirmedCalendarKeys: ["0000000000000000"] });
   const result = await executeRegisteredTool(c, JOE, "morning-brief", {});

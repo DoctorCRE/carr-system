@@ -21,6 +21,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["full_person_name_required", "Resolve the full first and last personal name before creating a person. Initials and partial names are not records."],
   ["conflicting_party_inputs", "Supply one consistent party identity input using the documented operation shape."],
   ["field_required", "Supply the required field using the documented operation shape."],
+  ["calendar_completion_review_required", "Refresh the calendar review and confirm the current completed meeting revision."],
   ["calendar_event_key_invalid", "Use the meeting review key: exactly 16 lowercase hexadecimal characters."],
   ["calendar_event_key_requires_deal_meeting", "Confirm the calendar meeting on a deal with kind meeting."],
   ["answer_blocks_invalid", "Use table.v1 or chart.v1 answer blocks with typed columns and sourced numbers. Limit each answer to 8 blocks, each table to 200 rows and 20 columns, and the payload to 128 KiB. Charts must reference a table in the answer."],

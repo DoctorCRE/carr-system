@@ -1,3 +1,4 @@
+import { confirmCalendarCompletion } from './calendar-completion.js';
 // Register MCP tools and their shared write envelope.
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
@@ -4523,6 +4524,7 @@ export const TOOLS = {
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
       email_identity: EMAIL_IDENTITY_SCHEMA,
+      calendar_source_revision: { type: "string", pattern: "^[0-9a-f]{64}$" },
       calendar_event_key: { type: "string", pattern: "^[0-9a-f]{16}$", description: "Stable Outlook event key for a meeting confirmation" },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
@@ -4580,12 +4582,14 @@ export const TOOLS = {
       if (args.calendar_event_key !== undefined && (typeof args.calendar_event_key !== 'string' || !/^[0-9a-f]{16}$/.test(args.calendar_event_key)))
         throw new ToolError({ error: 'calendar_event_key_invalid', hint: 'calendar_event_key must be exactly 16 lowercase hexadecimal characters' });
       const s = await resolveSubject(c, args.ref);
+      let calendarCompletion = null;
       if (args.calendar_event_key !== undefined) {
         if (s.type !== 'deal' || args.kind !== 'meeting')
           throw new ToolError({ error: 'calendar_event_key_requires_deal_meeting' });
+        calendarCompletion = await confirmCalendarCompletion(c, actor, args.calendar_event_key, args.calendar_source_revision, executeRegisteredTool);
         await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`calendar-confirmation:${s.id}:${args.calendar_event_key}`]);
         const existing = await c.query('select id from activity where calendar_event_key=$1 and deal_id=$2', [args.calendar_event_key, s.id]);
-        if (existing.rows.length) return { ok: true, activity_id: existing.rows[0].id, subject: s, deduped: true };
+        if (existing.rows.length) return { ok: true, activity_id: existing.rows[0].id, subject: s, deduped: true, calendar_completion: calendarCompletion };
       }
       let emailIdentity = null;
       if (args.email_identity) {
@@ -4633,7 +4637,7 @@ export const TOOLS = {
       const r = await c.query(
         `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key)
          values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11) returning id, occurred_at`,
-        [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+        [calendarCompletion?.occurred_at ?? args.occurred_at ?? null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null,
           emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null]);
@@ -4642,6 +4646,7 @@ export const TOOLS = {
       const links = args.links && args.links.length
         ? await writeLinks(c, actor, args.links, args.idempotency_key) : [];
       return { ok: true, activity_id: r.rows[0].id, subject: s,
+               ...(calendarCompletion ? { calendar_completion: calendarCompletion } : {}),
                ...(assignments.length ? {vendor_assignments:assignments} : {}),
                ...(links.length ? { links } : {}) };
     }),
@@ -10897,7 +10902,7 @@ registerTools(featureSwitchTools({ withEnvelope, executeRegisteredTool }), 'feat
 registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine");
 registerTools(orgConventionTools({ withEnvelope, writeEvent }), "org-conventions");
 registerTools(systemWorkTools(), "system-work-census");
-registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
+registerTools(boardAnswerTools({ withEnvelope, writeEvent, executeRegisteredTool }), "board-answers");
 registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
 registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(partyDuplicateCandidateTools(), "party-duplicate-candidates");

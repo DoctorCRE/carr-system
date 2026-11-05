@@ -135,7 +135,7 @@ DECODER_HEALTH_FLOORS = {'block_verification': 0.95, 'sender': 0.5,
 DECODER_HEALTH_DROP = 0.20
 DECODER_HEALTH_MIN_SAMPLE = 20
 AGENDA_BOARD = 'calendar-agenda'
-CALENDAR_POLICY = 4
+CALENDAR_POLICY = 5
 
 
 def resolve_store(home: Path) -> Path:
@@ -1752,6 +1752,12 @@ class Run:
             evidence[candidate] = {'status': 'canceled' if canceled else 'unsupported',
                                    'reason': e['lifecycle_reason'] if canceled else 'hxstore_lifecycle_unverified',
                                    'evidence': 'provisional_schedule',
+                                   'source_revision': candidate, 'canonical_event_identity': _hash(e['goid']) if e.get('goid') else None,
+                                   'resolved_attendees': sorted({ref for email in
+                                       {(m or '').lower() for _, m in e['attendees']} | {(e['organizer_email'] or '').lower()}
+                                       if email and matcher.reason(email) is None
+                                       for ref in matcher.by_email.get(email, ())}),
+                                   'activity_outcomes': [],
                                    'start_unix': e['start_unix'], 'end_unix': e['end_unix']}
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email, self.settings.internal_domain)]
             org = (e['organizer_email'] or '').lower()

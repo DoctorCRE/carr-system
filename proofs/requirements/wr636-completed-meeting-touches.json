@@ -1,0 +1,26 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR636-S1-J25-completed-meeting-touches",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "worker-release-and-registry",
+      "predicate": "After deployment verify release identity with worker-release-smoke.v1. This does not establish semantic completion. Coordinator must separately observe a natural installed run and authorized current-revision confirmations. Each resolved client, lead and vendor role receives exactly one meeting activity. Repeated confirmations, source revisions and crash retries add zero duplicate activities. Canceled, unsupported and future events produce zero touches and canceled/unsupported counts remain separate. Reconcile an existing deal meeting. Unknown attendees never produce guessed targets. No automatic completion source is qualified by this slice.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "PASS for release identity only; semantic production acceptance remains pending the natural installed run and per-role activity readback.",
+      "input_class": "deployed Worker read-only release identity and verb registry, pinned runner and released source; no contact mutations",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 100,
+    "max_runtime_seconds": 150,
+    "max_artifact_bytes": 1048576
+  }
+}
