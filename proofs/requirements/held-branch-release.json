@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S15-held-branch-release",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "merged-holders-publish-once",
+    "predicate": "Read the installed GitHub Held branch release workflow's actual held-release.txt and held-release.json artifacts bound to the trusted main workflow runtime SHA. Require the diagnostic receipt observer to accept published minimum 1. Independently verify that the published PR has both main and original held head as ancestors, all holder PRs merged, and no overlapping open PR files at admission. Replay must retain the same PR number. Also read an actual conflict artifact with fix_needed minimum 1 and verify its remote held branch was not updated. The count predicate alone does not prove these GitHub facts, conflict dispatch, or downstream CI approval.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "A real successful workflow receipt at the exact trusted runtime SHA shows at least one published branch; direct GitHub readback verifies the same PR on replay and an unchanged conflicting branch with a fix_job artifact. Empty enrollment, local synthetic tests, absent artifacts, missing CI approval, or an undispatched fix candidate cannot establish automatic end-to-end delivery.",
+    "input_class": "read-only actual GitHub workflow artifacts and GitHub PR/ref readback; bounded to one release PR and one conflict receipt; no branch mutation, workflow approval or agent dispatch by the proof observer",
+    "deadline_seconds": 60
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 20, "max_records": 100, "max_runtime_seconds": 120, "max_artifact_bytes": 1048576}
+}

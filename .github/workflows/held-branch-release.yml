@@ -1,0 +1,32 @@
+name: Held branch release
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: held-branch-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.repository == 'DoctorCRE/carr-system' && github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Collect held release and conflict candidates using trusted main code
+        run: python3 ops/held-branch-release.py --receipt held-release.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: held-branch-release
+          path: held-release.*
+          if-no-files-found: warn
+          retention-days: 14
