@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617.S4-watch-contract",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "watch-contract-release",
+    "predicate": "The deployed Worker release matches the merged source revision and registers watch-subject-v1, unwatch-subject-v1, read-subject-watch-v1 and list-subject-watches-v1. This smoke does not prove Joe's signed-in persistence or listing support. The coordinator must separately observe Joe watching the exact deal, reloading, and removing only his subscription.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release matches the merged SHA and all four watch verbs are registered. Signed-in watch persistence remains unproven until the separate read-only proof job observes it.",
+    "input_class": "read-only Worker release identity and verb registry",
+    "deadline_seconds": 120
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
