@@ -27,10 +27,11 @@ export async function applyEmailPhase(c, actor, args, proposal, {lockDealField, 
   const identity=source.email_identity;
   const sourceKey=identity ? JSON.stringify([identity.mailbox_owner,identity.mailbox_account,identity.item_id]) : source.id;
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',['email-phase:'+sourceKey]);
-  const prior=(await c.query(`select correction_provenance->'email_phase' as receipt from email_proposal
+  const prior=(await c.query(`select deal_id,correction_provenance->'email_phase' as receipt from email_proposal
     where kind='phase_move' and correction_provenance#>>'{email_phase,source_key}'=$1
       and correction_provenance#>>'{email_phase,status}' in ('applied','undone') limit 1`,[sourceKey])).rows[0];
   if (prior) {
+    if (prior.deal_id!==args.deal) return result('review','source_deal_conflict');
     await c.query(`update email_proposal set status='confirmed',resolved_at=now(),resolved_by=$2,
       resolution_reason='duplicate_email_milestone',version=version+1 where id=$1 and status='pending'`,[proposal.id,actor.id]);
     return {...prior.receipt,replayed:true};

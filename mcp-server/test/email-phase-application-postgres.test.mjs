@@ -46,6 +46,17 @@ test('email milestones apply once and undo only while current', async () => {
     const again=await record(duplicate);
     assert.equal(again.phase_application.event_id,first.phase_application.event_id);
     assert.equal(again.phase_application.replayed,true);
+    const otherDeal=(await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic other phase',$1,'lease','site_selection','joe',$2,$2) returning id,version",[client,actor.id])).rows[0];
+    const conflicted=await source(quote,complete,{...identity,subject:'three'});
+    await c.query('update activity set deal_id=$2 where id=$1',[conflicted,otherDeal.id]);
+    await c.query("select public.enqueue_email_filing($1,$2,'conflict','confirmed')",[conflicted,otherDeal.id]);
+    const otherGeneration=(await c.query('select generation from email_filing_application where activity_id=$1',[conflicted])).rows[0].generation;
+    const otherClaim=await command('record-email-proposal',{mode:'application_claim',activity_id:conflicted,generation:otherGeneration,idempotency_key:randomUUID()});
+    const conflict=await command('record-email-proposal',{kind:'phase_move',activity_id:conflicted,deal:otherDeal.id,
+      generation:otherGeneration,claim_id:otherClaim.claim_id,evidence_quote:quote,confidence:0.99,
+      phase_base_version:otherDeal.version,idempotency_key:randomUUID()});
+    assert.equal(conflict.phase_application.reason,'source_deal_conflict');
+    assert.equal((await c.query('select phase from deal where id=$1',[otherDeal.id])).rows[0].phase,'site_selection');
     await c.query("update deal set phase='site_selection' where id=$1",[deal]);
     const crash=await source();
     await c.query("select public.enqueue_email_filing($1,$2,'crash','confirmed')",[crash,deal]);
