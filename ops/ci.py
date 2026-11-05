@@ -2,7 +2,7 @@
 """Run canonical CI classes and retain their verified verdicts and evidence."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import io
 import os
 from pathlib import Path
@@ -17,6 +17,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 CI_SELFTEST_TIMEOUT_SECONDS = 120
 CLASS_DESCRIPTIONS = {
+    'lint': 'diff whitespace and credential checks for documentation and guidance',
     'pushfloor': 'seeded defect that must not leave the machine (local pre-push floor)',
     'unit': 'seeded failing unit test',
     'types': 'seeded shape mistake in a data hand-off',
@@ -29,12 +30,13 @@ CLASS_DESCRIPTIONS = {
     'hxprobe': 'vendored HxStore reader tests and release build with locked dependencies',
 }
 USAGE = ('Usage: ops/ci.sh [--strict] [--only classes] '
-         '[--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] '
+         '[--changed-from base] [--migration-part all|core|proofs|gates|acceptance|fixtures|reconstruction|equivalence|shadow] '
          '[--unit-part all|fast|mcp|practice] [--gate-shard 1/2|2/2] [--list] [--gate-programs]')
 
 
 @dataclass(frozen=True)
 class Options:
+    changed_from: str | None = None
     strict: bool = False
     only: tuple[str, ...] | None = None
     migration_part: str = 'all'
@@ -57,6 +59,11 @@ def parse_options(argv):
             return None
         if arg == '--strict':
             values['strict'] = True
+        elif arg == '--changed-from':
+            if not value:
+                raise ValueError('--changed-from needs a Git base')
+            values['changed_from'] = value
+            i += 1
         elif arg == '--only':
             if only is None:
                 only = []
@@ -212,6 +219,28 @@ class Controller:
                 if status_code:
                     redacted.unlink(missing_ok=True)
         print(f'ci-retained-logs: {self.logdir}', file=sys.stderr)
+
+    def check_lint(self):
+        base, head = 'HEAD', None
+        if self.options.changed_from or os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
+            from ci_scope import diff_revisions
+            try:
+                base, head = diff_revisions(ROOT, self.options.changed_from, os.environ)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+                self.verdict('bad', 'lint diff unavailable')
+                return
+        command = ['git', 'diff', '--check', base]
+        if head:
+            command.append(head)
+        if self.run_quiet('lint-whitespace', command):
+            self.fail_tail('lint-whitespace')
+            self.verdict('bad', 'diff whitespace check failed')
+            return
+        # A docs-only lane retains the same secret qualification as the full suite.
+        if self.options.only is not None and 'secret' not in self.options.only:
+            self.check_secret()
+        else:
+            self.verdict('ok', 'whitespace passed; secret class owns credential qualification')
 
     def check_hxprobe(self):
         rc = self.run_quiet('hxprobe', ['bash', '-c',
@@ -394,6 +423,9 @@ if(/DATABASE_URL\s*=/.test(t)){console.error("wrangler.toml declares a DATABASE_
             if name not in CLASS_DESCRIPTIONS:
                 print(f'ci.sh: no such class: {name} (try --list)', file=sys.stderr)
                 return 64
+        if self.options.only == ():
+            print('CI group not applicable to selected changed paths')
+            return 0
         for name in CLASS_DESCRIPTIONS:
             if self.options.only is not None and name not in self.options.only:
                 continue
@@ -442,6 +474,13 @@ def main(argv=None):
         for name, description in CLASS_DESCRIPTIONS.items():
             print(f'  {name:<11} {description}')
         return 0
+    if options.changed_from or os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
+        from ci_scope import selection
+        receipt = selection(CLASS_DESCRIPTIONS, base=options.changed_from)
+        print('ci-selection: ' + receipt['reason'] + ': ' + ' '.join(receipt['classes']))
+        requested = options.only if options.only is not None else tuple(CLASS_DESCRIPTIONS)
+        options = replace(options, only=tuple(name for name in requested
+                          if name not in CLASS_DESCRIPTIONS or name in receipt['classes']))
     controller = Controller(options, python)
     rc = 1
     def cancel(signum, _):

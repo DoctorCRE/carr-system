@@ -102,13 +102,13 @@ def dynamic_counts():
     # settings.json, so this number falls on its own if a gate is removed.
     gates = 0
     try:
-        settings = json.load(open(os.path.expanduser("~/.claude/settings.json")))
+        settings = json.load(open(Path(__file__).resolve().parents[1] / ".claude/settings.json"))
         gates = len({
             h.get("command", "")
             for group in settings.get("hooks", {}).values()
             for entry in group
             for h in entry.get("hooks", [])
-            if "carr-system/hooks/" in h.get("command", "")
+            if "/hooks/" in h.get("command", "")
         })
     except Exception:
         pass
