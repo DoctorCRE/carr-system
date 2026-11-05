@@ -1,4 +1,8 @@
 """Synthetic CLI acceptance tests. No client sources or network access."""
+import contextlib
+import importlib.util
+import io
+from unittest.mock import patch
 import hashlib
 import json
 from pathlib import Path
@@ -61,6 +65,7 @@ class ExtractTest(unittest.TestCase):
         self.run_cli()
         package = json.loads((self.output / 'market-study.json').read_text())
         self.assertEqual(package['map']['center'], [-100.5, 40.25])
+        self.assert_provenance()
 
     def test_nested_property_leaves_build_arrays(self):
         data = json.loads((self.source / 'data.js').read_text().removeprefix(
@@ -74,6 +79,7 @@ class ExtractTest(unittest.TestCase):
         self.change_mapping(change)
         self.run_cli()
         package = json.loads((self.output / 'market-study.json').read_text())
+        self.assert_provenance()
         self.assertEqual(len(package['properties']), len(data['properties']))
         self.assertEqual(package['properties'][0]['address'], data['properties'][0]['address'])
 
@@ -89,6 +95,85 @@ class ExtractTest(unittest.TestCase):
             self.assertIn(message, str(result))
             self.assertIn(f'/map/center/{index}', str(result))
             self.assertFalse(self.output.exists())
+
+    def test_numeric_object_override(self):
+        pointer = '/demographics/income_bands/areas/0/counts/100000'
+        self.change_mapping(lambda m: m['fields'].update({pointer: {'source': 'data', 'pointer': pointer}}))
+        self.run_cli()
+        package = json.loads((self.output / 'market-study.json').read_text())
+        self.assertIsInstance(package['demographics']['income_bands']['areas'][0]['counts'], dict)
+
+    def test_reconstruct_numeric_objects_from_leaves(self):
+        data = json.loads((self.source / 'data.js').read_text().removeprefix(
+            'window.referenceData = ').removesuffix(';\n'))
+        def leaves(value, path):
+            if isinstance(value, dict) and value:
+                for key, child in value.items():
+                    yield from leaves(child, path + '/' + key)
+            elif isinstance(value, list) and value:
+                for index, child in enumerate(value):
+                    yield from leaves(child, path + '/' + str(index))
+            else:
+                yield path
+        def change(mapping):
+            mapping['fields'].pop('/demographics')
+            for pointer in reversed(list(leaves(data['demographics'], '/demographics'))):
+                mapping['fields'][pointer] = {'source': 'data', 'pointer': pointer}
+        self.change_mapping(change)
+        self.run_cli()
+        package = json.loads((self.output / 'market-study.json').read_text())
+        # Assets are replaced with content hashes by the extractor.
+        self.assertEqual(package['demographics']['income_bands'], data['demographics']['income_bands'])
+        for actual, expected in zip(package['demographics']['micro_zones']['zones'], data['demographics']['micro_zones']['zones']):
+            self.assertEqual(actual['population'], expected['population'])
+
+    def assert_provenance(self):
+        report = json.loads((self.output / 'manifest.json').read_text())
+        for row in report['rows']:
+            if row['status'] != 'mapped':
+                continue
+            for pointer in row['fields']:
+                if pointer in row['waived']:
+                    continue
+                entries = row['sources'][pointer]
+                self.assertIsInstance(entries, list)
+                self.assertTrue(entries, row['id'])
+                for entry in entries:
+                    if entry['file'] == 'data.js':
+                        self.assertNotIn('/map/center', entry['pointer'])
+
+    def call_main(self, module):
+        stdout = io.StringIO()
+        with patch.object(sys, 'argv', ['extract', '--source', str(self.source), '--output', str(self.output)]), contextlib.redirect_stdout(stdout):
+            status = module.main()
+        return status, json.loads(stdout.getvalue())
+
+    def test_workflow_failure_transitions(self):
+        spec = importlib.util.spec_from_file_location('extractor', CLI)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for fault in ('parse_timeout', 'validate_timeout', 'staging_create', 'files_create', 'write', 'chmod', 'rename'):
+            with self.subTest(fault=fault):
+                actual_run = module.subprocess.run
+                def timeout(*args, **kwargs):
+                    action = json.loads(kwargs['input'])['action']
+                    if action == fault.removesuffix('_timeout'):
+                        raise subprocess.TimeoutExpired('node PRIVATE_VALUE', 60)
+                    return actual_run(*args, **kwargs)
+                if fault.endswith('_timeout'):
+                    seam = patch.object(module.subprocess, 'run', side_effect=timeout)
+                elif fault == 'staging_create':
+                    seam = patch.object(module.tempfile, 'mkdtemp', side_effect=OSError('PRIVATE_VALUE'))
+                else:
+                    method = {'files_create': 'mkdir', 'write': 'write_bytes', 'chmod': 'chmod', 'rename': 'rename'}[fault]
+                    seam = patch.object(Path, method, side_effect=OSError('PRIVATE_VALUE'))
+                with seam:
+                    status, result = self.call_main(module)
+                self.assertEqual(status, 2)
+                self.assertFalse(result['ok'])
+                self.assertNotIn('PRIVATE_VALUE', json.dumps(result))
+                self.assertFalse(self.output.exists())
+                self.assertEqual(list(self.base.glob('.reference-extract-*')), [])
 
     def test_optional_ownership_absent(self):
         shutil.rmtree(self.source)
