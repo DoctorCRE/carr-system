@@ -132,7 +132,9 @@ export function deriveDealChecklist(record: ChecklistDeal, sources: SourceRow[],
 
 let storageUnavailableLogged = false;
 
-export async function readDealChecklist(client: Db, record: ChecklistDeal, now = new Date()) {
+export async function readDealChecklist(client: Db & { inTransaction?: boolean }, record: ChecklistDeal, now = new Date()) {
+  const savepoint = client.inTransaction ? `deal_checklist_${crypto.randomUUID().replaceAll('-', '')}` : null;
+  if (savepoint) await client.query(`savepoint ${savepoint}`);
   let sources, commissions, requests;
   try {
     sources = await client.query(
@@ -141,18 +143,23 @@ export async function readDealChecklist(client: Db, record: ChecklistDeal, now =
     commissions = await client.query(
       `select commission_id, status, to_jsonb(received_on)#>>'{}' as received_on
          from v_deal_room_commission where deal_id=$1 order by commission_id /* checklist:commissions */`, [record.id]);
+    const available = await client.query("select to_regclass('v_requirement_request') as relation /* checklist:requests-available */");
+    requests = available.rows[0]?.relation ? await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
+      document_type,satisfied,receipts,status,fulfilled_at,fulfilled_by,evidence_attachment_id,evidence_filename from v_requirement_request
+      where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]) : null;
+    if (savepoint) await client.query(`release savepoint ${savepoint}`);
   } catch (error) {
-    if ((error as { code?: string }).code !== '42P01') throw error;
+    if (savepoint) {
+      await client.query(`rollback to savepoint ${savepoint}`);
+      await client.query(`release savepoint ${savepoint}`);
+    }
+    if (!(error instanceof Error) || !('code' in error) || error.code !== '42P01') throw error;
     if (!storageUnavailableLogged) {
       storageUnavailableLogged = true;
       console.warn('Deal checklist storage unavailable.');
     }
     return { schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [] };
   }
-  const available = await client.query("select to_regclass('v_requirement_request') as relation /* checklist:requests-available */");
-  requests = available.rows[0]?.relation ? await client.query(`select id,row_key,owner,to_char(due_on,'YYYY-MM-DD') as due_on,
-    document_type,satisfied,receipts,status,fulfilled_at,fulfilled_by,evidence_attachment_id,evidence_filename from v_requirement_request
-    where organization_tenant_id='carr-internal' and deal_id=$1 order by row_key /* checklist:requests */`, [record.id]) : null;
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
   return { ...deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests?.rows }, sources.rows, today),
     requests_state: requests ? 'current' : 'unavailable' };

@@ -1,0 +1,199 @@
+{
+  "schema": "carr.portal-migration-rehearsal.v1",
+  "synthetic": true,
+  "portals": [
+    {
+      "slug": "synthetic-ref-a",
+      "deal": "synthetic-deal-ref-a",
+      "password": {
+        "use_synthetic_slug": true
+      },
+      "kind": "package",
+      "revision": 1,
+      "files": [
+        {
+          "path": "source.txt",
+          "content": "Synthetic reference source synthetic-ref-a",
+          "sha256": "8ba8fca4f6cf1940e4badbfa029b5b452527406213ec0dfefb16e975ffdd24ec",
+          "revision": 1
+        }
+      ],
+      "aliases": [],
+      "copy": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "freeze": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "package": {
+        "revision": 1,
+        "sha256": "283aab0c07980936c286c43c4acd42e49398358b33a7277de88b5769c10171f6",
+        "fixture": "example-health.market-study.json"
+      }
+    },
+    {
+      "slug": "synthetic-ref-v",
+      "deal": "synthetic-deal-ref-v",
+      "password": {
+        "use_synthetic_slug": true
+      },
+      "kind": "package",
+      "revision": 1,
+      "files": [
+        {
+          "path": "source.txt",
+          "content": "Synthetic reference source synthetic-ref-v",
+          "sha256": "ea0dc854fe9ed98182d098f61c60f8adc736349d8d990123335435994db20426",
+          "revision": 1
+        }
+      ],
+      "aliases": [],
+      "copy": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "freeze": {
+        "version": 8,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "package": {
+        "revision": 1,
+        "sha256": "283aab0c07980936c286c43c4acd42e49398358b33a7277de88b5769c10171f6",
+        "fixture": "example-health.market-study.json"
+      },
+      "delta": {
+        "from_version": 7,
+        "selection": {
+          "version": 8,
+          "selections": [
+            "active-1",
+            "retired-1"
+          ],
+          "notes_by_property": {
+            "retired-1": "Synthetic retired note"
+          },
+          "notes": "Synthetic legacy note"
+        }
+      }
+    },
+    {
+      "slug": "synthetic-leg-1",
+      "deal": "synthetic-deal-leg-1",
+      "password": {
+        "use_synthetic_slug": true
+      },
+      "kind": "legacy",
+      "revision": 1,
+      "files": [
+        {
+          "path": "document.pdf",
+          "content": "Synthetic legacy file leg-1",
+          "sha256": "e3e41e838eb53b84000388e3dd3325bd14f8023c390ebf2e8651779d9c059537",
+          "revision": 1
+        }
+      ],
+      "aliases": [],
+      "copy": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "freeze": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "bundle_sha256": "5376c53c99664ae1d28353135167aae6f49eeef348fa1f0ae6404bebbfbf364e"
+    },
+    {
+      "slug": "synthetic-leg-2",
+      "deal": "synthetic-deal-leg-2",
+      "password": {
+        "use_synthetic_slug": true
+      },
+      "kind": "legacy",
+      "revision": 1,
+      "files": [
+        {
+          "path": "document.pdf",
+          "content": "Synthetic legacy file leg-2",
+          "sha256": "16b499a3714d64ff24617f39a13b800023e3149ee4bad5eab0f470a9e424ab25",
+          "revision": 1
+        }
+      ],
+      "aliases": [
+        {
+          "path": "recovery/document.pdf",
+          "portal": "synthetic-leg-2",
+          "target": "document.pdf",
+          "revision": 1
+        }
+      ],
+      "copy": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "freeze": {
+        "version": 7,
+        "selections": [
+          "active-1",
+          "retired-1"
+        ],
+        "notes_by_property": {
+          "retired-1": "Synthetic retired note"
+        },
+        "notes": "Synthetic legacy note"
+      },
+      "bundle_sha256": "c2b94e2aefbe6d101881e58b60c21f9a10ff0637b690b45e72f80dfc67497c2a"
+    }
+  ]
+}

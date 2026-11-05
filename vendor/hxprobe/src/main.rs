@@ -33,6 +33,7 @@ mod census;
 mod task_candidate;
 mod calendar;
 mod category;
+mod contact;
 mod detail;
 mod folder;
 mod header;
@@ -326,6 +327,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
         message_objects.values().filter(|m| m.recipients.as_ref().is_some_and(|r| !r.is_empty())).count()
     );
     let tx = db.transaction().expect("tx");
+    contact::export(&tx, header::check(&mm).expect("validated header").version)
+        .expect("contact capability");
     {
         let mut ins_folder = tx
             .prepare(

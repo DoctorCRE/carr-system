@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "email-touch-cohort-runner",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "cohort-semantic-proof",
+    "predicate": "After merge, run python3 ops/email-touch-cohort-selftest.py from main in CI. All positive and inverse fixture predicates must pass. Natural email-touch lineage is separately held until Unit 2 supplies an immutable journal and this runner reconciles its exact production cohort.",
+    "runner": "email-touch-cohort-reconcile.v1",
+    "expected_result": "Disposable fixture acceptance passes; no production lineage claim from fixture success.",
+    "input_class": "synthetic disposable PostgreSQL fixture; natural journal required for production",
+    "deadline_seconds": 300
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 4, "max_records": 1000, "max_runtime_seconds": 300, "max_artifact_bytes": 4096}
+}

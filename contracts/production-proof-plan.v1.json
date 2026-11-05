@@ -56,10 +56,27 @@
         "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
       }
     },
+    "email-touch-cohort-reconcile.v1": {
+      "path": "ops/email-touch-cohort-proof.py",
+      "targets": [
+        "worker"
+      ],
+      "sources": {
+        "ops/email-touch-cohort-proof.py": "4720a27ce261b6373de88d6defd78594943007bf0d74af900a88a29d94f5fbfb",
+        "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
+      }
+    },
     "app-release-live-walk.v1": {
       "path": "ops/app-proof-observe.py",
       "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
       "targets": ["app"]
+    },
+    "worker-email-link-marker.v1": {
+      "path": "ops/email-link-marker-proof.py",
+      "targets": ["worker"],
+      "sources": {
+        "ops/email-link-marker-proof.py": "eceef3abaa2eb898c368094f3b3e707e70f05491d60e5d637bcd0019e22ba94b"
+      }
     },
     "worker-release-smoke.v1": {
       "path": "ops/release-smoke.py",

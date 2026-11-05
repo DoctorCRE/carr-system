@@ -72,6 +72,7 @@ import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
+import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from "./email-touch.js";
 import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.js";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
@@ -378,9 +379,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reuse fail as key_reuse before a stored response can be returned. The
   // session/token/epoch fields are added by SIEP-12/17/21; their absence here
   // cannot widen authority because this manifest is monotonic and deny-only.
-  const hash = await requestHash({
-    manifest_version: "scac-application-mutation.v1",
-    ...mutationManifestIdentity(),
+  const operation = {
     operation: verb,
     principal: {
       actor_id: actor.id,
@@ -393,7 +392,11 @@ async function withEnvelope(client, actor, verb, args, fn) {
       organization_tenant_id: identity.organization_tenant_id,
     },
     args: { ...args, idempotency_key: undefined },
-  });
+  };
+  const hash = await requestHash({manifest_version: 'scac-application-mutation.v1',
+    ...mutationManifestIdentity(), ...operation});
+  const applicationHash = verb === 'log-activity'
+    ? await requestHash({manifest_version:'email-touch-application.v1', ...operation}) : hash;
   // Versioned writes need same-key serialization before their replay read:
   // otherwise two first calls can both see no tool_call row, and the loser
   // reports a version conflict instead of the promised replay.
@@ -409,10 +412,15 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if (verb === "record-finding" && args.kind === "email_delivery_failure")
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
       [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
-  const prior = await client.query(`select request_hash, response from tool_call where idempotency_key=$1
+  const prior = await client.query(verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
+    and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')
+    union all select new_value#>>'{email_application,request_hash}' as request_hash,
+      new_value#>'{email_application,response}' as response, true as permanent from event
+      where idempotency_key=$1 and verb='log-activity' and new_value ? 'email_application'
+    order by permanent desc limit 2` : `select request_hash, response from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
-    if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
+    if (prior.rows[0].request_hash !== (prior.rows[0].permanent ? applicationHash : hash)) throw new ToolError({ error: "key_reuse" });
     const response = prior.rows[0].response;
     if (verb === "add-industry-event" || verb === "update-industry-event")
       return { replayed: true, ...response, event: industryEventRecord(response.event) };
@@ -420,7 +428,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   }
   if (verb !== 'record-email-lifecycle' && (verb.includes('email') || args.email_context?.source_activity_id))
     await guardEmailAction(client, args, ToolError);
-  const result = await fn();                                        // inside the open transaction
+  const result = await fn(applicationHash);                                        // inside the open transaction
   if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
   await client.query(
     `insert into tool_call (idempotency_key, verb, actor_id, request_hash, response, via, client_id,
@@ -4501,6 +4509,8 @@ export const TOOLS = {
     }),
   },
 
+  "reconcile-email-touches": emailTouchReader(ToolError),
+
   "log-activity": {
     write: true,
     description: "Log a business touch (call, email, meeting, tour, text, note, LOI...) against a deal/client/lead/vendor. THE default verb after any real-world contact. occurred_at = when it happened (defaults now); anything missing goes in 'owed', never invented. Writes an activity row; contact-kind rows are what move last_touch and lift capture coverage.",
@@ -4528,6 +4538,7 @@ export const TOOLS = {
               name: { type: ['string', 'null'] }, kind: { enum: ['to', 'cc'] }, internal: { type: 'boolean' } } } },
         } },
       email_identity: EMAIL_IDENTITY_SCHEMA,
+      email_touch: EMAIL_TOUCH_SCHEMA,
       calendar_event_key: { type: "string", pattern: "^[0-9a-f]{16}$", description: "Stable Outlook event key for a meeting confirmation" },
       email_source: { type: "object", additionalProperties: false, required: ["sender_email", "mailbox_owner"],
         properties: { sender_email: { type: "string", format: "email", maxLength: 254 },
@@ -4546,7 +4557,7 @@ export const TOOLS = {
           kind: { type: "string", description: "party_link_kind slug: knows, intro, intro_received, can_introduce, works_with, referral" },
           note: { type: "string" } }, required: ["from_ref","to_ref","kind"] } },
     }, required: ["idempotency_key","ref","kind","summary"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "log-activity", args, async () => {
+    handler: async (c, actor, args) => withEnvelope(c, actor, "log-activity", args, async (request_hash) => {
       // A TOUCH CANNOT HAVE HAPPENED TOMORROW. Found 2026-08-15: of 59 vendors
       // carrying a last-touch date, four were dated after today — the nearest
       // three days out, which reads exactly like a booked meeting logged as
@@ -4585,6 +4596,8 @@ export const TOOLS = {
       if (args.calendar_event_key !== undefined && (typeof args.calendar_event_key !== 'string' || !/^[0-9a-f]{16}$/.test(args.calendar_event_key)))
         throw new ToolError({ error: 'calendar_event_key_invalid', hint: 'calendar_event_key must be exactly 16 lowercase hexadecimal characters' });
       const s = await resolveSubject(c, args.ref);
+      const binding = emailTouchBinding(args, s, ToolError);
+      await guardEmailTouch(c, actor, binding, ToolError);
       if (args.calendar_event_key !== undefined) {
         if (s.type !== 'deal' || args.kind !== 'meeting')
           throw new ToolError({ error: 'calendar_event_key_requires_deal_meeting' });
@@ -4607,7 +4620,17 @@ export const TOOLS = {
         if (existing) {
           if (existing.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
           if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
-          return { ok: true, activity_id: existing.id, subject: s };
+          if (binding) {
+            const captured = (await c.query(`select occurred_at=$2::timestamptz as occurrence_matches, ${FK[s.type]} as target_id from activity where id=$1`, [existing.id,binding.occurred_at])).rows[0];
+            if (!captured.occurrence_matches || captured.target_id !== s.id)
+              throw new ToolError({error:'email_touch_occurrence_conflict'});
+          }
+          const result = { ok: true, activity_id: existing.id, subject: s,
+            ...(binding ? {email_application:{...binding,activity_id:existing.id}} : {}) };
+          if (binding) await writeEvent(c, actor, 'log-activity', s.type, s.id,
+            {new:{activity:existing.id,kind:args.kind,email_application:{binding,request_hash,response:result}},
+              idempotency_key:args.idempotency_key,cause:'ingest_email'});
+          return result;
         }
       }
       const assignments = [];
@@ -4638,17 +4661,21 @@ export const TOOLS = {
       const r = await c.query(
         `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key)
          values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11) returning id, occurred_at`,
-        [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+        [binding?.occurred_at || args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null,
           emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null]);
-      await writeEvent(c, actor, "log-activity", s.type, s.id,
-        { new: { activity: r.rows[0].id, kind: args.kind }, human_quote: args.human_quote, idempotency_key: args.idempotency_key });
       const links = args.links && args.links.length
         ? await writeLinks(c, actor, args.links, args.idempotency_key) : [];
-      return { ok: true, activity_id: r.rows[0].id, subject: s,
+      const result = { ok: true, activity_id: r.rows[0].id, subject: s,
+               ...(binding ? {email_application:{...binding,activity_id:r.rows[0].id}} : {}),
                ...(assignments.length ? {vendor_assignments:assignments} : {}),
                ...(links.length ? { links } : {}) };
+      await writeEvent(c, actor, "log-activity", s.type, s.id,
+        { new: { activity: r.rows[0].id, kind: args.kind,
+          ...(binding ? {email_application:{binding,request_hash,response:result}} : {}) },
+          human_quote: args.human_quote, idempotency_key: args.idempotency_key });
+      return result;
     }),
   },
 
