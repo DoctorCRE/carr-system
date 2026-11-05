@@ -186,6 +186,29 @@ class WatchdogTests(unittest.TestCase):
         ledger = watchdog.read_latest(self.root / self.config['paths']['scan_ledger'])['scan']
         self.assertEqual(ledger['runtime_sha'], revision)
 
+    def test_scan_without_runtime_identity_cannot_prove_success(self):
+        output = io.StringIO()
+        with patch.object(watchdog, 'collect', return_value={'jobs': [], 'disk_free_percent': 50}), \
+             patch.object(watchdog, 'git_run', side_effect=OSError('git unavailable')), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        receipt = json.loads(output.getvalue().split(' ', 1)[1])
+        self.assertIsNone(receipt['runtime_sha'])
+        self.assertEqual(receipt['counts']['scans'], 1)
+        ledger = watchdog.read_latest(self.root / self.config['paths']['scan_ledger'])['scan']
+        self.assertEqual(ledger['status'], 'completed')
+        self.assertIsNone(ledger['runtime_sha'])
+
+    def test_failed_or_lock_skipped_scan_emits_no_success_receipt(self):
+        for error, result in ((OSError('unavailable'), 1), (BlockingIOError(), 0)):
+            with self.subTest(error=type(error).__name__):
+                output = io.StringIO()
+                target = 'collect' if result else 'locked'
+                with patch.object(watchdog, target, side_effect=error), \
+                     contextlib.redirect_stdout(output):
+                    self.assertEqual(watchdog.scan(self.root, self.config), result)
+                self.assertEqual(output.getvalue(), '')
+
     def test_transport_timeout_preserves_local_failed_and_missing_verdicts(self):
         state = self.root / 'out/outlook-intake/state.json'
         state.parent.mkdir(parents=True)

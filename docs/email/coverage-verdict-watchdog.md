@@ -18,7 +18,11 @@ both DST transitions.
 
 `coverage_check_day` proves that an actual verdict occurred, whether it passed
 or failed. `coverage_run_day` records the latest successful intake run. It provides
-first-run grace only when no check day exists. A stale check remains owed even
+first-run grace only when no check day exists and no persisted missed-verdict failure exists.
+With no check day, `coverage_failed=true` proves that intake already observed
+a missed prior day. The producer can set this flag without a check only for
+that missed-day case, and retains it until an actual verdict. A resumed run
+cannot reset that obligation. A stale check remains owed even
 when a later intake run resumes. A legacy state with only a check day also
 establishes tracking. Neither day means a first
 install has no established obligation. A first run before its first deadline
@@ -42,7 +46,12 @@ Collection reads one local state snapshot and makes one bounded outcome request.
 Cross-source transactions are not needed because freshness uses local facts
 alone. Existing scan locking serializes reconciliation. Repeated scans converge
 to one active key and do not append unchanged findings. There is no retry loop
-or new persistent state. Each scan reads one state file and one outcome response;
+or new persistent state. A completed scan emits `job-watchdog-receipt` with
+one completed scan, the detected finding count, and its executing source SHA.
+The local scan ledger retains that same SHA. The SHA read uses one bounded local
+Git command; failure leaves identity unknown, so the observer refuses proof
+without suppressing the scan or its findings. Failed or lock-skipped scans emit
+no success receipt. Each scan reads one state file and one outcome response;
 ten times the scan frequency means ten times those reads, with the existing
 serialized scan lock and remote outcome timeout as likely first limits. This is
 an estimate, not a measured capacity. There is no cache to invalidate or evict,
@@ -83,3 +92,12 @@ The proof declaration is
 receipt observer cannot itself attest local finding and digest semantics. Its
 receipt result is only runtime evidence; the coordinator must supply the direct
 readback above. A missing watchdog receipt is BLOCKED, never a passing proof.
+
+
+Capture one natural completed scan's `job-watchdog-receipt` line from the
+installed LaunchAgent stdout log into an explicit receipt file. Run the
+registry-pinned `studio-run-receipt.v1` observer with `--service job-watchdog`,
+`--count scans`, `--minimum 1`, and `--runtime-sha` equal to the independently
+verified installed full SHA. The exact observer command is in the proof
+declaration. This tests execution and source identity even with zero findings.
+Read the local ledger, findings and digest separately for freshness semantics.

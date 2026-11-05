@@ -10,6 +10,7 @@ import plistlib
 import re
 import shutil
 import subprocess
+from subprocess import run as git_run
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -178,7 +179,7 @@ def coverage_findings(facts, now):
     try:
         checked = coverage_day(facts.get("coverage_check_day"), today)
         started = coverage_day(facts.get("coverage_run_day"), today) or checked
-        missing = checked < due if checked is not None else started <= due
+        missing = checked < due if checked is not None else started <= due or facts.get("coverage_failed") is True
         reason = f"daily coverage verdict missing for {due}"
     except (TypeError, ValueError):
         missing = True
@@ -410,7 +411,16 @@ def scan(root, config):
                 observed.add("com.carr.outlook-intake")
             reconcile(root, config, found, observed, now, facts.get("outlook"))
             deliver_findings(root, config, now)
-            append(ledger, {"key": "scan", "status": "completed", "at": stamp(), "findings": len(found)})
+            try:
+                revision = git_run(["git", "rev-parse", "HEAD"], cwd=SOURCE, check=True,
+                                   capture_output=True, text=True,
+                                   timeout=config["thresholds"]["command_timeout_seconds"]).stdout.strip()
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                revision = None
+            append(ledger, {"key": "scan", "status": "completed", "at": stamp(),
+                            "findings": len(found), "runtime_sha": revision})
+            print("job-watchdog-receipt " + json.dumps({"state": "succeeded", "reason": "scanned",
+                  "runtime_sha": revision, "counts": {"scans": 1, "findings": len(found)}}))
             return 0
     except BlockingIOError:
         return 0

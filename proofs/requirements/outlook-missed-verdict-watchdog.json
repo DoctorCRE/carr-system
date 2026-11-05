@@ -1,14 +1,25 @@
 {
   "schema": "carr-production-proof-plan.v1",
   "requirement_id": "outlook-missed-verdict-watchdog",
-  "targets": ["studio"],
-  "assertions": [{
-    "id": "daily-verdict-freshness",
-    "predicate": "After normal runtime refresh at the merged full SHA, observe the watchdog scan evidence and directly read its findings and digest against persisted coverage days and the mailbox deadline. A naturally missed verdict must remain active through subsequent scans until a later actual verdict. The registered receipt observer alone cannot prove these local ledger and digest semantics; require the coordinator's direct readback as additional evidence. Never stop intake or mutate production state to induce a miss.",
-    "runner": "studio-run-receipt.v1",
-    "expected_result": "BLOCKED if a matching successful watchdog receipt or direct findings and digest readback is unavailable. A receipt pass alone does not prove freshness or persistence. A naturally missed deadline with later actual recovery supplies the persistence observation; otherwise that production claim remains unproven.",
-    "input_class": "Coordinator-supplied actual watchdog runtime receipt plus read-only local findings, digest and coverage-day readback after normal refresh. Synthetic fixtures never substitute for production evidence.",
-    "deadline_seconds": 30
-  }],
-  "safety": {"read_only": true, "no_sends": true, "max_requests": 1, "max_records": 100, "max_runtime_seconds": 30, "max_artifact_bytes": 65536}
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "daily-verdict-freshness",
+      "predicate": "After normal runtime refresh at the merged full SHA, observe the watchdog scan evidence and directly read its findings and digest against persisted coverage days and the mailbox deadline. A naturally missed verdict must remain active through subsequent scans until a later actual verdict. The registered receipt observer alone cannot prove these local ledger and digest semantics; require the coordinator's direct readback as additional evidence. Never stop intake or mutate production state to induce a miss. Capture the actual job-watchdog-receipt line from the installed LaunchAgent stdout log after a natural completed scan into PROOF_RECEIPT. Independently verify PROOF_RUNTIME_SHA is the installed full SHA containing the merge. Extract the registry-pinned observer into PROOF_OBSERVER, then execute: python3 \"$PROOF_OBSERVER\" --receipt-file \"$PROOF_RECEIPT\" --service job-watchdog --runtime-sha \"$PROOF_RUNTIME_SHA\" --count scans --minimum 1. Require the local completed scan ledger runtime_sha to match. Zero findings is a valid scan, not proof of missed-verdict persistence.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "BLOCKED if a matching successful watchdog receipt or direct findings and digest readback is unavailable. A receipt pass alone does not prove freshness or persistence. A naturally missed deadline with later actual recovery supplies the persistence observation; otherwise that production claim remains unproven.",
+      "input_class": "Coordinator-supplied actual watchdog runtime receipt plus read-only local findings, digest and coverage-day readback after normal refresh. Synthetic fixtures never substitute for production evidence.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 100,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
 }
