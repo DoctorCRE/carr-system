@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "deal-checklist-transaction-recovery",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "deployed-worker-includes-checklist-recovery",
+    "predicate": "The production Worker release contains the merged checklist recovery revision. Release smoke proves identity only. The coordinator must additionally run python3 tools/prove-deal-checklist-transaction-recovery.py --live --timeout-seconds 30 --max-records 3 from the merged revision to observe usable deal reads. The absent-storage transition requires the disposable PostgreSQL regression at that same revision.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release identity contains the merge; the separate bounded checklist runner succeeds. A natural live walk never proves the synthetic absent-storage transition.",
+    "input_class": "Production release identity and read-only actual deal IDs, at most three. No induced production failures.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 5,
+    "max_records": 3,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}
