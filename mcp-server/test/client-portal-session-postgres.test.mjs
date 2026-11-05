@@ -71,9 +71,10 @@ test('slug-bound portal session statechart', async t => {
       await c.query("update ops.client_portal set password_hash=password_hash where slug='a'");
       assert.deepEqual(await timestamps(), before, 'unchanged hash does not revoke');
       await c.query('begin');
-      await rotate();
-      assert.deepEqual(await read('a', 'rotation-one'), denied, 'rotation revokes inside the password transaction');
-      await c.query('rollback');
+      try {
+        await rotate();
+        assert.deepEqual(await read('a', 'rotation-one'), denied, 'rotation revokes inside the password transaction');
+      } finally { await c.query('rollback'); }
       assert.deepEqual(await timestamps(), before, 'rollback restores password and sessions together');
       assert.equal((await read('a', 'rotation-one')).status, 'success');
       await rotate();

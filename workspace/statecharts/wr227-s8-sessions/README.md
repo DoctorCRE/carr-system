@@ -33,7 +33,9 @@ returns denied rather than evicting another browser. Bcrypt CPU breaks first at
 
 Load spreads by slug. Existing verification performs bcrypt before taking its
 slug row lock. Exchange holds that lock through replay, cleanup and insert.
-Read and revoke lock the same slug to order against exchange and disable. No
+Read and revoke lock the same slug to order against exchange, disable and password changes.
+A password-hash update trigger revokes the slug's sessions inside that update's
+transaction. It preserves existing revocation and expiry timestamps. No
 cross-slug lock or fan-out. Storage uses digest primary key and slug/expiry
 index. One set-based canonical projection, capped at 100 materials, has no N+1.
 
@@ -77,6 +79,7 @@ stateDiagram-v2
   Active --> Revoked: revoke
   Revoked --> Revoked: repeat revoke / success and original timestamps
   Revoked --> Revoked: exchange replay / denied
+  Revoked --> Active: new password and fresh digest / new session
   Active --> Expired: seven days elapsed
   Expired --> Expired: read or exchange replay after cleanup / denied
   Active --> Disabled: portal disabled

@@ -84,6 +84,20 @@ create table ops.client_portal_session_digest (
 );
 revoke all on ops.client_portal_session_digest from public,carr_reader,carr_writer,carr_authority,dot_reader;
 
+create function ops.revoke_client_portal_sessions_on_password_change() returns trigger
+language plpgsql set search_path=pg_catalog,pg_temp as $$
+begin
+  update ops.client_portal_session set revoked_at=coalesce(revoked_at,clock_timestamp())
+    where portal_slug=new.slug;
+  return new;
+end $$;
+revoke all on function ops.revoke_client_portal_sessions_on_password_change()
+  from public,carr_reader,carr_writer,carr_authority,dot_reader;
+create trigger client_portal_password_change_revoke_sessions
+  after update of password_hash on ops.client_portal
+  for each row when (old.password_hash is distinct from new.password_hash)
+  execute function ops.revoke_client_portal_sessions_on_password_change();
+
 create function ops.exchange_client_portal_session(p_slug text,p_password text,p_digest text) returns jsonb
 language plpgsql volatile security definer set search_path=pg_catalog,pg_temp as $$
 declare
