@@ -10,11 +10,16 @@ create index activity_party_timeline_idx on public.activity(party_id,occurred_at
 create or replace view public.v_subject_timeline as
 select 'activity'::text as entry_kind,a.id,a.occurred_at,a.recorded_at,act.slug as actor,
   a.kind as verb,a.summary,a.detail,a.owed,
-  coalesce(a.deal_id,a.client_id,a.lead_id,a.vendor_id,a.party_id) as subject_id,
+  coalesce(a.deal_id,a.client_id,a.lead_id,a.vendor_id) as subject_id,
   case when a.deal_id is not null then 'deal' when a.client_id is not null then 'client'
-    when a.lead_id is not null then 'lead' when a.vendor_id is not null then 'vendor'
-    when a.party_id is not null then 'party' else 'vendor' end as subject_type
+    when a.lead_id is not null then 'lead' else 'vendor' end as subject_type
 from public.activity a join public.actor act on act.id=a.actor_id
+where a.party_id is null
+union all
+select 'activity'::text,a.id,a.occurred_at,a.recorded_at,act.slug,a.kind,
+  a.summary,a.detail,a.owed,a.party_id,'party'::text
+from public.activity a join public.actor act on act.id=a.actor_id
+where a.party_id is not null
 union all
 select 'event'::text,e.id,e.occurred_at,e.recorded_at,act.slug,e.verb,
   coalesce(nullif(btrim(e.new_value->>'summary'),''),e.field,e.verb),e.human_quote,

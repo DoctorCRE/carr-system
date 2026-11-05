@@ -26,7 +26,8 @@ System design uses existing sequential intake and atomic, idempotent CARR writes
 No new API, queue, cache, external call, retry policy, fan-out or circuit breaker is added.
 At ten times the intake volume the existing bounded intake cadence and write transport
 remain the limiting components. The new partial party timeline index supports the same
-subject lookup pattern as the existing role indexes. Reads refuse a database error.
+subject lookup pattern as the existing role indexes. A separate party branch
+preserves the indexed role expressions in the existing timeline projection. Reads refuse a database error.
 No stale cache or additional N+1 query is introduced. Deployment must apply the additive
 migration before the changed handler. Existing role activities remain unchanged.
 
