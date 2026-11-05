@@ -2,6 +2,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { researchSummary } from '../src/lead-follow-up.ts';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 
@@ -197,3 +198,108 @@ test('party contact state controls advice on both boards and quiet lead and vend
     }
   } finally { await c.query("update party set contact_state='active' where id=$1", [party]); }
 });
+
+
+test('research clock admits observations only at or before the evaluation and preserves evidence', () => {
+  const now = Date.parse('2030-01-02T00:00:00Z');
+  const finding = { flag_id: randomUUID(), kind: 'verified', found: true, expired: false,
+    proposes_correction: false, source: 'https://example.test/registry',
+    observed_at: '2030-01-02T00:00:00Z', expires_on: null, value: {} };
+  for (const [observed_at, state] of [
+    ['2030-01-01T23:59:59.999Z', 'verified'], ['2030-01-02T00:00:00Z', 'verified'],
+    ['2030-01-02T00:00:00.001Z', 'needs_research'], ['2030-01-02T01:00:00+01:00', 'verified'],
+    ['2030-01-01T23:00:00-02:00', 'needs_research'], ['invalid', 'needs_research'],
+    ['', 'needs_research'], ['infinity', 'needs_research'],
+    ['2020-02-30T00:00:00Z', 'needs_research'], ['1', 'needs_research'],
+    ['2030-01-01T23:59:59.999999+00:00', 'verified'],
+    ['2030-01-02T00:00:00.001001+00:00', 'needs_research'],
+  ]) {
+    for (const kind of ['verified', 'discrepancy']) {
+      const evidence = [{ ...finding, observed_at, kind }];
+      const result = researchSummary(evidence, now);
+      assert.equal(result.state, state === 'verified' && kind === 'discrepancy' ? 'needs_review' : state, observed_at);
+      assert.deepEqual(result.evidence, evidence);
+      assert.equal(result.coverage, 'recorded_findings_only');
+    }
+  }
+  assert.equal(researchSummary([finding], now - 1).state, 'needs_research');
+  assert.equal(researchSummary([finding], now).state, 'verified');
+  assert.equal(researchSummary([finding], now + 1).state, 'verified');
+  for (const patch of [{ expired: true }, { found: false }, { source: '  ' }]) {
+    assert.equal(researchSummary([{ ...finding, ...patch }], now).state, 'needs_research');
+  }
+  const conflict = { ...finding, kind: 'discrepancy' };
+  assert.equal(researchSummary([finding, conflict], now).state, 'needs_review');
+  assert.equal(researchSummary([finding, { ...conflict, expired: true }], now).state, 'verified');
+  assert.equal(researchSummary([{ ...finding, expired: true }, { ...conflict, expired: true }], now).state, 'needs_research');
+  assert.equal(researchSummary([], now).state, 'needs_research');
+  assert.equal(researchSummary(Array(500).fill(finding), now).state, 'verified');
+  assert.throws(() => researchSummary(Array(501).fill(finding), now), e => e.payload.error === 'research_evidence_limit_exceeded');
+});
+
+test('future research remains inspectable through prospect and lead detail without activating verification or conflict', async () => {
+  const subject = randomUUID(), prospect = randomUUID();
+  await c.query(`insert into party(id,kind,name,created_by,updated_by)
+    values($1,'org','Synthetic future research',$2,$2)`, [subject, actor.id]);
+  await c.query(`insert into lead(id,party_id,stage,created_by,updated_by)
+    values($1,$2,'new',$3,$3)`, [prospect, subject, actor.id]);
+  const flag = async (kind, observed) => c.query(`insert into record_flag
+    (subject_type,subject_id,kind,value,source,observed_at,expires_on,created_by)
+    values('party',$1,$2,'{"found":true}','https://example.test/future',$3,'2999-02-01',$4)`,
+    [subject, kind, observed, actor.id]);
+  const summaries = async () => [
+    (await read('prospect-research', { subject: prospect })).research,
+    (await read('lead-board', { workspace: 'leads', lead_id: prospect })).detail.research,
+  ];
+  await flag('verified', '2999-01-01T00:00:00Z');
+  for (const summary of await summaries()) {
+    assert.equal(summary.state, 'needs_research');
+    assert.equal(summary.evidence.length, 1);
+    assert.equal(summary.evidence[0].expired, false);
+  }
+  await flag('verified', '2001-01-01T00:00:00Z');
+  await flag('discrepancy', '2999-01-01T00:00:00Z');
+  for (const summary of await summaries()) {
+    assert.equal(summary.state, 'verified');
+    assert.equal(summary.evidence.length, 3);
+  }
+  await flag('discrepancy', '2001-01-01T00:00:00Z');
+  for (const summary of await summaries()) assert.equal(summary.state, 'needs_review');
+});
+
+for (const kind of ['verified', 'discrepancy']) {
+  test(`malformed observation cannot activate ${kind} research`, () => {
+    const now = Date.parse('2030-01-02T00:00:00Z');
+    for (const observed_at of ['2020-01-01 junk', '2020-01-01', '2020-01-01T00:00:00',
+      '2020-01-01T24:00:00Z', '2020-01-01T00:00:00Z junk']) {
+      const evidence = [{ flag_id: 'synthetic', kind, found: true, expired: false,
+        proposes_correction: false, source: 'https://example.test', observed_at,
+        expires_on: null, value: {} }];
+      const result = researchSummary(evidence, now);
+      assert.equal(result.state, 'needs_research', observed_at);
+      assert.deepEqual(result.evidence, evidence);
+    }
+  });
+}
+
+for (const kind of ['verified', 'discrepancy']) {
+  for (const zone of ['Z', '+01:00']) {
+    test(`research preserves submillisecond observation precision for ${kind} with ${zone}`, () => {
+      const now = Date.parse('2030-01-02T00:00:00.123Z');
+      const time = zone === 'Z' ? '00:00:00' : '01:00:00';
+      for (const [fraction, eligible] of [
+        ['122999', true], ['123000', true], ['123001', false],
+        ['123000000000000000001', false],
+      ]) {
+        const evidence = [{ flag_id: 'synthetic', kind, found: true, expired: false,
+          proposes_correction: false, source: 'https://example.test',
+          observed_at: `2030-01-02T${time}.${fraction}${zone}`, expires_on: null, value: {} }];
+        const result = researchSummary(evidence, now);
+        assert.equal(result.state, eligible ? kind === 'verified' ? 'verified' : 'needs_review' : 'needs_research',
+          evidence[0].observed_at);
+        assert.deepEqual(result.evidence, evidence);
+        assert.equal(researchSummary(evidence, now + 1).state, kind === 'verified' ? 'verified' : 'needs_review');
+      }
+    });
+  }
+}

@@ -286,7 +286,8 @@ class ProofDeclarationTest(unittest.TestCase):
             files = Path(tmp) / 'files.json'
             body.write_text('## Production proof\nproofs/requirements/wr634-triage-runner.json\n')
             files.write_text(json.dumps(['lib/outlook_triage.py', 'lib/outlook_triage_snapshot.py',
-                                         'lib/outlook_triage_capability.py']))
+                                         'lib/outlook_triage_capability.py',
+                                         'proofs/requirements/wr634-triage-runner.json']))
             result = subprocess.run([sys.executable, str(ROOT / 'ops/production-proof-plan.py'),
                                      '--body-file', str(body), '--files-file', str(files)],
                                     capture_output=True, text=True, timeout=20)

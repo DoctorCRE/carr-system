@@ -983,7 +983,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             reply_draft_count: row.reply_draft_count };
         }
         if (args.purpose === 'links') {
-          const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,a.version,
+          const { rows } = await c.query(`select a.id as activity_id,a.deal_id as deal,a.version,a.kind,
               coalesce(hydrated.detail,a.detail) as body,a.occurred_at
             from activity a left join lateral (
               select h.detail from activity h where h.kind='note' and h.detail is not null
