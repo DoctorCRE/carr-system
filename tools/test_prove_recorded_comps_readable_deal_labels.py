@@ -1,3 +1,4 @@
+"""Exercise the recorded comps proof CLI with synthetic records and release sources."""
 import contextlib
 import http.server
 import json

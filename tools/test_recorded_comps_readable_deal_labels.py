@@ -1,3 +1,4 @@
+"""Verify recorded comps names, proposal dates and record provenance."""
 import json
 from pathlib import Path
 import subprocess
