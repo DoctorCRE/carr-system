@@ -4595,6 +4595,18 @@ export const TOOLS = {
       if (args.calendar_event_key !== undefined && (typeof args.calendar_event_key !== 'string' || !/^[0-9a-f]{16}$/.test(args.calendar_event_key)))
         throw new ToolError({ error: 'calendar_event_key_invalid', hint: 'calendar_event_key must be exactly 16 lowercase hexadecimal characters' });
       const s = await resolveSubject(c, args.ref);
+      if (s.type === 'party') {
+        // Retained requests keep their original ref. Lock only the current
+        // survivor, so following merge pointers cannot invert endpoint locks.
+        const party = (await c.query(`with recursive target as (
+          select id,merged_into from party where id=$1
+          union select p.id,p.merged_into from party p join target t on p.id=t.merged_into
+        ) select p.id,p.merged_into,p.deleted_at from party p join target t on t.id=p.id
+          where t.merged_into is null for share of p`, [s.id])).rows[0];
+        if (!party || party.merged_into || party.deleted_at)
+          throw new ToolError({error:'email_touch_target_not_live'});
+        s.id = party.id;
+      }
       const binding = emailTouchBinding(args, s, ToolError);
       await guardEmailTouch(c, actor, binding, ToolError);
       if (args.calendar_event_key !== undefined) {
@@ -4631,13 +4643,6 @@ export const TOOLS = {
               idempotency_key:args.idempotency_key,cause:'ingest_email'});
           return result;
         }
-      }
-      if (s.type === 'party') {
-        // Replay above preserves historical identity. New attachments must hold
-        // off confirm-merge's endpoint lock until this transaction commits.
-        const party = (await c.query('select merged_into,deleted_at from party where id=$1 for share', [s.id])).rows[0];
-        if (!party || party.merged_into || party.deleted_at)
-          throw new ToolError({error:'email_touch_target_not_live'});
       }
       const assignments = [];
       if (args.vendor_assignments !== undefined) {

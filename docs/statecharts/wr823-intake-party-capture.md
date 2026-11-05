@@ -13,8 +13,8 @@ stateDiagram-v2
     Pending --> Capturing: capture locks live party
     Capturing --> Capturing: merge waits for capture
     Capturing --> Captured: transaction commits
-    Pending --> Retrying: merge commits before party lock
-    Retrying --> Pending: resolve live survivor
+    Pending --> CapturingSurvivor: merge commits before party lock
+    CapturingSurvivor --> CapturedOnSurvivor: capture commits on live survivor
     Captured --> Captured: same key or mailbox identity retried
     Captured --> Visible: read party timeline
     Captured --> Captured: refuse a lower-ranked survivor
@@ -57,24 +57,32 @@ reporting. Refusing all party-mail merges was considered; moving these rows safe
 uses the existing locks and transaction without adding a resolution workflow.
 
 
-Concurrent capture and merge share the party row lock. A new direct attachment
-holds FOR SHARE through commit. confirm-merge takes FOR UPDATE on both endpoints
-before scoring or transferring activities. Capture-first therefore commits before
-merge reads the activities. Merge-first causes the waiting capture to recheck
-merged_into and refuse email_touch_target_not_live. The retained mail can retry
-against a fresh survivor match. No successful new attachment lands on a retired
-party. Existing key and mailbox replay run before this check to preserve historical
-captures. Refusal avoids locking a survivor chain in an order that could deadlock.
+Concurrent capture follows the merge pointer chain and locks only the current
+survivor FOR SHARE before mailbox replay or insertion. confirm-merge takes
+FOR UPDATE on both endpoints before scoring or transferring activities.
+Capture-first therefore commits before merge reads the activities. Merge-first
+captures directly on the survivor. The retained payload and key remain unchanged.
+The lock query rechecks merged_into and deleted_at after waiting. If the selected
+survivor itself retires during the wait, the write refuses email_touch_target_not_live
+and retry follows the new chain. It never locks the retired ancestors, so it cannot
+invert merge endpoint lock ordering. No successful new attachment lands on a retired
+party. Exact receipt replay preserves historical responses, and mailbox replay
+matches the current attachment while preserving immutable source identity.
 
 The test `concurrent party capture and merge preserve mail in either lock order`
 covers Pending to Capturing to Captured to CapturedOnSurvivor in
-`capture first waits then merge transfers mail`. It covers Capturing to Capturing by observing the blocked merge
-and checks transfer and replay. `merge first refuses stale capture and retry succeeds`
-covers Pending to Retrying to Pending to Capturing to Captured on the survivor.
-It checks the public refusal code, absence of a success receipt, successful retry,
-physical attachment, survivor timeline and mailbox replay. Both use two real
-PostgreSQL connections and bound the merge statement with a timeout.
+`capture first waits then merge transfers mail`. It covers Capturing to Capturing
+by observing the blocked merge, then checks transfer and replay.
+`merge first redirects retained capture and retry succeeds` covers Pending to
+CapturingSurvivor to CapturedOnSurvivor. It checks successful capture on the survivor,
+unchanged payload retry, physical attachment, survivor timeline and mailbox replay.
+Both use two real PostgreSQL connections and bound merge statements with a timeout.
 
 Role captures reference the role row, whose party_id moves in the merge.
 Their activity foreign key remains valid, so they do not have this direct-party
-attachment race. This lock changes only new direct-party attachments.
+attachment race. This lock changes only direct-party capture resolution.
+
+Refusing all captures against a retired original ref was rejected after checking
+lib/outlook_intake.py. The retained request retries its original payload, so refusal
+alone would keep that request failing. Following the pointer in the lock query
+recovers the retained request without a new queue or a client retry workaround.
