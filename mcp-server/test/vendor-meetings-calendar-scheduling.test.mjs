@@ -55,6 +55,8 @@ for (const [name, calendar] of [
   ['invalid warning container', snapshot([], { warnings: {} })],
   ['null warning container', snapshot([], { warnings: null })],
   ['invalid warning count', snapshot([], { warnings: [{ code: 'responses_unverified', count: 0 }] })],
+  ['zero-duration timed entry', snapshot([meeting(1, 1)])],
+  ['zero-duration timed entry outside rolling window', snapshot([meeting(30, 30)])],
   ['zero-duration all-day entry', snapshot([meeting(2, 2, { all_day: true })])],
   ['invalid warning', snapshot([], { warnings: [null] })],
   ['projection cap', snapshot(Array.from({ length: 100 }, () => meeting(40, 41)))],
@@ -120,4 +122,21 @@ test('scheduling uses the authenticated calendar scope and rejects caller-select
   await assert.rejects(executeRegisteredTool(invalid, JOE, 'read-vendor-meetings', { scheduling_window: {} }));
   await assert.rejects(executeRegisteredTool(invalid, JOE, 'read-vendor-meetings', { sponsor: 'other' }));
   assert.equal(invalid.queries.length, 0);
+});
+
+for (const offset of [1, 30]) test(`zero-duration timed meeting at ${offset} hours stays in the agenda`, async () => {
+  const calendar = snapshot([meeting(offset, offset, { organizer: { email: 'vendor@example.test' } })]);
+  const c = client(calendar);
+  const query = c.query;
+  c.query = async (sql, params) => sql.includes('with candidates')
+    ? { rows: [{ total: 1, items: [{ contact: { email: 'vendor@example.test' } }] }] }
+    : query(sql, params);
+  const result = await read(c);
+  assert.equal(result.calendar.state, 'ready');
+  assert.equal(result.items[0].possible_meetings.length, 1);
+  assert.equal(result.items[0].possible_meetings[0].start, at(offset));
+  assert.equal(result.items[0].possible_meetings[0].end, at(offset));
+  assert.equal(result.calendar.scheduling.state, 'unavailable');
+  assert.equal(result.calendar.scheduling.reason, 'calendar_coverage_insufficient');
+  assert.deepEqual(result.calendar.scheduling.items, []);
 });
