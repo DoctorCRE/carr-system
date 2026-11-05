@@ -170,6 +170,9 @@ def main():
             payload['cwd'] = tmp
             cases.append((f"ALLOW read, {spelling}", "guard-unattended.py", payload, ALLOW))
         for label, command, expected in (
+            ("copy trailing flag", 'cp /tmp/x "$HOME/.claude/skills/handoff/SKILL.md" -v', DENY),
+            ("sed long in-place", "sed --in-place 's/a/b/' ~/.claude/skills/handoff/SKILL.md", DENY),
+            ("previous cwd", 'cd -; echo hi > .claude/skills/handoff/SKILL.md', DENY),
             ("dynamic variable", 'echo hi > "$TARGET"', DENY),
             ("command substitution", 'echo hi > "$(printf x)"', DENY),
             ("glob write", 'echo hi | tee /tmp/*.md', DENY),
