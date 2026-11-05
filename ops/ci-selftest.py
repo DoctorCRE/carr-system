@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import importlib.util
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -600,6 +601,18 @@ def test_database_scope_receipts():
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
     check("database scope skips docs-only changes", not scope.needs_full(["README.md", "docs/guide.md"]))
+
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        receipt = pathlib.Path(directory) / 'receipt.json'
+        for force in (False, True):
+            argv = ['scope', '--receipt', str(receipt)] + (['--full'] if force else [])
+            with patch.object(scope, 'classify', return_value=(False, ['docs/guide.md'], 'docs only')), \
+                 patch.object(sys, 'argv', argv), patch.dict(os.environ, {'GITHUB_OUTPUT': os.devnull}), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                rc = scope.main()
+            check(f'full CI selection overrides narrower DB scope force={force}',
+                  rc == 0 and json.loads(receipt.read_text())['full'] is force)
 
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
