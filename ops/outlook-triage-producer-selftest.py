@@ -368,6 +368,16 @@ class InvocationTest(unittest.TestCase):
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
         self.assertEqual(output.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_installed_out_cannot_redirect_publication_into_source(self):
+        source, _ = self.prepare_copy()
+        repo, _, output = self.installed_output()
+        (repo / 'out').unlink()
+        (repo / 'out').symlink_to(source, target_is_directory=True)
+        before = {p.name: p.read_bytes() for p in source.iterdir()}
+        with self.assertRaisesRegex(ProducerError, 'output_inside_source'):
+            produce(source, output, self.settings)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in source.iterdir()})
+
     def test_installed_output_symlink_escape_is_refused(self):
         source, _ = self.prepare_copy()
         _, shared, output = self.installed_output()
