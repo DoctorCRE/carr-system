@@ -1,3 +1,4 @@
+// Partner subscriptions preserve each actor's initial canonical subject baseline.
 const VERSION = 'subject-watch.v1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const targetProperties = {
