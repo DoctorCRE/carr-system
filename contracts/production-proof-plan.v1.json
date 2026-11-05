@@ -40,11 +40,24 @@
       }
     }
   },
+  "x-runner-source-binding": "Registry CI validates either an ancestor revision/path or a sources map of repository-local paths to SHA256 at tested HEAD. Content bindings include the entry path and its local dependency closure; squash preserves their identity. Never fall back from a refused revision. Neither binding attests installation or execution.",
   "x-runners": {
     "worker-release-smoke.v1": {
       "path": "ops/release-smoke.py",
       "revision": "8bdabfe3275668cd10401a8e58244b953d3d2428",
       "targets": ["worker"]
+    },
+    "studio-canonical-run.v1": {
+      "path": "ops/studio-proof-observe.py",
+      "targets": [
+        "studio"
+      ],
+      "sources": {
+        "ops/studio-proof-observe.py": "2de3fadf40d11b38dbea2a7425f37e1d74fa53c2550fa737bd0e2cd677552858",
+        "lib/studio_proof.py": "ac765ddbfde7c2ea5a7c58507898ac693e5502d65dbdc1f748997d3cc303e571",
+        "tools/ops-record.py": "1ab49d2f330c6be053d3bc07819778e5f32efc7411636c58f7b0dedaa726a7c2",
+        "lib/credential_file.py": "68c27169405b12a9a41b94d3de6aa94b66eec324b8971e12c0ebc9228456919b"
+      }
     },
     "studio-run-receipt.v1": {"path": "ops/studio-proof-observe.py", "revision": "f699e1859dc87e4122501bbaba35a312607452a7", "targets": ["studio"]}
   },
