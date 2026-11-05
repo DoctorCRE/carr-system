@@ -154,7 +154,7 @@ def prove(state, read, account, start, end, clock):
             if not reasons:
                 corroborated[kind].add(subject)
                 counts['corroborated_requests'] += 1
-                examples.setdefault(kind, hashlib.sha256(request['binding'].encode()).hexdigest())
+                examples.setdefault(kind, []).append(hashlib.sha256(request['binding'].encode()).hexdigest())
         if reasons:
             findings.append(dict(binding=hashlib.sha256(request['binding'].encode()).hexdigest(), reasons=reasons))
     failures = sum(counts[k] for k in ('mismatches', 'unavailable_identities',

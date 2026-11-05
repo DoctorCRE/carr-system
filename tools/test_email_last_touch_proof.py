@@ -55,6 +55,15 @@ class ProofTests(unittest.TestCase):
         self.assertNotIn('fixture@example.test', json.dumps(result))
         self.assertNotIn('source', json.dumps(result))
 
+    def test_every_vendor_binding_is_available_for_private_readback(self):
+        entries = {'one': request(), 'two': request('L-1'), 'three': request('V-1'), 'four': request('V-2')}
+        result = self.run_proof(entries, [row(), row('two','lead'), row('three','vendor'),
+                                         row('four','vendor',subject_id='second-vendor',
+                                             email_identity={**IDENTITY,'subject':'second-vendor'})])
+        self.assertTrue(result['ok'])
+        self.assertEqual(len(result['examples']['vendor']), 2)
+        self.assertTrue(all(len(binding) == 64 for binding in result['examples']['vendor']))
+
     def test_mismatches_are_separate_from_unknown_identity(self):
         for change in [dict(target_matches=False), dict(kind='email_out'),
                        dict(occurred_at='2026-11-02T01:00:00Z'),
