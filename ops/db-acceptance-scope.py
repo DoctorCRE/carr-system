@@ -110,8 +110,11 @@ def decide() -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--receipt', type=Path)
+    parser.add_argument('--full', action='store_true')
     args = parser.parse_args()
     full, paths, reason = classify()
+    if args.full:
+        full, reason = True, 'full CI class selection requires database proof'
     status = 'required' if full else 'not applicable'
     try:
         inputs = sorted(proof_inputs())

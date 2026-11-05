@@ -1,0 +1,211 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "repository",
+    "environment",
+    "source",
+    "contracts",
+    "changed_paths",
+    "lanes",
+    "targets",
+    "required_proofs",
+    "requirements",
+    "execution_attested",
+    "plan_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "carr-delivery-plan.v1"
+    },
+    "repository": {
+      "const": "DoctorCRE/carr-system"
+    },
+    "environment": {
+      "const": "production"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "first_parent",
+        "tree"
+      ],
+      "properties": {
+        "commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "first_parent": {
+          "$ref": "#/$defs/sha"
+        },
+        "tree": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sourceReference"
+      },
+      "maxItems": 3
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 10000
+    },
+    "lanes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "database",
+          "worker",
+          "studio",
+          "control",
+          "docs",
+          "app"
+        ]
+      },
+      "maxItems": 6
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "worker",
+          "studio",
+          "app"
+        ]
+      },
+      "maxItems": 3
+    },
+    "required_proofs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 100
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/requirement"
+      },
+      "maxItems": 100
+    },
+    "execution_attested": {
+      "const": false
+    },
+    "plan_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "carr-delivery-plan.v1",
+  "description": "Sanitized immutable source plan only. No execution, receipt acceptance, credential, or release authority.",
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "commit",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requirement_id",
+        "path",
+        "commit",
+        "sha256",
+        "targets",
+        "observers"
+      ],
+      "properties": {
+        "requirement_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "$ref": "#/$defs/sha"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "worker",
+              "studio",
+              "app"
+            ]
+          },
+          "maxItems": 3
+        },
+        "observers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observer"
+          },
+          "maxItems": 100
+        }
+      }
+    },
+    "observer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner",
+        "sources"
+      ],
+      "properties": {
+        "runner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sourceReference"
+          },
+          "maxItems": 16
+        }
+      }
+    }
+  }
+}

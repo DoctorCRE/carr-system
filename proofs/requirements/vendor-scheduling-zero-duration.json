@@ -1,0 +1,28 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR647-S4-vendor-scheduling-zero-duration",
+  "targets": ["worker", "studio"],
+  "assertions": [{
+    "id": "natural-zero-duration-withholds-candidates",
+    "predicate": "After merge and deploy, verify Worker release identity with the registered release smoke runner. Separately run python3 tools/prove-vendor-scheduling-zero-duration.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. It must observe a natural fresh authenticated timed zero-duration agenda row and unavailable scheduling with no gaps. Release smoke alone does not prove this regression. The coordinator owns this authenticated observation.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "The deployed release includes the fix and the dedicated natural-evidence runner exits 0 with eligible_records greater than zero and both assertions passing. Exit 78 or absent evidence leaves the unit landed-unproven. Exit 1 reports a contradiction. No synthetic snapshot publication is allowed.",
+    "input_class": "Natural authenticated vendor calendar and morning brief agenda. No record writes or sends. Public receipt redacts identities.",
+    "deadline_seconds": 30
+  }, {
+    "id": "installed-studio-proof-cli-and-canonical-source",
+    "predicate": "After ordinary Studio installation, independently verify the installed tools/prove-vendor-scheduling-zero-duration.py source digest against the merged revision and retain the actual installed execution receipt from the dedicated natural-evidence command above. Require exit 0, eligible_records greater than zero, two passing assertions and the same pinned Worker release. Separately observe an ordinary outlook-intake canonical run at the exact installed full runtime SHA with studio-canonical-run.v1 for service outlook-intake, key outlook.intake, environment production, count run.mail_ids minimum 1 and maximum age 3600 seconds. The registered observer supplies ancillary installed source-run evidence only; it neither launches nor attests the dedicated CLI. Missing trusted installation interval or target association remains held. No job launch or runtime refresh is part of this read-only observation.",
+    "runner": "studio-canonical-run.v1",
+    "expected_result": "Both the independently verified installed CLI execution and the registered Studio observation must pass. Canonical intake counts alone do not prove the scheduling regression. Absent natural evidence, installation identity or canonical target binding leaves the unit landed-unproven.",
+    "input_class": "Read-only installed CLI source digest and redacted execution receipt plus one bounded canonical outlook-intake batch after installation. No synthetic publication, business writes or sends.",
+    "deadline_seconds": 120
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 20,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
+}

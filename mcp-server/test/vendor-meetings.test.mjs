@@ -118,11 +118,11 @@ test('both partners traverse exact contacts and scoped Unicode searches without 
  const first=await read({q:query,limit:1});
  assert.equal(first.total,2);
  assert.equal(first.has_more,true);
- const next=await read({q:query,limit:1,cursor:first.next_cursor},{slug:'dell'});
+ const next=await read({q:query,limit:1,cursor:first.next_cursor},{slug:'dell',human:true});
  assert.equal(next.has_more,false);
  assert.equal(next.next_cursor,null);
  assert.deepEqual([first.items[0].contact.id,next.items[0].contact.id].sort(),[f.contact,second].sort());
- assert.deepEqual(await read({q:query,limit:1},{slug:'dell'}),first);
+ assert.deepEqual(await read({q:query,limit:1},{slug:'dell',human:true}),first);
  await assert.rejects(read({view:'research',q:query,cursor:first.next_cursor}),e=>e.payload.error==='vendor_meetings_query_invalid');
  await assert.rejects(read({q:'Other',cursor:first.next_cursor}),e=>e.payload.error==='vendor_meetings_query_invalid');
 });
@@ -132,8 +132,8 @@ test('audience and query refusals happen before any database read',async()=>{
  const tool=TOOLS['read-vendor-meetings'];
  for(const identity of [null,{slug:'external'},{slug:'codex'}]) await assert.rejects(tool.handler(c,identity,{}),e=>e.payload.error==='AUTHORIZATION_REFUSED');
  for(const args of [{limit:0},{limit:51},{limit:'2'},{q:42},{q:'x'.repeat(81)},{view:'all'},{cursor:'invalid'},{actor:'joe'}])
-  await assert.rejects(tool.handler(c,{slug:'joe'},args),e=>e.payload.error==='vendor_meetings_query_invalid');
- await assert.rejects(tool.handler({query:()=>{throw new Error('private database error');}},{slug:'joe'},{}),e=>e.payload.error==='vendor_meetings_unavailable'&&!e.message.includes('private'));
+  await assert.rejects(tool.handler(c,{slug:'joe',human:true},args),e=>e.payload.error==='vendor_meetings_query_invalid');
+ await assert.rejects(tool.handler({query:()=>{throw new Error('private database error');}},{slug:'joe',human:true},{}),e=>e.payload.error==='vendor_meetings_unavailable'&&!e.message.includes('private'));
 });
 
 test('blank names and missing recorded meeting context remain Research',async()=>{

@@ -1826,7 +1826,7 @@ class IntakeTest(unittest.TestCase):
             CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
             INSERT INTO message_keys VALUES(1,100);
         """)
-        self.pdf = b'%PDF-1.7 synthetic attachment'
+        self.pdf = b'%PDF-1.7 synthetic attachment\n%%EOF\n'
         self.cache_path = '~/Files/S0/845/Attachments/1/Lease.pdf'
         con.execute('INSERT INTO attachments VALUES(7,100,?,1,?,?,?)',
                     ('Lease.pdf', 'image/png', len(self.pdf), self.cache_path))
@@ -1874,6 +1874,48 @@ class IntakeTest(unittest.TestCase):
         ports = self.fake.ports()
         ports.copy_attachments, ports.put_object = copy, put
         return ports
+
+    def assert_pdf_proof(self, data, expected, *, existing=False):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr510-s3-pdf-admission.json').read_text())
+        self.assertIn('--count run.attachments_pdf_stored --minimum 1',
+                      requirement['assertions'][0]['predicate'])
+        ports = self.attachment_fixture()
+        if existing:
+            carr = ports.carr
+            def replay(verb, args):
+                reply = carr(verb, args)
+                return {**reply, 'existing': True} if verb == 'attach-deal-file' else reply
+            ports.carr = replay
+        self.pdf = data
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(outcome.counts.get('attachments_pdf_stored', 0), expected)
+        receipt = json.loads(intake.receipt_line(outcome, self.repo).split(' ', 1)[1])
+        # Synthetic identity tests the reader, not installed provenance.
+        receipt['runtime_sha'] = 'a' * 40
+        path = self.repo / 'pdf-proof-receipt.txt'
+        path.write_text('outlook-intake-receipt ' + json.dumps(receipt))
+        command = [sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
+                   '--receipt-file', str(path), '--service', 'outlook-intake',
+                   '--runtime-sha', 'a' * 40, '--count', 'run.attachments_pdf_stored',
+                   '--minimum', '1']
+        observed = REAL_RUN(command, capture_output=True, text=True, timeout=10)
+        self.assertEqual(observed.returncode, 0 if expected else 1, observed.stdout + observed.stderr)
+
+    def test_pdf_proof_accepts_admitted_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1)
+
+    def test_pdf_proof_accepts_existing_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1, existing=True)
+
+    def test_pdf_proof_refuses_office_only(self):
+        self.assert_pdf_proof(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1synthetic Office', 0)
+
+    def test_pdf_proof_refuses_png_only(self):
+        self.assert_pdf_proof(b'\x89PNG\r\n\x1a\nsynthetic image', 0)
+
+    def test_pdf_proof_refuses_truncated_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 truncated', 0)
 
     def test_attachment_routing_reasons_do_not_hold_the_run(self):
         for scenario in ('missing_folder', 'ambiguous_folder', 'no_deal', 'duplicate_deal'):
@@ -2020,6 +2062,7 @@ class IntakeTest(unittest.TestCase):
                 terminal = status in ('too_large', 'empty', 'type_refused')
                 self.assertEqual(result.state, 'succeeded' if terminal else 'failed')
                 self.assertEqual(result.counts['attachments_' + status], 1)
+                self.assertEqual(result.counts.get('attachments_pdf_stored', 0), 0)
                 self.assertEqual(result.counts.get('attachments_unresolved', 0),
                                  int(status in ('error', 'path_refused', 'unreadable', 'path_conflict')))
                 state = json.loads((self.out() / intake.STATE).read_text())
@@ -2987,7 +3030,7 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual({k: json.loads(receipt)[k] for k in ('state', 'reason', 'counts')}, {'state': 'failed', 'reason': 'writes_failed',
-                                                'counts': {'run': {'writes_failed': 3}, 'backlog': {}}})
+                                                'counts': {'run': {'mail_ids': 0, 'writes_failed': 3}, 'backlog': {}}})
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
         write_settings(self.home, ROOT, model='sonnet')
@@ -4538,6 +4581,23 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertNotIn('intent', state['mail_unresolved'][ident(m)])
 
+    def test_every_receipt_includes_zero_mail_ids_when_no_snapshot_exists(self):
+        for status, reason in [('failed', 'ledger_state_invalid'), ('skipped', 'previous_run_active')]:
+            receipt = json.loads(intake.receipt_line(intake.Outcome(status, reason)).split(' ', 1)[1])
+            self.assertEqual(receipt['counts']['run']['mail_ids'], 0)
+
+    def test_failed_write_receipt_counts_retained_mail_ids(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=2), message_id='<retained@example.test>')])
+        self.fake.now = NOW + timedelta(minutes=30)
+        self.fake.fail_verbs = {'log-activity'}
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=2), message_id='<retained@example.test>'),
+                                  mail('pat@example.test', -timedelta(minutes=10), subject='Different')])
+        self.assertEqual(result.reason, 'writes_failed')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertGreater(len(state['mail_ids']), 0)
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['run']['mail_ids'], len(state['mail_ids']))
+
     def test_receipt_splits_run_deltas_from_backlog_totals(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                                   mail('stranger@example.test', -timedelta(minutes=10), subject='New inquiry')])
@@ -4560,7 +4620,7 @@ class IntakeTest(unittest.TestCase):
             'calendar_lifecycle_unsupported': 4, 'calendar_lifecycle_canceled': 2,
             'calendar_requests_quarantined': 1, 'calendar_unresolved_expired': 3})
         receipt = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])
-        self.assertEqual(receipt['counts'], {'run': {}, 'backlog': {
+        self.assertEqual(receipt['counts'], {'run': {'mail_ids': 0}, 'backlog': {
             'calendar_copies_in_store': 4, 'calendar_canceled_copies_in_store': 2,
             'calendar_write_requests_held': 1, 'calendar_expired_total': 3}})
 

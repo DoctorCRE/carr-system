@@ -211,9 +211,11 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoi
           where l.registry_ref=$1 and p.merged_into is null and p.deleted_at is null and p.contact_state='active'`,[args.lead])).rows[0];
         if (!l) fail("lead_not_found");
         const address=String(args.counterparty_address||"").trim().toLowerCase();
-        const known=String(l.email||"").trim().toLowerCase();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) fail("invalid_counterparty_address");
-        const match=address===known ? "exact" : "unconfirmed";
+        const validAddress=/^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+        if (!validAddress.test(address) || address.length>254 || address.split("@")[0].length>64 ||
+          address.split("@")[1].split(".").some(label=>label.length>63)) fail("invalid_counterparty_address");
+        const known=String(l.email||"").split(";").map(token=>token.trim().toLowerCase());
+        const match=known.includes(address) ? "exact" : "unconfirmed";
         const detail={match,party_id:l.party_id,evidence_ref:args.native_ref,
           automated:args.automated ?? true,attended:args.attended ?? false,ended_at:args.ended_at,
           first_contact_draft_id:args.first_contact_draft_id,draft_body_sha256:args.draft_body_sha256,lead_stage_signal:args.lead_stage_signal,follow_up_after:args.follow_up_after,archive_reason:args.archive_reason};
