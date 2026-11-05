@@ -65,7 +65,9 @@ test('rollback before commit, aliases, pagination and unverified boundary',async
   const counts=await executeRegisteredTool(c,actor,'read-email-candidate-signature-counts',{since:'2026-10-01T00:00:00Z',until:'2026-10-02T00:00:00Z'});
   assert.equal(counts.observations,3);
   assert.equal(counts.duplicate_observations,0);
-  assert.deepEqual(counts.observations_per_candidate,[{observations:3,candidates:1}]);
+  assert.equal(counts.sources,2);
+  assert.equal(counts.invalidated_sources,1);
+  assert.deepEqual(counts.observations_per_candidate,[{observations:3,sources:2,candidates:1}]);
   await c.query('set role carr_reader');
   try {
     assert.equal((await read()).observations.length,3);

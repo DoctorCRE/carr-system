@@ -130,14 +130,16 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
         if(Date.parse(args.until)<=Date.parse(args.since)) fail('email_candidate_window_invalid');
         const counts=(await c.query(`with scoped as (select s.* from email_candidate_signature s
           where mailbox_owner=$1 and observed_at >= $2 and observed_at < $3), grouped as (
-          select pool_id,count(*)::int as observations from scoped group by pool_id)
+          select pool_id,count(*)::int as observations,count(distinct (mailbox_account,source_id))::int as sources from scoped group by pool_id)
           select (select count(*)::int from scoped) as observations,
           (select count(*)::int from grouped) as candidates,
+          (select count(distinct (pool_id,mailbox_account,source_id))::int from scoped) as sources,
           (select count(*)::int from scoped where invalidated_at is not null) as invalidated_observations,
+          (select count(distinct (pool_id,mailbox_account,source_id))::int from scoped where invalidated_at is not null) as invalidated_sources,
           (select count(*)::int from (select pool_id,mailbox_account,source_id,raw_digest,extraction_version
             from scoped group by 1,2,3,4,5 having count(*)>1) duplicates) as duplicate_observations,
-          coalesce((select jsonb_agg(jsonb_build_object('observations',observations,'candidates',candidates)) from (
-            select observations,count(*)::int as candidates from grouped group by observations order by observations) histogram),'[]'::jsonb) as observations_per_candidate`,
+          coalesce((select jsonb_agg(jsonb_build_object('observations',observations,'sources',sources,'candidates',candidates)) from (
+            select observations,sources,count(*)::int as candidates from grouped group by observations,sources order by observations,sources) histogram),'[]'::jsonb) as observations_per_candidate`,
           [owner,args.since,args.until])).rows[0];
         return {ok:true,contract:'email-candidate-signature-counts.v1',...counts};
       }
