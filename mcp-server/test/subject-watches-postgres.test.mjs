@@ -239,7 +239,7 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
   t.after(()=>rmSync(directory,{recursive:true,force:true}));
   const frozenPython=fileURLToPath(new URL('../../.venv/bin/python',import.meta.url));
   const python=process.env.CARR_CI_PYTHON || (existsSync(frozenPython) ? frozenPython : 'python3');
-  const proof=(...args)=>execFileSync(python,[fileURLToPath(new URL('../../tools/verify-subject-watch-proof.py',import.meta.url)),...args],{encoding:'utf8'});
+  const proof=(...args)=>execFileSync(python,[fileURLToPath(new URL('../../ops/verify-subject-watch-proof.py',import.meta.url)),...args],{encoding:'utf8'});
   for (const who of [joe,dell,agent]) await t.test(who.slug,async wt=>{
     const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic writer regression',$1,$1) returning id",[joe.id])).rows[0].id;
     const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,joe.id])).rows[0].id;

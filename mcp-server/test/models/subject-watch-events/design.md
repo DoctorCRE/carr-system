@@ -104,7 +104,7 @@ tests retain the foreign-tenant and own-mailbox cases.
 The coordinator owns the live mutations and release observation. This worker
 used disposable synthetic PostgreSQL only. Release smoke alone cannot establish
 notification behavior. The supplemental verifier is
-`tools/verify-subject-watch-proof.py`. It has no write mode or provider sends.
+`ops/verify-subject-watch-proof.py`. It has no write mode or provider sends.
 Each capture runs one repeatable-read transaction with a five-second SQL timeout,
 returns two aggregate rows and saves only a selection hash, subscription presence, and counts.
 The initial live selection must contain a watched, visible deal and an unwatched, visible
@@ -117,7 +117,7 @@ Never place a live connection string in a command or artifact.
 The coordinator runs all of these steps after release identity matches.
 
 1. Select the live watched and unwatched deal UUIDs for one partner.
-2. Run `python tools/verify-subject-watch-proof.py capture` with those `--watched`, `--unwatched`, and `--actor` values and `--output /tmp/watch-before.json`.
+2. Run `python ops/verify-subject-watch-proof.py capture` with those `--watched`, `--unwatched`, and `--actor` values and `--output /tmp/watch-before.json`.
 3. Execute one registered update-deal per selected deal, changing one field each, and retain each exact idempotency key and request.
 4. Capture the same selection to `/tmp/watch-after.json`.
 5. Replay both original registered requests with their original idempotency keys.
@@ -126,7 +126,7 @@ The coordinator runs all of these steps after release identity matches.
 8. Capture the same selection to `/tmp/watch-removed.json`.
 9. Execute a distinct registered update-deal on that deal with its current version and a fresh idempotency key.
 10. Capture the same selection to `/tmp/watch-suppressed.json`.
-11. Run `python tools/verify-subject-watch-proof.py verify --before /tmp/watch-before.json --after /tmp/watch-after.json --replay /tmp/watch-replay.json --removed /tmp/watch-removed.json --suppressed /tmp/watch-suppressed.json`.
+11. Run `python ops/verify-subject-watch-proof.py verify --before /tmp/watch-before.json --after /tmp/watch-after.json --replay /tmp/watch-replay.json --removed /tmp/watch-removed.json --suppressed /tmp/watch-suppressed.json`.
 
 The final command must return zero and report watched 1, unwatched 0, replay 0,
 and suppressed 0. Each initial change adds one receipt. Replay adds neither
@@ -212,3 +212,7 @@ stateDiagram-v2
 The proof sequence is executable PostgreSQL acceptance, not a new TLC claim.
 The original finite model does not model source merges, deletion, resubscription,
 or actor isolation. The checked-in database tests exercise these cases.
+
+The supplemental read-only verifier lives in `ops/` alongside other production
+proof runners. The current delivery inventory reserves `tools/` for installed
+Studio runtime. This verifier does not install or operate a Studio service.
