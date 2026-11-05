@@ -17,7 +17,7 @@ COLUMNS = {
     "folders": ["id", "account_id", "name", "parent_status", "parent_id"],
     "message_objects": ["local_key", "account_id", "folder_id", "subject", "recipients_status"],
     "messages": ["id", "local_keys", "sender", "subject", "body", "html", "body_kind",
-                 "body_source", "copies", "flag_status", "flag_due_unix", "flag_completed_unix",
+                 "body_completeness", "body_outcome", "body_source", "copies", "flag_status", "flag_due_unix", "flag_completed_unix",
                  "folder_links_unresolved", "sent_unix", "received_unix"],
     "recipients": ["local_key", "kind", "kind_code", "position", "address", "name"],
     "message_folders": ["message_id", "folder_id"],

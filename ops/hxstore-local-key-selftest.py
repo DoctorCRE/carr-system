@@ -317,6 +317,26 @@ class LocalKeyExportTests(unittest.TestCase):
                                 (str(0x2002), 'full', 'inline', 'Synthetic inline body text.')])
         self.assertEqual((meta['sidecar_linked'], meta['sidecar_rejected']), (1, 0))
 
+    def test_conflicting_bodies_export_a_named_held_outcome(self):
+        rows, _ = self.export(message(0x1001), body(0x1001, html='<p>Old longer text</p>'),
+                              body(0x1001, html='<p>New</p>'),
+                              columns='body_kind, body_completeness, body_outcome, html')
+        self.assertEqual(rows, [('conflict', 'conflict', 'conflict', None)])
+
+    def test_short_html_is_not_replaced_by_preview(self):
+        rows, _ = self.export(message(0x1001), body(0x1001, html='<p>Yes.</p>'),
+                              columns='body_kind, body_completeness, body')
+        self.assertEqual(rows, [('full', 'complete', 'Yes.')])
+
+    def test_oversized_sidecar_exports_no_partial_body(self):
+        with tempfile.TemporaryDirectory() as files:
+            efm = Path(files) / 'S0/3/EFMData'
+            efm.mkdir(parents=True)
+            (efm / '1.dat').write_bytes(gzip.compress(b'x' * ((32 << 20) + 1)))
+            rows, _ = self.export(message(0x1001), body(0x1001, sidecar='~/Files/S0/3/EFMData/1.dat'),
+                                  columns='body_kind, body_completeness, body_outcome, html', files=files)
+        self.assertEqual(rows, [('oversized', 'unknown', 'oversized', None)])
+
     def test_a_header_only_message_keeps_its_slots_and_its_preview(self):
         rows, _ = self.export(message(0x1001, subject='Synthetic header only', sender_name='Pat Example'),
                               columns='sender, sender_name, subject, recipients, body_kind, body, local_keys')
