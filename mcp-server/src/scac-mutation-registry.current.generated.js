@@ -1666,7 +1666,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "0074c0a9c651ad4ff3d2eee165e33f2fff421b7b04957c1e161960bc5c0d8d5c",
+    "schema_digest": "fbd361fcb812742079879498cc6cbea4b93d98b1df6caa709f3ab894e83accbb",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2708,6 +2708,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:recall-memory",
     "source_locator": "mcp-server/src/memory.js",
     "schema_digest": "84213490479ffbfb80f837c67f8af28b5066459043bff72c81ceb9caa0bd4ce5",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "reconcile-email-touches": {
+    "ingress_key": "mcp-tool:reconcile-email-touches",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "a060c650c973309ad7ba14995556c2ad676b1e3dcee276e7a9f66736cb1fe9f9",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
