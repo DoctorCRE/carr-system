@@ -94,3 +94,41 @@ receipt remains BLOCKED under the pinned observer. Verify the installed full
 runtime SHA. Synthetic source tests and held observations never prove automatic
 moves. Replay unsafe paths only against isolated synthetic copies, never by
 altering a real research copy. This builder performs no production operation.
+
+## Immediate bounded proof
+
+The installed runtime now exposes an explicit proof admission window. From the
+installed runtime directory, run `.venv/bin/python -m lib.outlook_triage
+--proof-window`. It uses the same `fire` entry, service/repository checks,
+`bin/run-scheduled.sh`, run key and receipt as launchd. It admits one attempt at
+the actual invocation time, with a 180-second deadline and process-group timeout.
+It never changes the machine clock or the normal evening schedule. Timeout
+termination may prevent the inner receipt; the scheduled wrapper still records
+the timed-out operation. A held receipt remains BLOCKED by the pinned observer.
+
+To exercise the producer and planner together, append `--copy` with the absolute
+path of the explicitly authorized research directory. No path is selected
+implicitly. Without a supplied copy the attempt reaches the existing truthful
+`snapshot_producer_unavailable` refusal. Neither mode creates a mover or proves
+filing. Do not run the proof from a source worktree or change installed settings
+to admit one. The coordinator owns production invocation after deployment.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Admission
+    Admission --> OutsideWindow: Normal call outside evening
+    Admission --> Observing: Evening or explicit 180-second proof
+    Observing --> Refused: No copy or failed current producer
+    Observing --> Held: Current producer returned observations
+    Observing --> TimedOut: Real deadline reached
+    Refused --> Receipt
+    Held --> Receipt
+    TimedOut --> Receipt
+    OutsideWindow --> [*]
+    Receipt --> [*]
+```
+
+The runner regression tests cover unchanged scheduled admission, immediate
+proof refusal, explicit copy forwarding, deadline refusal and the supervised
+scheduled command. Producer tests cover publication and per-item holds. This
+chart is a lifecycle sketch, not a checked formal model.

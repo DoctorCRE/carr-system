@@ -140,6 +140,63 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(triage.fire(self.repo, moment.replace(hour=9)), 0)
         execute.assert_not_called()
 
+    def test_proof_window_reaches_current_attempt_outside_evening(self):
+        moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
+        copy = self.repo / 'explicit-copy'
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage, '_triage', return_value=(triage.Outcome('skipped', 'snapshot_producer_unavailable'), triage.Report())) as attempt:
+            outcome = triage.run(self.repo, self.home, moment, now_fn=lambda: moment,
+                                 research_copy=copy, proof_window=True)
+        self.assertEqual(outcome.reason, 'snapshot_producer_unavailable')
+        self.assertEqual(attempt.call_args.args[-1], copy)
+        self.assertFalse(attempt.call_args.args[-2]())
+        attempt.reset_mock()
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage, '_triage') as attempt:
+            self.assertEqual(triage.run(self.repo, self.home, moment, now_fn=lambda: moment).reason, 'outside_window')
+        attempt.assert_not_called()
+
+    def test_proof_deadline_refuses_planning_after_180_seconds(self):
+        from datetime import timedelta
+        moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage, '_triage') as attempt:
+            outcome = triage.run(self.repo, self.home, moment, proof_window=True,
+                                 now_fn=lambda: moment + timedelta(seconds=180))
+        self.assertEqual(outcome.reason, 'window_closed')
+        attempt.assert_not_called()
+
+    def test_proof_fire_uses_scheduled_wrapper_with_process_timeout(self):
+        moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
+        copy = self.repo / 'explicit copy'
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage.os, 'chdir'), patch.object(triage.os, 'execv') as execute:
+            triage.fire(self.repo, moment, proof_window=True, research_copy=copy)
+        argv = execute.call_args.args[1]
+        self.assertEqual(argv[:4], ['/bin/zsh', str(self.repo / 'bin/run-scheduled.sh'), triage.SERVICE, triage.RUN_KEY])
+        self.assertEqual(argv[4:8], [sys.executable, str(self.repo / 'bin/with-timeout.py'), '180', sys.executable])
+        self.assertEqual(argv[-3:], ['--proof-window', '--copy', str(copy)])
+
+    def test_main_proof_emits_real_attempt_receipt_outside_evening(self):
+        moment = datetime.now(self.settings.timezone).replace(hour=9, minute=0)
+        capture = io.StringIO()
+        with patch.object(triage, 'load_settings', return_value=self.settings), \
+                patch.object(triage.Path, 'home', return_value=self.home), \
+                patch.object(triage, '__file__', str(self.repo / 'lib/outlook_triage.py')), \
+                patch('lib.outlook_runtime.stamp', return_value={'runtime_sha': 'a' * 40}), \
+                patch.object(triage, 'datetime', wraps=datetime) as clock, redirect_stdout(capture):
+            clock.now.return_value = moment
+            self.assertEqual(triage.main(['--proof-window']), 78)
+        output = capture.getvalue()
+        self.assertNotIn('outside_window', output)
+        receipt = json.loads(next(line.split(' ', 1)[1] for line in output.splitlines()
+                                  if line.startswith('outlook-triage-receipt ')))
+        self.assertEqual(receipt['reason'], 'snapshot_producer_unavailable')
+        self.assertEqual(receipt['runtime_sha'], 'a' * 40)
+        reports = list(self.path.parent.glob('*.report.md'))
+        self.assertEqual(len(reports), 1)
+        self.assertIn(moment.isoformat(), reports[0].read_text())
+
     def test_main_writes_aggregate_hold_receipt_and_returns_skipped(self):
         self.save()
         moment = datetime.now(self.settings.timezone).replace(hour=19, minute=15)

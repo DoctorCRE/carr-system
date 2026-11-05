@@ -7,10 +7,10 @@
   "assertions": [
     {
       "id": "producer-observation-holds-are-not-filing",
-      "predicate": "After source, CI, independent review, merge and install, observe the bounded canonical launchd outlook-triage receipt at the full merged runtime SHA. Require current-attempt planning with nonzero observed, planned=0, held=observed, moved=0, matching copy/decoder provenance and unavailable provider identity/revision/read state, or a truthful snapshot_producer_unavailable held refusal when no explicit current copy is supplied. Unresolved effects require reconciliation. The pinned observer reports BLOCKED for skipped receipts. Held observations never prove automatic filing.",
+      "predicate": "After source, CI, independent review, merge and install, observe the bounded canonical outlook-triage receipt through the shared scheduled wrapper at the full merged runtime SHA. Require current-attempt planning with nonzero observed, planned=0, held=observed, moved=0, matching copy/decoder provenance and unavailable provider identity/revision/read state, or a truthful snapshot_producer_unavailable held refusal when no explicit current copy is supplied. Unresolved effects require reconciliation. The pinned observer reports BLOCKED for skipped receipts. Held observations never prove automatic filing.",
       "runner": "studio-run-receipt.v1",
       "expected_result": "BLOCKED by the pinned observer on a skipped receipt. Source admission is not production proof. Actual filing additionally requires independent mover qualification and a positive destination-confirmed count.",
-      "input_class": "one supplied actual-run outlook-triage receipt; the coordinator may execute the already authorized bounded run immediately, while the observer itself remains read-only and never launches jobs or refreshes runtimes",
+      "input_class": "one supplied actual-run outlook-triage receipt; the coordinator may execute the already authorized bounded run immediately, while the observer itself remains read-only and never launches jobs or refreshes runtimes; invoke from the installed runtime with .venv/bin/python -m lib.outlook_triage --proof-window, optionally --copy followed by the explicitly authorized absolute research directory; this opens a 180-second real-time admission window without waiting for evening",
       "deadline_seconds": 30
     }
   ],
