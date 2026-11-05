@@ -21,22 +21,31 @@ const json = (body, status = 200) =>
 const refuse = (error) => {
   throw Object.assign(new Error(error), { payload: { error } });
 };
-async function boundedBody(request, max) {
+async function boundedBody(request, max, timeoutMs) {
   const reader = request.body?.getReader();
   if (!reader) refuse("upload_size_refused");
+  const expires = Date.now() + timeoutMs;
   const chunks = [];
   let size = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      if (Date.now() >= expires) refuse("deliverable_body_timeout");
+      const { done, value } = await deadline(
+        reader.read(),
+        Math.max(1, expires - Date.now()),
+        "deliverable_body_timeout",
+      );
       if (done) break;
       size += value.byteLength;
       if (size > max) {
-        await reader.cancel();
+        void reader.cancel().catch(() => {});
         refuse("upload_size_refused");
       }
       chunks.push(value);
     }
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -48,11 +57,100 @@ async function boundedBody(request, max) {
   }
   return bytes;
 }
+export const DELIVERABLE_IO_POLICY = Object.freeze({
+  timeoutMs: 10_000,
+  failureThreshold: 3,
+  cooldownMs: 30_000,
+  maxOutstanding: 4,
+  requestsPerMinute: 60,
+});
+const bucketPolicies = new WeakMap();
+async function deadline(work, milliseconds, code) {
+  let timer;
+  try {
+    return await Promise.race([
+      work,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              Object.assign(new Error(code), { payload: { error: code } }),
+            ),
+          milliseconds,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function dependencyPolicy(bucket, timeoutMs) {
+  if (bucketPolicies.has(bucket)) return bucketPolicies.get(bucket);
+  let failures = 0,
+    openUntil = 0,
+    outstanding = 0,
+    probing = false;
+  const windows = new Map();
+  const policy = {
+    admit(slug) {
+      const minute = Math.floor(Date.now() / 60_000);
+      const entry = windows.get(slug);
+      const count = entry?.minute === minute ? entry.count + 1 : 1;
+      windows.set(slug, { minute, count });
+      if (count > DELIVERABLE_IO_POLICY.requestsPerMinute)
+        refuse("deliverable_rate_limited");
+    },
+    async run(work) {
+      if (
+        Date.now() < openUntil ||
+        probing ||
+        outstanding >= DELIVERABLE_IO_POLICY.maxOutstanding
+      )
+        refuse("deliverable_storage_unavailable");
+      const probe = openUntil !== 0;
+      if (probe) probing = true;
+      outstanding++;
+      const pending = Promise.resolve()
+        .then(work)
+        .finally(() => {
+          outstanding--;
+        });
+      try {
+        const result = await deadline(
+          pending,
+          timeoutMs,
+          "deliverable_storage_timeout",
+        );
+        failures = 0;
+        openUntil = 0;
+        return result;
+      } catch (error) {
+        if (++failures >= DELIVERABLE_IO_POLICY.failureThreshold || probe) {
+          openUntil = Date.now() + DELIVERABLE_IO_POLICY.cooldownMs;
+          console.error(
+            JSON.stringify({
+              event: "deal_deliverables_storage_circuit_open",
+              cooldown_ms: DELIVERABLE_IO_POLICY.cooldownMs,
+            }),
+          );
+        }
+        throw error;
+      } finally {
+        if (probe) probing = false;
+      }
+    },
+  };
+  bucketPolicies.set(bucket, policy);
+  return policy;
+}
+
 export function createDealDeliverablesHandler({
   transaction,
   bucket,
   callTool,
+  operationTimeoutMs = DELIVERABLE_IO_POLICY.timeoutMs,
 }) {
+  const storage = bucket && dependencyPolicy(bucket, operationTimeoutMs);
   return async (request, actor, sessionActive) => {
     const match = path.exec(new URL(request.url).pathname);
     if (!match) return json({ error: "not_found" }, 404);
@@ -62,6 +160,8 @@ export function createDealDeliverablesHandler({
     };
     try {
       await active();
+      if (!["joe", "dell"].includes(actor.slug)) refuse("deliverable_denied");
+      storage?.admit(actor.slug);
       if (action === "bytes") {
         if (request.method !== "PUT")
           return json({ error: "method_not_allowed" }, 405);
@@ -79,6 +179,17 @@ export function createDealDeliverablesHandler({
           refuse("upload_size_refused");
         if (!bucket)
           return json({ error: "deliverable_storage_unavailable" }, 503);
+        const reservation = await transaction((c) =>
+          deliverableRow(c, actor, deal, id),
+        );
+        const bytes = await boundedBody(
+          request,
+          Math.min(Number(reservation.bytes), DELIVERABLE_POLICY.maxBytes),
+          operationTimeoutMs,
+        );
+        if (length && Number(length) !== bytes.length)
+          refuse("upload_size_refused");
+        const verified = await verifyDeliverableBytes(bytes, reservation);
         const result = await transaction(async (c) => {
           const row = await deliverableRow(c, actor, deal, id, { lock: true });
           if (row.state !== "started") refuse("deliverable_upload_conflict");
@@ -88,20 +199,17 @@ export function createDealDeliverablesHandler({
             "update ops.deal_deliverable set state='uploading' where id=$1",
             [id],
           );
-          const bytes = await boundedBody(
-            request,
-            Math.min(Number(row.bytes), DELIVERABLE_POLICY.maxBytes),
-          );
-          if (length && Number(length) !== bytes.length)
-            refuse("upload_size_refused");
-          const verified = await verifyDeliverableBytes(bytes, row);
           await active();
-          try {
-            const stored = await bucket.put(row.object_key, bytes, {
-              httpMetadata: { contentType: "application/octet-stream" },
-              customMetadata: { sha256: verified.sha256 },
+          // Failed PUTs may finish late. Retain identical private bytes so
+          // cleanup cannot race a successful retry at this immutable key.
+          {
+            await storage.run(async () => {
+              const stored = await bucket.put(row.object_key, bytes, {
+                httpMetadata: { contentType: "application/octet-stream" },
+                customMetadata: { sha256: verified.sha256 },
+              });
+              if (!stored) refuse("deliverable_storage_unavailable");
             });
-            if (!stored) refuse("deliverable_storage_unavailable");
             await active();
             await deliverableRow(c, actor, deal, id);
             await c.query(
@@ -109,9 +217,6 @@ export function createDealDeliverablesHandler({
               [id],
             );
             await active();
-          } catch (error) {
-            await bucket.delete(row.object_key);
-            throw error;
           }
           return {
             ok: true,
@@ -132,17 +237,29 @@ export function createDealDeliverablesHandler({
           if (row.state !== "finalized") refuse("deliverable_not_finalized");
           return row;
         });
-        const object = await bucket.get(row.object_key);
+        const object = await storage.run(() => bucket.get(row.object_key));
         if (
           !object ||
           object.size !== Number(row.bytes) ||
           object.customMetadata?.sha256 !== row.sha256
         )
           refuse("deliverable_storage_unavailable");
+        const downloadBytes = await storage.run(() =>
+          boundedBody(
+            new Request("https://internal.invalid", {
+              method: "POST",
+              body: object.body,
+              duplex: "half",
+            }),
+            Number(row.bytes),
+            operationTimeoutMs,
+          ),
+        );
+        await verifyDeliverableBytes(downloadBytes, row);
         await active();
         await transaction((c) => deliverableRow(c, actor, deal, id));
         await active();
-        return new Response(object.body, {
+        return new Response(downloadBytes, {
           headers: {
             "content-type": row.mime,
             "content-length": String(row.bytes),
@@ -169,7 +286,9 @@ export function createDealDeliverablesHandler({
         request.method === "GET"
           ? {}
           : JSON.parse(
-              new TextDecoder().decode(await boundedBody(request, 4096)),
+              new TextDecoder().decode(
+                await boundedBody(request, 4096, operationTimeoutMs),
+              ),
             );
       if (
         !args ||
@@ -206,6 +325,9 @@ export function createDealDeliverablesHandler({
         invalid_visibility: 400,
         unregistered_operation_fields: 400,
         deliverable_storage_unavailable: 503,
+        deliverable_storage_timeout: 503,
+        deliverable_body_timeout: 408,
+        deliverable_rate_limited: 429,
       }[code];
       if (error instanceof SyntaxError)
         return json({ error: "invalid_json" }, 400);
