@@ -19,7 +19,7 @@ The data shape is `carr-source-ci-review-candidate.v1`. A candidate names the re
 | Admission artifact plus periodically scanning Studio consumer | Durable source evidence, but normal operation polls GitHub. | Reject as final transport. Artifacts remain for audit and bounded replay. |
 | Hosted Codex or GitHub-native reviewer | Avoids Studio delivery, but does not reuse T3 and does not establish the empirical independent reviewer-of-record. Model usage is separate from runner cost. | Reject for this brief. |
 
-Two interface sketches were `collect(run_id) -> candidate; admit(candidate) -> launch_receipt` and one privileged `coordinate(run_id) -> launch_receipt` in GitHub. The first wins. It keeps Card and local executor authority off hosted runners and places durable job transitions in software-factory. The second exposes CARR admission and a T3 launch capability to Actions.
+Two interface sketches were `collect(run_id, run_attempt) -> candidate; admit(candidate) -> launch_receipt` and one privileged `coordinate(run_id) -> launch_receipt` in GitHub. The first wins. It keeps Card and local executor authority off hosted runners and places durable job transitions in software-factory. The second exposes CARR admission and a T3 launch capability to Actions.
 
 GitHub documents [free standard runners for public repositories](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) and [workflow_run security risks](https://docs.github.com/en/actions/reference/security/secure-use). The adapter checks out the workflow's trusted default-branch revision, never PR code or artifacts. It queries public source metadata only. Repository permissions are read-only. No model, merge, review, or CARR token is supplied.
 
@@ -39,7 +39,7 @@ Receipts bind source run and attempt, current head, builder Card and executor, r
 
 ### Capacity, availability, and consistency
 
-The producer performs at most five GitHub reads, each with a 15-second timeout, without retries. One collector runs per CI completion. At ten times current load, machine admission capacity fails before this bounded collector. Consumer fan-out needs its own resource admission. No cache is used. Mutable PR metadata is reread. Unknown, ambiguous, truncated, stale, closed, draft, or fork input refuses. A candidate never proves that the PR remains current after collection.
+The producer performs at most six GitHub reads, each with a 15-second timeout, without retries. One collector runs per CI completion. At ten times current load, machine admission capacity fails before this bounded collector. Consumer fan-out needs its own resource admission. No cache is used. Mutable PR metadata is reread. Unknown, ambiguous, truncated, stale, closed, draft, or fork input refuses. A candidate never proves that the PR remains current after collection.
 
 GitHub or artifact failure fails the job. This piece has no database or N+1 query. Artifacts expire after seven days and are audit evidence, not the durable admission ledger. Future signed webhook delivery carries a source-run locator and stable key. Transport failures must be visible with bounded replay of specific missed events. No release transition changes.
 
@@ -48,17 +48,25 @@ GitHub or artifact failure fails the job. This piece has no database or N+1 quer
 ```mermaid
 stateDiagram-v2
     [*] --> Observed
-    Observed --> Refused: Invalid or unsuccessful source run
-    Observed --> Refused: Missing or ambiguous PR association
-    Observed --> Refused: Closed, fork, draft, or stale PR
-    Observed --> Candidate: Current CARR PR and successful source CI
-    Candidate --> Candidate: Duplicate or rerun produces same request key
+    Observed --> Refused: Invalid event or latest run identity
+    Observed --> Refused: A newer attempt has superseded the event
+    Observed --> AttemptVerified: Triggering attempt matches latest source run
+    AttemptVerified --> Refused: Invalid or unsuccessful triggering attempt
+    AttemptVerified --> Refused: Missing or ambiguous PR association
+    AttemptVerified --> Refused: Closed, fork, draft, or stale PR
+    AttemptVerified --> Candidate: Current CARR PR and successful source CI
+    Candidate --> Candidate: Duplicate event preserves attempt and request key
+    Candidate --> Observed: Rerun completes with its own attempt and the same request key
     Candidate --> Recheck: Future consumer receives event
     Recheck --> Superseded: Head moved
     Recheck --> Claimed: Independent executor and durable unique claim
     Claimed --> Launched: T3 accepts stable request identity
     Claimed --> Held: Ambiguous acceptance or repeated failure
 ```
+
+The event supplies the run ID and attempt through environment variables. The collector checks the latest run for supersession, then reads the exact attempt endpoint and its jobs. A queued completion never adopts a newer attempt. Refusals preserve the triggering attempt too. A rerun has a different evidence attempt but the same head-based request key. The latest attempt can change after collection, so the future consumer still must recheck before admission.
+
+`test_queued_completion_never_adopts_newer_attempt` covers completed and in-progress newer attempts after successful and cancelled events. `test_attempt_endpoint_identity_and_conclusion_are_verified` covers mismatched attempt, run, head and conclusion. Existing collection tests cover PR refusal, candidate and duplicate transitions. The YAML contract tests enforce trusted checkout, read-only permissions, ephemeral token use, pinned actions, no PR artifacts, and no event interpolation into executable shell. Unexpected jobs or steps fail closed.
 
 Only transitions through Candidate are implemented here. Recheck onward are software-factory obligations. No formal invariant or production launch is claimed. Run `python3 ops/source-ci-review-selftest.py` for executable transition tests.
 

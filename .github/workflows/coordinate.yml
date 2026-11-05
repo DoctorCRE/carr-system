@@ -17,9 +17,10 @@ jobs:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - name: Collect source evidence without launch authority
-        run: python3 ops/source-ci-review.py --run-id "$SOURCE_RUN_ID" > candidate.json
+        run: python3 ops/source-ci-review.py --run-id "$SOURCE_RUN_ID" --run-attempt "$SOURCE_RUN_ATTEMPT" > candidate.json
         env:
           SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           GH_TOKEN: ${{ github.token }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

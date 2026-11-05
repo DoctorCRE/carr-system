@@ -15,18 +15,25 @@ def positive_int(value):
     return type(value) is int and value > 0
 
 
-def collect(run_id, read):
+def collect(run_id, run_attempt, read):
     """Read current GitHub metadata and return a candidate or explicit refusal."""
-    if not positive_int(run_id):
-        raise ValueError("source run id must be a positive integer")
+    if not positive_int(run_id) or not positive_int(run_attempt):
+        raise ValueError("source run id and attempt must be positive integers")
 
     def refused(reason):
         return {"schema": "carr-source-ci-review-candidate.v1", "state": "refused",
-                "source_run_id": run_id, "reason": reason}
+                "source_run_id": run_id, "source_run_attempt": run_attempt, "reason": reason}
 
-    run = read(f"actions/runs/{run_id}")
-    if not isinstance(run, dict):
+    latest = read(f"actions/runs/{run_id}")
+    if (not isinstance(latest, dict) or latest.get("id") != run_id
+            or not positive_int(latest.get("run_attempt"))):
         return refused("malformed-source-run")
+    if latest["run_attempt"] != run_attempt:
+        return refused("superseded-source-attempt")
+    run = read(f"actions/runs/{run_id}/attempts/{run_attempt}")
+    if (not isinstance(run, dict) or run.get("run_attempt") != run_attempt
+            or run.get("head_sha") != latest.get("head_sha")):
+        return refused("malformed-source-identity")
     workflow = read("actions/workflows/ci.yml")
     if (not isinstance(workflow, dict) or not positive_int(workflow.get("id"))
             or run.get("workflow_id") != workflow["id"] or run.get("id") != run_id
@@ -39,7 +46,7 @@ def collect(run_id, read):
     sha = run.get("head_sha")
     if not isinstance(sha, str) or not SHA.fullmatch(sha) or not positive_int(run.get("run_attempt")):
         return refused("malformed-source-identity")
-    jobs = read(f"actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100")
+    jobs = read(f"actions/runs/{run_id}/attempts/{run_attempt}/jobs?per_page=100")
     if (not isinstance(jobs, dict) or not isinstance(jobs.get("jobs"), list)
             or jobs.get("total_count") != len(jobs["jobs"]) or len(jobs["jobs"]) >= 100):
         return refused("incomplete-source-jobs")
@@ -75,7 +82,7 @@ def collect(run_id, read):
         "schema": "carr-source-ci-review-candidate.v1", "state": "candidate",
         "repository": REPO, "pull_request": number, "head_sha": sha,
         "review_round": 1, "request_key": key,
-        "source_run_id": run_id, "source_run_attempt": run["run_attempt"],
+        "source_run_id": run_id, "source_run_attempt": run_attempt,
     }
 
 
@@ -93,9 +100,10 @@ def github_read(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", type=int, required=True)
+    parser.add_argument("--run-attempt", type=int, required=True)
     args = parser.parse_args()
     try:
-        print(json.dumps(collect(args.run_id, github_read), sort_keys=True))
+        print(json.dumps(collect(args.run_id, args.run_attempt, github_read), sort_keys=True))
     except (ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f"source-ci-review: {type(error).__name__}", file=sys.stderr)
         return 1
