@@ -911,8 +911,6 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
 
 class Matcher:
     def __init__(self, contacts: list, domain: str):
-        if not contacts:
-            raise CarrError(code='contacts_empty')
         self.contact_rows: dict[str, list[Contact]] = {}
         self.shared: set[str] = set()
         self.people = [(c.email.lower(), c.ref, c.name) for c in contacts
@@ -930,6 +928,13 @@ class Matcher:
             evidence = {(c.exact, str(c.party_id or snapshot_party or ''),
                          c.target_type or '', c.target_id or '', c.ref) for c in rows}
             self.revisions[address] = _hash(json.dumps(sorted(evidence)))
+
+    @classmethod
+    def read(cls, reader: Callable[[], list], domain: str) -> 'Matcher':
+        contacts = reader()
+        if not contacts:
+            raise CarrError(code='contacts_empty')
+        return cls(contacts, domain)
 
     def revision(self, address: str) -> str:
         return self.revisions.get(address.lower(), 'missing')
@@ -2160,7 +2165,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     matcher = None
     if state.get('mail_unresolved') or state.get('calendar_unresolved'):
         try:
-            matcher = Matcher(ports.contacts(), settings.internal_domain)
+            matcher = Matcher.read(ports.contacts, settings.internal_domain)
         except CarrError as error:
             return Outcome('failed', 'carr_unreachable' if error.code == 'transport_error' else error.code)
     contacts_changed = matcher is not None and state.get('contact_map') != matcher.fingerprint()
@@ -2245,7 +2250,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     if health.get('error_class'):
         work.counts['decoder_health_error_' + health['error_class']] = 1
     try:
-        matcher = matcher or Matcher(ports.contacts(), settings.internal_domain)
+        matcher = matcher or Matcher.read(ports.contacts, settings.internal_domain)
         complete_mails = [m for m in mails if not m['metadata_incomplete']]
         prepared = work.prepare_attachments(complete_mails, matcher, db, files)
         _remove(files.parent)
