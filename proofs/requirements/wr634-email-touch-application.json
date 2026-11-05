@@ -1,14 +1,33 @@
 {
-  "schema":"carr-production-proof-plan.v1",
-  "requirement_id":"WR634-S1-email-touch-application",
-  "targets":["worker"],
-  "assertions":[{
-    "id":"release-and-natural-intake-reconciliation",
-    "predicate":"After deployment verify the merged full SHA with worker-release-smoke.v1 release-identity and verb-registry. Then separately capture one natural intake run's exact expected email-contact cohort, reconcile every cohort batch through reconcile-email-touches at the deployed release, and prove every applied touch reads back with zero unexplained missing, dangling, tombstoned or out-of-window differences. Verify the submitted counts sum to the frozen expected cohort and that no activity is duplicated per source version and canonical target. Release smoke alone does not prove email application semantics. Unit 2 must supply bound requests before this natural-run proof can pass.",
-    "runner":"worker-release-smoke.v1",
-    "expected_result":"PASS for release identity and registry only. Full production proof requires the separate natural intake cohort reconciliation with zero unexplained differences. Until then landed-unproven.",
-    "input_class":"deployed Worker read-only identity and registry plus privately supplied natural intake cohort, counts-only output; no intake launch or writes",
-    "deadline_seconds":120
-  }],
-  "safety":{"read_only":true,"no_sends":true,"max_requests":10,"max_records":500,"max_runtime_seconds":120,"max_artifact_bytes":1048576}
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR634-S1-email-touch-application",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "release-identity-and-registry",
+      "predicate": "Verify the deployed merged full SHA and verb registry with the registered release smoke runner.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "PASS for the deployed merged full SHA and verb registry.",
+      "input_class": "deployed Worker read-only identity and registry",
+      "deadline_seconds": 60
+    },
+    {
+      "id": "natural-email-touch-cohort",
+      "predicate": "Run python3 tools/db-tap.py run ops/email-touch-cohort-proof.py with --journal bound to Unit 2's frozen natural-intake journal bytes, --journal-ref bound to sha256: plus their digest, and --journal-sha256 bound to that digest. The journal must bind the current deployed merged release SHA, authenticated local principal, canonical actor, tenant, occurrence window and exact expected source/version/key/role/target/occurrence cohort. Accept only mode=production, verdict=proven, reason=matched, expected=applied greater than zero, and zero missing, dangling, conflicting, tombstoned, out_of_window, extra and orphan counts. No fixture result proves natural production lineage.",
+      "runner": "email-touch-cohort-reconcile.v1",
+      "expected_result": "Exit 0 with production proven matched and exact positive count conservation; otherwise remain landed-unproven.",
+      "input_class": "Unit 2 immutable natural-intake expectation journal with original bytes, SHA256, content-addressed reference and acquisition provenance; counts-only read-only evidence",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 4096
+  }
 }
