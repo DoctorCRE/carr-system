@@ -349,12 +349,10 @@ resolve through `CLAUDE_PROJECT_DIR` in each checkout, including T3 worktrees.
 User settings retain personal MCP servers and preferences. After merge, use
 `python3 ops/scope-agent-config.py` to preview removal of legacy user copies.
 
-Codex CARR hooks load from the common checkout’s `.codex/hooks.json`, including
-linked worktrees. The installer targets that common layer and integrity checks
-it against this checkout’s required contract. Commands resolve
-`git rev-parse --show-toplevel` from the session cwd, including linked worktrees
-and subdirectories. Trust the project layer and review its exact hooks through
-Codex `/hooks`; changed hooks require trust again. User-wide Codex hooks are
-independent and additive. After merge, `python3 ops/scope-agent-config.py`
-previews removal of CARR hook script registrations from both clients' user files;
-`--apply` writes private backups and preserves unrelated registrations.
+Codex CARR hooks load from the common checkout's `.codex/hooks.json`, including
+linked worktrees. The installer targets this layer; integrity checks it against
+this checkout's contract. Commands use `git rev-parse --show-toplevel` from the
+session cwd. Review and trust project hooks in Codex `/hooks`; changed hooks
+need trust again. User-wide hooks are additive. After merge,
+`python3 ops/scope-agent-config.py` previews CARR hook removal from both clients'
+user files. `--apply` saves private backups and preserves unrelated registrations.
