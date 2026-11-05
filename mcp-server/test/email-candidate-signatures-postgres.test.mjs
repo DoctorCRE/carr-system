@@ -89,6 +89,8 @@ test('installed lifecycle handles candidate-only sources and terminal retries',a
   const otherEvidence=await executeRegisteredTool(c,actor,'read-email-candidate-signatures',{pool_id:other.pool_id});
   assert.equal(otherEvidence.source_invalid,true);
   assert.equal(otherEvidence.observations.length,0);
+  const audit=(await c.query("select new_value from event where verb='observe-email-candidate-signatures' and subject_id=$1",[other.pool_id])).rows[0].new_value;
+  assert.deepEqual(audit.terminal_sources,[{source_id:'b'.repeat(64),raw_digest:'d'.repeat(64)}]);
 });
 test('decline persists and ownership protects readback',async () => {
   await c.query("update candidate_pool set status='declined',declined_at=now(),declined_by=$1,decline_reason='Synthetic' where id=$2",[actor.id,pool]);
