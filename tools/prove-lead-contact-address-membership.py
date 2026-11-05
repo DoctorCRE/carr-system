@@ -29,6 +29,7 @@ def observe(origin, wrapper, seconds):
     receipt = dict(schema='lead-contact-address-membership-proof.v1', release_sha=None,
                    assertions=0, eligible_records=0, exact_activities=0, detail_reads=0)
     seen = set()
+    human_candidate = False
 
     def remaining():
         value = deadline - time.monotonic()
@@ -92,6 +93,12 @@ def observe(origin, wrapper, seconds):
                         continue
                     if metadata.get('match') == 'exact':
                         receipt['exact_activities'] += 1
+                        reference = metadata.get('evidence_ref')
+                        prefix = 'local-mail:' if activity.get('source') == 'local_mail' else 'local-calendar:'
+                        if (activity.get('kind') in ('email_in', 'email_out', 'meeting', 'call', 'tour')
+                                and isinstance(reference, str) and reference.startswith(prefix)
+                                and len(reference) > len(prefix)):
+                            human_candidate = True
                     for move in preview['moves']:
                         if (move.get('lead_id') == lead['id'] and move.get('activity_id') == activity['id']
                                 and move.get('strength') == 'strong' and move.get('status') == 'applied'):
@@ -109,9 +116,20 @@ def observe(origin, wrapper, seconds):
                 break
         if release() != receipt['release_sha']:
             raise Unavailable('release_changed')
-        # record-lead-contact deliberately omits the captured address from detail.
-        # Neither exact metadata nor a preview proves which stored token matched.
-        raise Unavailable('captured_address_not_exposed_by_public_contract')
+        if not human_candidate:
+            raise Unavailable('no_natural_exact_contact_for_human_observation')
+        return 0, {**receipt, 'status': 'human_pending',
+                   'reason': 'captured_address_not_exposed_by_public_contract',
+                   'human_steps': [
+                       'Open the original Outlook message or calendar item identified by evidence_ref '
+                       'beside its authenticated lead-board workspace=leads detail. '
+                       'For that same natural activity, verify the sender, recipient or attendee '
+                       'equals a complete non-first semicolon-separated token in the lead email '
+                       'after trimming and lowercasing, and detail records match=exact. '
+                       'The coordinator must supply these authenticated read results and confirm '
+                       'release_sha is unchanged across this observation. '
+                       'Report only pass or contradiction and the count, without addresses or identities.'
+                   ]}
     except Contradiction as error:
         return 1, {**receipt, 'status': 'contradiction', 'reason': str(error)}
     except Unavailable as error:

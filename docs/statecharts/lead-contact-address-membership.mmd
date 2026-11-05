@@ -18,3 +18,17 @@ stateDiagram-v2
     %% never qualify from an exact contact alone without existing strong evidence
     %% capture is synchronous; it introduces no background work or teardown
     %% address limits are 254 ASCII octets total, 64 local-part octets, and 63 octets per domain label
+
+    state ProductionObservation {
+        [*] --> ReadNaturalContact
+        ReadNaturalContact --> ProofRefused: Source unavailable, empty, unconfirmed or deadline exhausted
+        ReadNaturalContact --> ProofContradiction: Strong preview disagrees with recorded evidence
+        ReadNaturalContact --> CheckReleaseAgain: Bounded natural contact reads finish
+        CheckReleaseAgain --> ProofRefused: Release changed
+        CheckReleaseAgain --> HumanObservationPending: Stable release and native exact contact candidate
+        HumanObservationPending --> [*]: Joe compares original Outlook item with workspace detail on same release
+        ProofRefused --> [*]
+        ProofContradiction --> [*]
+    }
+    %% human_pending is not live-proven; eligible_records remains zero
+    %% never infer captured-address membership from exact metadata alone

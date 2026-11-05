@@ -28,7 +28,7 @@ if mode=='timeout': time.sleep(2)
 if verb=='lead-stage-preview':
  print(json.dumps({{'contract':'lead-automation.v1','dry_run':True,'moves':[{{'lead_id':'lead-0','activity_id':'activity-0','evidence_ref':'local-mail:private','strength':'strong','status':'applied'}}] if mode in ('contradiction','positive') else []}}))
 else:
- detail={{'id':args.get('lead_id'),'email':'first@example.test;second@example.test','correspondence':[{{'id':'activity-0','kind':'email_in','source':'local_mail','detail':{{'match':'unconfirmed' if mode=='contradiction' else 'exact','evidence_ref':'local-mail:private'}}}}], 'correspondence_page':{{'has_more':True,'next_cursor':{{'id':'cursor','occurred_at':'2026-01-01T00:00:00Z'}}}}}}
+ detail={{'id':args.get('lead_id'),'email':'first@example.test;second@example.test','correspondence':[{{'id':'activity-0','kind':'email_in','source':'local_mail','detail':{{'match':'unconfirmed' if mode in ('contradiction','unconfirmed') else 'exact','evidence_ref':None if mode=='missing-reference' else 'local-mail:private'}}}}], 'correspondence_page':{{'has_more':True,'next_cursor':{{'id':'cursor','occurred_at':'2026-01-01T00:00:00Z'}}}}}}
  print(json.dumps({{'schema_version':'lead-workspace.v1','leads':[{{'id':'lead-'+str(i)}} for i in range({count})], 'detail':detail if 'lead_id' in args else None}}))
 ''')
             wrapper.chmod(0o700)
@@ -93,6 +93,21 @@ else:
         self.assertEqual(result.returncode, 78)
         self.assertEqual(json.loads(result.stdout)['detail_reads'], 0)
         self.assertNotIn('human_steps', json.loads(result.stdout))
+
+    def test_no_natural_exact_contact_refuses_human_handoff(self):
+        result, _, _ = self.run_cli('unconfirmed')
+        self.assertEqual(result.returncode, 78)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['status'], 'insufficient_evidence')
+        self.assertEqual(receipt['exact_activities'], 0)
+        self.assertNotIn('human_steps', receipt)
+
+    def test_exact_without_native_reference_refuses_human_handoff(self):
+        result, _, _ = self.run_cli('missing-reference')
+        self.assertEqual(result.returncode, 78)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['exact_activities'], 1)
+        self.assertNotIn('human_steps', receipt)
 
     def test_read_budget_and_two_page_cap(self):
         result, calls, _ = self.run_cli(count=30)
