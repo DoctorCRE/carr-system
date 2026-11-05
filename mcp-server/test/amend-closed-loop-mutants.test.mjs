@@ -11,6 +11,7 @@
 // FAILS against the mutant.
 
 import test from "node:test";
+import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,8 +32,7 @@ function relink(source) {
   // tools.js wraps a couple of long import statements across two lines
   // (`import { x } from\n  "./y.js";`), so the gap between `from` and the
   // string literal is whitespace, not always a single space.
-  return source.replace(/from\s+"\.\/([^"]+)"/g, (_, file) =>
-    `from "${pathToFileURL(join(SRC, file)).href}"`);
+  return relinkSourceImports(source, SRC);
 }
 
 function mutate(anchor, replacement) {

@@ -841,6 +841,18 @@
       "rule": "client-data",
       "value_sha256": "f0be891b1f61d8c54f697ce4bb0d122db2b81e8c530d757807d1b083dbad5929",
       "reason": "WR634.S1.J87 reviewed source-only Git fetch, remote-main revision readback and ancestry check. This token window contains code and Git ref names, no client record. Bound to exact file bytes and matched value hash."
+    },
+    {
+      "path": "contracts/production-proof-plan.v1.json",
+      "sha256": "d1a20d5447937ffc6e03f568e9777f0d2d627089f4c4d1430799858c7278baca",
+      "rule": "generic-api-key",
+      "reason": "Reviewed canonical runner source SHA256 map, including credential_file.py source digest. Contains no credential. Exact contract blob only."
+    },
+    {
+      "path": "contracts/production-proof-plan.v1.json",
+      "sha256": "d42772e957f951ae57ddab30dec59e3e9feb13c95f815af806d2c860bb106049",
+      "rule": "generic-api-key",
+      "reason": "Reviewed canonical runner source SHA256 map retained with app runner registration. Contains source digests, not credentials. Exact combined contract blob only."
     }
   ]
 }

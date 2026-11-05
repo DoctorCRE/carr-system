@@ -96,7 +96,8 @@ if sys.argv[3] != "outlook-intake":
         "compose_window_open screen_locked".split())
 if sys.argv[3] == "outlook-triage":
     reasons |= frozenset("snapshot_unavailable capability_not_verified executor_unavailable "
-                         "reconciliation_required snapshot_invalid snapshot_stale".split())
+                         "reconciliation_required snapshot_invalid snapshot_stale "
+                         "snapshot_producer_unavailable".split())
 prefix = sys.argv[3] + "-receipt "
 # Count keys are code-built names; values carry the meaning. A snake_case name with a
 # bounded non-negative integer value cannot carry mail content, so no key list drifts.

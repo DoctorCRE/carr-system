@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S1-app-runner-registration",
+  "targets": [
+    "app"
+  ],
+  "assertions": [
+    {
+      "id": "app-release-and-signed-in-walk",
+      "predicate": "After the CARR registry deploy and app contract repin, run app-release-live-walk.v1 against the app merge SHA. Verify the public app release identity and ancestry. Retain a named signed-in Home walk as human pending until Joe observes it. Admission acceptance alone is not execution proof.",
+      "runner": "app-release-live-walk.v1",
+      "expected_result": "The observer verifies app release ancestry and reports human_pending for the signed-in Home walk. No automated signed-in content assertion or completion claim.",
+      "input_class": "public release identity and explicit human signed-in Home walk; no mailbox or contact data",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 20,
+    "max_records": 1,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
