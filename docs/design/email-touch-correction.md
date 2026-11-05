@@ -26,6 +26,8 @@ Throughput checkpoint. Chart, failing PostgreSQL tests, compensation and reader 
 
 The correction marker is activity.touch_correction_key. v_last_touch excludes marked activities for clients, leads, vendors and inherited deal dates. Vendor relationship last_contacted_at and last_contact_note use the same exclusion. History retains marked activities. Reconciliation adds a mutually exclusive corrected count to its existing submitted-cohort partition. It never reports a compensated application as still applied.
 
+Correction also refuses an activity whose target changed or gained another target attachment, even with fresh versions. Excluding a shared activity could otherwise subtract another party's later work. Exact replay of the original application retains the compensation marker and never restores the contact date.
+
 Model the Domain shaped the immutable compensation and the single corrected disposition. The codebase-design pass keeps transaction guards behind one registered command. The zero-tech-debt pass reuses the existing activity and event ownership rather than introducing another ledger or undo framework. Delegated design and review steps are omitted under the explicit no-subagents instruction. No rebase is used.
 
 Bound log-activity defers its source-row lifecycle guard until after the source-target and mailbox locks. Correction uses the same ordering. A synthetic concurrent linked-source application exposed the previous lock inversion. A deterministic regression holds the source-target lock, waits for the revision to reach it, then corrects before releasing it. The revision must finish after that correction without a database deadlock.

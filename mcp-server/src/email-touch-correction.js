@@ -42,7 +42,9 @@ export function emailTouchCorrection({ToolError,withEnvelope,versionGuard,writeE
         throw new ToolError({error:'email_not_live'});
       if (activity.version!==args.activity_base_version || source.version!==args.source_base_version)
         throw new ToolError({error:'version_conflict'});
-      if (activity[`${table}_id`]!==binding.target_id || !['email_in','email_out'].includes(activity.kind) ||
+      if (activity[`${table}_id`]!==binding.target_id ||
+          ['deal','client','lead','vendor'].some(type=>type!==table && activity[`${type}_id`]!=null) ||
+          !['email_in','email_out'].includes(activity.kind) ||
           new Date(activity.occurred_at).toISOString()!==binding.occurred_at)
         throw new ToolError({error:'email_touch_source_conflict'});
       const conflict=(await c.query(`select 1 from event where verb='log-activity' and new_value ? 'email_application'

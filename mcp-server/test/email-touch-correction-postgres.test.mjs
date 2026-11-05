@@ -33,6 +33,8 @@ test('guarded email touch correction through registered transactions',async t=>{
   await t.test('latest correction restores exact prior date and retains original',async()=>{
     const x=await setup(); assert.equal(await date(x.target),'2026-01-03');
     const r=await call('correct-email-touch',x.args);assert.equal(r.ok,true);assert.equal(await date(x.target),'2026-01-01');
+    assert.equal((await call('log-activity',x.input)).activity_id,x.applied.activity_id);
+    assert.equal(await date(x.target),'2026-01-01');
     assert.equal((await c.query('select kind from activity where id=$1',[x.applied.activity_id])).rows[0].kind,'email_in');
     assert.equal((await c.query("select count(*)::int n from event where idempotency_key=$1 and new_value ? 'email_application'",[x.input.idempotency_key])).rows[0].n,1);
     await c.query('delete from tool_call where idempotency_key=$1',[x.args.idempotency_key]);
@@ -76,6 +78,16 @@ test('guarded email touch correction through registered transactions',async t=>{
   await t.test('newer source revision refuses even with current versions',async()=>{
     const x=await setup();await call('log-activity',{...x.input,idempotency_key:randomUUID(),email_touch:{...x.input.email_touch,source_version:'2'}});
     await assert.rejects(call('correct-email-touch',x.args),e=>e.payload?.error==='email_touch_newer_work');assert.equal(await date(x.target),'2026-01-03');
+  });
+  await t.test('changed or shared target attachment refuses with fresh activity version',async()=>{
+    const x=await setup(),other=await setup();
+    await c.query('update activity set client_id=$2,version=version+1 where id=$1',[x.applied.activity_id,other.target]);
+    await assert.rejects(call('correct-email-touch',{...x.args,activity_base_version:2,source_base_version:2}),e=>e.payload?.error==='email_touch_source_conflict');
+    const y=await setup();
+    const party=(await c.query('select party_id from client where id=$1',[y.target])).rows[0].party_id;
+    const lead=(await c.query("insert into lead(party_id,stage,created_by,updated_by) values($1,'new',$2,$2) returning id",[party,actor.id])).rows[0].id;
+    await c.query('update activity set lead_id=$2,version=version+1 where id=$1',[y.applied.activity_id,lead]);
+    await assert.rejects(call('correct-email-touch',{...y.args,activity_base_version:2,source_base_version:2}),e=>e.payload?.error==='email_touch_source_conflict');
   });
   await t.test('changed target, activity, binding and source versions refuse',async()=>{
     for(const field of ['base_version','activity_base_version','source_base_version','source_version']){
