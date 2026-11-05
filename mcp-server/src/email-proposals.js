@@ -1,4 +1,5 @@
 // Expose and resolve email-derived proposals.
+import { filingApplicationQueue, filingApplicationWrite, lockFilingApplication } from './email-filing-application.js';
 import { lockEmailIdentity, capturedEmail } from './email-identity.js';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
@@ -338,6 +339,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           fail('email_thread_filing_changed');
         await c.query('update activity set deal_id=null,version=version+1,updated_by=$2,updated_at=now() where id=$1',
           [filing.new_value.activity_id,actor.id]);
+        await c.query("update email_filing_application set status='suppressed',reason='undo',claim_id=null,claim_until=null where activity_id=$1", [filing.new_value.activity_id]);
         await writeEvent(c, actor, 'undo-email-thread-filing', 'deal', filing.subject_id,
           { new: { event_id: filing.id, activity_id: filing.new_value.activity_id }, cause: 'human_correction',
             idempotency_key: args.idempotency_key, recorded_at_after_lock: true });
@@ -392,6 +394,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const updated = (await c.query(`update activity set deal_id=$2,version=version+1,updated_by=$3,updated_at=now() where id=$1 and deal_id is null returning version`,
           [current.activity_id,prior.deal,actor.id])).rows[0];
         if (!updated) fail('email_thread_not_continuous');
+        await c.query('select public.enqueue_email_filing($1,$2,$3,$4)',
+          [current.activity_id,prior.deal,args.idempotency_key,'inherited']);
         await writeEvent(c, actor, 'inherit-email-thread', 'deal', prior.deal,
           { new: { activity_id: current.activity_id, thread_activity_id: prior.activity_id, activity_version: updated.version },
             cause: 'observed', idempotency_key: args.idempotency_key });
@@ -607,7 +611,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           { required: ['kind','activity_id','evidence_quote','confidence'] }, { required: ['mode'] },
         ], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
-          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result'] },
+          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result'] },
+          generation: { type: 'string', format: 'uuid' },
+          application_status: { enum: ['applied','retry'] },
           source_hash: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
           claim_id: { type: 'string', format: 'uuid' },
           summary_status: { enum: ['available', 'unavailable'] },
@@ -636,6 +642,18 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           body: { type: 'string', minLength: 1, maxLength: 20000 },
         } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'record-email-proposal', args, async () => {
+        if (['application_claim','application_result'].includes(args.mode)) {
+          if (!args.activity_id || !args.generation) fail('email_proposal_fields_invalid');
+          const result = await filingApplicationWrite(c,actor,args,fail);
+          await writeEvent(c,actor,'record-email-proposal','activity',args.activity_id,
+            { new: { generation:args.generation,...result },cause:'observed',idempotency_key:args.idempotency_key });
+          return result;
+        }
+        if (args.generation) {
+          const work = await lockFilingApplication(c,actor,args,fail);
+          if (!work.claim_active || work.claim_id!==args.claim_id || args.deal!==work.deal_id)
+            fail('email_application_stale');
+        }
         if (['summary_claim', 'summary_result'].includes(args.mode)) {
           const allowed = ['mode','activity_id','source_hash','idempotency_key',
             ...(args.mode === 'summary_result' ? ['claim_id','summary_status','summary_text','summary_provenance'] : [])];
@@ -931,7 +949,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=summaries pages pending-card incoming sources by UUID without the proposal age limit; pending_only=false pages all incoming sources recorded within three days independently of proposals. It returns source_hash for summary_claim and performs no generation. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
-          purpose: { enum: ['links', 'outcomes', 'summaries'] },
+          purpose: { enum: ['links', 'outcomes', 'summaries', 'applications'] },
           pending_only: { type: 'boolean' }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
@@ -939,6 +957,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const limit = args.limit ?? 25;
         // The age window's start follows the server clock, so tests on a fixed clock stay in range.
         const clock = new Date().toISOString();
+        if (args.purpose === 'applications') return filingApplicationQueue(c,_actor,args);
         if (args.purpose === 'summaries') {
           if (Object.keys(args).some(key => !['purpose','limit','after','pending_only'].includes(key))) fail('email_proposal_fields_invalid');
           const owner = partnerAuthoritySlugForActor(_actor);
