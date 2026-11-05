@@ -17,6 +17,7 @@ from unittest import mock
 
 RUNNER = Path(__file__).with_name('prove-lease-comparison-tiny-rate-stability.py')
 spec = importlib.util.spec_from_file_location('lease_proof', RUNNER)
+assert spec is not None and spec.loader is not None
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 
