@@ -13,6 +13,42 @@ use std::{
 
 const CAP: usize = 10_000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Kind {
+    MailFlag,
+    StandaloneTask,
+    #[allow(dead_code)]
+    CalendarReminder,
+}
+
+impl Kind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MailFlag => "mail_flag",
+            Self::StandaloneTask => "standalone_task",
+            Self::CalendarReminder => "calendar_reminder",
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum IdentityBasis {
+    VerifiedLocalObject,
+    Unresolved,
+}
+
+#[derive(PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DecodeStatus {
+    #[allow(dead_code)]
+    Supported,
+    Partial,
+    Unsupported,
+    Conflict,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
 #[allow(dead_code)]
@@ -78,7 +114,7 @@ struct Source<'a> {
     store_generation: &'a str,
     account_key: String,
     object_key: Option<String>,
-    identity_basis: &'static str,
+    identity_basis: IdentityBasis,
     format_id: Option<&'static str>,
     outlook_build: &'a str,
     decoder_revision: &'a str,
@@ -98,7 +134,7 @@ struct Provenance {
 #[derive(Serialize)]
 struct Candidate<'a> {
     schema: &'static str,
-    kind: &'static str,
+    kind: Kind,
     source: Source<'a>,
     revision: Field<Revision>,
     title: Field<String>,
@@ -107,7 +143,7 @@ struct Candidate<'a> {
     deletion: Field<Deletion>,
     reminder: Field<Reminder>,
     provenance: Vec<Provenance>,
-    decode_status: &'static str,
+    decode_status: DecodeStatus,
     reason_codes: Vec<&'static str>,
 }
 
@@ -155,7 +191,7 @@ fn due(db: &Connection, value: Option<Option<i64>>) -> Field<Due> {
 fn candidate<'a>(
     db: &Connection,
     key: u64,
-    kind: &'static str,
+    kind: Kind,
     evidence: &Evidence,
     account: u64,
     generation: &'a str,
@@ -169,7 +205,7 @@ fn candidate<'a>(
             store_generation: generation,
             account_key: account.to_string(),
             object_key: None,
-            identity_basis: "unresolved",
+            identity_basis: IdentityBasis::Unresolved,
             format_id: None,
             outlook_build: build,
             decoder_revision: revision,
@@ -181,7 +217,7 @@ fn candidate<'a>(
         deletion: Field::Unknown("tombstone_unverified"),
         reminder: Field::Unknown("reminder_format_unverified"),
         provenance: vec![],
-        decode_status: "unsupported",
+        decode_status: DecodeStatus::Unsupported,
         reason_codes: vec!["admission_disabled"],
     };
     if evidence.task_classifier {
@@ -198,7 +234,7 @@ fn candidate<'a>(
     } else if !evidence.unsupported && evidence.mail_verified && !evidence.classifier_ambiguous {
         if let Some((rev, d)) = evidence.details.details.get(&key) {
             c.source.object_key = Some(key.to_string());
-            c.source.identity_basis = "verified_local_object";
+            c.source.identity_basis = IdentityBasis::VerifiedLocalObject;
             c.source.format_id = Some("mail-detail-060f-00c9-layout3");
             c.revision = Field::Known(Revision {
                 scheme: "mail_detail_u32",
@@ -230,9 +266,9 @@ fn candidate<'a>(
                 }
             };
             c.decode_status = if !evidence.conflicts.is_empty() {
-                "conflict"
+                DecodeStatus::Conflict
             } else {
-                "partial"
+                DecodeStatus::Partial
             };
             for (field, offset, length, encoding) in [
                 ("revision", 1418, 4, "u32le"),
@@ -333,7 +369,7 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
         ("selected_account_objects", 0),
     ]);
     let mut deferred_min = u64::MAX;
-    let mut held: BTreeMap<(u64, &'static str, u8), Evidence> = BTreeMap::new();
+    let mut held: BTreeMap<(u64, Kind, u8), Evidence> = BTreeMap::new();
     let (signatures, issues) = observe::verified_blocks(&raw, |_, _, block| {
         add(&mut counts, "blocks_verified");
         let data = &block.data;
@@ -396,7 +432,7 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
                     }
                     Some("IPM.Task") => {
                         add(&mut counts, "task_classifier_hypotheses");
-                        ("standalone_task", 0)
+                        (Kind::StandaloneTask, 0)
                     }
                     _ => {
                         add(&mut counts, "unreadable_candidates");
@@ -408,7 +444,7 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
                     add(&mut counts, "unreadable_candidates");
                     continue;
                 }
-                ("mail_flag", body.get(1491).copied().unwrap_or(0))
+                (Kind::MailFlag, body.get(1491).copied().unwrap_or(0))
             };
             add(&mut counts, "candidates_seen");
             if key <= after {
@@ -474,9 +510,9 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
                 .flatten()
                 .and_then(object::text);
             for ((local_key, kind, _), evidence) in
-                held.range_mut((key, "", 0)..=(key, "zzzz", u8::MAX))
+                held.range_mut((key, Kind::MailFlag, 0)..=(key, Kind::MailFlag, u8::MAX))
             {
-                if *local_key != key || *kind != "mail_flag" {
+                if *local_key != key || *kind != Kind::MailFlag {
                     continue;
                 }
                 if classifier
@@ -533,9 +569,9 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
         .map_err(|_| ())?;
     for ((key, kind, layout), evidence) in &held {
         let c = candidate(
-            &tx, *key, kind, evidence, account, generation, build, revision,
+            &tx, *key, *kind, evidence, account, generation, build, revision,
         );
-        if c.decode_status == "conflict" {
+        if c.decode_status == DecodeStatus::Conflict {
             add(&mut counts, "revisions_conflicted");
         }
         let mut value = serde_json::to_value(c).map_err(|_| ())?;
@@ -548,7 +584,12 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
             .unwrap()
             .insert("candidate_digest".into(), Value::String(digest));
         insert
-            .execute(params![key.to_string(), kind, layout, value.to_string()])
+            .execute(params![
+                key.to_string(),
+                kind.as_str(),
+                layout,
+                value.to_string()
+            ])
             .map_err(|_| ())?;
     }
     drop(insert);
