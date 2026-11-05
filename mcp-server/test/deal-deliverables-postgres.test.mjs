@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { executeRegisteredTool } from "../src/tools.js";
 import { restoreEventIdentity } from "./helpers/snapshot-schema.mjs";
@@ -774,8 +775,11 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
           };
           await writeFile(`${directory}/receipt.json`, JSON.stringify(receipt));
           await writeFile(`${directory}/fixture.json`, JSON.stringify(fixture));
+          const proofPath = fileURLToPath(
+            new URL("../../ops/deal-deliverables-proof.py", import.meta.url),
+          );
           const command = [
-            "ops/deal-deliverables-proof.py",
+            proofPath,
             "--receipt",
             `${directory}/receipt.json`,
             "--fixture",
@@ -793,7 +797,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
               "-c",
               `
 import importlib.util, io, json, base64, sys
-spec = importlib.util.spec_from_file_location('proof', 'ops/deal-deliverables-proof.py')
+spec = importlib.util.spec_from_file_location('proof', sys.argv[4])
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 fixture = json.load(open(sys.argv[2]))
@@ -827,6 +831,7 @@ assert len(seen) == 4
               `${directory}/receipt.json`,
               `${directory}/fixture.json`,
               directory,
+              proofPath,
             ],
             { encoding: "utf8" },
           );

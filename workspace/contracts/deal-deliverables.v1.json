@@ -71,7 +71,12 @@
   "concurrency": "deal reservation advisory lock; upload and finalization row locks; visibility expected_version compare under row lock; finalization replay returns existing without another event",
   "retention": "files kept with the deal record; unused started reservations expire after 24 hours; no file deletion operation",
   "policy_source": "mcp-server/src/deal-deliverables.js DELIVERABLE_POLICY",
+  "transport_policy_source": "mcp-server/src/deal-deliverables-web.js DELIVERABLE_IO_POLICY",
   "refusals": [
+    "deliverable_body_timeout",
+    "deliverable_storage_timeout",
+    "deliverable_storage_unavailable",
+    "deliverable_rate_limited",
     "deliverable_denied",
     "session_revoked",
     "upload_size_refused",
