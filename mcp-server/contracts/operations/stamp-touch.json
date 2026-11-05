@@ -1,0 +1,12 @@
+{
+  "ingress_key": "mcp-tool:stamp-touch",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "ff770d41299ef7cb660d6072bdb5757c07dd3bfb11d46b9bcf2f84b4fe9b51b1",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": [
+    "log-activity"
+  ]
+}

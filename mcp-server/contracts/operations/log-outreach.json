@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:log-outreach",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "bcfc9931d607007393378ea1a94e181b89f300339ff6f960f1d8002bcb81ef35",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

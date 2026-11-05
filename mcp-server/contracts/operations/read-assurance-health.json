@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-assurance-health",
+  "source_locator": "mcp-server/src/assurance-health-store.v5.ts",
+  "schema_digest": "a18d5c967bd49cafa432c9bb1d7c116f289725ee3a111b9750b90e8bd2a7bd53",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

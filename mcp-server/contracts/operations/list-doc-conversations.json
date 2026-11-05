@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-doc-conversations",
+  "source_locator": "mcp-server/src/doc-conversation.js",
+  "schema_digest": "8d0a5c66aafa64530231ec5bb1183b4f576dcb57006af7170ad99980c62e66c1",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

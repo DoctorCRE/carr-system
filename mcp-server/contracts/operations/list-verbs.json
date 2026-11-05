@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-verbs",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "c9cf3bf1ed2c491cce794e2aebcd0cd394e697ccdf6d72779e521f83d066ede2",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

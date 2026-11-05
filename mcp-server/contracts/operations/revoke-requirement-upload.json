@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:revoke-requirement-upload",
+  "source_locator": "mcp-server/src/requirement-requests.js",
+  "schema_digest": "fb1e2483a8d6da867a4fc7d161872a598a38efa47900eb71af2068932d06e141",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

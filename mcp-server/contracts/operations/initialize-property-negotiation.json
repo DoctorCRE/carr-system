@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:initialize-property-negotiation",
+  "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
+  "schema_digest": "39f7707362a4c568e216bcb2b8807ce298ec31da7ab790defbe5c69ec2fe6670",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

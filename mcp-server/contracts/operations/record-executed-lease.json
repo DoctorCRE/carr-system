@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-executed-lease",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "1eb88fa6d63c1509122d7b86c21b5f14107fe06336f4c4747f1b4751126365fc",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

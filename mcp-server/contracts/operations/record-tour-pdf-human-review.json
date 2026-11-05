@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-tour-pdf-human-review",
+  "source_locator": "mcp-server/src/tour-artifacts.js",
+  "schema_digest": "f10b99f70895c181be001452d81b822afe11758230bbc22721e165108146fb23",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

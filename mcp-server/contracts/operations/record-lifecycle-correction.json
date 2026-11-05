@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-lifecycle-correction",
+  "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
+  "schema_digest": "80d129fa5949522ecac83d2391dea13797320d611a0a68faaf61976c1be866dc",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

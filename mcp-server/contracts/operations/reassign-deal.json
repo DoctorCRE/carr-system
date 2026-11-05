@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:reassign-deal",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "ff7d546a0402d2e65bf53a29167e87264c8e9c43e021706d06d0addef76d042f",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

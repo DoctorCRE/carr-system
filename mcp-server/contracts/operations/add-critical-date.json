@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:add-critical-date",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "a9056015d815dd919593024f338ad8df8d775f918ac90101242b988db1d74b3d",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

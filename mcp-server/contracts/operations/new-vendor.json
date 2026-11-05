@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:new-vendor",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "c40d64bca766934387f77f764c079f5856c8f1418d4c6b8bca4328c05c32beec",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

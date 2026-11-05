@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:inherit-email-thread",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "c332c505a0485964fe37690e03489418f074f61f7dd7e0f0519e2a255cc088ec",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

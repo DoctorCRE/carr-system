@@ -2,11 +2,7 @@
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
-import censusInventoryFamily from "./tool-families/census-inventory.js";
-import practiceOriginationFamily from "./tool-families/practice-origination.js";
-import scheduleBoardFamily from "./tool-families/schedule-board.js";
-import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
-const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
+import toolFamilies from "#verb-families";
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";

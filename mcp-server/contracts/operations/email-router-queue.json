@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:email-router-queue",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "5de2330498176f1c8857ac4fe6a2748c1e5e2abe8273f1647d97a8a18dd4f6ef",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

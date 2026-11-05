@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-record-source-authority",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "fddc80850e615ad4b807d4418efb9d238855d357df22f922327a06e8db08ec27",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

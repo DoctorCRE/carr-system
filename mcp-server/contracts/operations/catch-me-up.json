@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:catch-me-up",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "c6390215581d934d925661d49a0155f8d5df7506b042ff50e7996d49f4c6d08d",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:claim-meeting-processing",
+  "source_locator": "mcp-server/src/meeting-mode.js",
+  "schema_digest": "c44909adba57ff5631f6ef9118a593ff30a8a1f2e49f85cca4385e0ba41dcb72",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

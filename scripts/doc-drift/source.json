@@ -2,11 +2,20 @@
   "repository": "jbookout/software-factory",
   "revision": "42b5fbd61cbbb7b6d780086b6c363aa828c104ea",
   "files": {
-    "scripts/doc-drift/check.py": "60b63d7cc23ec9df91e83ccc1f8986542ecc8c3449cc6c7fea8bf2e4fe9796e9",
+    "scripts/doc-drift/check.py": "bc77e28e2fdc1d6f50b02296425f1ab16f02c904fd81e41f587b81ede8b20826",
     "scripts/doc-drift/requirements.txt": "0969da99a0bc2a1b71ed50584560f4588a37567ac63af3ddbaf3c4617ca5621a",
     "scripts/doc-drift/ci.py": "3904481467ce9f238b930e455b872b4c8e73d990ce80cb5bc6fa441c20870f7e",
-    "scripts/doc-drift/README.md": "17e71e7805ec958c3dcdbc949acfb5920bdb90f2acfd36f3062e97c4c1c474e3",
+    "scripts/doc-drift/README.md": "bcd721376fc1d6cf640ba84067ecc76e635ad07f34e624b9c215597d2ccce77c",
     "test/doc_drift/test_ci.py": "71cc810d1e47395e8ba9c612d7d7ff7d7cf6fd7eb9f0497010f0f1507145f076",
-    "test/doc_drift/test_checker.py": "328895616c39a8b255db8f0adf43f1c20a9d7b0559ad648d86668b65aea63b03"
+    "test/doc_drift/test_checker.py": "8840a9e7497c46d30092103e3c91711ce111f2705eca1a33bcb41aeac649349c"
+  },
+  "local_patch": {
+    "card": "WR622.S1.J257",
+    "reason": "CARR registry package-import and descriptor graph integration; upstream retired this checker after the pinned revision. Original source provenance retained below.",
+    "upstream_files": {
+      "scripts/doc-drift/check.py": "60b63d7cc23ec9df91e83ccc1f8986542ecc8c3449cc6c7fea8bf2e4fe9796e9",
+      "test/doc_drift/test_checker.py": "328895616c39a8b255db8f0adf43f1c20a9d7b0559ad648d86668b65aea63b03",
+      "scripts/doc-drift/README.md": "17e71e7805ec958c3dcdbc949acfb5920bdb90f2acfd36f3062e97c4c1c474e3"
+    }
   }
 }

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-practice-origination",
+  "source_locator": "mcp-server/src/practice-origination.ts",
+  "schema_digest": "b8319b8bea15d7254ae39824845137dba10e60c4a815fe26974578446b30c646",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

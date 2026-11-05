@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:dismiss-email-proposal",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "31ab5be87558fe51fefefe0d4482cf370aad4916834f1d2965dfe7e90130f4e8",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

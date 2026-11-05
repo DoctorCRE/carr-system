@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-field-assertion",
+  "source_locator": "mcp-server/src/tour-rights-projection.js",
+  "schema_digest": "cf51bf2c166dc8e467ea04346c901626652ed923f2201d0956a4627a4de405f6",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

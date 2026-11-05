@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:add-meeting-note",
+  "source_locator": "mcp-server/src/meeting-mode.js",
+  "schema_digest": "a8b72ebd25012fd4c9624a3ffe0c2f5823e16c973c0431537d758e89a1372897",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

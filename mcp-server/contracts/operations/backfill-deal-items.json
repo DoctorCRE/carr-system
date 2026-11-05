@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:backfill-deal-items",
+  "source_locator": "mcp-server/src/deal-items.ts",
+  "schema_digest": "3d04228d37402b099b25aa43111cf25861870ff522d682fb6a46b27f150fc38d",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

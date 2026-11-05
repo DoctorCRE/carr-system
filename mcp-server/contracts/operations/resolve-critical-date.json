@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:resolve-critical-date",
+  "source_locator": "mcp-server/src/action-closure.ts",
+  "schema_digest": "41bc49bd69fc88114bbfd298dfd0ea096ec1ebecdeedaaa5502cda463b495cf2",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

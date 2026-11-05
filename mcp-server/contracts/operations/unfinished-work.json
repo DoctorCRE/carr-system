@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:unfinished-work",
+  "source_locator": "mcp-server/src/system-work-census.v5.js",
+  "schema_digest": "126ebd4723150468d305a554501dcf6d3f15023849350468d33e1bb0d9154fb6",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

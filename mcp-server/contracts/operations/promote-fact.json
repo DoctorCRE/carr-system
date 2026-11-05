@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:promote-fact",
+  "source_locator": "mcp-server/src/fact-observations.ts",
+  "schema_digest": "1ccf57205ceea669f9543384f5963cc521d96e1a0a8868ea37603d9d6425bc31",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

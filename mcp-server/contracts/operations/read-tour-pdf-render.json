@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-tour-pdf-render",
+  "source_locator": "mcp-server/src/tour-artifacts.js",
+  "schema_digest": "81a6340809292c11952c0637ffa7bd513606945d0857ff6737621c580610d8f5",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:propose-doc-correction",
+  "source_locator": "mcp-server/src/doc-suggestions.ts",
+  "schema_digest": "c3e28db8c33d0780b31f68b1675258aca14ad252a5930cf2289987ae3dfb4564",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

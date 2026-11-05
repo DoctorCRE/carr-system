@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:submit-email-draft",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "2daf2db280b7ff695d4a548fc889b7f4c5a74f6ddb1b8efac2f37818be27362f",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:suggest-doc-work",
+  "source_locator": "mcp-server/src/doc-suggestions.ts",
+  "schema_digest": "3ddd15c959ff6dcea225e01f63c0caadfaf046c55cf8fc41fbe45e5117029050",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

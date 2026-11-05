@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:link-salesforce-reference",
+  "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
+  "schema_digest": "fee19b4dda019dc4b1ee509c75214c8bcee91f79a77b915ae4d46d21c73ac5b7",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

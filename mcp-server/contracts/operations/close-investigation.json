@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:close-investigation",
+  "source_locator": "mcp-server/src/investigation.js",
+  "schema_digest": "db664360f520c6b28dcf09fefd1d186bc517e55e9eef838d8a0660beee63d964",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

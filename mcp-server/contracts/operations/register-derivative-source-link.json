@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:register-derivative-source-link",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "4f6df024bf1a9a071cd8a957fc597fa2201bcbe583800024a4095e925944e189",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

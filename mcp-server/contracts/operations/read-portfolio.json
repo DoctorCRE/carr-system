@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-portfolio",
+  "source_locator": "mcp-server/src/work-portfolio.js",
+  "schema_digest": "585f7ca789d06f75b00844efc142578b00b790f398b6731615232d7f2c6f360a",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

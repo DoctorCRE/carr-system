@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:review-and-triage",
+  "source_locator": "mcp-server/src/work-request-intake.js",
+  "schema_digest": "a1e87aba031deb0f0d129aba3fdaa4406179e1f32e9ba6946e86a2f2a5c6e9c9",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

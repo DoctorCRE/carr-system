@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:drop-action",
+  "source_locator": "mcp-server/src/action-closure.ts",
+  "schema_digest": "37bdfaed2e83c1ff6dea605289fad775ce558d9e9b0e8a3b052844576bbba880",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

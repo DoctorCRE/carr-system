@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-loop",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "9d499f26dbc68f347fc2eb1d1095f0d3fb277cabd410b3154f727a4b722fe4d3",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

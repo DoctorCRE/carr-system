@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-work-shape",
+  "source_locator": "mcp-server/src/work-shape.ts",
+  "schema_digest": "1fdd12ba613b33ad7907ec4b00801b41afe0b4ed02604f38c7c63a0fb2bf258e",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

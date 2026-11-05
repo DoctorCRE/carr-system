@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-correspondence-adapter-consent",
+  "source_locator": "mcp-server/src/governed-correspondence-store.v5.js",
+  "schema_digest": "c9aed64da03f8fee5521b76f84dd5f8c1183cf38db5f116aba2403a1f1126974",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

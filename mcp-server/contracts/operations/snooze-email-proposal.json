@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:snooze-email-proposal",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "f4aeb37d67db30f69eb27c52f24a28f17c9e4529a547a7ef4421b96e5bf3ef54",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

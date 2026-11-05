@@ -2,7 +2,7 @@
 // Build and inspect the SCAC mutation inventory.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { SCAC_MUTATION_OPERATIONS, SCAC_MUTATION_REGISTRY_VERSION } from "../mcp-server/src/scac-mutation-registry.current.generated.js";
@@ -525,15 +525,9 @@ export function fullInventory(tools = defaultTools) {
 }
 
 
-export function renderCurrentContracts(tools, source) {
-  const rows = mcpInventory(tools);
-  const operations = Object.fromEntries(rows.map(row => [row.operation,
-    Object.fromEntries(["ingress_key", "source_locator", "schema_digest",
-      "write", "human_only", "human_caller_only", "authority_only", "delegates_to"].map(key => [key, row[key]])),
-  ]));
-  return source
-    .replace(/export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);/,
-      `export const SCAC_MUTATION_OPERATIONS = Object.freeze(${JSON.stringify(operations, null, 2)});`);
+export function currentContracts(tools) {
+  return Object.fromEntries(mcpInventory(tools).map(row => [row.operation,
+    Object.fromEntries(["ingress_key", "source_locator", "schema_digest", "write", "human_only", "human_caller_only", "authority_only", "delegates_to"].map(key => [key, row[key]]))]));
 }
 
 export function assertCurrentContracts(tools) {
@@ -553,15 +547,21 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     throw new Error("unknown argument; run ./run.sh regen registry");
   const { TOOLS } = await import("../mcp-server/src/tools.js");
   if (process.argv[2] === "--write-current") {
-    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
-    writeFileSync(path, renderCurrentContracts(TOOLS, readFileSync(path, "utf8")));
+    const directory = resolve(REPO_ROOT, "mcp-server/contracts/operations");
+    const operations = currentContracts(TOOLS);
+    for (const [name,row] of Object.entries(operations)) {
+      const path = resolve(directory, `${name}.json`);
+      const content = JSON.stringify(row, null, 2) + "\n";
+      let previous;
+      try { previous = readFileSync(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (previous !== content) writeFileSync(path, content);
+    }
+    for (const file of readdirSync(directory)) {
+      if (!Object.hasOwn(operations, file.slice(0,-5))) unlinkSync(resolve(directory,file));
+    }
     console.log("current MCP source contracts regenerated; DB registry seal preserved");
   } else {
     assertCurrentContracts(TOOLS);
-    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
-    const source = readFileSync(path, "utf8");
-    if (renderCurrentContracts(TOOLS, source) !== source)
-      throw new Error("committed registry differs from regeneration; run ./run.sh regen registry");
     console.log("current MCP contracts: OK");
   }
 }

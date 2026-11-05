@@ -18,7 +18,7 @@ PATH = re.compile(r'(?<![\w/:])(?:\./|\.\./|~/|/)?(?:[\w.@*<>${}-]+/)+[\w.@*<>${
 LINK = re.compile(r'\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)')
 CODE = re.compile(r'`([^`\n]+)`')
 COMMAND = re.compile(r'^(?:python[\d.]*|node|bash|sh|zsh|shasum|sha256sum|cat|git|npm|npx|pip[\d.]*|curl|ls|rg|grep|find|sed|awk|cp|mv|rm|chmod|mkdir|touch|[\w./-]+\.(?:sh|py|js|mjs))\s+')
-IMPORT = re.compile(r'''(?:from\s*|import\s*)["'](\.[^"']+)["']''')
+IMPORT = re.compile(r'''(?:from\s*|import\s*)["']([.#][^"']+)["']''')
 
 
 def git(root, *args):
@@ -117,6 +117,17 @@ class Tree:
         self.verb_sources.add(file)
         source = (self.root / file).read_text()
         for relative in IMPORT.findall(source):
+            if relative.startswith('#'):
+                package = json.loads((self.root / 'mcp-server/package.json').read_text())
+                target = package.get('imports', {}).get(relative)
+                if not isinstance(target, str):
+                    raise ValueError(f'unknown package import: {relative}')
+                self.load_verbs('mcp-server/' + target.removeprefix('./'))
+                if relative == '#verb-families':
+                    for descriptor in sorted(self.files):
+                        if descriptor.startswith('mcp-server/src/tool-families/') and descriptor.endswith('.js'):
+                            self.load_verbs(descriptor)
+                continue
             path = (self.root / file).parent / relative
             self.load_verbs(path.resolve().relative_to(self.root).as_posix())
 

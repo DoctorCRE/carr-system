@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-evidence-subject-link",
+  "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
+  "schema_digest": "87b85c5d5c18b13241292a391110d31b41ef2af6dfd938f7435261321741ea5b",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:report-problem",
+  "source_locator": "mcp-server/src/work-request-intake.js",
+  "schema_digest": "c28b3754255bfbd66c641547717e679b5507174515990184db15aaea67972a69",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

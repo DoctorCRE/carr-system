@@ -2,7 +2,6 @@
 """Regenerate CARR operation contracts or the generated schema snapshot."""
 import argparse
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -12,7 +11,6 @@ from git_env import scrubbed_env
 
 REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
 SCHEMA = 'db/schema.sql'
-OPERATIONS = re.compile(rb'export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);')
 
 
 def git(*args):
@@ -22,29 +20,17 @@ def git(*args):
 def regenerate():
     unresolved = git('diff', '--name-only', '--diff-filter=U', '-z').split(b'\0')
     unresolved = [path.decode() for path in unresolved if path]
-    if any(path != REGISTRY for path in unresolved):
-        raise ValueError('resolve source conflicts before regenerating the registry')
+    if unresolved:
+        raise ValueError('resolve source conflicts before regenerating the registry; sealed metadata conflicts require explicit resolution')
+    # Regeneration may change reviewed rows, never the sealed metadata facade.
     target = ROOT / REGISTRY
-    original = target.read_bytes()
-    resolving = REGISTRY in unresolved
-    if resolving:
-        ours = git('show', f':2:{REGISTRY}')
-        theirs = git('show', f':3:{REGISTRY}')
-        parts = [OPERATIONS.split(source) for source in (ours, theirs)]
-        if any(len(part) != 2 for part in parts) or parts[0] != parts[1]:
-            raise ValueError('registry conflict includes sealed metadata; resolve it explicitly')
-        if OPERATIONS.split(original) != parts[0]:
-            raise ValueError('registry has edits outside operations; preserve those before regeneration')
-        target.write_bytes(ours)
-    try:
-        subprocess.run(['node', 'ops/scac-mutation-inventory.mjs', '--write-current'], cwd=ROOT, env=scrubbed_env(), check=True)
-        subprocess.run(['node', 'ops/scac-mutation-inventory.mjs'], cwd=ROOT, env=scrubbed_env(), check=True)
-        if resolving:
-            git('add', '--', REGISTRY)
-    except BaseException:
-        target.write_bytes(original)
-        raise
-    print('Registry regenerated' + (' and its Git conflict resolved.' if resolving else '.'))
+    committed = git('show', f'HEAD:{REGISTRY}').decode()
+    prefix = 'export const SCAC_MUTATION_OPERATIONS'
+    if committed.split(prefix)[0].split('export { SCAC_MUTATION_OPERATIONS')[0] != target.read_text().split('export { SCAC_MUTATION_OPERATIONS')[0]:
+        raise ValueError('sealed metadata drift; resolve it explicitly')
+    subprocess.run(['node', 'ops/scac-mutation-inventory.mjs', '--write-current'], cwd=ROOT, env=scrubbed_env(), check=True)
+    subprocess.run(['node', 'ops/scac-mutation-inventory.mjs'], cwd=ROOT, env=scrubbed_env(), check=True)
+    print('Registry contracts regenerated.')
 
 
 def regenerate_schema():

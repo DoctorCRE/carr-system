@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:edit-loop-header",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "4e3c661894bac221f812e9381c7c6d1ab898a2b3de74c850c2db187864593a7c",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

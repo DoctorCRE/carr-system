@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:set-market-agent",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "f9e8c7d9c0c0b1debc14f97989a118bb416dff94a907db3fc6dfabbc96388d28",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

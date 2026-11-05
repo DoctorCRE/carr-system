@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:claim-lead",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "e8fd95ee3e3428270a198dcc4b1dcdacbeaa9634c11c610c86e867aa83ffee2a",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

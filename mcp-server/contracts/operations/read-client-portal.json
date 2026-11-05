@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-client-portal",
+  "source_locator": "mcp-server/src/client-portal.ts",
+  "schema_digest": "25c4425e3887511ffa3b9a7d402b99e4167a424450ee8f986d53e1f1bd686c7a",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:patch-deal-field",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "f78008f634adc4ae7b9484290accb372afd9a641edc56e0bc831ac7baae2a786",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:stale-records",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

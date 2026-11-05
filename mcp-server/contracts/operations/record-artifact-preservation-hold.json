@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-artifact-preservation-hold",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "c21511276d8981c8fc5c401775d10b970de6c773a7f83a089cb1b5e433475406",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

@@ -361,4 +361,8 @@ tag = "phone-audio-handoff-v1"
 new_sqlite_classes = ["PhoneAudioHandoff"]
 
 [build]
-command = "node ../ops/scac-mutation-inventory.mjs"
+command = "python3 ../tools/assemble_registry.py"
+
+[alias]
+"#verb-families" = "./.generated/current/verb-families.js"
+"#operation-contracts" = "./.generated/current/operation-contracts.js"

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:prepare-terms-comparison",
+  "source_locator": "mcp-server/src/fact-generation.ts",
+  "schema_digest": "a4a685b6cbd90a9e378441a59fe51b319c9c55f8465300d85247502dc84bd774",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

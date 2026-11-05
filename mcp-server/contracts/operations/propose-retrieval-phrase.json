@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:propose-retrieval-phrase",
+  "source_locator": "mcp-server/src/situation-retrieval.js",
+  "schema_digest": "a8e463fceda6f817e8b62a053d222f5c14f193629f7ccb3d88f7a6f75f7a06f8",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

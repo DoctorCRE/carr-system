@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:retire-retrieval-curation",
+  "source_locator": "mcp-server/src/situation-retrieval.js",
+  "schema_digest": "9013091b73c6eaaccd10e5fb6eff9f9debd6b582e549fad7acf75ed48d70416e",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:decline-candidate",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "7b2699702c3bc67c35115d50c0c7e5b10578725d2f682de2a4561b97421aac34",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

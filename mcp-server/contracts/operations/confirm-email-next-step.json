@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:confirm-email-next-step",
+  "source_locator": "mcp-server/src/email-next-step.ts",
+  "schema_digest": "7e469c587c16befbb0ac85177a8fd12f98563007d534f8279f51e3c8ed8325ff",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

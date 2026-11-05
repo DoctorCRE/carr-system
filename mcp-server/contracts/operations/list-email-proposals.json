@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-email-proposals",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "d7fed6589f2127a1df61b9190d67ed60e05816d59898458487f9d1aedb476d6e",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

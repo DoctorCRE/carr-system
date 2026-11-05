@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:answer-work-request-for-joe",
+  "source_locator": "mcp-server/src/work-request-intake.js",
+  "schema_digest": "b39c0b2fa5bf6ea17ada8e22d5d49eca980ab780e9e69e599d9296cb130001e9",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

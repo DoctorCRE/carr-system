@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-fact-conflicts",
+  "source_locator": "mcp-server/src/fact-observations.ts",
+  "schema_digest": "fc8a1ff80543bb7a4fac294c21044da3990f1264c375e02aa9901df765f9449b",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

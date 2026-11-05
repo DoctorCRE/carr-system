@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:acknowledge-dispatch",
+  "source_locator": "mcp-server/src/dispatch-spine.ts",
+  "schema_digest": "8a2f036ce4faad712a557b4f336f8e991737485f338d349847660b5af0c552cc",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

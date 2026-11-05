@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:counterparty-history",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "fb816f0158e4d62cbe4bc17536833d3666cba05ea615eb758abcb3fe973cd42b",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

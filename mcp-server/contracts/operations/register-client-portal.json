@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:register-client-portal",
+  "source_locator": "mcp-server/src/client-portal.ts",
+  "schema_digest": "00c44019421387c2c793304e33b1051cd1b100eea9e54f30b62fa37797e99e81",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

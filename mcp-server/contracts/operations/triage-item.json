@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:triage-item",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "e04f9c33266839fdb956e0830937b7f6da693b6e7afb124c7152e92b7e6b0532",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

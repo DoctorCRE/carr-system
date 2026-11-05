@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-corporate-artifact",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "05dc766b87e5f3eb59218df1cb428300aa1c62c77f0408f4ad2b483c380960c5",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:attach-to-campaign",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "bd3dfef9b4017175eb9ee2f8e10744db6d164325701e80539a798ae020edd375",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

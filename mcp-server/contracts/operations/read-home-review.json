@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-home-review",
+  "source_locator": "mcp-server/src/home-review.js",
+  "schema_digest": "ecbb41a5144b8e7b8af118734773b53accc8e2728df96efe2f0cbc92d42571ca",
+  "write": false,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

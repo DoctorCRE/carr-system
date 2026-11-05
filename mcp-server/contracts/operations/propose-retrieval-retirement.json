@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:propose-retrieval-retirement",
+  "source_locator": "mcp-server/src/situation-retrieval.js",
+  "schema_digest": "c18c50df01dd2cd38c6b38c02c6d2d4cb92ddee50bf3f83857f80bb6c6335a19",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

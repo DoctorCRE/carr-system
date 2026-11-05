@@ -1,0 +1,12 @@
+{
+  "ingress_key": "mcp-tool:call-verb",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "f06eb6b85aca60ac42eede018a041127f76f7f1db83386e7933dc2293175737e",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": [
+    "*registered_operation"
+  ]
+}

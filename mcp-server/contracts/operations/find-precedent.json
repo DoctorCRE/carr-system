@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:find-precedent",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "c56d94b238592c8e3c48652c9844e169ecf9ef43c8604f3faa495ec292354dd2",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

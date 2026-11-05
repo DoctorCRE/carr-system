@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:answer-board-question",
+  "source_locator": "mcp-server/src/board-answers.js",
+  "schema_digest": "53f4e8b7367cd9f892f94cbf76ec53dab19e4de30a2e41789d6fd81a58e17a60",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

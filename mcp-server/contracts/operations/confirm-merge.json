@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:confirm-merge",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "caae7052c96e6b23f626a7656eb0a6187074f6bde2994ef39e06b9002a70cdfe",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

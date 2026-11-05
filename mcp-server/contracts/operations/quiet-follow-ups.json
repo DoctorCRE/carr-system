@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:quiet-follow-ups",
+  "source_locator": "mcp-server/src/lead-follow-up.ts",
+  "schema_digest": "037640c2932ce4804d4d9b08127658569bd28b6d5b48c49f35e9e92f538881c7",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

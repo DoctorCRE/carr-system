@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:set-doctrine-refs",
+  "source_locator": "mcp-server/src/doctrine.js",
+  "schema_digest": "fe2da3aa52b6ae0980c2f7da2a8efae02cd0bb92ed0ffaa9e3adacefbdad7208",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

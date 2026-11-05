@@ -79,7 +79,7 @@ class CodemapTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [
             f"{name}: add an opening description under 100 characters" for name in (
-                "bin/launcher", "hooks/check.py", "hooks/launch", "mcp-server/src/top.ts",
+                "bin/launcher", "hooks/check.py", "hooks/launch", "mcp-server/src/nested/module.ts", "mcp-server/src/top.ts",
                 "ops/githooks/new-hook", "ops/renamed tool.py", "tools/nested/tool.py", "tools/run")])
 
     def test_check_uses_merge_base_instead_of_changes_from_main(self):

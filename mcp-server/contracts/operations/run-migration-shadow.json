@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:run-migration-shadow",
+  "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
+  "schema_digest": "ce4da3e1effcf733376b25bce4c52ab9d9fbc7eeb301edb6d0c7fcc39576c3b7",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

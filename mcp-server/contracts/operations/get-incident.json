@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:get-incident",
+  "source_locator": "mcp-server/src/incident.js",
+  "schema_digest": "d977f0ebe822cfc040ca0f22325c5602d306f573582533a60c41a655fd47644f",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

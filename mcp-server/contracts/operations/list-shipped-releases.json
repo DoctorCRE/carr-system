@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-shipped-releases",
+  "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
+  "schema_digest": "7f435f34236214403d51b03f6169599d02a16307bc5ecc5dac0d62ccc566ca47",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

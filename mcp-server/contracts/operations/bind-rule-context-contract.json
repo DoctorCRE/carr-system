@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:bind-rule-context-contract",
+  "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
+  "schema_digest": "357731a0c8ada42b5cb4198a6ca8484d53c8d303e0fe54afd23560b1a441a75b",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

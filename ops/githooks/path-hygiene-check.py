@@ -40,7 +40,12 @@ def violations(paths: list[str]) -> list[str]:
         depth = len(parts) - 1
         if depth > MAX_DIRECTORY_DEPTH:
             bad.append(f"{path}: {depth} folder levels (maximum is {MAX_DIRECTORY_DEPTH})")
-        if BAD_VERSION_NAME.search(parts[-1]):
+        # A shard's basename is the registered operation key, including any
+        # protocol version. It is not an editorial file revision. Contract
+        # identity/shape is checked by the registry gate; final drafts still refuse.
+        operation_key = (re.fullmatch(r'mcp-server/contracts/operations/[a-z][a-z0-9-]*\.json', path)
+                         and not re.search(r'(?:^|[_-])final(?:$|[_.-])', parts[-1], re.I))
+        if BAD_VERSION_NAME.search(parts[-1]) and not operation_key:
             bad.append(f"{path}: draft/final version filename is forbidden")
     return bad
 

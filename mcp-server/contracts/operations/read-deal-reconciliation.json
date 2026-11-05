@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-deal-reconciliation",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "c95ca24a7624ac4279c35aa1fa5a3ee0968da2adcbfc03ab6c4d3cd9ddf30190",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

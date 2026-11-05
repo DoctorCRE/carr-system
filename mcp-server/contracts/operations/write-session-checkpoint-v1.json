@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:write-session-checkpoint-v1",
+  "source_locator": "mcp-server/src/session-checkpoints.js",
+  "schema_digest": "cebc18bf254f84b3096ee4df4215408cd1a17098bc56e95a04d61350c352d977",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

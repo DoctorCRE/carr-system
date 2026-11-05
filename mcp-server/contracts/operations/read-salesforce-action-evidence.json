@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-salesforce-action-evidence",
+  "source_locator": "mcp-server/src/salesforce-reconciliation-store-rw02.v5.js",
+  "schema_digest": "e1c0eaf9331a82edba1a0352e96ef1a70b215bda9a6e435322faeb21da8adde1",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

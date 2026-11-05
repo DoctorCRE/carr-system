@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:change-doctrine-sections",
+  "source_locator": "mcp-server/src/doctrine.js",
+  "schema_digest": "bd7e111718a648307821681af2e8f538e2ebd7ffec15f7eb636f095078b08223",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

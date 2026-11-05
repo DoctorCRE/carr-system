@@ -12,7 +12,7 @@ EXTENSIONS = {".py", ".sh", ".zsh", ".js", ".mjs", ".cjs", ".ts", ".applescript"
 
 
 def in_scope(path):
-    return path.parts[0] in {"bin", "ops", "tools", "hooks"} or path.parent == Path("mcp-server/src")
+    return path.parts[0] in {"bin", "ops", "tools", "hooks"} or Path("mcp-server/src") in path.parents
 
 
 def description(path):

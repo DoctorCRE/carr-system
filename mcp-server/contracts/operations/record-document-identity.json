@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-document-identity",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "c78df4fb3f0cdb1a423e53002c9c36649f96c93803a37c24a36e12597d216f47",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

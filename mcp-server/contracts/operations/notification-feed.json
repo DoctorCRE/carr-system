@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:notification-feed",
+  "source_locator": "mcp-server/src/notifications.ts",
+  "schema_digest": "b996de53e8285fe886bd3e47406dd97a98a40fa6085a02e4531dbacc4adb0da8",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

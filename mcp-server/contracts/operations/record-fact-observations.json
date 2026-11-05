@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-fact-observations",
+  "source_locator": "mcp-server/src/fact-observations.ts",
+  "schema_digest": "ef62b8a358d922a010b6a9c4f8fe397c169f3b9df1533a43c0ea7c19713d57f3",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-property-identifier-assertion",
+  "source_locator": "mcp-server/src/tour-property-jurisdiction.js",
+  "schema_digest": "5301815a0b79d9b5d7b5ed5ccd4f652e1fe48cbcb46d5feb28b1a6c6f5632dbd",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

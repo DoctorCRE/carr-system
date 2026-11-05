@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-salesforce-write-readback",
+  "source_locator": "mcp-server/src/salesforce-reconciliation-store-rw02.v5.js",
+  "schema_digest": "d17d83aaf76c3f0b3faccef281ab904e923af5894055d30b30aae9ab8342401d",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

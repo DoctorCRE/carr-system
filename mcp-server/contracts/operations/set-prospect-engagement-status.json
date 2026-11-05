@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:set-prospect-engagement-status",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "332c856695b9d91906277c8e1e029be847d51b16c4f4de5dde254e3a74834812",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

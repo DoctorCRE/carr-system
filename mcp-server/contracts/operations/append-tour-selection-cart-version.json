@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-selection-cart-version",
+  "source_locator": "mcp-server/src/tour-property-search.js",
+  "schema_digest": "b9eaa9e0d52fe440bcf8d3197350d0d4b1bb158d90fb00f44c009183e0d816e8",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-entrance-verification-receipt",
+  "source_locator": "mcp-server/src/tour-property-jurisdiction.js",
+  "schema_digest": "524db3f439673db083666ad94ba432d644d203c5e9cbcfc4eb7874dd1001fafc",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

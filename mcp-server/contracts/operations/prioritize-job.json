@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:prioritize-job",
+  "source_locator": "mcp-server/src/work-queue.js",
+  "schema_digest": "e990010394ce48b46786d4938bd060e1163f733b96ebd0d3cc363354b78a6967",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

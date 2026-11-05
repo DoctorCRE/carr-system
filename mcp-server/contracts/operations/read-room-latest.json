@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-room-latest",
+  "source_locator": "mcp-server/src/partner-room.js",
+  "schema_digest": "d8142b9a3058bdb92612a579b5dc8f75286704ec1021c1f6cd87c345e7224447",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

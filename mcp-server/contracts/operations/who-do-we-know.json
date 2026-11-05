@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:who-do-we-know",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "cefe11d8b81e40e9d870e91f56fd054356671a193c80fa8cc5a01ea4f93b4ae7",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

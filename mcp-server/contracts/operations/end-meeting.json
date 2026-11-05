@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:end-meeting",
+  "source_locator": "mcp-server/src/meeting-mode.js",
+  "schema_digest": "db1341ac19d195908534d14aae0a8ecb64c817a2040bc746b7e66d3718f40721",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

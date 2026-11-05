@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:preview-email-deal-progress",
+  "source_locator": "mcp-server/src/email-deal-progress.ts",
+  "schema_digest": "01563165207c5295db5f140cf83fcfc593ba0e9e8973a033244709709a4c2d25",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

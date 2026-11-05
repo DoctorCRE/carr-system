@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:promote-pool",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "a9e60593cae6bd8c4a201b71d419efca18c1c703c3ab15b68e70b27121084e9f",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

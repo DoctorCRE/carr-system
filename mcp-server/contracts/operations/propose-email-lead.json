@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:propose-email-lead",
+  "source_locator": "mcp-server/src/email-lead-proposal.ts",
+  "schema_digest": "0a0e49bfdb9de7c7b3d46c7ee4bb22deb5b0a77564f6c301f552e5d148db246a",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

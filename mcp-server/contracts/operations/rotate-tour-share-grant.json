@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:rotate-tour-share-grant",
+  "source_locator": "mcp-server/src/tour-sharing.js",
+  "schema_digest": "c3c0a603485563ac784409e8e4beeee5dc5ca984ab4410512b4ed7bba6c530f9",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

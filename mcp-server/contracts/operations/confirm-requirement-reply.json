@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:confirm-requirement-reply",
+  "source_locator": "mcp-server/src/requirement-replies.js",
+  "schema_digest": "883179841fab34432a118d355cd9a69c2e7d786de27a7e2d249b3c293e455b6a",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:attach-deal-file",
+  "source_locator": "mcp-server/src/deal-files.js",
+  "schema_digest": "cc60fe5acf3f7a282321a0e07718ca97d344facd2cd874e4f153a50b8da4b5ee",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

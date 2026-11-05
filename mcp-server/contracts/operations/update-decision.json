@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:update-decision",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "be0e90a9a118a8afd94b247f95c553dbd769ef89581e0177cb57fa3816d4b760",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:accept-ready-plan",
+  "source_locator": "mcp-server/src/work-request-intake.js",
+  "schema_digest": "bfddecd87f29f70193ab958b001c0ec53659a1b1fd35caa41f87b09259e27fd2",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

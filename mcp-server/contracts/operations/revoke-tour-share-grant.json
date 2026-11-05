@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:revoke-tour-share-grant",
+  "source_locator": "mcp-server/src/tour-sharing.js",
+  "schema_digest": "ea375f0be29645f3b58be00427369dd9281c475beab8d09f9bfcf442f43f51c4",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

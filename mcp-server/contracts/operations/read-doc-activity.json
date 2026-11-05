@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-doc-activity",
+  "source_locator": "mcp-server/src/doc-activity.js",
+  "schema_digest": "48a8b4cc6443fc0dd85860cadfb1a1faee8ac2c8a2bf4452634a270ab9789440",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:detach-decision",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "a80352803536ee97105f4789bea2de8fd473a7696b9f6a4f7e882560805fb889",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

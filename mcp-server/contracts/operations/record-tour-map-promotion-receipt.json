@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-tour-map-promotion-receipt",
+  "source_locator": "mcp-server/src/tour-map-promotion.js",
+  "schema_digest": "0291c2b6b9008987119bddc4722fffdef51d15ec760e9756ff41ae2f4d108771",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

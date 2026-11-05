@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-coordinate-candidate",
+  "source_locator": "mcp-server/src/tour-property-jurisdiction.js",
+  "schema_digest": "c8c8d422409106dd5c0e1c1bc18ae001b4051e3622ebffe6c710b92f67c344d4",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

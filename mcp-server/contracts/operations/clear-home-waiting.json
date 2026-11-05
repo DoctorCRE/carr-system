@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:clear-home-waiting",
+  "source_locator": "mcp-server/src/home-waiting.ts",
+  "schema_digest": "e151e38d47cf26da7d90f57c138fa6cabe18d05574caf5640f98df41224cd125",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

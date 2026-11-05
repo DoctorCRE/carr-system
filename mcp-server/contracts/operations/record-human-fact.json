@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-human-fact",
+  "source_locator": "mcp-server/src/fact-review.ts",
+  "schema_digest": "0cd1ec8b6b4e47bf8c061bfa0dddae92c0d57637f6b98f8bd8f2b5dd32b1b2fd",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

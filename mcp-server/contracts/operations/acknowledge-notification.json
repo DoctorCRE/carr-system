@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:acknowledge-notification",
+  "source_locator": "mcp-server/src/notifications.ts",
+  "schema_digest": "3c2d95b332067ee9cf468ccbf7145bdc13b0a4a83edc850152cc75430a7a1a19",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

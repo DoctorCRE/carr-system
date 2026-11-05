@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-requirement-requests",
+  "source_locator": "mcp-server/src/requirement-requests.js",
+  "schema_digest": "6090673a493e5225d9d0fa948e3ba6f8191dbef5560bff4696dcb8a86fbbb5a6",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-route-version",
+  "source_locator": "mcp-server/src/tour-domain.js",
+  "schema_digest": "fb9629aa247d2f48633c3f123ae3535827a47a7527e0107186f8d0953e3cf669",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

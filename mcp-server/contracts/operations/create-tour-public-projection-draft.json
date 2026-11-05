@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:create-tour-public-projection-draft",
+  "source_locator": "mcp-server/src/tour-rights-projection.js",
+  "schema_digest": "a76320188824805cfe72fbc89885c17baa03dd932812fb1f2111b21e2f6d2ca1",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

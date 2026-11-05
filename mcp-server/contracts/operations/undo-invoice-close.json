@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:undo-invoice-close",
+  "source_locator": "mcp-server/src/invoice-automation.js",
+  "schema_digest": "fed6108dc0ceae873f770789b0372493709217599ad15839962d65d8daf02b16",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

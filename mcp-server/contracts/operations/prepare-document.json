@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:prepare-document",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "ca4dd8b72db67eee6dc276036b2e5b1a184c959d0f02fdf7e0acd7b3de54e9a0",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

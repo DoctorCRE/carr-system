@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-commission-receipt",
+  "source_locator": "mcp-server/src/invoice-tracker.ts",
+  "schema_digest": "51745ae15bc5d1ff8741889b5518a243ec1fd5faf9638ce26d9219ae5337244f",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

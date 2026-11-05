@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-tour-sharing-library",
+  "source_locator": "mcp-server/src/tour-sharing.js",
+  "schema_digest": "0bb99e1b6d16d8150d47e8b04bcc4b8e1a76099a738f6934e530fa233467f43a",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:new-deal",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "51202123db5c43455e827cbd483863a853941a3f167b781561f8acc447b054fc",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

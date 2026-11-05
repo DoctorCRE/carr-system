@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:cancel-workflow-cutover-plan",
+  "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
+  "schema_digest": "dd9d470f4fb7f884fc398b14fe5e3d2896733667657adfff3c99c479e9a565e7",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

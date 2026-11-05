@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:seal-tour-public-projection",
+  "source_locator": "mcp-server/src/tour-rights-projection.js",
+  "schema_digest": "cd0f7833d41cefc8c46369744c9eddd6e07e53ca9070130dbb6c9a5723c8940f",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

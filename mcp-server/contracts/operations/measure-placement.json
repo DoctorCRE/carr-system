@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:measure-placement",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "f4312bc0ff52a95b7db89197ee11278fd8ac428f49f1c2f0ef97afd8a5486516",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

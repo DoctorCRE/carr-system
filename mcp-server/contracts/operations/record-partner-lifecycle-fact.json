@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-partner-lifecycle-fact",
+  "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
+  "schema_digest": "447d0f73701d5237bdf75656501e9d197be4838b2d151316cff307ca6a4324c8",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

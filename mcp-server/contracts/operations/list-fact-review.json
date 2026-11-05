@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-fact-review",
+  "source_locator": "mcp-server/src/fact-review.ts",
+  "schema_digest": "2eb8162d7a72a27311477f8dc60c85b41431c41d80f8bdc713e34ab2c6512c94",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

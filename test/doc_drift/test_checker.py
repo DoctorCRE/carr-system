@@ -73,6 +73,20 @@ Set config key `ui.removed` in `config/app.json`.
                           ("npm-script", "lost"), ("workflow", "Old CI"), ("job", "old-check"),
                           ("config-key", "ui.removed")})
 
+    def test_package_discovered_descriptor_changes_select_verb_documentation(self):
+        self.write('mcp-server/package.json', json.dumps({'type':'module','imports':{'#verb-families':'./src/families.js'}}))
+        self.write('mcp-server/src/tools.js', 'import families from "#verb-families"; export const TOOLS = Object.assign({}, ...families);')
+        self.write('mcp-server/src/families.js', 'import family from "./tool-families/example.js"; export default [family];')
+        self.write('mcp-server/src/tool-families/example.js', 'import {extra} from "../extra.js"; export default extra;')
+        self.write('mcp-server/src/extra.js', 'export const extra = {"extra-verb": {handler(){}}};')
+        self.write('docs/verbs.md', "Use verb `extra-verb`.\n")
+        self.git('commit', '-qm', 'baseline')
+        self.write('mcp-server/src/extra.js', 'export const extra = {};')
+        self.git('commit', '-qm', 'remove descriptor-owned verb')
+        report = self.scan('--base', 'HEAD~1')
+        self.assertIn('docs/verbs.md', report['files_checked'])
+        self.assertIn(('verb', 'extra-verb'), {(x['kind'],x['target']) for x in report['findings']})
+
     def test_documents_outside_tree_and_examples_are_explicitly_unchecked(self):
         self.write("README.md", """See [website](https://example.org/guide.md).
 Read `~/Library/config.json`, `DNA/old.md`, and `src/<name>.js`.

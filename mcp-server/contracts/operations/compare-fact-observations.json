@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:compare-fact-observations",
+  "source_locator": "mcp-server/src/fact-observations.ts",
+  "schema_digest": "20b9ad0b103dba9c2d81172a1bca73ed516e78661864e4d948c1630d9895c300",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

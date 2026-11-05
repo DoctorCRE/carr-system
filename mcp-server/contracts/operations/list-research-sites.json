@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:list-research-sites",
+  "source_locator": "mcp-server/src/research-sites.ts",
+  "schema_digest": "5493417ec69df86cbda832cfeb3f78e02c7778671aaf3aae358385b61c8ac1c4",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

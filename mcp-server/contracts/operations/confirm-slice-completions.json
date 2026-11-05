@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:confirm-slice-completions",
+  "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
+  "schema_digest": "e140267ad22953ee2b03cfda598318303f73de68205e864ce9c541a70b7ff15c",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

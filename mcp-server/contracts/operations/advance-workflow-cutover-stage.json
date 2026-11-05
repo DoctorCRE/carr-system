@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:advance-workflow-cutover-stage",
+  "source_locator": "mcp-server/src/workflow-cutover.v5.ts",
+  "schema_digest": "d82b23ab7624ac7dea98ec11cb70412417fa7926b528902fce8a99dbdfbb7b14",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

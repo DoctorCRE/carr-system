@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-email-sent",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "ea8b7dd6cfec4367a8cad32c67819c75bee819fec10f22f9620a1de2e5ea3f26",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

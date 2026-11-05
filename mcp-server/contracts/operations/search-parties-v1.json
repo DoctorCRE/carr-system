@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:search-parties-v1",
+  "source_locator": "mcp-server/src/people-directory.ts",
+  "schema_digest": "6c7dc49505694188b8c7d751a127e1bea431e2b416f11d247848516573c3d31f",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

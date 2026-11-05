@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-correspondence-thread",
+  "source_locator": "mcp-server/src/governed-correspondence-store.v5.js",
+  "schema_digest": "a040086927206f6850bb42a36146f800614962d1ddd4295e1408cb6e0c6d3179",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

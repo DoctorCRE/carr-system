@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:append-tour-cheat-sheet-revision",
+  "source_locator": "mcp-server/src/tour-domain.js",
+  "schema_digest": "a71528d3bc2b922a768d304ad281de584dcbfc4ad2f72c1327ea6340e70f4bf4",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:accept-ready-plan-amendment",
+  "source_locator": "mcp-server/src/work-request-intake.js",
+  "schema_digest": "9a071af1268ae1dc9beff7e7c4751e5e1fc92242b04601ad66801fe63c02e56c",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

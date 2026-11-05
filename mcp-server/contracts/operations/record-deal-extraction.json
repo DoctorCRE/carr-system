@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-deal-extraction",
+  "source_locator": "mcp-server/src/deal-extraction.ts",
+  "schema_digest": "07439bbcaf9b067794bf3a6f43ab4b637a70579e4768336b473b8b97dae83259",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

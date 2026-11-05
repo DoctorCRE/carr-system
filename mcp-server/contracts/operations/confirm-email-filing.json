@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:confirm-email-filing",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "4d0c8fb13b3a860aa17e5b2ad72f1591d01e6e1ff79ee98468ae838938bac725",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

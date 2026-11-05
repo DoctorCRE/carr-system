@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:propose-outcome-feedback",
+  "source_locator": "mcp-server/src/work-request-intake.js",
+  "schema_digest": "bf92a42013eb33f78d2ef296a4f47d79b27e5e68697fe162043000d7e7da5b40",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

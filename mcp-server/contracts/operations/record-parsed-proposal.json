@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-parsed-proposal",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "ea58e96ff5a67969c0b40d3b99b43ae1ae9c88641c1f38340ee4ef90dcb7f9c5",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

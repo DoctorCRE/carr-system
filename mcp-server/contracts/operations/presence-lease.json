@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:presence-lease",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "eba5b6e5177efcabd49e5c8b255a6ef0d187e6574638cb42c69e56b544682795",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

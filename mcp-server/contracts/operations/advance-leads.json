@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:advance-leads",
+  "source_locator": "mcp-server/src/lead-automation.js",
+  "schema_digest": "04c691c2cb639985e5d8ab3f360510859fd3664b69caad2671333ab5f2f95b61",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

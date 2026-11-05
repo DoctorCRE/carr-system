@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-meeting",
+  "source_locator": "mcp-server/src/meeting-mode.js",
+  "schema_digest": "e5aafd9450b309bb413a396b41b78f2dcadbe0dc95d918ea0edc176e02c29d65",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

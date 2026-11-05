@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-salesforce-run-outcome",
+  "source_locator": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
+  "schema_digest": "ef6d316b0327c1388eb2ce690d68e0cb020815238947e0396595810c14aa5922",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

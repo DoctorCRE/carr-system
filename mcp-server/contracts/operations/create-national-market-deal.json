@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:create-national-market-deal",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "0d3dbf94dc275a7f0dc0141048f14e4c8b92b88a24f15ae8a7c6067ddf68bbf8",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

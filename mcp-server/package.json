@@ -38,5 +38,9 @@
   "overrides": {
     "@hono/node-server": "^2.0.10",
     "hono": "4.13.11"
+  },
+  "imports": {
+    "#verb-families": "./src/verb-families.node.js",
+    "#operation-contracts": "./src/operation-contracts.node.js"
   }
 }

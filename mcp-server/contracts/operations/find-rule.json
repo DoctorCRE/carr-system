@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:find-rule",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "62d8d08c4fbc232594ac95bdd685d3c9c25435a6210ad1006ea9361cead2a8c2",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

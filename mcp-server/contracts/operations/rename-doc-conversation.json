@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:rename-doc-conversation",
+  "source_locator": "mcp-server/src/doc-conversation.js",
+  "schema_digest": "b28a3f61fed0fe4c06200832be31bc217a89b867f8d65e45cb770108e0033f41",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

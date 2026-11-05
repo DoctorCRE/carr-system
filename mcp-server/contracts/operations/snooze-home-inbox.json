@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:snooze-home-inbox",
+  "source_locator": "mcp-server/src/home-inbox.js",
+  "schema_digest": "adde3d4b1d061a6712ad93270f40ecdf82ff08bb60592f713b7fdbf9ee3cd794",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

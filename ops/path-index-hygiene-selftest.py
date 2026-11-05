@@ -105,6 +105,13 @@ def main() -> int:
     check("version suffix refuses", bool(PATHS.violations(["ops/report-v2.json"])), failures)
     check("dot-versioned machine contract passes",
           not PATHS.violations(["ops/config/policy.v1.json"]), failures)
+    check("versioned operation contract keys pass",
+          not PATHS.violations(["mcp-server/contracts/operations/read-home-inbox-v5.json",
+                                "mcp-server/contracts/operations/read-v5-a02-rule-enforcement-coverage.json"]), failures)
+    check("draft final names remain forbidden in operation contracts",
+          bool(PATHS.violations(["mcp-server/contracts/operations/report-final.json"])), failures)
+    check("versioned files outside operation contracts still refuse",
+          bool(PATHS.violations(["mcp-server/contracts/report-v5.json"])), failures)
     check("ordinary descriptive filename passes", not PATHS.violations(["ops/report-2026.json"]), failures)
 
     check("parent traversal refuses",

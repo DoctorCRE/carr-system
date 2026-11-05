@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:add-doc-conversation-turn",
+  "source_locator": "mcp-server/src/doc-conversation.js",
+  "schema_digest": "5ecd7782c4e8d01e7e7e8131274c3bdbdc60a5fd25ca70cfe320ccdcd13df13c",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:undo-email-thread-filing",
+  "source_locator": "mcp-server/src/email-proposals.js",
+  "schema_digest": "924711896f731da725114452205f966ca8461ee0a65888e70fdc235b72e7f856",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": false,
+  "delegates_to": []
+}

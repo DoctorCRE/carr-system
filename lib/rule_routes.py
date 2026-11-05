@@ -48,8 +48,6 @@ KNOWN_CONNECTOR_TOOLS = frozenset({
 })
 CONNECTOR_GLOB = re.compile(r"^mcp__(\*|[A-Za-z0-9_-]+)__([A-Za-z0-9_-]+)$")
 
-REGISTRY_IMPORT = re.compile(r'from\s+"\./(scac-mutation-registry\.(?:v\d+|current)\.generated\.js)"')
-REGISTRY_VERB = re.compile(r'"ingress_key":\s*"mcp-tool:([a-z0-9][a-z0-9-]*)"')
 SHORT_ID = re.compile(r"\b[0-9a-f]{8}\b")
 
 DEDUPE_SECONDS = 30 * 60
@@ -124,24 +122,28 @@ def load_routes(repo: Path) -> dict:
 
 
 def known_verbs(repo: Path) -> set[str]:
-    """Every verb the server serves, from the registry the server itself checks.
-
-    mcp-server/src/tools.js assembles its verbs from many modules, several of
-    which build entries programmatically, so no regex over tools.js finds them
-    all. Every served verb must instead be registered, and
-    mcp-server/src/mutation-registry.js imports exactly one generated registry
-    whose `mcp-tool:<verb>` ingress keys are that set (reads included). This
-    reads the generated file that import names, so a new registry successor is
-    picked up without editing this file."""
-    src = Path(repo) / "mcp-server/src"
-    importer = (src / "mutation-registry.js").read_text(encoding="utf-8")
-    names = REGISTRY_IMPORT.findall(importer)
-    if len(set(names)) != 1:
-        raise ValueError("mutation-registry.js does not import exactly one generated registry")
-    text = (src / names[0]).read_text(encoding="utf-8")
-    found = set(REGISTRY_VERB.findall(text))
+    """Read the independently reviewed committed operation contracts."""
+    directory = Path(repo) / 'mcp-server/contracts/operations'
+    found = set()
+    keys = {'ingress_key', 'source_locator', 'schema_digest', 'write', 'human_only',
+            'human_caller_only', 'authority_only', 'delegates_to'}
+    for path in sorted(directory.iterdir()):
+        row = json.loads(path.read_text(encoding='utf-8'))
+        if (not path.is_file() or path.suffix != '.json' or
+                not re.fullmatch(r'[a-z][a-z0-9-]*', path.stem) or
+                not isinstance(row, dict) or set(row) != keys or
+                row['ingress_key'] != f'mcp-tool:{path.stem}' or
+                not re.fullmatch(r'mcp-server/src/[\w./-]+\.(?:js|ts)', str(row['source_locator'])) or
+                not re.fullmatch(r'[a-f0-9]{64}', str(row['schema_digest'])) or
+                any(type(row[k]) is not bool for k in ('write', 'human_only', 'human_caller_only', 'authority_only')) or
+                not isinstance(row['delegates_to'], list) or
+                any(not isinstance(x, str) or not x for x in row['delegates_to'])):
+            raise ValueError(f'invalid operation contract: {path.name}')
+        if path.stem in found:
+            raise ValueError(f'duplicate operation contract: {path.stem}')
+        found.add(path.stem)
     if not found:
-        raise ValueError(f"{names[0]} declares no mcp-tool ingress")
+        raise ValueError('empty operation contracts')
     return found
 
 def hook_matcher(repo: Path) -> str | None:

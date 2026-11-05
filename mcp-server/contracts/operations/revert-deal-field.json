@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:revert-deal-field",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "2dec7b6002d8d31a0c90744ba9ea4f98e2eee8006b5022613e375e1fb3495e69",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

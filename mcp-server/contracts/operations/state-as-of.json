@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:state-as-of",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "dccd878006d7481717f8769d681cf6cfa7fe826328188010f24cedf07a56701e",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

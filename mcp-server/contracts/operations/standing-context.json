@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:standing-context",
+  "source_locator": "mcp-server/src/doctrine.js",
+  "schema_digest": "dd5bbb6af7846216c05b6df0b6b559309b0f67178d29fc5bf33b95c93df9354e",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

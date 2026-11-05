@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-rule-enforcement-fallback",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "e7fbfbdb72bf5be472c4e52f3fdb8a89121ce572db7e1e9bb3b201507b01a451",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": true,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-market-terms",
+  "source_locator": "mcp-server/src/market-terms.ts",
+  "schema_digest": "6a271f2f2d87a5457274108e3fdb7ea11b5820985b6286d6a1198972e4b9abcd",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

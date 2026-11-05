@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:read-dispatch-history",
+  "source_locator": "mcp-server/src/session-identity.ts",
+  "schema_digest": "ab8eb05d9de0072dae860e982c077acfa9e09effe59cb22d7590386b95d9a225",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

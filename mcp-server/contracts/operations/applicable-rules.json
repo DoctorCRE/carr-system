@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:applicable-rules",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "e1079c75c09bb092fd355b767bafa3b38a4ef8997b73cd27cbc711ec99427129",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

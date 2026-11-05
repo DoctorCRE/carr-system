@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:remove-research-site",
+  "source_locator": "mcp-server/src/research-sites.ts",
+  "schema_digest": "a534cf101856ece084f5e8ae8057d50dc304073e576105903c45f385dc50fb4e",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

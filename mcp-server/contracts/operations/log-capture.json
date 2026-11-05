@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:log-capture",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "c860986438e8d6de11859107d57a4aecd06c137c995db4e12cdc35db60c4df7c",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

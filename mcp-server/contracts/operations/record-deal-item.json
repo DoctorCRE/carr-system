@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-deal-item",
+  "source_locator": "mcp-server/src/deal-items.ts",
+  "schema_digest": "d5a78060a33a3a5b39bc500730bb9afde3cc8668c77c97aedf74f9358673d29a",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:approve-lead-draft",
+  "source_locator": "mcp-server/src/lead-automation.js",
+  "schema_digest": "d1ac3f56428f038a8c2d05c0c37c7ff3aaeab73008c623f88af0f38d94d4f04a",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

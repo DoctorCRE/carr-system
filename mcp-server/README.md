@@ -1,32 +1,40 @@
 # MCP registration and checkout imports
 
-`src/tools.js` imports the four family descriptors directly from committed source.
-A verb added to an existing family changes that family and its implementation.
-A new family adds an import and an entry in the small `toolFamilies` array.
-There is no generated family index or install-time registration step. A normal
-`git pull --ff-only` leaves the import graph ready to use with installed dependencies.
+`src/tools.js` imports `#verb-families`. Node discovers committed descriptors in
+`src/tool-families/` read-only. Add a descriptor and its implementation to register
+a family; no shared list edit is needed. Each descriptor exports exactly
+`{source, createTools}`. Source is the reviewed logical locator; dependency binding
+receives the existing bounded helper object. The four original families initialize
+in their original order; new descriptor IDs append in bytewise order. Duplicate
+verb names refuse registration. Inline handlers and envelope policy remain central.
 
-## SCAC registry is a separate decision
+## Reviewed operation contracts
 
-`src/scac-mutation-registry.current.generated.js` is committed and remains the
-single registry consumed by production and gates. It contains the reviewed
-seal/grant expectations and generated operation contracts. There is no separate
-input registry. Runtime imports never run a generator.
+`contracts/operations/<verb>.json` owns each expected operation row. The stable
+`src/scac-mutation-registry.current.generated.js` facade retains seal metadata and
+exports the composed operation view through `#operation-contracts`. Node imports
+need only committed source and installed dependencies, including when install
+scripts are disabled. Imports never write to the checkout.
 
-`node ops/scac-mutation-inventory.mjs`, from the repository root, checks the
-committed operation contracts and exact regenerated text without writing.
-The gates class, npm type/test entry points and Wrangler build run that check.
-An added or changed verb must explicitly run `./run.sh regen registry` and commit
-the result. CI and deploy verify the merged file rather than silently updating it.
+`node ops/scac-mutation-inventory.mjs` compares actual tools with committed rows.
+CI never regenerates expectations. Run `./run.sh regen registry` explicitly when
+changing a contract, then review and commit only changed rows. It refuses source
+conflicts and seal drift; the obsolete flat-file conflict repair is removed.
+Retirement still requires the existing retirement ledger and loss checks.
 
-The registry is still a shared file. Independent changes to separated operation
-rows merge cleanly; adjacent additions can conflict. After resolving source files,
-`./run.sh regen registry` resolves an operations-only Git conflict and stages that
-file. It refuses conflicts in database seals or grants, preserving those for
-explicit review. It restores the original conflict on generation failure.
-GitHub can merge an already conflict-free combined registry and required checks
-verify it. A conflicting PR must run the repair command on its branch before
-entering the merge queue. No merge driver is required.
+## Worker assembly
+
+Wrangler's Python custom build validates actual contracts and atomically publishes
+both static adapters under ignored `.generated/`. Its aliases replace both Node
+adapters; incorrect alias configuration refuses the build. Content-addressed
+assembly directories contain static imports, expected rows and an input receipt.
+A single atomic pointer publishes a complete pair after validation. A failed build
+leaves the previous complete pair unchanged and stops Wrangler. Every build
+revalidates inputs; there is no runtime cache, install hook or runtime generation.
+The Worker receives static data/imports and performs no filesystem discovery.
+Run `python3 tools/verify_registry_bundle.py` from the repository root for a
+credential-free Wrangler dry-run and static-adapter graph check; scratch stays
+under `scratchpad/` and is removed when verification finishes.
 
 ## Test suites
 
@@ -68,8 +76,7 @@ No workflow needs a generation step to make a runtime import resolve.
   tools and mutation-registry identity.
 - `ops/scac-mutation-inventory.mjs` imports the same committed file for checks
   and explicit regeneration; `tools/regen.py` preserves its seal.
-- `lib/rule_routes.py` follows the import in mutation-registry and reads the same
-  file for `ops/rule-route-coverage.py` and its selftest.
+- `lib/rule_routes.py` validates the committed operation shard directory for `ops/rule-route-coverage.py` and its selftest.
 - `ops/scac_mutation_db_inventory.py validate_current_catalog` reads the
   migration-installed grant contract and compares it with the installed catalog.
   Its scheduler retirement and migration-control tests were included in the source audit.

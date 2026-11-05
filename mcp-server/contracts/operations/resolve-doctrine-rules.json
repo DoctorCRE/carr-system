@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:resolve-doctrine-rules",
+  "source_locator": "mcp-server/src/doctrine.js",
+  "schema_digest": "ef5027b786a7f59b13b9abaf0da32b1ad4796dafd60c7590d57f70eb51df096e",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

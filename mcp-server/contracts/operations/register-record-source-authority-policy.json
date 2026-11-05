@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:register-record-source-authority-policy",
+  "source_locator": "mcp-server/src/record-source-authority-store.v5.js",
+  "schema_digest": "2f7f1b58e2de7c9842c0a65f5edcc29e2b2b966be878968b54e3bc45fb3fd748",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": true,
+  "authority_only": true,
+  "delegates_to": []
+}

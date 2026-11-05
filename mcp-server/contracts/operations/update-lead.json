@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:update-lead",
+  "source_locator": "mcp-server/src/tools.js",
+  "schema_digest": "e1df98e06c10b4b237933e86855f595cac3f749a3ecd42dae982706209e1a97e",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

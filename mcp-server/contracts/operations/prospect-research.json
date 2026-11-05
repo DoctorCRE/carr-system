@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:prospect-research",
+  "source_locator": "mcp-server/src/lead-follow-up.ts",
+  "schema_digest": "f095a14b2ad92a51e0ffb91b530bc24be7c9bade075d5a832e1311a649bd4157",
+  "write": false,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

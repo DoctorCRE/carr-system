@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:release-doctrine-claims",
+  "source_locator": "mcp-server/src/doctrine.js",
+  "schema_digest": "89c5446e7b07cac8842cd04d36fb530694fbf308577e8ea2e9a013e0694af9fe",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

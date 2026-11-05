@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:instruct-deal-item",
+  "source_locator": "mcp-server/src/deal-items.ts",
+  "schema_digest": "df627bb068d1ef32abc72e6c64a88b8658829d5bff6a27b7a3e39c46f74d218e",
+  "write": true,
+  "human_only": true,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

@@ -41,3 +41,9 @@ fixtures with a source revision and file hashes, so their CI does not depend on
 a running factory. Update a snapshot through a source PR and run its fixtures.
 The weekly workflow starts only after this source reaches main. Its first
 hosted run must be checked by the orchestrator.
+
+The CARR source manifest retains the upstream revision and records its registry
+package-import graph integration as an explicit local patch, with original and
+current file hashes. The upstream checker was retired after that pinned revision;
+this patch supports the product registry layout without restoring retired factory
+code or creating a runtime dependency on software-factory.

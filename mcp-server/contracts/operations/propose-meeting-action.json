@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:propose-meeting-action",
+  "source_locator": "mcp-server/src/meeting-mode.js",
+  "schema_digest": "320800ef7e37bd7cca2fff4e923a9b2c61a13123f4dd627f42ffe1113f99e35c",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}

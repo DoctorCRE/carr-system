@@ -1,0 +1,10 @@
+{
+  "ingress_key": "mcp-tool:record-dispatch-link",
+  "source_locator": "mcp-server/src/dispatch-spine.ts",
+  "schema_digest": "c26cf30b62954f502d18cdf3c7c17921b4f9b375a3bc558bf86343d2e5bf6f33",
+  "write": true,
+  "human_only": false,
+  "human_caller_only": false,
+  "authority_only": false,
+  "delegates_to": []
+}
