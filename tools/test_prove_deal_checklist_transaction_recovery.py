@@ -13,6 +13,7 @@ import unittest
 
 RUNNER = Path(__file__).with_name('prove-deal-checklist-transaction-recovery.py')
 SPEC = importlib.util.spec_from_file_location('deal_proof', RUNNER)
+assert SPEC is not None and SPEC.loader is not None
 PROOF = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROOF)
 
