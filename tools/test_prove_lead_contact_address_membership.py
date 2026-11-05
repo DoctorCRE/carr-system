@@ -26,7 +26,7 @@ mode={mode!r}
 if mode=='auth': print('private@example.test',file=sys.stderr);sys.exit(1)
 if mode=='timeout': time.sleep(2)
 if verb=='lead-stage-preview':
- print(json.dumps({{'contract':'lead-automation.v1','dry_run':True,'moves':[{{'lead_id':'lead-0','activity_id':'activity-0','evidence_ref':'local-mail:private','strength':'strong','status':'applied'}}] if mode=='contradiction' else []}}))
+ print(json.dumps({{'contract':'lead-automation.v1','dry_run':True,'moves':[{{'lead_id':'lead-0','activity_id':'activity-0','evidence_ref':'local-mail:private','strength':'strong','status':'applied'}}] if mode in ('contradiction','positive') else []}}))
 else:
  detail={{'id':args.get('lead_id'),'email':'first@example.test;second@example.test','correspondence':[{{'id':'activity-0','kind':'email_in','source':'local_mail','detail':{{'match':'unconfirmed' if mode=='contradiction' else 'exact','evidence_ref':'local-mail:private'}}}}], 'correspondence_page':{{'has_more':True,'next_cursor':{{'id':'cursor','occurred_at':'2026-01-01T00:00:00Z'}}}}}}
  print(json.dumps({{'schema_version':'lead-workspace.v1','leads':[{{'id':'lead-'+str(i)}} for i in range({count})], 'detail':detail if 'lead_id' in args else None}}))
@@ -61,9 +61,15 @@ else:
 
     def test_exact_metadata_without_captured_address_is_not_membership_proof(self):
         result, calls, releases = self.run_cli()
-        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         receipt = json.loads(result.stdout)
         self.assertEqual(receipt['eligible_records'], 0)
+        self.assertEqual(receipt['status'], 'human_pending')
+        self.assertEqual(len(receipt['human_steps']), 1)
+        self.assertIn('Outlook', receipt['human_steps'][0])
+        self.assertIn('non-first', receipt['human_steps'][0])
+        self.assertIn('match=exact', receipt['human_steps'][0])
+        self.assertIn('release_sha', receipt['human_steps'][0])
         self.assertEqual(receipt['exact_activities'], 1)
         self.assertEqual(receipt['release_sha'], 'a' * 40)
         self.assertEqual(releases, ['/release', '/release'])
@@ -71,14 +77,27 @@ else:
         self.assertNotIn('example.test', result.stdout + result.stderr)
         self.assertNotIn('local-mail:private', result.stdout + result.stderr)
 
+    def test_positive_capture_defers_only_address_observation_to_joe(self):
+        result, _, releases = self.run_cli('positive')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['status'], 'human_pending')
+        self.assertEqual(receipt['assertions'], 1)
+        self.assertEqual(receipt['eligible_records'], 0)
+        self.assertEqual(len(receipt['human_steps']), 1)
+        self.assertEqual(releases, ['/release', '/release'])
+        self.assertNotIn('private', result.stdout + result.stderr)
+
     def test_empty_preview_and_board_never_pass(self):
         result, calls, _ = self.run_cli(count=0)
         self.assertEqual(result.returncode, 78)
         self.assertEqual(json.loads(result.stdout)['detail_reads'], 0)
+        self.assertNotIn('human_steps', json.loads(result.stdout))
 
     def test_read_budget_and_two_page_cap(self):
         result, calls, _ = self.run_cli(count=30)
-        self.assertEqual(result.returncode, 78)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)['status'], 'human_pending')
         details = [args for verb, args in calls if verb == 'lead-board' and 'lead_id' in args]
         self.assertEqual(len(details), 20)
         self.assertTrue(all(sum(d['lead_id'] == x['lead_id'] for x in details) <= 2 for d in details))
