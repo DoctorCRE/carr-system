@@ -6,7 +6,7 @@ Capture sanitized JSON responses for upload, private finalization, shared versio
 
 After capturing the writes, revoke the upload session using the existing sign-out flow. Supply that session cookie in out/deliverables/revoked-cookie. Supply a separate current session for the same partner in out/deliverables/active-cookie. Keep both files local and do not commit or paste them. The observer reads these files at runtime and never prints their values.
 
-From the deployed merge checkout, run the following command. The observer uses four GETs with redirects disabled, a 10-second timeout and a 36 MiB limit per response. It checks release identity, exact current private row/version, identical file bytes and a 401 for the revoked session. A network or contract failure exits 1.
+From the deployed merge checkout, run the following command. The observer uses four GETs with redirects disabled, a 10-second timeout and a 36 MiB limit per response. The release GET uses api.doctorcre.com without a cookie; authenticated GETs use app.doctorcre.com. An overall 60-second deadline bounds the command. It checks release identity, exact current private row/version, identical file bytes and a 401 for the revoked session. A network or contract failure exits 1.
 
 ```sh
 python3 ops/deal-deliverables-proof.py --receipt out/deliverables/partner-receipt.json --sha "$(git rev-parse HEAD)" --active-cookie-file out/deliverables/active-cookie --revoked-cookie-file out/deliverables/revoked-cookie

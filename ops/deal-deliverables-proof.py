@@ -78,8 +78,12 @@ def main():
                     return None
             opener = urllib.request.build_opener(NoRedirect())
             def read(key):
-                cookie = (args.revoked_cookie_file if key == 'revoked' else args.active_cookie_file).read_text().strip()
-                request = urllib.request.Request('https://api.doctorcre.com' + paths[key], headers={'Cookie':cookie})
+                origin = 'https://api.doctorcre.com' if key == 'release' else 'https://app.doctorcre.com'
+                headers = {}
+                if key != 'release':
+                    cookie = (args.revoked_cookie_file if key == 'revoked' else args.active_cookie_file).read_text().strip()
+                    headers['Cookie'] = cookie
+                request = urllib.request.Request(origin + paths[key], headers=headers)
                 try:
                     response = opener.open(request, timeout=10)
                 except urllib.error.HTTPError as error:

@@ -180,20 +180,29 @@ test("registered upload rejects a caller-selected object key before database acc
   );
 });
 
-test("storage circuit and rate admission fail closed", async () => {
+test("storage circuit and rate admission fail closed", async (t) => {
   const { createDealDeliverablesHandler } =
     await import("../src/deal-deliverables-web.js");
   const id = "20000000-0000-4000-8000-000000000002";
-  let calls = 0;
+  let calls = 0,
+    healthy = false;
+  const bytes = new TextEncoder().encode("%PDF-1.7\nSynthetic");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const row = {
     id,
     deal_id: path.split("/").at(-1),
     object_key: `deliverables/carr-internal/${path.split("/").at(-1)}/${id}`,
     state: "finalized",
+    bytes: bytes.length,
+    mime: "application/pdf",
+    sha256,
+    filename: "synthetic.pdf",
   };
   const bucket = {
     async get() {
       calls++;
+      if (healthy)
+        return { size: bytes.length, body: bytes, customMetadata: { sha256 } };
       throw new Error("offline");
     },
   };
@@ -218,4 +227,10 @@ test("storage circuit and rate admission fail closed", async () => {
   assert.equal(calls, 3, "fourth call must not reach open dependency");
   for (let i = 4; i < 60; i++) await get();
   assert.equal((await get()).status, 429);
+  const future = Date.now() + 61_000;
+  t.mock.method(Date, "now", () => future);
+  healthy = true;
+  assert.equal((await get()).status, 200, "half-open probe restores service");
+  assert.equal((await get()).status, 200);
+  assert.equal(calls, 5);
 });

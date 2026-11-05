@@ -785,6 +785,56 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
           ];
           const pass = spawnSync("python3", command, { encoding: "utf8" });
           assert.equal(pass.status, 0, pass.stdout + pass.stderr);
+          await writeFile(`${directory}/active-cookie`, "synthetic-active");
+          await writeFile(`${directory}/revoked-cookie`, "synthetic-revoked");
+          const transport = spawnSync(
+            "python3",
+            [
+              "-c",
+              `
+import importlib.util, io, json, base64, sys
+spec = importlib.util.spec_from_file_location('proof', 'ops/deal-deliverables-proof.py')
+proof = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(proof)
+fixture = json.load(open(sys.argv[2]))
+receipt = json.load(open(sys.argv[1]))
+row = receipt['finalize']['deliverable']
+root = 'https://app.doctorcre.com/api/v1/deal-deliverables/' + row['deal_id']
+seen = []
+class Opener:
+    def open(self, request, timeout):
+        seen.append(request.full_url)
+        if len(seen) == 1:
+            assert request.full_url == 'https://api.doctorcre.com/release'
+            assert request.get_header('Cookie') is None
+            key = 'release'
+        elif len(seen) == 2:
+            assert request.full_url == root
+            key = 'list'
+        else:
+            assert request.full_url == root + '/' + row['id'] + '/download'
+            key = 'revoked' if request.get_header('Cookie') == 'synthetic-revoked' else 'download'
+        data = base64.b64decode(fixture[key]['base64']) if key == 'download' else json.dumps(fixture[key]).encode()
+        response = io.BytesIO(data)
+        response.status = fixture[key]['status'] if key == 'revoked' else 200
+        return response
+proof.urllib.request.build_opener = lambda *args: Opener()
+directory = sys.argv[3]
+sys.argv = ['proof', '--receipt',sys.argv[1], '--sha','1'*40,'--active-cookie-file',directory+'/active-cookie','--revoked-cookie-file',directory+'/revoked-cookie']
+assert proof.main() == 0
+assert len(seen) == 4
+`,
+              `${directory}/receipt.json`,
+              `${directory}/fixture.json`,
+              directory,
+            ],
+            { encoding: "utf8" },
+          );
+          assert.equal(
+            transport.status,
+            0,
+            transport.stdout + transport.stderr,
+          );
           for (const mutation of [
             () => {
               fixture.revoked.status = 200;
