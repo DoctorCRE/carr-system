@@ -26,6 +26,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOKS = os.path.join(REPO, "hooks")
@@ -36,9 +38,10 @@ DENY, ALLOW = 2, 0
 CASES: list[tuple[str, str, dict, int]] = []   # (label, hook, payload, expected_exit)
 
 
-def run(hook, payload):
+def run(hook, payload, home=None):
     p = subprocess.run(["/usr/bin/env", "python3", os.path.join(HOOKS, hook)],
-                       input=json.dumps(payload), capture_output=True, text=True)
+                       input=json.dumps(payload), capture_output=True, text=True,
+                       env={**os.environ, "HOME": home} if home else None)
     return p.returncode, (p.stderr or "").strip()
 
 
@@ -110,16 +113,39 @@ def build():
                   "guard-unattended.py", bash(f'echo hi >> "{repo_src}"'), ALLOW))
 
 
-def main():
-    build()
+def check_cases(cases, home=None):
     fails = []
-    for label, hook, payload, want in CASES:
-        code, err = run(hook, payload)
+    for label, hook, payload, want in cases:
+        code, err = run(hook, payload, home)
         if code != want:
             verb = "DENIED" if code == DENY else f"allowed (exit {code})"
             fails.append(f"  {label}: expected {'DENY' if want == DENY else 'ALLOW'}, "
                          f"got {verb}. {err[:160]}")
-    print(f"corpus-render gate selftest — {len(CASES) - len(fails)}/{len(CASES)} passed "
+    return fails
+
+
+def main():
+    build()
+    fails = check_cases(CASES)
+    with tempfile.TemporaryDirectory(prefix="corpus-render-home-") as tmp:
+        canonical_home = Path(tmp).resolve() / "home"
+        canonical_home.mkdir()
+        linked_home = Path(tmp) / "linked-home"
+        linked_home.symlink_to(canonical_home, target_is_directory=True)
+        cases = []
+        for spelling, home in (("symlinked", linked_home), ("canonical", canonical_home)):
+            target = home / ".claude/skills/handoff/SKILL.md"
+            for operation, command, want in (
+                ("tee", f'echo hi | tee "{target}"', DENY),
+                ("redirect", f'echo hi > "{target}"', DENY),
+                ("cp", f'cp /tmp/x.md "{target}"', DENY),
+                ("read", f'cat "{target}"', ALLOW),
+            ):
+                cases.append((f"Bash {operation}, {spelling} HOME", "guard-unattended.py",
+                              bash(command), want))
+        fails.extend(check_cases(cases, str(linked_home)))
+    total = len(CASES) + len(cases)
+    print(f"corpus-render gate selftest — {total - len(fails)}/{total} passed "
           f"· deny set {len(render_map())} render(s)")
     if fails:
         print("FAILED:")
