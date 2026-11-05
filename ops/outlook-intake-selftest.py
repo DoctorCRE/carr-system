@@ -337,6 +337,32 @@ class IntakeTest(unittest.TestCase):
         self.assertNotEqual(outcome.reason, 'store_unchanged')
         self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
 
+    def test_captured_source_revision_refreshes_census_with_schema_intact(self):
+        from lib.outlook_field_census import SCHEMA, validate
+        rows = [mail(CLIENT.email, -timedelta(hours=1))]
+        self.run_intake(rows)
+        before = validate(json.loads((self.out() / 'field-census-latest.json').read_text()))
+        self.assertEqual(before['census']['fields']['body']['raw_missing'], 0)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(state['field_census_schema'], SCHEMA)
+        cached = self.run_intake(rows, touch=False)
+        self.assertEqual(cached.reason, 'store_unchanged')
+        self.assertEqual(json.loads((self.out() / 'field-census-latest.json').read_text()), before)
+        rows[0]['body'] = ''
+        rows[0]['body_kind'] = 'preview'
+        outcome = self.run_intake(rows)
+        after = validate(json.loads((self.out() / 'field-census-latest.json').read_text()))
+        self.assertNotEqual(outcome.reason, 'store_unchanged')
+        self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
+        self.assertNotEqual(before['binding']['commitment'], after['binding']['commitment'])
+        self.assertEqual(before['census']['population'], after['census']['population'])
+        self.assertEqual(after['census']['fields']['body']['captured'],
+                         before['census']['fields']['body']['captured'] - 1)
+        self.assertEqual(after['census']['fields']['body']['raw_missing'], 1)
+        self.assertEqual(after['census']['fields']['body']['causes']['unclassified'], 1)
+        self.assertEqual(after['receipt']['counts']['body_complete'], outcome.counts['body_complete'])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['field_census_schema'], SCHEMA)
+
     def test_natural_decode_publishes_census_before_private_cleanup(self):
         from lib.outlook_field_census import validate
         outcome = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
@@ -5816,6 +5842,23 @@ class FieldCensusTest(unittest.TestCase):
             mutate(bad)
             with self.assertRaises(ValueError):
                 census.validate(bad)
+
+    def test_receipt_subpopulations_cannot_exceed_source_population(self):
+        from lib import outlook_field_census as census
+        import copy
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, _ = self.fixture(directory)
+        for counts, causes in (
+                (dict(stored=5), dict(other_stored_unadmitted=2)),
+                (dict(mail_account_unknown_not_stored=1), dict(unknown_account=1)),
+                (dict(stored=4, stored_not_admitted_account_ambiguous=1), dict(ambiguous=1)),
+                (dict(stored=4, stored_not_admitted_account_unresolved=1), dict(unresolved=1))):
+            with self.subTest(counts=counts):
+                bad = copy.deepcopy(bundle)
+                bad['receipt']['counts'].update(counts)
+                bad['census']['message_causes'].update(causes)
+                with self.assertRaises(ValueError):
+                    census.validate(bad)
 
     def test_proof_cli_refuses_inconsistent_population(self):
         import copy

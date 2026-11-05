@@ -11,6 +11,7 @@ CAUSES = ('legitimately_empty', 'protected', 'never_requested', 'acquisition_fai
 FIELDS = {'subject': 'subject_decoded', 'body': 'body_complete', 'sender': 'sender_decoded', 'recipients': 'recipients_decoded'}
 MESSAGE_COUNTERS = ('mail_account_unknown_not_stored', 'decoder_rejected',
                     'stored_not_admitted_account_ambiguous', 'stored_not_admitted_account_unresolved')
+UNADMITTED_COUNTERS = ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved')
 VERSIONS = {'admission_policy': 'intake-account-v1', 'completion_predicate': 'nonempty-full-v1'}
 
 DISPOSITIONS = {
@@ -56,11 +57,11 @@ def build(meta, mails, bound):
     for field in fields.values():
         field['dispositions'] = dispositions(field['causes'])
     admitted = len(mails)
-    unadmitted = sum((meta.get(key, 0) for key in ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved')))
+    unadmitted = sum((meta.get(key, 0) for key in UNADMITTED_COUNTERS))
     rejected = meta.get('decoder_rejected', 0)
     population = dict(decoded=admitted + unadmitted, admitted=admitted, unadmitted=unadmitted, rejected=rejected, observed=admitted + unadmitted + rejected)
     receipt = dict(generation=bound['generation'], counts={key: meta[key] for key in
-                   ('admitted', 'stored', *FIELDS.values(), *MESSAGE_COUNTERS)})
+                   ('admitted', 'stored', *FIELDS.values(), *MESSAGE_COUNTERS, *UNADMITTED_COUNTERS)})
     message_causes = dict(rejected=rejected, unknown_account=meta['mail_account_unknown_not_stored'],
                           ambiguous=meta['stored_not_admitted_account_ambiguous'],
                           unresolved=meta['stored_not_admitted_account_unresolved'])
@@ -97,7 +98,7 @@ def validate(bundle):
         if not receipt['generation'] == census['generation'] == bound['generation']:
             raise ValueError('invalid_field_census')
         counts, population = (receipt['counts'], census['population'])
-        if not set(counts) == {'admitted', 'stored', *FIELDS.values(), *MESSAGE_COUNTERS}:
+        if not set(counts) == {'admitted', 'stored', *FIELDS.values(), *MESSAGE_COUNTERS, *UNADMITTED_COUNTERS}:
             raise ValueError('invalid_field_census')
         if not set(population) == {'decoded', 'admitted', 'unadmitted', 'rejected', 'observed'}:
             raise ValueError('invalid_field_census')
@@ -120,6 +121,12 @@ def validate(bundle):
             raise ValueError('invalid_field_census')
         admitted = population['admitted']
         if not admitted == counts['admitted']:
+            raise ValueError('invalid_field_census')
+        if (population['rejected'] != counts['decoder_rejected']
+                or population['unadmitted'] != sum(counts[key] for key in UNADMITTED_COUNTERS)
+                or counts['stored'] + causes['unknown_account'] > population['decoded']
+                or causes['ambiguous'] > counts['mail_account_ambiguous']
+                or causes['unresolved'] + causes['unknown_account'] > counts['mail_account_unresolved']):
             raise ValueError('invalid_field_census')
         if not population['decoded'] == admitted + population['unadmitted']:
             raise ValueError('invalid_field_census')
