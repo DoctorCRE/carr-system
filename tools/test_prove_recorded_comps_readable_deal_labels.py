@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +22,7 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 
 
 class ProofTest(unittest.TestCase):
-    def invoke(self, mode='pass'):
+    def invoke(self, mode='pass', timeout_seconds=30):
         requests = []
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
@@ -63,6 +64,18 @@ class ProofTest(unittest.TestCase):
             responses = {'list-doc-conversations': {'conversations': [{'id': ID}]}, 'read-doc-conversation': {'turns': turns}, 'get-deal-room': {'name': 'Different' if mode == 'name' else 'Synthetic Harbor'}}
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
+            if mode in ('timeout', 'wrapper_error'):
+                child = ("from pathlib import Path; import time; "
+                         f"Path({str(folder / 'started')!r}).touch(); "
+                         "time.sleep(3); "
+                         f"Path({str(folder / 'escaped')!r}).touch()")
+                wrapper.write_text(
+                    '#!/usr/bin/env python3\nimport subprocess,sys,time\n'
+                    + f'child=subprocess.Popen([sys.executable,"-c",{child!r}])\n'
+                    + f'started={str(folder / "started")!r}\n'
+                    + 'from pathlib import Path\n'
+                    + 'while not Path(started).exists(): time.sleep(0.01)\n'
+                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'child.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
             harness = '''import runpy,sys,urllib.request
@@ -73,10 +86,15 @@ def opened(self,url,*args,**kwargs):
   url=origin+url.removeprefix('https://raw.githubusercontent.com')
  return original(self,url,*args,**kwargs)
 urllib.request.OpenerDirector.open=opened
-sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds','30']
+sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds',sys.argv[4]]
 runpy.run_path(sys.argv[0],run_name='__main__')
 '''
-            result = subprocess.run(['python3', '-c', harness, str(RUNNER), origin, str(wrapper)], capture_output=True, text=True, timeout=35)
+            result = subprocess.run(['python3', '-c', harness, str(RUNNER), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
+            if mode in ('timeout', 'wrapper_error'):
+                self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
+                time.sleep(3.2)
+                self.assertFalse((folder / 'escaped').exists(),
+                                 'wrapper descendant performed work after proof exit')
             self.assertLessEqual(len(requests), 4)
             return result
 
@@ -96,6 +114,14 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             with self.subTest(mode=mode):
                 result = self.invoke(mode)
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_timeout_terminates_wrapper_descendants(self):
+        result = self.invoke('timeout', timeout_seconds=2)
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+
+    def test_wrapper_error_terminates_descendants(self):
+        result = self.invoke('wrapper_error')
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
 
     def test_deadline_flag(self):
         result = subprocess.run(['python3', str(RUNNER), '--origin', 'http://127.0.0.1', '--call-wrapper', '/missing', '--timeout-seconds', '31'], capture_output=True, timeout=5)
