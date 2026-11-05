@@ -13,7 +13,7 @@ export async function applyPendingDealRoomReads(client) {
   if (!(await client.query("select 1 from information_schema.columns where table_schema='public' and table_name='activity' and column_name='calendar_event_key'")).rows.length)
     await client.query(readFileSync(new URL('../../../migrations/1125_calendar_confirmation.sql', import.meta.url), 'utf8'));
   if (!(await client.query("select to_regclass('public.calendar_completion') as relation")).rows[0].relation)
-    await client.query(readFileSync(new URL('../../../migrations/1153_calendar_completion.sql', import.meta.url), 'utf8'));
+    await client.query(readFileSync(new URL('../../../migrations/1155_calendar_completion.sql', import.meta.url), 'utf8'));
   const { rows } = await client.query("select to_regclass('public.v_deal_client_portal') as view");
   if (!rows[0].view)
     await client.query(readFileSync(new URL('../../../migrations/1013_register_client_portal.sql', import.meta.url), 'utf8'));

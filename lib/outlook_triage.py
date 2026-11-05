@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, time as clock
+from datetime import datetime, timedelta, time as clock
 import argparse
 import sqlite3
 import stat
@@ -204,14 +204,18 @@ def _minute(moment: datetime) -> clock:
 
 def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits(),
         now_fn: Callable[[], datetime] = lambda: datetime.now(load_settings().timezone),
-        research_copy: Path | None = None) -> Outcome:
-    """One triage run, only from 19:15 to 21:00; it selects nothing once now_fn() reaches 21:15."""
+        research_copy: Path | None = None, *, proof_window: bool = False) -> Outcome:
+    """Admit evening planning or one explicit 180-second proof attempt."""
     load_settings(home).require_repo(repo)
+    if research_copy is not None and not research_copy.is_absolute():
+        print('outlook-triage skipped research_copy_not_absolute moved=0 left=0')
+        return Outcome('skipped', 'research_copy_not_absolute')
     os.umask(0o077)
-    if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
+    if not proof_window and not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         print('outlook-triage skipped outside_window moved=0 left=0')
         return Outcome('skipped', 'outside_window')
-    close = datetime.combine(now.astimezone(load_settings().timezone).date(), WINDOW_CLOSE, load_settings().timezone)
+    close = (now + timedelta(seconds=180) if proof_window else
+             datetime.combine(now.astimezone(load_settings().timezone).date(), WINDOW_CLOSE, load_settings().timezone))
     if now_fn() >= close:
         print('outlook-triage timed_out window_closed moved=0 left=0')
         return Outcome('timed_out', 'window_closed')
@@ -238,30 +242,51 @@ def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: L
     return outcome
 
 
-def fire(repo: Path | None = None, now: datetime | None = None) -> int:
-    """launchd entry: nothing to do outside 19:15-21:00 else run the job."""
+def fire(repo: Path | None = None, now: datetime | None = None, *,
+         proof_window: bool = False, research_copy: Path | None = None) -> int:
+    """Shared scheduled entry; explicit proofs receive a supervised real-time window."""
     repo = repo or Path(__file__).resolve().parents[1]
     settings = load_settings()
     settings.require_repo(repo)
     settings.require_service('triage')
     now = now or datetime.now(load_settings().timezone)
-    if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
+    if not proof_window and not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         return 0
+    if research_copy is not None and not research_copy.is_absolute():
+        print('outlook-triage skipped research_copy_not_absolute moved=0 left=0')
+        return EXIT['skipped']
     os.chdir(repo)
-    os.execv('/bin/zsh', ['/bin/zsh', str(repo / 'bin/run-scheduled.sh'), SERVICE, RUN_KEY,
-                          sys.executable, '-c', ENTRY])
+    command = [sys.executable, '-c', ENTRY]
+    if proof_window:
+        command += ['--proof-window']
+    if research_copy is not None:
+        command += ['--copy', str(research_copy)]
+    if proof_window:
+        command = [sys.executable, str(repo / 'bin/with-timeout.py'), '180', *command]
+    os.execv('/bin/zsh', ['/bin/zsh', str(repo / 'bin/run-scheduled.sh'), SERVICE, RUN_KEY, *command])
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--copy', type=Path, help='explicit research copy for this observation invocation')
+    parser.add_argument('--proof-window', action='store_true',
+                        help='admit one non-send planning proof now, bounded to 180 real seconds')
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parents[1]
     try:
         load_settings().require_service('triage')
-        outcome = run(repo, Path.home(), datetime.now(load_settings().timezone), research_copy=args.copy)
+        outcome = run(repo, Path.home(), datetime.now(load_settings().timezone), research_copy=args.copy,
+                      proof_window=args.proof_window)
     except (OSError, ValueError):
         outcome = Outcome('skipped', 'snapshot_producer_unavailable')
         print('outlook-triage skipped snapshot_producer_unavailable observed=0 planned=0 held=0 moved=0')
     print(receipt_line('outlook-triage', outcome.state, outcome.reason, {}, Path(__file__).resolve().parents[1]))
     return EXIT[outcome.state]
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Run one bounded triage proof through the scheduled wrapper.')
+    parser.add_argument('--proof-window', action='store_true', required=True)
+    parser.add_argument('--copy', type=Path)
+    args = parser.parse_args()
+    raise SystemExit(fire(proof_window=args.proof_window, research_copy=args.copy))
