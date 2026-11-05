@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 import unittest
+import copy
+import os
 import contextlib
 import io
 import subprocess
@@ -23,103 +25,83 @@ spec.loader.exec_module(gate)
 
 
 class SafetyHooks(unittest.TestCase):
-    def test_strict_cli_rejects_removed_or_tampered_required_hooks(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            hooks = root / 'hooks'
-            config = root / 'ops/config'
-            hooks.mkdir()
-            config.mkdir(parents=True)
-            (hooks / 'gate-integrity.py').write_bytes((REPO / 'hooks/gate-integrity.py').read_bytes())
-            required = {'guard-unattended.py', 'record-home-gate.py', 'orchestrator-question.py'}
-            for name in required | {'lint-gate.py'}:
-                (hooks / name).write_text('# fixture hook\n')
-            baseline = {'hashes': {
-                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in hooks.iterdir()
-            }, 'contracts': {}}
-            document = {'PreToolUse': [{'hooks': [
-                {'command': f'python {{{{REPO}}}}/hooks/{name}'} for name in sorted(required)
-            ]}]}
-            for name in ('hooks', 'codex-hooks'):
-                (config / f'{name}.json').write_text(json.dumps(document))
-            baseline['contracts'] = {
-                f'{name}.json': hashlib.sha256((config / f'{name}.json').read_bytes()).hexdigest()
-                for name in ('hooks', 'codex-hooks')
-            }
-            (config / 'gate-baseline.json').write_text(json.dumps(baseline))
+    def documents(self):
+        return {client: json.loads((REPO / f'ops/config/{name}.json').read_text())
+                for client, name in [('claude', 'hooks'), ('codex', 'codex-hooks')]}
 
-            def run():
-                return subprocess.run([sys.executable, hooks / 'gate-integrity.py', '--strict'],
-                                      capture_output=True, text=True, env=fixture_env())
+    def test_every_registration_is_required_and_cannot_be_altered(self):
+        counts = {}
+        for client, original in self.documents().items():
+            block = original.get('hooks', original)
+            self.assertEqual(gate.check(original, client), [])
+            counts[client] = 0
+            for event, groups in block.items():
+                for gi, group in enumerate(groups):
+                    for hi, hook in enumerate(group.get('hooks', [])):
+                        counts[client] += 1
+                        name = hook['command'].split('/')[-1]
+                        for mutation in ('delete', 'matcher', 'command', 'timeout', 'type', 'async', 'event'):
+                            with self.subTest(client=client, event=event, hook=name, mutation=mutation):
+                                document = copy.deepcopy(original)
+                                hooks = document.get('hooks', document)
+                                changed = hooks[event][gi]
+                                if mutation == 'delete':
+                                    del changed['hooks'][hi]
+                                elif mutation == 'matcher':
+                                    changed['matcher'] = 'NeverMatches'
+                                elif mutation == 'event':
+                                    hooks['WrongEvent'] = [hooks[event].pop(gi)]
+                                elif mutation == 'async':
+                                    changed['hooks'][hi]['async'] = True
+                                else:
+                                    changed['hooks'][hi][mutation] = 'altered'
+                                errors = '\n'.join(gate.check(document, client))
+                                self.assertIn(f'{client}: required safety hook is not installed:', errors)
+                                self.assertIn(name, errors)
+                                self.assertIn(event, errors)
+        self.assertEqual(counts, {'claude': 12, 'codex': 7})
 
-            healthy = run()
-            self.assertEqual(healthy.returncode, 0, healthy.stderr)
-            for name in sorted(required):
-                script = hooks / name
-                original = script.read_bytes()
-                with self.subTest(hook=name, mutation='missing script'):
-                    script.unlink()
-                    result = run()
-                    self.assertEqual(result.returncode, 1)
-                    self.assertIn(f'MISSING: hooks/{name}', result.stderr)
-                    script.write_bytes(original)
-                with self.subTest(hook=name, mutation='tampered script'):
-                    script.write_bytes(original + b'# tampered\n')
-                    result = run()
-                    self.assertEqual(result.returncode, 1)
-                    self.assertIn(f'CHANGED: hooks/{name}', result.stderr)
-                    script.write_bytes(original)
-                for client, config_name in [('claude', 'hooks'), ('codex', 'codex-hooks')]:
-                    if name == 'orchestrator-question.py' and client == 'codex':
-                        continue
-                    with self.subTest(hook=name, client=client, mutation='removed registration'):
-                        path = config / f'{config_name}.json'
-                        removed = {'PreToolUse': [{'hooks': [
-                            hook for hook in document['PreToolUse'][0]['hooks']
-                            if not hook['command'].endswith('/' + name)
-                        ]}]}
-                        path.write_text(json.dumps(removed))
-                        result = run()
-                        self.assertEqual(result.returncode, 1)
-                        self.assertIn(f'{client}: required safety hook is not installed: {name}', result.stderr)
-                        path.write_text(json.dumps(document))
-            self.assertEqual(run().returncode, 0)
-
-    def test_session_start_requires_installed_question_gate(self):
-        document = json.loads((REPO / 'ops/config/hooks.json').read_text())
-        with tempfile.TemporaryDirectory() as tmp:
+    def test_effective_config_homes(self):
+        with tempfile.TemporaryDirectory(dir=REPO / 'scratchpad') as tmp:
             home = Path(tmp)
-            settings = home / '.claude/settings.json'
-            settings.parent.mkdir()
-            settings.write_text(json.dumps(document).replace('{{REPO}}', str(REPO)))
-            with patch.object(gate.Path, 'home', return_value=home), \
+            sources = {'claude': home / '.claude/settings.json',
+                       'codex': home / '.codex/hooks.json'}
+            for client, document in self.documents().items():
+                sources[client].parent.mkdir()
+                sources[client].write_text(json.dumps(document).replace('{{REPO}}', str(REPO)))
+            with patch.dict(os.environ, {'HOME': str(home)}, clear=True), \
                     patch.object(gate, 'check_baseline', return_value=[]), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \
                     contextlib.redirect_stdout(io.StringIO()), \
                     contextlib.redirect_stderr(io.StringIO()) as errors:
                 self.assertEqual(gate.main(), 0)
-                document['PreToolUse'] = [group for group in document['PreToolUse']
-                    if not any('orchestrator-question.py' in hook.get('command', '')
-                               for hook in group['hooks'])]
-                settings.write_text(json.dumps(document).replace('{{REPO}}', str(REPO)))
+                for client, variable in [('claude', 'CLAUDE_CONFIG_DIR'), ('codex', 'CODEX_HOME')]:
+                    for missing in (False, True):
+                        with self.subTest(client=client, missing=missing):
+                            selected = home / f'{client}-selected-{missing}'
+                            if not missing:
+                                selected.mkdir()
+                            with patch.dict(os.environ, {variable: str(selected)}):
+                                self.assertEqual(gate.main(), 1)
+                                self.assertIn(str(selected), errors.getvalue())
+                    selected = home / f'{client}-valid'
+                    selected.mkdir()
+                    (selected / sources[client].name).write_text(sources[client].read_text())
+                    sources[client].write_text('{}')
+                    with patch.dict(os.environ, {variable: str(selected)}):
+                        self.assertEqual(gate.main(), 0)
+                    sources[client].write_text((selected / sources[client].name).read_text())
+                for source in sources.values():
+                    source.unlink()
                 self.assertEqual(gate.main(), 1)
-                self.assertIn('claude: required safety hook is not installed: orchestrator-question.py',
-                              errors.getvalue())
 
-    def test_native_configuration(self):
-        for client, name in [('claude', 'hooks'), ('codex', 'codex-hooks')]:
-            document = json.loads((REPO / f'ops/config/{name}.json').read_text())
+    def test_unrelated_hooks_and_group_order_are_preserved(self):
+        for client, document in self.documents().items():
+            hooks = document.get('hooks', document)
+            for groups in hooks.values():
+                groups.reverse()
+            hooks.setdefault('Stop', []).append({'hooks': [{'command': '/usr/bin/true'}]})
             self.assertEqual(gate.check(document, client), [])
-
-    def test_removed_guard(self):
-        self.assertIn('codex: required safety hook is not installed: guard-unattended.py',
-                      gate.check({'PreToolUse': []}, 'codex'))
-
-    def test_stop_guard_is_not_a_pre_action_safeguard(self):
-        document = {'Stop': [{'hooks': [{'command': 'python {{REPO}}/hooks/guard-unattended.py'}]}]}
-        self.assertIn('codex: required safety hook is not installed: guard-unattended.py',
-                      gate.check(document, 'codex'))
 
     def test_missing_command(self):
         document = {'PreToolUse': [{'hooks': [{'command': 'python {{REPO}}/hooks/absent.py'}]}]}
