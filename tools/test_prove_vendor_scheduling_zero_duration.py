@@ -25,8 +25,8 @@ class ProofCLI(unittest.TestCase):
         vendor = {'schema': 'vendor-meetings.v1', 'items': [], 'calendar': {**section, 'scheduling': {
             'state': state, 'items': [] if gaps is None else gaps,
             'window': {'start': at(0), 'end': at(24)}}}}
-        agenda = {'calendar': {**section, 'items': rows if rows is not None else [
-            {'title': 'PRIVATE SYNTHETIC IDENTITY', 'start': at(1), 'end': at(1), 'all_day': False}]}}
+        agenda = {'sections': {'calendar': {**section, 'items': rows if rows is not None else [
+            {'title': 'PRIVATE SYNTHETIC IDENTITY', 'start': at(1), 'end': at(1), 'all_day': False}]}}}
         if change:
             change(vendor, agenda, at)
         requests = []
@@ -68,12 +68,12 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
                         "const actor = agentActorForToken('Bearer synthetic-only-token', JSON.stringify({[owner + '-local']: 'synthetic-only-token'}), 'local-token');\n" +
                         "const c = {async query(sql, params) {\n" +
                         "  if (sql.includes('with candidates')) return {rows: [{total: 0, items: []}]};\n" +
-                        "  if (sql.includes('from board_snapshot')) {\n" +
+                        "  if (sql.includes('from board_snapshot') && params[2] === 'calendar-agenda') {\n" +
                         "    if (params[1] !== owner) throw Error('wrong sponsor');\n" +
-                        "    return {rows: [{snapshot_json: {schema: 'carr-calendar-agenda.v1', observed_at: data.agenda.calendar.observed_at, warnings: [], items: data.agenda.calendar.items}}]};\n" +
-                        "  } throw Error('unexpected query');\n" +
+                        "    return {rows: [{snapshot_json: {schema: 'carr-calendar-agenda.v1', observed_at: data.agenda.sections.calendar.observed_at, warnings: [], items: data.agenda.sections.calendar.items}}]};\n" +
+                        "  } return {rows: []};\n" +
                         "}};\n" +
-                        "const value = process.argv[3] === 'read-vendor-meetings' ? await executeRegisteredTool(c, actor, process.argv[3], JSON.parse(process.argv[4])) : data.agenda;\n" +
+                        "const value = await executeRegisteredTool(c, actor, process.argv[3], JSON.parse(process.argv[4]));\n" +
                         "console.log(JSON.stringify(value));\n")
                     wrapper.write_text('#!' + sys.executable + '\nimport os, sys\n' +
                         f"os.execv({shutil.which('node')!r}, ['node', {str(registry)!r}, *sys.argv[1:]])\n")
@@ -118,23 +118,23 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
 
     def test_normal_ready_and_empty_calendars_cannot_prove_regression(self):
         self.assertEqual(self.run_cli(78, state='ready', rows=[])['status'], 'insufficient_natural_evidence')
-        self.run_cli(78, change=lambda v, a, at: a['calendar']['items'][0].update(end=at(2)))
+        self.run_cli(78, change=lambda v, a, at: a['sections']['calendar']['items'][0].update(end=at(2)))
 
     def test_stale_warning_missing_or_changed_source_is_insufficient(self):
         for change in [
-            lambda v, a, at: a['calendar'].update(state='partial'),
+            lambda v, a, at: a['sections']['calendar'].update(state='partial'),
             lambda v, a, at: v['calendar'].update(observed_at=at(-19)),
-            lambda v, a, at: a['calendar'].update(observed_at=at(-1)),
-            lambda v, a, at: a['calendar'].update(items=None),
-            lambda v, a, at: a['calendar']['items'][0].update(all_day=True),
-            lambda v, a, at: a['calendar']['items'][0].update(time_changed=True),
-            lambda v, a, at: a['calendar']['items'][0].update(start=at(30), end=at(30)),
+            lambda v, a, at: a['sections']['calendar'].update(observed_at=at(-1)),
+            lambda v, a, at: a['sections']['calendar'].update(items=None),
+            lambda v, a, at: a['sections']['calendar']['items'][0].update(all_day=True),
+            lambda v, a, at: a['sections']['calendar']['items'][0].update(time_changed=True),
+            lambda v, a, at: a['sections']['calendar']['items'][0].update(start=at(30), end=at(30)),
         ]:
             with self.subTest(change=change):
                 self.run_cli(78, change=change)
 
     def test_excess_records_are_not_examined(self):
-        self.run_cli(78, change=lambda v, a, at: a['calendar'].update(items=a['calendar']['items'] * 21))
+        self.run_cli(78, change=lambda v, a, at: a['sections']['calendar'].update(items=a['sections']['calendar']['items'] * 21))
 
     def test_release_change_is_not_a_passing_observation(self):
         self.assertEqual(self.run_cli(78, release_change=True)['status'], 'release_changed')
