@@ -1628,6 +1628,8 @@ class Run:
             status = reply['status']
             self.counts['attachments_' + status] = self.counts.get('attachments_' + status, 0) + 1
             if status in ('stored', 'existing'):
+                if result['detected_type'] == 'pdf':
+                    self.counts['attachments_pdf_stored'] = self.counts.get('attachments_pdf_stored', 0) + 1
                 done[f"{ident}/{result['attachment']}"] = int(self.now.timestamp())
             else:
                 self.state['attachments_pending'] = True

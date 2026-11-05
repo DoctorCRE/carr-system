@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> Acquired: Matched attachment bytes copied
+    Acquired --> Refused: PDF header or tail missing, or image type refused
+    Acquired --> Admitted: Byte detector admits PDF or Office
+    Admitted --> Pending: Archive or filing fails
+    Admitted --> FiledPDF: Filing stored or existing PDF
+    Admitted --> FiledOffice: Filing stored or existing Office document
+    FiledPDF --> Observed: Successful receipt has positive PDF count and expected full SHA
+    FiledOffice --> Held: PDF count absent
+    Refused --> Held: PDF count absent
+    Pending --> Held: Failed receipt or PDF count absent
