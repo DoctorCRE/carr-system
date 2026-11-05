@@ -49,7 +49,7 @@ enum DecodeStatus {
     Conflict,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
 #[allow(dead_code)]
 enum Field<T> {
@@ -132,6 +132,15 @@ struct Provenance {
 }
 
 #[derive(Serialize)]
+struct UnresolvedSpan {
+    object_offset: usize,
+    length: usize,
+    encoding: &'static str,
+    raw_value: Field<String>,
+    reason_code: &'static str,
+}
+
+#[derive(Serialize)]
 struct Candidate<'a> {
     schema: &'static str,
     kind: Kind,
@@ -143,6 +152,7 @@ struct Candidate<'a> {
     deletion: Field<Deletion>,
     reminder: Field<Reminder>,
     provenance: Vec<Provenance>,
+    unresolved_spans: Vec<UnresolvedSpan>,
     decode_status: DecodeStatus,
     reason_codes: Vec<&'static str>,
 }
@@ -150,6 +160,7 @@ struct Candidate<'a> {
 #[derive(Default)]
 struct Evidence {
     details: detail::Index,
+    raw_dates: Option<(u32, [Field<String>; 2])>,
     task_classifier: bool,
     unsupported: bool,
     mail_verified: bool,
@@ -157,9 +168,27 @@ struct Evidence {
     conflicts: BTreeSet<&'static str>,
 }
 
-type Counts = BTreeMap<&'static str, u64>;
-fn add(counts: &mut Counts, key: &'static str) {
-    *counts.entry(key).or_default() += 1;
+#[derive(Default, Serialize)]
+struct Counts {
+    candidates_seen: u64,
+    candidates_supported: u64,
+    candidates_held: u64,
+    candidates_admitted: u64,
+    reviews_pending: u64,
+    writes_acknowledged: u64,
+    candidates_deferred: u64,
+    account_unknown: u64,
+    foreign_account_excluded: u64,
+    unreadable_candidates: u64,
+    unknown_tag_class: u64,
+    mail_classifiers: u64,
+    task_classifier_hypotheses: u64,
+    calendar_objects: u64,
+    blocks_verified: u64,
+    block_failures: u64,
+    revisions_conflicted: u64,
+    decoder_incomplete: u64,
+    selected_account_objects: u64,
 }
 
 fn uuid(s: &str) -> bool {
@@ -176,16 +205,6 @@ fn uuid(s: &str) -> bool {
 fn date(db: &Connection, seconds: i64) -> String {
     db.query_row("SELECT date(?1,'unixepoch')", [seconds], |r| r.get(0))
         .unwrap()
-}
-
-fn due(db: &Connection, value: Option<Option<i64>>) -> Field<Due> {
-    match value {
-        Some(Some(seconds)) if seconds % 86400 == 0 => Field::Known(Due::DateOnly {
-            date: date(db, seconds),
-        }),
-        Some(None) => Field::Absent,
-        _ => Field::Unknown("date_semantics_unverified"),
-    }
 }
 
 fn candidate<'a>(
@@ -217,6 +236,7 @@ fn candidate<'a>(
         deletion: Field::Unknown("tombstone_unverified"),
         reminder: Field::Unknown("reminder_format_unverified"),
         provenance: vec![],
+        unresolved_spans: vec![],
         decode_status: DecodeStatus::Unsupported,
         reason_codes: vec!["admission_disabled"],
     };
@@ -240,11 +260,21 @@ fn candidate<'a>(
                 scheme: "mail_detail_u32",
                 value: rev.to_string(),
             });
-            c.due = if evidence.conflicts.contains("due") {
-                Field::Conflict
-            } else {
-                due(db, d.due_unix)
-            };
+            c.due = Field::Unknown("date_semantics_unverified");
+            c.reason_codes.push("date_semantics_unverified");
+            if let Some((_, raw)) = &evidence.raw_dates {
+                c.unresolved_spans = [294, 302]
+                    .into_iter()
+                    .zip(raw)
+                    .map(|(offset, value)| UnresolvedSpan {
+                        object_offset: offset,
+                        length: 8,
+                        encoding: "u64le_decimal",
+                        raw_value: value.clone(),
+                        reason_code: "date_semantics_unverified",
+                    })
+                    .collect();
+            }
             c.completion = if evidence.conflicts.contains("completion") {
                 Field::Conflict
             } else {
@@ -273,7 +303,6 @@ fn candidate<'a>(
             for (field, offset, length, encoding) in [
                 ("revision", 1418, 4, "u32le"),
                 ("completion", 1474, 1, "flag_byte"),
-                ("due", 294, 8, "dotnet_ticks_or_no_date"),
                 ("completion_date", 286, 8, "dotnet_ticks_or_no_date"),
             ] {
                 c.provenance.push(Provenance {
@@ -349,38 +378,18 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
     let file = fs::File::open(source).map_err(|_| ())?;
     let before = file.metadata().map_err(|_| ())?;
     let raw = unsafe { Mmap::map(&file) }.map_err(|_| ())?;
-    let mut counts = Counts::from([
-        ("candidates_seen", 0),
-        ("candidates_supported", 0),
-        ("candidates_held", 0),
-        ("candidates_admitted", 0),
-        ("reviews_pending", 0),
-        ("writes_acknowledged", 0),
-        ("candidates_deferred", 0),
-        ("account_unknown", 0),
-        ("foreign_account_excluded", 0),
-        ("unreadable_candidates", 0),
-        ("unknown_tag_class", 0),
-        ("mail_classifiers", 0),
-        ("task_classifier_hypotheses", 0),
-        ("calendar_objects", 0),
-        ("blocks_verified", 0),
-        ("block_failures", 0),
-        ("revisions_conflicted", 0),
-        ("decoder_incomplete", 0),
-        ("selected_account_objects", 0),
-    ]);
+    let mut counts = Counts::default();
     let mut deferred_min = u64::MAX;
     let mut held: BTreeMap<(u64, Kind, u8), Evidence> = BTreeMap::new();
     let (signatures, issues) = observe::verified_blocks(&raw, |_, _, block| {
-        add(&mut counts, "blocks_verified");
+        counts.blocks_verified += 1;
         let data = &block.data;
         for start in memchr::memchr_iter(5, data) {
             if data.get(start..start + 2) != Some(&[5, 0]) {
                 continue;
             }
             let Some(header) = data.get(start..start.saturating_add(10)) else {
-                add(&mut counts, "unreadable_candidates");
+                counts.unreadable_candidates += 1;
                 continue;
             };
             if header[8..10] != [0, 0] {
@@ -392,20 +401,20 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
                 .checked_sub(10)
                 .and_then(|len| data.get(start + 10..start + 10 + len))
             else {
-                add(&mut counts, "unreadable_candidates");
+                counts.unreadable_candidates += 1;
                 continue;
             };
             let Some(class) = object::u16_at(body, 0) else {
-                add(&mut counts, "unreadable_candidates");
+                counts.unreadable_candidates += 1;
                 continue;
             };
             if !known(tag, class) {
-                add(&mut counts, "unknown_tag_class");
+                counts.unknown_tag_class += 1;
                 continue;
             }
             if (tag, class) == (0x0455, 0x006b) {
-                add(&mut counts, "calendar_objects");
-                add(&mut counts, "account_unknown");
+                counts.calendar_objects += 1;
+                counts.account_unknown += 1;
                 continue;
             }
             if (tag, class) != (0x060f, 0x00c9) {
@@ -413,14 +422,14 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
             }
             let Some((key, owner)) = object::reference(body, 0xc9, 212).filter(|(_, a)| *a > 0)
             else {
-                add(&mut counts, "account_unknown");
+                counts.account_unknown += 1;
                 continue;
             };
             if owner != account {
-                add(&mut counts, "foreign_account_excluded");
+                counts.foreign_account_excluded += 1;
                 continue;
             }
-            add(&mut counts, "selected_account_objects");
+            counts.selected_account_objects += 1;
             let is_revision = message::is_revision(body);
             let (kind, layout) = if is_revision {
                 let classifier = object::Object::new(body, 1541)
@@ -429,32 +438,32 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
                     .and_then(object::text);
                 match classifier.as_deref() {
                     Some(s) if s.starts_with("IPM.Note") => {
-                        add(&mut counts, "mail_classifiers");
+                        counts.mail_classifiers += 1;
                         continue;
                     }
                     Some("IPM.Task") => {
-                        add(&mut counts, "task_classifier_hypotheses");
+                        counts.task_classifier_hypotheses += 1;
                         (Kind::StandaloneTask, 0)
                     }
                     _ => {
-                        add(&mut counts, "unreadable_candidates");
+                        counts.unreadable_candidates += 1;
                         continue;
                     }
                 }
             } else {
                 if body.len() >= 1541 && body.get(1491) != Some(&3) {
-                    add(&mut counts, "unreadable_candidates");
+                    counts.unreadable_candidates += 1;
                     continue;
                 }
                 (Kind::MailFlag, body.get(1491).copied().unwrap_or(0))
             };
-            add(&mut counts, "candidates_seen");
+            counts.candidates_seen += 1;
             if key <= after {
                 continue;
             }
             let id = (key, kind, layout);
             if !held.contains_key(&id) && held.len() >= CAP {
-                add(&mut counts, "candidates_deferred");
+                counts.candidates_deferred += 1;
                 if held.last_key_value().is_some_and(|(last, _)| *last > id) {
                     if let Some(((removed, _, _), _)) = held.pop_last() {
                         deferred_min = deferred_min.min(removed);
@@ -476,13 +485,30 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
                             e.conflicts.clear();
                         }
                         if rev == old_rev {
-                            if new.due_unix != old.due_unix {
-                                e.conflicts.insert("due");
-                            }
                             if new.flag != old.flag || new.completed_unix != old.completed_unix {
                                 e.conflicts.insert("completion");
                             }
                         }
+                    }
+                }
+                if let Some((rev, _)) = incoming.details.get(&key) {
+                    let raw = [294, 302].map(|offset| {
+                        Field::Known(
+                            u64::from_le_bytes(body[offset..offset + 8].try_into().unwrap())
+                                .to_string(),
+                        )
+                    });
+                    match &mut e.raw_dates {
+                        Some((old_rev, _)) if *old_rev > *rev => {}
+                        Some((old_rev, old)) if *old_rev == *rev => {
+                            for (held, new) in old.iter_mut().zip(raw) {
+                                if *held != new {
+                                    *held = Field::Conflict;
+                                    e.conflicts.insert("raw_date_slots");
+                                }
+                            }
+                        }
+                        _ => e.raw_dates = Some((*rev, raw)),
                     }
                 }
                 e.details.observe(&data[start..start + length]);
@@ -492,11 +518,11 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
     })
     .map_err(|_| ())?;
     if let Some(((last, _, _), _)) = held.last_key_value() {
-        if counts["candidates_deferred"] > 0 && deferred_min <= *last {
+        if counts.candidates_deferred > 0 && deferred_min <= *last {
             let boundary = *last;
             let before = held.len();
             held.retain(|(key, _, _), _| *key < boundary);
-            *counts.get_mut("candidates_deferred").unwrap() += (before - held.len()) as u64;
+            counts.candidates_deferred += (before - held.len()) as u64;
         }
     }
     observe::verified_blocks(&raw, |_, _, block| {
@@ -535,24 +561,20 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
     {
         return Err(());
     }
-    counts.insert("block_failures", issues.len() as u64);
+    counts.block_failures = issues.len() as u64;
     if signatures == 0
         || !issues.is_empty()
-        || [
-            "unknown_tag_class",
-            "account_unknown",
-            "unreadable_candidates",
-            "candidates_deferred",
-            "calendar_objects",
-            "task_classifier_hypotheses",
-        ]
-        .iter()
-        .any(|key| counts[key] > 0)
+        || counts.unknown_tag_class > 0
+        || counts.account_unknown > 0
+        || counts.unreadable_candidates > 0
+        || counts.candidates_deferred > 0
+        || counts.calendar_objects > 0
+        || counts.task_classifier_hypotheses > 0
         || held.values().any(|e| {
             e.unsupported || (!e.task_classifier && (!e.mail_verified || e.classifier_ambiguous))
         })
     {
-        counts.insert("decoder_incomplete", 1);
+        counts.decoder_incomplete = 1;
     }
     let output = fs::OpenOptions::new()
         .write(true)
@@ -574,7 +596,7 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
             &tx, *key, *kind, evidence, account, generation, build, revision,
         );
         if c.decode_status == DecodeStatus::Conflict {
-            add(&mut counts, "revisions_conflicted");
+            counts.revisions_conflicted += 1;
         }
         let mut value = serde_json::to_value(c).map_err(|_| ())?;
         let digest = format!(
@@ -595,7 +617,7 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
             .map_err(|_| ())?;
     }
     drop(insert);
-    counts.insert("candidates_held", held.len() as u64);
+    counts.candidates_held = held.len() as u64;
     let cursor = held
         .last_key_value()
         .map(|((key, _, _), _)| *key)

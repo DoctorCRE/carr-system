@@ -25,6 +25,8 @@ unresolved accounts, rejected objects, foreign accounts, and block failures.
 Unknown membership is counted but never materialized. Duplicate observations reduce
 into one candidate per account, key, kind, and layout. Conflicting revisions stay held.
 Raw source bytes and private titles never enter stdout or error messages.
+The receipt has a closed set of numeric fields in Rust and Python. Intake rejects
+unknown or missing counters before any stdout output.
 
 Load spread and async are n/a. One local synchronous scan has no fan-out or queue.
 Caching and eviction are n/a. There is no persistent authority cache. Each evidence
@@ -51,7 +53,9 @@ stateDiagram-v2
     Observed --> Excluded: foreign or unresolved account
     Observed --> Incomplete: corrupt input or retention cap
     Held --> Held: same observation, changed revision, or snapshot absence
-    Held --> Receipt: validate projection
+    Held --> Receipt: verify identity, field provenance, and receipt schema
+    Held --> Rejected: inconsistent field evidence or malformed receipt
+    Rejected --> Finished: generic rejection and no stdout
     Receipt --> Finished: report counts and zero admissions
 ```
 
@@ -59,6 +63,20 @@ No transition to Review or Open exists in this job. The intake interface takes n
 writer dependency. Tests cover unknown layout, truncation, descriptor overflow,
 foreign-account key collision, ties, revision order, replay, absence, cap/resume,
 and corruption. These tests exercise the command and intake interface.
+Transition coverage maps to executable tests in `ops/outlook-task-candidates-selftest.py`.
+
+| Transition | Test |
+| --- | --- |
+| Initial to Observed | `test_nonmail_classifier_is_visible_but_never_verified` |
+| Observed to Held | `test_unproven_due_semantics_preserve_exact_raw_slots` |
+| Observed to Excluded | `test_foreign_account_collision_cannot_poison_selected_candidate` |
+| Observed to Incomplete | `test_corrupt_block_and_live_store_name_fail_closed`, `test_cap_and_resume_on_large_synthetic_corpus` |
+| Held to Held | `test_revision_order_and_conflict_are_scan_independent`, `test_replay_absence_and_readonly_intake_have_no_writer` |
+| Held to Receipt | `test_replay_absence_and_readonly_intake_have_no_writer`, `test_interpreted_fields_require_exact_observation_records` |
+| Held to Rejected | `test_intake_rejects_interpretation_without_observed_provenance`, `test_receipt_rejects_hostile_names_and_missing_counters` |
+| Rejected to Finished | `test_receipt_rejects_hostile_names_and_missing_counters` |
+| Receipt to Finished | `test_cli_intake_emits_only_counts_and_refuses_bad_context` |
+
 Formal checking and rendered statechart are not claimed.
 
 ## Throughput checkpoint
@@ -90,3 +108,25 @@ It emits counts only and always reports zero admitted candidates.
 Production proof remains a later read-only Studio job after deployment and installation.
 It must emit a task census receipt and zero admitted candidates. This source job uses
 synthetic stores only. Standalone task and calendar reminder format offsets remain unknown.
+
+## Round 2 evidence corrections
+
+Due meaning remains unverified, including the apparent no-date sentinel. The new
+candidate interface never interprets either +294 or +302 as due. `unresolved_spans`
+retains both raw u64 values as decimal strings, their offsets, lengths, encoding,
+and the unresolved reason. Fractions are preserved. Newest verified mail revision
+wins for raw observations. Equal-revision disagreements become raw-span conflicts
+independently of due meaning. Retention stays bounded to two raw slots per candidate.
+Historical mail date decoding remains unchanged.
+
+Known or absent interpreted fields require verified mail identity and the exact
+observed atlas provenance tuple for that field. A completed date also requires its
+own observed tuple. Unknown fields cannot become interpreted merely by changing a
+kind label or recomputing a digest. This validates the declared evidence relationships;
+it does not authenticate an arbitrary database producer or authorize admission.
+
+The repair keeps the existing read-only intake interface. A generic schema engine
+was considered and rejected because the supported shape is one local evidence
+format. Fixed receipt structures remove arbitrary string keys at the producer and
+consumer. No cache, queue, external call, additional scan, or canonical write was
+introduced. Capacity and failure behavior remain as described above.

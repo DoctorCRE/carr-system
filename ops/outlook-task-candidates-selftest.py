@@ -121,6 +121,93 @@ class Candidates(unittest.TestCase):
                 self.assertEqual(done.stdout, '')
                 self.assertNotIn(key, done.stderr)
 
+    def test_interpreted_fields_require_exact_observation_records(self):
+        from lib.outlook_task_candidates import intake_evidence
+        for field in ('revision', 'completion'):
+            for mutation in ('missing', 'offset', 'evidence_id', 'encoding', 'tag', 'class', 'length'):
+                with self.subTest(field=field, mutation=mutation):
+                    self.decode(message(classifier='IPM.Note') + detail())
+                    intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+                    def change(c):
+                        if mutation == 'missing':
+                            c['provenance'] = [s for s in c['provenance'] if s['field'] != field]
+                        else:
+                            span = next(s for s in c['provenance'] if s['field'] == field)
+                            key = 'object_offset' if mutation == 'offset' else mutation
+                            span[key] = 'unobserved' if isinstance(span[key], str) else span[key] + 1
+                    self.mutate_candidate(change)
+                    with self.assertRaises(ValueError):
+                        intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+        for field in ('revision', 'due', 'completion'):
+            for state in ('known', 'absent', 'conflict'):
+                self.decode(message())
+                def change(c):
+                    c['kind'] = 'mail_flag'
+                    c['provenance'] = []
+                    c[field] = {'state': state}
+                    if state == 'known':
+                        c[field]['value'] = {'kind': 'open'}
+                self.mutate_candidate(change)
+                with self.assertRaises(ValueError):
+                    intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+
+    def test_completed_date_and_clear_require_their_own_provenance(self):
+        from lib.outlook_task_candidates import intake_evidence
+        for flag, field in ((1, 'completion_date'), (0, 'completion')):
+            data = bytearray(detail(flag=flag))
+            struct.pack_into('<Q', data, 10 + 286, 621355968000000000 + 1793232000 * 10000000)
+            self.decode(message(classifier='IPM.Note') + data)
+            intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+            self.mutate_candidate(lambda c: c.update(
+                provenance=[s for s in c['provenance'] if s['field'] != field]))
+            with self.assertRaises(ValueError):
+                intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+
+    def test_raw_date_conflicts_and_new_revisions_are_order_independent(self):
+        note = message(classifier='IPM.Note')
+        a = bytearray(detail(revision=3, due=1793232000))
+        b = bytearray(a)
+        struct.pack_into('<Q', b, 10 + 302, 2**64 - 1)
+        _, forward = self.decode(note + a + b)
+        _, reverse = self.decode(note + b + a)
+        self.assertEqual(forward, reverse)
+        self.assertEqual(forward[0]['decode_status'], 'conflict')
+        self.assertEqual(forward[0]['unresolved_spans'][1]['raw_value'], {'state': 'conflict'})
+        latest = detail(revision=9, due=1793232000)
+        _, forward = self.decode(note + a + b + latest)
+        _, reverse = self.decode(note + latest + b + a)
+        self.assertEqual(forward, reverse)
+        self.assertEqual(forward[0]['decode_status'], 'partial')
+        self.assertEqual(forward[0]['due']['state'], 'unknown')
+
+    def test_all_receipt_counters_are_required_and_numeric(self):
+        from lib.outlook_task_candidates import intake_evidence
+        receipt, _ = self.decode(message())
+        for key in receipt:
+            for bad in (None, 'Synthetic private title', True, -1):
+                self.decode(message())
+                with closing(sqlite3.connect(self.root / 'evidence.db')) as db:
+                    original = db.execute('select receipt_json from task_census').fetchone()[0]
+                    altered = dict(receipt)
+                    if bad is None:
+                        altered.pop(key)
+                    else:
+                        altered[key] = bad
+                    db.execute('update task_census set receipt_json=? where receipt_json=?',
+                               (json.dumps(altered), original))
+                    db.commit()
+                with self.subTest(key=key, bad=bad), self.assertRaises(ValueError):
+                    intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+
+    def test_admission_flags_are_not_available(self):
+        self.decode(message())
+        for flag in ('--admit', '--admission-enabled', '--write'):
+            done = subprocess.run([sys.executable, str(ROOT / 'tools/outlook-task-evidence.py'),
+                                   str(self.root / 'evidence.db'), '7', GENERATION, flag],
+                                  capture_output=True, text=True)
+            self.assertEqual(done.returncode, 2)
+            self.assertEqual(done.stdout, '')
+
     def test_nonmail_classifier_is_visible_but_never_verified(self):
         receipt, rows = self.decode(message())
         self.assertEqual(len(rows), 1)
@@ -148,15 +235,13 @@ class Candidates(unittest.TestCase):
         self.assertEqual(receipt['foreign_account_excluded'], 2)
         self.assertTrue(all(c['source']['account_key'] == '7' for c in mixed))
 
-    def test_dates_unknown_absent_and_clear_are_distinct(self):
-        _, rows = self.decode(message(classifier="IPM.Note") + detail())
-        self.assertEqual(rows[0]['due'], {'state': 'absent'})
-        _, rows = self.decode(message(classifier="IPM.Note") + detail(due=1793232000))
-        self.assertEqual(rows[0]['due']['value'], {'kind': 'date_only', 'date': '2026-10-29'})
-        _, rows = self.decode(message(classifier="IPM.Note") + detail(due=-60000000000))
-        self.assertEqual(rows[0]['due']['state'], 'unknown')
-        _, rows = self.decode(message(classifier="IPM.Note") + detail(flag=0))
+    def test_due_stays_unresolved_and_clear_is_not_deletion(self):
+        for stamp in (None, 1793232000, -60000000000):
+            _, rows = self.decode(message(classifier='IPM.Note') + detail(due=stamp))
+            self.assertEqual(rows[0]['due'], {'state': 'unknown', 'value': 'date_semantics_unverified'})
+        _, rows = self.decode(message(classifier='IPM.Note') + detail(flag=0))
         self.assertIn('mail_flag_clear', rows[0]['reason_codes'])
+        self.assertEqual(rows[0]['completion']['state'], 'absent')
         self.assertEqual(rows[0]['deletion']['state'], 'unknown')
 
     def test_revision_order_and_conflict_are_scan_independent(self):
@@ -239,7 +324,8 @@ class Candidates(unittest.TestCase):
         _, rows = self.decode(note + detail(flag=3))
         self.assertEqual(rows[0]['completion']['state'], 'unknown')
         _, rows = self.decode(note + detail(due=1793232000) + detail(due=None))
-        self.assertEqual(rows[0]['due']['state'], 'conflict')
+        self.assertEqual(rows[0]['due']['state'], 'unknown')
+        self.assertEqual(rows[0]['unresolved_spans'][0]['raw_value'], {'state': 'conflict'})
         self.assertEqual(rows[0]['decode_status'], 'conflict')
 
     def test_u64_keys_remain_decimal_text_and_never_enter_receipts(self):
