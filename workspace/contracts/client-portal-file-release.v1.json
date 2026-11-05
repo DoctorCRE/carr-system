@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doctorcre.com/contracts/client-portal-file-release.v1.json",
+  "title": "Portal file publication metadata",
+  "description": "Proposed metadata contract. No runtime producer or byte release is implemented by this artifact. Schema validity does not authorize access.",
+  "x-implementation-status": "blocked-on-s4-producers",
+  "x-authority-rules": [
+    "The existing publication transaction owns publish, replacement, withdrawal, and replay.",
+    "material_id is the S4 publication UUID, not the legacy material bigint.",
+    "The binding is append-only at material_id and publication_version.",
+    "Match same-deal finalized/shared canonical ID, version, hash, size, MIME, and filename exactly.",
+    "A current live session for portal_slug and current publication authority are required on every listing and release.",
+    "Every listed binding portal_slug must equal the listing portal_slug.",
+    "Withdrawal never selects a previous version. Replays return receipts without mutating current authority.",
+    "No storage keys, source URLs, credentials, or release tokens appear in public metadata."
+  ],
+  "oneOf": [
+    {
+      "$ref": "#/$defs/listing"
+    },
+    {
+      "$ref": "#/$defs/release"
+    }
+  ],
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "material_id",
+        "publication_version",
+        "portal_slug",
+        "document_id",
+        "document_version",
+        "content_sha256",
+        "byte_size",
+        "content_type",
+        "filename"
+      ],
+      "properties": {
+        "material_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "publication_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "portal_slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "document_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "document_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 26214400
+        },
+        "content_type": {
+          "type": "string",
+          "enum": [
+            "application/pdf",
+            "application/msword",
+            "application/vnd.ms-excel",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          ]
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[^\\x00-\\x1f\\x7f/\\\\]+$"
+        }
+      }
+    },
+    "listing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "portal_slug",
+        "files"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "portal-files.v1"
+        },
+        "portal_slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 100,
+          "x-carr-unique-by": "material_id",
+          "items": {
+            "$ref": "#/$defs/binding"
+          }
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "binding"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "portal-file-release.v1"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        }
+      }
+    }
+  }
+}
