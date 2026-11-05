@@ -11,6 +11,7 @@
 // check can mask a surviving mutant.
 
 import test from "node:test";
+import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,8 +25,7 @@ test.after(() => rmSync(WORK, { recursive: true, force: true }));
 
 let serial = 0;
 function relink(source) {
-  return source.replace(/from\s+"\.\/([^"]+)"/g, (_, file) =>
-    `from "${pathToFileURL(join(SRC, file)).href}"`);
+  return relinkSourceImports(source, SRC);
 }
 async function loadReal(file) {
   return import(pathToFileURL(join(SRC, file)).href);
