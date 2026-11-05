@@ -264,3 +264,18 @@ test('future research remains inspectable through prospect and lead detail witho
   await flag('discrepancy', '2001-01-01T00:00:00Z');
   for (const summary of await summaries()) assert.equal(summary.state, 'needs_review');
 });
+
+for (const kind of ['verified', 'discrepancy']) {
+  test(`malformed observation cannot activate ${kind} research`, () => {
+    const now = Date.parse('2030-01-02T00:00:00Z');
+    for (const observed_at of ['2020-01-01 junk', '2020-01-01', '2020-01-01T00:00:00',
+      '2020-01-01T24:00:00Z', '2020-01-01T00:00:00Z junk']) {
+      const evidence = [{ flag_id: 'synthetic', kind, found: true, expired: false,
+        proposes_correction: false, source: 'https://example.test', observed_at,
+        expires_on: null, value: {} }];
+      const result = researchSummary(evidence, now);
+      assert.equal(result.state, 'needs_research', observed_at);
+      assert.deepEqual(result.evidence, evidence);
+    }
+  });
+}
