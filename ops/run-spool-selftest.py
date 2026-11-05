@@ -27,6 +27,10 @@ RUN IT:
     python3 ops/run-spool-selftest.py
 """
 import fcntl
+import importlib.util
+import io
+from contextlib import redirect_stdout
+from unittest.mock import patch
 import json
 import os
 import sqlite3
@@ -137,6 +141,53 @@ def main() -> int:
     check("...and the queue now holds both rows in arrival order",
           [r[1] for r in rows(spool)] == ["selftest.hb", "selftest.down"],
           repr(rows(spool)))
+
+    # Exercise a real recorder refusal before it ever connects.
+    refusal = ["--service", "carr-spool-selftest", "--key", "selftest.refused",
+               "--state", "failed", "--source-ref", "selftest"]
+    diagnostic_spool = fresh_spool()
+    refused = run_tool(diagnostic_spool, "run", *refusal)
+    reason = "ops-record: a failed run must name its failure class (--failure-class)"
+    with sqlite3.connect(diagnostic_spool) as db:
+        retained_reason = db.execute("select last_error from spool").fetchone()[0]
+    check("direct refusal retains exit code AND stderr in durable row and receipt",
+          all("rc=2" in value and reason in value
+              for value in (retained_reason, refused.stdout)))
+
+    spec = importlib.util.spec_from_file_location("spool_diagnostic_test", SPOOL_TOOL)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    private_spool = fresh_spool()
+    output = io.StringIO()
+    safe_line = ("ops-record: the ops schema is not on this database — "
+                 "migration 0115 is unapplied here. Nothing recorded.")
+    private = "postgresql://" + "private:credential" + "@invalid/db client-payload"
+    stderr = safe_line + "\n" + private * 1000
+    with patch.dict(os.environ, {"CARR_RUN_SPOOL_DB": private_spool}), \
+            patch.object(module, "replay", return_value=subprocess.CompletedProcess(
+                [], 78, "", stderr)), redirect_stdout(output):
+        module.cmd_run(refusal)
+    with sqlite3.connect(private_spool) as db:
+        stored = db.execute("select last_error from spool").fetchone()[0]
+    check("configuration stderr survives but private stderr never reaches row or receipt",
+          all(safe_line in value and "rc=78" in value
+              and "credential" not in value and "client-payload" not in value
+              and len(value) < 1000 for value in (stored, output.getvalue())))
+
+    unknown_service = "ops-record: no service registered with key 'private-value'. Add it to ops/config/services.json"
+    with patch.dict(os.environ, {"CARR_RUN_SPOOL_DB": private_spool}), \
+            patch.object(module, "replay", return_value=subprocess.CompletedProcess(
+                [], 78, "", unknown_service)), redirect_stdout(io.StringIO()):
+        module.cmd_flush()
+    with sqlite3.connect(private_spool) as db:
+        stored = db.execute("select last_error, attempts from spool").fetchone()
+    check("flush retains safe registry refusal and attempt without raw interpolated service",
+          "rc=78" in stored[0] and "no service registered" in stored[0]
+          and "private-value" not in stored[0] and stored[1] == 1)
+    check("stderr projection is bounded for repeated safe lines and strips terminal controls",
+          len(module.recorder_stderr((safe_line + "\n") * 100)) <= 500
+          and "\x1b" not in module.recorder_stderr("\x1b[31m" + safe_line))
 
     # ── nothing durable anywhere is the ONLY failure ─────────────────────────
     broken = os.path.join(os.path.devnull, "spool.sqlite3")
