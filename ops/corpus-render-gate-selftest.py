@@ -178,6 +178,7 @@ def main():
             ("changed HOME", 'HOME=/tmp tee "$HOME/.claude/skills/handoff/SKILL.md"', DENY),
             ("Python heredoc", "python3 - <<'PYCODE'\nopen('" + str(linked_home) + "/.claude/skills/handoff/SKILL.md','w').write('x')\nPYCODE", DENY),
             ("dynamic Python heredoc", "python3 - <<'PYCODE'\nopen(path, 'w').write('x')\nPYCODE", DENY),
+            ("shell here-string", "bash <<< 'echo hi > ~/.claude/skills/handoff/SKILL.md'", DENY),
             ("shell heredoc", "bash <<'SHCODE'\necho hi > ~/.claude/skills/handoff/SKILL.md\nSHCODE", DENY),
             ("substitution write", 'echo "$(echo hi > ~/.claude/skills/handoff/SKILL.md)"', DENY),
             ("nested shell", "bash -c 'echo hi > ~/.claude/skills/handoff/SKILL.md'", DENY),

@@ -546,7 +546,7 @@ def corpus_render_write_target(cmd, cwd=None, depth=0):
             reason = corpus_render_write_target(body, cwd, depth + 1)
             if reason:
                 return reason
-        if '<<' in cmd:
+        if re.search(r'(?<!<)<<-?(?!<)', cmd):
             header = strip_inert_text(cmd).split('\n', 1)[0]
             for program, arguments in executed_invocations(header):
                 if program.startswith('python') or program in {'sh', 'bash', 'zsh', 'dash'}:

@@ -255,13 +255,15 @@ def shell_write_verdict(command, cwd=None, _depth=0):
         if token not in SHELL_BOUNDARIES and token != '\n':
             segment.append(token)
             continue
-        words, outputs, i = [], [], 0
+        words, outputs, stdin_scripts, i = [], [], [], 0
         while i < len(segment):
             raw = segment[i]
             if raw in SHELL_REDIRECTS:
                 if i + 1 >= len(segment):
                     raise ValueError('missing redirection target')
                 target = _shell_word(segment[i + 1])
+                if raw == "<<<":
+                    stdin_scripts.append(target)
                 if raw in {'>', '>>', '>|', '<>', '&>', '&>>'} or (
                         raw == '>&' and not target.isdigit() and target != '-'):
                     outputs.append(target)
@@ -274,6 +276,13 @@ def shell_write_verdict(command, cwd=None, _depth=0):
             continue
         program = os.path.basename(words[0]) if words else ''
         args = words[1:]
+        if program.startswith('python') or program in {'sh', 'bash', 'zsh', 'dash'}:
+            for script in stdin_scripts:
+                script = shlex.join([program, '-c', script]) if program.startswith('python') else script
+                for base in possible_cwds:
+                    reason = shell_write_verdict(script, base, _depth + 1)
+                    if reason:
+                        return reason
         if program == 'cd':
             if len(args) != 1:
                 raise ValueError('cannot resolve working directory change')
