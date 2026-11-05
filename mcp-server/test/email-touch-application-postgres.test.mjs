@@ -5,6 +5,17 @@ import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
+import { ToolError } from '../src/tool-error.ts';
+import { publicError } from '../src/public-errors.ts';
+
+test('email touch refusals preserve their public codes without source payloads',()=>{
+  for(const code of ['email_touch_requires_email_occurrence','email_touch_role_mismatch',
+    'email_touch_target_not_live','email_touch_already_applied','email_touch_occurrence_conflict',
+    'email_touch_window_invalid','email_touch_duplicate_expectation']) {
+    const error=publicError(new ToolError({error:code,source_id:'private-fixture'}),{});
+    assert.equal(error.error,code); assert.equal(error.source_id,undefined);
+  }
+});
 
 test('email touch permanent applications and bounded reconciliation', async t => {
   assert.equal(connectionRouteForTool(TOOLS['reconcile-email-touches']),'writer_read_only');
@@ -52,6 +63,8 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     const r=await read([expected,{...expected,original_key:randomUUID(),source_id:randomUUID()},{...expected,original_key:randomUUID(),source_id:randomUUID(),refused:true}]);
     assert.equal(r.counts.applied,1); assert.equal(r.counts.missing,1); assert.equal(r.counts.refused,1);
     assert.equal(r.counts.expected,3); assert.equal(r.complete,true); assert.equal(r.effects,undefined);
+    assert.deepEqual(r.groups,[{target_type:'client',source_version:'1',counts:r.counts}]);
+    assert.equal(Object.entries(r.counts).filter(([key])=>key!=='expected').reduce((sum,[,n])=>sum+n,0),r.counts.expected);
     await assert.rejects(read([expected,expected]));
     await assert.rejects(read(Array(501).fill(expected)));
     assert.equal((await read([{...expected,source_version:'changed'}])).counts.conflicting,1);
@@ -81,9 +94,21 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     assert.equal((await read([expected])).counts.dangling,1);
   });
   await t.test('failed transaction leaves no successful application event',async()=>{
-    const bad={...input,idempotency_key:randomUUID(),email_touch:{...input.email_touch,source_version:'rollback'},links:[{from_ref:'C-999134',to_ref:'C-999134',kind:'not-a-kind'}]};
-    await assert.rejects(call('log-activity',bad));
+    const bad={...input,idempotency_key:randomUUID(),email_touch:{...input.email_touch,source_version:'rollback'}};
+    await c.query(`create function fixture_receipt_failure() returns trigger language plpgsql as $$
+      begin
+        if new.idempotency_key='${bad.idempotency_key}' then
+          if exists(select 1 from event where idempotency_key=new.idempotency_key) then
+            raise exception 'fixture_after_application_event';
+          end if;
+          raise exception 'fixture_before_application_event';
+        end if;
+        return new;
+      end $$;
+      create trigger fixture_receipt_failure before insert on tool_call for each row execute function fixture_receipt_failure()`);
+    await assert.rejects(call('log-activity',bad),e=>e.message==='fixture_after_application_event' || e.payload?.message==='fixture_after_application_event');
     assert.equal((await c.query('select count(*)::int n from event where idempotency_key=$1',[bad.idempotency_key])).rows[0].n,0);
+    await c.query('drop trigger fixture_receipt_failure on tool_call; drop function fixture_receipt_failure()');
   });
   await t.test('mailbox tombstones retain proof, refuse new application, allow exact replay',async()=>{
     const identity={mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()};

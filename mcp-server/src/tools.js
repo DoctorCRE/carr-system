@@ -69,7 +69,7 @@ import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
-import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from './email-touch.js';
+import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from "./email-touch.js";
 import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.js";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
@@ -409,12 +409,13 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if (verb === "record-finding" && args.kind === "email_delivery_failure")
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
       [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
-  const prior = await client.query(`select request_hash, response, false as permanent from tool_call where idempotency_key=$1
+  const prior = await client.query(verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')
     union all select new_value#>>'{email_application,request_hash}' as request_hash,
       new_value#>'{email_application,response}' as response, true as permanent from event
       where idempotency_key=$1 and verb='log-activity' and new_value ? 'email_application'
-    order by permanent desc limit 2`, [key, durableReceipt(verb, key)]);
+    order by permanent desc limit 2` : `select request_hash, response from tool_call where idempotency_key=$1
+    and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== (prior.rows[0].permanent ? applicationHash : hash)) throw new ToolError({ error: "key_reuse" });
     const response = prior.rows[0].response;
