@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Read-only local watchdog behavior through its collection and scan interfaces."""
 import json
+import contextlib
+import io
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import os
@@ -131,6 +133,58 @@ class WatchdogTests(unittest.TestCase):
         intake.fake.now = evening + timedelta(days=2, minutes=30)
         intake.run_intake()
         self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+
+    def test_no_prior_verdict_survives_resumed_intake_and_fresh_ledger(self):
+        ns = runpy.run_path(str(ROOT / 'ops/outlook-intake-selftest.py'))
+        intake = ns['IntakeTest']()
+        intake.setUp()
+        self.addCleanup(intake.doCleanups)
+        intake.fake.now = datetime.fromisoformat('2026-10-20T16:00:00Z')
+        intake.coverage_run([ns['mail']('pat@example.test', -timedelta(hours=1), subject='Complete')],
+                            evening=False)
+        state_path = intake.out() / ns['intake'].STATE
+        settings = SimpleNamespace(repo=intake.out().parents[1], account='fixture@example.test',
+                                   timezone=ns['load_settings'](intake.home).timezone,
+                                   transport_environment=lambda: {})
+        def scan():
+            with patch.object(watchdog, 'load_settings', return_value=settings), \
+                 patch.object(watchdog.subprocess, 'run', side_effect=OSError('offline')):
+                outlook = watchdog.collect_outlook(self.config)
+            found = watchdog.detect({'jobs': [], 'disk_free_percent': 50, 'outlook': outlook},
+                                    intake.fake.now.timestamp())
+            watchdog.reconcile(self.root, self.config, found, {'com.carr.outlook-intake'},
+                               intake.fake.now.timestamp(), outlook)
+            return {f['key'] for f in watchdog.active_findings(self.root, self.config)}
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = datetime.fromisoformat('2026-10-21T16:00:00Z')
+        intake.run_intake()
+        self.assertIsNone(json.loads(state_path.read_text()).get('coverage_check_day'))
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = datetime.fromisoformat('2026-10-21T23:30:00Z')
+        intake.run_intake()
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+
+    def test_completed_scan_receipt_passes_registered_observer(self):
+        contract = json.loads((ROOT / 'contracts/production-proof-plan.v1.json').read_text())
+        runner = contract['x-runners']['studio-run-receipt.v1']
+        observer = self.root / 'observer.py'
+        observer.write_bytes(subprocess.check_output(
+            ['git', 'show', runner['revision'] + ':' + runner['path']], cwd=ROOT))
+        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        output = io.StringIO()
+        with patch.object(watchdog, 'collect', return_value={'jobs': [], 'disk_free_percent': 50}), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        receipt = self.root / 'scan.receipt'
+        receipt.write_text(output.getvalue())
+        result = subprocess.run([sys.executable, str(observer), '--receipt-file', str(receipt),
+            '--service', 'job-watchdog', '--runtime-sha', revision, '--count', 'scans', '--minimum', '1'],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        ledger = watchdog.read_latest(self.root / self.config['paths']['scan_ledger'])['scan']
+        self.assertEqual(ledger['runtime_sha'], revision)
 
     def test_transport_timeout_preserves_local_failed_and_missing_verdicts(self):
         state = self.root / 'out/outlook-intake/state.json'
