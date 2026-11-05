@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Test bounded email readback with synthetic fixtures and read-only PostgreSQL."""
 import importlib.util
 import json
 import os
@@ -172,7 +173,7 @@ class PostgresTests(unittest.TestCase):
 
     def test_real_sql_projection_and_read_only_guard(self):
         import psycopg
-        with patch.dict(os.environ, {'DATABASE_URL': self.dsn}, clear=True):
+        with patch.dict(os.environ, {'DATABASE_URL': self.dsn, 'PGTZ': 'Asia/Tokyo'}, clear=True):
             rows = proof.database_read(self.selected())
             self.assertEqual({r['subject_type']: r['latest'] for r in rows},
                              dict(client='2026-11-02', lead='2026-10-31', vendor='2026-10-31'))
