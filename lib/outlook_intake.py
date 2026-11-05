@@ -937,8 +937,9 @@ class Matcher:
             return ParticipantResolution('shared_role')
         if not rows:
             return ParticipantResolution('automated' if automated(address) else 'missing')
-        parties = {str(c.party_id or (c.contact_snapshot or {}).get('party_id')) for c in rows
-                   if c.party_id or (c.contact_snapshot or {}).get('party_id')}
+        snapshot_contact = self.signature_contact(address)
+        snapshot_party = snapshot_contact.contact_snapshot['party_id'] if snapshot_contact else None
+        parties = {str(c.party_id or snapshot_party) for c in rows if c.party_id or snapshot_party}
         if len(parties) > 1:
             return ParticipantResolution('ambiguous')
         targets = {}
@@ -952,7 +953,7 @@ class Matcher:
                 target_id = c.ref
             if kind not in ('client', 'lead', 'vendor', 'deal') or not target_id:
                 continue
-            party = str(c.party_id or (c.contact_snapshot or {}).get('party_id') or '') or None
+            party = str(c.party_id or snapshot_party or '') or None
             targets[(kind, target_id)] = RoleTarget(party, kind, target_id, c.display_ref)
         party = next(iter(parties)) if parties else None
         if not targets:
