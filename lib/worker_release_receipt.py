@@ -66,27 +66,39 @@ def discover(live, *, api=github):
     sha, version = identity(live)
     name = f'worker-release-{sha}'
     base = f'repos/{REPOSITORY}/actions'
-    artifacts = api(f'{base}/artifacts?name={name}&per_page=2')['artifacts']
-    candidates = [a for a in artifacts[:2] if a.get('name') == name]
-    for artifact in candidates:
-        if (artifact.get('expired') is not False or type(artifact.get('id')) is not int
-                or type(artifact.get('size_in_bytes')) is not int
-                or not 0 < artifact['size_in_bytes'] <= MAX_ARCHIVE):
+    runs = api(f'{base}/workflows/deploy.yml/runs?branch=main&per_page=2')['workflow_runs']
+    for producer in runs[:2]:
+        run_id = producer.get('id')
+        if type(run_id) is not int or run_id < 1 or not trusted_run(producer, run_id):
             continue
-        run_id = artifact.get('workflow_run', {}).get('id')
-        if type(run_id) is not int or run_id < 1:
-            continue
-        run = api(f'{base}/runs/{run_id}')
-        if (run.get('id') != run_id or run.get('path') != '.github/workflows/deploy.yml'
-                or run.get('event') not in {'workflow_run', 'workflow_dispatch'}
-                or run.get('head_branch') != 'main'
-                or run.get('repository', {}).get('full_name') != REPOSITORY
-                or run.get('head_repository', {}).get('full_name') != REPOSITORY):
-            continue
-        receipt = unpack(api(f'{base}/artifacts/{artifact["id"]}/zip', binary=True))
-        expected = seal(live, sha, version, live.get('verb_count'), run_id, run.get('run_attempt'))
-        integers = ('verb_count', 'run_id', 'run_attempt')
-        if (isinstance(receipt, dict) and all(type(receipt.get(k)) is int for k in integers)
-                and receipt == expected and artifact['name'] == name):
-            return {**receipt, 'artifact_id': artifact['id']}
+        artifacts = api(f'{base}/runs/{run_id}/artifacts?name={name}&per_page=2')['artifacts']
+        for artifact in artifacts[:2]:
+            if (artifact.get('name') != name or artifact.get('expired') is not False
+                    or type(artifact.get('id')) is not int or artifact['id'] < 1
+                    or type(artifact.get('size_in_bytes')) is not int
+                    or not 0 < artifact['size_in_bytes'] <= MAX_ARCHIVE
+                    or artifact.get('workflow_run', {}).get('id') != run_id):
+                continue
+            try:
+                receipt = unpack(api(f'{base}/artifacts/{artifact["id"]}/zip', binary=True))
+            except (ValueError, KeyError, TypeError):
+                continue
+            expected = seal(live, sha, version, live.get('verb_count'), run_id, producer.get('run_attempt'))
+            integers = ('verb_count', 'run_id', 'run_attempt')
+            if (isinstance(receipt, dict) and all(type(receipt.get(k)) is int for k in integers)
+                    and receipt == expected):
+                run = api(f'{base}/runs/{run_id}')
+                if trusted_run(run, run_id) and run['run_attempt'] == receipt['run_attempt']:
+                    return {**receipt, 'artifact_id': artifact['id']}
+                raise ValueError('Worker receipt producer changed during discovery')
     raise ValueError('matching verified Worker lane receipt unavailable')
+
+
+def trusted_run(run, run_id):
+    return (type(run.get('id')) is int and run['id'] == run_id
+            and type(run.get('run_attempt')) is int and run['run_attempt'] > 0
+            and run.get('path') == '.github/workflows/deploy.yml'
+            and run.get('event') in {'workflow_run', 'workflow_dispatch'}
+            and run.get('head_branch') == 'main'
+            and run.get('repository', {}).get('full_name') == REPOSITORY
+            and run.get('head_repository', {}).get('full_name') == REPOSITORY)

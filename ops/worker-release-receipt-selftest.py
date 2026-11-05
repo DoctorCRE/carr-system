@@ -44,6 +44,8 @@ class ReceiptTests(unittest.TestCase):
         self.calls.append(path)
         if binary:
             return archive(self.receipt)
+        if '/workflows/deploy.yml/runs?' in path:
+            return {'workflow_runs': [self.run]}
         if '/artifacts?' in path:
             return {'artifacts': [self.artifact]}
         return self.run
@@ -52,7 +54,7 @@ class ReceiptTests(unittest.TestCase):
         got = discover(LIVE, api=self.api)
         self.assertEqual(got['source_sha'], SHA)
         self.assertEqual(got['run_id'], 42)
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 4)
         self.assertEqual(self.run['status'], 'in_progress')
 
     def test_parent_title_and_final_conclusion_are_irrelevant(self):
@@ -94,7 +96,7 @@ class ReceiptTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 discover(LIVE, api=api)
         with self.assertRaises(ValueError):
-            discover(LIVE, api=lambda *a, **k: {'artifacts': []})
+            discover(LIVE, api=lambda *a, **k: {'workflow_runs': []})
         self.artifact['expired'] = True
         self.calls.clear()
         def many(path, *, binary=False):
@@ -103,7 +105,7 @@ class ReceiptTests(unittest.TestCase):
             return self.api(path, binary=binary)
         with self.assertRaises(ValueError):
             discover(LIVE, api=many)
-        self.assertEqual(self.calls, [])
+        self.assertEqual(len(self.calls), 1)
 
     def test_transport_has_deadline_and_response_byte_cap(self):
         with patch('lib.worker_release_receipt.subprocess.run', return_value=Mock(stdout=b'{}')) as run:
@@ -122,7 +124,40 @@ class ReceiptTests(unittest.TestCase):
             return self.api(path, binary=binary)
         with self.assertRaises(ValueError):
             discover(LIVE, api=many)
-        self.assertEqual(len(self.calls), 4)
+        self.assertEqual(len(self.calls), 3)
+
+    def test_bad_archive_does_not_shadow_valid_sibling(self):
+        def api(path, *, binary=False):
+            if '/artifacts?' in path:
+                return {'artifacts': [{**self.artifact, 'id': 8}, self.artifact]}
+            if path.endswith('/artifacts/8/zip'):
+                return b'broken archive'
+            return self.api(path, binary=binary)
+        self.assertEqual(discover(LIVE, api=api)['artifact_id'], 7)
+
+    def test_trusted_producer_budget_and_full_request_cap(self):
+        calls = []
+        def api(path, *, binary=False):
+            calls.append(path)
+            if '/workflows/' in path:
+                return {'workflow_runs': [RUN, {**RUN, 'id': 43}] * 10}
+            if '/artifacts?' in path:
+                run_id = 42 if '/runs/42/' in path else 43
+                return {'artifacts': [{**self.artifact, 'id': 8, 'workflow_run': {'id': run_id}},
+                                      {**self.artifact, 'workflow_run': {'id': run_id}}] * 10}
+            if binary:
+                return archive(seal(LIVE, SHA, VERSION, 410, 43, 1)) if len(calls) == 7 else b'bad'
+            return {**RUN, 'id': 43}
+        self.assertEqual(discover(LIVE, api=api)['run_id'], 43)
+        self.assertEqual(len(calls), 8)
+
+    def test_changed_producer_attempt_refuses_current_receipt(self):
+        def api(path, *, binary=False):
+            if path.endswith('/runs/42'):
+                return {**RUN, 'run_attempt': 2}
+            return self.api(path, binary=binary)
+        with self.assertRaisesRegex(ValueError, 'producer changed'):
+            discover(LIVE, api=api)
 
     def test_receipt_numbers_must_not_accept_boolean_or_float_aliases(self):
         self.receipt['run_attempt'] = True

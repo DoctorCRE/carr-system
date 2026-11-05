@@ -16,8 +16,7 @@ stateDiagram-v2
     Observe --> DiscoveryRetry: first discovery failure
     DiscoveryRetry --> Observe: next five-minute tick
     DiscoveryRetry --> DiscoveryOpen: second discovery failure, alert
-    DiscoveryOpen --> DiscoveryOpen: recover runtime, no network calls
-    DiscoveryOpen --> Observe: operator resets discovery_failures after repair
+    DiscoveryOpen --> Observe: next five-minute half-open probe after runtime recovery
     Observe --> Open: two attempts failed for this SHA
     Observe --> Cooldown: last attempt less than ten minutes ago
     Observe --> Attempt: persist attempt before any refresh effects
@@ -111,11 +110,10 @@ launchd state is touched. No formal proof is claimed.
 The shared release reader owns GET headers, redirect refusal and HTTP replies.
 Both smoke commands and automatic discovery use it. The existing ledger gains
 `discovery_failures`, a consecutive failure count reserved before discovery.
-Two failures open discovery permanently and alert through the existing watchdog
-finding and inbox. Success clears the count before local runtime verification.
-Open discovery still recovers interrupted runtime work but makes no HTTP or
-GitHub call. After repair an operator resets only `discovery_failures` to zero
-under the ledger lock. This builder changes no live ledger.
+Two failures open discovery and alert through the existing watchdog finding and
+inbox. The next five-minute tick admits one half-open discovery probe. A failed
+probe stays open. A valid receipt closes discovery before local verification.
+Recovery runs first. This builder changes no live ledger.
 
 Loading the smoke CLI dynamically would couple runtime discovery to unrelated
 smoke imports. The shared module keeps the actual HTTP implementation in one
@@ -123,18 +121,18 @@ place. The existing per-SHA refresh budget is unchanged. Discovery reservations
 survive crashes. Capacity remains one sequential read per five minutes at
 today's and 10x load. Discovery has a 20-second HTTP timeout. There is no fan-out,
 queue, database or N+1 access. The only cache is the atomic local ledger,
-cleared on success or explicit operator recovery after an open circuit.
+cleared on verified discovery success.
 Stale release truth never authorizes a refresh. Writes reuse the existing lock,
 atomic replace and fsync. Alerts use the existing finding key for deduplication.
 
 | Transition | Test |
 | --- | --- |
 | Discovery sends smoke headers | `test_released_sha_uses_shared_release_reader` |
-| Two 403s open discovery, no third read, one alert | `test_discovery_403_opens_breaker_and_alerts_without_third_request` |
+| Two 403s open discovery, bounded half-open read, one alert | `test_discovery_403_opens_breaker_and_probes_at_next_interval` |
 | Successful discovery resets first failure | `test_discovery_success_resets_failure_budget` |
 | Discovery crash consumes reserved budget | `test_discovery_reservation_survives_crash` |
 | Open discovery still recovers runtime | `test_discovery_open_still_recovers` |
-| Counter reset permits fresh read | `test_discovery_operator_reset_allows_read` |
+| Open circuit permits fresh bounded read | `test_discovery_next_valid_receipt_closes_open_circuit` |
 
 
 ## Worker lane receipt cutover for WR823.S8.J1
@@ -142,8 +140,10 @@ atomic replace and fsync. Alerts use the existing finding key for deduplication.
 The deploy job seals `worker-release.json` from its already verified `/release`
 readback and uploads `worker-release-<full source SHA>` before downstream waits.
 A rerun replaces its prior artifact, while each artifact ID remains immutable.
-Discovery reads at most two exact-name artifacts and accepts only the current
-attempt from the same repository's main deploy workflow. It compares production
+Discovery first lists at most two main deploy workflow runs from the repository.
+Only trusted producer metadata authorizes a run-scoped artifact list. Each list
+contains at most two exact-name candidates. Full receipt identity and a fresh run
+attempt read authorize acceptance. Repository-wide artifact order has no role. It compares production
 source SHA, Worker UUID and verb count against a fresh `/release` read. No CARR
 key or OIDC exchange is introduced. The live registry reconciliation found no
 such reader contract. Canonical CARR installation evidence remains a separate
@@ -158,12 +158,12 @@ readback never emits installed success. No generic delivery state store is added
 
 Receipts expire after 90 days. Expiry, unavailable identity, invalid archives,
 wrong workflow, wrong attempt or mismatched release refuse installation. There
-is no stale success fallback. Each discovery has at most five GitHub requests,
+is no stale success fallback. Each discovery has at most eight GitHub requests,
 each with a 20-second timeout, and one public identity read. The existing drain
 wrapper independently rechecks eligibility before applying effects. No inner
 retry or fan-out is added. The existing discovery breaker opens after two failed
-ticks, including a missing receipt during cutover, and needs operator recovery
-after the cause is repaired. This builder never resets production state.
+ticks, including a missing receipt during cutover. Each later five-minute tick
+admits one half-open probe and the next valid receipt closes discovery. This builder never resets production state.
 
 The statechart is the chart above plus this receipt admission region.
 
@@ -179,7 +179,7 @@ stateDiagram-v2
     Failed --> Open: Second failure
     Refused --> Observe: Next bounded discovery
     Refused --> DiscoveryOpen: Second discovery failure
-    DiscoveryOpen --> DiscoveryOpen: No third network read
+    DiscoveryOpen --> Observe: Next five-minute half-open probe
     Open --> Open: No third install
     Installed --> Observe: Next calendar tick
     Current --> Observe: Next calendar tick
@@ -224,3 +224,39 @@ path. The parent completion and attempt-change tests cover the final refusal
 edges. Existing wrong-parent, installed-identity and report tests cover the
 initial and local refusal edges. This region was added after the executed race
 reproduction exposed the missing observation edge.
+
+
+## Round 2 receipt isolation and recovery
+
+The admission region now ignores repository-wide artifacts. Untrusted same-name
+artifacts cannot consume a trusted producer's candidate budget. A malformed
+archive inside that budget is skipped rather than blocking a later valid
+candidate. Names only locate candidates. The sealed lane identity still binds
+production source SHA, Worker version, verb count, repository, environment, run
+and current attempt. Parent success and display titles are never consulted.
+
+Discovery reservations saturate at two. Every eligible tick persists its check
+time before the probe, including half-open probes. A failed probe records its
+named reason and stays open. Success resets the budget. Install failures keep
+the existing per-SHA two-attempt limit. No install breaker resets on discovery.
+
+| Transition or invariant | Executable test in worker-release-receipt-selftest.py |
+| --- | --- |
+| Same-name untrusted artifacts ignored through real tick | `test_untrusted_artifacts_cannot_shadow_valid_receipt_or_open_tick` |
+| Parent waiting to installed | `test_requested_refresh_while_parent_is_in_progress` |
+| Missing identity to refused, wait, then recovered | `test_unavailable_identity_names_reason_and_retries_without_blind_refresh` |
+| Two same-cause failures to open, wait, then valid probe to installed | `test_two_same_cause_failures_open_and_next_valid_receipt_recovers` |
+| Failed half-open probe stays open, next early tick waits | `test_half_open_failed_probe_remains_open_and_rate_limited` |
+| Reader never accesses aggregate success or title | `test_reader_never_consults_overall_success_or_title` |
+
+Run `python3 ops/worker-release-receipt-selftest.py` and
+`python3 ops/studio-runtime-auto-refresh-selftest.py` for the transition checks.
+These run real discover, Host.release and tick with synthetic transports and
+runtime effects. No production observation or formal model proof is claimed.
+
+The eight-call ceiling consists of one producer list, up to two producer artifact
+lists, up to four archive reads, and one fresh producer read before acceptance.
+The [GitHub run-artifact contract](https://docs.github.com/en/rest/actions/artifacts#list-workflow-run-artifacts)
+supports the run scope and exact-name filter. The proof observer adds two parent
+reads and one public identity read. Its declaration allows eleven requests and
+240 seconds, including each existing 20-second transport deadline.

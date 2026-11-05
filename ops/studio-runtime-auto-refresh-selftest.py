@@ -52,13 +52,13 @@ class AutoRefreshTests(unittest.TestCase):
         row = json.loads((self.root / 'runs.jsonl').read_text().splitlines()[-1])
         self.assertEqual(row['installed_sha'], A)
 
-    def test_unavailable_worker_identity_opens_discovery_without_third_read(self):
+    def test_unavailable_worker_identity_probes_open_discovery(self):
         self.host.release.side_effect = released_sha
         with patch('lib.studio_runtime_auto_refresh.read', return_value=SimpleNamespace(status=200, body=b'{}')) as read:
             self.assertEqual(self.run_tick(), 'refused')
             self.assertEqual(self.run_tick(10300), 'open')
             self.assertEqual(self.run_tick(10600), 'open')
-            self.assertEqual(read.call_count, 2)
+            self.assertEqual(read.call_count, 3)
         self.host.refresh.assert_not_called()
         self.host.alert.assert_called_with(None, 10600)
 
@@ -95,7 +95,7 @@ class AutoRefreshTests(unittest.TestCase):
         self.assertEqual(self.run_tick(11200), 'open')
         self.assertEqual(self.host.refresh.call_count, 2)
 
-    def test_discovery_403_opens_breaker_and_alerts_without_third_request(self):
+    def test_discovery_403_opens_breaker_and_probes_at_next_interval(self):
         self.host.release.side_effect = HTTPError('http://localhost/release', 403, 'Forbidden', {}, None)
         real = object.__new__(Host)
         real.source = self.root
@@ -103,7 +103,7 @@ class AutoRefreshTests(unittest.TestCase):
         self.assertEqual(self.run_tick(), 'refused')
         self.assertEqual(self.run_tick(10300), 'open')
         self.assertEqual(self.run_tick(10600), 'open')
-        self.assertEqual(self.host.release.call_count, 2)
+        self.assertEqual(self.host.release.call_count, 3)
         self.host.refresh.assert_not_called()
         rows = (self.root / 'out/watchdog/orchestrator-inbox.jsonl').read_text().splitlines()
         self.assertEqual(len(rows), 1)
@@ -122,24 +122,23 @@ class AutoRefreshTests(unittest.TestCase):
         for now in (10000, 10300):
             with self.assertRaises(SystemExit):
                 self.run_tick(now)
-        self.assertEqual(self.run_tick(10600), 'open')
-        self.assertEqual(self.host.release.call_count, 2)
-        self.host.alert.assert_called_with(None, 10600)
+        with self.assertRaises(SystemExit):
+            self.run_tick(10600)
+        self.assertEqual(self.host.release.call_count, 3)
+        self.assertEqual(json.loads((self.root / 'state.json').read_text())['discovery_failures'], 2)
 
     def test_discovery_open_still_recovers(self):
         (self.root / 'state.json').write_text(json.dumps({'failures': {}, 'discovery_failures': 2}))
+        self.host.release.side_effect = ValueError('still unavailable')
         self.assertEqual(self.run_tick(), 'open')
         self.host.recover.assert_called_once()
-        self.host.release.assert_not_called()
+        self.host.release.assert_called_once()
 
-    def test_discovery_operator_reset_allows_read(self):
+    def test_discovery_next_valid_receipt_closes_open_circuit(self):
         path = self.root / 'state.json'
         path.write_text(json.dumps({'failures': {}, 'discovery_failures': 2}))
-        self.assertEqual(self.run_tick(), 'open')
-        state = json.loads(path.read_text())
-        state['discovery_failures'] = 0
-        path.write_text(json.dumps(state))
-        self.assertEqual(self.run_tick(10300), 'refreshed')
+        self.assertEqual(self.run_tick(), 'refreshed')
+        self.assertEqual(json.loads(path.read_text())['discovery_failures'], 0)
 
     def test_crash_after_install_reconciles_to_current(self):
         def crash(sha):
@@ -328,6 +327,8 @@ class ReleaseTests(unittest.TestCase):
         def api(path, *, binary=False):
             if binary:
                 return data.getvalue()
+            if '/workflows/deploy.yml/runs?' in path:
+                return {'workflow_runs': [parent]}
             if '/artifacts?' in path:
                 return {'artifacts': [{'id': 7, 'name': f'worker-release-{A}', 'expired': False,
                                       'size_in_bytes': 1000, 'workflow_run': {'id': 42}}]}

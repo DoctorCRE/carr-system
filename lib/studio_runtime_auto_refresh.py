@@ -60,8 +60,10 @@ def tick(root, host, *, now=None):
         path = root / 'state.json'
         state = json.loads(path.read_text()) if path.exists() else {'failures': {}}
         installation_started_at = None
-        def receipt(status, sha=None):
+        def receipt(status, sha=None, reason=None):
             row = {'at': stamp(now), 'status': status, 'sha': sha}
+            if reason is not None:
+                row['reason'] = reason
             worker = getattr(host, 'worker_receipt', None)
             if isinstance(worker, dict):
                 row['worker_receipt'] = worker
@@ -78,21 +80,18 @@ def tick(root, host, *, now=None):
             return receipt('refused')
         if now - state.get('checked_at', 0) < 300:
             return receipt('wait')
-        if state.get('discovery_failures', 0) >= 2:
-            host.alert(None, now)
-            return receipt('open')
         state['checked_at'] = now
-        state['discovery_failures'] = state.get('discovery_failures', 0) + 1
+        state['discovery_failures'] = min(2, state.get('discovery_failures', 0) + 1)
         save(path, state)
         try:
             sha = host.release()
             if not isinstance(sha, str) or not SHA.fullmatch(sha):
                 raise ValueError('invalid release SHA')
-        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             if state['discovery_failures'] >= 2:
                 host.alert(None, now)
-                return receipt('open')
-            return receipt('refused')
+                return receipt('open', reason=str(error))
+            return receipt('refused', reason=str(error))
         state['discovery_failures'] = 0
         save(path, state)
         try:
@@ -201,7 +200,8 @@ class Host:
         target = f'for {sha}' if sha else 'discovery'
         finding = {'key': key, 'kind': 'job_failed', 'subject': LABEL, 'exit_code': 1,
                    'release_sha': sha,
-                   'reason': f'Runtime refresh {target} breaker open; two failures; retries stopped.',
+                   'reason': (f'Runtime refresh {target} breaker open; two failures; '
+                              + ('bounded discovery probes continue.' if sha is None else 'install retries stopped.')),
                    'first_seen': stamp(now), 'cleared_at': None}
         append(self.source / 'out/watchdog/findings.jsonl', finding)
         inbox = self.source / 'out/watchdog/orchestrator-inbox.jsonl'
