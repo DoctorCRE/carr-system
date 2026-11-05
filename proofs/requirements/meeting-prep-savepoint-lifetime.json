@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR636-S3-meeting-prep-savepoint-lifetime",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "meeting-prep-natural-read-and-source-recovery",
+    "predicate": "After merge and normal deployment, verify the production release SHA contains this merge with the registered worker-release-smoke.v1 identity observer. Then run python3 tools/prove-meeting-prep-savepoint-lifetime.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30 from the delivered revision. Require both structurally valid natural calendar-meeting-prep evidence and separately labeled full-release-SHA source fault injection returning partial, retaining meeting and possible-deal labels, marking preparation unavailable, and accepting a subsequent query. The registered smoke runner proves identity only. Its success alone is insufficient. The supplemental unit runner and natural read must also pass. Fixture runs and synthetic-only checks never establish live proof.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Both natural_read.structurally_valid and release_bound_synthetic.subsequent_query are true at a full production release SHA containing this merge. Exit 78 means unavailable and leaves the product unproven; exit 1 means contradiction. No production database fault is induced.",
+    "input_class": "Read-only authenticated calendar projection and authorized repository source at the exact production release SHA; fixed synthetic transaction ports only for fault injection",
+    "deadline_seconds": 30
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 12, "max_records": 1000, "max_runtime_seconds": 30, "max_artifact_bytes": 1048576}
+}

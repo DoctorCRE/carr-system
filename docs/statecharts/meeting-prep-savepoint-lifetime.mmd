@@ -1,0 +1,22 @@
+stateDiagram-v2
+    [*] --> Pending: meeting retained, preparation requested
+    Pending --> Disposed: no possible deals
+    Pending --> Active: possible deals found
+    Pending --> Failed: savepoint cannot start
+    Active --> Ready: read, projection and release succeed
+    Active --> Partial: possible deal absent, release succeeds
+    Active --> Recovery: read, projection or release fails
+    Recovery --> Unavailable: rollback and release succeed
+    Recovery --> Failed: transaction recovery fails
+    Ready --> Disposed: return meeting
+    Partial --> Disposed: return meeting
+    Unavailable --> Disposed: return meeting with safe note
+    Failed --> [*]: propagate unrecoverable failure
+    Disposed --> [*]: caller continues
+    note right of Pending
+      Authorization retirement is n/a here.
+      The existing caller authorizes before projection.
+      Nontransactional calls follow the same states without savepoint SQL.
+    end note
+    %% never roll back a released preparation savepoint
+    %% never retain ready preparation after a contained projection failure
