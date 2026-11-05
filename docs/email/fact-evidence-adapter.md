@@ -53,16 +53,26 @@ The Model the Domain principle selected an immutable EmailFactSource and one fie
 After the ordinary consumer is connected, deployed and has received natural intake, use this counts-only query through the authorized read-only proof lane. The prefix binds the adapter version and original source identity. Do not rerun intake to create evidence.
 
 ```sql
-with email_evidence as (
+with retained_email_evidence as (
   select id, organization_tenant_id, entity_ref, fact_key, document_ref, content_hash
   from ops.fact_observation
   where organization_tenant_id='carr-internal'
     and extractor_version like 'email-facts.v1+%'
     and document_ref like 'email:%'
+), email_evidence as (
+  select e.* from retained_email_evidence e
+  join public.deal d on d.id::text=e.entity_ref
+  join public.client cl on cl.id=d.client_id and cl.merged_into is null
+  join public.party p on p.id=cl.party_id and p.merged_into is null and p.deleted_at is null
 ), fields as (
   select distinct organization_tenant_id,entity_ref,fact_key from email_evidence
 )
 select
+  (select count(*) from retained_email_evidence e
+    where not exists(select 1 from public.deal d where d.id::text=e.entity_ref)) as dangling_deal_observations,
+  (select count(*) from retained_email_evidence e
+    where exists(select 1 from public.deal d where d.id::text=e.entity_ref)
+      and not exists(select 1 from email_evidence live where live.id=e.id)) as retired_party_observations,
   (select count(*) from email_evidence) as body_observations,
   (select count(distinct (document_ref,content_hash)) from email_evidence) as body_source_versions,
   (select count(distinct c.id) from ops.canonical_fact c
@@ -74,3 +84,5 @@ select
 ```
 
 A positive canonical count is necessary but insufficient. The verifier must read at least one canonical field through list-fact-review and bind its source UUID privately. An unchanged next ordinary run must add no observation rows for the same batch. Attachment routing gauges are the attachments_distinct_* keys in the ordinary intake receipt, backed by attachment_outcomes in private state. Those gauges must not be summed over runs. This partial build cannot yet supply durable unsupported-field totals or attachment extraction/application counts, so the requested whole-unit production proof remains pending until the consumer and server job are implemented.
+
+The query covers all retained adapter evidence, not a dated intake window or a current-party census. Live counts exclude merged client and party tombstones and deleted parties. Dangling deal references and retired-party evidence are separate counts. The inverse partition is retained evidence equals live plus dangling plus retired evidence. The verifier must bind a natural-run occurrence window privately before attributing causality to that run.
