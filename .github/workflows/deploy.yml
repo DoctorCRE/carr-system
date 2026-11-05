@@ -230,6 +230,23 @@ jobs:
           echo "::error::$RELEASE_URL did not report git_sha $SHA, version $VERSION_ID, env production and $VERBS verbs within two minutes."
           exit 1
 
+      - name: Seal verified Worker lane receipt
+        run: |
+          python tools/worker-release-receipt.py --release release.json \
+            --sha "$SHA" --version "${{ steps.version.outputs.id }}" \
+            --verbs "${{ steps.stamp.outputs.verbs }}" \
+            --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --output worker-release.json
+
+      - name: Publish Worker lane receipt before downstream proof waits
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: worker-release-${{ env.SHA }}
+          path: worker-release.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
   # Staging is paused until Cloudflare Access protects its endpoint and the
   # release probe authenticates through Access. Its public workers.dev and
   # preview URLs are disabled for billing safety. Production runs independently.
