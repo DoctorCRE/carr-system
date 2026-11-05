@@ -2923,7 +2923,7 @@ sys.path.insert(0, 'ops')
 f=runpy.run_path('ops/outlook-intake-selftest.py')
 t=f['IntakeTest'](); t.setUp()
 try:
-    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], body='Please send the floor plan.')
+    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], body='We received the LOI from the landlord.')
     t.run_intake([m])
     payload=t.fake.writes('log-activity')[-1][1]
     print(json.dumps(payload))
@@ -2932,7 +2932,7 @@ finally:
 `, kind], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' }).trim().split('\n').at(-1));
     const source = await command('log-activity', { ...payload, ref: clientRef, idempotency_key: randomUUID() });
     await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
-      activity_id: source.activity_id, deal, evidence_quote: 'Please send the floor plan.', confidence: 0.9 });
+      activity_id: source.activity_id, deal, evidence_quote: 'We received the LOI from the landlord.', confidence: 0.9 });
     const queued = (await summaryQueue(false)).emails.find(row => row.activity_id === source.activity_id);
     assert.deepEqual(queued.email_context, payload.email_context);
     const generated = JSON.parse(execFileSync('python3', ['-c', `
@@ -2940,7 +2940,7 @@ import json,sys
 from lib.email_summary import generate
 called=[]
 result=generate(json.load(sys.stdin), lambda _: called.append(True) or {
-    'text':'The sender requests the floor plan.', 'evidence':'Please send the floor plan.'})
+    'text':'The sender reports receiving the LOI.', 'evidence':'We received the LOI from the landlord.'})
 print(json.dumps({'called': bool(called), **result}))
 `], { cwd: new URL('../..', import.meta.url), input: JSON.stringify(queued), encoding: 'utf8' }));
     const complete = kind === 'full';
@@ -2950,8 +2950,8 @@ print(json.dumps({'called': bool(called), **result}))
     if (!complete) {
       await assert.rejects(command('record-email-proposal', { idempotency_key: randomUUID(),
         mode: 'summary_result', activity_id: queued.activity_id, source_hash: queued.source_hash,
-        claim_id: claim.claim_id, summary_status: 'available', summary_text: 'The sender requests the floor plan.',
-        summary_provenance: { evidence: 'Please send the floor plan.' } }),
+        claim_id: claim.claim_id, summary_status: 'available', summary_text: 'The sender reports receiving the LOI.',
+        summary_provenance: { evidence: 'We received the LOI from the landlord.' } }),
       error => error.payload?.error === 'email_summary_incomplete_capture');
     }
     await command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_result',

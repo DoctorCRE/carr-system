@@ -54,8 +54,8 @@ def generate(email: dict, model) -> dict:
     context = email.get('email_context') or {}
     # Legacy non-decoder sources have no capture fields. Decoder captures need a full verdict.
     capture_fields = ('body_kind', 'body_completeness', 'body_outcome', 'body_truncated')
-    captured = any(key in context for key in capture_fields)
-    if (len(body) > MAX_CHARS or (captured and (
+    has_capture = any(key in context for key in capture_fields)
+    if (len(body) > MAX_CHARS or (has_capture and (
             context.get('body_truncated') or context.get('body_kind') != 'full'
             or context.get('body_completeness') != 'complete' or context.get('body_outcome') != 'complete'))):
         return unavailable('incomplete_capture')
