@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -82,14 +83,22 @@ class RunnerTest(unittest.TestCase):
         cls.socket = str(pg.root)
         cls.dsn = f'host={pg.root} port=55474 dbname=postgres'
         cls.psql = [str(binary / 'psql'), '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', cls.dsn]
-        cls.sql('''create table actor(id uuid primary key, slug text);
-create table party(id uuid primary key, deleted_at timestamptz);
-create table refs(subject_type text, subject_id uuid, party_id uuid, merged boolean);
-create view v_ref_index as select * from refs;
-create table activity(id uuid primary key, kind text, occurred_at timestamptz, created_by uuid,
- client_id uuid, lead_id uuid, vendor_id uuid, email_context jsonb);
-create table event(idempotency_key text, verb text, actor_id uuid, organization_tenant_id text,
- recorded_at timestamptz, new_value jsonb);''')
+        snapshot = (ROOT / 'db/schema.sql').read_text()
+        for name in ('actor', 'party', 'activity', 'event', 'client', 'lead', 'vendor', 'deal'):
+            statements = re.findall(r'CREATE TABLE public\.' + name + r' \(.*?\n\);',
+                                    snapshot, re.DOTALL)
+            if len(statements) != 1:
+                raise AssertionError(f'Expected one canonical table definition for {name}')
+            cls.sql(statements[0])
+        views = re.findall(r'CREATE VIEW public\.v_ref_index AS\n.*?;\n', snapshot, re.DOTALL)
+        if len(views) != 1:
+            raise AssertionError('Expected one canonical resolver view')
+        cls.sql(views[0])
+        migration = (ROOT / 'migrations/1020_email_deal_matching.sql').read_text()
+        activity_ddl = re.findall(r'^alter table public\.activity .*?;$', migration, re.MULTILINE)
+        if len(activity_ddl) != 2:
+            raise AssertionError('Expected the email-context column and constraint migration')
+        cls.sql('\n'.join(activity_ddl))
 
     @classmethod
     def sql(cls, sql):
@@ -98,20 +107,26 @@ create table event(idempotency_key text, verb text, actor_id uuid, organization_
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='email-proof-input-')
         self.addCleanup(self.tmp.cleanup)
-        self.sql('truncate event,activity,refs,party,actor;')
-        self.sql(f"insert into actor values ('{ACTOR}','fixture'); insert into party values ('{TARGET}',null); "
-                 f"insert into refs values ('client','{TARGET}','{TARGET}',false);")
+        self.sql('truncate event,activity,client,lead,vendor,deal,party,actor;')
+        self.sql(f"insert into actor(id,slug,kind,display_name) values ('{ACTOR}','fixture','human','Fixture'); "
+                 f"insert into party(id,kind,name,created_by,updated_by) "
+                 f"values ('{TARGET}','person','Fixture','{ACTOR}','{ACTOR}'); "
+                 f"insert into client(id,party_id,created_by,updated_by) "
+                 f"values ('{TARGET}','{TARGET}','{ACTOR}','{ACTOR}');")
         self.activity()
         self.event()
 
     def activity(self, ident=ACTIVITY):
-        self.sql(f"insert into activity values ('{ident}','email_in','2026-01-01T12:00Z','{ACTOR}',"
-                 f"'{TARGET}',null,null,'{{}}');")
+        self.sql(f"insert into activity(id,kind,occurred_at,actor_id,client_id,lead_id,vendor_id,email_context,summary) "
+                 f"values ('{ident}','email_in','2026-01-01T12:00Z','{ACTOR}',"
+                 f"'{TARGET}',null,null,'{{}}','Fixture email');")
 
     def event(self, key=KEY, binding=None):
         payload = json.dumps(dict(activity=ACTIVITY, email_application=dict(binding=binding or EFFECT))).replace("'", "''")
-        self.sql(f"insert into event values ('{key}','log-activity','{ACTOR}','carr-internal',"
-                 f"'2026-01-02T00:00Z','{payload}');")
+        self.sql(f"insert into event(idempotency_key,verb,actor_id,organization_tenant_id,recorded_at,new_value,"
+                 f"occurred_at,subject_type,subject_id,cause,mutation_order) "
+                 f"values ('{key}','log-activity','{ACTOR}','carr-internal',"
+                 f"'2026-01-02T00:00Z','{payload}','2026-01-01T12:00Z','activity','{ACTIVITY}','system',1);")
 
     def command(self, journal=None, digest=None, missing=False):
         path = Path(self.tmp.name) / 'journal.json'
@@ -135,6 +150,18 @@ create table event(idempotency_key text, verb text, actor_id uuid, organization_
         self.assertNotEqual(code, 0)
         self.assertEqual(result['reason'], reason)
         return result
+
+    def test_acquisition_columns_exist_in_canonical_schema(self):
+        module = runner_module()
+        import psycopg
+        from psycopg.rows import dict_row
+        with psycopg.connect(self.dsn, autocommit=True, row_factory=dict_row) as conn:
+            module.begin_read_only(conn)
+            events, activities = module.acquire(conn, JOURNAL)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(activities, [dict(activity_id=ACTIVITY)])
+            self.assertEqual(module.reconcile(JOURNAL, events, activities)[0], 'matched')
+            conn.rollback()
 
     def test_positive_and_idempotent(self):
         first = self.command()
@@ -174,9 +201,9 @@ create table event(idempotency_key text, verb text, actor_id uuid, organization_
         self.sql('truncate activity;')
         self.refuses('dangling')
         self.activity()
-        self.sql('update refs set merged=true;')
+        self.sql(f"update client set merged_into='{OTHER}';")
         self.refuses('tombstoned')
-        self.sql('update refs set merged=false; update party set deleted_at=now();')
+        self.sql('update client set merged_into=null; update party set deleted_at=now();')
         self.refuses('tombstoned')
 
     def test_source_lineage_and_lifecycle(self):
@@ -208,8 +235,11 @@ create table event(idempotency_key text, verb text, actor_id uuid, organization_
         self.refuses('invalid_journal', journal={**JOURNAL, 'expected':[], 'expected_count':0})
         self.refuses('invalid_journal', journal={**JOURNAL, 'expected':[EFFECT]*501})
         self.refuses('duplicate_expectation', journal={**JOURNAL, 'expected':[EFFECT]*2, 'expected_count':2})
-        self.sql(f"insert into event select '{OTHER}', 'log-activity','{ACTOR}','carr-internal',"
-                 f"'2026-01-02', new_value from event cross join generate_series(1,1001);")
+        self.sql(f"insert into event(idempotency_key,verb,actor_id,organization_tenant_id,recorded_at,"
+                 f"new_value,occurred_at,subject_type,subject_id,cause,mutation_order) "
+                 f"select '{OTHER}', 'log-activity','{ACTOR}','carr-internal','2026-01-02', "
+                 f"new_value,occurred_at,subject_type,subject_id,cause,mutation_order "
+                 f"from event cross join generate_series(1,1001);")
         self.refuses('row_cap')
 
     def test_read_only_write_attempt_fails(self):
@@ -219,7 +249,7 @@ create table event(idempotency_key text, verb text, actor_id uuid, organization_
             module.begin_read_only(conn)
             self.assertEqual(conn.execute('show transaction_read_only').fetchone()[0], 'on')
             with self.assertRaises(psycopg.errors.ReadOnlySqlTransaction):
-                conn.execute("insert into actor values (gen_random_uuid(),'forbidden')")
+                conn.execute("insert into actor(id,slug,kind,display_name) values (gen_random_uuid(),'forbidden','human','Forbidden')")
             conn.rollback()
 
 
