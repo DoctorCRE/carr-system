@@ -52,7 +52,7 @@ def generate(email: dict, model) -> dict:
     unavailable = lambda reason: {'text': None, 'status': 'unavailable', 'provenance': {'reason': reason}}
     body = email.get('body') or ''
     context = email.get('email_context') or {}
-    if context.get('body_truncated') or context.get('body_kind') in ('preview', 'absent') or len(body) > MAX_CHARS:
+    if context.get('body_truncated') or context.get('body_kind') not in (None, 'full') or len(body) > MAX_CHARS:
         return unavailable('incomplete_capture')
     text = substantive(body, context.get('subject') or '')
     if not text:

@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR587-S3-J2-truthful-completeness",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "natural-decoder-completeness",
+      "predicate": "After independent review, merge and installation on Studio, observe one natural outlook-intake run at the full merged runtime SHA. Require a nonempty admitted count, zero rows classified full whose body equals preview, and any conflicting or oversized body held under its named outcome. Inspect decoded rows alongside the actual run receipt; receipt counts alone cannot prove the zero-row predicate.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "A successful natural intake with nonzero admitted messages and no falsely complete rows. Missing receipts, zero admitted rows or unavailable row-level evidence remain BLOCKED, never production proof.",
+      "input_class": "one supplied natural Studio outlook-intake receipt and bounded corresponding decoder evidence; coordinator performs later, observer read-only",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

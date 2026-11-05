@@ -501,12 +501,17 @@ def _folder_kind(path: str | None) -> str:
     return next((kind for kind, names in FOLDER_CLASSES.items() if top in names), 'user' if top else 'unknown')
 
 
+def _body_complete(mail: dict) -> bool:
+    return (mail.get('body_completeness') == 'complete' and mail.get('body_kind') == 'full'
+            and bool((mail.get('body') or '').strip()))
+
+
 def _coverage_counts(mails: list[dict], classes: dict[int, set[str]]) -> dict:
     """Field coverage over every admitted message; a message counts once per class."""
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
                             *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
-    counts['body_complete'] = sum(m['body_kind'] == 'full' and bool((m['body'] or '').strip()) for m in mails)
+    counts['body_complete'] = sum(_body_complete(m) for m in mails)
     counts['sender_decoded'] = sum(bool((m['sender'] or '').strip()) for m in mails)
     counts['recipients_decoded'] = sum(bool(_addresses(m['recipients']) or _addresses(m.get('cc'))) for m in mails)
     for mail in mails:
@@ -534,7 +539,7 @@ def _load(db: Path, account_id: int | None = None, account_address: str | None =
         signature_html = 'html AS signature_html' if 'html' in columns else 'NULL AS signature_html'
         context_columns = ', '.join(name if name in columns else f'NULL AS {name}'
                                     for name in ('message_id', 'conversation_id', 'cc', 'flag_status', 'flag_due_unix',
-                                                 'flag_completed_unix', 'folder_links_unresolved'))
+                                                 'flag_completed_unix', 'folder_links_unresolved', 'body_completeness', 'body_outcome'))
         mails = [dict(r) for r in con.execute(
             'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key, '
             f'{local_keys}, {signature_html}, {context_columns} FROM messages')]
@@ -845,7 +850,7 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
         m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'] or '', m['subject'] or '',
                                           m['sent_unix'], m['local_keys'])
         m['signature_ident'] = m['ident']
-        m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
+        m['full'] = _body_complete(m)
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
     claimed = set()
