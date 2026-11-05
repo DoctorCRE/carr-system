@@ -4632,6 +4632,13 @@ export const TOOLS = {
           return result;
         }
       }
+      if (s.type === 'party') {
+        // Replay above preserves historical identity. New attachments must hold
+        // off confirm-merge's endpoint lock until this transaction commits.
+        const party = (await c.query('select merged_into,deleted_at from party where id=$1 for share', [s.id])).rows[0];
+        if (!party || party.merged_into || party.deleted_at)
+          throw new ToolError({error:'email_touch_target_not_live'});
+      }
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
