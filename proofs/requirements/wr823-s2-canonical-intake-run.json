@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S2-J13-canonical-intake-run",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "registry-migration-release",
+      "predicate": "Verify the successful production Worker release contains the forward intake-service registration migration from this PR. Independently use the sanctioned read-only catalog path to verify outlook-intake exists with its production cadence. Release identity alone is insufficient.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "OBSERVED only with matching deployed release identity and independent read-only service-registry evidence.",
+      "input_class": "deployed release identity and read-only service registry evidence",
+      "deadline_seconds": 60
+    },
+    {
+      "id": "next-installed-intake-canonical-run",
+      "predicate": "After normal deployment and Studio installation, observe the next naturally scheduled outlook-intake run. Independently acquire the complete canonical ops.run readout for service outlook-intake, run_key outlook.intake and environment production over that exact run interval. Require a canonical UUID row matching the actual run state, timestamps and installed full runtime revision receipt. Supply that actual successful installed receipt with count run.mail_ids minimum 0 to the pinned receipt observer. A local SQLite row or receipt alone does not pass. Do not invoke intake, recorder, spool flush or any production write for this proof.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "OBSERVED only when the next installed intake run appears in the canonical readout and matches the installed receipt. A missing canonical row is BLOCKED even if the receipt observer passes.",
+      "input_class": "one naturally occurring installed intake receipt plus independent complete canonical read-only run acquisition",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 3,
+    "max_records": 1000,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
+}
