@@ -1,15 +1,19 @@
 {
   "schema": "carr-production-proof-plan.v1",
   "requirement_id": "WR442-S9-J6-task-candidate-evidence",
-  "targets": ["studio"],
-  "assertions": [{
-    "id": "installed-task-census-with-zero-admissions",
-    "predicate": "After deployment and Studio installation, independently verify the installed decoder revision contains this change. Run task-candidates on one explicitly supplied immutable supported copy with the enrolled store generation and selected account. Validate its evidence database through outlook-task-evidence.py. Require a count-only task census receipt, exact selected-account context, explicit incomplete coverage when applicable, and candidates_admitted equal to zero. No candidate may be sent to CARR. A missing installed command, missing receipt, nonzero admission count or unsupported schema is BLOCKED. Observe the matching installed run receipt with the pinned Studio reader; that observer alone does not establish candidate correctness or zero admissions.",
-    "runner": "studio-run-receipt.v1",
-    "expected_result": "OBSERVED only with installed full runtime identity, independently validated task census and exactly zero admitted candidates.",
-    "input_class": "one selected-account immutable copy, enrolled generation and installed count-only run receipt; no source content in proof artifacts",
-    "deadline_seconds": 300
-  }],
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-task-census-with-zero-admissions",
+      "predicate": "Execute the bash block in docs/models/outlook-task-candidates/production-proof.md with the explicitly supplied enrolled immutable copy, account, generation, build, installed checkout and merged change SHA. The fresh task-candidates run and tools/outlook-task-evidence.py --studio-receipt produce $PROOF_DIR/task-census.receipt from a validated read-only database, never arbitrary stdout. The producer requires candidates_admitted, candidates_supported, reviews_pending and writes_acknowledged exactly zero. Independently verify installed HEAD contains the merged change, then use the registry-pinned reader: python3 \"$PROOF_DIR/studio-proof-observe.py\" --receipt-file \"$PROOF_DIR/task-census.receipt\" --service outlook-task-evidence --runtime-sha \"$RUNTIME_SHA\" --count blocks_verified --minimum 1. Require at least one CRC-verified block and the separate exact-zero validator assertion. A minimum check alone cannot prove zero. Any command failure is BLOCKED. Incomplete coverage remains explicit in counts; this proves the held census only, never natural task correctness or CARR admission.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "OBSERVED only after fresh census, successful account/generation and installed revision checks, exact-zero validation, and at least one verified block.",
+      "input_class": "One enrolled immutable copy; supplied account, generation and Outlook build; clean installed checkout containing merged change; new private proof directory. Only count-only receipt leaves Studio.",
+      "deadline_seconds": 300
+    }
+  ],
   "safety": {
     "read_only": true,
     "no_sends": true,

@@ -104,17 +104,32 @@ class Candidates(unittest.TestCase):
         receipt_file = self.root / 'receipt.txt'
         receipt_file.write_text(receipt.stdout)
         command = [sys.executable, str(reader), '--receipt-file', str(receipt_file), '--service',
-                   'outlook-task-evidence', '--runtime-sha', revision, '--count', 'candidates_admitted',
-                   '--minimum', '0']
+                   'outlook-task-evidence', '--runtime-sha', revision, '--count', 'blocks_verified',
+                   '--minimum', '1']
         passed = subprocess.run(command, text=True, capture_output=True)
         self.assertEqual(passed.returncode, 0, passed.stdout)
-        failed = subprocess.run(command[:-1] + ['1'], text=True, capture_output=True)
+        failed = subprocess.run(command[:-1] + ['2'], text=True, capture_output=True)
         self.assertEqual(failed.returncode, 1, failed.stdout)
-        for args in ([str(database), '9', GENERATION, '--studio-receipt'],):
-            rejected = subprocess.run(producer[:2] + args, text=True, capture_output=True)
-            self.assertEqual(rejected.returncode, 2)
-            self.assertEqual(rejected.stdout, '')
-        (runtime / 'lib/outlook_task_candidates.py').write_text('# altered installed source')
+        print('declared runner pass:', passed.returncode, passed.stdout.strip())
+        print('declared runner fail:', failed.returncode, failed.stdout.strip())
+        rejected = subprocess.run(producer[:2] + [str(database), '9', GENERATION, '--studio-receipt'],
+                                  text=True, capture_output=True)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertEqual(rejected.stdout, '')
+        with closing(sqlite3.connect(database)) as db:
+            counts = json.loads(db.execute('select receipt_json from task_census').fetchone()[0])
+            counts['candidates_admitted'] = 1
+            db.execute('update task_census set receipt_json=? where rowid=1', (json.dumps(counts),))
+            db.commit()
+        rejected = subprocess.run(producer, text=True, capture_output=True)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertEqual(rejected.stdout, '')
+        with closing(sqlite3.connect(database)) as db:
+            counts['candidates_admitted'] = 0
+            db.execute('update task_census set receipt_json=? where rowid=1', (json.dumps(counts),))
+            db.commit()
+        installed = runtime / 'lib/outlook_task_candidates.py'
+        installed.write_text(installed.read_text() + '\n# altered installed source\n')
         rejected = subprocess.run(producer, text=True, capture_output=True)
         self.assertEqual(rejected.returncode, 2)
         self.assertEqual(rejected.stdout, '')
