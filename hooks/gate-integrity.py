@@ -14,9 +14,9 @@ import re
 import sys
 
 REPO = Path(__file__).resolve().parent.parent
-REQUIRED = {
-    'claude': {'guard-unattended.py', 'record-home-gate.py', 'orchestrator-question.py'},
-    'codex': {'guard-unattended.py', 'record-home-gate.py'},
+REGISTRATIONS = {
+    'claude': REPO / 'ops/config/hooks.json',
+    'codex': REPO / 'ops/config/codex-hooks.json',
 }
 
 HOOKS = REPO / "hooks"
@@ -212,22 +212,47 @@ def check_baseline():
     return problems
 
 
-def check(document, client, repo=REPO):
+def registrations(document):
     hooks = document.get('hooks', document)
-    installed = set()
-    errors = []
     for event, groups in hooks.items():
         for group in groups:
+            scope = {key: value for key, value in group.items() if key != 'hooks'}
             for hook in group.get('hooks', []):
-                for path in re.findall(r'(?:\{\{REPO\}\}|[^\s\"\']+)/(?:hooks|ops)/[^\s\"\']+\.py', hook.get('command', '')):
-                    path = Path(path.replace('{{REPO}}', str(repo)))
-                    if not path.is_file():
-                        errors.append(f'missing hook script: {path}')
-                    if event == "PreToolUse":
-                        installed.add(path.name)
-    errors.extend(f'{client}: required safety hook is not installed: {name}'
-                  for name in sorted(REQUIRED[client] - installed))
+                yield event, scope, hook
+
+
+def check(document, client, repo=REPO):
+    installed = list(registrations(document))
+    errors = []
+    if document.get('disableAllHooks'):
+        errors.append(f'{client}: hooks are disabled by disableAllHooks')
+    for event, scope, hook in installed:
+        for path in re.findall(r'(?:\{\{REPO\}\}|[^\s\"\']+)/(?:hooks|ops)/[^\s\"\']+\.py', hook.get('command', '')):
+            path = Path(path.replace('{{REPO}}', str(repo)))
+            if not path.is_file():
+                errors.append(f'missing hook script: {path}')
+    expected = json.loads(REGISTRATIONS[client].read_text())
+    matches = [(e, g, json.loads(json.dumps(h).replace('{{REPO}}', str(repo))))
+               for e, g, h in installed]
+    for event, scope, hook in registrations(expected):
+        wanted = json.loads(json.dumps(hook).replace('{{REPO}}', str(repo)))
+        if (event, scope, wanted) not in matches:
+            name = re.findall(r'/(?:hooks|ops)/([^/\s\"\']+\.py)', hook['command'])[-1]
+            errors.append(f'{client}: required safety hook is not installed: {name} '
+                          f'(event={event}, matcher={scope.get("matcher", "*")}); missing or altered registration')
     return errors
+
+
+def installation_repo():
+    try:
+        result = subprocess.run(
+            ['git', '-C', str(REPO), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+            env={'PATH': os.defpath}, capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip()).parent
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return REPO
 
 
 def main():
@@ -238,15 +263,14 @@ def main():
     strict = '--strict' in sys.argv
     home = Path.home()
     sources = {
-        'claude': REPO / 'ops/config/hooks.json' if strict else home / '.claude/settings.json',
-        'codex': REPO / 'ops/config/codex-hooks.json' if strict else home / '.codex/hooks.json',
+        'claude': REGISTRATIONS['claude'] if strict else Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude')) / 'settings.json',
+        'codex': REGISTRATIONS['codex'] if strict else Path(os.environ.get('CODEX_HOME', home / '.codex')) / 'hooks.json',
     }
+    repo = REPO if strict else installation_repo()
     errors = check_baseline()
     for client, path in sources.items():
-        if not strict and not path.exists():
-            continue
         try:
-            errors.extend(check(json.loads(path.read_text()), client))
+            errors.extend(check(json.loads(path.read_text()), client, repo=repo))
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             errors.append(f'{path}: {exc}')
     if errors:

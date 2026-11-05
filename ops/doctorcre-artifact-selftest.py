@@ -11,7 +11,10 @@ import json
 import sys
 import tarfile
 import tempfile
+import urllib.error
+from email.message import Message
 from pathlib import Path
+from unittest.mock import call, patch
 
 REPO = Path(__file__).resolve().parent.parent
 TOOL = REPO / "tools" / "doctorcre-artifact.py"
@@ -96,8 +99,52 @@ def current_digest(root: Path) -> str:
     return target.rsplit("/", 1)[-1]
 
 
+def test_download_failures() -> None:
+    url = "https://github.com/example/release.tar"
+    payload = b"verified bytes"
+
+    for status in (502, 503, 504):
+        failure = urllib.error.HTTPError(url, status, "transient", Message(), None)
+        with patch.object(ARTIFACT.urllib.request, "urlopen", side_effect=[failure, io.BytesIO(payload)]) as request, patch("time.sleep") as sleep:
+            try:
+                result = ARTIFACT.download(url, len(payload))
+            except urllib.error.HTTPError:
+                result = None
+            check(f"download recovers from HTTP {status}", result == payload and request.call_count == 2)
+            check(f"download backs off after HTTP {status}", sleep.call_args_list == [call(1)])
+
+    failure = urllib.error.HTTPError(url, 504, "unavailable", Message(), None)
+    with patch.object(ARTIFACT.urllib.request, "urlopen", side_effect=failure) as request, patch("time.sleep") as sleep:
+        try:
+            ARTIFACT.download(url, len(payload))
+        except urllib.error.HTTPError as exc:
+            check("persistent outage preserves the error and stops after three attempts", exc is failure and request.call_count == 3)
+        else:
+            check("persistent outage fails closed", False)
+        check("persistent outage has two bounded backoffs", sleep.call_args_list == [call(1), call(2)])
+
+    for status in (403, 404):
+        failure = urllib.error.HTTPError(url, status, "permanent", Message(), None)
+        with patch.object(ARTIFACT.urllib.request, "urlopen", side_effect=failure) as request, patch("time.sleep") as sleep:
+            try:
+                ARTIFACT.download(url, len(payload))
+            except urllib.error.HTTPError as exc:
+                check(f"HTTP {status} fails immediately", exc is failure and request.call_count == 1 and not sleep.called)
+            else:
+                check(f"HTTP {status} fails closed", False)
+
+    with patch.object(ARTIFACT.urllib.request, "urlopen", return_value=io.BytesIO(payload)) as request, patch("time.sleep") as sleep:
+        try:
+            ARTIFACT.download(url, len(payload) + 1)
+        except ValueError:
+            check("wrong byte count fails without retry", request.call_count == 1 and not sleep.called)
+        else:
+            check("wrong byte count fails closed", False)
+
+
 def main() -> int:
     print("doctorcre-artifact-selftest: exact pin and reversible activation")
+    test_download_failures()
     prior_pin, prior_archive, prior_manifest = bundle("prior")
     candidate_pin, candidate_archive, candidate_manifest = bundle("candidate")
 
