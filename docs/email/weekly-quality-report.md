@@ -71,7 +71,7 @@ A local week spanning the autumn clock change exceeds 168 hours. The command acc
 so an explicit seven-calendar-day local window remains valid across that transition.
 `tools/db-tap.py run` is the existing sanctioned Studio route used by the last-touch proof and other production taps.
 It resolves the configured production connection privately and supplies `DATABASE_URL` with a read-only default.
-The report also enforces read-only transactions. It does not obtain grants or discover credentials itself.
+The report also enforces read-only transactions. The proof plan allows 100 seconds for the wrapper's bounded provider lookup and the database read, with at most two requests total. It does not obtain grants or discover credentials itself.
 A missing wrapper-supplied connection fails at `database_connect` with category `configuration`.
 Connection, permission, timeout, query, fixture, aggregate, and output failures name their step and safe category.
 Raw database errors, connection strings, SQL payloads, and fixture contents are never printed.

@@ -11,15 +11,15 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "A bounded read-only report with independently reconciled numerator and denominator, or an explicit failed read or no_evidenced_population result. No autonomous policy writes. The registered observer remains BLOCKED without an actual operational receipt; its count comparison alone does not prove reporting semantics.",
       "input_class": "One explicit completed weekly canonical email filing cohort owned by Joe, observed through an exclusive fixed undo cutoff. No mailbox reads or sends.",
-      "deadline_seconds": 35
+      "deadline_seconds": 100
     }
   ],
   "safety": {
     "read_only": true,
     "no_sends": true,
-    "max_requests": 1,
+    "max_requests": 2,
     "max_records": 5,
-    "max_runtime_seconds": 35,
+    "max_runtime_seconds": 100,
     "max_artifact_bytes": 65536
   }
 }
