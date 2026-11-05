@@ -1943,6 +1943,9 @@ def _prune(state: dict, now: datetime) -> None:
     state['mail_keys'] = {ident: k for ident, k in state.get('mail_keys', {}).items()
                           if ident in held or ident in state.get('flags', {})
                           or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
+    state['mail_participants'] = {ident: progress for ident, progress in state.get('mail_participants', {}).items()
+                                  if ident in held or ident in state.get('flags', {})
+                                  or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
                          if not r['acknowledged'] or r['created_at'] >= horizon
                          or (r['verb'] == 'record-finding' and json.loads(r['payload']).get('kind') == email_contact_review.KIND)
