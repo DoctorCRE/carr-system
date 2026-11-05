@@ -1,0 +1,79 @@
+{
+  "schema": "market-study-publication.v1",
+  "implementation_state": "core_only_pending_canonical_adapter",
+  "versions": {
+    "schema": "market-study-publication.v1",
+    "package_schema": "carr.market-study.v1",
+    "composer": "market-study-composer.v1",
+    "renderer": "carr.market-study.v1",
+    "composer_sha256": "e652d6a309b68da79ed94837bf946a1e4fdaf4b33a3ccaaee2d82793eb1c9e7e",
+    "validator_sha256": "840c255ce3bb4ea5e291ecb2cf8514574a9baa2eb09c28ad050a5242c9bb7453",
+    "package_schema_sha256": "7fdbbe045615a0d9c5825e955dc0e1d0682412093150c8218c9458ec7014552f"
+  },
+  "limits": {
+    "bytes": 2097152,
+    "properties": 20,
+    "assets": 200,
+    "revisions": 200,
+    "nodes": 100000,
+    "depth": 64,
+    "page": 50,
+    "token_characters": 65536,
+    "token_ttl_ms": 300000
+  },
+  "interface": {
+    "factory": "createMarketStudyPreparation",
+    "dependencies": {
+      "authorize": "Authenticated actor and deal return a current authorization-scope identity, or refuse.",
+      "readSnapshot": "Read canonical data at one strict database snapshot after authorization. Accept only actor and selectors. Return immutable research identity and digest, reviewed groups, canonical asset envelopes and all consumed revisions. Never copy caller assertions into membership.",
+      "listPackages": "Authorized deal-scoped keyset query. Return at most limit rows. The core requests page size plus one. Cursor is {id,version}. Each item identifies an immutable version and digest.",
+      "signingKey": "Runtime-injected HMAC SHA-256 CryptoKey with at least 256 bits and sign/verify usages. No default or source credential.",
+      "clock": "Current epoch milliseconds. Defaults to Date.now."
+    },
+    "methods": [
+      "list(actor,{deal_id,limit?,after?:{id,version}})",
+      "prepare(actor,{deal_id,research_package_id,research_version,renderer_version})",
+      "verify(actor,selectors,preview_token)"
+    ],
+    "snapshot": {
+      "required": [
+        "deal_id",
+        "client_id",
+        "research",
+        "reviewed",
+        "assets",
+        "revisions"
+      ],
+      "research": [
+        "id",
+        "version",
+        "deal_id",
+        "client_id",
+        "sha256",
+        "data"
+      ],
+      "reviewed": "Existing four-argument composer reviewed envelopes.",
+      "assets": "Canonical exact hash/name/type membership envelopes, derived from stored deal/client ownership.",
+      "revisions_required": [
+        "deal",
+        "client",
+        "property_membership",
+        "reviewed_client",
+        "reviewed_prepared",
+        "reviewed_properties",
+        "asset_membership",
+        "publication"
+      ],
+      "revisions_rule": "Include every canonical input revision consumed, not only the required categories. Values are nonnegative safe integers or lowercase SHA-256 digests. Property entries and source assertions must be bound individually or by a digest over the complete ordered set."
+    }
+  },
+  "publication": "No publication method, persistence, or publication authority. Verification must occur again at the later publication transaction snapshot.",
+  "pending": [
+    "Canonical immutable package ingestion and catalog relation",
+    "Canonical reviewed package-group projection and provenance mapping",
+    "Current publication relation and revision contract",
+    "Runtime signing binding and registered tool integration",
+    "Real PostgreSQL query-count and zero-publication tests",
+    "Integrated read-only production observation"
+  ]
+}
