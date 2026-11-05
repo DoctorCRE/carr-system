@@ -94,3 +94,22 @@ revoke all on function ops.subject_watch_actor(),ops.subject_watch_target(text,u
   from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 grant execute on function ops.read_subject_watch(text,uuid),ops.set_subject_watch(text,uuid,boolean),
   ops.list_subject_watches(uuid,integer) to carr_writer,carr_authority;
+
+do $append_grant$
+declare contract jsonb; entries jsonb;
+begin
+  contract:=ops.scac_current_grant_contract();
+  select jsonb_agg(jsonb_build_object(
+    'grantee',grantee,'signature',signature,'grantable',false,'privilege','execute',
+    'ingress_key','db-function-acl:'||signature||':'||grantee||':execute',
+    'ingress_kind','db_function_acl','function_kind','f','security_definer',true,
+    'volatility',volatility,'parallel','u','config',jsonb_build_array('search_path=pg_catalog, pg_temp')))
+    into entries from (values
+      ('ops.read_subject_watch(p_kind text, p_id uuid)','s'),
+      ('ops.set_subject_watch(p_kind text, p_id uuid, p_watching boolean)','v'),
+      ('ops.list_subject_watches(p_cursor uuid, p_limit integer)','s')
+    ) functions(signature,volatility) cross join (values('carr_writer'),('carr_authority')) roles(grantee);
+  contract:=jsonb_set(contract,'{secdef_execute}',(contract->'secdef_execute')||entries);
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
+    'select '||quote_literal(contract::text)||'::jsonb');
+end $append_grant$;

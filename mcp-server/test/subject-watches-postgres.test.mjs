@@ -9,6 +9,7 @@ const dsn = await snapshotDatabase('subject-watches-');
 test('registered watch transitions preserve isolation and initial baseline', async t => {
   const c = new pg.Client({ connectionString: dsn });
   await c.connect(); t.after(() => c.end());
+  assert.equal((await c.query('select ops.scac_mutation_catalog_v118_current() as valid')).rows[0].valid,true);
   const joe = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   const dell = { ...(await c.query("select id,slug from actor where slug='dell'")).rows[0], human: true };
   const party = (await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic watch client',$1,$1) returning id",[joe.id])).rows[0].id;
