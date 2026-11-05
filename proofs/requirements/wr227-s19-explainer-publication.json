@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S19-explainer-publication",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "reviewed-explicit-publication-parity",
+    "predicate": "After S4 integration, existing partner content signoff, and deployment of the integrated producer, compare authenticated partner preview and client-reader publication IDs, optimistic versions, and reviewed payload digests. Both readers must omit absent, unapproved, revoked, withdrawn, unpublished, mismatched, and cross-portal revisions. The registered release-smoke runner establishes release identity only. Coordinator-owned authenticated read-only observations remain required. This preparation-only build cannot satisfy the predicate.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Matching explicit publications and reviewed immutable revisions in both projections, with hidden content omitted. Blocked until S4 and the authoritative approval-record schema are integrated. A release smoke alone is insufficient.",
+    "input_class": "Existing approved explainer publications and read-only partner and portal views, no content approval or publication writes",
+    "deadline_seconds": 120
+  }],
+  "safety": { "read_only": true, "no_sends": true, "max_requests": 4, "max_records": 2, "max_runtime_seconds": 120, "max_artifact_bytes": 32768 }
+}

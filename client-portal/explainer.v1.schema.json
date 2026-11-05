@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doctorcre.com/schemas/explainer.v1.schema.json",
+  "title": "Immutable explainer payload",
+  "description": "Preparation grants no review or publication authority. Canonical UTF-8 JSON must not exceed 32768 bytes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "section_key", "title", "paragraphs"],
+  "properties": {
+    "kind": { "const": "explainer" },
+    "section_key": { "enum": ["transaction", "carr"] },
+    "title": { "allOf": [{ "$ref": "#/$defs/Text" }], "maxLength": 200 },
+    "paragraphs": {
+      "type": "array", "minItems": 1, "maxItems": 20,
+      "items": {
+        "type": "array", "minItems": 1, "maxItems": 32,
+        "items": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["text"], "properties": { "text": { "$ref": "#/$defs/Text" } } },
+            { "type": "object", "additionalProperties": false, "required": ["link"], "properties": { "link": { "$ref": "#/$defs/Link" } } }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Text": {
+      "type": "string", "minLength": 1, "maxLength": 4000,
+      "pattern": "^(?![\\s\\S]*<[A-Za-z/!?])(?=[\\s\\S]*\\S)[\\s\\S]+$"
+    },
+    "Link": {
+      "type": "object", "additionalProperties": false, "required": ["label", "url"],
+      "properties": {
+        "label": { "$ref": "#/$defs/Text" },
+        "url": {
+          "type": "string", "maxLength": 2048,
+          "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:[/?#][^\\s<>\"\\\\]*)?(?![\\s\\S])"
+        }
+      }
+    }
+  }
+}
