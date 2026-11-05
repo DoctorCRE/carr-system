@@ -94,7 +94,7 @@ begin
   select * into e from public.event where id=p_event;
   if not found then raise exception 'watch_event_required'; end if;
   if coalesce(e.organization_tenant_id,'carr-internal')<>'carr-internal'
-    or coalesce(e.personal_scope,'none')<>'none' then return; end if;
+    or coalesce(e.personal_scope,'none') not in ('none','joe-personal','dell-personal') then return; end if;
   insert into ops.subject_watch_event_receipt(event_id) values(e.id) on conflict do nothing;
   if not found then return; end if;
   if e.subject_type='deal' then

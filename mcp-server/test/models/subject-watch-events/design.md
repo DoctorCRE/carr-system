@@ -76,3 +76,57 @@ registration dependency on PR 2974. The subscription contract has landed on main
 The app routes were verified in `jbookout/doctorcre-app` source, `js/lease-radar.js`, which links clients with `record` and deals with `deal`. The notification check constraint now admits only those exact UUID query forms in addition to its existing paths. The replacement check is NOT VALID to avoid scanning historical notification rows; existing rows already satisfied the stricter old constraint.
 
 The production requirement admits a read-only release smoke only. The registered smoke runner cannot execute a watched-record mutation. After deployment the coordinator must perform the requested live experiment, inspect the watching partner feed, and verify the unwatched control and rerun. No production completion is claimed here.
+
+
+# Partner writer regression and scope rule
+
+Card: WR617.S4.J12
+
+The event's personal_scope records the writer's sponsor, not the confidentiality
+of a canonical deal or lease. The consumer accepts none, joe-personal and
+dell-personal inside carr-internal. Ordinary shared deal changes notify either
+partner who subscribed. A Joe-attributed update-deal therefore wakes Dell when
+Dell watches that deal. Inbound replies still require the activity's mailbox
+owner to match the watching partner. The activity's content is never copied.
+Other tenants remain excluded before receipts or lease scans.
+
+The data shape remains an event identity, shared subject identity, subscription
+identity and recipient. No new write interface, queue, cache or external call
+is introduced. The fixed transition is Quiet to Notified on a registered human
+or sponsored update-deal. The retained isolation transition is Quiet to Quiet
+on another mailbox's reply even when its audit scope is joe-personal. Registered
+writer regressions exercise Joe, Dell and Joe-sponsored Codex through carr_writer.
+They also replay the registered write and event consumer. Existing event-ingress
+tests retain the foreign-tenant and own-mailbox cases.
+
+# Execute the production proof
+
+The coordinator owns the live mutations and release observation. This worker
+used disposable synthetic PostgreSQL only. Release smoke alone cannot establish
+notification behavior. The supplemental verifier is
+`tools/verify-subject-watch-proof.py`. It has no write mode or provider sends.
+Each capture runs one repeatable-read transaction with a five-second SQL timeout,
+returns two aggregate rows and saves only a selection hash and counts.
+The live selection must contain a watched, visible deal and an unwatched, visible
+control for the same partner. Merged clients and deleted or merged parties fail
+selection. Keep these records otherwise quiet during the experiment. Concurrent
+changes fail closed through unexpected count deltas. Use a configured libpq
+service with read access to the watch, event, notification and receipt tables.
+Never place a live connection string in a command or artifact.
+
+The coordinator runs all of these steps after release identity matches.
+
+1. Select the live watched and unwatched deal UUIDs for one partner.
+2. Run `python tools/verify-subject-watch-proof.py capture` with those `--watched`, `--unwatched`, and `--actor` values and `--output /tmp/watch-before.json`.
+3. Execute one registered update-deal per selected deal, changing one field each, and retain each exact idempotency key and request.
+4. Capture the same selection to `/tmp/watch-after.json`.
+5. Replay both original registered requests with their original idempotency keys.
+6. Capture the same selection to `/tmp/watch-replay.json`.
+7. Run `python tools/verify-subject-watch-proof.py verify --before /tmp/watch-before.json --after /tmp/watch-after.json --replay /tmp/watch-replay.json`.
+
+The final command must return zero and report watched 1, unwatched 0 and replay 0.
+Each initial change must add one receipt; replay must change neither receipts
+nor notifications. A watched change producing zero notifications fails. A missing
+source, wrong watch selection, duplicate wake or changed control also fails.
+The PostgreSQL suite runs the exact CLI against the registered Joe, Dell and
+sponsored writer paths, including zero-change and duplicate-wake refusals.

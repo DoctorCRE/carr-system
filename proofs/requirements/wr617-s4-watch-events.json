@@ -7,10 +7,10 @@
   "assertions": [
     {
       "id": "watch-event-worker-release",
-      "predicate": "The deployed Worker release matches the merged watch consumer revision. This read-only release check does not attest the coordinator-owned live watch change experiment.",
+      "predicate": "Release identity matches the merged watch consumer revision. Release smoke is only the first check; the supplemental notification count verifier in mcp-server/test/models/subject-watch-events/design.md is mandatory before live-proven.",
       "runner": "worker-release-smoke.v1",
-      "expected_result": "Release identity matches the merged SHA. Coordinator separately observes one watched deal change produces exactly one partner notification, an unwatched deal produces zero, and rerun produces zero.",
-      "input_class": "read-only release identity; live notification transition proof remains coordinator-owned",
+      "expected_result": "After release smoke, execute the documented three captures and tools/verify-subject-watch-proof.py verify --before /tmp/watch-before.json --after /tmp/watch-after.json --replay /tmp/watch-replay.json. Exit 0 must report watched=1, unwatched=0, replay=0; both original events add one receipt, and replay adds none. Release identity alone never satisfies this product proof.",
+      "input_class": "Read-only release and aggregate count observations; coordinator performs the two registered deal changes and same-key replays separately. Exact capture procedure and SQL are in the design note and verifier.",
       "deadline_seconds": 120
     }
   ],
