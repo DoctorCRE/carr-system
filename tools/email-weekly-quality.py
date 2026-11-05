@@ -16,7 +16,7 @@ with scope as (
         {cutoff}::timestamptz as cutoff, {partner}::text as partner, {account}::text as account
 ), effects as (
  select e.*, case
-   when not (who.slug=s.partner or (who.kind in ('automation','system') and e.sponsoring_human_slug=s.partner))
+   when (who.slug=s.partner or (who.kind in ('automation','system') and e.sponsoring_human_slug=s.partner)) is not true
      then 'unrelated_actor'
    when e.cause in ('import_migration','import_salesforce') then 'bulk_import'
    when e.verb='inherit-email-thread' and e.cause='automation_job' and nullif(btrim(e.human_quote),'') is null

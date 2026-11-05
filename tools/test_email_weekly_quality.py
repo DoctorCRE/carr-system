@@ -99,6 +99,19 @@ insert into event values ('{ident}','deal','{verb}','{{"activity_id":"{ident}"}}
         self.assertEqual((result['actions'][0]['numerator'], result['actions'][0]['denominator']), (1, 1))
         self.assertEqual(result['separate_populations'], dict(partner_confirmed=1, bulk_import=1, unclassified=1, unrelated_actor=1))
 
+    def test_nonhuman_sponsorship(self):
+        self.sql("insert into actor values ('s','scheduler','system');")
+        for actor in ('a', 's'):
+            for sponsor, value in (('null', 'null'), ('wrong', "'dell'"), ('partner', "'joe'")):
+                ident = f'{actor}-{sponsor}'
+                self.effect(ident, actor=actor)
+                self.sql(f"update event set sponsoring_human_slug={value} where id='{ident}';")
+        self.effect('direct-partner', actor='j')
+        self.sql("update event set sponsoring_human_slug=null where id='direct-partner';")
+        result = self.result()
+        self.assertEqual(result['actions'][0]['denominator'], 3)
+        self.assertEqual(result['separate_populations']['unrelated_actor'], 4)
+
     def test_undo_filters(self):
         for name in ('cutoff', 'wrong-actor', 'wrong-link', 'before', 'recorded-late'):
             self.effect(name)
