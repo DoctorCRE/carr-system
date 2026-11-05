@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S2-producer-containment",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-output-root-current-snapshot",
+      "predicate": "After merge and installation of the exact full runtime SHA, the coordinator runs the authorized installed .venv/bin/python -m lib.outlook_triage --proof-window --copy with an explicit absolute authorized research directory. Require exit 0, current-attempt observed >= 1, snapshot=validated, matching snapshot and manifest provenance, mode 0600 snapshot, mode 0700 publication directory and moved=0. Read one bounded outlook-triage receipt at that full runtime SHA with run.observed minimum 1 through the pinned Studio observer. Independently check the current-attempt snapshot and provenance; receipt count alone does not prove root containment or publication. No-copy, stale evidence, nested symlink escape or source overlap must refuse and cannot satisfy this predicate.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "Current installed producer publishes and validates a nonempty snapshot through the intentional configured out symlink with zero mailbox mutations. The current triage outcome is skipped while the executor is unavailable, so the pinned receipt observer reports BLOCKED. Admission is not live proof; retain direct snapshot evidence and do not claim filing or Live from a held or skipped receipt.",
+      "input_class": "one explicit actual-run outlook-triage receipt plus current-attempt snapshot and provenance from the authorized installed research-copy proof; no mailbox send or move; observer never launches a job or refreshes runtime",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

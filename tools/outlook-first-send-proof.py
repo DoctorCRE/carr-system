@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import outlook_send as send
 from lib.outlook_settings import load_settings
 
+SCHEMA = 'outlook-first-send-proof.v2'
+
 SQL = """
 WITH first_submission AS (
   SELECT * FROM email_proposal
@@ -25,6 +27,7 @@ SELECT p.id::text AS proposal_id,p.version,p.status,p.resolved_by=partner.id AS 
   partner.email AS account,copy.email AS partner_cc,
   p.submitted_email->>'body' AS body,p.submitted_email->>'subject' AS subject,p.submitted_email->'to' AS "to",
   p.submitted_email->'cc' AS cc,p.send_result,
+  COALESCE(p.submitted_email->'attachments', '[]'::jsonb) AS attachments,
   COALESCE((SELECT jsonb_agg(a.email_context) FROM activity a
     WHERE a.kind='email_out' AND a.email_context->>'send_id'=p.id::text), '[]'::jsonb) AS correspondence
 FROM first_submission p
@@ -33,9 +36,29 @@ JOIN actor copy ON copy.slug=CASE p.owner WHEN 'joe' THEN 'dell' ELSE 'joe' END
 """
 
 
+def manifest_digests(manifest):
+    if not isinstance(manifest, list) or any(
+            not isinstance(a, dict) or not isinstance(a.get('sha256'), str)
+            or re.fullmatch(r'[0-9a-f]{64}', a['sha256']) is None
+            or type(a.get('size')) is not int or a['size'] < 0 for a in manifest):
+        return None
+    return sorted(a['sha256'] for a in manifest)
+
+
+def ledger_digests(row):
+    manifest = row.get('attachments', {'count': 0, 'sha256': []})
+    if (not isinstance(manifest, dict) or type(manifest.get('count')) is not int
+            or not isinstance(manifest.get('sha256'), list)
+            or manifest['count'] != len(manifest['sha256'])
+            or any(not isinstance(d, str) or re.fullmatch(r'[0-9a-f]{64}', d) is None
+                   for d in manifest['sha256'])):
+        return None
+    return sorted(manifest['sha256'])
+
+
 def prove(row, ledger, snapshot, settings):
     if row is None:
-        return dict(ok=False, reason='no_partner_submission')
+        return dict(schema=SCHEMA, ok=False, reason='no_partner_submission')
     result = row.get('send_result') or {}
     submission_version = row['version'] - (2 if result.get('reconciled_from_uncertainty') else 1)
     key = str(uuid.uuid5(uuid.NAMESPACE_URL,
@@ -63,7 +86,8 @@ def prove(row, ledger, snapshot, settings):
         ledger_confirmed=bool(done) and all(r.get('sent_item_id') == item_id and r.get('sent_at') == sent_at for r in done),
         one_sent_item=len(matches) == 1 and item_id in matches and matches[item_id].sent_at == sent_at,
         one_correspondence=len(records) == 1 and all(
-            r.get('sent_item_id') == item_id and r.get('sent_at') == sent_at
+            r.get('send_id') == row['proposal_id']
+            and r.get('sent_item_id') == item_id and r.get('sent_at') == sent_at
             and r.get('sender', {}).get('email') == settings.account
             and sorted((v.get('email'), v.get('kind')) for v in r.get('recipients', [])) == expected_recipients
             for r in records))
@@ -71,8 +95,20 @@ def prove(row, ledger, snapshot, settings):
     checks['exact_body'] = (item_id in matches and isinstance(row.get('body'), str)
         and matches[item_id].body_fingerprint == send.body_fingerprint(row['body'])
         and result.get('reason') not in ('body_unverified', 'body_mismatch'))
-    return dict(ok=all(checks.values()), dispatch_verified=dispatch_verified,
-                proposal_id=row['proposal_id'], checks=checks)
+    submitted = manifest_digests(row.get('attachments', []))
+    checks['submission_manifest_verified'] = (
+        submitted is not None and checks['partner_submitted'] and checks['one_press']
+        and checks['ledger_confirmed'] and checks['one_correspondence']
+        and presses[0].get('key') == key and len(prints) == 1
+        and all(ledger_digests(r) == submitted for r in presses + done)
+        and manifest_digests(records[0].get('attachments', [])) == submitted)
+    checks['sent_attachment_content_verified'] = True if submitted == [] else None
+    reason = ('submission_manifest_mismatch' if not checks['submission_manifest_verified']
+              else 'first_send_invariants_failed' if not dispatch_verified or not checks['exact_body']
+              else 'sent_attachment_content_unavailable' if submitted else 'proven')
+    return dict(schema=SCHEMA, ok=all(checks.values()), reason=reason,
+                dispatch_verified=dispatch_verified, proposal_id=row['proposal_id'], checks=checks,
+                sent_attachment_content_status='not_required' if submitted == [] else 'unavailable')
 
 
 def main():
@@ -92,7 +128,7 @@ def main():
         snapshot = send.DecodedMailbox(Path.home(), settings.repo).snapshot()
         result = prove(row, ledger, snapshot, settings)
     except Exception as exc:
-        result = dict(ok=False, reason='proof_unavailable', error_type=type(exc).__name__)
+        result = dict(schema=SCHEMA, ok=False, reason='proof_unavailable', error_type=type(exc).__name__)
     print(json.dumps(result, sort_keys=True))
     return 0 if result['ok'] else 1
 
