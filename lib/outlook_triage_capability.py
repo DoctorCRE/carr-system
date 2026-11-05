@@ -1,4 +1,4 @@
-"""Pure executor qualification. This module has no transport or runtime caller."""
+"""Pure executor qualification used by the evening runner. No transport exists."""
 
 from enum import Enum
 

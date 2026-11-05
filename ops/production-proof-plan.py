@@ -134,9 +134,11 @@ def main():
         if args.body_file:
             body = read(args.body_file)
             base = args.base
+            head = 'HEAD'
         elif os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
             event = json.loads(read(Path(os.environ['GITHUB_EVENT_PATH'])))
             base = event['pull_request']['base']['sha']
+            head = event['pull_request']['head']['sha']
             history = command('git', 'log', '--first-parent', '--diff-filter=A', '--format=%cI', base, '--', CONTRACT_PATH)
             if not history:
                 print('Production proof: rollout not merged into base; admission not required')
@@ -150,7 +152,7 @@ def main():
             print('Production proof: PR admission not evaluated; local use --body-file and --base')
             return 0
         paths = json.loads(read(args.files_file)) if args.files_file else command(
-            'git', 'diff', '--name-only', '--no-renames', '-z', base + '...HEAD').rstrip('\0').split('\0')
+            'git', 'diff', '--name-only', '--no-renames', '-z', base + '...' + head).rstrip('\0').split('\0')
         print('Production proof: ' + admission(body, paths, args.root, contract))
         return 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:

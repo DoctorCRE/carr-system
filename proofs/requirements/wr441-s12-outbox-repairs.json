@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR441-S12-outbox-repairs",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "worker-release-contract",
+      "predicate": "Read the deployed Worker /release identity for the merged full SHA and run the pinned verb-registry smoke with that source. The outbox-for-sender and record-email-sent verbs must remain registered. This smoke proves release and registry availability only; late uncertainty correction and exactly one correspondence still require the separately authorized existing-submission readback.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "PASS for release identity and registry. Behavioral production proof remains pending until the original frozen submission, one Sent identity, one press and one correspondence are read back without another send.",
+      "input_class": "deployed Worker read-only release and verb registry",
+      "deadline_seconds": 120
+    },
+    {
+      "id": "studio-natural-outbox-receipt",
+      "predicate": "Read one explicitly supplied natural outlook-outbox service receipt with studio-run-receipt.v1, matching the installed merged full runtime SHA and counts.sent minimum 1. Receipt absence, idle counts or abbreviated runtime identity is BLOCKED. Aggregate receipt success alone does not prove full frozen body equality, no resend, late reconciliation or truthful legacy draft persistence. Preserve the existing-submission exact-body proof and separately authorized natural draft evidence obligations.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "PASS only on a matching full-SHA successful natural nonempty receipt. Otherwise BLOCKED. Full behavior remains unproven until private read-only evidence shows one press, original Sent account/time/recipients, matching full frozen body hash and one correspondence. No new send or draft save is authorized by this plan.",
+      "input_class": "one supplied natural outlook-outbox receipt, counts.sent minimum 1; no discovery, job launch or runtime refresh",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 100,
+    "max_runtime_seconds": 150,
+    "max_artifact_bytes": 1048576
+  }
+}

@@ -1,0 +1,21 @@
+stateDiagram-v2
+  [*] --> Unknown
+  Unknown: No one named
+  Waiting: Waiting on a verified person with reason and evidence
+  Cleared: Wait cleared, previous wait retained in audit
+  Completed: Item completed, waiting cleared
+  Unknown --> Waiting: Name a person
+  Waiting --> Waiting: Replace the person or reason
+  Waiting --> Cleared: Clear the wait
+  Cleared --> Waiting: Name a person again
+  Waiting --> Completed: Complete underlying work
+  Unknown --> Completed: Complete underlying work
+  Cleared --> Completed: Complete underlying work
+  Waiting --> Waiting: Retry exact command, no second change
+  Waiting --> Waiting: Refuse stale version or invalid identity
+  Unknown --> Unknown: Refuse merged, deleted, unknown or foreign identity
+  Completed --> Completed: Refuse a new wait
+  %% never A read changes stored waiting state
+  %% never Naming a person changes action ownership
+  %% never A deleted party displays a stale name
+  %% never A foreign tenant reads or changes internal waits

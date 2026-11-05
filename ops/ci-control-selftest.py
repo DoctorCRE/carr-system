@@ -117,7 +117,7 @@ class Controls(unittest.TestCase):
                 "p=pathlib.Path(os.environ['ATTEMPTS'])\n"
                 "n=int(p.read_text())+1 if p.exists() else 1\n"
                 "p.write_text(str(n))\n"
-                "assert sys.argv[1:] == ['--kill-after=5s','110s','bash','-euo','pipefail','-c','install_postgres']\n"
+                "assert sys.argv[1:3] == ['--kill-after=5s','110s'] and sys.argv[-1] == '--postgres-attempt' and sys.argv[-2].endswith('/ci-apt.py')\n"
                 "sys.exit({'timeout':124,'failure':1,'missing':127}.get(os.environ['INSTALL_RESULT'], 1 if n==1 else 0))\n")
             timeout.chmod(0o755)
             for mode, expected in [('retry-success', 0), ('timeout', 1), ('failure', 1), ('missing', 1)]:

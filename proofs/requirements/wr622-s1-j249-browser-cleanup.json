@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S1-J249-browser-cleanup-budget",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "released-source-identity",
+      "predicate": "After merge, read the normal Worker release identity and verify its source ancestry contains this test-only change. Separately require the hosted practice-plugin unit job on the merged source to pass the real-browser lifecycle probe. The registered release smoke runner establishes release identity only; it does not execute or attest the browser test. No product behavior changes in this requirement.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "The normal release readback matches the deployed source containing the repair, and the corresponding hosted practice-plugin unit result passes. Missing hosted unit evidence leaves the test repair unproven even if release smoke passes.",
+      "input_class": "normal public release readback and hosted CI result for the deployed source; no business records or sends",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

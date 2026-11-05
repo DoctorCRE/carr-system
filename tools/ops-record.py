@@ -176,12 +176,13 @@ def _is_forward_fix_verifier_dsn(value: str) -> bool:
     return any(part == "user=carr_program5_forward_fix_verifier" for part in value.split())
 
 
-def connect(kind: str):
+def connect(kind: str, *, timeout: int | None = None):
     try:
         import psycopg
     except ImportError:
         raise SystemExit("ops-record: psycopg not installed (pip install 'psycopg[binary]')")
-    conn = psycopg.connect(dsn(kind), autocommit=True)
+    conn = (psycopg.connect(dsn(kind), autocommit=True, connect_timeout=timeout)
+            if timeout is not None else psycopg.connect(dsn(kind), autocommit=True))
     if kind in ("routine", "authority", "forward_fix_verifier"):
         with conn.cursor() as cur:
             if kind == "forward_fix_verifier":
@@ -1699,6 +1700,51 @@ def cmd_settings_change(args) -> int:
     return 0
 
 
+# The projection never exports arbitrary detail or a caller-asserted target.
+RUN_READ_COLUMNS = ('run_id', 'correlation_id', 'service', 'run_key', 'environment',
+                    'source_kind', 'source_ref', 'state', 'exit_code', 'started_at',
+                    'ended_at', 'observed_at', 'expires_at', 'detail')
+
+
+def read_run_batch(service, run_key, environment, since, until, limit=1000):
+    from lib.studio_proof import Run, RunBatch, timestamp
+    try:
+        since, until = timestamp(since), timestamp(until)
+        if (not service or not run_key or environment not in {'local', 'production', 'staging', 'rehearsal'}
+                or type(limit) is not int or not 1 <= limit <= 1000
+                or not timedelta(0) < until-since <= timedelta(days=7)):
+            raise ValueError('invalid bounded query')
+    except (TypeError, ValueError):
+        return RunBatch('invalid-query', False, False, since, until)
+    try:
+        with connect('read', timeout=10) as conn, conn.transaction(), conn.cursor() as cur:
+            cur.execute('set transaction read only')
+            cur.execute("set local statement_timeout = '10s'")
+            cur.execute(
+                """select r.id, r.correlation_id, s.key, r.run_key, r.environment,
+                          r.source_kind, r.source_ref, r.state, r.exit_code,
+                          r.started_at, r.ended_at, r.observed_at, r.expires_at, r.detail
+                     from ops.run r join ops.service s on s.id = r.service_id
+                    where s.key = %s and r.run_key = %s and r.environment = %s
+                      and ((r.ended_at >= %s and r.ended_at <= %s)
+                           or (r.ended_at is null and (r.started_at <= %s or r.started_at is null)))
+                    order by r.ended_at desc nulls first, r.started_at desc nulls first
+                    limit %s""",
+                (service, run_key, environment, since, until, until, limit+1))
+            rows = cur.fetchall()
+        truncated = len(rows) > limit
+        runs = tuple(Run.from_record(dict(zip(RUN_READ_COLUMNS, row))) for row in rows[:limit])
+        return RunBatch('ok', not truncated, truncated, since, until, runs)
+    except (Exception, SystemExit):
+        return RunBatch('unavailable', False, False, since, until)
+
+
+def cmd_read_runs(args):
+    batch = read_run_batch(args.service, args.key, args.environment, args.since, args.until, args.limit)
+    print(json.dumps(batch.projection(), default=lambda v: v.isoformat()))
+    return 0 if batch.status == 'ok' and batch.complete else 1
+
+
 # ── trace ────────────────────────────────────────────────────────────────────
 def cmd_trace(args) -> int:
     try:
@@ -1855,6 +1901,14 @@ def main() -> int:
                     choices=["local", "rehearsal", "staging", "production"],
                     default="production")
 
+    rr = sub.add_parser('read-runs', help='bounded count-only canonical run acquisition')
+    rr.add_argument('--service', required=True)
+    rr.add_argument('--key', required=True)
+    rr.add_argument('--environment', required=True)
+    rr.add_argument('--since', required=True)
+    rr.add_argument('--until', required=True)
+    rr.add_argument('--limit', type=int, default=1000)
+
     t = sub.add_parser("trace", help="read one correlation id back as a chain")
     t.add_argument("correlation")
 
@@ -1897,6 +1951,7 @@ def main() -> int:
         "run": cmd_run,
         "deployment": cmd_deployment,
         "trace": cmd_trace,
+        "read-runs": cmd_read_runs,
         "health": cmd_health,
         "assess": cmd_assess,
         "pr-evidence": cmd_pr_evidence,

@@ -1,0 +1,14 @@
+{
+  "schema_version": "workspace-people-directory.v1",
+  "canonical_contract": "../../mcp-server/contracts/people-directory.v1.json",
+  "transport": "Authenticated versioned MCP call-verb",
+  "reads": [
+    "read-actor-roster-v1",
+    "search-parties-v1"
+  ],
+  "waiting_target": {
+    "actor": "Use actor UUID with target.kind=actor",
+    "party": "Use party UUID with target.kind=party"
+  },
+  "writes": []
+}

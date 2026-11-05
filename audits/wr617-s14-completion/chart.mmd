@@ -1,0 +1,16 @@
+stateDiagram-v2
+  [*] --> Open
+  state "Open, no completion time" as Open
+  state "Done, proven completion time" as Done
+  state "Done, completion time unknown" as Unknown
+  state "Reopened, no completion time" as Reopened
+  state "Done again, new completion time" as Recompleted
+  Open --> Done: Complete with source evidence
+  Open --> Unknown: Legacy completion without evidence
+  Done --> Done: Receive later notification or result ingestion
+  Done --> Reopened: Reopen task
+  Unknown --> Reopened: Reopen task
+  Reopened --> Recompleted: Complete again with new evidence
+  Reopened --> Unknown: Complete again without new evidence
+  Recompleted --> Recompleted: Receive later notification
+  Recompleted --> Reopened: Reopen task

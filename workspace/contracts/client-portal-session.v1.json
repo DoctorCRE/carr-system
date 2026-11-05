@@ -35,7 +35,7 @@
         "success": {"status": "success", "schema_version": "client-portal.v1", "portal": "existing canonical client-portal.v1 projection"},
         "denied": {"status": "denied", "error": "portal_access_denied"}
       },
-      "rules": ["Always checks live slug, digest, expiry, revocation, portal enablement and canonical client binding. No stale cache.", "No client, deal or material selectors. No internal notes. Refuses libraries above the canonical 100-material cap."]
+      "rules": ["Always checks live slug, digest, expiry, revocation, portal enablement and canonical client binding. No stale cache. Changing the portal password hash atomically revokes every existing session for that portal; revoked digests cannot be reused.", "No client, deal or material selectors. No internal notes. Refuses libraries above the canonical 100-material cap."]
     },
     "revoke": {
       "sql": "select ops.revoke_client_portal_session($1::text,$2::text)",

@@ -8,6 +8,8 @@ import pathlib
 import re
 import sys
 
+from ci_unit_shards import COUNT
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CANARY = REPO / ".github" / "workflows" / "main-canary.yml"
 CI_YML = REPO / ".github" / "workflows" / "ci.yml"
@@ -79,7 +81,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           and main_names['migration_shard_2'] == {
               'name': 'ops/ci.sh --strict --only migration --migration-part fixtures', 'classes': 'migration'})
     check('main fallback and CI share the MCP shard workflow and coverage gate; both run practice-plugin separately',
-          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix']['shard'] == [1, 2, 3, 4]
+          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix']['shard'] == list(range(1, COUNT + 1))
           and pr['jobs']['unit-coverage']['needs'] == 'unit'
           and 'unit-coverage' in pr['jobs']['checks']['needs']
           and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])
@@ -162,7 +164,7 @@ def test_main_retains_migration_shadow_coverage():
     y = CANARY.read_text()
     check('main installs PG18 for the migration shadow',
           'run: bash ops/ci-postgres.sh' in y
-          and 'postgresql-18-pgvector' in (REPO / 'ops/ci-postgres.sh').read_text())
+          and 'postgresql-18-pgvector' in (REPO / 'ops/ci-apt.py').read_text())
     check('main collects migration shadow artifacts',
           'CARR_SHADOW_ARTIFACT_DIR:' in y and 'shadow-schema' in y)
 
@@ -181,12 +183,12 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
     for path in (CANARY, CI_YML):
         y = path.read_text(encoding="utf-8")
         installer = 'run: bash ops/ci-postgres.sh'
-        install_text = (REPO / 'ops/ci-postgres.sh').read_text() if installer in y else y
+        install_text = (REPO / 'ops/ci-apt.py').read_text() if installer in y else y
         install = y.find(installer if installer in y else "sudo apt-get install -y -qq postgresql-17")
         check(f"{path.name} installs PG17 for owned role-migration fixtures",
-              install >= 0 and re.search(r"(?m)^\s*sudo apt-get\b[^\n]*\binstall\b[^\n]*\bpostgresql-17(?=\s|$)", install_text) is not None)
+              install >= 0 and 'postgresql-17' in install_text)
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
-              'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in install_text)
+              "output.write('/usr/lib/postgresql/17/bin\\n')" in install_text)
         check(f"{path.name} provisions PG17 before check execution",
               0 <= install < y.find("- name: Run this group's check classes"))
 

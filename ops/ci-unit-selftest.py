@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from git_env import fixture_env
+from ci_unit_shards import COUNT
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ('mcp-server', 'practice-plugin')
@@ -203,6 +204,17 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(receipt.read_text())['suites'])
         self.assertEqual(deadline.read_text(), '600')
+        last_receipt = self.root / 'last-receipt.json'
+        last = subprocess.run(command, cwd=self.root,
+            env={**shard_env, 'CARR_CI_UNIT_SHARD': str(COUNT), 'CARR_CI_UNIT_RECEIPT': str(last_receipt)},
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(last.returncode, 0, last.stdout + last.stderr)
+        self.assertEqual(json.loads(last_receipt.read_text())['shard'], COUNT)
+        invalid = subprocess.run(command, cwd=self.root,
+            env={**shard_env, 'CARR_CI_UNIT_SHARD': str(COUNT + 1)},
+            capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(invalid.returncode, 0)
+
         first = mcp / 'test' / json.loads(receipt.read_text())['suites'][0]
         original = first.read_text()
         for body in ("import test from 'node:test'; test.skip('not executed', () => {});", ""):
@@ -245,6 +257,22 @@ class UnitClassTests(unittest.TestCase):
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('zero passing tests', result.stderr)
+        self.assertFalse(receipt.exists())
+
+    def test_watchdog_timeout_cannot_emit_a_success_receipt(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
+        for n in range(32):
+            (mcp / f'test/extra{n}.test.mjs').write_text('')
+        (self.root / 'bin/with-timeout.py').write_text("raise SystemExit(124)\n")
+        receipt = self.root / 'timeout-receipt.json'
+        result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+            cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)},
+            capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('command exited 124', result.stdout + result.stderr)
         self.assertFalse(receipt.exists())
 
     def test_package_skip_exit_is_red(self):

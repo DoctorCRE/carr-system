@@ -33,7 +33,9 @@ returns denied rather than evicting another browser. Bcrypt CPU breaks first at
 
 Load spreads by slug. Existing verification performs bcrypt before taking its
 slug row lock. Exchange holds that lock through replay, cleanup and insert.
-Read and revoke lock the same slug to order against exchange and disable. No
+Read and revoke lock the same slug to order against exchange, disable and password changes.
+A password-hash update trigger revokes the slug's sessions inside that update's
+transaction. It preserves existing revocation and expiry timestamps. No
 cross-slug lock or fan-out. Storage uses digest primary key and slug/expiry
 index. One set-based canonical projection, capped at 100 materials, has no N+1.
 
@@ -71,9 +73,13 @@ stateDiagram-v2
   Anonymous --> Active: valid password and capacity
   Active --> Active: read canonical projection
   Active --> Active: exchange replay / unchanged expiry
+  Active --> Revoked: password changed / all portal sessions revoked atomically
+  Active --> Active: password change rolled back / sessions retained
+  Active --> Active: unchanged password hash / sessions retained
   Active --> Revoked: revoke
-  Revoked --> Revoked: repeat revoke / success
+  Revoked --> Revoked: repeat revoke / success and original timestamps
   Revoked --> Revoked: exchange replay / denied
+  Revoked --> Active: new password and fresh digest / new session
   Active --> Expired: seven days elapsed
   Expired --> Expired: read or exchange replay after cleanup / denied
   Active --> Disabled: portal disabled
@@ -86,3 +92,16 @@ shared password allowance, capacity, cleanup, indexed lookup, private grants,
 projection identity, private sentinels and database-error propagation. Structural
 assertions cover the no-cache/no-queue/no-external-call design; future adapter
 outage handling and observed 10x capacity remain unit B verification.
+
+## Password rotation regression
+
+An administrative password-hash change revokes all existing sessions for that
+portal in the same transaction. Rollback restores both password and sessions.
+Updating the hash to itself retains sessions. Existing revocation timestamps and
+fixed expiry never move. Other portals remain usable. A new digest and the new
+password can establish a new session; a revoked digest cannot be reused.
+The `password changes atomically revoke all sessions only for that portal` test
+derives these transitions from the chart and exercises administrative SQL plus
+the existing exchange/read interface. The repeated-revoke test compares exact
+PostgreSQL timestamp text across separate transactions to retain microseconds.
+No HTTP rotation interface, transport or production behavior is modeled here.

@@ -1,3 +1,4 @@
+// Map client portal HTTP requests to slug-bound session operations.
 export const PORTAL_ORIGIN = 'https://share.doctorcre.com';
 const TTL_SECONDS = 604800;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;

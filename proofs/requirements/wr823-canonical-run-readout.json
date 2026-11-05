@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S3-canonical-semantic-run",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "canonical-intake-eligibility",
+      "predicate": "After ordinary deployment and Studio installation, invoke the canonical subcommand of studio-canonical-run.v1 for outlook-intake, outlook.intake, production, the exact full installed runtime and merge SHAs, run.mail_ids minimum 1, max age 3600 seconds and a bounded actual installation interval. Read one canonical batch through the authenticated reader. Independently verify release and source ancestry, actual install interval, settings, helper pin, rendered and registered command, and clean on-disk executables for the same target. Ordinary ops.run has no host/registered-command binding and the current acquisition adapter must return held naming this missing fact. Do not substitute caller JSON or a spool integer. Retain the canonical UUID, correlation and actual start/end locally. A supplied receipt remains diagnostic. No mailbox action is started.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Held with exact missing installation and canonical target association facts under the current collector. No Live claim until a trusted execution collector supplies those facts. A complete bound synthetic fixture proves only validator behavior. A future natural canonical execution must meet the declared semantic predicate; signature extraction, cancellations and filing each require their own product readback.",
+      "input_class": "authenticated canonical ops.run count-only batch; trusted execution owner assumptions; no raw stdout or mailbox payload",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1000,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

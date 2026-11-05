@@ -60,8 +60,8 @@ def _sources(repo: Path, ref: str) -> set[str]:
 def stamp(repo: Path) -> dict:
     result: dict[str, str | int | None] = {'runtime_sha': None, 'runtime_behind': None}
     try:
-        result['runtime_sha'] = _git(repo, 'rev-parse', '--short', 'HEAD')
         installed = _git(repo, 'rev-parse', 'HEAD')
+        result['runtime_sha'] = installed
         source = repo / '.venv'
         if source.is_symlink():
             repo = source.resolve(strict=True).parent

@@ -1,50 +1,26 @@
-"""Nightly Inbox triage: file the user's already-read Inbox email into Outlook folders.
-
-Code only: no agent session and no model. launchd fires `fire()` every 15
-minutes from 19:15 to 21:00, and both `fire()` and `run()` refuse any other time. Once a
-day is settled (a run that succeeded, or whatever the 21:00 fire ends with) the
-remaining fires exit at once without a run row; a skipped or failed earlier run
-leaves the later fires to retry. Otherwise `fire()` hands over to
-bin/run-scheduled.sh, which runs `main()` and turns its exit code into the run
-row (0 succeeded, 78 skipped, 124 timed out, anything else failed). From 21:15 a
-run selects nothing more: the clock is checked right before every row it would
-select, so the 21:00 fire gets a quarter hour. The row carries no names.
-
-The Inbox is selected from the folder pane and confirmed by the window title
-before anything is read, and every move re-checks that title. Unread email is
-never selected, so it stays unread: the unread rows are read off the list first
-and must add up to the Inbox unread badge before anything is touched, and after
-the moves the unread set must be exactly the same, new arrivals included (a
-difference fails the run and a later fire retries). Any failed move fails the
-run; two in a row stop it at once. The folder tree and the sender table come
-from the configured private folder guide, which must be 0600; the report in
-out/outlook-triage/ (0700/0600) carries counts and fixed reason codes, never
-label hashes, senders, subjects or folders.
-
-"""
+"""Read-only evening planning. No mover exists until independently verified."""
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, time as clock, timezone
+from datetime import datetime, timedelta, time as clock
+import argparse
+import sqlite3
+import stat
 import json
 import os
 from pathlib import Path
 import re
-import stat
 import subprocess
 import sys
-import time
 from typing import Callable
 
-from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Row, UiError, Waits,
-                            Window, outlook_pid, prepare_outlook, private_file, usable_window)
+from lib.outlook_ui import EXIT, Outcome, Waits
 
 from lib.outlook_settings import load_settings
 from lib.outlook_runtime import receipt_line
 OUT = Path('out/outlook-triage')
 FIRST_FIRE, LAST_FIRE, WINDOW_CLOSE = clock(19, 15), clock(21, 0), clock(21, 15)
-IDLE_SECONDS = 600
 MAP_LINE = re.compile(r'^map:\s*(?P<key>\S.*?)\s*->\s*(?P<path>\S.*?)\s*$')
 EMAIL = re.compile(r'[^\s<>@,]+@[^\s<>@,]+\.[^\s<>@,]+')
 SERVICE, RUN_KEY = 'outlook-triage', 'outlook.triage'
@@ -54,22 +30,6 @@ ENTRY = 'from lib.outlook_triage import main; raise SystemExit(main())'
 @dataclass(frozen=True)
 class Limits:
     max_moves: int = 150
-    failures_in_a_row: int = 2
-
-
-@dataclass(frozen=True)
-class Move:
-    path: str
-    rule: str
-
-
-@dataclass(frozen=True)
-class Leave:
-    reason: str
-
-
-class FindError(Exception):
-    pass
 
 
 def _same(a: str | None, b: str | None) -> bool:
@@ -116,32 +76,6 @@ class FolderGuide:
         return [p for p in self.paths if p.startswith(prefix)
                 and not any(q.startswith(p + '/') for q in self.paths)]
 
-    def unique_name(self, path: str) -> bool:
-        """The Move picker is searched by leaf name, so that name must name one folder."""
-        return sum(self.leaf(p) == self.leaf(path) for p in self.paths) == 1
-
-
-class CarrFinder:
-    """Exact-name lookups through the record layer's `find` verb, cached per run."""
-
-    def __init__(self, repo: Path):
-        self.repo = repo
-        self.cache: dict[str, dict] = {}
-
-    def __call__(self, name: str) -> dict:
-        if name not in self.cache:
-            try:
-                result = subprocess.run([str(self.repo / 'run.sh'), 'call', 'find', json.dumps({'query': name})],
-                                        cwd=self.repo, capture_output=True, text=True, timeout=90,
-                                        env=load_settings().transport_environment())
-                value = json.loads(result.stdout)
-            except (OSError, subprocess.TimeoutExpired, ValueError):
-                raise FindError from None
-            if result.returncode or not isinstance(value, dict):
-                raise FindError
-            self.cache[name] = value
-        return self.cache[name]
-
 
 def _deal_rule(sender: str, guide: FolderGuide, find) -> list[str] | None:
     name = person_name(sender)
@@ -173,34 +107,11 @@ def _map_rule(sender: str, guide: FolderGuide, find) -> list[str]:
 RULES = (('deal', _deal_rule), ('vendor', _vendor_rule), ('map', _map_rule))
 
 
-def decide(row: Row, guide: FolderGuide, find) -> Move | Leave:
-    """First rule with exactly one folder wins; an ambiguous rule leaves the email where it is."""
-    sender = row.sender
-    if row.read_state is not ReadState.READ or sender is None:
-        return Leave(row.read_state.value)
-    for rule, match in RULES:
-        hits = match(sender, guide, find)
-        if hits is None or not hits:
-            continue
-        if len(set(hits)) > 1:
-            return Leave(f'{rule}_ambiguous')
-        if not guide.unique_name(hits[0]):
-            return Leave('folder_name_not_unique')
-        return Move(hits[0], rule)
-    return Leave('no_rule_matched')
-
-
 @dataclass
 class Report:
     moved: list[str] = field(default_factory=list)
     left: Counter = field(default_factory=Counter)
-    unread_changed: int = 0
-    coverage: dict = field(default_factory=lambda: {
-        'selected_inbox_rows': 0, 'badge_status': 'unverified',
-        'viewport_rows': 0, 'viewport_unread': 0,
-        'full_scan_rows': 0, 'full_scan_unread': 0, 'scan_count': 0,
-        'coverage': 'unverified',
-    })
+    planning: dict = field(default_factory=dict)
 
     def text(self, outcome: Outcome) -> str:
         lines = [f'outcome: {outcome.state} {outcome.reason}']
@@ -209,8 +120,7 @@ class Report:
         lines += [f'moved: {len(self.moved)}']
         lines += [f'  {rule}: {n}' for rule, n in sorted(Counter(self.moved).items())]
         lines += ['left in Inbox:'] + [f'  {reason}: {n}' for reason, n in sorted(self.left.items())]
-        if self.unread_changed:
-            lines += [f'unread_changed: {self.unread_changed}']
+        lines += [f'{key}: {value}' for key, value in sorted(self.planning.items())]
         return '\n'.join(lines) + '\n'
 
 
@@ -224,275 +134,68 @@ def hid_idle_seconds() -> float | None:
     return int(match.group(1)) / 1e9 if match else None
 
 
-def _inbox(window: Window) -> tuple[int, dict[str | None, list[Row]]]:
-    """(Inbox unread badge, rows per Focused/Other tab), leaving the folder pane hidden."""
-    window.show_folder_pane(True)
-    window.select_inbox()
-    badge = window.inbox_badge()
-    window.show_folder_pane(False)
-    tab, rows = window.rows()
-    if tab is None:
-        return badge, {None: rows}
-    tabs: dict[str | None, list[Row]] = {tab: rows}
-    other = 'other' if tab == 'focused' else 'focused'
-    window.switch_tab(other)
-    tabs[other] = window.rows()[1]
-    return badge, tabs
-
-
-def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
-    unique: dict[str, Row] = {}
-    for rows in tabs.values():
-        seen = set()
-        for row in rows:
-            if row.selected and row.read_state is not ReadState.READ:
-                raise UiError('unread_row_selected')
-            if row.read_state is ReadState.UNCERTAIN:
-                raise UiError('coverage_read_state_unverified')
-            if not row.sender or row.subject is None or row.key in seen:
-                raise UiError('coverage_identity_ambiguous')
-            seen.add(row.key)
-            previous = unique.get(row.key)
-            if previous is not None and (previous.label, previous.selected) != (row.label, row.selected):
-                raise UiError('coverage_identity_ambiguous')
-            unique[row.key] = row
-    return Counter(r.label for r in unique.values() if r.read_state is ReadState.UNREAD)
-
-
-def _coverage(window: Window, badge: int, tabs: dict[str | None, list[Row]],
-              allowed: Callable[[], bool], report: Report,
-              observe: Callable[[dict, bool], None] | None = None) -> dict[str | None, list[Row]]:
-
-    def scan() -> dict[str | None, list[Row]]:
-        result = {}
-        report.coverage['scan_count'] += 1
-        for tab in tabs:
-            if not allowed():
-                raise UiError('coverage_deadline')
-            if tab is not None:
-                window.switch_tab(tab)
-            result[tab] = window.scan_rows(allowed)
-            if observe is not None:
-                observe({tab: result[tab]}, False)
-        if observe is not None:
-            observe(result, True)
-        report.coverage['full_scan_rows'] = sum(len(rows) for rows in result.values())
-        report.coverage['full_scan_unread'] = sum(_unread(result).values())
-        window.show_folder_pane(True)
-        try:
-            if window.inbox_badge() != badge:
-                raise UiError('coverage_changed')
-        finally:
-            window.show_folder_pane(False)
-        return result
-
-    first = scan()
-    for tab, rows in tabs.items():
-        initial = {r.key: (r.label, r.selected) for r in rows}
-        if len(initial) != len(rows):
-            raise UiError('coverage_identity_ambiguous')
-        observed = {r.key: (r.label, r.selected) for r in first[tab]}
-        if any(observed.get(key) != state for key, state in initial.items()):
-            raise UiError('coverage_changed')
-    second = scan()
-    fingerprint = lambda result: {tab: [(r.key, r.read_state, r.selected) for r in rows]
-                                  for tab, rows in result.items()}
-    if fingerprint(first) != fingerprint(second):
-        raise UiError('coverage_changed')
-    if len(_unread(second)) != badge:
-        raise UiError('coverage_incomplete')
-    if not allowed():
-        raise UiError('coverage_deadline')
-    return second
-
-
-def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
-               closed: Callable[[], bool]) -> Outcome:
-    deadline = time.monotonic() + 120
-    def file_verified(tabs: dict) -> Outcome:
-        result = _move_all(window, tabs, guide, find, limits, report,
-                           lambda: time.monotonic() >= deadline or closed())
-        if time.monotonic() >= deadline:
-            raise UiError('coverage_deadline')
-        return result
-    return preserve_unread(window, report, file_verified, closed, deadline=deadline)
-
-
-def preserve_unread(window: Window, report: Report, action: Callable[[dict], Outcome],
-                    closed: Callable[[], bool], *, deadline: float | None = None) -> Outcome:
-    """Verify the unread set before and after any read-mail operation."""
-    if deadline is None:
-        deadline = time.monotonic() + 120
-    allowed = lambda: time.monotonic() < deadline and not closed()
-
-    def finish(state: str, reason: str, code: str, detail: str = '') -> Outcome:
-        report.coverage['coverage'] = code
-        return Outcome(state, reason, (detail + ' ' if detail else '')
-                       + ' '.join(f'{k}={v}' for k, v in report.coverage.items()))
-
-    def badge_provenance() -> None:
-        report.coverage.update(getattr(window, 'badge_diagnostics', {}))
-
-    try:
-        badge, tabs = _inbox(window)
-        badge_provenance()
-        report.coverage['viewport_rows'] = sum(len(rows) for rows in tabs.values())
-        unread = _unread(tabs)
-        report.coverage['viewport_unread'] = sum(unread.values())
-        scanned = sum(unread.values()) != badge
-        if scanned:
-            tabs = _coverage(window, badge, tabs, allowed, report)
-            unread = _unread(tabs)
-        window.show_folder_pane(True)
-        try:
-            if window.inbox_badge() != badge:
-                raise UiError('coverage_changed')
-        finally:
-            window.show_folder_pane(False)
-        if not allowed():
-            raise UiError('coverage_deadline')
-    except UiError as exc:
-        badge_provenance()
-        if not str(exc).startswith(('coverage_', 'inbox_badge_', 'unread_')) and str(exc) not in {
-                'inbox_not_selected', 'inbox_row_not_found'}:
-            raise
-        if str(exc) == 'unread_row_selected':
-            return finish('failed', 'unread_row_selected', str(exc))
-        code = exc.step if str(exc) == 'inbox_badge_unverified' else str(exc)
-        # UI exceptions outside coverage may carry tab names; emit fixed codes only.
-        code = code if code and re.fullmatch(r'[a-z_]+', code) else 'coverage_ui_unverified'
-        return finish('skipped', 'unread_set_unverified', code)
-    def check_unread(observed: dict, complete: bool) -> None:
-        current = _unread(observed)
-        changed = (current - unread) + ((unread - current) if complete else Counter())
-        unread_keys = {r.key for rows in tabs.values() for r in rows
-                       if r.read_state is ReadState.UNREAD}
-        read = 0 if complete else sum(
-            row.key in unread_keys and row.read_state is ReadState.READ
-            for rows in observed.values() for row in rows)
-        if changed or read:
-            report.unread_changed = sum(changed.values()) + read
-            raise UiError('coverage_changed')
-
-    try:
-        outcome = action(tabs)
-    except UiError as exc:
-        if str(exc) == 'coverage_deadline':
-            return finish('skipped', 'unread_set_unverified', 'coverage_deadline')
-        outcome = Outcome('failed', str(exc))
-    except CuaError as exc:
-        outcome = Outcome('failed', 'cua_driver_failed', str(exc))
-    try:
-        end_badge, end_tabs = _inbox(window)
-        end_unread = _unread(end_tabs)
-        check_unread(end_tabs, False)
-        if end_badge != badge:
-            return finish('failed', 'unread_set_changed', 'coverage_changed')
-        if scanned:
-            end_tabs = _coverage(window, end_badge, end_tabs, allowed, report, check_unread)
-            end_unread = _unread(end_tabs)
-        window.show_folder_pane(True)
-        try:
-            if window.inbox_badge() != badge:
-                return finish('failed', 'unread_set_changed', 'coverage_changed')
-        finally:
-            window.show_folder_pane(False)
-    except UiError as exc:
-        badge_provenance()
-        if str(exc) == 'coverage_deadline':
-            return finish('skipped', 'unread_set_unverified', 'coverage_deadline')
-        return finish('failed', 'unread_set_changed', 'post_action_unverified')
-    changed = (unread - end_unread) + (end_unread - unread)
-    report.unread_changed = sum(changed.values())
-    if changed or end_badge != badge or end_badge != sum(end_unread.values()):
-        return finish('failed', 'unread_set_changed', 'coverage_changed')
-    if time.monotonic() >= deadline:
-        return finish('skipped', 'unread_set_unverified', 'coverage_deadline')
-    return finish(outcome.state, outcome.reason, 'verified', outcome.detail)
-
-
-def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGuide, find,
-              limits: Limits, report: Report, closed: Callable[[], bool]) -> Outcome:
-    failures = in_a_row = 0
-    for tab, rows in tabs.items():
-        if tab is not None:
-            window.switch_tab(tab)
-        for row in rows:
-            try:
-                decision = decide(row, guide, find)
-            except FindError:
-                return Outcome('failed', 'carr_find_failed')
-            if isinstance(decision, Leave):
-                report.left[decision.reason] += 1
-                continue
-            if len(report.moved) >= limits.max_moves:
-                report.left['move_cap_reached'] += 1
-                continue
-            result = window.move(row.label, guide.leaf(decision.path), lambda: not closed())
-            if result is Moved.WINDOW_CLOSED:
-                return Outcome('timed_out', 'window_closed')
-            if result is Moved.MOVED:
-                in_a_row = 0
-                report.moved.append(decision.rule)
-                continue
-            report.left[result.value] += 1
-            if result is Moved.FAILED:
-                failures += 1
-                in_a_row += 1
-                if in_a_row >= limits.failures_in_a_row:
-                    return Outcome('failed', 'move_failed_twice')
-    return Outcome('failed', 'move_failed') if failures else Outcome('succeeded', 'filed')
-
-
 def triage(repo: Path, home: Path, waits: Waits, limits: Limits,
            closed: Callable[[], bool]) -> tuple[Outcome, Report]:
-    settings = load_settings(home)
+    return _triage(repo, home, limits, closed, None)
+
+
+def observe_and_triage(repo, home, research_copy, waits, limits, closed):
+    """Observe and plan in one invocation; no retained file grants admission."""
+    return _triage(repo, home, limits, closed, research_copy)
+
+
+def _triage(repo, home, limits, closed, research_copy):
+    from lib.outlook_triage_snapshot import read_snapshot, SnapshotError
+    from lib.outlook_triage_producer import produce
+    from lib.outlook_triage_plan import plan_triage
+    from lib.outlook_triage_capability import select_candidate
+
     report = Report()
+    capability = 'capability_not_verified'
+    snapshot = 'snapshot_producer_unavailable'
+    observations = ()
+    reason = snapshot
     try:
-        mode = stat.S_IMODE(settings.folder_guide.stat().st_mode)
-        if mode != 0o600:
-            print(f'outlook-triage: the folder guide names clients, so it must be mode 0600, not {mode:04o}; '
-                  f'run chmod 600 {settings.folder_guide}', file=sys.stderr)
-            return Outcome('failed', 'folder_guide_not_0600'), report
-        guide = FolderGuide.parse(settings.folder_guide.read_text(), deal_prefix=settings.deal_prefix,
-                                  vendor_prefix=settings.vendor_prefix)
-    except OSError:
-        return Outcome('failed', 'folder_guide_missing'), report
-    except ValueError:
-        return Outcome('failed', 'folder_guide_invalid'), report
-    idle = hid_idle_seconds()
-    if idle is None:
-        return Outcome('failed', 'idle_time_unreadable'), report
-    if idle < IDLE_SECONDS:
-        return Outcome('skipped', 'user_active'), report
-    blocked = prepare_outlook(waits)
-    if blocked:
-        return blocked, report
-    try:
-        pid = outlook_pid()
-        found = usable_window(pid) if pid else None
-    except CuaError:
-        found = None
-    if not found or pid is None:
-        return Outcome('failed', 'no_usable_main_window'), report
-    window = Window(pid, found['window_id'], waits)
-    try:
-        window.front()
-        outcome = file_inbox(window, guide, CarrFinder(repo), limits, report, closed)
-    except UiError as exc:
-        outcome = Outcome('failed', str(exc))
-    except CuaError as exc:
-        outcome = Outcome('failed', 'cua_driver_failed', str(exc))
-    try:
-        window.show_folder_pane(True)
-    except (UiError, CuaError):
-        if outcome.state != 'failed':
-            outcome = Outcome('failed', 'folder_pane_restore_failed')
-    return outcome, report
-
-
-def _settled(repo: Path, day: str) -> Path:
-    return repo / OUT / f'{day}.settled'
+        settings = load_settings(home)
+        try:
+            contract = json.loads((repo / 'spec/outlook/triage-executor-contract.v1.json').read_text())
+            select_candidate(contract, contract['recommendation']['candidate'])
+            capability = 'executor_unavailable'
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        path = repo / OUT / 'snapshot.json'
+        if research_copy is None:
+            try:
+                evidence = read_snapshot(path, settings, limits.max_moves, evidence=True)
+                if evidence[-1] != 'none':
+                    reason = 'reconciliation_required'
+            except SnapshotError:
+                pass
+        else:
+            published = produce(research_copy, path, settings, max_intents=limits.max_moves)
+            observations, routing, catalog, policy, effect = published.parsed
+            snapshot = 'validated'
+            reason = capability
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError) as exc:
+        if str(exc) == 'reconciliation_required':
+            reason = 'reconciliation_required'
+        observations = ()
+    if snapshot != 'validated':
+        report.planning = dict(observed=0, planned=0, held=0, moved=0,
+                               snapshot=snapshot, capability=capability)
+        detail = ' '.join(f'{key}={value}' for key, value in report.planning.items())
+        return Outcome('timed_out' if closed() else 'skipped',
+                       'window_closed' if closed() else reason, detail), report
+    plan = plan_triage(observations, routing, catalog, policy)
+    report.left.update(item.reason for item in plan.leaves)
+    report.left[reason] += len(plan.moves)
+    report.planning = {'observed': len(observations), 'planned': len(plan.moves),
+                       'held': len(plan.moves) + len(plan.leaves), 'moved': 0,
+                       'snapshot': snapshot, 'capability': capability}
+    detail = ' '.join(f'{key}={value}' for key, value in report.planning.items())
+    if closed():
+        return Outcome('timed_out', 'window_closed', detail), report
+    return Outcome('skipped', reason, detail), report
 
 
 def _minute(moment: datetime) -> clock:
@@ -500,50 +203,90 @@ def _minute(moment: datetime) -> clock:
 
 
 def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits(),
-        now_fn: Callable[[], datetime] = lambda: datetime.now(load_settings().timezone)) -> Outcome:
-    """One triage run, only from 19:15 to 21:00; it selects nothing once now_fn() reaches 21:15."""
+        now_fn: Callable[[], datetime] = lambda: datetime.now(load_settings().timezone),
+        research_copy: Path | None = None, *, proof_window: bool = False) -> Outcome:
+    """Admit evening planning or one explicit 180-second proof attempt."""
     load_settings(home).require_repo(repo)
+    if research_copy is not None and not research_copy.is_absolute():
+        print('outlook-triage skipped research_copy_not_absolute moved=0 left=0')
+        return Outcome('skipped', 'research_copy_not_absolute')
     os.umask(0o077)
-    if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
+    if not proof_window and not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         print('outlook-triage skipped outside_window moved=0 left=0')
         return Outcome('skipped', 'outside_window')
-    close = datetime.combine(now.astimezone(load_settings().timezone).date(), WINDOW_CLOSE, load_settings().timezone)
+    close = (now + timedelta(seconds=180) if proof_window else
+             datetime.combine(now.astimezone(load_settings().timezone).date(), WINDOW_CLOSE, load_settings().timezone))
     if now_fn() >= close:
         print('outlook-triage timed_out window_closed moved=0 left=0')
         return Outcome('timed_out', 'window_closed')
     folder = repo / OUT
-    folder.mkdir(parents=True, exist_ok=True)
-    folder.chmod(0o700)
     day = now.strftime('%Y-%m-%d')
-    outcome, report = triage(repo, home, waits, limits, lambda: now_fn() >= close)
-    with private_file(folder / f'{day}.report.md') as handle:
-        handle.write(f'## {now.isoformat()}\n' + report.text(outcome))
-    if outcome.state == 'succeeded' or _minute(now) >= LAST_FIRE:
-        with private_file(_settled(repo, day)) as handle:
-            handle.write(f'{outcome.state} {outcome.reason}\n')
+    outcome, report = _triage(repo, home, limits, lambda: now_fn() >= close, research_copy)
+    safe_report = not any(p.is_symlink() for p in (folder, *folder.parents))
+    if research_copy is not None:
+        safe_report = safe_report and not folder.resolve().is_relative_to(Path(research_copy).resolve())
+    if safe_report:
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            fd = os.open(folder / f'{day}.report.md',
+                         os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+            with os.fdopen(fd, 'a') as handle:
+                info = os.fstat(handle.fileno())
+                if (stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                        and stat.S_IMODE(info.st_mode) == 0o600):
+                    handle.write(f'## {now.isoformat()}\n' + report.text(outcome))
+        except OSError:
+            pass
     print(f'outlook-triage {outcome.state} {outcome.reason} moved={len(report.moved)} '
           f'left={sum(report.left.values())}' + (f' {outcome.detail}' if outcome.detail else ''))
     return outcome
 
 
-def fire(repo: Path | None = None, now: datetime | None = None) -> int:
-    """launchd entry: nothing to do outside 19:15-21:00 or once today is settled, else run the job."""
+def fire(repo: Path | None = None, now: datetime | None = None, *,
+         proof_window: bool = False, research_copy: Path | None = None) -> int:
+    """Shared scheduled entry; explicit proofs receive a supervised real-time window."""
     repo = repo or Path(__file__).resolve().parents[1]
     settings = load_settings()
     settings.require_repo(repo)
     settings.require_service('triage')
     now = now or datetime.now(load_settings().timezone)
-    if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
+    if not proof_window and not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         return 0
-    if _settled(repo, now.strftime('%Y-%m-%d')).exists():
-        return 0
+    if research_copy is not None and not research_copy.is_absolute():
+        print('outlook-triage skipped research_copy_not_absolute moved=0 left=0')
+        return EXIT['skipped']
     os.chdir(repo)
-    os.execv('/bin/zsh', ['/bin/zsh', str(repo / 'bin/run-scheduled.sh'), SERVICE, RUN_KEY,
-                          sys.executable, '-c', ENTRY])
+    command = [sys.executable, '-c', ENTRY]
+    if proof_window:
+        command += ['--proof-window']
+    if research_copy is not None:
+        command += ['--copy', str(research_copy)]
+    if proof_window:
+        command = [sys.executable, str(repo / 'bin/with-timeout.py'), '180', *command]
+    os.execv('/bin/zsh', ['/bin/zsh', str(repo / 'bin/run-scheduled.sh'), SERVICE, RUN_KEY, *command])
 
 
-def main() -> int:
-    load_settings().require_service('triage')
-    outcome = run(Path(__file__).resolve().parents[1], Path.home(), datetime.now(load_settings().timezone))
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--copy', type=Path, help='explicit research copy for this observation invocation')
+    parser.add_argument('--proof-window', action='store_true',
+                        help='admit one non-send planning proof now, bounded to 180 real seconds')
+    args = parser.parse_args(argv)
+    repo = Path(__file__).resolve().parents[1]
+    try:
+        load_settings().require_service('triage')
+        outcome = run(repo, Path.home(), datetime.now(load_settings().timezone), research_copy=args.copy,
+                      proof_window=args.proof_window)
+    except (OSError, ValueError):
+        outcome = Outcome('skipped', 'snapshot_producer_unavailable')
+        print('outlook-triage skipped snapshot_producer_unavailable observed=0 planned=0 held=0 moved=0')
     print(receipt_line('outlook-triage', outcome.state, outcome.reason, {}, Path(__file__).resolve().parents[1]))
     return EXIT[outcome.state]
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Run one bounded triage proof through the scheduled wrapper.')
+    parser.add_argument('--proof-window', action='store_true', required=True)
+    parser.add_argument('--copy', type=Path)
+    args = parser.parse_args()
+    raise SystemExit(fire(proof_window=args.proof_window, research_copy=args.copy))

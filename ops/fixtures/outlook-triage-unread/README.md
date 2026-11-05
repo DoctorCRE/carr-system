@@ -1,5 +1,9 @@
 # Outlook unread verification lifecycle
 
+Historical model for the retired UI triage route. WR634.S1.J102 removes that
+route and its exclusive tests. The active runner model and verification are in
+`docs/outlook-triage-runner.md`. This model does not describe current filing.
+
 This is the supplied WR634.S1.J59 abstract lifecycle, bound to the implementation.
 It models one attempt. A retry is a new instance. TLC checks TypeOK,
 NoUnverifiedSorting and NoChangedSuccess. The generated summary records eight

@@ -1,0 +1,23 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S9-http-adapter",
+  "targets": ["worker"],
+  "assertions": [
+    {
+      "id": "http-adapter-release-deployed",
+      "predicate": "The deployed Worker release identity matches the merged SHA containing the portal HTTP handler. The release runner proves identity only. The coordinator must separately observe a published deal URL accepting its slug-bound session, serving only that deal, and refusing a session minted for another slug after Worker wiring.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity matches the merged SHA. Public URL isolation remains unproven until the coordinator runs the live journey after Worker wiring.",
+      "input_class": "read-only release identity and verb registry",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}

@@ -23,7 +23,7 @@ WITH first_submission AS (
 )
 SELECT p.id::text AS proposal_id,p.version,p.status,p.resolved_by=partner.id AS partner_submitted,
   partner.email AS account,copy.email AS partner_cc,
-  p.submitted_email->>'subject' AS subject,p.submitted_email->'to' AS "to",
+  p.submitted_email->>'body' AS body,p.submitted_email->>'subject' AS subject,p.submitted_email->'to' AS "to",
   p.submitted_email->'cc' AS cc,p.send_result,
   COALESCE((SELECT jsonb_agg(a.email_context) FROM activity a
     WHERE a.kind='email_out' AND a.email_context->>'send_id'=p.id::text), '[]'::jsonb) AS correspondence
@@ -36,13 +36,14 @@ JOIN actor copy ON copy.slug=CASE p.owner WHEN 'joe' THEN 'dell' ELSE 'joe' END
 def prove(row, ledger, snapshot, settings):
     if row is None:
         return dict(ok=False, reason='no_partner_submission')
+    result = row.get('send_result') or {}
+    submission_version = row['version'] - (2 if result.get('reconciled_from_uncertainty') else 1)
     key = str(uuid.uuid5(uuid.NAMESPACE_URL,
-        f"outlook-outbox|{row['proposal_id']}|{row['version'] - 1}"))
+        f"outlook-outbox|{row['proposal_id']}|{submission_version}"))
     rows = [r for r in ledger if r.get('key') == key]
     prints = {r['fingerprint'] for r in rows}
     presses = [r for r in ledger if r.get('fingerprint') in prints and r.get('state') == 'pressing']
     done = [r for r in rows if r.get('state') == 'done']
-    result = row.get('send_result') or {}
     item_id, sent_at = result.get('sent_item_id'), result.get('sent_at')
     since = presses[0]['at'] - send.CLOCK_SKEW if presses else 0
     until = since + send.DUPLICATE_WINDOW + send.CLOCK_SKEW
@@ -66,7 +67,12 @@ def prove(row, ledger, snapshot, settings):
             and r.get('sender', {}).get('email') == settings.account
             and sorted((v.get('email'), v.get('kind')) for v in r.get('recipients', [])) == expected_recipients
             for r in records))
-    return dict(ok=all(checks.values()), proposal_id=row['proposal_id'], checks=checks)
+    dispatch_verified = all(checks.values())
+    checks['exact_body'] = (item_id in matches and isinstance(row.get('body'), str)
+        and matches[item_id].body_fingerprint == send.body_fingerprint(row['body'])
+        and result.get('reason') not in ('body_unverified', 'body_mismatch'))
+    return dict(ok=all(checks.values()), dispatch_verified=dispatch_verified,
+                proposal_id=row['proposal_id'], checks=checks)
 
 
 def main():
