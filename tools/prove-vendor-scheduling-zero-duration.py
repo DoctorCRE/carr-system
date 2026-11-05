@@ -6,6 +6,7 @@ import json
 import os
 import re
 import signal
+import selectors
 import subprocess
 import sys
 import time
@@ -64,8 +65,19 @@ def observe(args, receipt):
         with subprocess.Popen([args.call_wrapper, 'call', verb, json.dumps(payload)],
                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True) as process:
             try:
-                output, _ = process.communicate(timeout=remaining())
-                if process.returncode:
+                output = bytearray()
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ)
+                    while True:
+                        if not selector.select(timeout=remaining()):
+                            raise Insufficient()
+                        chunk = os.read(process.stdout.fileno(), min(65536, MAX_BYTES + 1 - len(output)))
+                        if not chunk:
+                            break
+                        output.extend(chunk)
+                        if len(output) > MAX_BYTES:
+                            raise Insufficient()
+                if process.wait(timeout=remaining()):
                     raise Insufficient()
                 return decode(output)
             finally:

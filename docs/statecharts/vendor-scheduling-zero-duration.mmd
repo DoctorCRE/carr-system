@@ -19,3 +19,16 @@ stateDiagram-v2
     %% never Offer candidate gaps when a displayed meeting has zero duration.
     %% never Rewrite a missing or delayed source as an empty calendar.
     %% The awaited database read settles before projection. No owned background work or teardown.
+
+    [*] --> ProofReading: Observe release and authenticated calendar
+    ProofReading --> ProofInsufficient: Read fails, deadline expires, or response exceeds one MiB
+    ProofReading --> ProofInsufficient: Natural evidence is absent or release changes
+    ProofReading --> ProofPassed: Natural zero-duration row has no candidate gaps
+    ProofReading --> ProofContradiction: Natural zero-duration row still has candidate gaps
+    ProofInsufficient: Insufficient observation, exit 78
+    ProofPassed: Both assertions pass, exit 0
+    ProofContradiction: Contradiction, exit 1
+    ProofInsufficient --> [*]: Kill owned wrapper group and reap leader
+    ProofPassed --> [*]: Kill owned wrapper group and reap leader
+    ProofContradiction --> [*]: Kill owned wrapper group and reap leader
+    %% never Drain wrapper stdout beyond one MiB plus one overflow byte.
