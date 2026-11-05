@@ -214,14 +214,13 @@ def converge():
 
 def main():
     global REPO
-    if scrubbed_env is not None:
+    try:
+        if scrubbed_env is None:
+            return 0
         common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
         if common.returncode == 0 and common.stdout.strip():
             REPO = str(Path(common.stdout.strip()).parent)
-    sys.path.insert(0, REPO)
-    try:
-        if scrubbed_env is None:
-            return 0  # cannot pin which repository git would hit — see above
+        sys.path.insert(0, REPO)
         # An explicit machine-role marker outranks the actor slug: Joe owns
         # more than one Mac, and only the one marked primary is the shared
         # work surface this no-op protects (lib/machine_role.py).

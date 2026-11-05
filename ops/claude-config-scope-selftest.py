@@ -17,6 +17,15 @@ MIGRATION = runpy.run_path(str(ROOT / 'ops/scope-claude-config.py'))
 
 
 class Scope(unittest.TestCase):
+    def test_installer_default_and_project_template_have_one_scope(self):
+        installer = runpy.run_path(str(ROOT / 'ops/config-as-code.py'))
+        self.assertEqual(Path(installer['SETTINGS']), ROOT / '.claude/settings.json')
+        project = json.loads((ROOT / '.claude/settings.json').read_text())
+        template = json.loads((ROOT / 'ops/config/hooks.json').read_text().replace(
+            '{{REPO}}', '${CLAUDE_PROJECT_DIR}'))
+        self.assertEqual(project['hooks'], template)
+
+
     def test_cleanup_is_exact_dry_by_default_backed_up_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
