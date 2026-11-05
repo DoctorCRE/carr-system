@@ -1,3 +1,4 @@
+// Compose reviewed market study record groups without publication effects.
 import { RECORD_LAYER_GROUPS, validateMarketStudyPackage } from './market-study-package.js';
 
 const identityFields = ['deal_id', 'client_id'];
