@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR586.S3.J2-deal-deliverables",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "deliverables-release",
+      "predicate": "Deployed Worker release matches the merged source and registers list-deal-deliverables, start-deal-deliverable, finalize-deal-deliverable and set-deal-deliverable-visibility. Release identity and registry smoke do not prove the file lifecycle. Separately observe an authorized partner uploading a synthetic file to the exact deal, finalizing privately, changing visibility with the expected version, downloading identical bytes and losing download access after session revocation. The read-only observer records these partner actions and release identity without uploading, mutating or sending itself.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Matching release and verb registry are observed; lifecycle remains unproven until the separate authenticated production walkthrough is observed.",
+      "input_class": "read-only Worker release and verb registry, followed by separately observed partner lifecycle evidence",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}

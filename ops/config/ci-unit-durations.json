@@ -16,6 +16,7 @@
     "hosted_slower_update_count": 48,
     "selected_suites": ["doc-conversation-postgres.test.mjs", "email-delivery-finding-postgres.test.mjs", "email-lifecycle-postgres.test.mjs", "home-inbox-version-guard.test.mjs", "home-review-postgres.test.mjs", "home-waiting-postgres.test.mjs", "lead-approval-queue-reader.test.mjs", "people-directory-postgres.test.mjs", "post-call-action-pairs.test.mjs", "tour-deal-access.test.mjs"]
   },
+  "deliverable_suite_measurement": {"card": "WR622.S1.J258", "source_sha": "e566a5473679afdd34db0618570d6551205a9645", "command": "CARR_CI_UNIT_SUITES=[deal-deliverables.test.mjs,deal-deliverables-web.test.mjs,deal-deliverables-postgres.test.mjs] node mcp-server/run-tests.mjs", "samples_ms": {"deal-deliverables-postgres.test.mjs": [1600, 1694, 1274, 7866, 1545], "deal-deliverables-web.test.mjs": [347, 382, 274, 314, 315], "deal-deliverables.test.mjs": [224, 246, 189, 210, 210]}, "budget_multiplier": 10, "basis": "Existing conservative local-to-hosted multiplier; hosted snapshot setup and watchdog preserved. Uses maximum observed suite duration including teardown; no speedup claim.", "logs": [{"path": "/tmp/J258-deliverables-timings.log", "sha256": "d7d61584e80969810f5bbbeff017f48cb7c4777b01f8b5e5c308cd948d495d04"}, {"path": "/tmp/J258-deliverables-timings-1.log", "sha256": "8e791baca5cfa9e27444338a65505528fb7d705dddc0b02f34938bcb51dcb102"}, {"path": "/tmp/J258-deliverables-timings-2.log", "sha256": "4918172734b72e928191e1fe996c588e4d177e4a3519086cbb7f427f20be9deb"}, {"path": "/tmp/J258-deliverables-timings-3.log", "sha256": "78155570dea4b8a85fb5868c781a5996b808d2917d597096ae2b30c99ce846bb"}, {"path": "/tmp/J258-deliverables-timings-4.log", "sha256": "0132f7807f892cc4d7cb3dd3f3c0c8386e58b9156115723c5d03a82499d75273"}]},
   "suites": {
     "a02-rule-enforcement-postgres.test.mjs": {"milliseconds": 3248, "serial": true},
     "a02-rule-enforcement-reader-mutants.test.mjs": {"milliseconds": 1021, "serial": false},
@@ -93,6 +94,9 @@
     "database-transport-recovery.test.mjs": {"milliseconds": 3514, "serial": false},
     "deal-checklist-pings.test.mjs": {"milliseconds": 1025, "serial": false},
     "deal-checklist.test.mjs": {"milliseconds": 315, "serial": false},
+    "deal-deliverables-postgres.test.mjs": {"milliseconds": 78660, "serial": true},
+    "deal-deliverables-web.test.mjs": {"milliseconds": 3820, "serial": false},
+    "deal-deliverables.test.mjs": {"milliseconds": 2460, "serial": false},
     "deal-extraction-postgres.test.mjs": {"milliseconds": 1614, "serial": true},
     "deal-files-postgres.test.mjs": {"milliseconds": 1377, "serial": true},
     "deal-items-postgres.test.mjs": {"milliseconds": 2546, "serial": true},
