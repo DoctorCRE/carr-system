@@ -109,43 +109,21 @@ def validate(value, schema, label='requirement'):
         raise ValueError(f'{label}: budget bounds')
 
 
-def resolve(root, sha, *, main_ref='origin/main'):
-    if not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{40}', sha):
-        raise ValueError('source SHA must be full lowercase commit SHA')
-    if not re.fullmatch(r'[A-Za-z0-9_./-]+', main_ref) or main_ref.startswith('-'):
-        raise ValueError('invalid main ref')
-    source = Source(root)
-    if source.git('cat-file', '-t', sha).strip() != b'commit':
-        raise ValueError('source must be a commit')
-    # Ancestry alone admits side-branch commits that never landed independently.
-    chain = source.git('rev-list', '--first-parent', '--max-count=100000', main_ref).decode().splitlines()
-    if sha not in chain:
-        raise ValueError('source not in first-parent main history')
-    parents = source.git('rev-list', '--parents', '-n', '1', sha).decode().split()
-    if len(parents) < 2:
-        raise ValueError('source has no first parent')
-    parent = parents[1]
-    policy = json.loads(source.blob(sha, POLICY))
-    inventory = json.loads(source.blob(sha, INVENTORY))
-    schema = json.loads(source.blob(sha, SCHEMA))
-    if (inventory['schema'] != 'carr-delivery-inventory.v1' or schema['$id'] != 'carr-delivery-plan.v1'
-            or inventory['repository'] != 'DoctorCRE/carr-system' or inventory['environment'] != 'production'
-            or set(inventory['lanes']) != {'database', 'worker', 'studio', 'app', 'control', 'docs'}):
-        raise ValueError('unsupported delivery contract')
-    paths = sorted(set(source.git('diff', '--name-only', '--no-renames', '-z', parent, sha)
-                       .decode().rstrip('\0').split('\0')) - {''})
-    classification = classify_paths(paths, policy, inventory) if paths else {
-        'required_targets': [], 'lanes': ['docs']}
+def requirement_paths(paths):
+    return sorted({p for p in paths if re.fullmatch(
+        r'proofs/requirements/[A-Za-z0-9][A-Za-z0-9._-]*\.json', p)})
+
+
+def bind_requirements(paths, policy, source, sha, read):
     requirements, covered, ids = [], set(), set()
-    names = [p for p in paths if re.fullmatch(r'proofs/requirements/[A-Za-z0-9][A-Za-z0-9._-]*\.json', p)]
+    names = requirement_paths(paths)
     if len(names) > 100:
         raise ValueError('requirements exceed 100')
-    deleted = set(source.git('diff', '--name-only', '--no-renames', '--diff-filter=D', '-z', parent, sha)
-                  .decode().rstrip('\0').split('\0'))
     for name in names:
-        if name in deleted:
-            raise ValueError('deleted requirement cannot supply proof')
-        raw = source.blob(sha, name)
+        try:
+            raw = read(name)
+        except (ValueError, OSError) as error:
+            raise ValueError('deleted requirement cannot supply proof') from error
         requirement = json.loads(raw)
         validate(requirement, policy)
         if requirement['requirement_id'] in ids:
@@ -175,11 +153,43 @@ def resolve(root, sha, *, main_ref='origin/main'):
             runner_targets.update(runner['targets'])
             observers.append({'runner': runner_id, 'sources': refs})
         if set(requirement['targets']) - runner_targets:
-            raise ValueError('requirement target has no registered observer')
+            raise ValueError('target has no registered runner')
         covered.update(requirement['targets'])
         requirements.append({'requirement_id': requirement['requirement_id'], 'path': name,
                              'commit': sha, 'sha256': digest(raw), 'targets': sorted(set(requirement['targets'])),
                              'observers': observers})
+    return requirements, covered
+
+
+def resolve(root, sha, *, main_ref='origin/main'):
+    if not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{40}', sha):
+        raise ValueError('source SHA must be full lowercase commit SHA')
+    if not re.fullmatch(r'[A-Za-z0-9_./-]+', main_ref) or main_ref.startswith('-'):
+        raise ValueError('invalid main ref')
+    source = Source(root)
+    if source.git('cat-file', '-t', sha).strip() != b'commit':
+        raise ValueError('source must be a commit')
+    # Ancestry alone admits side-branch commits that never landed independently.
+    chain = source.git('rev-list', '--first-parent', '--max-count=100000', main_ref).decode().splitlines()
+    if sha not in chain:
+        raise ValueError('source not in first-parent main history')
+    parents = source.git('rev-list', '--parents', '-n', '1', sha).decode().split()
+    if len(parents) < 2:
+        raise ValueError('source has no first parent')
+    parent = parents[1]
+    policy = json.loads(source.blob(sha, POLICY))
+    inventory = json.loads(source.blob(sha, INVENTORY))
+    schema = json.loads(source.blob(sha, SCHEMA))
+    if (inventory['schema'] != 'carr-delivery-inventory.v1' or schema['$id'] != 'carr-delivery-plan.v1'
+            or inventory['repository'] != 'DoctorCRE/carr-system' or inventory['environment'] != 'production'
+            or set(inventory['lanes']) != {'database', 'worker', 'studio', 'app', 'control', 'docs'}):
+        raise ValueError('unsupported delivery contract')
+    paths = sorted(set(source.git('diff', '--name-only', '--no-renames', '-z', parent, sha)
+                       .decode().rstrip('\0').split('\0')) - {''})
+    classification = classify_paths(paths, policy, inventory) if paths else {
+        'required_targets': [], 'lanes': ['docs']}
+    requirements, covered = bind_requirements(
+        paths, policy, source, sha, lambda name: source.blob(sha, name))
     if set(classification['required_targets']) - covered:
         raise ValueError('changed runtime target missing from landed requirements')
     lanes = sorted(set(classification['lanes']) | covered)
@@ -193,7 +203,7 @@ def resolve(root, sha, *, main_ref='origin/main'):
             'required_proofs': sorted({proof for lane in lanes
                                        for proof in inventory['lanes'][lane]['required_proofs']}),
             'requirements': requirements, 'execution_attested': False}
-    if len(canonical(plan)) > 1048576 - 128:
-        raise ValueError('plan projection exceeds 1 MiB')
     plan['plan_digest'] = digest(canonical(plan))
+    if len(canonical(plan)) + 1 > 1048576:
+        raise ValueError('plan projection exceeds 1 MiB')
     return plan

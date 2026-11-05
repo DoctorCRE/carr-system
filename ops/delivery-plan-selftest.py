@@ -247,7 +247,9 @@ class DeliveryTest(unittest.TestCase):
             self.resolve(sha)
         req['requirement_id'] = 'new-change'
         self.write(name, json.dumps(req))
-        sha = self.commit()
+        self.git('add', '--', name)
+        self.git('commit', '--amend', '--no-edit')
+        sha = self.git('rev-parse', 'HEAD')
         paths = ['mcp-server/src/runtime.py', name]
         self.assertIn('accepted', admission.admission(body, paths, self.root, policy))
         self.assertEqual(self.resolve(sha)['requirements'][0]['commit'], sha)
@@ -260,6 +262,31 @@ class DeliveryTest(unittest.TestCase):
             admission.admission(body, paths, self.root, policy)
         with self.assertRaises(ValueError):
             self.resolve()
+
+    def test_admission_validates_all_changed_requirements_and_content_bindings(self):
+        spec = importlib.util.spec_from_file_location('admission', ROOT / 'ops/production-proof-plan.py')
+        admission = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(admission)
+        first = 'proofs/requirements/change.json'
+        second = 'proofs/requirements/second.json'
+        self.requirement(first)
+        self.requirement(second)
+        policy = json.loads((self.root / delivery.POLICY).read_text())
+        self.commit()
+        for body in ['## Production proof\n' + first, '## Production proof\nn/a: observer contracts only']:
+            with self.subTest(body=body), self.assertRaisesRegex(ValueError, 'duplicate requirement'):
+                admission.admission(body, [first, second], self.root, policy)
+        with self.assertRaisesRegex(ValueError, 'duplicate requirement'):
+            self.resolve()
+        policy['x-runners']['fixture.v1'] = {
+            'path': 'ops/observer.py', 'targets': ['worker', 'studio'],
+            'sources': {'ops/observer.py': '0' * 64}}
+        self.write(delivery.POLICY, json.dumps(policy))
+        self.commit()
+        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+            admission.admission('## Production proof\n' + first, [first], self.root, policy)
+        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+            admission.admission('## Production proof\nn/a: observer contract', [first], self.root, policy)
 
     def test_cli_stdout_respects_response_budget(self):
         for i in range(1000):

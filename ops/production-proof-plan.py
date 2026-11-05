@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 
-from delivery_plan import classify_paths, validate
+from delivery_plan import Source, bind_requirements, classify_paths, requirement_paths, validate
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = 'contracts/production-proof-plan.v1.json'
@@ -38,34 +38,34 @@ def admission(body, paths, root, contract):
         raise ValueError('exactly one Production proof section required')
     i = matches[0]
     section = clean[headings[i].end():headings[i+1].start() if i+1 < len(headings) else len(clean)].strip()
-    if section.lower().startswith('n/a:'):
+    non_product = section.lower().startswith('n/a:')
+    if non_product:
         reason = section[4:].strip()
         if product or len(reason) < 3 or reason.lower() in {'todo', 'tbd', 'placeholder'}:
             raise ValueError('n/a requires non-product paths and a real reason')
-        return 'non-product declaration accepted (admission only)'
     match = re.fullmatch(r'`?(proofs/requirements/[A-Za-z0-9][A-Za-z0-9._-]*\.json)`?', section)
-    if not match:
+    if not non_product and not match:
         raise ValueError('Production proof must name one proofs/requirements/<change>.json')
+    if not non_product and match[1] not in requirement_paths(paths):
+        raise ValueError('Production proof must name a changed requirement')
     root = root.resolve()
-    path = root / match[1]
-    if any(p.is_symlink() for p in [path, path.parent, path.parent.parent]) or not path.resolve().is_relative_to(root):
-        raise ValueError('requirement path escape or symlink')
-    requirement = json.loads(read(path))
-    validate(requirement, contract)
-    ids = [a['id'] for a in requirement['assertions']]
-    if len(set(ids)) != len(ids):
-        raise ValueError('duplicate assertion IDs')
+
+    def requirement_bytes(name):
+        path = root / name
+        if any(p.is_symlink() for p in [path, path.parent, path.parent.parent]) or not path.resolve().is_relative_to(root):
+            raise ValueError('requirement path escape or symlink')
+        return read(path).encode()
+
     covered = set()
-    for assertion in requirement['assertions']:
-        runner = contract['x-runners'].get(assertion['runner'])
-        if runner is None:
-            raise ValueError('unregistered runner')
-        covered.update(runner['targets'])
+    if requirement_paths(paths):
+        source = Source(root)
+        sha = source.git('rev-parse', 'HEAD').decode().strip()
+        _, covered = bind_requirements(paths, contract, source, sha, requirement_bytes)
     required_targets = set(classify_paths(paths, contract)['required_targets'])
-    if required_targets - set(requirement['targets']):
+    if required_targets - covered:
         raise ValueError('changed runtime target missing from declaration')
-    if set(requirement['targets']) - covered:
-        raise ValueError('target has no registered runner')
+    if non_product:
+        return 'non-product declaration accepted (admission only)'
     return 'proof declaration accepted (admission only; execution unproven)'
 
 

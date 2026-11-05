@@ -2,11 +2,15 @@
 
 ```mermaid
 stateDiagram-v2
+    [*] --> Declaration
+    Declaration --> Refused: requirement unchanged or observer binding invalid
+    Declaration --> Admitted: changed requirements and observer bindings valid
+    Admitted --> Requested: same source tree lands on main
     [*] --> Requested
     Requested --> Refused: source is unavailable or outside main history
     Requested --> Bound: source commit and first parent verified
     Bound --> Refused: unknown path or invalid requirement
-    Bound --> Resolved: every path and requirement classified and hashed
+    Bound --> Resolved: every path and requirement classified and emitted bytes bounded
     Resolved --> Resolved: repeat read returns identical digest
 ```
 
@@ -69,3 +73,26 @@ non-product allowlist exempts paths. Test and CI-only paths use the control lane
 The statechart conversion wrote a TLA skeleton under
 `scratchpad/wr823-s6-j1`, then exited 2 because TLC is unavailable. The chart
 is checked by behavioral tests, not a formally verified model.
+
+## Review fixes and consumer contract
+
+Admission and resolution share `requirement_paths` and `bind_requirements`.
+A declaration must select a changed requirement. Both callers validate every
+changed requirement, duplicate identifiers, target coverage and immutable
+observer sources. Admission reads requirement files from the tested checkout
+and binds observer sources to its HEAD. Resolution reads the landed Git objects.
+The admission function retains its four arguments and its success strings for
+WR622.S1.J299. Callers must include changed requirement files in the paths list;
+an existing requirement named only in the body is intentionally refused.
+Canonical CLI JSON plus its newline is bounded to 1 MiB before any stdout write.
+
+| Transition | Behavioral test in `ops/delivery-plan-selftest.py` |
+| --- | --- |
+| Declaration to Refused | `test_admission_to_resolution_requires_changed_bound_requirement` |
+| Declaration to Admitted to Requested | `test_admission_to_resolution_requires_changed_bound_requirement` |
+| Requested to Refused | `test_requested_to_refused`, `test_cli_refusal_has_no_partial_plan` |
+| Requested to Bound to Resolved | `test_requested_to_bound_to_resolved_and_repeat`, `test_union_and_immutable_requirements_and_observers`, `test_cli_stdout_respects_response_budget` |
+| Bound to Refused | `test_bound_to_refused_unknown_and_missing_proof`, `test_missing_runtime_proof_refuses`, `test_response_budget_refuses_large_requirement_identifiers` |
+| Resolved to Resolved | `test_requested_to_bound_to_resolved_and_repeat` |
+
+This chart excludes deployment, production execution and persisted acceptance.
