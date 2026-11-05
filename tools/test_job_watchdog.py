@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import os
 from pathlib import Path
 import plistlib
+import runpy
+from datetime import timedelta
 import subprocess
 import sys
 import tempfile
@@ -14,6 +16,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
+sys.path.insert(0, str(ROOT / "ops"))
 import job_watchdog as watchdog
 
 
@@ -75,6 +78,32 @@ class WatchdogTests(unittest.TestCase):
         facts['outlook'] = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
                             'coverage_run_day': '2026-11-02', 'coverage_deadline_seconds': 19 * 3600 + 300}
         self.assertEqual(watchdog.detect(facts, datetime.fromisoformat('2026-11-02T18:00:00Z').timestamp()), [])
+
+    def test_resumed_intake_keeps_owed_verdict_until_actual_verdict(self):
+        ns = runpy.run_path(str(ROOT / 'ops/outlook-intake-selftest.py'))
+        intake = ns['IntakeTest']()
+        intake.setUp()
+        self.addCleanup(intake.doCleanups)
+        intake.coverage_run([ns['mail']('pat@example.test', -timedelta(hours=1), subject='Complete')])
+        state_path = intake.out() / ns['intake'].STATE
+        evening = intake.fake.now
+        def scan():
+            state = json.loads(state_path.read_text())
+            outlook = {**state, 'timezone': str(ns['load_settings'](intake.home).timezone),
+                       'reply_draft_count': 1, 'coverage_deadline_seconds': 19 * 3600 + 300}
+            found = watchdog.detect({'jobs': [], 'disk_free_percent': 50, 'outlook': outlook},
+                                    intake.fake.now.timestamp())
+            watchdog.reconcile(self.root, self.config, found, {'com.carr.outlook-intake'},
+                               intake.fake.now.timestamp(), outlook)
+            return {f['key'] for f in watchdog.active_findings(self.root, self.config)}
+        intake.fake.now = evening + timedelta(days=2, hours=-8)
+        intake.run_intake()
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = evening + timedelta(days=2, minutes=30)
+        intake.run_intake()
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
 
     def test_transport_timeout_preserves_local_failed_and_missing_verdicts(self):
         state = self.root / 'out/outlook-intake/state.json'

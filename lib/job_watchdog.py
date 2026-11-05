@@ -178,7 +178,7 @@ def coverage_findings(facts, now):
     try:
         checked = coverage_day(facts.get("coverage_check_day"), today)
         started = coverage_day(facts.get("coverage_run_day"), today) or checked
-        missing = (checked is None or checked < due) and started <= due
+        missing = checked < due if checked is not None else started <= due
         reason = f"daily coverage verdict missing for {due}"
     except (TypeError, ValueError):
         missing = True

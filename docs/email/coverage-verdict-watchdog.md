@@ -17,8 +17,10 @@ which still uses business days. Mailbox wall time preserves the deadline across
 both DST transitions.
 
 `coverage_check_day` proves that an actual verdict occurred, whether it passed
-or failed. `coverage_run_day` establishes when coverage tracking began. A legacy
-state with only a check day also establishes tracking. Neither day means a first
+or failed. `coverage_run_day` records the latest successful intake run. It provides
+first-run grace only when no check day exists. A stale check remains owed even
+when a later intake run resumes. A legacy state with only a check day also
+establishes tracking. Neither day means a first
 install has no established obligation. A first run before its first deadline
 gets the remaining daily window. Invalid, noncanonical, or future days raise
 the same freshness finding rather than suppressing it or aborting the scan.
@@ -40,10 +42,28 @@ Collection reads one local state snapshot and makes one bounded outcome request.
 Cross-source transactions are not needed because freshness uses local facts
 alone. Existing scan locking serializes reconciliation. Repeated scans converge
 to one active key and do not append unchanged findings. There is no retry loop
-or new persistent state. Outcome-read, coverage-failed, job-exit, and disk alarms
+or new persistent state. Each scan reads one state file and one outcome response;
+ten times the scan frequency means ten times those reads, with the existing
+serialized scan lock and remote outcome timeout as likely first limits. This is
+an estimate, not a measured capacity. There is no cache to invalidate or evict,
+no fan-out, queue, or N+1 query, and no new load distribution or scaling path. Outcome-read, coverage-failed, job-exit, and disk alarms
 remain independent.
 
-The requested statechart skill was unavailable. This table defines the states.
+```mermaid
+stateDiagram-v2
+    [*] --> Unestablished
+    Unestablished --> Waiting: first run before deadline
+    Waiting --> Owed: deadline passes without verdict
+    Unestablished --> Fresh: actual verdict
+    Fresh --> Owed: next deadline passes without verdict
+    Owed --> Owed: intake resumes without verdict
+    Owed --> Reported: watchdog scan
+    Reported --> Reported: resumed run or lost state
+    Owed --> Fresh: late actual verdict
+    Reported --> Fresh: late actual verdict and scan
+```
+
+The table defines the same transitions.
 
 | Observation | Transition |
 | --- | --- |
