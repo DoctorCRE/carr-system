@@ -23,6 +23,53 @@ spec.loader.exec_module(gate)
 
 
 class BaselineIntegrity(unittest.TestCase):
+    def test_linked_worktree_keeps_installed_codex_root_and_rejects_missing_hooks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            worktree = root / 'worker'
+            canonical = root / 'canonical'
+            codex_home = root / 'codex'
+            codex_home.mkdir()
+            project_settings = worktree / '.claude/settings.json'
+            project_settings.parent.mkdir(parents=True)
+            project = json.loads((REPO / '.claude/settings.json').read_text())
+            codex_template = gate.REGISTRATIONS['codex'].read_text()
+            codex = json.loads(codex_template.replace('{{REPO}}', str(canonical)))
+            for repo in (worktree, canonical):
+                for script in (REPO / 'hooks').glob('*.py'):
+                    target = repo / 'hooks' / script.name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.touch()
+            project_settings.write_text(json.dumps(project))
+            installed_codex = codex_home / 'hooks.json'
+            installed_codex.write_text(json.dumps(codex))
+            with patch.object(gate, 'REPO', worktree), \
+                    patch.object(gate, 'installation_repo', return_value=canonical), \
+                    patch.object(gate, 'check_baseline', return_value=[]), \
+                    patch.dict(gate.os.environ, {'CODEX_HOME': str(codex_home)}), \
+                    patch.object(gate.sys, 'argv', ['gate-integrity.py']), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(gate.main(), 0, errors.getvalue())
+                for client, path, document in (
+                        ('claude', project_settings, project),
+                        ('codex', installed_codex, codex)):
+                    with self.subTest(client=client):
+                        broken = json.loads(json.dumps(document))
+                        broken['hooks']['PreToolUse'] = [
+                            group for group in broken['hooks']['PreToolUse']
+                            if not any('guard-unattended.py' in hook['command']
+                                       for hook in group['hooks'])]
+                        path.write_text(json.dumps(broken))
+                        errors.seek(0)
+                        errors.truncate()
+                        self.assertEqual(gate.main(), 1)
+                        self.assertIn(f'{client}: required safety hook is not installed: '
+                                      'guard-unattended.py', errors.getvalue())
+                        path.write_text(json.dumps(document))
+                with patch.object(gate.sys, 'argv', ['gate-integrity.py', '--strict']):
+                    self.assertEqual(gate.main(), 0, errors.getvalue())
+
     def test_scoped_bless_removes_only_the_named_deleted_script(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
