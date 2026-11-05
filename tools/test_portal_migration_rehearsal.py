@@ -2,6 +2,8 @@
 import copy
 import importlib.util
 import json
+import os
+import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -111,10 +113,12 @@ class RehearsalTests(unittest.TestCase):
         self.assertEqual(receipt['integration'], {'S9': 'pending', 'S10-S17': 'pending'})
 
     def test_cli_pending_is_nonzero_and_names_steps(self):
-        run = module.subprocess.run(['python3', str(ROOT / 'tools/portal-migration-rehearsal.py'),
-                                     str(ROOT / 'client-portal/fixtures/migration-rehearsal.json')],
-                                    text=True, capture_output=True, timeout=200)
-        self.assertEqual(run.returncode, 3, run.stderr)
+        with tempfile.TemporaryDirectory(prefix='portal-rehearsal-ci-' + 'x' * 80) as temporary:
+            run = module.subprocess.run(['python3', str(ROOT / 'tools/portal-migration-rehearsal.py'),
+                                         str(ROOT / 'client-portal/fixtures/migration-rehearsal.json')],
+                                        env={**os.environ, 'TMPDIR': temporary, 'TMP': temporary, 'TEMP': temporary},
+                                        text=True, capture_output=True, timeout=200)
+        self.assertEqual(run.returncode, 3, run.stdout + run.stderr)
         receipt = json.loads(run.stdout)
         self.assertIn('selection-import', receipt['pending_steps'])
         self.assertFalse(receipt['cutover_ready'])
