@@ -3208,7 +3208,7 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([m])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['email_context'], {
-            'body_kind': 'full', 'body_completeness': 'complete',
+            'body_kind': 'full', 'body_completeness': 'complete', 'attachment_count': 0,
             'body_outcome': 'complete', 'body_truncated': False,
             'subject': 'Suite question', 'conversation_id': None,
             'sender': {'email': 'pat@example.test', 'name': 'Pat Example', 'internal': False},

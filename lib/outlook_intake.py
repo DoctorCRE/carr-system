@@ -363,6 +363,7 @@ def email_context(mail: dict, domain: str) -> dict:
             recipients.append({'email': address, 'name': None, 'kind': kind,
                                'internal': _internal(address, domain)})
     return {'body_kind': mail.get('body_kind') or 'unknown',
+            'attachment_count': len(mail['attachments']) if isinstance(mail.get('attachments'), list) else None,
             'body_completeness': mail.get('body_completeness') or 'unknown',
             'body_outcome': mail.get('body_outcome') or 'unknown',
             'body_truncated': bool(mail.get('body_truncated')),

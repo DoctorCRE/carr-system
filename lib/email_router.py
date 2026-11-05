@@ -55,7 +55,7 @@ import time
 from typing import Callable
 import uuid
 
-from lib import email_matching, email_summary, model_call
+from lib import email_matching, email_summary, model_call, email_critical_dates
 from lib.fence import DATA_SENTENCE, fence
 from lib.outlook_runtime import stamp
 
@@ -192,6 +192,8 @@ def consume_applications(carr, classify, refusal_code, now, clock):
                 continue
             counts['application_claimed'] += 1
             claimed = {**binding, 'claim_id': claim['claim_id']}
+            for obligation in email_critical_dates.extract(source):
+                write({**obligation, **claimed})
             reply = classify(source, now.date())
             for args in proposals(reply, source, now.date()):
                 if source.get('kind') == 'email_out' and args['kind'] != 'next_step':

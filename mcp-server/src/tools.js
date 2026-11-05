@@ -4518,6 +4518,7 @@ export const TOOLS = {
           source_activity_id: { type: 'string', format: 'uuid' },
           body_kind: { type: 'string' }, body_completeness: { type: 'string' },
           body_outcome: { type: 'string' }, body_truncated: { type: 'boolean' },
+          attachment_count: { type: ['integer','null'], minimum: 0 },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },

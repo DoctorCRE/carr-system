@@ -25,9 +25,11 @@ export async function filingApplicationQueue(c, actor, args) {
     next_cursor:rows.length>limit ? rows[limit-1].generation : null };
 }
 
-export async function lockFilingApplication(c, actor, args, fail) {
+export async function lockFilingApplication(c, actor, args, fail, mutateDeal = false) {
   await c.query('select id from activity where id=$1 for update',[args.activity_id]);
-  await c.query('select id from deal where id=(select deal_id from activity where id=$1) for share',[args.activity_id]);
+  await c.query(mutateDeal
+    ? 'select id from deal where id=(select deal_id from activity where id=$1) for update'
+    : 'select id from deal where id=(select deal_id from activity where id=$1) for share',[args.activity_id]);
   const row = (await c.query(`select g.*,(${current}) as current,g.claim_until>now() as claim_active
     from email_filing_application g join activity a on a.id=g.activity_id left join deal d on d.id=g.deal_id
     where g.generation=$1 and g.activity_id=$4 for update of g`,

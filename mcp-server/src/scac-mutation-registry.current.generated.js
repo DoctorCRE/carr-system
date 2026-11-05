@@ -1113,7 +1113,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "email-router-queue": {
     "ingress_key": "mcp-tool:email-router-queue",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "a0992444d172f3513b9f166c0d566b256be39d5bc6e37643a301ec921e5f5402",
+    "schema_digest": "c7dce926be5d843e8568b8ddacf64c408392cf689d16fee0985dbd4dd91190b8",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -1666,7 +1666,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "5509932a8c6d51e009086aff1bc9bd4005c0c0fdd7072c78907514a57d9736bc",
+    "schema_digest": "2550e7f3e3640c759fb3149d09042f73ae47471bd85add4b460a40781f37e1e2",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2877,7 +2877,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "03c0dbe8cbd2b0c016dbd091c3862e3e72d91c145277a0260b861446ae080f3f",
+    "schema_digest": "f7e0c2ab7ea6ddaacaf04252f17d319bb067612e88ac05803389daec01527998",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

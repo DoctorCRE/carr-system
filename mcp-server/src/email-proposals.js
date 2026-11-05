@@ -1,5 +1,6 @@
 // Expose and resolve email-derived proposals.
 import { filingApplicationQueue, filingApplicationWrite, lockFilingApplication } from './email-filing-application.js';
+import { emailCriticalDateQueue, emailCriticalDateWrite } from './email-critical-dates.js';
 import { lockEmailIdentity, capturedEmail } from './email-identity.js';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
@@ -610,13 +611,19 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-proposal': {
       write: true,
-      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance, and need no deal. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. mode=repair_match revalidates and reclassifies exactly one pending matching proposal at base_version, retaining its source quote and recording classification history. match_evidence stores diagnostic scores and candidates. mode=summary_claim reserves one incoming source hash for at most three generation attempts with a five minute lease. mode=summary_result stores grounded text or honest unavailability for that claim. This operation never files or sends email.',
+      description: 'Store email match, progress, next-step or reply-draft proposals. Matching uses sender_role; possible_new_deal and contact-only steps/drafts need no deal. expire_blocked rechecks 200 owned pending cards aged 30 days and dismisses only still-blocked previews. repair_match reclassifies one pending match at base_version. match_evidence retains diagnostics. summary_claim reserves one source hash for three attempts with five minute leases; summary_result stores grounded text or unavailability. application_claim/application_result lease and acknowledge durable filing generations. critical_date requires generation, claim_id, activity_id, deal, obligation_kind and evidence_quote. It automatically adds only a complete, grounded agreed absolute date-only obligation without a conflict; all other evidence stays in review. critical_date_review requires a verified human partner, effect_id, decision and reason; apply needs due_on and corrections/cancellations need critical_date_id and base_version. critical_date_undo restores only a still-current applied value by effect_id. Read date effects with email-router-queue purpose=critical_dates. Sends no email.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key'], anyOf: [
           { required: ['kind','activity_id','evidence_quote','confidence'] }, { required: ['mode'] },
         ], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
-          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result'] },
+          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result', 'critical_date', 'critical_date_review', 'critical_date_undo'] },
+          obligation_kind: { enum: ['loi_expiry','lease_commencement','lease_expiration','contingency_deadline'] },
+          effect_id: { type: 'string', format: 'uuid' },
+          critical_date_id: { type: 'string', format: 'uuid' },
+          due_on: { type: 'string', format: 'date' },
+          decision: { enum: ['apply','cancel','dismiss'] },
+          reason: { type: 'string', minLength: 1, maxLength: 2000 },
           generation: { type: 'string', format: 'uuid' },
           application_status: { enum: ['applied','retry'] },
           source_hash: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
@@ -647,6 +654,8 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           body: { type: 'string', minLength: 1, maxLength: 20000 },
         } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'record-email-proposal', args, async () => {
+        if (['critical_date','critical_date_review','critical_date_undo'].includes(args.mode))
+          return emailCriticalDateWrite(c,actor,args,fail,writeEvent);
         if (['application_claim','application_result'].includes(args.mode)) {
           if (!args.activity_id || !args.generation) fail('email_proposal_fields_invalid');
           const result = await filingApplicationWrite(c,actor,args,fail);
@@ -955,7 +964,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
       description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=summaries pages pending-card incoming sources by UUID without the proposal age limit; pending_only=false pages all incoming sources recorded within three days independently of proposals. It returns source_hash for summary_claim and performs no generation. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
-          purpose: { enum: ['links', 'outcomes', 'summaries', 'applications'] },
+          purpose: { enum: ['links', 'outcomes', 'summaries', 'applications', 'critical_dates'] },
           pending_only: { type: 'boolean' }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
@@ -964,6 +973,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         // The age window's start follows the server clock, so tests on a fixed clock stay in range.
         const clock = new Date().toISOString();
         if (args.purpose === 'applications') return filingApplicationQueue(c,_actor,args);
+        if (args.purpose === 'critical_dates') return emailCriticalDateQueue(c,_actor,args);
         if (args.purpose === 'summaries') {
           if (Object.keys(args).some(key => !['purpose','limit','after','pending_only'].includes(key))) fail('email_proposal_fields_invalid');
           const owner = partnerAuthoritySlugForActor(_actor);
