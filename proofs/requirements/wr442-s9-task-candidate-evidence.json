@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR442-S9-J6-task-candidate-evidence",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "installed-task-census-with-zero-admissions",
+    "predicate": "After deployment and Studio installation, independently verify the installed decoder revision contains this change. Run task-candidates on one explicitly supplied immutable supported copy with the enrolled store generation and selected account. Validate its evidence database through outlook-task-evidence.py. Require a count-only task census receipt, exact selected-account context, explicit incomplete coverage when applicable, and candidates_admitted equal to zero. No candidate may be sent to CARR. A missing installed command, missing receipt, nonzero admission count or unsupported schema is BLOCKED. Observe the matching installed run receipt with the pinned Studio reader; that observer alone does not establish candidate correctness or zero admissions.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "OBSERVED only with installed full runtime identity, independently validated task census and exactly zero admitted candidates.",
+    "input_class": "one selected-account immutable copy, enrolled generation and installed count-only run receipt; no source content in proof artifacts",
+    "deadline_seconds": 300
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 3,
+    "max_records": 1000,
+    "max_runtime_seconds": 300,
+    "max_artifact_bytes": 1048576
+  }
+}
