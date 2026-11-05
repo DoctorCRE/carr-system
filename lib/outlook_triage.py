@@ -207,6 +207,9 @@ def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: L
         research_copy: Path | None = None, *, proof_window: bool = False) -> Outcome:
     """Admit evening planning or one explicit 180-second proof attempt."""
     load_settings(home).require_repo(repo)
+    if research_copy is not None and not research_copy.is_absolute():
+        print('outlook-triage skipped research_copy_not_absolute moved=0 left=0')
+        return Outcome('skipped', 'research_copy_not_absolute')
     os.umask(0o077)
     if not proof_window and not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         print('outlook-triage skipped outside_window moved=0 left=0')
@@ -249,6 +252,9 @@ def fire(repo: Path | None = None, now: datetime | None = None, *,
     now = now or datetime.now(load_settings().timezone)
     if not proof_window and not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
         return 0
+    if research_copy is not None and not research_copy.is_absolute():
+        print('outlook-triage skipped research_copy_not_absolute moved=0 left=0')
+        return EXIT['skipped']
     os.chdir(repo)
     command = [sys.executable, '-c', ENTRY]
     if proof_window:
