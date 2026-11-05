@@ -76,12 +76,14 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
           const otherCandidates=[...new Set(invalidated.rows.map(r=>r.pool_id).filter(id=>id!==row.id))];
           if(otherCandidates.length) await c.query(`update candidate_pool set source_invalid=true,version=version+1,
             evidence_version=evidence_version+1 where id=any($1::uuid[])`,[otherCandidates]);
-          changed ||= invalidated.rows.length>0;
+          changed ||= invalidated.rows.length>0 || (Boolean(observation.extraction.ambiguity) && !row.source_invalid);
           const existing=(await c.query(`select id,extraction from email_candidate_signature where pool_id=$1 and mailbox_account=$2
             and source_id=$3 and raw_digest=$4 and extraction_version=$5`,[row.id,args.mailbox_account,observation.source_id,observation.raw_digest,observation.extraction_version])).rows[0];
           if (existing) {
             const equal=(await c.query('select $1::jsonb=$2::jsonb as equal',[existing.extraction,observation.extraction])).rows[0].equal;
-            if (!equal) fail('email_candidate_observation_conflict');
+            if (!equal && !observation.extraction.ambiguity) fail('email_candidate_observation_conflict');
+            if (observation.extraction.ambiguity) await c.query(`update email_candidate_signature
+              set invalidated_at=coalesce(invalidated_at,now()),invalid_reason=coalesce(invalid_reason,'source_representation_conflict') where id=$1`,[existing.id]);
             await c.query(`update email_candidate_signature set item_ids=array(select distinct unnest(item_ids||$2::text[])) where id=$1`,[existing.id,observation.item_ids]);
             continue;
           }

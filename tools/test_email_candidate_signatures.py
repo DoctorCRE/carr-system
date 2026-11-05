@@ -29,6 +29,14 @@ class CandidateSources(unittest.TestCase):
         result = observations([mail('first', ['7']), mail('second', ['8'])], {}, digest, 300)
         self.assertEqual(len(result['sender@synthetic.test']), 2)
 
+    def test_changed_keyless_representation_holds_retained_candidate(self):
+        state = {}
+        first = observations([mail('keyless')], state, digest, 300)['sender@synthetic.test'][0]
+        revised = mail('new-keyless', body=mail('keyless')['body'].replace('1234', '5678'))
+        changed = observations([revised], state, digest, 300)['sender@synthetic.test'][0]
+        self.assertEqual(first['source_id'], changed['source_id'])
+        self.assertEqual(changed['extraction']['ambiguity'], 'competing_source_representation')
+
     def test_html_revision_or_lost_completeness_is_not_an_old_signature(self):
         state = {}
         first = observations([mail('first')], state, digest, 300)['sender@synthetic.test'][0]
