@@ -15,7 +15,7 @@ test('email critical dates apply once, hold conflicts and undo only current valu
     const deal = (await c.query("insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic date',$1,'lease','legal','joe',$2,$2) returning id",[client,actor.id])).rows[0].id;
     const invoke = async (verb,args,who=actor) => {
       await c.query('begin');
-      await c.query(verb==='email-router-queue'?'set local role carr_reader':'set local role carr_writer');
+      await c.query(['email-router-queue','get-deal-room'].includes(verb)?'set local role carr_reader':'set local role carr_writer');
       try {const r=await executeRegisteredTool(c,who,verb,args);await c.query('commit');return r;}
       catch(e){await c.query('rollback');throw e;}
     };
