@@ -1,0 +1,24 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR587-S4-field-census",
+  "targets": ["studio", "worker"],
+  "assertions": [
+    {
+      "id": "natural-generation-census",
+      "predicate": "After installation at the merged revision, observe the next natural intake run and its aggregate field-census-latest.json. Run ops/outlook-field-census-proof.py with --after set before that natural run. Require identical generation binding for receipt and census, nonzero admitted population, zero accounting differences, all field cause sums equal their raw shortfalls, and message causes equal coverage_messages_shortfall. Report unclassified causes. This establishes accounting, never capture completion.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "A newly observed natural intake and matching aggregate bundle reconcile with zero accounting differences. Missing, stale, empty or mixed generations remain unproven.",
+      "input_class": "Natural installed intake receipt at the merged runtime SHA and its aggregate bundle. Observer runs the census CLI after checking canonical runtime evidence. No content or contact fields.",
+      "deadline_seconds": 30
+    },
+    {
+      "id": "deployed-source-identity",
+      "predicate": "Verify the production worker release identifies the merged source revision. Census operation on Studio requires the separate natural-generation proof.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "The deployed worker identifies the merged source revision. This does not establish installed census operation.",
+      "input_class": "Read-only production release identity, no business records.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 4, "max_records": 2, "max_runtime_seconds": 60, "max_artifact_bytes": 65536}
+}

@@ -490,7 +490,8 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
             'JOIN message_objects o ON o.local_key = k.local_key'):
         fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender', 'in_reply_to')
                   if row[name] is not None and str(row[name]).strip()}
-        fields.update(account_id=row['account_id'], folder_id=row['folder_id'])
+        fields.update(account_id=row['account_id'], folder_id=row['folder_id'],
+                      census_recipients_status=row['recipients_status'])
         lists = recipients.get(row['local_key'])
         # No observed recipient objects does not prove an empty recipient list.
         if row['recipients_status'] == 'listed' and lists:
@@ -511,16 +512,22 @@ def _body_complete(mail: dict) -> bool:
             and bool((mail.get('body') or '').strip()))
 
 
+def field_presence(mail: dict) -> dict[str, bool]:
+    return dict(subject=bool((mail.get('subject') or '').strip()), body=_body_complete(mail),
+                sender=bool((mail.get('sender') or '').strip()),
+                recipients=bool(_addresses(mail.get('recipients')) or _addresses(mail.get('cc'))))
+
+
 def _coverage_counts(mails: list[dict], classes: dict[int, set[str]]) -> dict:
     """Field coverage over every admitted message; a message counts once per class."""
     counts = dict.fromkeys(('subject_decoded', 'subject_missing',
                             *('subject_missing_' + kind for kind in FOLDER_CLASSES)), 0)
     counts['admitted'] = len(mails)
-    counts['body_complete'] = sum(_body_complete(m) for m in mails)
-    counts['sender_decoded'] = sum(bool((m['sender'] or '').strip()) for m in mails)
-    counts['recipients_decoded'] = sum(bool(_addresses(m['recipients']) or _addresses(m.get('cc'))) for m in mails)
+    for name, counter in (('body', 'body_complete'), ('sender', 'sender_decoded'),
+                          ('recipients', 'recipients_decoded')):
+        counts[counter] = sum(field_presence(m)[name] for m in mails)
     for mail in mails:
-        if (mail['subject'] or '').strip():
+        if field_presence(mail)['subject']:
             counts['subject_decoded'] += 1
             continue
         counts['subject_missing'] += 1
@@ -780,12 +787,19 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], a
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
+        started_at = datetime.now(timezone.utc).isoformat()
         _snapshot(home, work, settings)
         files = work / 'Files'
         _coverage_census(home, out, copy, files, account_id, settings)
         db = work / 'store.db'
         decode(copy, files, db)
         loaded = _load(db, account_id=account_id, account_address=account_address)
+        from lib import outlook_field_census
+        bound = outlook_field_census.binding(copy, files, str(account_id) + ':' + account_address,
+                                             started_at, (settings or load_settings(home)).decoder)
+        bundle = outlook_field_census.build(loaded[0], loaded[1], bound)
+        outlook_field_census.publish(out / 'field-census-latest.json', bundle)
+        loaded[0]['field_census_generation'] = bound['generation']
         from lib.email_local_search import build_index, published_index_path
         try:
             index = published_index_path(account_id, home=home)
@@ -2150,7 +2164,8 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    from lib.outlook_field_census import SCHEMA as field_census_schema
+    if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -2163,6 +2178,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     try:
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account, settings) as (meta, mails, events, db, files):
             outcome = _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
+        state['field_census_schema'] = field_census_schema
         publication = meta.get('email_index_receipt', {})
         outcome.counts.update(publication)
         state['email_index_published'] = bool(publication.get('email_index_published'))
