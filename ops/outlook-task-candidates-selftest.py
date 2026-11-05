@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Exercise evidence-held task candidates with synthetic stores."""
 from contextlib import closing
 import hashlib
 import json

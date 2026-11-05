@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Validate an evidence database and report counts without admitting tasks."""
 import argparse
 import json
 from pathlib import Path
