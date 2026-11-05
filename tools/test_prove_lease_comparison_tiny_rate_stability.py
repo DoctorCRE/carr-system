@@ -70,6 +70,7 @@ class ProofTest(unittest.TestCase):
         calls = directory / 'calls.jsonl'
         wrapper.write_text(f'''#!{sys.executable}
 import json, pathlib, sys, time
+if {mode!r} == 'timeout': time.sleep(0.3)
 assert sys.argv[1:3] == ['call', 'compare-lease-terms']
 data = json.loads(sys.argv[3])
 with pathlib.Path({str(calls)!r}).open('a') as log:
