@@ -92,7 +92,8 @@ def intake_evidence(path: Path, account: str, generation: str) -> dict[str, int]
             counts = json.loads(receipts[0][0])
             if not isinstance(counts, dict) or not all(type(n) is int and n >= 0 for n in counts.values()):
                 raise ValueError('evidence_receipt')
-            if counts.get('candidates_admitted') != 0 or counts.get('candidates_supported') != 0:
+            if any(counts.get(key) != 0 for key in ('candidates_admitted', 'candidates_supported',
+                                                   'reviews_pending', 'writes_acknowledged')):
                 raise ValueError('admission_disabled')
             total = 0
             for row in db.execute('SELECT candidate_json FROM task_candidates'):

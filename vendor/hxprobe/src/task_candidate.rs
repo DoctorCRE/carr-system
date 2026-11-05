@@ -354,6 +354,8 @@ pub fn run(args: &[OsString]) -> Result<String, ()> {
         ("candidates_supported", 0),
         ("candidates_held", 0),
         ("candidates_admitted", 0),
+        ("reviews_pending", 0),
+        ("writes_acknowledged", 0),
         ("candidates_deferred", 0),
         ("account_unknown", 0),
         ("foreign_account_excluded", 0),

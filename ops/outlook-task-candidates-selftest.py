@@ -72,6 +72,8 @@ class Candidates(unittest.TestCase):
         self.assertEqual(c['decode_status'], 'unsupported')
         self.assertNotIn('Synthetic private title', json.dumps(c))
         self.assertEqual(receipt['candidates_admitted'], 0)
+        self.assertEqual(receipt['writes_acknowledged'], 0)
+        self.assertEqual(receipt['reviews_pending'], 0)
         digest = c.pop('candidate_digest')
         canonical = json.dumps(c, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
         self.assertEqual(digest, hashlib.sha256(canonical.encode()).hexdigest())
@@ -143,6 +145,18 @@ class Candidates(unittest.TestCase):
         for account, generation in [('9', GENERATION), ('7', 'bad')]:
             with self.assertRaises(ValueError):
                 intake_evidence(self.root / 'evidence.db', account, generation)
+        with closing(sqlite3.connect(self.root / 'evidence.db')) as db:
+            original = db.execute('select receipt_json from task_census').fetchone()[0]
+            for key in ('candidates_admitted', 'candidates_supported', 'reviews_pending', 'writes_acknowledged'):
+                altered = {**json.loads(original), key: 1}
+                db.execute('update task_census set receipt_json=? where receipt_json=?',
+                           (json.dumps(altered), original))
+                db.commit()
+                with self.assertRaises(ValueError):
+                    intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+                db.execute('update task_census set receipt_json=? where receipt_json=?',
+                           (original, json.dumps(altered)))
+                db.commit()
         with closing(sqlite3.connect(self.root / 'evidence.db')) as db:
             db.execute("update task_candidates set candidate_json='{}' where local_key='70'")
             db.commit()
