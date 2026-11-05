@@ -40,7 +40,7 @@ CASES: list[tuple[str, str, dict, int]] = []   # (label, hook, payload, expected
 
 def run(hook, payload, home=None):
     p = subprocess.run(["/usr/bin/env", "python3", os.path.join(HOOKS, hook)],
-                       input=json.dumps(payload), capture_output=True, text=True,
+                       input=payload if isinstance(payload, str) else json.dumps(payload), capture_output=True, text=True,
                        env={**os.environ, "HOME": home} if home else None)
     return p.returncode, (p.stderr or "").strip()
 
@@ -143,6 +143,42 @@ def main():
             ):
                 cases.append((f"Bash {operation}, {spelling} HOME", "guard-unattended.py",
                               bash(command), want))
+        suffix = "/.claude/skills/handoff/SKILL.md"
+        spellings = {
+            "HOME": '"$HOME' + suffix + '"',
+            "braced HOME": '"${HOME}' + suffix + '"',
+            "tilde": '~' + suffix,
+            "relative real": 'home' + suffix,
+            "relative symlink": 'linked-home' + suffix,
+            "dotdot": str(linked_home) + '/../linked-home' + suffix,
+            "double slash": str(linked_home) + '//' + suffix.lstrip('/'),
+            "dot segment": str(linked_home) + '/.' + suffix,
+            "internal dotdot": str(linked_home) + '/.claude/skills/../skills/handoff/SKILL.md',
+        }
+        for spelling, operand in spellings.items():
+            for operation, command in (
+                ("tee", f'echo hi | tee {operand}'),
+                ("redirect", f'echo hi > {operand}'),
+                ("append", f'echo hi >> {operand}'),
+                ("cp", f'cp /tmp/x.md {operand}'),
+                ("mv", f'mv /tmp/x.md {operand}'),
+                ("heredoc", f'cat > {operand} <<EOF\nprobe\nEOF'),
+                ("python", "python3 -c \"open('" + operand.strip('"') + "','w').write('x')\""),
+            ):
+                payload = bash(command)
+                payload["cwd"] = tmp
+                cases.append((f"Bash {operation}, {spelling}", "guard-unattended.py", payload, DENY))
+            payload = bash(f'cat {operand}')
+            payload['cwd'] = tmp
+            cases.append((f"ALLOW read, {spelling}", "guard-unattended.py", payload, ALLOW))
+        for label, payload in (
+            ("malformed JSON", "{"),
+            ("empty input", ""),
+            ("numeric command", {"tool_name": "Bash", "tool_input": {"command": 42}}),
+            ("missing command", {"tool_name": "Bash", "tool_input": {}}),
+            ("array event", []),
+        ):
+            cases.append((label, "guard-unattended.py", payload, DENY))
         fails.extend(check_cases(cases, str(linked_home)))
     total = len(CASES) + len(cases)
     print(f"corpus-render gate selftest — {total - len(fails)}/{total} passed "
