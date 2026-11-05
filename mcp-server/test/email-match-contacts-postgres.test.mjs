@@ -74,7 +74,7 @@ test('every live party address comes back with its record ref, in or out of mark
     assert.equal(tool.write, false);
     const reply = await tool.handler(db, {}, {});
     assert.equal(reply.schema_version, 'email-match-contacts.v1');
-    assert.deepEqual(reply.contacts.map(({contact_snapshot, ...contact}) => contact), [
+    assert.deepEqual(reply.contacts.map(({contact_snapshot, party_id, target_type, target_id, display_ref, ...contact}) => contact), [
       {address: 'pat@client.test', ref: 'C-0101', name: 'Pat Client', exact: true},
       {address: 'pat@client.test', ref: 'L-0201', name: 'Pat Client', exact: true},
       {address: 'dr@practice.test', ref: 'L-0206', name: 'Practice Org', exact: true},
@@ -88,7 +88,7 @@ test('every live party address comes back with its record ref, in or out of mark
       {address: 'pm@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: true},
       {address: 'office@build.test', ref: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Office build', exact: false},
     ], 'out-of-market and role-less parties are read, plus open-deal contacts by deal ref; merged-away and deleted parties never are');
-    const mainContacts = reply.contacts.map(({contact_snapshot, ...contact}) => contact)
+    const mainContacts = reply.contacts
       .filter(contact => contact.ref !== 'P-0007');
     for (const state of ['deleted', 'merged']) {
       await t.test(`${state} organization preserves main contact fields and duplicate plan`, async () => {
@@ -98,7 +98,7 @@ test('every live party address comes back with its record ref, in or out of mark
           : "update party set deleted_at=null, merged_into=1 where id=7");
         await db.query('set role carr_reader');
         const actual = await tool.handler(db, {}, {});
-        assert.deepEqual(actual.contacts.map(({contact_snapshot, ...contact}) => contact), mainContacts);
+        assert.deepEqual(actual.contacts.map(({contact_snapshot, party_id, target_type, target_id, display_ref, ...contact}) => contact), mainContacts.map(({contact_snapshot, party_id, target_type, target_id, display_ref, ...contact}) => contact));
         const plans = JSON.parse(execFileSync('python3', ['-c', `
 import importlib.util, json, sys
 from pathlib import Path
@@ -128,6 +128,18 @@ print(json.dumps([loader.plan(attendees, rows, [], internal_domain='internal.tes
     }
     await db.query('reset role');
     await db.query('update party set deleted_at=null, merged_into=null where id=7');
+    await db.query('set role carr_reader');
+    const typed = reply.contacts.filter(item => item.address === 'pat@client.test');
+    assert.deepEqual(typed.map(c => [c.party_id, c.target_type, c.target_id, c.display_ref]),
+      [[1, 'client', '1', 'C-0101'], [1, 'lead', '2', 'L-0201']]);
+    await db.query('reset role');
+    await db.query('update client set roster_ref=null where party_id=1');
+    await db.query('set role carr_reader');
+    const nullRef = await tool.handler(db, {}, {});
+    assert.ok(nullRef.contacts.some(c => c.party_id === 1 && c.target_type === 'client'
+      && c.target_id === '1' && c.display_ref === null && c.ref === '1'));
+    await db.query('reset role');
+    await db.query("update client set roster_ref='C-0101' where party_id=1");
     await db.query('set role carr_reader');
     const pat = reply.contacts.filter(item => item.address === 'pat@client.test');
     assert.deepEqual(pat[0].contact_snapshot, {

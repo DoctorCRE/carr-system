@@ -3366,6 +3366,126 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual([(v, a.get('applies_to')) for v, a in self.fake.writes()],
                          [('propose-email-lead', 'not_business')])
 
+    def typed_contacts(self):
+        return [intake.Contact('pat@example.test', ref, '', True, None,
+                               '11111111-1111-4111-8111-111111111111', kind, role_id, None)
+                for ref, kind, role_id in [('C-901', 'client', '33333333-3333-4333-8333-333333333333'),
+                                            ('V-903', 'vendor', '55555555-5555-4555-8555-555555555555')]]
+
+    def test_typed_resolution_applies_all_roles_and_retains_unknown(self):
+        self.fake.contacts_rows = self.typed_contacts()
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test; unknown@example.test')
+        self.run_intake([m])
+        self.assertEqual({a['ref'] for _, a in self.fake.writes('log-activity')},
+                         {'33333333-3333-4333-8333-333333333333', '55555555-5555-4555-8555-555555555555'})
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(set(state['mail_unresolved'][ident(m)]['participants'].values()), {'missing'})
+        before = len(self.fake.writes('log-activity'))
+        self.run_intake([m])
+        self.assertEqual(len(self.fake.writes('log-activity')), before)
+
+    def test_participant_revisions_reconsider_only_changed_mapping(self):
+        self.fake.contacts_rows = self.typed_contacts()
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test; unknown@example.test')
+        self.run_intake([m])
+        calls = []
+        original = intake.Matcher.resolve
+        def resolve(matcher, address):
+            calls.append(address)
+            return original(matcher, address)
+        self.fake.contacts_rows.append(intake.Contact('unrelated@example.test', 'C-999', ''))
+        with patch.object(intake.Matcher, 'resolve', resolve):
+            self.run_intake([m])
+        self.assertNotIn('unknown@example.test', calls)
+        self.fake.contacts_rows.append(intake.Contact('unknown@example.test', 'L-999', ''))
+        with patch.object(intake.Matcher, 'resolve', resolve):
+            self.run_intake([m])
+        self.assertIn('unknown@example.test', calls)
+        self.assertEqual(len(self.fake.writes('log-activity')), 3)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertNotIn(ident(m), state['mail_unresolved'])
+
+    def test_typed_partial_write_replays_original_key_and_payload(self):
+        self.fake.contacts_rows = self.typed_contacts()
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test; unknown@example.test')
+        original = self.fake.carr
+        attempts = []
+        def carr(verb, args):
+            if verb == 'log-activity':
+                attempts.append(dict(args))
+                if args['ref'].startswith('55555555') and len(attempts) == 2:
+                    raise intake.CarrError(code='transport_error')
+            return original(verb, args)
+        self.fake.carr = carr
+        self.run_intake([m])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        progress = state['mail_unresolved'][ident(m)]
+        self.assertEqual(len(progress['completed_refs']), 1)
+        failed = attempts[-1]
+        self.fake.now += timedelta(minutes=5)
+        self.run_intake([m])
+        self.assertEqual(attempts[-1], failed)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(attempts[0]['email_touch']['role'], 'client')
+        self.assertEqual(attempts[1]['email_touch']['role'], 'vendor')
+
+    def test_typed_upgrade_preserves_historical_request_key_and_completed_target(self):
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test; unknown@example.test')
+        self.run_intake([m])
+        prior = self.fake.writes('log-activity')[0][1]
+        self.fake.contacts_rows = [intake.Contact(**{**vars(c), 'display_ref': c.ref})
+                                   for c in self.typed_contacts()]
+        self.run_intake([m])
+        writes = self.fake.writes('log-activity')
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(writes[0][1], prior)
+        self.assertEqual(writes[1][1]['email_touch']['role'], 'vendor')
+        self.assertNotEqual(writes[1][1]['idempotency_key'], prior['idempotency_key'])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        effects = state['mail_unresolved'][ident(m)]['effect_keys']
+        self.assertEqual(effects['33333333-3333-4333-8333-333333333333'], prior['idempotency_key'])
+
+    def test_source_revision_reconsiders_without_duplicate_completed_roles(self):
+        self.fake.contacts_rows = self.typed_contacts()
+        m = mail(OWNER, -timedelta(hours=1), recipients='pat@example.test; unknown@example.test', local_keys='91')
+        self.run_intake([m])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        before = state['mail_unresolved'][ident(m)]['participant_outcomes']
+        self.run_intake([{**m, 'body': 'Updated synthetic body'}])
+        state = json.loads((self.out() / intake.STATE).read_text())
+        after = state['mail_unresolved'][ident(m)]['participant_outcomes']
+        self.assertNotEqual(before, after)
+        self.assertEqual(len(self.fake.writes('log-activity')), 2)
+
+    def test_typed_empty_reader_never_clears_unresolved(self):
+        m = mail('unknown@example.test', -timedelta(hours=1))
+        self.run_intake([m])
+        prior = json.loads((self.out() / intake.STATE).read_text())['mail_unresolved']
+        self.fake.contacts_rows = []
+        result = self.run_intake([m])
+        self.assertEqual(result.reason, 'contacts_empty')
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['mail_unresolved'], prior)
+
+    def test_typed_resolution_single_party_null_ref_and_shared_review(self):
+        rows = self.typed_contacts()
+        matcher = intake.Matcher(rows + rows, 'internal.test')
+        result = matcher.resolve('PAT@example.test')
+        self.assertEqual(result.disposition, 'eligible')
+        self.assertEqual(result.party_id, '11111111-1111-4111-8111-111111111111')
+        self.assertEqual(len(result.targets), 2)
+        self.assertIsNone(result.single_target())
+        self.assertIsNone(matcher.ref('pat@example.test'))
+        self.assertEqual(intake.Matcher(rows[:1], 'internal.test').resolve(
+            'pat@example.test').single_target().target_id, '33333333-3333-4333-8333-333333333333')
+        shared = rows + [intake.Contact('pat@example.test', 'C-902', '', True, None,
+                                       '22222222-2222-4222-8222-222222222222', 'client', '44444444-4444-4444-8444-444444444444')]
+        self.assertEqual(intake.Matcher(shared, 'internal.test').resolve(
+            'pat@example.test').disposition, 'ambiguous')
+        changed = [intake.Contact('pat@example.test', 'C-901', '', True, None,
+                                 '22222222-2222-4222-8222-222222222222', 'client', '33333333-3333-4333-8333-333333333333')]
+        self.assertNotEqual(intake.Matcher(rows[:1], 'internal.test').fingerprint(),
+                            intake.Matcher(changed, 'internal.test').fingerprint())
+
     def test_an_address_shared_by_two_records_is_ambiguous(self):
         self.fake.contacts_rows.append(intake.Contact('pat@example.test', 'L-907', 'Pat Example'))
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])

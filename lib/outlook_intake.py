@@ -96,7 +96,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from typing import Callable
+from typing import Callable, Literal
 import uuid
 
 from lib.calendar_agenda import (agenda, AGENDA_SCHEMA, AGENDA_DAYS, AGENDA_ATTENDEES,
@@ -205,6 +205,32 @@ class Contact:
     name: str
     exact: bool = True
     contact_snapshot: dict | None = None
+    party_id: str | None = None
+    target_type: str | None = None
+    target_id: str | None = None
+    display_ref: str | None = None
+
+
+@dataclass(frozen=True)
+class RoleTarget:
+    party_id: str | None
+    target_type: str
+    target_id: str
+    display_ref: str | None = None
+
+    @property
+    def ref(self) -> str:
+        return self.target_id
+
+
+@dataclass(frozen=True)
+class ParticipantResolution:
+    disposition: Literal['eligible', 'ambiguous', 'shared_role', 'missing', 'automated', 'unsupported']
+    party_id: str | None = None
+    targets: tuple[RoleTarget, ...] = ()
+
+    def single_target(self) -> RoleTarget | None:
+        return self.targets[0] if self.disposition == 'eligible' and len(self.targets) == 1 else None
 
 
 @dataclass
@@ -885,24 +911,55 @@ def _best_copies(mails: list[dict], state: dict | None = None) -> list[dict]:
 
 class Matcher:
     def __init__(self, contacts: list, domain: str):
+        if not contacts:
+            raise CarrError(code='contacts_empty')
         self.contact_rows: dict[str, list[Contact]] = {}
-        self.by_email: dict[str, set] = {}
-        self.unsupported: set[str] = set()
         self.shared: set[str] = set()
         self.people = [(c.email.lower(), c.ref, c.name) for c in contacts
                        if c.exact and '@' in c.email and RECORD_REF.match(c.ref) and not _internal(c.email, domain)]
         for c in contacts:
-            self.contact_rows.setdefault(c.email.lower(), []).append(c)
             if '@' in c.email and not _internal(c.email, domain):
+                self.contact_rows.setdefault(c.email.lower(), []).append(c)
                 if not c.exact:
                     self.shared.add(c.email.lower())
-                elif RECORD_REF.match(c.ref) or DEAL_REF.match(c.ref):
-                    self.by_email.setdefault(c.email.lower(), set()).add(c.ref)
-                else:
-                    self.unsupported.add(c.email.lower())
-        for address in self.shared:  # a possibly shared inbox is never exact, on any record
-            self.by_email.pop(address, None)
-            self.unsupported.discard(address)
+        self.revisions = {}
+        for address, rows in self.contact_rows.items():
+            evidence = {(c.exact, str(c.party_id or (c.contact_snapshot or {}).get('party_id') or ''),
+                         c.target_type or '', c.target_id or '', c.ref) for c in rows}
+            self.revisions[address] = _hash(json.dumps(sorted(evidence)))
+
+    def revision(self, address: str) -> str:
+        return self.revisions.get(address.lower(), 'missing')
+
+    def resolve(self, address: str) -> ParticipantResolution:
+        rows = self.contact_rows.get(address.lower(), [])
+        if address.lower() in self.shared:
+            return ParticipantResolution('shared_role')
+        if not rows:
+            return ParticipantResolution('automated' if automated(address) else 'missing')
+        parties = {str(c.party_id or (c.contact_snapshot or {}).get('party_id')) for c in rows
+                   if c.party_id or (c.contact_snapshot or {}).get('party_id')}
+        if len(parties) > 1:
+            return ParticipantResolution('ambiguous')
+        targets = {}
+        for c in rows:
+            kind = c.target_type
+            target_id = c.target_id
+            if kind is None:
+                kind = ('client' if c.ref.startswith('C-') else 'lead' if c.ref.startswith('L-')
+                        else 'vendor' if c.ref.startswith('V-') else 'deal' if DEAL_REF.match(c.ref)
+                        else 'party')
+                target_id = c.ref
+            if kind not in ('client', 'lead', 'vendor', 'deal') or not target_id:
+                continue
+            party = str(c.party_id or (c.contact_snapshot or {}).get('party_id') or '') or None
+            targets[(kind, target_id)] = RoleTarget(party, kind, target_id, c.display_ref)
+        party = next(iter(parties)) if parties else None
+        if not targets:
+            return ParticipantResolution('unsupported', party)
+        if len(targets) > 1 and (not party or any(t.party_id != party for t in targets.values())):
+            return ParticipantResolution('ambiguous')
+        return ParticipantResolution('eligible', party, tuple(targets[k] for k in sorted(targets)))
 
     def signature_contact(self, address: str) -> Contact | None:
         rows = self.contact_rows.get(address.lower(), [])
@@ -925,28 +982,21 @@ class Matcher:
         return sorted(rows, key=lambda c: c.ref)[0]
 
     def fingerprint(self) -> str:
-        return _hash(json.dumps({'supported': {a: sorted(refs) for a, refs in self.by_email.items()},
-                                 'unsupported': sorted(self.unsupported), 'shared': sorted(self.shared)},
-                                sort_keys=True))
+        return _hash(json.dumps(self.revisions, sort_keys=True))
 
     def reason(self, address: str) -> str | None:
-        refs = self.by_email.get(address.lower(), set())
-        if len(refs) > 1:
-            return 'ambiguous'
-        if not refs:
-            if address.lower() in self.unsupported:
-                return 'unsupported'
-            return 'shared_role' if address.lower() in self.shared else 'missing'
-        return None
+        result = self.resolve(address)
+        if result.disposition == 'eligible':
+            return None if result.single_target() else 'ambiguous'
+        return 'missing' if result.disposition == 'automated' else result.disposition
 
     def classify(self, address: str) -> str | None:
-        """reason(), except an unknown machine sender is 'automated': not business, not unresolved."""
-        reason = self.reason(address)
-        return 'automated' if reason == 'missing' and automated(address) else reason
+        result = self.resolve(address)
+        return result.disposition if result.disposition != 'eligible' else (None if result.single_target() else 'ambiguous')
 
     def ref(self, address: str) -> str | None:
-        refs = self.by_email.get(address.lower(), set())
-        return next(iter(refs)) if len(refs) == 1 else None
+        target = self.resolve(address).single_target()
+        return (target.display_ref or target.ref) if target else None
 
 
 # ---- one run -----------------------------------------------------------------
@@ -982,7 +1032,9 @@ class Run:
         return key(verb, ref, f'{self.settings.owner}|{source}')
 
     def activity_key(self, ref: str, source: str) -> str:
-        return self.owner_key('log-activity', ref, source)
+        progress = (self.state.get('mail_unresolved', {}).get(source)
+                    or self.state.get('mail_participants', {}).get(source, {}))
+        return progress.get('effect_keys', {}).get(ref) or self.owner_key('log-activity', ref, source)
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
@@ -1039,6 +1091,8 @@ class Run:
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
             if verb == 'log-activity':
                 request['activity_id'] = reply.get('activity_id')
+                if reply.get('email_application'):
+                    request['email_application'] = reply['email_application']
                 if args.get('kind') == 'email_in':
                     self.state['last_email_in_filed_at'] = int(self.now.timestamp())
             request.update(acknowledged=True, disposition='acknowledged', retry_at=None, error_code=None)
@@ -1319,32 +1373,60 @@ class Run:
                     unresolved.pop(m['ident'], None)
                     done.setdefault(m['ck'], []).append(m['sent_unix'])
                 continue
-            refs = []
-            for address, name in parties:
-                ref = matcher.ref(address)
-                if ref is None:
-                    reason = matcher.classify(address)
-                    assert reason is not None
-                    if reason != 'automated':
-                        self.unmatched.add((name or '(no name)', _domain(address), reason))
-                elif ref not in refs:
-                    refs.append(ref)
             progress = unresolved.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix']})
+            self.state.setdefault('mail_participants', {})[m['ident']] = progress
             progress['sent'] = m['sent_unix']
             progress.pop('metadata_incomplete', None)
             progress.pop('recipients_unknown', None)
-            progress['participants'] = {_hash(address): matcher.classify(address) for address, _ in parties
-                                        if matcher.classify(address)}
+            outcomes = progress.setdefault('participant_outcomes', {})
+            refs, targets, reasons = [], {}, {}
+            for address, name in parties:
+                participant = _hash(address)
+                mapping_revision = matcher.revision(address)
+                source_revision = _hash(json.dumps(
+                    [address, name, m['sender'], m['subject'], m['text'], m['full'],
+                     m['sent_unix'], m.get('metadata_incomplete', False)]))
+                outcome = outcomes.get(participant)
+                if (not outcome or outcome.get('mapping_revision') != mapping_revision
+                        or outcome.get('source_revision') != source_revision):
+                    result = matcher.resolve(address)
+                    outcome = {'mapping_revision': mapping_revision, 'source_revision': source_revision,
+                               'disposition': result.disposition,
+                               'party_id': result.party_id,
+                               'targets': [vars(t) for t in result.targets]}
+                    outcomes[participant] = outcome
+                reason = outcome['disposition']
+                if reason != 'eligible':
+                    reasons[participant] = reason
+                    if reason != 'automated':
+                        self.unmatched.add((name or '(no name)', _domain(address), reason))
+                for data in outcome['targets']:
+                    target = RoleTarget(**data)
+                    targets[target.ref] = target
+                    if target.ref not in refs:
+                        refs.append(target.ref)
+            progress['participants'] = reasons
             if not refs and progress['participants'] and set(progress['participants'].values()) == {'automated'}:
                 unresolved.pop(m['ident'], None)
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
                 self.counts['skipped_automated'] += 1
                 continue
             completed = progress.setdefault('completed_refs', [])
+            effect_keys = progress.setdefault('effect_keys', {})
+            for ref, target in targets.items():
+                canonical_key = self.owner_key('log-activity', ref, m['ident'])
+                prior_key = self.owner_key('log-activity', target.display_ref, m['ident']) if target.display_ref else None
+                if prior_key in self.state.get('requests', {}):
+                    effect_keys[ref] = prior_key
+                elif canonical_key in self.state.get('requests', {}):
+                    effect_keys[ref] = canonical_key
+                else:
+                    effect_keys.setdefault(ref, canonical_key)
             missing = any(reason != 'automated' for reason in progress['participants'].values())
-            if not outbound and matcher.classify(m['sender']) == 'missing' and proposable(m['sender']):
+            if not outbound and reasons.get(_hash(m['sender'])) == 'missing' and proposable(m['sender']):
                 self.lead_candidates.append((m, progress))
-            refs = [ref for ref in refs if ref not in completed]
+            refs = [ref for ref in refs if ref not in completed
+                    and targets[ref].display_ref not in completed]
             if not refs:
                 if not missing:
                     unresolved.pop(m['ident'], None)
@@ -1359,9 +1441,13 @@ class Run:
                                                 'subject_hash': _hash(m['subject'] or '')})
                 pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
             results = [self.write('log-activity', {
-                'idempotency_key': self.activity_key(ref, m['ident']), 'ref': ref, 'kind': kind,
+                'idempotency_key': effect_keys[ref], 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
+                **({'email_touch': {'source_id': m['ident'], 'source_version': '1',
+                    'role': {'lead': 'prospect'}.get(targets[ref].target_type, targets[ref].target_type)}}
+                   if targets[ref].party_id and targets[ref].target_type != 'deal'
+                   and effect_keys[ref] not in self.state.get('requests', {}) else {}),
                 'email_context': email_context(m, self.settings.internal_domain),
                 **({'email_identity': {'mailbox_owner': self.settings.owner, 'mailbox_account': self.settings.account,
                      'item_id': 'hxstore-key:' + ','.join(_store_keys(m['local_keys']))}}
@@ -1526,7 +1612,14 @@ class Run:
                 continue
             parties = (_addresses(mail['recipients']) if _internal(mail['sender'], self.settings.internal_domain)
                        else [mail['sender']])
-            refs = {matcher.ref(a) for a in parties if not _internal(a, self.settings.internal_domain)} - {None}
+            resolutions = [matcher.resolve(a) for a in parties if not _internal(a, self.settings.internal_domain)]
+            role_targets = {target for result in resolutions if (target := result.single_target())}
+            refs = {target.display_ref or target.ref for target in role_targets if target.target_type == 'client'}
+            if (refs and len(role_targets) != 1) or any(
+                    result.disposition in ('ambiguous', 'shared_role')
+                    or (result.disposition == 'eligible' and not result.single_target()) for result in resolutions):
+                self.counts['attachments_client_ambiguous'] = self.counts.get('attachments_client_ambiguous', 0) + pending
+                continue
             names = {parts[i + 1] for path in mail.get('folders', [])
                      for parts in [path.split('/')] for i, part in enumerate(parts[:-1])
                      if part.casefold() == 'active deals'}
@@ -1545,7 +1638,7 @@ class Run:
             deals = self.ports.carr('read-deal-reconciliation', {'all': True})['deals']
             selected = {}
             for mail, ref, name in candidates:
-                matches = [d for d in deals if d['client_ref'] == ref and d['name'].casefold() == name.casefold()]
+                matches = [d for d in deals if ref in (d['client_ref'], d.get('client_id')) and d['name'].casefold() == name.casefold()]
                 if len(matches) != 1:
                     counter = 'attachments_deal_missing' if not matches else 'attachments_deal_ambiguous'
                     self.counts[counter] = self.counts.get(counter, 0) + sum(
@@ -2258,7 +2351,8 @@ def _contacts(carr: Callable[[str, dict], dict]) -> Callable[[], list]:
     """Every live party address in any market, through the record layer's one contact read."""
     def read() -> list:
         try:
-            rows = [Contact(c['address'], c['ref'], c['name'], c['exact'], c.get('contact_snapshot'))
+            rows = [Contact(c['address'], c['ref'], c['name'], c['exact'], c.get('contact_snapshot'),
+                            c.get('party_id'), c.get('target_type'), c.get('target_id'), c.get('display_ref'))
                     for c in carr('email-match-contacts', {})['contacts']]
         except (CarrError, KeyError, TypeError):
             raise CarrError(code='contacts_read_failed') from None
