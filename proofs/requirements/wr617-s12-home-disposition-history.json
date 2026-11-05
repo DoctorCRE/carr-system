@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617.S12.J17",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "home-disposition-history-release",
+    "predicate": "Worker release contains migration 1155 and read-home-inbox-v6 and read-recently-settled-home-inbox. Release identity alone does not prove the product journey. Coordinator must observe an authorized Home settle with time, actor and method in v6, listed first in recent settlements, then unsettle and observe its removal.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release matches merged SHA and registry contains both reads. Product proof remains pending until coordinator observes the settle/read/recent/unsettle journey, including shared batch_id for a bulk settle.",
+    "input_class": "read-only release identity and verb registry",
+    "deadline_seconds": 120
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 10, "max_records": 1000, "max_runtime_seconds": 180, "max_artifact_bytes": 1048576}
+}

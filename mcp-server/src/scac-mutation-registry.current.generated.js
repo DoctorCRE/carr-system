@@ -2424,6 +2424,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-home-inbox-v6": {
+    "ingress_key": "mcp-tool:read-home-inbox-v6",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-home-review": {
     "ingress_key": "mcp-tool:read-home-review",
     "source_locator": "mcp-server/src/home-review.js",
@@ -2518,6 +2528,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-progress-board",
     "source_locator": "mcp-server/src/board-answers.js",
     "schema_digest": "09ba6375dcf875532b1fdb4424f53890ed66ef3ff23ae0e769a312c15b8a9f85",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-recently-settled-home-inbox": {
+    "ingress_key": "mcp-tool:read-recently-settled-home-inbox",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "f2207aba66ad01982befccf422aa0754a1e4628c6d949f4dae198bd61c3a9e92",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

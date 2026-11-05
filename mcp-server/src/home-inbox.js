@@ -50,6 +50,19 @@ export const HOME_INBOX_WAITING_CONTRACT = Object.freeze({
   },
 });
 
+export const HOME_INBOX_HISTORY_CONTRACT = Object.freeze({
+  ...HOME_INBOX_WAITING_CONTRACT,
+  schema_version: 'home-inbox.v6',
+  read_verb: 'read-home-inbox-v6',
+  item_fields: { ...HOME_INBOX_WAITING_CONTRACT.item_fields,
+    settlement: 'null|{at:UTC ISO-8601|null,actor_id:UUID|null,method:single|bulk|automatic,batch_id:UUID|null}; current settlement evidence; legacy manual settlement is null; automatic actor is null and time is proven completed_at or null',
+    snooze: 'null|{at:UTC ISO-8601,actor_id:UUID,method:single|bulk,batch_id:UUID|null}; current snooze evidence, legacy unknown is null',
+    last_disposition_change: 'null|{at:UTC ISO-8601,actor_id:UUID,method:single|bulk,batch_id:UUID|null,action:settle|snooze|unsettle|unsnooze,request_key:UUID}; latest successful manual command; undo has its own time; replay adds no event',
+  },
+  history: 'Metadata is actor-scoped. Bulk uses the command idempotency key as shared batch_id; single uses null. Unsettle clears settlement. Exact snooze undo restores prior settlement evidence. Legacy times are never inferred from updated_at. Automatic settlement remains a read-only canonical projection.',
+  recent_settles: 'read-recently-settled-home-inbox returns home-recent-settles.v1, limit 1..100 default 20; current known-time settlements in this bounded Home snapshot, newest settlement time first then item_id. Unknown times excluded. Propagates Home truncated; it is not an exhaustive historical export. Unsettled or snoozed cards are excluded. Undo manual bulk via existing reversible command batch_id; single or automatic via unsettle-home-inbox and current base_version.',
+});
+
 function withAutomaticSettlement(snapshot, pendingReplyIds) {
   return { ...snapshot, auto_settle_enabled: true,
     items: snapshot.items.map(item => {
@@ -68,14 +81,27 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
     if (result?.ok !== true) throw new ToolError({ error: result?.error || 'inbox_unavailable' });
     return result;
   };
-  const readWithSettlement = async (c, version) => {
-    const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_${version}() as result)
+  const readWithSettlement = async (c, version, limit) => {
+    const sql = version === 'recent' ? 'ops.read_recently_settled_home_inbox($1::integer)' : `ops.read_home_inbox_${version}()`;
+    const row = (await c.query(`with snapshot as materialized (select ${sql} as result)
       select result,array(select p.id::text from jsonb_array_elements(result->'items') i
         join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
-        where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
+        where p.status='pending') as pending_reply_ids from snapshot`, version === 'recent' ? [limit ?? 20] : [])).rows[0];
     return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
   };
   const tools = {
+    'read-home-inbox-v6': {
+      writerConnection: true,
+      description: 'Read Home v6 with current settlement and snooze evidence and latest manual transition time, actor, single/bulk method and shared batch ID. Automatic settlement is distinct, using proven completion time or null. Legacy manual times stay unknown. Includes v5 waiting and v4 completion. Reads never write.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: c => readWithSettlement(c, 'v6'),
+    },
+    'read-recently-settled-home-inbox': {
+      writerConnection: true,
+      description: 'Read actor-scoped current known-time settlements from the bounded Home v6 snapshot, newest settlement first, item_id tie breaker. Limit 1..100, default 20. Unknown legacy times excluded. Propagates truncated. Unsettle removes the card. Uses home-recent-settles.v1.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: { limit: { type: 'integer', minimum: 1, maximum: 100 } } },
+      handler: (c, actor, args) => readWithSettlement(c, 'recent', args.limit),
+    },
     'read-home-inbox-v5': {
       writerConnection: true,
       description: 'Read Home with nullable verified waiting identity, reason, evidence and independent waiting_version. Unknown is null. Merged parties resolve to survivors; deleted identities are unavailable. Completed items have no wait. Reads do not change records. Uses home-inbox.v5 with v4 completion times and v3 automatic settlement.',

@@ -1,0 +1,137 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
+import pg from 'pg';
+import { readFileSync } from 'node:fs';
+import { HOME_INBOX_HISTORY_CONTRACT } from '../src/home-inbox.js';
+import { executeRegisteredTool } from '../src/tools.js';
+
+const dsn = await snapshotDatabase('home-history-');
+test('Home transition history follows the disposition statechart', async t => {
+  const c = new pg.Client({ connectionString: dsn });
+  await c.connect(); t.after(() => c.end());
+  const actor = (await c.query("select id,slug from actor where slug='joe'")).rows[0]; actor.human=true;
+  const other = (await c.query("select id,slug from actor where slug='dell'")).rows[0]; other.human=true;
+  const ids = [randomUUID(),randomUUID()];
+  await c.query(`insert into next_action(id,owner_id,subject_type,subject_id,description,created_by,updated_by)
+    select n,$2,'client',n,'Synthetic history task',$2,$2 from unnest($1::uuid[]) n`,[ids,actor.id]);
+  const context = who => c.query("select set_config('carr.acting_actor_slug',$1,false),set_config('carr.verified_human_actor_slug',$1,false)",[who.slug]);
+  const read = async (who=actor) => { await context(who); return executeRegisteredTool(c,who,'read-home-inbox-v6',{}); };
+  const items = async () => (await read()).items.filter(i=>ids.includes(i.source_id));
+  const recent = async (who=actor,limit=10) => { await context(who); return executeRegisteredTool(c,who,'read-recently-settled-home-inbox',{limit}); };
+  const change = async (verb,current,extra={},key=randomUUID()) => {
+    await context(actor); await c.query('begin');
+    try {
+      const args={idempotency_key:key,...(current?{items:current.map(({item_id,base_version})=>({item_id,base_version}))}:{}),...extra};
+      const result=await executeRegisteredTool(c,actor,verb,args); await c.query('commit'); return result;
+    } catch(e) {await c.query('rollback');throw e;}
+  };
+  const initial=await items(); assert.equal(initial.length,2);
+  assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v6.json',import.meta.url))),HOME_INBOX_HISTORY_CONTRACT);
+  assert.ok(initial.every(i=>i.settlement===null && i.last_disposition_change===null));
+  const snoozeKey=randomUUID();
+  await change('snooze-home-inbox',[initial[0]],{reversible:true,until:'2099-01-01T00:00:00Z'},snoozeKey);
+  await change('snooze-home-inbox',null,{undo_of:snoozeKey});
+  assert.equal((await items()).find(i=>i.item_id===initial[0].item_id).disposition,'inbox');
+  const key=randomUUID();
+  const settled=await change('settle-home-inbox',initial,{reversible:true},key);
+  assert.ok(settled.results.every(i=>i.status==='applied'));
+  let current=await items();
+  for(const i of current) {
+    assert.equal(i.settlement.actor_id,actor.id); assert.equal(i.settlement.method,'bulk');
+    assert.equal(i.settlement.batch_id,key); assert.ok(Date.parse(i.settlement.at));
+  }
+  assert.equal(current[0].settlement.at,current[1].settlement.at);
+  const original=current[0].settlement;
+  await change('settle-home-inbox',initial,{reversible:true},key);
+  assert.deepEqual((await items())[0].settlement,original);
+  assert.equal((await c.query('select count(*)::int n from ops.home_inbox_transition where request_key=$1',[key])).rows[0].n,2);
+  assert.equal((await recent(other)).items.length,0);
+  assert.equal((await recent(actor,1)).items.length,1);
+  await change('snooze-home-inbox',[current[0]],{reversible:true,until:'2099-01-01T00:00:00Z'},ids[0]);
+  const snoozed=(await items()).find(i=>i.item_id===current[0].item_id);
+  assert.equal(snoozed.settlement,null); assert.equal(snoozed.snooze.method,'single');
+  await change('snooze-home-inbox',null,{undo_of:ids[0]});
+  current=await items();
+  assert.deepEqual(current.find(i=>i.item_id===snoozed.item_id).settlement,original);
+  assert.equal(current.find(i=>i.item_id===snoozed.item_id).last_disposition_change.action,'unsnooze');
+  await change('unsettle-home-inbox',current);
+  assert.ok((await items()).every(i=>i.settlement===null && i.last_disposition_change.action==='unsettle'));
+  assert.equal((await recent()).items.length,0);
+  current=await items();
+  await change('settle-home-inbox',[current[0]]);
+  const single=(await items()).find(i=>i.item_id===current[0].item_id);
+  assert.equal(single.settlement.method,'single'); assert.equal(single.settlement.batch_id,null);
+  await change('settle-home-inbox',[single]);
+  assert.deepEqual((await items()).find(i=>i.item_id===single.item_id).settlement,single.settlement);
+  await change('settle-home-inbox',[current[1]],{reversible:true},ids[1]);
+  await change('settle-home-inbox',null,{undo_of:ids[1]});
+  assert.equal((await items()).find(i=>i.item_id===current[1].item_id).settlement,null);
+  const before=(await c.query('select count(*)::int n from ops.home_inbox_transition')).rows[0].n;
+  await change('settle-home-inbox',[{...current[1],base_version:'0'.repeat(32)}]);
+  assert.equal((await c.query('select count(*)::int n from ops.home_inbox_transition')).rows[0].n,before);
+  current=await items();
+  await change('unsettle-home-inbox',current);
+  await c.query('delete from ops.home_inbox_disposition where actor_id=$1',[actor.id]);
+  await c.query("update next_action set status='done',version=version+1,updated_at=now() where id=$1",[ids[1]]);
+  let automatic=(await items()).find(i=>i.source_id===ids[1]);
+  assert.equal(automatic.auto_settled,true); assert.equal(automatic.settlement.method,'automatic');
+  assert.equal(automatic.settlement.actor_id,null); assert.equal(automatic.settlement.at,null,'unproven canonical time stays unknown');
+  await c.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,field,old_value,new_value,cause,organization_tenant_id)
+    values('2026-11-04T23:00:00Z',$1,'complete-one-action','client',$2,'status','{"status":"open"}',
+      jsonb_build_object('status','done','next_action_id',$2::uuid::text),'human_stated','carr-internal')`,[actor.id,ids[1]]);
+  automatic=(await items()).find(i=>i.source_id===ids[1]);
+  assert.equal(automatic.settlement.at,'2026-11-04T23:00:00.000000Z');
+  assert.equal((await recent()).items[0].source_id,ids[1]);
+  const auditBefore=(await c.query('select count(*)::int n from ops.home_inbox_transition')).rows[0].n;
+  await read(); await recent();
+  assert.equal((await c.query('select count(*)::int n from ops.home_inbox_transition')).rows[0].n,auditBefore,'reads never persist automatic events');
+  await change('snooze-home-inbox',[automatic],{reversible:true,until:'2099-01-01T00:00:00Z'});
+  assert.equal((await items()).find(i=>i.source_id===ids[1]).settlement,null);
+  assert.equal((await recent()).items.length,0);
+  await c.query("update ops.home_inbox_disposition set snoozed_until=now()-interval '1 second' where actor_id=$1",[actor.id]);
+  assert.equal((await items()).find(i=>i.source_id===ids[1]).settlement.method,'automatic');
+  await change('unsettle-home-inbox',[(await items()).find(i=>i.source_id===ids[1])]);
+  assert.equal((await recent()).items.length,0);
+  await c.query('delete from ops.home_inbox_disposition where actor_id=$1',[actor.id]);
+  await c.query("update next_action set status='open',version=version+1,updated_at=now() where id=$1",[ids[1]]);
+  const open=(await items()).find(i=>i.source_id===ids[1]);
+  await change('snooze-home-inbox',[open],{until:'2099-01-01T00:00:00Z'});
+  await c.query("update next_action set description='Materially changed instruction',version=version+1,updated_at=now() where id=$1",[ids[1]]);
+  assert.equal((await items()).find(i=>i.source_id===ids[1]).snooze,null);
+  const legacy=(await items()).find(i=>i.source_id===ids[0]);
+  await change('settle-home-inbox',[legacy]);
+  await c.query('update ops.home_inbox_disposition set settlement=null where actor_id=$1',[actor.id]);
+  assert.equal((await items()).find(i=>i.source_id===ids[0]).settlement,null,'legacy updated_at is never invented as settle time');
+  await c.query('set role carr_writer');
+  assert.equal((await read()).schema_version,'home-inbox.v6');
+  await assert.rejects(c.query('select ops.change_home_inbox_without_history(null,null,null,null)'),e=>e.code==='42501');
+  await c.query('reset role');
+  await assert.rejects(recent(actor,101),e=>e.payload?.error==='invalid_limit');
+  await t.test('pre-migration exact undo receipts remain usable with unknown times',async()=>{
+    await c.query(`drop function ops.read_recently_settled_home_inbox(integer);
+      drop function ops.read_home_inbox_v6();
+      drop function ops.change_home_inbox_without_history(uuid,text,jsonb,timestamptz);
+      drop table ops.home_inbox_transition;
+      alter table ops.home_inbox_disposition drop column settlement,drop column snooze;
+      truncate ops.home_inbox_disposition,ops.home_inbox_batch,ops.home_inbox_write,tool_call;`);
+    const old=readFileSync(new URL('../../migrations/1145_home_inbox_bulk.sql',import.meta.url),'utf8');
+    await c.query(old.slice(old.indexOf('create function ops.write_home_inbox_disposition'))
+      .replaceAll('create function ops.','create or replace function ops.'));
+    const legacySnapshot=await executeRegisteredTool(c,actor,'read-home-inbox-v5',{});
+    const legacyItem=legacySnapshot.items.find(i=>i.source_id===ids[0]);
+    const legacyKey=randomUUID();
+    await change('settle-home-inbox',[legacyItem],{reversible:true},legacyKey);
+    await c.query(readFileSync(new URL('../../migrations/1155_home_disposition_history.sql',import.meta.url),'utf8'));
+    assert.equal((await items()).find(i=>i.item_id===legacyItem.item_id).settlement,null);
+    const undo=await change('settle-home-inbox',null,{undo_of:legacyKey});
+    assert.equal(undo.results[0].status,'applied');
+    const restored=(await items()).find(i=>i.item_id===legacyItem.item_id);
+    assert.equal(restored.disposition,'inbox'); assert.equal(restored.settlement,null);
+    assert.equal(restored.last_disposition_change.action,'unsettle');
+  });
+  await c.query('set role carr_reader');
+  await assert.rejects(c.query('select * from ops.home_inbox_transition'),e=>e.code==='42501');
+  await c.query('reset role');
+});
