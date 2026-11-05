@@ -9,8 +9,11 @@ import io
 import json
 import os
 import shutil
+import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -87,11 +90,23 @@ def safe_path(value: object) -> bool:
 
 def download(url: str, expected_bytes: int) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": "carr-system-doctorcre-artifact/1"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        data = response.read(MAX_ARCHIVE_BYTES + 1)
-    if len(data) != expected_bytes:
-        raise ValueError(f"downloaded byte count mismatch for {url}")
-    return data
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                data = response.read(MAX_ARCHIVE_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {502, 503, 504} or attempt == 2:
+                raise
+            exc.close()
+            delay = attempt + 1
+            print(f"doctorcre-artifact: HTTP {exc.code}; retrying in {delay}s "
+                  f"(attempt {attempt + 2}/3)", file=sys.stderr)
+            time.sleep(delay)
+            continue
+        if len(data) != expected_bytes:
+            raise ValueError(f"downloaded byte count mismatch for {url}")
+        return data
+    raise AssertionError("download attempts exhausted without a result")
 
 
 def artifact_inputs(pin: dict[str, Any], archive_path: Path | None = None,
