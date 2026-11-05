@@ -72,6 +72,36 @@ class PublicationTests(unittest.TestCase):
             for value in item['excerpt'].values():
                 self.assert_marked(value)
 
+    def test_neutral_empty_and_null_excerpts_keep_their_shapes(self):
+        from lib.fence import DATA_SENTENCE, fence
+        with closing(sqlite3.connect(self.source)) as db, db:
+            db.execute('UPDATE messages SET subject=?,body=? WHERE id=1', ('orchard', ''))
+            db.execute('UPDATE messages SET subject=?,body=? WHERE id=2', ('orchard', None))
+        self.build()
+        result = self.query(excerpts=True)
+        by_id = {int(item['source_ref'].split(':')[1]): item['excerpt'] for item in result['results']}
+        self.assertEqual(by_id[1]['body'], DATA_SENTENCE + '\n' + fence('email', ''))
+        self.assertIsNone(by_id[2]['body'])
+        for item in result['results']:
+            self.assertEqual(set(item['excerpt']), {'subject', 'body'})
+            self.assertEqual(item['excerpt']['subject'], DATA_SENTENCE + '\n' + fence('email', 'orchard'))
+        metadata_only = self.query()
+        self.assertEqual(metadata_only['match_count'], result['match_count'])
+        self.assertNotIn('excerpt', metadata_only['results'][0])
+        self.assertNotIn(DATA_SENTENCE, json.dumps(metadata_only))
+
+    def test_every_page_and_both_cli_modes_keep_the_marker(self):
+        self.hostile_source()
+        first = self.query(excerpts=True, limit=1)
+        second = self.query(excerpts=True, limit=1, cursor=first['next_cursor'])
+        self.assertIsNone(second['next_cursor'])
+        for page in (first, second):
+            for value in page['results'][0]['excerpt'].values():
+                self.assert_marked(value)
+        result = self.query_cli('--query', 'orchard', '--local-excerpts')
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), self.query(excerpts=True))
+
     def test_default_consumers_use_per_user_publication(self):
         from lib.email_local_search import published_index_path, query_index
         target = published_index_path(42, home=self.home)
@@ -311,7 +341,8 @@ class PublicationTests(unittest.TestCase):
                 modules = [(node.module or '').split('.')[0]]
             else:
                 continue
-            self.assertTrue(set(modules) <= sys.stdlib_module_names, modules)
+            self.assertTrue(set(modules) <= sys.stdlib_module_names or
+                            isinstance(node, ast.ImportFrom) and node.module == 'lib.fence', modules)
         self.build()
         with patch('socket.socket', side_effect=AssertionError('network')) as network, \
                 patch('subprocess.Popen', side_effect=AssertionError('external process')) as process:
@@ -338,8 +369,11 @@ class PublicationTests(unittest.TestCase):
         before = self.target.read_bytes()
         with patch('lib.email_local_search._readonly', side_effect=readonly):
             result = self.query('orchard', excerpts=True, limit=1)
-        self.assertEqual(len(result['results'][0]['excerpt']['body']), 500)
-        self.assertEqual(len(result['results'][0]['excerpt']['subject']), 240)
+        from lib.fence import DATA_SENTENCE, fence
+        self.assertEqual(result['results'][0]['excerpt']['body'],
+                         DATA_SENTENCE + '\n' + fence('email', 'orchard ' + 'é' * 492))
+        self.assertEqual(result['results'][0]['excerpt']['subject'],
+                         DATA_SENTENCE + '\n' + fence('email', 's' * 240))
         self.assertLess(len(json.dumps(result)), 5000)
         self.assertEqual(before, self.target.read_bytes())
 
