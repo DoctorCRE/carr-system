@@ -116,6 +116,16 @@ if isinstance(counts, dict) and set(counts) == {"run", "backlog"}:
     groups, run_counts = [counts["run"], counts["backlog"]], counts["run"]
 else:
     groups, run_counts = [counts], counts
+valid_counts = (all(isinstance(group, dict) for group in groups)
+                and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
+                        for group in groups for k, v in group.items()))
+if sys.argv[3] == "outlook-triage" and isinstance(counts, dict) and set(counts) == {"run"}:
+    facts = counts["run"]
+    valid_counts = (isinstance(facts, dict)
+                    and set(facts) == {"snapshot_validated", "observed", "moved", "held", "exit_code"}
+                    and all(type(facts[key]) is bool for key in ("snapshot_validated", "held"))
+                    and all(type(facts[key]) is int and 0 <= facts[key] <= 1_000_000_000
+                            for key in ("observed", "moved", "exit_code")))
 if (isinstance(receipt, dict) and isinstance(counts, dict)
         and (receipt.get("state") == sys.argv[2]
         or (receipt.get("state") == "degraded" and receipt.get("reason") in ("decoder_degraded", "writes_deferred")
@@ -123,9 +133,7 @@ if (isinstance(receipt, dict) and isinstance(counts, dict)
             and ((sys.argv[2] == "failed" and run_counts.get("decoder_alarm") == 1)
                  or (sys.argv[2] == "succeeded" and run_counts.get("decoder_alarm") == 0))))
         and isinstance(receipt.get("reason"), str) and receipt["reason"] in reasons
-        and all(isinstance(group, dict) for group in groups)
-        and all(count_key.fullmatch(k) and type(v) is int and 0 <= v <= 1_000_000_000
-                for group in groups for k, v in group.items())):
+        and valid_counts):
     safe = {k: receipt[k] for k in ("state", "reason", "counts")}
     if (isinstance(receipt.get("runtime_sha"), str)
             and re.fullmatch(r"[0-9a-f]{7,40}", receipt["runtime_sha"])

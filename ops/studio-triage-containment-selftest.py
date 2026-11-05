@@ -34,6 +34,20 @@ class ContainmentTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('OBSERVED', result.stdout)
 
+    def test_bounded_reader_refuses_missing_malformed_or_multiple_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'receipt'
+            command = [sys.executable, str(ROOT / 'ops/studio-triage-containment-observe.py'),
+                       '--receipt-file', str(path), '--runtime-sha', 'a' * 40]
+            for raw in [None, b'x' * 1048577, b'outlook-triage-receipt {', b'\xff',
+                        b'outlook-outbox-receipt {}',
+                        b'outlook-triage-receipt {}\noutlook-triage-receipt {}']:
+                if raw is not None:
+                    path.write_bytes(raw)
+                result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('BLOCKED', result.stdout)
+
     def test_registered_source_binding_and_declaration(self):
         import hashlib
         contract = json.loads((ROOT / 'contracts/production-proof-plan.v1.json').read_text())

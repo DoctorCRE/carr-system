@@ -30,6 +30,8 @@ Architecture and consistency. The existing Report owns attempt facts. The receip
 writer serializes them once, including the process exit code. A dedicated
 studio-triage-containment.v1 observer refuses incomplete or inconsistent facts.
 It never reads retained snapshots or treats a skipped run as successful filing.
+The scheduled wrapper preserves the exact typed triage shape in its durable
+receipt and continues rejecting arbitrary content and other service shapes.
 The existing studio-run-receipt.v1 source pin remains unchanged.
 
 Capacity, load spread, storage and scaling. One local receipt per invocation,

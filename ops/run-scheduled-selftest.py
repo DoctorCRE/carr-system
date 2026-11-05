@@ -146,7 +146,9 @@ class ScheduledRunTests(unittest.TestCase):
                    'snapshot_producer_unavailable')
         for reason in reasons:
             with self.subTest(reason=reason):
-                receipt = {'state': 'skipped', 'reason': reason, 'counts': {},
+                receipt = {'state': 'skipped', 'reason': reason,
+                           'counts': {'run': dict(snapshot_validated=True, observed=1120,
+                                                  moved=0, held=True, exit_code=78)},
                            'runtime_sha': 'a' * 40, 'runtime_behind': 0,
                            'private_body': 'SYNTHETIC_PRIVATE_BODY'}
                 child = self.root / 'hold.py'
@@ -162,6 +164,27 @@ class ScheduledRunTests(unittest.TestCase):
                 expected = {k: v for k, v in receipt.items() if k != 'private_body'}
                 self.assertEqual(json.loads(args[args.index('--detail') + 1]), expected)
                 self.assertNotIn('SYNTHETIC_PRIVATE_BODY', args[args.index('--detail') + 1])
+
+    def test_containment_shape_is_triage_only_and_refuses_content(self):
+        facts = dict(snapshot_validated=True, observed=1120, moved=0, held=True, exit_code=78)
+        cases = [('outlook-outbox', facts),
+                 ('outlook-triage', facts | {'snapshot_validated': 'private body'}),
+                 ('outlook-triage', facts | {'unexpected': 'private body'}),
+                 ('outlook-triage', facts | {'observed': True})]
+        for service, run in cases:
+            with self.subTest(service=service, run=run):
+                receipt = dict(state='skipped', reason='processed', counts={'run': run})
+                child = self.root / 'invalid-facts.py'
+                child.write_text(f"print({(service + '-receipt ' + json.dumps(receipt))!r})\n"
+                                 "raise SystemExit(78)\n")
+                result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+                    service, service + '.run', sys.executable, str(child)], cwd=self.root,
+                    env=self.env, text=True, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 78)
+                args = json.loads(self.rows()[-1][3])
+                detail = args[args.index('--detail') + 1]
+                self.assertNotIn('snapshot_validated', detail)
+                self.assertNotIn('private body', detail)
 
     def test_receipt_tempfile_failure_still_runs_service(self):
         (self.root / 'out').write_text('synthetic unavailable receipt directory')
