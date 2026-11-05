@@ -369,6 +369,27 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len([1 for v,a in self.fake.calls if v=='record-email-touch-journal-outcome']), 1)
         self.assertFalse(any(v=='log-activity' for v,a in self.fake.calls))
 
+    def test_natural_journal_hold_does_not_stop_unrelated_mail(self):
+        first = mail(CLIENT.email, timedelta(hours=-2), local_keys='101')
+        write_db(self.fake.fixture, [first])
+        ports = self.journal_ports()
+        self.assertEqual(intake.run(self.repo, self.home, ports).state, 'succeeded')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        state['email_cohort'].update(phase='held', reason='synthetic_diagnosis', failures=2)
+        intake._save(self.out(), state)
+        self.fake.calls.clear()
+        self.store.write_bytes(self.store.read_bytes() + b'new snapshot')
+        second = mail(CLIENT.email, timedelta(hours=-1), subject='Different natural email', local_keys='102')
+        self.fake.fixture.unlink()
+        write_db(self.fake.fixture, [first, second])
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual(outcome.state, 'failed')
+        writes = [a for v,a in self.fake.calls if v=='log-activity' and a.get('kind')=='email_in']
+        self.assertEqual(len(writes), 1, 'unrelated mail continues while the selected cohort stays held')
+        self.assertIn('Different natural email', writes[0]['summary'])
+        self.assertNotIn('email_touch', writes[0])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['email_cohort']['phase'], 'held')
+
     def test_natural_journal_preview_remains_outside_capture(self):
         write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), local_keys='101', kind='preview')])
         outcome = intake.run(self.repo, self.home, self.journal_ports())

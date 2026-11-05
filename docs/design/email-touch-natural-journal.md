@@ -43,6 +43,8 @@ stateDiagram-v2
 
 `pending_email_capture` persists the chosen message and planned requests before any release probe. It remains separate from `requests`. `email_cohort` retains the receipt, every intended application, original keys, pending observation UUIDs, and failure count. `Run.write` only receives the final frozen payload. Capture, application and outcome transport failures preserve their original identities. Recovery precedes unchanged-store and watermark exits. A second consecutive failure holds the cohort. `Cohort.resume_after_diagnosis(reason)` validates the original receipt before clearing that hold. This is an internal recovery interface for a diagnosed repair, not an automatic retry.
 
+A held cohort reports a failed run and retains the watermark. Unrelated mail still files normally. The selected cohort does not get another attempt during that run. An unchanged store with a held cohort reports pending rather than success.
+
 Successful cohorts remain in Postgres. A new installed producer SHA archives the completed private cohort and permits selection of a new unattempted natural email. Outstanding cohorts do not rotate on release changes. Existing private-state pruning preserves the selected requests. Hydration remains outside touch expectations.
 
 The journal is one deterministic UTF-8 JSON byte sequence, stored as `bytea`, with a checked SHA256. A custody trigger binds raw identity and scope to provenance. Runtime roles can invoke only the narrow capture and outcome functions. They cannot insert, update, delete or truncate rows. Owners can alter schema and backups; hashes are tamper evidence when compared with an independently retained receipt. Existing Postgres backups own recovery.

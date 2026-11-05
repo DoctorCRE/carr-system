@@ -2143,9 +2143,7 @@ def _save(out: Path, state: dict) -> None:
 
 def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     settings = load_settings(home)
-    if not Run(ports, state, ports.now(), out, settings).journal_recover():
-        _save(out, state)
-        return Outcome('failed', 'email_journal_pending', {'writes_deferred': 1})
+    journal_ready = Run(ports, state, ports.now(), out, settings).journal_recover()
     if settings.folder_account_id is None:
         return Outcome('failed', 'folder_account_id_required')
     try:
@@ -2182,10 +2180,12 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
                   'email_index_failed': int(not state.get('email_index_published')),
                   'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
                   **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
+        if not journal_ready:
+            return Outcome('failed', 'email_journal_pending', {**counts, 'writes_deferred': 1})
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (meta, mails, events, db, files):
-            outcome = _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
+            outcome = _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files, journal_ready)
         publication = meta.get('email_index_receipt', {})
         outcome.counts.update(publication)
         state['email_index_published'] = bool(publication.get('email_index_published'))
@@ -2202,7 +2202,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
         return Outcome('failed', 'decode_failed', detail=detail)
 
 
-def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files):
+def _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files, journal_ready=True):
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
     try:
@@ -2242,6 +2242,9 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
     mails = _best_copies(mails, state)
     state['hydration_check_at'] = int((now + REFRESH_INTERVAL).timestamp())
     work = Run(ports, state, now, out, settings)
+    if not journal_ready:
+        work.journal_result = False
+        work.counts['writes_deferred'] += 1
     work.counts['mail_rows_reusing_prior_identity'] = sum(bool(m.get('mail_rows_reusing_prior_identity')) for m in mails)
     work.counts.update({name: meta[name] for name in MAIL_STORE_COUNTERS})
     work.counts['decoder_alarm'] = alarm
