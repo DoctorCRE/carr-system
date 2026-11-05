@@ -9,11 +9,13 @@ import re
 import subprocess
 import tempfile
 
+from git_env import scrubbed_env
+
 REPOSITORY = 'DoctorCRE/carr-system'
 
 
 def command(*argv, cwd=None):
-    return subprocess.check_output(argv, cwd=cwd, text=True, stderr=subprocess.PIPE, timeout=45).strip()
+    return subprocess.check_output(argv, cwd=cwd, env=scrubbed_env(), text=True, stderr=subprocess.PIPE, timeout=45).rstrip('\n')
 
 
 def manifest(value):

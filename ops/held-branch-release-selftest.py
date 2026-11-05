@@ -3,6 +3,8 @@
 import importlib.util
 from pathlib import Path
 import tempfile
+import os
+from git_env import fixture_env
 import subprocess
 import sys
 from unittest.mock import patch
@@ -62,6 +64,9 @@ class LocalGithub:
 
 class Reconciliation(unittest.TestCase):
     def setUp(self):
+        isolated = patch.dict(os.environ, fixture_env(), clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
@@ -104,6 +109,10 @@ class Reconciliation(unittest.TestCase):
         self.assertEqual(self.run_release()['head'], first['head'])
         self.assertEqual(self.g.created, 1)
 
+    def test_hook_git_location_cannot_escape_worktree(self):
+        with patch.dict(os.environ, {'GIT_DIR': '/nonexistent-hook-git-dir'}):
+            self.assertEqual(self.run_release()['state'], 'published')
+
     def test_default_mode_collects_without_remote_writes(self):
         result = release.reconcile(EVENT, [ROW], self.g)[0]
         self.assertEqual(result['state'], 'ready')
@@ -115,6 +124,15 @@ class Reconciliation(unittest.TestCase):
         self.assertEqual(self.run_release()['reason'], 'overlap')
         self.assertEqual(self.g.git('rev-parse', 'origin/topic'), self.head)
         self.assertEqual(self.g.created, 0)
+
+    def test_overlap_preserves_whitespace_and_unicode_paths(self):
+        self.g.git('switch', 'topic')
+        self.commit(' spaced café.txt', 'held', 'unusual path')
+        self.g.git('push', 'origin', 'topic')
+        self.g.git('switch', 'main')
+        with patch.object(self.g, 'overlap', return_value=[3]) as overlap:
+            self.assertEqual(self.run_release()['reason'], 'overlap')
+            self.assertIn(' spaced café.txt', overlap.call_args.args[0])
 
     def test_new_overlap_after_merge_holds(self):
         with patch.object(self.g, 'overlap', side_effect=[[], [3]]):
@@ -135,6 +153,18 @@ class Reconciliation(unittest.TestCase):
         self.assertEqual(self.run_release()['fix_job'], result['fix_job'])
         self.assertEqual(self.g.git('rev-parse', 'origin/topic'), held)
         self.assertEqual(self.g.git('worktree', 'list', '--porcelain').count('worktree '), 1)
+
+    def test_release_serialization_rechecks_overlap_between_branches(self):
+        self.g.git('branch', 'second', self.head)
+        self.g.git('push', 'origin', 'second')
+        def prs(branch=None):
+            return self.g.prs if branch == 'topic' else []
+        with patch.object(self.g, 'pull_requests', side_effect=prs), patch.object(self.g, 'overlap', side_effect=[[], [], [42]]):
+            results = release.reconcile(EVENT, [ROW, {**ROW, 'branch': 'second'}], self.g, execute=True)
+        self.assertEqual([r['state'] for r in results], ['published', 'held'])
+        self.assertEqual(results[1]['holders'], [42])
+        self.assertEqual(self.g.created, 1)
+        self.assertEqual(self.g.git('rev-parse', 'origin/second'), self.head)
 
     def test_closed_pr_never_reopens(self):
         self.g.prs = [{'state': 'closed'}]
