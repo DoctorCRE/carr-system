@@ -119,3 +119,33 @@ test('confirmed receipt preserves authoritative lease, invoice and commission co
   }
   assert.deepEqual(result.due_items, []);
 });
+
+test('checklist owns distinct savepoints and never starts a caller transaction', async () => {
+  const { readDealChecklist } = await import('../src/deal-checklist.ts');
+  const statements = [];
+  const client = { inTransaction: true, query: async sql => {
+    statements.push(sql);
+    return { rows: sql.includes('checklist:doctrine') ? sources() : [] };
+  } };
+  await readDealChecklist(client, { id: 'synthetic', type: 'renewal' });
+  await readDealChecklist(client, { id: 'synthetic', type: 'renewal' });
+  const owned = statements.filter(sql => sql.startsWith('savepoint '));
+  assert.equal(owned.length, 2);
+  assert.notEqual(owned[0], owned[1]);
+  for (const sql of owned) assert.ok(statements.includes(`release ${sql}`));
+  assert.equal(statements.some(sql => /^(begin|commit|rollback)\b/i.test(sql)), false);
+  statements.length = 0;
+  client.inTransaction = false;
+  await readDealChecklist(client, { id: 'synthetic', type: 'renewal' });
+  assert.equal(statements.some(sql => /savepoint|^begin|^commit|^rollback/i.test(sql)), false);
+});
+
+test('failure to establish a savepoint propagates without rollback', async () => {
+  const { readDealChecklist } = await import('../src/deal-checklist.ts');
+  const error = new Error('synthetic savepoint failure');
+  const statements = [];
+  await assert.rejects(readDealChecklist({ inTransaction: true, query: async sql => {
+    statements.push(sql); throw error;
+  } }, { id: 'synthetic' }), value => value === error);
+  assert.equal(statements.length, 1);
+});
