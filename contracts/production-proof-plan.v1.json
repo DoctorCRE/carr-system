@@ -42,6 +42,18 @@
   },
   "x-runner-source-binding": "Registry CI validates either an ancestor revision/path or a sources map of repository-local paths to SHA256 at tested HEAD. Content bindings include the entry path and its local dependency closure; squash preserves their identity. Never fall back from a refused revision. Neither binding attests installation or execution.",
   "x-runners": {
+    "github-verdict-delivery.v1": {
+          "path": "ops/verdict-delivery-proof.py",
+          "targets": [
+                "worker"
+          ],
+          "sources": {
+                "ops/verdict-delivery-proof.py": "18097a030361bc71eb4def5f50ddbf69d32a6c4e72f51fe454b3de7e82ca8a4c",
+                "ops/verdict-delivery.py": "184b5f6412a75d1e44e9c44b8a0db5e1a52c1f0a318147269fcdf06310ca4380",
+                "ops/review-gate.py": "be86926b7cc6397487575aba80e040b40acc0dcb354108deb7e87b6a628cce0d",
+                "lib/loadpy.py": "868281532b1b418afbd18c535653adbf21fa580f54da01da158548e539ed40fd"
+          }
+    },
     "email-touch-cohort-reconcile.v1": {
       "path": "ops/email-touch-cohort-proof.py",
       "targets": [

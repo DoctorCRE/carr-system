@@ -459,5 +459,15 @@
     "write-reconciliation.test.mjs": {"milliseconds": 547, "serial": false},
     "session-checkpoints-auth.test.mjs": {"milliseconds": 805, "serial": false},
     "session-checkpoints.test.mjs": {"milliseconds": 1256, "serial": true}
+  },
+  "gate_suite_measurements": {
+      "ops/verdict-delivery-selftest.py": {
+          "milliseconds": 54,
+          "serial": false
+      },
+      "ops/verdict-delivery-proof-selftest.py": {
+          "milliseconds": 57,
+          "serial": false
+      }
   }
 }
