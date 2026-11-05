@@ -108,8 +108,47 @@ class Delivery(unittest.TestCase):
 
     def test_duplicate_intake_no_review_write(self):
         self.review['body'] += '\nVerdict-Intake: 1'
-        self.assertEqual(self.run_delivery(verdict=BODY, intake_id=1)['state'], 'checks-green')
+        self.assertEqual(self.run_delivery(verdict=BODY, intake_id=1)['state'], 'refused')
         self.assertFalse(self.writes)
+
+    def test_consumed_approval_cannot_replace_newer_changes(self):
+        self.review['body'] += '\nVerdict-Intake: 1'
+        change = dict(self.review, id=6, state='CHANGES_REQUESTED',
+                      body=BODY.replace('APPROVE', 'CHANGES') + '\nVerdict-Intake: 2',
+                      submitted_at='2026-11-05T13:00:00Z')
+        self.data['pulls/12/reviews?per_page=100'].append(change)
+        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'refused')
+        self.assertEqual(self.run_delivery(verdict=BODY, intake_id=1,
+                                          arm_enabled=True)['state'], 'refused')
+        self.assertFalse(self.writes)
+        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'refused')
+
+    def test_consumed_intake_refused_across_all_prior_app_reviews(self):
+        for state in ('APPROVED', 'CHANGES_REQUESTED', 'DISMISSED', 'COMMENTED', 'PENDING'):
+            with self.subTest(state=state):
+                prior = dict(self.review, state=state, body=BODY + '\nVerdict-Intake: 1')
+                latest = dict(self.review, id=6, body=BODY + '\nVerdict-Intake: 2',
+                              submitted_at='2026-11-05T13:00:00Z')
+                self.data['pulls/12/reviews?per_page=100'] = [prior, latest]
+                for body in (BODY, BODY.replace('APPROVE', 'CHANGES'), BODY + '\nRevised text.'):
+                    result = self.run_delivery(verdict=body, intake_id=1, arm_enabled=True)
+                    self.assertEqual(result['state'], 'refused')
+                    self.assertFalse(self.writes)
+
+    def test_delayed_older_intake_refused_after_newer_changes(self):
+        self.review.update(state='CHANGES_REQUESTED',
+                           body=BODY.replace('APPROVE', 'CHANGES') + '\nVerdict-Intake: 2')
+        self.assertEqual(self.run_delivery(verdict=BODY, intake_id=1)['state'], 'refused')
+        self.assertFalse(self.writes)
+
+    def test_intake_consumption_is_scoped_to_app_and_head(self):
+        for changes in ({'commit_id': 'b' * 40}, {'user': {'login': 'other[bot]'}}):
+            with self.subTest(changes=changes):
+                self.data['pulls/12/reviews?per_page=100'] = [
+                    dict(self.review, body=BODY + '\nVerdict-Intake: 2', **changes)]
+                self.writes.clear()
+                self.assertEqual(self.run_delivery(verdict=BODY, intake_id=1)['state'], 'submitted')
+                self.assertEqual(len(self.writes), 1)
 
     def test_new_changes_invalidates_approval(self):
         change = dict(self.review, id=6, state='CHANGES_REQUESTED', submitted_at='2026-11-05T13:00:00Z')
@@ -196,9 +235,11 @@ class Delivery(unittest.TestCase):
 
     def test_new_approval_after_changes_posts_again(self):
         self.review['body'] += '\nVerdict-Intake: 1'
-        change = dict(self.review, id=6, state='CHANGES_REQUESTED', submitted_at='2026-11-05T13:00:00Z')
+        change = dict(self.review, id=6, state='CHANGES_REQUESTED',
+                      body=BODY.replace('APPROVE', 'CHANGES') + '\nVerdict-Intake: 2',
+                      submitted_at='2026-11-05T13:00:00Z')
         self.data['pulls/12/reviews?per_page=100'].append(change)
-        self.assertEqual(self.run_delivery(verdict=BODY, intake_id=2)['state'], 'submitted')
+        self.assertEqual(self.run_delivery(verdict=BODY, intake_id=3)['state'], 'submitted')
         self.assertEqual(len(self.writes), 1)
 
     def test_checks_turn_red_before_arm(self):
