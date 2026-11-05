@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617.S4-watch-events",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "watch-event-worker-release",
+      "predicate": "The deployed Worker release matches the merged watch consumer revision. This read-only release check does not attest the coordinator-owned live watch change experiment.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity matches the merged SHA. Coordinator separately observes one watched deal change produces exactly one partner notification, an unwatched deal produces zero, and rerun produces zero.",
+      "input_class": "read-only release identity; live notification transition proof remains coordinator-owned",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
