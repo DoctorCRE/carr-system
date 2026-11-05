@@ -1,0 +1,15 @@
+stateDiagram-v2
+  [*] --> Pulled: Partner pulls saved list
+  Pulled --> Pending: IDs resolve and revision is new
+  Pending --> Partial: Partner chooses some properties
+  Partial --> Partial: Partner chooses more properties
+  Partial --> Accepted: Partner resolves remaining differences
+  Pending --> Accepted: Partner uses client list
+  Partial --> Accepted: Partner uses client list
+  Pending --> Dismissed: Partner keeps own list
+  Partial --> Dismissed: Partner keeps remaining own choices
+  Pending --> Superseded: Newer saved list arrives
+  Partial --> Superseded: Newer saved list arrives
+%% never Pulling changes the partner shortlist
+%% never A portal actor accepts a proposal
+%% never An unresolved property is matched by name

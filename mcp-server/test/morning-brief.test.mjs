@@ -32,6 +32,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       queries.push({ sql, params });
       if (/^(savepoint|rollback to savepoint|release savepoint) calendar_contacts/.test(sql)) return { rows: [] };
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
+      if (sql.includes("ops.pending_client_tour_proposals")) return { rows: [] };
       if (sql.includes("select distinct calendar_event_key")) return { rows: confirmedCalendarKeys.map(calendar_event_key => ({ calendar_event_key })) };
       if (sql.includes("calendar_deal_matches")) return { rows: calendarDeals };
       if (sql.includes("/* calendar_meeting_prep */")) return { rows: meetingPrep };
@@ -80,13 +81,32 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
   };
 }
 
+test("morning_brief_lists_pending_tour_proposals_read_only", async () => {
+  const c = client();
+  const query = c.query;
+  c.query = async (sql, params) => {
+    if (sql.includes('ops.pending_client_tour_proposals')) {
+      c.queries.push({ sql, params });
+      assert.deepEqual(params, ['joe']);
+      return { rows: [{ deal_id: 'deal-one', deal_name: 'Synthetic lease', properties_changed: 3 }] };
+    }
+    return query(sql, params);
+  };
+  const result = await executeRegisteredTool(c, JOE, 'morning-brief', {});
+  assert.equal(result.sections.tour_proposals.state, 'ready');
+  assert.equal(result.sections.tour_proposals.limit, 20);
+  assert.deepEqual(result.sections.tour_proposals.items, [{ deal_id: 'deal-one', deal_name: 'Synthetic lease',
+    properties_changed: 3, line: 'Synthetic lease: client proposed tour list changes (3 properties changed).' }]);
+  assert.ok(c.queries.every(({ sql }) => !/\b(insert|update|delete|pull_client_tour_proposal|accept_client_tour_proposal)\b/i.test(sql)));
+});
+
 test("morning-brief derives Joe's sponsor from authenticated context and composes only record views", async () => {
   const c = client();
   const result = await executeRegisteredTool(c, JOE, "morning-brief", {});
   assert.equal(result.state, "ready");
   assert.equal(result.sponsor, "joe");
   assert.deepEqual(Object.keys(result.sections).sort(),
-    ["needs_joe", "claim_card", "deals", "renewals", "today", "loops", "assurance_cadence", "costs"].sort());
+    ["needs_joe", "claim_card", "deals", "renewals", "today", "loops", "assurance_cadence", "costs", "tour_proposals"].sort());
   assert.equal(Object.keys(result.sections)[0], "needs_joe", "the list of what waits on Joe leads the brief");
   assert.equal(result.sections.renewals.state, "ready");
   assert.equal(result.sections.renewals.items[0].display_name, "Renewal Safe");
@@ -242,7 +262,7 @@ test("coverage names every required section and counts returned work beyond prio
   assert.equal(result.coverage.schema, "morning-brief-coverage.v1");
   assert.equal(result.coverage.count_scope, "returned_rows_only");
   assert.deepEqual(result.coverage.required_sections.map(({ key }) => key), [
-    "needs_joe", "today", "claim_card", "deals", "loops", "renewals", "assurance_cadence", "costs",
+    "needs_joe", "today", "claim_card", "deals", "tour_proposals", "loops", "renewals", "assurance_cadence", "costs",
   ]);
   const entries = Object.fromEntries(result.coverage.required_sections.map(entry => [entry.key, entry]));
   assert.equal(entries.needs_joe.state, "ready");
@@ -646,4 +666,32 @@ test("morning-brief skips preparation reads when no meeting has a possible deal"
   assert.equal(result.sections.calendar.state, "ready");
   assert.ok(result.sections.calendar.items.every(item => item.possible_deals.length === 0));
   assert.equal(c.queries.some(({ sql }) => sql.includes("/* calendar_meeting_prep */")), false);
+});
+
+
+test('morning proposal source distinguishes none from unavailable and isolates Dell', async () => {
+  const empty = await executeRegisteredTool(client(), DELL, 'morning-brief', {});
+  assert.equal(empty.sections.tour_proposals.state, 'empty');
+  assert.match(empty.sections.tour_proposals.message, /none/);
+  const c = client({ unavailable: 'ops.pending_client_tour_proposals' });
+  const failed = await executeRegisteredTool(c, DELL, 'morning-brief', {});
+  assert.equal(failed.sections.tour_proposals.state, 'unavailable');
+  assert.equal(failed.sections.tour_proposals.message, undefined);
+  assert.deepEqual(c.queries.find(q => q.sql.includes('ops.pending_client_tour_proposals')).params, ['dell']);
+  assert.doesNotMatch(JSON.stringify(failed.sections.tour_proposals), /fixture|none/);
+});
+
+test('morning proposal lines and coverage are capped at 20 deals', async () => {
+  const c = client();
+  const query = c.query;
+  c.query = async (sql, params) => sql.includes('ops.pending_client_tour_proposals')
+    ? { rows: Array.from({ length: 21 }, (_, i) => ({ deal_id: `deal-${i}`, deal_name: `Lease ${i}`, properties_changed: 1 })) }
+    : query(sql, params);
+  const result = await executeRegisteredTool(c, JOE, 'morning-brief', {});
+  assert.equal(result.sections.tour_proposals.state, 'partial');
+  assert.equal(result.sections.tour_proposals.items.length, 20);
+  assert.equal(result.sections.tour_proposals.truncated, true);
+  assert.match(result.sections.tour_proposals.message, /first 20 deals/);
+  assert.match(result.sections.tour_proposals.items[0].line, /1 property changed/);
+  assert.equal(result.coverage.required_sections.find(s => s.key === 'tour_proposals').counts.items, 20);
 });

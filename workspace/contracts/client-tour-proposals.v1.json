@@ -1,0 +1,38 @@
+{
+  "schema_version": "client-tour-proposals.v1",
+  "owner": "DoctorCRE/carr-system",
+  "source": {
+    "method": "GET",
+    "origin": "https://share.doctorcre.com",
+    "path": "/<registered-portal-slug>/api/selection",
+    "schema_version": "client-tour-selection.v1",
+    "required_fields": ["schema_version", "portal_slug", "revision", "items"],
+    "item_fields": ["carr_property_id"],
+    "revision": "positive safe integer, monotonically increasing per portal",
+    "identity": "ops.tour_property.id in carr-internal, active; never a name or address match",
+    "unknown_fields": "rejected",
+    "authentication": "No browser cookie or credential is forwarded. Hosting must authorize the CARR server GET before activation. Existing browser-session-only endpoints fail closed."
+  },
+  "verbs": {
+    "pull-client-tour-proposal": {"input": ["deal_id", "tour_id", "idempotency_key"], "output": "proposal id, state, portal_revision"},
+    "list-deal-tour-proposals": {"input": ["deal_id"], "output": "latest 50 proposals with items, choices, current difference.add/remove, expected_selection_version_id and total pending_count"},
+    "accept-client-tour-proposal": {"input": ["deal_id", "proposal_id", "idempotency_key", "expected_selection_version_id", "mode"], "mode": ["use_theirs", "per_property"], "choices": "For per_property, a nonempty map from proposal or original-cart property UUID to desired boolean membership. Unchosen properties retain current membership.", "output": "receipt with proposal_id, state, actor, selection_version_id and portal_revision"},
+    "dismiss-client-tour-proposal": {"input": ["deal_id", "proposal_id", "idempotency_key"], "output": "dismissal receipt; preserves existing shortlist and earlier accepted choices"}
+  },
+  "states": ["pending", "partially_accepted", "accepted", "superseded", "dismissed"],
+  "limits": {"properties": 100, "proposals_per_portal": 1000, "response_bytes": 98304, "timeout_ms": 5000, "pulls_per_portal_per_minute_per_isolate": 20, "breaker_failures": 2, "breaker_cooldown_ms": 60000, "isolate_source_entries": 1000},
+  "invariants": [
+    "Every verb requires an authenticated human partner authorized for the deal.",
+    "Portal actors have no proposal mutation route. Source payload and URL are never tool arguments.",
+    "Pull creates proposal metadata only. Acceptance appends the existing Tour cart, never a parallel shortlist.",
+    "Tour must already belong to the portal deal. Portal ownership cannot be rebound.",
+    "Equal portal revision and equal sorted IDs replay the original proposal. Different content or Tour refuses key reuse.",
+    "A newer revision supersedes pending and partially accepted proposals without undoing accepted choices.",
+    "Acceptance locks the portal then Tour and checks the current cart version. Concurrent stale accepts refuse.",
+    "Acceptance and dismissal receipts replay by actor and idempotency key, and refuse changed requests.",
+    "Lists and badge counts perform no remote pull. Counts include pending and partially accepted states.",
+    "No route, public share, send, financial fields or hosting deployment is created by these verbs."
+  ],
+  "morning_brief": {"section": "tour_proposals","source": "ops.pending_client_tour_proposals(text)","read_role": "carr_reader","deal_limit": 20,"query_deal_limit": 21,"scope": "authenticated partner owns the deal; active portal and matching deal/client/Tour binding","states": ["ready","empty","partial","unavailable"],"changed_properties": "distinct symmetric difference of proposal IDs and current cart IDs per deal, including partially_accepted proposals","read_effects": "none; local stored pending proposals only; no portal GET, proposal import or cart mutation"},
+  "activation_dependencies": ["Portal hosting supports and authorizes the source contract", "S3 and S4 registry queue lands", "App WR586.S5.J5", "Morning brief WR586.S5.J3", "Synthetic full-schema CI then production proof under a separately authorized job"]
+}

@@ -27,6 +27,7 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementReplyTools } from "./requirement-replies.js";
 import { requirementRequestTools } from "./requirement-requests.js";
+import { dealDeliverableTools } from "./deal-deliverables.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -59,6 +60,8 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.js";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
+import { clientPublicationTools } from "./client-publications.js";
+import { clientTourProposalTools, pendingClientTourProposals } from "./client-tour-proposals.js";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { sessionCheckpointTools, SESSION_CHECKPOINT_VERBS } from './session-checkpoints.js';
@@ -3690,7 +3693,7 @@ export const TOOLS = {
 
   "morning-brief": {
     write: false,
-    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, assurance cadence, published system costs, and, once the partner's own Outlook intake has published one, the next seven days of calendar meetings (Outlook local store; attendance and cancellations unverified). Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
+    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes Needs Joe when applicable, live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, up to 20 deals with pending client tour proposals (local read only), assurance cadence, published system costs, and, once the partner's own Outlook intake has published one, the next seven days of calendar meetings (Outlook local store; attendance and cancellations unverified). Sections preserve ready, empty, partial, or unavailable. Coverage names every required section, points to its response content, and counts returned rows only, never queue totals. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
     inputSchema: { type: "object", properties: {} },
     handler: async (c, actor, args) => {
       // This is an audience boundary, not a convenience filter.  A shared-only
@@ -3747,6 +3750,7 @@ export const TOOLS = {
         const accounts = value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor);
         return { state: items.length || accounts.length ? "ready" : "empty", items, accounts };
       });
+      const tourProposals = await section(() => pendingClientTourProposals(c, scope.sponsor));
       const loops = await section(async () => {
         // loop-board is a shared read that already accepts owner 'joe' or
         // 'dell' from any caller, so showing both partners' loops adds no
@@ -3847,7 +3851,7 @@ export const TOOLS = {
         calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
       }
       const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
-        today, ...(calendar ? { calendar } : {}), claim_card: claimCard, deals, loops, renewals,
+        today, ...(calendar ? { calendar } : {}), claim_card: claimCard, deals, tour_proposals: tourProposals, loops, renewals,
         assurance_cadence: assuranceCadence, costs };
       const coverage = {
         schema: "morning-brief-coverage.v1", count_scope: "returned_rows_only",
@@ -9318,6 +9322,8 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
   "client-portal": "mcp-server/src/client-portal.ts",
+  "client-publications": "mcp-server/src/client-publications.js",
+  "client-tour-proposals": "mcp-server/src/client-tour-proposals.js",
   "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",
   "action-links": "mcp-server/src/action-links.js",
@@ -10912,6 +10918,7 @@ registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
 registerTools(requirementReplyTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-replies");
 registerTools(requirementRequestTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-requests");
+registerTools(dealDeliverableTools({ withEnvelope, writeEvent }), "mcp-server/src/deal-deliverables.js");
 registerTools(dealFileTools({ withEnvelope, writeEvent, resolveSubject }), "deal-files");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
@@ -11004,6 +11011,8 @@ registerTools(dealExtractionTools(), "deal-extraction");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
+registerTools(clientPublicationTools({ withEnvelope, writeEvent }), "client-publications");
+registerTools(clientTourProposalTools({ withEnvelope, writeEvent }), "client-tour-proposals");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
