@@ -27,7 +27,19 @@ const WARNINGS = {
   trimmed: n => `${n} later ${plural(n, "meeting was", "meetings were")} left out to keep the brief small.`,
 };
 
-const instant = value => typeof value === "string" && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null;
+const instant = value => {
+  if (typeof value !== "string") return null;
+  const fields = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):?(\d{2}))$/.exec(value);
+  if (!fields) return null;
+  const [, year, month, day, hour, minute, second] = fields.map(Number);
+  const offsetHour = Number(fields[7] ?? 0), offsetMinute = Number(fields[8] ?? 0);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]
+      || hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const text = value => typeof value === "string" && value.trim() ? value.trim().slice(0, 500) : null;
 const person = value => value && typeof value === "object"
   ? { name: text(value.name), email: text(value.email)?.toLowerCase() ?? null } : { name: null, email: null };
@@ -40,18 +52,21 @@ export function calendarSection(snapshot, now = new Date()) {
   if (snapshot?.schema !== CALENDAR_AGENDA_SCHEMA || observed === null || !Array.isArray(snapshot.items))
     return { state: "unavailable", reason: "source_unavailable", items: [] };
   let malformed = 0;
+  let malformedTimes = 0;
   const items = [];
   for (const row of snapshot.items) {
     const start = instant(row?.start), end = instant(row?.end);
     if (start === null || end === null || end < start || !text(row?.title)) { malformed++; continue; }
     if (end <= nowMs || start >= nowMs + HORIZON_MS) continue;
     const attendees = Array.isArray(row.attendees) ? row.attendees.map(person) : [];
+    const times = Array.isArray(row.times) ? row.times.map(instant) : [];
+    malformedTimes += times.filter(t => t === null).length;
+    if (row.times !== undefined && !Array.isArray(row.times)) malformedTimes++;
     items.push({ start: new Date(start).toISOString(), end: new Date(end).toISOString(),
       title: text(row.title), location: text(row.location), organizer: person(row.organizer),
       attendees, attendee_count: Number.isSafeInteger(row.attendee_count) ? row.attendee_count : attendees.length,
       all_day: row.all_day === true, recurring: row.recurring === true, time_changed: row.time_changed === true,
-      times: Array.isArray(row.times)
-        ? row.times.map(instant).filter(t => t !== null).map(t => new Date(t).toISOString()) : [],
+      times: times.filter(t => t !== null).map(t => new Date(t).toISOString()),
       conflict: row.conflict === true });
   }
   items.sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
@@ -85,6 +100,7 @@ export function calendarSection(snapshot, now = new Date()) {
     notes.push(say ? say(count) : "This calendar has a gap the brief cannot describe. Check Outlook.");
   }
   if (malformed) notes.push(`${malformed} stored ${plural(malformed, "meeting", "meetings")} could not be shown.`);
+  if (malformedTimes) notes.push(`${malformedTimes} stored alternate ${plural(malformedTimes, "time", "times")} could not be shown. Check Outlook for the current time.`);
   if (items.length > LIMIT) notes.push(`Only the first ${LIMIT} meetings are shown.`);
   const stale = nowMs - observed > STALE_MS;
   const future = observed > nowMs;
