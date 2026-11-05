@@ -30,9 +30,9 @@ def _digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
-def binding(copy, files, mailbox, started_at, decoder=None):
+def binding(copy, files, mailbox, started_at, decoder):
     root = Path(__file__).resolve().parent
-    revisions = dict(intake_revision=_digest(root / 'outlook_intake.py'), decoder_revision=_digest(decoder or copy), census_revision=_digest(__file__), **VERSIONS)
+    revisions = dict(intake_revision=_digest(root / 'outlook_intake.py'), decoder_revision=_digest(decoder), census_revision=_digest(__file__), **VERSIONS)
     sidecars = [(str(p.relative_to(files)), _digest(p)) for p in sorted(files.rglob('*')) if p.is_file()] if files.exists() else []
     private_manifest = [_digest(copy), sidecars, mailbox, revisions, started_at, SCHEMA]
     return dict(generation=str(uuid.uuid4()), commitment=hashlib.sha256(json.dumps(private_manifest, sort_keys=True).encode()).hexdigest(), started_at=started_at, finished_at=datetime.now(timezone.utc).isoformat(), **revisions)

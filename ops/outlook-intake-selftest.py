@@ -5742,8 +5742,10 @@ class FieldCensusTest(unittest.TestCase):
         with sqlite3.connect(db) as con:
             con.execute('INSERT INTO message_folders VALUES(1,7)')
         meta, admitted, _ = intake._load(db, account_id=7)
+        decoder = Path(directory) / 'decoder-fixture'
+        decoder.write_bytes(b'synthetic-decoder-revision')
         binding = census.binding(db, Path(directory) / 'Files', 'private-mailbox',
-                                 '2026-11-05T00:00:00+00:00')
+                                 '2026-11-05T00:00:00+00:00', decoder)
         return census.build(meta, admitted, binding), meta
 
     def test_measuring_to_held_and_conflict_preserves_deficits(self):
@@ -5773,7 +5775,7 @@ class FieldCensusTest(unittest.TestCase):
                             "body_completeness='complete' WHERE id=1")
             meta, rows, _ = intake._load(db, account_id=7)
             bound = census.binding(db, Path(directory) / 'Files', 'private-mailbox',
-                                   '2026-11-05T00:00:00+00:00')
+                                   '2026-11-05T00:00:00+00:00', Path(directory) / 'decoder-fixture')
             after = census.build(meta, rows, bound)
         self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
         self.assertNotEqual(before['binding']['commitment'], after['binding']['commitment'])
@@ -5795,7 +5797,7 @@ class FieldCensusTest(unittest.TestCase):
                 """)
             meta, rows, _ = intake._load(db, account_id=7)
             bound = census.binding(db, Path(directory) / 'Files', 'private-mailbox',
-                                   '2026-11-05T00:00:00+00:00')
+                                   '2026-11-05T00:00:00+00:00', Path(directory) / 'decoder-fixture')
             bundle = census.build(meta, rows, bound)
         self.assertEqual(bundle['census']['fields']['recipients']['causes']['conflict_or_overflow'], 1)
         self.assertEqual(bundle['census']['fields']['recipients']['causes']['unclassified'], 2)
