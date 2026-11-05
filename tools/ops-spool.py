@@ -160,6 +160,30 @@ def replay(args: list[str]) -> subprocess.CompletedProcess:
         capture_output=True, text=True, timeout=REPLAY_TIMEOUT)
 
 
+# Raw recorder stderr can contain driver SQL, credentials or caller detail.
+# Preserve only complete, known static diagnostics, never interpolated values.
+SAFE_RECORDER_ERRORS = (
+    "ops-record: a failed run must name its failure class (--failure-class)",
+    "ops-record: the ops schema is not on this database — "
+    "migration 0115 is unapplied here. Nothing recorded.",
+    "ops-record: incident fingerprint columns and the recovery "
+    "function are missing — migration 0293 is unapplied here. Nothing recorded.",
+)
+STDERR_LIMIT = 500
+
+
+def recorder_stderr(stderr: str) -> str:
+    lines = stderr.splitlines()
+    safe = [line for line in lines if line in SAFE_RECORDER_ERRORS]
+    if any(line.startswith("ops-record: no service registered with key ")
+           for line in lines):
+        safe.append("ops-record: no service registered with requested key; "
+                    "check ops/config/services.json and sync-registry")
+    if any(line not in SAFE_RECORDER_ERRORS for line in lines):
+        safe.append("[other recorder stderr redacted]")
+    return " | ".join(safe)[:STDERR_LIMIT]
+
+
 def enqueue(conn: sqlite3.Connection, args: list[str], note: str = "") -> None:
     conn.execute(
         "insert into spool (enqueued_at, service, run_key, state, argv, last_error)"
@@ -191,7 +215,7 @@ def cmd_run(args: list[str]) -> int:
             sys.stderr.write(direct.stderr)
             print(f"ops-spool: recorded direct: {service}/{key} state={state}")
             return 0
-        detail = (f"direct rc={direct.returncode}" if direct is not None
+        detail = (f"direct rc={direct.returncode}: {recorder_stderr(direct.stderr)}" if direct is not None
                   else "direct timed out")
 
         try:
@@ -248,7 +272,7 @@ def cmd_flush() -> int:
             args = json.loads(argv_json)
             try:
                 proc = replay(args)
-                rc, err = proc.returncode, proc.stderr.strip()[-500:]
+                rc, err = proc.returncode, recorder_stderr(proc.stderr)
             except subprocess.TimeoutExpired:
                 rc, err = -1, "replay timed out"
 

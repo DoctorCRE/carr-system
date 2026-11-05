@@ -853,6 +853,12 @@
       "sha256": "d42772e957f951ae57ddab30dec59e3e9feb13c95f815af806d2c860bb106049",
       "rule": "generic-api-key",
       "reason": "Reviewed canonical runner source SHA256 map retained with app runner registration. Contains source digests, not credentials. Exact combined contract blob only."
+    },
+    {
+      "path": "ops/run-spool-selftest.py",
+      "sha256": "8bc3e984ac8784aca89f96a1d3702e6e974695cfdf2eeed3ca48562adebc7cbb",
+      "rule": "credential-url",
+      "reason": "Historical synthetic recorder-stderr fixture used the literal private:credential at invalid, never a live credential. The current test uses private-data canaries. Exact historical blob retained to preserve no-rebase delivery history."
     }
   ]
 }
