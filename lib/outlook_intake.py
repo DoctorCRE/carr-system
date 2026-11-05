@@ -138,9 +138,9 @@ AGENDA_BOARD = 'calendar-agenda'
 CALENDAR_POLICY = 4
 
 
-def resolve_store(home: Path) -> Path:
+def resolve_store(home: Path, settings: OutlookSettings | None = None) -> Path:
     """Use only the explicitly configured profile."""
-    store = load_settings(home).profile / 'HxStore.hxd'
+    store = (settings or load_settings(home)).profile / 'HxStore.hxd'
     if not store.is_file():
         raise FileNotFoundError(f'No Outlook store found: {store}')
     return store
@@ -400,8 +400,8 @@ def _clean_name(name: str | None, subject: str | None) -> str | None:
     return name
 
 
-def in_window(now: datetime) -> bool:
-    return WINDOW[0] <= now.astimezone(load_settings().timezone).time() <= WINDOW[1]
+def in_window(now: datetime, settings: OutlookSettings) -> bool:
+    return WINDOW[0] <= now.astimezone(settings.timezone).time() <= WINDOW[1]
 
 
 # ---- the decoded store -------------------------------------------------------
@@ -686,8 +686,8 @@ def _tool_detail(tool: str, code: int | None, failure: str) -> str:
     return f'{tool} exit={code} code={failure}'
 
 
-def _snapshot(home: Path, work: Path) -> None:
-    settings = load_settings(home)
+def _snapshot(home: Path, work: Path, settings: OutlookSettings | None = None) -> None:
+    settings = settings or load_settings(home)
     settings.verify_helper()
     helper = settings.copy_helper
     try:
@@ -722,7 +722,8 @@ CENSUS_METRICS = frozenset((
 ).split())
 
 
-def _coverage_census(home: Path, out: Path, copy: Path, files: Path, account_id: int) -> None:
+def _coverage_census(home: Path, out: Path, copy: Path, files: Path, account_id: int,
+                     settings: OutlookSettings | None = None) -> None:
     request = out / 'coverage-census.request'
     try:
         info = request.lstat()
@@ -739,7 +740,7 @@ def _coverage_census(home: Path, out: Path, copy: Path, files: Path, account_id:
                 or info.st_uid != os.getuid() or info.st_size != 0):
             raise ValueError
         reason = 'setup'
-        decoder = load_settings(home).decoder
+        decoder = (settings or load_settings(home)).decoder
         with tempfile.TemporaryFile(dir=copy.parent) as output:
             reason = 'launch'
             done = subprocess.run([str(decoder), 'census', '--immutable-copy',
@@ -774,13 +775,14 @@ def _remove(work: Path) -> None:
 
 
 @contextmanager
-def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], account_id: int, account_address: str):
+def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], account_id: int, account_address: str,
+            settings: OutlookSettings | None = None):
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
-        _snapshot(home, work)
+        _snapshot(home, work, settings)
         files = work / 'Files'
-        _coverage_census(home, out, copy, files, account_id)
+        _coverage_census(home, out, copy, files, account_id, settings)
         db = work / 'store.db'
         decode(copy, files, db)
         loaded = _load(db, account_id=account_id, account_address=account_address)
@@ -1938,7 +1940,7 @@ def _reconcile(out: Path, home: Path, ports: Ports, settings: OutlookSettings, s
     if settings.folder_account_id is None:
         return Outcome('failed', 'reconcile_failed', detail='folder_account_id_required')
     try:
-        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (_, mails, _, _, _):
+        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account, settings) as (_, mails, _, _, _):
             work = Run(ports, state, ports.now(), out, settings)
             work.reconcile([m for m in _best_copies(mails, state) if not m['metadata_incomplete']])
         _save(out, state)
@@ -1996,8 +1998,8 @@ def _normal_receipt(out: Path, settings: OutlookSettings, ports: Ports,
     return outcome
 
 
-def run(repo: Path, home: Path, ports: Ports) -> Outcome:
-    settings = load_settings(home)
+def run(repo: Path, home: Path, ports: Ports, *, settings: OutlookSettings | None = None) -> Outcome:
+    settings = settings or load_settings(home)
     settings.require_repo(repo)
     out = repo / OUT
     out.mkdir(parents=True, exist_ok=True)
@@ -2037,7 +2039,7 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
 
 def _execute(out: Path, home: Path, ports: Ports, settings: OutlookSettings, state: dict) -> Outcome:
     reconcile = (out / STATE).is_file() and 'mail_ids' not in state and os.access(settings.decoder, os.X_OK)
-    if not reconcile and not in_window(ports.now()):
+    if not reconcile and not in_window(ports.now(), settings):
         return Outcome('skipped', 'outside_window')
     for stale in out.glob(WORK_PREFIX + '*'):
         _remove(stale)
@@ -2048,7 +2050,7 @@ def _execute(out: Path, home: Path, ports: Ports, settings: OutlookSettings, sta
         for name in ('filing_observed_at', 'last_email_in_filed_at'):
             state.pop(name, None)
         state['filing_account'] = filing_account
-    outcome = _run(out, home, ports, state)
+    outcome = _run(out, home, ports, state, settings)
     if outcome.state != 'succeeded':
         if outcome.state == 'degraded':
             return _filing_outcome(out, state, outcome, ports.now(), settings)
@@ -2117,12 +2119,11 @@ def _save(out: Path, state: dict) -> None:
     _private_write(out / STATE, json.dumps(state))
 
 
-def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
-    settings = load_settings(home)
+def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSettings) -> Outcome:
     if settings.folder_account_id is None:
         return Outcome('failed', 'folder_account_id_required')
     try:
-        store = resolve_store(home)
+        store = resolve_store(home, settings)
     except FileNotFoundError:
         return Outcome('failed', 'store_missing')
     if _retire_email_steps(state):
@@ -2157,7 +2158,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
                   **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
         return Outcome('succeeded', 'store_unchanged', counts)
     try:
-        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account) as (meta, mails, events, db, files):
+        with _decode(home, out, ports.decode, settings.folder_account_id, settings.account, settings) as (meta, mails, events, db, files):
             outcome = _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
         publication = meta.get('email_index_receipt', {})
         outcome.counts.update(publication)
@@ -2296,11 +2297,13 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
 
 # ---- production ports --------------------------------------------------------
 
-def _carr(repo: Path) -> Callable[[str, dict], dict]:
+def _carr(repo: Path, settings: OutlookSettings | None = None) -> Callable[[str, dict], dict]:
+    settings = settings or load_settings()
+
     def call(verb: str, args: dict) -> dict:
         try:
             done = subprocess.run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args), cwd=repo,
-                                  capture_output=True, text=True, timeout=120, env=load_settings().transport_environment())
+                                  capture_output=True, text=True, timeout=120, env=settings.transport_environment())
         except subprocess.TimeoutExpired:
             raise CarrError(code='timeout') from None
         except OSError as error:
@@ -2346,10 +2349,12 @@ def _contacts(carr: Callable[[str, dict], dict]) -> Callable[[], list]:
     return read
 
 
-def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
+def _decoder(home: Path, settings: OutlookSettings | None = None) -> Callable[[Path, Path, Path], None]:
+    settings = settings or load_settings(home)
+
     def decode(copy: Path, files: Path, db: Path) -> None:
         try:
-            done = subprocess.run([str(load_settings(home).decoder), 'db', str(copy), str(db), str(files)],
+            done = subprocess.run([str(settings.decoder), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)
         except subprocess.TimeoutExpired:
             raise DecodeError(_tool_detail('hxprobe', None, 'timeout')) from None
@@ -2367,12 +2372,12 @@ def main() -> int:
     settings = load_settings(home)
     settings.require_repo(repo)
     settings.require_service('intake')
-    carr = _carr(repo)
+    carr = _carr(repo, settings)
     ports = Ports(carr=carr, contacts=_contacts(carr),
-                  decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
+                  decode=_decoder(home, settings), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
-    outcome = run(repo, home, ports)
+    outcome = run(repo, home, ports, settings=settings)
     print(status_line(outcome))
     print(receipt_line(outcome, settings.repo))
     if outcome.reason not in ('outside_window', 'previous_run_active', 'reconciled', 'reconcile_failed',

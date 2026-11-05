@@ -389,6 +389,30 @@ class IntakeTest(unittest.TestCase):
     def test_owner_replaced_after_admission(self):
         self.settings_replaced_after_admission('joe', 'dell', change_account=False)
 
+    def test_owner_replaced_after_admission_dell_to_joe(self):
+        self.settings_replaced_after_admission('dell', 'joe', change_account=False)
+
+    def test_admitted_run_never_reloads_settings(self):
+        settings = load_settings(self.home)
+        self.out().mkdir(parents=True)
+        (self.out() / 'coverage-census.request').touch(mode=0o600)
+        with patch.object(intake, 'load_settings', side_effect=[settings]) as loads:
+            result = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(loads.call_count, 1)
+
+    def test_transport_and_decoder_capture_settings_when_constructed(self):
+        settings = load_settings(self.home)
+        carr = intake._carr(self.repo, settings)
+        decoder = intake._decoder(self.home, settings)
+        with patch.object(intake, 'load_settings', side_effect=AssertionError('settings reloaded')), \
+                patch.object(intake.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                    [], 0, stdout='{"ok":true}')) as execute:
+            carr('log-activity', {'idempotency_key': 'synthetic'})
+            self.assertEqual(execute.call_args.kwargs['env']['CARR_MCP_ENV'], str(settings.mcp_credentials))
+            decoder(self.tmp / 'copy', self.tmp / 'files', self.tmp / 'db')
+            self.assertEqual(execute.call_args.args[0][0], str(settings.decoder))
+
     def test_private_normal_receipt_and_safe_projection(self):
         with patch.object(intake, 'stamp', return_value={'runtime_sha': 'a' * 40, 'runtime_behind': 0}):
             result = self.run_intake()
@@ -2970,7 +2994,7 @@ class IntakeTest(unittest.TestCase):
         settings = load_settings(self.home)
         order, models = [], []
 
-        def fake_run(repo, home, ports):
+        def fake_run(repo, home, ports, *, settings=None):
             order.append('intake')
             ports.read_unresolved({'subject': 'S', 'text': 'T', 'sender': 'a@b.test'}, datetime(2026, 10, 26).date(), [], [])
             return intake.Outcome('succeeded', 'ok')
