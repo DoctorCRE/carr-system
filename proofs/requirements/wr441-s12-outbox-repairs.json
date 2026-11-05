@@ -12,7 +12,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "PASS for release identity and registry. Behavioral production proof remains pending until the original frozen submission, one Sent identity, one press and one correspondence are read back without another send.",
       "input_class": "deployed Worker read-only release and verb registry",
-      "deadline_seconds": 120
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR441-S12-outbox-repairs receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     },
     {
       "id": "studio-natural-outbox-receipt",
@@ -20,7 +24,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "PASS only on a matching full-SHA successful natural nonempty receipt. Otherwise BLOCKED. Full behavior remains unproven until private read-only evidence shows one press, original Sent account/time/recipients, matching full frozen body hash and one correspondence. No new send or draft save is authorized by this plan.",
       "input_class": "one supplied natural outlook-outbox receipt, counts.sent minimum 1; no discovery, job launch or runtime refresh",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR441-S12-outbox-repairs receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

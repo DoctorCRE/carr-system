@@ -11,7 +11,11 @@
       "runner": "studio-canonical-run.v1",
       "expected_result": "Held with exact missing installation and canonical target association facts under the current collector. No Live claim until a trusted execution collector supplies those facts. A complete bound synthetic fixture proves only validator behavior. A future natural canonical execution must meet the declared semantic predicate; signature extraction, cancellations and filing each require their own product readback.",
       "input_class": "authenticated canonical ops.run count-only batch; trusted execution owner assumptions; no raw stdout or mailbox payload",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR823-S3-canonical-semantic-run receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

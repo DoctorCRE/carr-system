@@ -11,7 +11,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "BLOCKED by the pinned observer on the current skipped receipt. Production hold verification remains pending separate natural-run evidence; producer and sanctioned mover remain missing. No production completion or successful filing is asserted.",
       "input_class": "one supplied natural-run outlook-triage receipt; read-only, no job launch or runtime refresh",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR634 triage hold receipt evaluator",
+        "reason": "The current receipt reader rejects the held or skipped receipt. Exit 78 and zero-move hold semantics need a dedicated registered receipt evaluator."
+      }
     }
   ],
   "safety": {

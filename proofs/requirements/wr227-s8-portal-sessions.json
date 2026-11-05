@@ -11,7 +11,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "The release identity matches the merged SHA. Session isolation and revocation require a separate synthetic integration proof after the HTTP adapter lands.",
       "input_class": "read-only release identity and verb registry",
-      "deadline_seconds": 120
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR227.S8-portal-sessions receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

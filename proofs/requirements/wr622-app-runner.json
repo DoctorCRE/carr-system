@@ -11,7 +11,11 @@
       "runner": "app-release-live-walk.v1",
       "expected_result": "The observer verifies app release ancestry and reports human_pending for the signed-in Home walk. No automated signed-in content assertion or completion claim.",
       "input_class": "public release identity and explicit human signed-in Home walk; no mailbox or contact data",
-      "deadline_seconds": 120
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR622-S1-app-runner-registration receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

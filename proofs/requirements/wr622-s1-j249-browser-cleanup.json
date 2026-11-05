@@ -11,7 +11,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "The normal release readback matches the deployed source containing the repair, and the corresponding hosted practice-plugin unit result passes. Missing hosted unit evidence leaves the test repair unproven even if release smoke passes.",
       "input_class": "normal public release readback and hosted CI result for the deployed source; no business records or sends",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR622-S1-J249-browser-cleanup-budget receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

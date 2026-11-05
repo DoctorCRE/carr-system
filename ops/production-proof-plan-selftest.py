@@ -79,7 +79,8 @@ class AdmissionTest(unittest.TestCase):
                 'id': 'release', 'predicate': 'Released worker returns the expected response shape',
                 'runner': 'worker-release-smoke.v1',
                 'expected_result': 'all required shape assertions pass',
-                'input_class': 'read-only production response', 'deadline_seconds': 300}],
+                'input_class': 'read-only production response', 'deadline_seconds': 300, 'deferred': {'blocking_unit': 'Synthetic receipt producer',
+                'reason': 'Synthetic legacy declaration awaits a full predicate evaluator'}}],
             'safety': {'read_only': True, 'no_sends': True, 'max_requests': 20,
                        'max_records': 100, 'max_runtime_seconds': 300, 'max_artifact_bytes': 65536}}
         self.manifest = self.root / 'proofs/requirements/synthetic.json'

@@ -1,14 +1,29 @@
 {
- "schema":"carr-production-proof-plan.v1",
- "requirement_id":"WR826.S3-checkpoint-authority",
- "targets":["worker"],
- "assertions":[{
-  "id":"checkpoint-source-release-only",
-  "predicate":"The deployed Worker release identity equals the merged revision containing the checkpoint implementation. The available release smoke runner does not prove authenticated checkpoint writes, readback, archive custody, native callbacks or installed recovery. A separate coordinator operational proof obligation is specified in mcp-server/test/models/session-checkpoints/design.md and remains pending.",
-  "runner":"worker-release-smoke.v1",
-  "expected_result":"Exact merged release identity observed. Source registration and authenticated operational write/readback must be proved separately before S3 completion; S4-S6 remain pending.",
-  "input_class":"read-only deployed release identity; no checkpoint operational write in builder or release smoke",
-  "deadline_seconds":120
- }],
- "safety":{"read_only":true,"no_sends":true,"max_requests":10,"max_records":1000,"max_runtime_seconds":180,"max_artifact_bytes":1048576}
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR826.S3-checkpoint-authority",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "checkpoint-source-release-only",
+      "predicate": "The deployed Worker release identity equals the merged revision containing the checkpoint implementation. The available release smoke runner does not prove authenticated checkpoint writes, readback, archive custody, native callbacks or installed recovery. A separate coordinator operational proof obligation is specified in mcp-server/test/models/session-checkpoints/design.md and remains pending.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Exact merged release identity observed. Source registration and authenticated operational write/readback must be proved separately before S3 completion; S4-S6 remain pending.",
+      "input_class": "read-only deployed release identity; no checkpoint operational write in builder or release smoke",
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR826.S3-checkpoint-authority receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
 }

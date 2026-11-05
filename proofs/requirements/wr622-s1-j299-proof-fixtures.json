@@ -1,0 +1,57 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S1-J299-proof-fixtures",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "next-product-pr-fixture-admission",
+      "predicate": "The next product PR admission executes its passing and failing synthetic receipt predicates and emits a fixtures-verified admission receipt.",
+      "runner": "receipt-predicate.v1",
+      "expected_result": "At least one fixture pair executes and no assertion is deferred; this observes admission behavior only.",
+      "input_class": "One carr-proof-admission-receipt.v1 JSON line from the hosted next product PR admission log",
+      "deadline_seconds": 30,
+      "execution": {
+        "command": [
+          "python3",
+          "ops/production-proof-plan.py",
+          "--observe-receipt"
+        ],
+        "receipt_source": "GitHub Actions gates production-proof-plan output for the next product PR and its exact tested head",
+        "fixture_pass": "proofs/fixtures/admission-pass.json",
+        "fixture_fail": "proofs/fixtures/admission-fail.json",
+        "checks": [
+          {
+            "path": "schema",
+            "operator": "equals",
+            "value": "carr-proof-admission-receipt.v1"
+          },
+          {
+            "path": "state",
+            "operator": "equals",
+            "value": "fixtures-verified"
+          },
+          {
+            "path": "fixture_runs",
+            "operator": "at_least",
+            "value": 1
+          },
+          {
+            "path": "deferred_assertions",
+            "operator": "equals",
+            "value": 0
+          }
+        ]
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

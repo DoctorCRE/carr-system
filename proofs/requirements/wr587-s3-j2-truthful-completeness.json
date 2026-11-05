@@ -12,7 +12,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "A successful natural intake with nonzero admitted messages and no falsely complete rows. Missing receipts, zero admitted rows or unavailable row-level evidence remain BLOCKED, never production proof.",
       "input_class": "one supplied natural Studio outlook-intake receipt and bounded corresponding decoder evidence; coordinator performs later, observer read-only",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR587-S3-J2-truthful-completeness receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     },
     {
       "id": "deployed-summary-capture-guard",
@@ -20,7 +24,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "The exact merged worker is live and a held captured message has no available summary. Missing held-message evidence remains BLOCKED; do not manufacture a production record.",
       "input_class": "one natural held email activity with its capture context and summary metadata; coordinator performs later, read-only",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR587-S3-J2-truthful-completeness receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

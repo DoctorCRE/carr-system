@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Validate proof admission, without executing or attesting product behavior."""
+"""Execute proof fixtures at admission without attesting production behavior."""
 import argparse
 from datetime import datetime
 import fnmatch
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = 'contracts/production-proof-plan.v1.json'
@@ -32,8 +34,9 @@ def validate(value, schema, label='requirement'):
     if 'enum' in schema and not any(type(value) is type(v) and value == v for v in schema['enum']):
         raise ValueError(f'{label}: unregistered value')
     if kind == 'object':
-        if set(schema['required']) - value.keys() or value.keys() - schema['properties'].keys():
-            raise ValueError(f'{label}: missing or unknown fields')
+        invalid = (set(schema['required']) - value.keys()) | (value.keys() - schema['properties'].keys())
+        if invalid:
+            raise ValueError(f'{label}: missing or unknown fields: ' + ', '.join(sorted(invalid)))
         for key, child in value.items():
             validate(child, schema['properties'][key], label + '.' + key)
     if kind == 'array':
@@ -61,6 +64,99 @@ def product_paths(paths, contract):
         if not any(fnmatch.fnmatchcase(name, pattern) for pattern in contract['x-non-product-paths']):
             product.append(name)
     return product
+
+
+def local_file(root, name, prefix):
+    if (not isinstance(name, str) or not name.startswith(prefix)
+            or any(part in {'', '.', '..'} for part in name.split('/'))):
+        raise ValueError('invalid fixture path')
+    path = root / name
+    if any(p.is_symlink() for p in [path, *path.parents] if p != root.parent):
+        raise ValueError('fixture path escape or symlink')
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError('fixture path escape')
+    if not path.is_file():
+        raise ValueError('fixture receipt file missing: ' + name)
+    return path
+
+
+def check_receipt(execution, receipt, repo, deadline):
+    for check in execution['checks']:
+        if time.monotonic() >= deadline:
+            raise TimeoutError('proof execution deadline exceeded')
+        path, operator, expected = check['path'], check['operator'], check['value']
+        if not re.fullmatch(r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*', path):
+            raise ValueError('invalid receipt check path')
+        if operator == 'equals' and (path.split('.')[-1] in {'source_sha', 'source_commit', 'release_sha', 'sha'}):
+            raise ValueError('release SHA equality is not ancestry; use contains_commit')
+        actual = receipt
+        try:
+            for key in path.split('.'):
+                actual = actual[key]
+        except (KeyError, TypeError):
+            raise ValueError('receipt missing check field: ' + path) from None
+        if operator == 'equals':
+            passed = type(actual) is type(expected) and actual == expected
+        elif operator == 'at_least':
+            if type(expected) is not int or expected < 0:
+                raise ValueError('at_least requires a nonnegative integer')
+            passed = type(actual) is int and actual >= expected
+        elif operator == 'contains_commit':
+            if not all(isinstance(v, str) and re.fullmatch(r'[0-9a-f]{40}', v) for v in (expected, actual)):
+                raise ValueError('ancestry requires full commit SHAs')
+            env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+            env.update(GIT_NO_REPLACE_OBJECTS='1', GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                       GIT_GRAFT_FILE=os.devnull)
+            def git(*args):
+                return subprocess.run(['git', '--no-replace-objects', '-C', str(repo), *args],
+                    env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, timeout=max(0.001, min(15, deadline - time.monotonic())))
+            passed = all(git('cat-file', '-t', sha).stdout.strip() == b'commit'
+                         for sha in (expected, actual)) and git('merge-base', '--is-ancestor', expected, actual).returncode == 0
+        else:
+            raise ValueError('unregistered receipt operator')
+        if not passed:
+            raise ValueError('receipt predicate failed: ' + path)
+
+
+def execution_budget(requirement):
+    return {'deadline': time.monotonic() + requirement['safety']['max_runtime_seconds'],
+            'bytes': requirement['safety']['max_artifact_bytes']}
+
+
+def assertion_execution(assertion, root, contract, budget, *, fixtures=True, receipt=None, repo=None):
+    if ('execution' in assertion) == ('deferred' in assertion):
+        raise ValueError('assertion requires exactly one execution or deferred declaration')
+    if 'deferred' in assertion:
+        return 'DEFERRED ' + assertion['id'] + ' blocked by ' + assertion['deferred']['blocking_unit']
+    deadline = min(budget['deadline'], time.monotonic() + assertion['deadline_seconds'])
+    runner = contract['x-runners'][assertion['runner']]
+    if runner.get('fixture_interface') != 'receipt-predicate.v1':
+        raise ValueError('registered runner has no fixture interface for this declaration')
+    execution = assertion['execution']
+    if execution['command'] != ['python3', runner['path'], '--observe-receipt']:
+        raise ValueError('command must match the registered receipt invocation')
+    binding = runner.get('sources', {}).get(runner['path'])
+    if binding != hashlib.sha256((ROOT / runner['path']).read_bytes()).hexdigest():
+        raise ValueError('registered receipt runner source binding mismatch')
+    if not fixtures:
+        check_receipt(execution, receipt, repo, deadline)
+        return 'receipt predicate observed; provenance and production acceptance unproven'
+    for name in ('fixture_pass', 'fixture_fail'):
+        text = read(local_file(root, execution[name], 'proofs/fixtures/'))
+        budget['bytes'] -= len(text.encode())
+        if budget['bytes'] < 0:
+            raise ValueError('fixture receipts exceed declared artifact bytes')
+        fixture = json.loads(text)
+        try:
+            check_receipt(execution, fixture, root, deadline)
+        except ValueError as error:
+            if name == 'fixture_pass':
+                raise ValueError('passing fixture refused: ' + str(error)) from None
+        else:
+            if name == 'fixture_fail':
+                raise ValueError('failing fixture unexpectedly passed')
+    return 'fixture executed ' + assertion['id'] + ' (pass accepted; fail refused; live unproven)'
 
 
 def admission(body, paths, root, contract):
@@ -101,7 +197,14 @@ def admission(body, paths, root, contract):
         raise ValueError('changed runtime target missing from declaration')
     if set(requirement['targets']) - covered:
         raise ValueError('target has no registered runner')
-    return 'proof declaration accepted (admission only; execution unproven)'
+    budget = execution_budget(requirement)
+    results = [assertion_execution(a, root, contract, budget) for a in requirement['assertions']]
+    deferred = sum('deferred' in a for a in requirement['assertions'])
+    print(json.dumps({'schema': 'carr-proof-admission-receipt.v1',
+        'requirement_id': requirement['requirement_id'],
+        'state': 'deferred' if deferred else 'fixtures-verified',
+        'fixture_runs': len(results) - deferred, 'deferred_assertions': deferred}))
+    return 'proof declaration accepted (admission only; execution unproven); ' + '; '.join(results)
 
 
 def activated(created, edited, activation):
@@ -128,9 +231,26 @@ def main():
     parser.add_argument('--body-file', type=Path)
     parser.add_argument('--files-file', type=Path)
     parser.add_argument('--base', default='origin/main')
+    parser.add_argument('--observe-receipt', action='store_true')
+    parser.add_argument('--requirement', type=Path)
+    parser.add_argument('--assertion')
+    parser.add_argument('--receipt-file', type=Path)
+    parser.add_argument('--repo', type=Path, default=ROOT)
     args = parser.parse_args()
     try:
         contract = json.loads(read(ROOT / CONTRACT_PATH))
+        if args.observe_receipt:
+            if not all((args.requirement, args.assertion, args.receipt_file)):
+                raise ValueError('--requirement, --assertion and --receipt-file required')
+            requirement = json.loads(read(args.requirement))
+            validate(requirement, contract)
+            matches = [a for a in requirement['assertions'] if a['id'] == args.assertion]
+            if len(matches) != 1 or 'deferred' in matches[0]:
+                raise ValueError('one executable assertion required; deferred proof is not observable')
+            result = assertion_execution(matches[0], args.root, contract, execution_budget(requirement), fixtures=False,
+                receipt=json.loads(read(args.receipt_file)), repo=args.repo)
+            print('Production proof: ' + result)
+            return 0
         if args.body_file:
             body = read(args.body_file)
             base = args.base

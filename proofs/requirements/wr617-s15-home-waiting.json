@@ -11,7 +11,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "Release identity matches the merged SHA and the verb registry includes read-home-inbox-v5, read-actor-roster-v1 and search-parties-v1.",
       "input_class": "read-only release identity and verb registry",
-      "deadline_seconds": 120
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR617.S15-home-waiting receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

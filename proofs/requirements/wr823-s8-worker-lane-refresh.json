@@ -11,7 +11,11 @@
       "runner": "studio-canonical-run.v1",
       "expected_result": "Exact intended source installed while its parent still waits for Studio proof. Stay landed-unproven until observed. Hold canonical proof when trusted collector facts are missing.",
       "input_class": "read-only fresh Worker identity, GitHub lane artifact and parent metadata, verified installed identity and explicit local diagnostic report; canonical count-only reader; no job launch",
-      "deadline_seconds": 240
+      "deadline_seconds": 240,
+      "deferred": {
+        "blocking_unit": "WR823.S4 unified delivery graph and trusted Studio collector",
+        "reason": "The waiting Studio proof job and trusted installation interval are not yet produced. The canonical count reader cannot evaluate this compound predicate."
+      }
     }
   ],
   "safety": {

@@ -12,7 +12,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "PASS only for the selected release and registry smoke checks. Full semantic production proof remains pending until all four original contacts and the refusal and account-binding obligations are observed through the installed flow.",
       "input_class": "deployed Worker read-only release identity and verb registry, pinned runner and released source; no contact mutations",
-      "deadline_seconds": 120
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR636-S1-canonical-contact-lookup receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     },
     {
       "id": "installed-intake-nonempty-receipt",
@@ -20,7 +24,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "OBSERVED only when the supported runtime, success and count predicate matches. Missing receipt, abbreviated or mismatched SHA, failed state or insufficient count is BLOCKED. Neither OBSERVED nor admission establishes the four-contact production proof.",
       "input_class": "one supplied actual outlook-intake receipt, run.mail_ids minimum 1; read-only observer, no discovery, job launch, installation or runtime refresh",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR636-S1-canonical-contact-lookup receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

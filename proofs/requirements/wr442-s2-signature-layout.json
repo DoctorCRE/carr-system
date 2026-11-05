@@ -11,7 +11,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "The receipt reports signature_recorded >= 1. A held or idle run does not establish positive processing.",
       "input_class": "read-only natural intake receipt and redacted finding metadata",
-      "deadline_seconds": 300
+      "deadline_seconds": 300,
+      "deferred": {
+        "blocking_unit": "wr442-s2-signature-layout receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     },
     {
       "id": "calendar-cancellation",
@@ -19,7 +23,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "calendar_agenda_published >= 1 on a successful expected-runtime receipt. A window without decoded cancellations does not establish the positive cancellation case.",
       "input_class": "read-only completed natural intake receipt",
-      "deadline_seconds": 300
+      "deadline_seconds": 300,
+      "deferred": {
+        "blocking_unit": "wr442-s2-signature-layout receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

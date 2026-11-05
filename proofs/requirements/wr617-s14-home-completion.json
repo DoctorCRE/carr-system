@@ -11,7 +11,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "Release identity matches the merged SHA and verb-registry journey passes with read-home-inbox-v4 present.",
       "input_class": "read-only release identity and verb registry",
-      "deadline_seconds": 120
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR617.S14-home-completion receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

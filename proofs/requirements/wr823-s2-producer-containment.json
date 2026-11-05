@@ -11,7 +11,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "Current installed producer publishes and validates a nonempty snapshot through the intentional configured out symlink with zero mailbox mutations. The current triage outcome is skipped while the executor is unavailable, so the pinned receipt observer reports BLOCKED. Admission is not live proof; retain direct snapshot evidence and do not claim filing or Live from a held or skipped receipt.",
       "input_class": "one explicit actual-run outlook-triage receipt plus current-attempt snapshot and provenance from the authorized installed research-copy proof; no mailbox send or move; observer never launches a job or refreshes runtime",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR823-S2-producer-containment receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

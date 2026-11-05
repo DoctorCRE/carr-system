@@ -12,7 +12,11 @@
       "runner": "worker-release-smoke.v1",
       "expected_result": "OBSERVED only with matching deployed release identity and independent read-only service-registry evidence.",
       "input_class": "deployed release identity and read-only service registry evidence",
-      "deadline_seconds": 60
+      "deadline_seconds": 60,
+      "deferred": {
+        "blocking_unit": "WR823-S2-J13-canonical-intake-run receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     },
     {
       "id": "next-installed-intake-canonical-run",
@@ -20,7 +24,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "OBSERVED only when the next installed intake run has at least one retained mail ID, appears in the canonical readout and matches the installed receipt. A missing canonical row is BLOCKED even if the receipt observer passes.",
       "input_class": "one naturally occurring successful installed intake receipt with at least one retained mail ID plus independent complete canonical read-only run acquisition",
-      "deadline_seconds": 60
+      "deadline_seconds": 60,
+      "deferred": {
+        "blocking_unit": "WR823-S2-J13-canonical-intake-run receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

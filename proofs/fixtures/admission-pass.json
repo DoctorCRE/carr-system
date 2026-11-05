@@ -1,0 +1,7 @@
+{
+  "schema": "carr-proof-admission-receipt.v1",
+  "requirement_id": "synthetic-product",
+  "state": "fixtures-verified",
+  "fixture_runs": 1,
+  "deferred_assertions": 0
+}

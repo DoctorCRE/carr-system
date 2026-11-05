@@ -11,7 +11,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "A bounded read-only report with independently reconciled numerator and denominator, or an explicit failed read or no_evidenced_population result. No autonomous policy writes. The registered observer remains BLOCKED without an actual operational receipt; its count comparison alone does not prove reporting semantics.",
       "input_class": "One explicit completed weekly canonical email filing cohort owned by Joe, observed through an exclusive fixed undo cutoff. No mailbox reads or sends.",
-      "deadline_seconds": 35
+      "deadline_seconds": 35,
+      "deferred": {
+        "blocking_unit": "WR634-S1-J142-email-weekly-quality-report receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {

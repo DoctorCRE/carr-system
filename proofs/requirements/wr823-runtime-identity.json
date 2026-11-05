@@ -1,7 +1,9 @@
 {
   "schema": "carr-production-proof-plan.v1",
   "requirement_id": "WR823-S2-runtime-identity",
-  "targets": ["studio"],
+  "targets": [
+    "studio"
+  ],
   "assertions": [
     {
       "id": "installed-intake-exact-runtime-receipt",
@@ -9,7 +11,11 @@
       "runner": "studio-run-receipt.v1",
       "expected_result": "OBSERVED only for a successful receipt with exact installed full identity and an integer count meeting the predicate. Missing, short, wrong-source, wrong-runtime, failed, degraded or skipped receipt, or missing, boolean or zero mail_ids is BLOCKED. Source checks alone leave production unproven. Installation and execution evidence must be independently verified by reserved J3.",
       "input_class": "one supplied actual authorized outlook-intake receipt, run.mail_ids minimum 1 as a retained RFC Message-ID map size, never an emails alias; observer only reads the receipt and never launches jobs, installs runtimes or sends mail",
-      "deadline_seconds": 30
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR823-S2-runtime-identity receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
     }
   ],
   "safety": {
