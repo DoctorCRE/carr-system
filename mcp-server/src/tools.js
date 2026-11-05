@@ -426,7 +426,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
       return { replayed: true, ...response, event: industryEventRecord(response.event) };
     return { replayed: true, ...response };                          // A1: replay, no second write
   }
-  if (!['record-email-lifecycle','correct-email-touch'].includes(verb) && (verb.includes('email') || args.email_context?.source_activity_id))
+  if (!['record-email-lifecycle','correct-email-touch','log-activity'].includes(verb) && (verb.includes('email') || args.email_context?.source_activity_id))
     await guardEmailAction(client, args, ToolError);
   const result = await fn(applicationHash);                                        // inside the open transaction
   if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
@@ -4614,6 +4614,7 @@ export const TOOLS = {
         if (args.email_identity.mailbox_account !== account)
           throw new ToolError({ error: 'email_identity_account_mismatch' });
         emailIdentity = await lockEmailIdentity(c, args.email_identity.mailbox_owner, account, args.email_identity.item_id);
+        await guardEmailAction(c,args,ToolError);
         const anyCapture = await capturedEmail(c, emailIdentity);
         if (anyCapture?.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
         const existing = await capturedEmail(c, emailIdentity, s.id);
@@ -4635,6 +4636,7 @@ export const TOOLS = {
           return result;
         }
       }
+      if (!emailIdentity) await guardEmailAction(c,args,ToolError);
       const assignments = [];
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)

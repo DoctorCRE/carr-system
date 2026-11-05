@@ -2,6 +2,7 @@
 -- expand-contract: expand; existing activities default to uncorrected.
 -- lock-review: activity nullable column and event partial indexes; runner timeouts apply.
 alter table public.activity add column touch_correction_key uuid;
+comment on column public.activity.touch_correction_key is 'Permanent compensation key. Excluded from contact-date readers; original activity remains in history.';
 create unique index event_email_touch_correction_key on public.event(idempotency_key) where verb='correct-email-touch';
 create unique index event_email_touch_correction_activity on public.event(subject_id) where verb='correct-email-touch';
 create or replace function public.email_touch_application_immutable() returns trigger

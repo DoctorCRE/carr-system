@@ -121,4 +121,27 @@ test('guarded email touch correction through registered transactions',async t=>{
       const y=await setup();const r=await Promise.allSettled(peers.map(p=>run(p,'correct-email-touch',{...y.args,idempotency_key:randomUUID()})));assert.equal(r.filter(x=>x.status==='fulfilled').length,1);assert.equal(r.find(x=>x.status==='rejected').reason.payload.error,'email_touch_already_corrected');
     }finally{await Promise.all(peers.map(p=>p.end()));}
   });
+  await t.test('linked-source revision and correction race without lock inversion',async()=>{
+    const x=await setup();
+    const source=await call('log-activity',{...x.input,idempotency_key:randomUUID(),email_touch:undefined});
+    const input={...x.input,idempotency_key:randomUUID(),email_touch:{...x.input.email_touch,source_id:randomUUID()},
+      email_context:{source_activity_id:source.activity_id,subject:'Synthetic',conversation_id:null,sender:{email:'fixture@example.test',internal:false},recipients:[]}};
+    const applied=await call('log-activity',input);
+    const peer=new pg.Client(fixture.connection);await peer.connect();
+    const pid=(await peer.query('select pg_backend_pid() pid')).rows[0].pid;
+    await c.query('begin');
+    await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify(['email-touch-source',actor.id,input.email_touch.source_id,'client',x.target])]);
+    const revision=run(peer,'log-activity',{...input,idempotency_key:randomUUID(),email_touch:{...input.email_touch,source_version:'2'}}).then(value=>({value}),error=>({error}));
+    try {
+      let blocked=false;
+      for(let attempt=0;attempt<200 && !blocked;attempt++)
+        blocked=(await c.query('select cardinality(pg_blocking_pids($1))>0 blocked',[pid])).rows[0].blocked;
+      assert.equal(blocked,true,'revision reaches the held source-target lock');
+      await c.query('set local role carr_writer');
+      await executeRegisteredTool(c,actor,'correct-email-touch',{...x.args,original_key:applied.email_application.original_key});
+      await c.query('commit');
+      const result=await revision;if(result.error) throw result.error;
+      assert.ok(result.value.activity_id);
+    }finally{await c.query('rollback');await revision;await peer.end();}
+  });
 });
