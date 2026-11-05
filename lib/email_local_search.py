@@ -13,6 +13,8 @@ import sqlite3
 import stat
 import tempfile
 
+from lib.fence import DATA_SENTENCE, fence
+
 
 class IndexError(ValueError):
     """The research copy or publication location violates the index contract."""
@@ -348,7 +350,8 @@ def query_index(index=None, *, source=None, source_revision=None, account_id, qu
     Freshness is exact source byte identity, not a maximum age. Missing or invalid
     provenance and changed sources refuse every page before MATCH. A timestamp
     describes publication age only; it does not prove mailbox capture recency.
-    Excerpts expose up to 240 subject and 500 body characters locally.
+    Excerpts expose up to 240 subject and 500 body characters locally, each
+    labeled as outside data and fenced with embedded closing tags escaped.
     """
     phrase = _literal_phrase(query)
     if (type(account_id) is not int or not 0 <= account_id <= 2**63 - 1
@@ -418,7 +421,9 @@ def query_index(index=None, *, source=None, source_revision=None, account_id, qu
                     raise IndexError('invalid_index_row')
                 item = dict(sent_unix=row[1], source_ref=row[2])
                 if excerpts:
-                    item['excerpt'] = dict(subject=row[3], body=row[4])
+                    item['excerpt'] = {
+                        key: DATA_SENTENCE + '\n' + fence('email', value) if value is not None else None
+                        for key, value in zip(('subject', 'body'), row[3:5])}
                 results.append(item)
         if not published_snapshot:
             _check_file(source)

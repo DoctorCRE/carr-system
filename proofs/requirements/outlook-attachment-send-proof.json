@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "outlook-attachment-send-proof",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "natural-submission-attachment-evidence",
+    "predicate": "After delivery, inspect a naturally partner-submitted real attachment send on Studio with the read-only first-send verifier at the delivered revision. Require the selected submission manifest, keyed pressing/done digest multisets and canonical correspondence send identity to agree. Observe submission_manifest_verified=true while sent_attachment_content_verified=null, reason=sent_attachment_content_unavailable and ok=false when the current decoder cannot expose Sent attachment bytes. A run receipt alone cannot prove these assertions. Missing natural submission, verifier evidence or Sent bytes leaves attachment delivery unproven. No new test email or resend.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "BLOCKED until a natural partner submission and read-only verifier evidence exist. Even with manifest agreement, attachment delivery remains unproven because Sent attachment bytes are unavailable. The pinned receipt reader alone cannot attest content.",
+    "input_class": "One explicitly supplied Studio operational receipt at the delivered full runtime SHA and one read-only redacted first-send verifier result for an existing natural attachment submission. Collection is coordinator work after delivery; the builder uses only synthetic fixtures and never opens a mailbox or attachment files.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

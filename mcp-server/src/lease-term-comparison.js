@@ -108,11 +108,11 @@ function ratio(value) {
 }
 
 function totalFinancingInterest(principal, annualRate, years) {
-  if (principal === 0 || annualRate === 0) return 0;
   const monthlyRate = annualRate / 12;
+  if (principal === 0 || monthlyRate === 0) return 0;
   const periods = years * 12;
-  const payment = principal * monthlyRate / (1 - ((1 + monthlyRate) ** -periods));
-  return payment * periods - principal;
+  const discountedPeriods = -Math.expm1(-periods * Math.log1p(monthlyRate));
+  return principal * (periods * monthlyRate / discountedPeriods - 1);
 }
 
 function calculateOption(option, squareFeet, financing) {
