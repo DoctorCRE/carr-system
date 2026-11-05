@@ -71,6 +71,46 @@ class StudioObservationTest(unittest.TestCase):
             args = json.loads(rows[0][1])
             recorded = args[args.index('--detail') + 1]
             self.assertEqual(json.loads(recorded), receipt)
+            import contextlib
+            from datetime import datetime, timedelta, timezone
+            import importlib.util
+            import io
+            from unittest.mock import MagicMock
+            from lib.studio_proof import Requirement, Source, Installation, Evidence, observe as join
+            spec = importlib.util.spec_from_file_location('boundary_recorder', ROOT / 'tools/ops-record.py')
+            recorder = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(recorder)
+            conn, cur = MagicMock(), MagicMock()
+            conn.__enter__.return_value = conn
+            conn.cursor.return_value.__enter__.return_value = cur
+            run_id = '00000000-0000-4000-8000-000000000001'
+            cur.fetchone.return_value = (run_id,)
+            with patch.object(recorder, 'connect', return_value=conn), \
+                 patch.object(recorder, 'service_id', return_value='synthetic-service'), \
+                 patch.object(recorder, '_record_success_recovery', return_value=[]), \
+                 patch.object(recorder, '_reap_expired_runs'), \
+                 patch.object(sys, 'argv', ['ops-record.py', 'run', *args]), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(recorder.main(), 0)
+            params = next(call.args[1] for call in cur.execute.call_args_list
+                          if 'insert into ops.run' in call.args[0])
+            now = datetime.now(timezone.utc)
+            cur.fetchall.return_value = [(run_id, params[1], 'outlook-intake', params[5], params[4],
+                params[15], params[16], params[6], params[8], params[10], params[11], now,
+                now+timedelta(hours=1), params[20])]
+            with patch.object(recorder, 'connect', return_value=conn):
+                batch = recorder.read_run_batch('outlook-intake', 'synthetic.identity', 'production',
+                                               now-timedelta(hours=1), now)
+            requirement = Requirement('synthetic-boundary', 'outlook-intake', 'synthetic.identity',
+                                      'production', 'studio', 'run.mail_ids', 1, 3600)
+            source = Source('DoctorCRE/carr-system', full_sha, full_sha, 'studio')
+            install = Installation('studio', full_sha, now-timedelta(minutes=20),
+                                   now-timedelta(minutes=10), True, True, True, True)
+            evidence = Evidence(batch, install, full_sha, {run_id: 'studio'}, source_ancestry_verified=True)
+            observed = join(requirement, source, evidence, now)
+            self.assertEqual(observed.state, 'live-proven', observed)
+            self.assertEqual(observed.run_id, run_id)
+            self.assertEqual(batch.runs[0].counts, receipt['counts'])
             result = observe('outlook-intake-receipt ' + recorded)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             for changes in ({'runtime_sha': full_sha[:9]}, {'runtime_sha': '0' * 40},
@@ -85,6 +125,33 @@ class StudioObservationTest(unittest.TestCase):
                                                     {'run': {'mail_ids': 2}}, root / 'missing')
             self.assertIsNone(json.loads(missing.split(' ', 1)[1])['runtime_sha'])
             self.assertEqual(observe(missing).returncode, 1)
+
+    def test_canonical_cli_acquires_in_process_and_cannot_certify_supplied_json(self):
+        import contextlib
+        from datetime import datetime, timedelta, timezone
+        import importlib.util
+        import io
+        from lib.studio_proof import Run, RunBatch, acquire_evidence
+        spec = importlib.util.spec_from_file_location('studio_observer', PROGRAM)
+        observer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(observer)
+        now = datetime.now(timezone.utc)
+        batch = RunBatch('ok', True, False, now-timedelta(hours=1), now, ())
+        arguments = ['--service', 'outlook-intake', '--key', 'outlook.intake',
+                     '--environment', 'production', '--runtime-sha', 'a'*40,
+                     '--merge-sha', 'a'*40, '--requirement-id', 'identity',
+                     '--since', (now-timedelta(hours=1)).isoformat(),
+                     '--count', 'run.mail_ids', '--minimum', '1', '--max-age-seconds', '3600']
+        with patch('lib.studio_proof.read_runs', return_value=batch) as read, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(observer.canonical_main(arguments), 1)
+        read.assert_called_once()
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['state'], 'held')
+        self.assertIn('target binding unavailable', result['reasons'][0])
+        self.assertIn('actual installation interval', result['reasons'][0])
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            observer.canonical_main(arguments + ['--receipt-file', '/tmp/untrusted.json'])
 
     def test_completed_receipt_and_blocked_prerequisites(self):
         with tempfile.TemporaryDirectory() as directory:
