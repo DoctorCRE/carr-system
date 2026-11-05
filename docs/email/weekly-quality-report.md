@@ -5,7 +5,7 @@
 This command owns reporting only. The existing email proposal module owns filing and undo policy.
 `Window` holds an explicit half-open action occurrence interval and a separate exclusive undo observation cutoff.
 `report(window, read, clock)` accepts a read port and an injected clock. The port executes one SQL statement.
-The CLI uses `psql` with an explicitly named libpq service. Synthetic mode uses a caller-supplied aggregate fixture.
+The CLI uses psycopg with `DATABASE_URL` supplied privately by the existing `tools/db-tap.py run` wrapper. Synthetic mode uses a caller-supplied aggregate fixture.
 The PostgreSQL tests execute the same query against synthetic canonical relations.
 
 Two designs were considered. Loading event history into Python would duplicate SQL population logic and transfer private rows.
@@ -13,14 +13,17 @@ Set-based aggregation keeps joins and populations together and returns only coun
 
 At current and ten-times load, there is one query and no per-effect requests or N+1 reads.
 The first limit is a scan of canonical event history and JSON effect references.
-A read-only repeatable-read transaction has a 30-second statement timeout and a 35-second client timeout.
+A read-only repeatable-read transaction has a five-second connection timeout, a 30-second statement timeout, and a five-second lock timeout.
 Action windows are at most eight elapsed days, including local weekly windows across clock changes. Observation extends at most 90 days from window end.
 There is no cache, daemon, scheduler, mutation, or autonomous downgrade.
 One consistent database snapshot supplies all counts. Late-recorded history can change a rerun even at a fixed cutoff.
 Identical history, window, and cutoff produce identical output. There is no generated-at field.
-The command fails closed on database, timeout, fixture, and output errors. Diagnostics never include database stderr or row payloads.
+The command fails closed on database, timeout, fixture, and output errors. Diagnostics never include database error text or row payloads.
 A new private JSON file is created exclusively with mode 0600. The human summary contains counts and rates only.
 Loops traverse a fixed population list and bounded fixture input, never mailbox items.
+
+The connection route changed from an unprovisioned libpq service to the existing Studio wrapper.
+Production execution and independent reconciliation remain required after delivery.
 
 ## Population contract
 
@@ -58,19 +61,23 @@ Unavailable counts are null, never zero.
 
 ## Command reference
 
-Run the command directly. No global registration is required.
+Use the existing Studio database tap. No new libpq service or credential is required.
 
 ```sh
-python3 tools/email-weekly-quality.py --start 2026-10-26T00:00:00-05:00 --end 2026-11-02T00:00:00-06:00 --undo-before 2026-11-03T00:00:00-06:00 --partner joe --service carr_quality_reader --output /tmp/email-quality-private.json
+.venv/bin/python tools/db-tap.py run tools/email-weekly-quality.py --start 2026-10-26T00:00:00-05:00 --end 2026-11-02T00:00:00-06:00 --undo-before 2026-11-03T00:00:00-06:00 --partner joe --database --output /tmp/email-quality-private.json
 ```
 
 A local week spanning the autumn clock change exceeds 168 hours. The command accepts up to eight elapsed days
 so an explicit seven-calendar-day local window remains valid across that transition.
-The service must already exist and have SELECT access to the canonical event, actor, activity, deal, and filing view.
-The command does not discover credentials or obtain new grants. `carr_reader` has filing-view access but may lack full event access.
-Use an already authorized read service. A permission failure is a failed report, not an empty population.
+`tools/db-tap.py run` is the existing sanctioned Studio route used by the last-touch proof and other production taps.
+It resolves the configured production connection privately and supplies `DATABASE_URL` with a read-only default.
+The report also enforces read-only transactions. It does not obtain grants or discover credentials itself.
+A missing wrapper-supplied connection fails at `database_connect` with category `configuration`.
+Connection, permission, timeout, query, fixture, aggregate, and output failures name their step and safe category.
+Raw database errors, connection strings, SQL payloads, and fixture contents are never printed.
+There is one database attempt with no retries or fallback. A failed read never becomes an empty population.
 `--mailbox-account` optionally narrows the partner population. The account is retained only in private JSON.
-`--fixture` replaces `--service` and accepts a JSON array of aggregate rows from the read-port contract.
+`--fixture` replaces `--database` and accepts a JSON array of aggregate rows from the read-port contract.
 Each row has `population`, `denominator`, and `numerator`; all five populations must occur exactly once.
 Populations are `automatic`, `partner_confirmed`, `bulk_import`, `unclassified`, and `unrelated_actor`.
 Fixture mode is labeled synthetic and does not establish production quality.
