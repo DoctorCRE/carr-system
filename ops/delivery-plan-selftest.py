@@ -230,6 +230,59 @@ class DeliveryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'duplicate assertion'):
             self.resolve(self.commit())
 
+    def test_admission_to_resolution_requires_changed_bound_requirement(self):
+        spec = importlib.util.spec_from_file_location('admission', ROOT / 'ops/production-proof-plan.py')
+        admission = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(admission)
+        name = 'proofs/requirements/change.json'
+        req = self.requirement(targets=['worker'])
+        self.commit()
+        self.write('mcp-server/src/runtime.py', 'synthetic runtime')
+        sha = self.commit()
+        policy = json.loads((self.root / delivery.POLICY).read_text())
+        body = '## Production proof\n' + name
+        with self.assertRaisesRegex(ValueError, 'changed requirement'):
+            admission.admission(body, ['mcp-server/src/runtime.py'], self.root, policy)
+        with self.assertRaisesRegex(ValueError, 'landed requirements'):
+            self.resolve(sha)
+        req['requirement_id'] = 'new-change'
+        self.write(name, json.dumps(req))
+        sha = self.commit()
+        paths = ['mcp-server/src/runtime.py', name]
+        self.assertIn('accepted', admission.admission(body, paths, self.root, policy))
+        self.assertEqual(self.resolve(sha)['requirements'][0]['commit'], sha)
+        policy['x-runners']['fixture.v1']['revision'] = 'f' * 40
+        self.write(delivery.POLICY, json.dumps(policy))
+        req['requirement_id'] = 'invalid-observer'
+        self.write(name, json.dumps(req))
+        self.commit()
+        with self.assertRaises(ValueError):
+            admission.admission(body, paths, self.root, policy)
+        with self.assertRaises(ValueError):
+            self.resolve()
+
+    def test_cli_stdout_respects_response_budget(self):
+        for i in range(1000):
+            self.write(f'docs/file-{i:04d}.md', 'synthetic')
+        name = 'proofs/requirements/change.json'
+        req = self.requirement(name)
+        req['requirement_id'] = 'a' * 900000
+        self.write(name, json.dumps(req))
+        self.commit()
+        size = len(delivery.canonical(self.resolve()))
+        req['requirement_id'] += 'a' * (1048401 - size)
+        self.write(name, json.dumps(req))
+        self.git('add', '--', name)
+        self.git('commit', '--amend', '--no-edit')
+        sha = self.git('rev-parse', 'HEAD')
+        self.git('update-ref', 'refs/remotes/origin/main', sha)
+        result = subprocess.run([sys.executable, str(ROOT / 'ops/delivery-plan.py'),
+            '--root', str(self.root), '--main-sha', sha],
+            env=self.env, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLessEqual(len(result.stdout), 1048576)
+        self.assertEqual(result.stdout, delivery.canonical(self.resolve(sha)) + b'\n')
+
     def test_cli_refusal_has_no_partial_plan(self):
         result = subprocess.run([sys.executable, str(ROOT / 'ops/delivery-plan.py'),
             '--root', str(self.root), '--main-sha', 'f' * 40],
