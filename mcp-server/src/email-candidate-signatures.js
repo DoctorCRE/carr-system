@@ -97,7 +97,7 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
           await c.query(`update candidate_pool set version=version+1,evidence_version=evidence_version+1,
             source_invalid=source_invalid or $2,updated_by=$3,updated_at=now() where id=$1`,[row.id,changed,actor.id]);
           await writeEvent(c,actor,'observe-email-candidate-signatures','candidate_pool',row.id,
-            {new:{inserted,source_invalid:changed,evidence_version:row.evidence_version+1},cause:'ingest_email',idempotency_key:args.idempotency_key});
+            {new:{inserted,source_invalid:row.source_invalid||changed,evidence_version:row.evidence_version+1},cause:'ingest_email',idempotency_key:args.idempotency_key});
         }
         return {ok:true,contract:'email-candidate-signatures.v1',pool_id:row.id,status:row.status,inserted,
           duplicates_suppressed:args.observations.length-inserted,source_invalid:row.source_invalid||changed,
@@ -113,7 +113,7 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
         const row=(await c.query(`select p.id,p.version,p.evidence_version,p.source_invalid,p.status,
           coalesce((select jsonb_agg(page order by page.id) from (select * from email_candidate_signature
             where pool_id=p.id and ($3::uuid is null or id>$3) order by id limit $4) page),'[]'::jsonb) as observations
-          from candidate_pool p where p.id=$1 and p.source='outlook-intake' and p.source_row->>'mailbox_owner'=$2`,
+          from v_email_candidate_evidence p where p.id=$1 and p.mailbox_owner=$2`,
           [args.pool_id,owner,args.after??null,limit+1])).rows[0];
         if (!row) fail('email_candidate_not_found');
         const observations=row.observations;

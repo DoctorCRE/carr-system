@@ -25,6 +25,10 @@ create index email_candidate_signature_identity on public.email_candidate_signat
 create index email_candidate_signature_items on public.email_candidate_signature using gin(item_ids);
 grant select on public.email_candidate_signature to carr_reader,carr_writer;
 grant insert,update on public.email_candidate_signature to carr_writer;
+create view public.v_email_candidate_evidence as
+select id,source,status,version,evidence_version,source_invalid,source_row->>'mailbox_owner' as mailbox_owner
+from public.candidate_pool where source='outlook-intake';
+grant select on public.v_email_candidate_evidence to carr_reader,carr_writer;
 
 create function public.guard_candidate_signature_source() returns trigger
 language plpgsql set search_path=pg_catalog,pg_temp as $$
@@ -37,3 +41,21 @@ end $$;
 revoke all on function public.guard_candidate_signature_source() from public;
 create trigger candidate_signature_source_guard before update on public.candidate_pool
 for each row execute function public.guard_candidate_signature_source();
+
+do $signature_grants$
+declare
+  contract jsonb := ops.scac_current_grant_contract();
+  privilege text;
+begin
+  foreach privilege in array array['insert','update'] loop
+    contract := jsonb_set(contract,'{relation_dml}',contract->'relation_dml' || jsonb_build_array(jsonb_build_object(
+      'ingress_key','db-relation-acl:public.email_candidate_signature:carr_writer:' || privilege,
+      'ingress_kind','db_relation_acl','relation','public.email_candidate_signature',
+      'relation_kind','r','grantee','carr_writer','privilege',privilege,'grantable',false)));
+  end loop;
+  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb '
+    'language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
+  if ops.scac_mutation_catalog_v118_current() is not true then
+    raise exception 'Candidate signature grant catalog is invalid';
+  end if;
+end $signature_grants$;
