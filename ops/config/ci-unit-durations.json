@@ -142,6 +142,7 @@
     "email-delivery-finding-postgres.test.mjs": {"milliseconds": 19100, "serial": true},
     "email-lead-proposal-postgres.test.mjs": {"milliseconds": 1653, "serial": true},
     "email-lifecycle-postgres.test.mjs": {"milliseconds": 27050, "serial": true},
+    "email-touch-application-postgres.test.mjs": {"milliseconds": 52400, "serial": true},
     "email-link-queue-postgres.test.mjs": {"milliseconds": 400, "serial": true},
     "email-link-queue.test.mjs": {"milliseconds": 744, "serial": false},
     "email-loi-spelling.test.mjs": {"milliseconds": 539, "serial": false},
