@@ -157,6 +157,17 @@ def test_changed_path_selection():
         rc, output = run(['--strict', '--changed-from', base], root=root)
         check('documentation lint propagates credential qualification failure',
               rc == 1 and 'seeded credential refusal' in output, output)
+        path.write_text('Guidance with trailing whitespace \n')
+        subprocess.run(['git', 'add', 'docs/new.md'], cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Whitespace defect'], cwd=root, env=fixture_env(), check=True)
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('documentation lint catches a seeded whitespace defect',
+              rc == 1 and 'diff whitespace check failed' in output, output)
+        subprocess.run(['git', 'mv', 'mcp-server/fixture.js', 'docs/renamed.md'],
+                       cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Move source into docs'], cwd=root, env=fixture_env(), check=True)
+        check('renaming product into documentation retains the old product path',
+              set(scope.selection(all_classes, root=root, base=base, environ={})['classes']) == all_classes)
         event.write_text('{}')
         check('malformed PR event falls back to full suite',
               set(scope.selection(all_classes, root=root, environ=env)['classes']) == all_classes)
