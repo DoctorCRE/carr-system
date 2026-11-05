@@ -23,7 +23,7 @@ def observations(mails, mailbox, source_key, copy_window):
             if source is None:
                 extraction = {'version': VERSION, 'ambiguity': 'competing_source_representation',
                               'contact_facts': [], 'identity_observations': []}
-            has_signature = any(line.strip() == '--' for line in body.splitlines())
+            has_signature = isinstance(body, str) and any(line.strip() == '--' for line in body.splitlines())
             if extraction['ambiguity'] and selected not in retained and not has_signature:
                 continue
             retained.add(selected)

@@ -92,6 +92,8 @@ class CandidateSources(unittest.TestCase):
         self.assertTrue(changed['extraction']['ambiguity'])
         partial = observations([mail('first', full=False)], state, digest, 300)['sender@synthetic.test'][0]
         self.assertNotEqual(first['raw_digest'], partial['raw_digest'])
+        absent = observations([mail('first', body=None, full=False)], state, digest, 300)['sender@synthetic.test'][0]
+        self.assertEqual(absent['extraction']['ambiguity'], 'incomplete_or_oversized')
 
 
 if __name__ == '__main__':
