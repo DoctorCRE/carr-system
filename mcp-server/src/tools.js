@@ -1390,7 +1390,7 @@ async function nextRenderSeq(client, blockId) {
   return r.rows[0].n;
 }
 
-const FK = { deal: "deal_id", client: "client_id", lead: "lead_id", vendor: "vendor_id" };
+const FK = { deal: "deal_id", client: "client_id", lead: "lead_id", vendor: "vendor_id", party: "party_id" };
 
 // [ORDER 18] How many intro-graph edges `find` returns per query. A cap, not a
 // page: find answers "who is this and who do we know through them", and the whole
