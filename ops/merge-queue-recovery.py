@@ -109,6 +109,6 @@ def recover(drop, database, observe, arm):
         except Exception:
             state = 'uncertain'
         else:
-            state = 'requeued'
+            state = 'armed'
         db.execute('UPDATE recovery SET state=? WHERE repository=? AND number=? AND event_id=?', (state, *key))
         return {'state': state, 'reason': why}

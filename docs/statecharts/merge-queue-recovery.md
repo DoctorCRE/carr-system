@@ -26,7 +26,7 @@ stateDiagram-v2
     Inspect --> Recorded: same cause or total retry limit reached
     Inspect --> Reserved: verified startup failure and unchanged approval and head
     Inspect --> Recorded: already queued or merged
-    Reserved --> Requeued: trusted native adapter succeeds
+    Reserved --> Armed: trusted native adapter succeeds
     Reserved --> Uncertain: adapter fails or process crashes
     Inspect --> Recorded: duplicate removal event, including unfinished reservation
 ```
@@ -64,7 +64,7 @@ All tests are in the existing merge-queue-signal-selftest.py suite.
 | Inspect to Recorded, unsafe cause | test_unsafe_causes_never_arm |
 | Inspect to Recorded, stale evidence or hold | test_changed_authority_never_arms |
 | Inspect to Recorded, existing queue or merge | test_terminal_queue_state_never_arms |
-| Inspect to Reserved to Requeued | test_transient_recovers_once |
+| Inspect to Reserved to Armed | test_transient_recovers_once |
 | Inspect to Recorded, duplicate event | test_duplicate_delivery_does_not_repeat_write |
 | Inspect to Recorded, retry limits | test_retry_budget_survives_restart_and_reapproval |
 | Reserved to Uncertain | test_write_failure_is_not_retried |

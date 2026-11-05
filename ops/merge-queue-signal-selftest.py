@@ -91,7 +91,7 @@ class QueueRecovery(unittest.TestCase):
                                      observe or self.observe, arm or self.arm)
 
     def test_transient_recovers_once(self):
-        self.assertEqual(self.run_drop()['state'], 'requeued')
+        self.assertEqual(self.run_drop()['state'], 'armed')
         self.assertEqual(self.calls, ['RFMQE_example'])
 
     def test_duplicate_delivery_does_not_repeat_write(self):
@@ -130,10 +130,10 @@ class QueueRecovery(unittest.TestCase):
     def test_retry_budget_survives_restart_and_reapproval(self):
         for i in range(3):
             result = self.run_drop(self.drop(event_id=str(i), approval_id=17+i))
-            self.assertEqual(result['state'], 'requeued' if i < 2 else 'diagnosis')
+            self.assertEqual(result['state'], 'armed' if i < 2 else 'diagnosis')
         self.assertEqual(result['reason'], 'retry-limit')
         self.assertEqual(len(self.calls), 2)
-        self.assertEqual(self.run_drop(self.drop(event_id='new-head', head='c' * 40))['state'], 'requeued')
+        self.assertEqual(self.run_drop(self.drop(event_id='new-head', head='c' * 40))['state'], 'armed')
 
     def test_write_failure_is_not_retried(self):
         def fail(drop):
@@ -169,7 +169,7 @@ class QueueRecovery(unittest.TestCase):
                 self.assertEqual(self.run_drop(self.drop(event_id='other'))['reason'], 'unresolved-write')
             finally:
                 release.set()
-            self.assertEqual(first.result()['state'], 'requeued')
+            self.assertEqual(first.result()['state'], 'armed')
         self.assertEqual(len(self.calls), 1)
 
     def test_adapter_refusal_is_not_success(self):
