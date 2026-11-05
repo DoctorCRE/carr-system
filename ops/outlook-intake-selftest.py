@@ -1677,6 +1677,34 @@ class IntakeTest(unittest.TestCase):
         ports.copy_attachments, ports.put_object = copy, put
         return ports
 
+    def test_attachment_outcomes_replace_retries_without_counting_more_files(self):
+        ports = self.attachment_fixture(folders=('Inbox',))
+        for _ in range(2):
+            result = intake.run(self.repo, self.home, ports)
+            state = json.loads((self.out() / intake.STATE).read_text())
+            self.assertEqual(len(state['attachment_outcomes']), 1)
+            self.assertEqual(next(iter(state['attachment_outcomes'].values()))['status'], 'folder_missing')
+            self.assertEqual(result.counts['attachments_distinct_folder_missing'], 1)
+            self.store.write_bytes(b'changed')
+
+    def test_attachment_missing_client_has_one_source_outcome(self):
+        ports = self.attachment_fixture(sender='unknown@example.test')
+        intake.run(self.repo, self.home, ports)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(len(state['attachment_outcomes']), 1)
+        self.assertEqual(next(iter(state['attachment_outcomes'].values()))['status'], 'client_missing')
+
+    def test_attachment_receipt_retains_stored_source_without_claiming_facts(self):
+        ports = self.attachment_fixture()
+        intake.run(self.repo, self.home, ports)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        outcome = next(iter(state['attachment_outcomes'].values()))
+        self.assertEqual(outcome['status'], 'stored')
+        self.assertEqual(outcome['attachment_id'], 'attachment-1')
+        self.assertEqual(outcome['facts'], 'not_extracted')
+        self.assertNotIn('name', outcome)
+        self.assertNotIn('body', outcome)
+
     def test_attachment_routing_reasons_do_not_hold_the_run(self):
         for scenario in ('missing_folder', 'ambiguous_folder', 'no_deal', 'duplicate_deal'):
             with self.subTest(scenario=scenario):

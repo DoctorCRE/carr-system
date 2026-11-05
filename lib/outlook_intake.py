@@ -1513,9 +1513,27 @@ class Run:
         mailbox['filing_complete'] = not self.state['links_cursor']
         return True
 
+    def attachment_outcome(self, source: str, status: str, **receipt) -> None:
+        """Keep the latest disposition per file; run counters still count attempts."""
+        outcomes = self.state.setdefault('attachment_outcomes', {})
+        previous = outcomes.get(source)
+        if previous:
+            key = 'attachments_distinct_' + previous['status']
+            self.counts[key] = max(0, self.counts.get(key, 0) - 1)
+        outcomes[source] = {'status': status, 'at': int(self.now.timestamp()), **receipt}
+        key = 'attachments_distinct_' + status
+        self.counts[key] = self.counts.get(key, 0) + 1
+
     def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
         from lib import outlook_attachments as att
 
+        cutoff = int((self.now - UNRESOLVED_DAYS).timestamp())
+        outcomes = {key: value for key, value in self.state.get('attachment_outcomes', {}).items()
+                    if value['at'] >= cutoff}
+        self.state['attachment_outcomes'] = outcomes
+        for outcome in outcomes.values():
+            key = 'attachments_distinct_' + outcome['status']
+            self.counts[key] = self.counts.get(key, 0) + 1
         prepared: list[tuple[str, dict, dict, bytes]] = []
         done = self.state.setdefault('attachments_done', {})
         self.state['attachments_pending'] = False
@@ -1540,10 +1558,18 @@ class Run:
                      for parts in [path.split('/')] for i, part in enumerate(parts[:-1])
                      if part.casefold() == 'active deals'}
             if not refs:
+                for attachment in mail['attachments']:
+                    source = f"{mail['ident']}/{attachment['id']}"
+                    if source not in done:
+                        self.attachment_outcome(source, 'client_missing')
                 continue
             reason = ('client_ambiguous' if len(refs) != 1 else
                       'folder_missing' if not names else 'folder_ambiguous' if len(names) != 1 else None)
             if reason:
+                for attachment in mail['attachments']:
+                    source = f"{mail['ident']}/{attachment['id']}"
+                    if source not in done:
+                        self.attachment_outcome(source, reason)
                 counter = 'attachments_' + reason
                 self.counts[counter] = self.counts.get(counter, 0) + pending
                 continue
@@ -1556,7 +1582,12 @@ class Run:
             for mail, ref, name in candidates:
                 matches = [d for d in deals if d['client_ref'] == ref and d['name'].casefold() == name.casefold()]
                 if len(matches) != 1:
-                    counter = 'attachments_deal_missing' if not matches else 'attachments_deal_ambiguous'
+                    reason = 'deal_missing' if not matches else 'deal_ambiguous'
+                    for attachment in mail['attachments']:
+                        source = f"{mail['ident']}/{attachment['id']}"
+                        if source not in done:
+                            self.attachment_outcome(source, reason)
+                    counter = 'attachments_' + reason
                     self.counts[counter] = self.counts.get(counter, 0) + sum(
                         f"{mail['ident']}/{a['id']}" not in done for a in mail['attachments'])
                     continue
@@ -1581,6 +1612,7 @@ class Run:
                 source = f"{mail['ident']}/{result['attachment']}"
                 if source in done:
                     continue
+                self.attachment_outcome(source, result['status'] if result['status'] != 'stored' else 'capture_ready')
                 if result['status'] == 'not_cached':
                     uncached[source] = mail['sent_unix']
                     self.counts['attachments_uncached'] = self.counts.get('attachments_uncached', 0) + 1
@@ -1599,6 +1631,11 @@ class Run:
                 prepared.append((mail['ident'], deal, {**result, 'requires_activity': not _internal(mail['sender'], self.settings.internal_domain)},
                                  Path(result['stored']).read_bytes()))
         except (CarrError, OSError, KeyError, sqlite3.Error, subprocess.TimeoutExpired):
+            for mail, _, _ in candidates:
+                for attachment in mail['attachments']:
+                    source = f"{mail['ident']}/{attachment['id']}"
+                    if source not in done:
+                        self.attachment_outcome(source, 'preparation_failed')
             self.state['attachments_pending'] = True
             self.counts['attachments_failed'] = self.counts.get('attachments_failed', 0) + 1
         return prepared
@@ -1617,12 +1654,16 @@ class Run:
                     break
             if result.get('requires_activity') and not activity_id:
                 self.state['attachments_pending'] = True
+                self.attachment_outcome(f"{ident}/{result['attachment']}", 'source_pending')
                 self.counts['attachments_source_pending'] = self.counts.get('attachments_source_pending', 0) + 1
                 continue
             reply = filing.file_attachment(deal['id'], {'id': result['attachment'], 'name': result['name']},
                 data, message_id=ident, client_ref=f"{deal['client_ref']}.{deal['id']}",
                 put_object=put, carr=self.ports.carr, activity_id=activity_id)
             status = reply['status']
+            self.attachment_outcome(f"{ident}/{result['attachment']}", status,
+                **{key: reply[key] for key in ('sha256', 'attachment_id') if key in reply},
+                facts='not_extracted')
             self.counts['attachments_' + status] = self.counts.get('attachments_' + status, 0) + 1
             if status in ('stored', 'existing'):
                 done[f"{ident}/{result['attachment']}"] = int(self.now.timestamp())
