@@ -1,0 +1,14 @@
+{
+  "schema":"carr-production-proof-plan.v1",
+  "requirement_id":"WR634-S1-email-touch-application",
+  "targets":["worker"],
+  "assertions":[{
+    "id":"release-and-natural-intake-reconciliation",
+    "predicate":"After deployment verify the merged full SHA with worker-release-smoke.v1 release-identity and verb-registry. Then separately capture one natural intake run's exact expected email-contact cohort, reconcile every cohort batch through reconcile-email-touches at the deployed release, and prove every applied touch reads back with zero unexplained missing, dangling, tombstoned or out-of-window differences. Verify the submitted counts sum to the frozen expected cohort and that no activity is duplicated per source version and canonical target. Release smoke alone does not prove email application semantics. Unit 2 must supply bound requests before this natural-run proof can pass.",
+    "runner":"worker-release-smoke.v1",
+    "expected_result":"PASS for release identity and registry only. Full production proof requires the separate natural intake cohort reconciliation with zero unexplained differences. Until then landed-unproven.",
+    "input_class":"deployed Worker read-only identity and registry plus privately supplied natural intake cohort, counts-only output; no intake launch or writes",
+    "deadline_seconds":120
+  }],
+  "safety":{"read_only":true,"no_sends":true,"max_requests":10,"max_records":500,"max_runtime_seconds":120,"max_artifact_bytes":1048576}
+}
