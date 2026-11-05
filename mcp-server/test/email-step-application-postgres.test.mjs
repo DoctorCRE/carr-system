@@ -98,6 +98,18 @@ test('email commitments apply atomically and undo refuses newer work', async t =
         assert.equal((await c.query('select count(*)::int n from next_action where subject_id=$1',[x.target])).rows[0].n,1);
       } finally {await other.end();}
     });
+    await t.test('incomplete extraction hold survives retry and resumes only after source repair',async()=>{
+      const x=await make({context:{body_kind:'preview'}});
+      const old=(await c.query('select generation from email_filing_application where activity_id=$1',[x.activity])).rows[0].generation;
+      const mode=(mode,extra={})=>command('record-email-proposal',{mode,activity_id:x.activity,generation:old,idempotency_key:randomUUID(),...extra});
+      const claim=await mode('application_claim');
+      await mode('application_result',{claim_id:claim.claim_id,application_status:'held'});
+      assert.equal((await mode('application_claim')).generate,false);
+      assert.equal((await command('email-router-queue',{purpose:'applications'})).emails.some(e=>e.activity_id===x.activity),false);
+      await c.query(`update activity set email_context='{"body_kind":"full","body_completeness":"complete","body_outcome":"complete"}' where id=$1`,[x.activity]);
+      const repaired=(await command('email-router-queue',{purpose:'applications'})).emails.find(e=>e.activity_id===x.activity);
+      assert.ok(repaired); assert.notEqual(repaired.generation,old);
+    });
     await t.test('rollback after canonical write leaves no effect and replay creates one task',async()=>{
       const x=await make();
       await c.query(`create function pg_temp.fail_email_receipt() returns trigger language plpgsql as $$begin

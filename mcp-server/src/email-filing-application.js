@@ -18,7 +18,7 @@ export async function filingApplicationQueue(c, actor, args) {
       d.id as deal,d.name as deal_name,d.phase,d.deal_type
     from email_filing_application g join activity a on a.id=g.activity_id join deal d on d.id=g.deal_id
     where ($1::uuid is null or g.generation>$1) and ${current}
-      and g.status in ('pending','claimed')
+      and g.status in ('pending','claimed') and g.reason is distinct from 'incomplete_source'
       and (g.claim_until is null or g.claim_until<=now())
     order by g.generation limit $4`, [args.after ?? null,partnerAuthoritySlugForActor(actor),actor.id,limit+1])).rows;
   return { schema_version:'email-filing-application.v1',emails:rows.slice(0,limit),more:rows.length>limit,
@@ -39,6 +39,7 @@ export async function lockFilingApplication(c, actor, args, fail) {
 export async function filingApplicationWrite(c, actor, args, fail) {
   const row = await lockFilingApplication(c,actor,args,fail);
   if (args.mode==='application_claim') {
+    if (row.reason==='incomplete_source') return {ok:true,generate:false,status:'held'};
     if (row.claim_active) return {ok:true,generate:false};
     if (row.attempts>=3) {
       await c.query("update email_filing_application set status='exhausted',reason='retry_exhausted',claim_id=null,claim_until=null where generation=$1",[row.generation]);
@@ -51,8 +52,8 @@ export async function filingApplicationWrite(c, actor, args, fail) {
   }
   if (!row.claim_active || row.claim_id!==args.claim_id) fail('email_application_stale');
   if (!['applied','retry','held'].includes(args.application_status)) fail('email_proposal_fields_invalid');
-  const status = args.application_status==='held' ? 'needs_review' : args.application_status==='applied' ? 'applied' : row.attempts>=3 ? 'exhausted' : 'pending';
+  const status = args.application_status==='held' ? 'pending' : args.application_status==='applied' ? 'applied' : row.attempts>=3 ? 'exhausted' : 'pending';
   await c.query(`update email_filing_application set status=$2,reason=$3,claim_id=null,claim_until=null
-    where generation=$1`,[row.generation,status,status==='needs_review' ? 'incomplete_source' : status==='exhausted' ? 'retry_exhausted' : null]);
+    where generation=$1`,[row.generation,status,args.application_status==='held' ? 'incomplete_source' : status==='exhausted' ? 'retry_exhausted' : null]);
   return {ok:true,status,generation:row.generation};
 }
