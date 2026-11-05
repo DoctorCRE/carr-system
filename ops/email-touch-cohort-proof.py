@@ -122,7 +122,7 @@ limit 1001
     activities = conn.execute("""
 with expected as (select value x from jsonb_array_elements(%(expected)s::jsonb))
 select a.id::text as activity_id from activity a
-where a.created_by=%(actor)s and a.kind in ('email_in','email_out')
+where a.actor_id=%(actor)s and a.kind in ('email_in','email_out')
  and a.occurred_at >= %(start)s::timestamptz and a.occurred_at < %(end)s::timestamptz
  and exists(select 1 from expected where x->>'target_id'=case x->>'target_type'
    when 'client' then a.client_id::text when 'lead' then a.lead_id::text when 'vendor' then a.vendor_id::text end)

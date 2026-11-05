@@ -48,7 +48,7 @@
         "worker"
       ],
       "sources": {
-        "ops/email-touch-cohort-proof.py": "f63f984a5fe9fc4d78dc98036990aab0967769d442c67d938d2a1d7c9bf2b17e",
+        "ops/email-touch-cohort-proof.py": "4720a27ce261b6373de88d6defd78594943007bf0d74af900a88a29d94f5fbfb",
         "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
       }
     },

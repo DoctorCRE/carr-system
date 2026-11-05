@@ -97,3 +97,92 @@ Exceptions and raw SQL diagnostics are suppressed. Fixture mode accepts only a
 local Unix socket in a disposable `email-proof-*` directory and uses explicit
 synthetic principal/release inputs. Its verdict is labeled `fixture`, never
 production. It cannot use an ambient production DATABASE_URL.
+
+## Canonical acquisition schema
+
+The fixture loads the exact `CREATE TABLE` definitions for actor, party,
+activity, event, client, lead, vendor and deal, plus the exact `v_ref_index`
+view, from the migration baseline's `db/schema.sql`. It then executes the
+activity column and constraint statements from `1020_email_deal_matching.sql`.
+No fixture table, view or column is invented. The snapshot subset omits
+separate indexes, triggers, grants and foreign keys. This proves SQL column
+compatibility and reconciliation, not migration replay or production permissions.
+
+`test_acquisition_columns_exist_in_canonical_schema` executes all acquisition
+queries in a real read-only transaction and reconciles a positive cohort.
+PostgreSQL resolves every named column, including both activity aliases and
+the resolver view's underlying relations. A nonexistent column raises its
+original database error instead of being hidden behind the CLI refusal.
+The positive CLI and all inverse cases use that same canonical schema.
+
+The runner reads these columns. Migration 0001 is preserved in the committed
+baseline and in Git history before migration compaction commit
+`8952141cbec936ac57b86285612ef9d1987f101c`.
+
+| Relation | Columns read | Defining migration |
+| --- | --- | --- |
+| actor | id, slug | 0001_init.sql, baseline `db/schema.sql` |
+| event | idempotency_key, new_value, recorded_at, verb, actor_id | 0001_init.sql, baseline `db/schema.sql` |
+| event | organization_tenant_id | 0095_sponsor_runtime_audit.sql |
+| activity, aliases a and s | id, kind, occurred_at, actor_id, client_id, lead_id, vendor_id | 0001_init.sql, baseline `db/schema.sql` |
+| activity, aliases a and s | email_context | 1020_email_deal_matching.sql |
+| v_ref_index | subject_type, subject_id, merged | 0016_ref_index_resolver_view.sql; current merge predicates in 0069_enrichment_write_gap.sql |
+| v_ref_index | party_id | 0027_review_fixes_graph_views.sql; retained in 0069_enrichment_write_gap.sql |
+| party | id, deleted_at | 0001_init.sql, baseline `db/schema.sql` |
+
+Activity attribution is `actor_id`. `created_by` belongs to other records and
+is not an activity column. The former handwritten fixture concealed this error.
+
+## Natural production declaration for email application
+
+The email-application change must keep its release assertion and add a semantic
+assertion using `email-touch-cohort-reconcile.v1`. The complete proposed
+replacement for `proofs/requirements/wr634-email-touch-application.json` is:
+
+```json
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR634-S1-email-touch-application",
+  "targets": ["worker"],
+  "assertions": [
+    {
+      "id": "release-identity-and-registry",
+      "predicate": "Verify the deployed merged full SHA and verb registry with the registered release smoke runner.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "PASS for the deployed merged full SHA and verb registry.",
+      "input_class": "deployed Worker read-only identity and registry",
+      "deadline_seconds": 60
+    },
+    {
+      "id": "natural-email-touch-cohort",
+      "predicate": "Run python3 tools/db-tap.py run ops/email-touch-cohort-proof.py with --journal bound to Unit 2's frozen natural-intake journal bytes, --journal-ref bound to sha256: plus their digest, and --journal-sha256 bound to that digest. The journal must bind the current deployed merged release SHA, authenticated local principal, canonical actor, tenant, occurrence window and exact expected source/version/key/role/target/occurrence cohort. Accept only mode=production, verdict=proven, reason=matched, expected=applied greater than zero, and zero missing, dangling, conflicting, tombstoned, out_of_window, extra and orphan counts. No fixture result proves natural production lineage.",
+      "runner": "email-touch-cohort-reconcile.v1",
+      "expected_result": "Exit 0 with production proven matched and exact positive count conservation; otherwise remain landed-unproven.",
+      "input_class": "Unit 2 immutable natural-intake expectation journal with original bytes, SHA256, content-addressed reference and acquisition provenance; counts-only read-only evidence",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 4096
+  }
+}
+```
+
+This declaration admits the right predicate but is not a bound runnable proof
+until Unit 2 supplies the actual artifact path, immutable reference and digest.
+Unit 2's natural-intake capture worker owns that journal. It must freeze the
+intended successful applications independently of the observed database result,
+including principal, actor, release and cohort provenance. The runner only
+consumes it. It cannot reconstruct the expectation from the evidence it judges.
+
+The deployed `list-verbs` query with `filter=journal` returned zero verbs during
+this fix. A repository search for `email-touch-expectations.v1` and expectation
+journals found this consumer, its synthetic tests and this documentation, with
+no natural-journal producer. This is a bounded search result, not proof that
+no external producer exists. Journal production and natural production
+observation remain Unit 2 work; this fix performs neither.
