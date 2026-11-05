@@ -13,10 +13,12 @@ stateDiagram-v2
     Conflict --> Verified: The discrepancy expires and verification remains current
     Verified --> Expired: All current findings expire
     Expired --> Verified: A current sourced verification is recorded
-    NoCurrent --> NoCurrent: Invalid observation, nothing found, or no source
+    NoCurrent --> NoCurrent: Invalid full timestamp, nothing found, or no source
     note right of Future
       Every finding stays visible in evidence.
       One observed clock governs each evaluation.
+      Observations need a full timestamp with an explicit timezone.
+      Malformed findings remain visible and cannot activate a conflict.
       Expiry follows the existing database policy.
     end note
     %% never A future or invalid observation establishes verification or an active discrepancy.

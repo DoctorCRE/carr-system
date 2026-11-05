@@ -211,6 +211,8 @@ test('research clock admits observations only at or before the evaluation and pr
     ['2030-01-01T23:00:00-02:00', 'needs_research'], ['invalid', 'needs_research'],
     ['', 'needs_research'], ['infinity', 'needs_research'],
     ['2020-02-30T00:00:00Z', 'needs_research'], ['1', 'needs_research'],
+    ['2030-01-01T23:59:59.999999+00:00', 'verified'],
+    ['2030-01-02T00:00:00.001001+00:00', 'needs_research'],
   ]) {
     for (const kind of ['verified', 'discrepancy']) {
       const evidence = [{ ...finding, observed_at, kind }];
