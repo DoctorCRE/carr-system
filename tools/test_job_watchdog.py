@@ -32,6 +32,103 @@ class WatchdogTests(unittest.TestCase):
             "Label": "com.carr.fixture", "StartCalendarInterval": {"Minute": 0},
             "StandardErrorPath": str(self.log)}))
 
+    def test_verdict_deadline_and_calendar_days(self):
+        outlook = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                   'coverage_deadline_seconds': 19 * 3600 + 300,
+                   'coverage_run_day': '2026-10-30', 'coverage_check_day': '2026-10-30'}
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}
+        for clock, missing in (
+                ('2026-11-01T00:05:00Z', False),
+                ('2026-11-01T00:05:01Z', True),  # Saturday 19:05 CDT
+                ('2026-11-02T01:05:01Z', True)):  # Sunday 19:05 CST
+            with self.subTest(clock=clock):
+                keys = [f['key'] for f in watchdog.detect(facts, datetime.fromisoformat(clock).timestamp())]
+                self.assertEqual('job_degraded:outlook:coverage_verdict_missing' in keys, missing)
+        outlook.update(coverage_check_day='2026-11-01', coverage_run_day='2026-11-01')
+        for clock, missing in (('2026-11-03T01:05:00Z', False), ('2026-11-03T01:05:01Z', True)):
+            self.assertEqual(bool(watchdog.detect(facts, datetime.fromisoformat(clock).timestamp())), missing)
+
+    def test_verdict_spring_dst_and_current_schedule_contract(self):
+        schedule = plistlib.loads(watchdog.OUTLOOK_CALENDAR.read_bytes())['StartCalendarInterval']
+        self.assertTrue(all(set(slot) == {'Hour', 'Minute'} for slot in schedule))
+        self.assertEqual(max((slot['Hour'], slot['Minute']) for slot in schedule), (19, 0))
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': {
+            'timezone': 'America/Chicago', 'reply_draft_count': 1,
+            'coverage_deadline_seconds': 19 * 3600 + self.config['thresholds']['scan_grace_seconds'],
+            'coverage_run_day': '2026-03-07', 'coverage_check_day': '2026-03-07'}}
+        for clock, missing in (('2026-03-09T00:05:00Z', False), ('2026-03-09T00:05:01Z', True)):
+            self.assertEqual(bool(watchdog.detect(facts, datetime.fromisoformat(clock).timestamp())), missing)
+
+    def test_verdict_legacy_first_install_and_invalid_days(self):
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        for days, missing in (({}, False), ({'coverage_run_day': '2026-11-02'}, True),
+                              ({'coverage_check_day': '2026-11-01'}, True),
+                              ({'coverage_check_day': '2026-11-02'}, False),
+                              ({'coverage_check_day': 'bad'}, True),
+                              ({'coverage_check_day': '2026-11-03'}, True),
+                              ({'coverage_run_day': 42}, True)):
+            with self.subTest(days=days):
+                facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': {
+                    'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                    'coverage_deadline_seconds': 19 * 3600 + 300, **days}}
+                self.assertEqual(bool(watchdog.detect(facts, now)), missing)
+        facts['outlook'] = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                            'coverage_run_day': '2026-11-02', 'coverage_deadline_seconds': 19 * 3600 + 300}
+        self.assertEqual(watchdog.detect(facts, datetime.fromisoformat('2026-11-02T18:00:00Z').timestamp()), [])
+
+    def test_transport_timeout_preserves_local_failed_and_missing_verdicts(self):
+        state = self.root / 'out/outlook-intake/state.json'
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps({'coverage_run_day': '2026-11-01', 'coverage_failed': True}))
+        settings = SimpleNamespace(repo=self.root, account='fixture@example.test', timezone='America/Chicago',
+                                   transport_environment=lambda: {})
+        with patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=subprocess.TimeoutExpired('fixture', 30)):
+            outlook = watchdog.collect_outlook(self.config)
+        self.assertEqual(outlook['coverage_deadline_seconds'], 19 * 3600 + 300)
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        keys = {f['key'] for f in watchdog.detect({'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}, now)}
+        self.assertEqual(keys, {'job_degraded:outlook:coverage_failed',
+                               'job_degraded:outlook:coverage_verdict_missing',
+                               'job_degraded:outlook:outcome_read_failed'})
+
+    def test_local_missed_verdict_survives_transport_failure_and_recovers(self):
+        state = self.root / 'out/outlook-intake/state.json'
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps({'coverage_run_day': '2026-11-01',
+                                     'coverage_check_day': '2026-11-01', 'coverage_failed': False}))
+        settings = SimpleNamespace(repo=self.root, account='fixture@example.test', timezone='America/Chicago',
+                                   transport_environment=lambda: {})
+        launch = subprocess.CompletedProcess([], 0, 'PID Status Label\n- 0 com.carr.outlook-intake\n', '')
+        unavailable = subprocess.CompletedProcess([], 1, '', '')
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=[launch, unavailable] * 2), \
+             patch.object(watchdog.shutil, 'disk_usage', return_value=(100, 95, 5)), \
+             patch.object(watchdog.time, 'time', return_value=now):
+            for _ in range(2):
+                self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        active = watchdog.active_findings(self.root, self.config)
+        self.assertEqual({f['key'] for f in active}, {'job_degraded:outlook:coverage_verdict_missing',
+            'job_degraded:outlook:outcome_read_failed', 'disk_low:local'})
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        path = self.root / self.config['paths']['findings']
+        self.assertEqual(len(path.read_text().splitlines()), 3)
+        # A lost state read is not proof of recovery.
+        state.unlink()
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', return_value=launch), \
+             patch.object(watchdog.time, 'time', return_value=now):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        state.write_text(json.dumps({'coverage_run_day': '2026-11-03', 'coverage_check_day': '2026-11-03'}))
+        later = datetime.fromisoformat('2026-11-04T00:30:00Z').timestamp()
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=[launch, unavailable]), \
+             patch.object(watchdog.time, 'time', return_value=later):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        self.assertNotIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+
     def test_outcome_alarms_reach_findings_and_digest_then_clear(self):
         base = {'jobs': [], 'disk_free_percent': 50, 'outlook': {
             'timezone': 'America/Chicago', 'stored': 8,

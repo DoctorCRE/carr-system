@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "outlook-missed-verdict-watchdog",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "daily-verdict-freshness",
+    "predicate": "After normal runtime refresh at the merged full SHA, observe the watchdog scan evidence and directly read its findings and digest against persisted coverage days and the mailbox deadline. A naturally missed verdict must remain active through subsequent scans until a later actual verdict. The registered receipt observer alone cannot prove these local ledger and digest semantics; require the coordinator's direct readback as additional evidence. Never stop intake or mutate production state to induce a miss.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "BLOCKED if a matching successful watchdog receipt or direct findings and digest readback is unavailable. A receipt pass alone does not prove freshness or persistence. A naturally missed deadline with later actual recovery supplies the persistence observation; otherwise that production claim remains unproven.",
+    "input_class": "Coordinator-supplied actual watchdog runtime receipt plus read-only local findings, digest and coverage-day readback after normal refresh. Synthetic fixtures never substitute for production evidence.",
+    "deadline_seconds": 30
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 1, "max_records": 100, "max_runtime_seconds": 30, "max_artifact_bytes": 65536}
+}

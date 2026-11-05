@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from email_outcomes import business_day_deadline
@@ -21,6 +21,8 @@ from outlook_settings import load_settings
 from local_jobs import append, command, epoch, locked, path_at, read_latest, stamp, tail
 
 SOURCE = Path(__file__).resolve().parents[1]
+OUTLOOK_CALENDAR = SOURCE / "ops/launchd/com.carr.outlook-intake.plist"
+MISSING_VERDICT = "job_degraded:outlook:coverage_verdict_missing"
 KINDS = {"job_failed", "job_degraded", "disk_low"}
 RECEIPT = re.compile(r"^([a-z][a-z-]*-receipt) (\{.*\})$")
 SOCIAL_BATCH_REPORT_KEY = "job_failed:social-batch-weekly:batch-output"
@@ -77,6 +79,12 @@ def collect(root, config):
 def collect_outlook(config):
     settings = load_settings()
     state = json.loads((settings.repo / "out/outlook-intake/state.json").read_text())
+    schedule = plistlib.loads(OUTLOOK_CALENDAR.read_bytes())["StartCalendarInterval"]
+    last_slot = max(entry["Hour"] * 3600 + entry["Minute"] * 60 for entry in schedule)
+    local = {"timezone": str(settings.timezone),
+             "coverage_deadline_seconds": last_slot + config["thresholds"]["scan_grace_seconds"],
+             **{field: state.get(field) for field in
+                ("filing_observed_at", "coverage_failed", "coverage_check_day", "coverage_run_day")}}
     try:
         result = subprocess.run(
             [str(settings.repo / "run.sh"), "call", "email-router-queue", "-"],
@@ -93,13 +101,10 @@ def collect_outlook(config):
                 datetime.fromisoformat(reply[field].replace("Z", "+00:00"))
         if type(reply["reply_draft_count"]) is not int or reply["reply_draft_count"] < 0:
             raise ValueError("outlook outcome count invalid")
-    except (KeyError, TypeError, AttributeError, ValueError) as exc:
-        raise ValueError("outlook outcome read invalid or unavailable") from exc
-    return {**{field: reply[field] for field in
-               ("journey_live_at", "last_email_in_filed_at", "reply_draft_count")},
-            "timezone": str(settings.timezone),
-            "filing_observed_at": state.get("filing_observed_at"),
-            "coverage_failed": state.get("coverage_failed", False)}
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, subprocess.SubprocessError):
+        return {**local, "read_error": "outlook outcome read invalid or unavailable"}
+    return {**local, **{field: reply[field] for field in
+               ("journey_live_at", "last_email_in_filed_at", "reply_draft_count")}}
 
 
 def degraded_receipt(lines):
@@ -153,11 +158,48 @@ def degraded_receipt(lines):
     return None
 
 
+def coverage_day(value, today):
+    if value is None:
+        return None
+    parsed = date.fromisoformat(value)
+    if parsed.isoformat() != value or parsed > today:
+        raise ValueError("invalid coverage day")
+    return parsed
+
+
+def coverage_findings(facts, now):
+    if not any(facts.get(field) is not None for field in ("coverage_run_day", "coverage_check_day")):
+        return []
+    local = now.astimezone(ZoneInfo(facts["timezone"]))
+    today = local.date()
+    deadline = datetime.combine(today, datetime.min.time(), local.tzinfo) + timedelta(
+        seconds=facts["coverage_deadline_seconds"])
+    due = today if local > deadline else today - timedelta(days=1)
+    try:
+        checked = coverage_day(facts.get("coverage_check_day"), today)
+        started = coverage_day(facts.get("coverage_run_day"), today) or checked
+        missing = (checked is None or checked < due) and started <= due
+        reason = f"daily coverage verdict missing for {due}"
+    except (TypeError, ValueError):
+        missing = True
+        reason = "daily coverage verdict missing; invalid or future coverage day"
+    if not missing:
+        return []
+    return [{"key": MISSING_VERDICT, "kind": "job_degraded", "subject": "com.carr.outlook-intake",
+             "source": "outlook-outcomes", "coverage_due_day": due.isoformat(),
+             "reason": f"Outlook intake: {reason}"}]
+
+
 def outlook_findings(facts, now):
+    found = coverage_findings(facts, now)
+    if facts.get("coverage_failed") is True:
+        found.append({"key": "job_degraded:outlook:coverage_failed", "kind": "job_degraded",
+                      "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
+                      "reason": "Outlook intake: daily coverage check failed"})
     if "read_error" in facts:
-        return [{"key": "job_degraded:outlook:outcome_read_failed", "kind": "job_degraded",
-                 "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
-                 "reason": f"Outlook intake: outcome read failed ({facts['read_error']})"}]
+        return found + [{"key": "job_degraded:outlook:outcome_read_failed", "kind": "job_degraded",
+                         "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
+                         "reason": f"Outlook intake: outcome read failed ({facts['read_error']})"}]
 
     def instant(value):
         if isinstance(value, (int, float)):
@@ -170,9 +212,8 @@ def outlook_findings(facts, now):
         "no_email_in": (overdue, "no email_in filed for more than one business day"),
         "no_reply_draft": ((facts.get("journey_live_at") or facts.get("filing_observed_at")) is not None and facts["reply_draft_count"] == 0,
                            "zero reply_draft rows since the email journey went live"),
-        "coverage_failed": (facts.get("coverage_failed") is True, "daily coverage check failed"),
     }
-    return [{"key": f"job_degraded:outlook:{code}", "kind": "job_degraded",
+    return found + [{"key": f"job_degraded:outlook:{code}", "kind": "job_degraded",
              "subject": "com.carr.outlook-intake", "source": "outlook-outcomes",
              "reason": f"Outlook intake: {reason}"}
             for code, (alarm, reason) in alarms.items() if alarm]
@@ -200,7 +241,7 @@ def detect(facts, now=None):
     return found
 
 
-def reconcile(root, config, found, observed_jobs, now=None):
+def reconcile(root, config, found, observed_jobs, now=None, outlook=None):
     path = path_at(root, config["paths"]["findings"])
     previous = read_latest(path)
     current = {f["key"]: f for f in found}
@@ -219,6 +260,14 @@ def reconcile(root, config, found, observed_jobs, now=None):
         if (prior.get("kind") == "job_failed" and "exit_code" in prior
                 and prior["subject"] not in observed_jobs and prior["subject"] in declared):
             continue
+        if key == MISSING_VERDICT and key not in current:
+            try:
+                local = datetime.fromtimestamp(now, ZoneInfo(outlook["timezone"]))
+                checked = coverage_day(outlook.get("coverage_check_day"), local.date())
+                if checked is None or checked < date.fromisoformat(prior["coverage_due_day"]):
+                    continue
+            except (KeyError, TypeError, ValueError):
+                continue
         if key not in current and not prior.get("cleared_at"):
             append(path, {**prior, "cleared_at": stamp(now)})
 
@@ -359,7 +408,7 @@ def scan(root, config):
             observed = {job["label"] for job in facts["jobs"]}
             if facts.get("outlook") is not None:
                 observed.add("com.carr.outlook-intake")
-            reconcile(root, config, found, observed, now)
+            reconcile(root, config, found, observed, now, facts.get("outlook"))
             deliver_findings(root, config, now)
             append(ledger, {"key": "scan", "status": "completed", "at": stamp(), "findings": len(found)})
             return 0
