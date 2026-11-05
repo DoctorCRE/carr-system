@@ -462,11 +462,11 @@
   },
   "gate_suite_measurements": {
       "ops/verdict-delivery-selftest.py": {
-          "milliseconds": 54,
+          "milliseconds": 121,
           "serial": false
       },
       "ops/verdict-delivery-proof-selftest.py": {
-          "milliseconds": 57,
+          "milliseconds": 78,
           "serial": false
       }
   }

@@ -48,9 +48,17 @@ def observe(armed_run, held_run, read, archive):
         if receipt['head_sha'] != pr['head']['sha']:
             raise ValueError('Proof head moved')
         if state == 'armed':
-            actor = (pr.get('auto_merge') or {}).get('enabled_by', {}).get('login')
-            if actor != m.APP:
-                raise ValueError('Current native auto-merge actor is not the review App; observe before merge')
+            queue = read(f'queue/{receipt["pull_request"]}')
+            if queue['headRefOid'] != receipt['head_sha']:
+                raise ValueError('Native merge queue head moved')
+            if queue['isInMergeQueue']:
+                actor = (queue.get('mergeQueueEntry') or {}).get('enqueuer') or {}
+                app_actor = (actor.get('__typename') == 'Bot' and
+                             actor.get('login', '').lower().removesuffix('[bot]') == m.APP.removesuffix('[bot]'))
+            else:
+                app_actor = (pr.get('auto_merge') or {}).get('enabled_by', {}).get('login') == m.APP
+            if not app_actor:
+                raise ValueError('Current native merge actor is not the review App; observe before merge')
         elif not m.held(pr, 2988):
             raise ValueError('Hold no longer exists')
         receipts.append(dict(receipt, run_id=run_id, run_url=run['html_url']))

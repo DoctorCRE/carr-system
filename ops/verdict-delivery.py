@@ -177,6 +177,11 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
         return state('approved-current-head', 'Required checks changed before arming')
     if current.get('auto_merge'):
         return state('armed', 'Native auto-merge already enabled')
+    queue = read(f'queue/{number}')
+    if queue['headRefOid'] != sha:
+        return state('head-moved', 'Head moved before queue readback')
+    if queue['isInMergeQueue']:
+        return state('armed', 'PR is already in the native merge queue')
     if dry_run:
         return state('would-arm', 'Current-head App approval and required checks green')
     write({'kind': 'arm', 'number': number, 'sha': sha})
@@ -201,6 +206,17 @@ def gh(args, payload=None, token=None):
 
 
 def github_read(path):
+    if path.startswith('queue/'):
+        number = int(path.removeprefix('queue/'))
+        if number < 1:
+            raise ValueError('Invalid queue PR number')
+        query = ('query($number:Int!){repository(owner:"DoctorCRE",name:"carr-system")'
+                 '{pullRequest(number:$number){headRefOid isInMergeQueue '
+                 'mergeQueueEntry{enqueuer{login __typename}}}}}')
+        data = json.loads(gh(['api', 'graphql', '-f', 'query=' + query, '-F', f'number={number}']))
+        if data.get('errors'):
+            raise ValueError('Native merge queue read failed')
+        return data['data']['repository']['pullRequest']
     return json.loads(gh(['api', path if path.startswith('apps/') else f'repos/{REPO}/{path}']))
 
 

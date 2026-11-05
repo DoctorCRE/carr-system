@@ -48,8 +48,8 @@
                 "worker"
           ],
           "sources": {
-                "ops/verdict-delivery-proof.py": "18097a030361bc71eb4def5f50ddbf69d32a6c4e72f51fe454b3de7e82ca8a4c",
-                "ops/verdict-delivery.py": "184b5f6412a75d1e44e9c44b8a0db5e1a52c1f0a318147269fcdf06310ca4380",
+                "ops/verdict-delivery-proof.py": "a199eb96015ea45a56e2b89ff5517eb43618855b3b9b14c7556d6b5ff2ab44c7",
+                "ops/verdict-delivery.py": "46eade54d0b4f5c565cc07e3b884df23b4c079f0fc7066d8eeb3e7c9252aac6a",
                 "ops/review-gate.py": "be86926b7cc6397487575aba80e040b40acc0dcb354108deb7e87b6a628cce0d",
                 "lib/loadpy.py": "868281532b1b418afbd18c535653adbf21fa580f54da01da158548e539ed40fd"
           }

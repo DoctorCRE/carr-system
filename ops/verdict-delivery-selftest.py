@@ -18,7 +18,7 @@ class Delivery(unittest.TestCase):
         self.review = {'id': 5, 'state': 'APPROVED', 'commit_id': SHA, 'body': BODY,
                        'submitted_at': '2026-11-05T12:00:00Z',
                        'user': {'login': m.APP, 'type': 'Bot'}}
-        self.data = {'pulls/12': self.pr, 'pulls/12/reviews?per_page=100': [self.review],
+        self.data = {'queue/12': {'headRefOid': SHA, 'isInMergeQueue': False}, 'pulls/12': self.pr, 'pulls/12/reviews?per_page=100': [self.review],
                      'rules/branches/main': [{'type': 'required_status_checks', 'parameters': {
                          'required_status_checks': [{'context': 'strict', 'integration_id': 15368}]}}],
                      f'commits/{SHA}/check-runs?per_page=100': {'total_count': 1, 'check_runs': [
@@ -220,6 +220,11 @@ class Delivery(unittest.TestCase):
         with patch.object(m, 'REQUESTS', m.MAX_REQUESTS), patch.object(m.subprocess, 'run') as command:
             with self.assertRaises(ValueError): m.gh(['api', 'repos/example'])
             command.assert_not_called()
+
+    def test_existing_native_queue_entry_is_idempotent(self):
+        self.data['queue/12']['isInMergeQueue'] = True
+        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'armed')
+        self.assertFalse(self.writes)
 
 
 if __name__ == '__main__':

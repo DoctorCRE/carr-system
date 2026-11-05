@@ -4,12 +4,12 @@
   "targets": ["worker"],
   "assertions": [{
     "id": "native-app-arm-and-held-refusal",
-    "predicate": "A trusted main-branch verdict workflow receipt arms a current-head approved CARR PR with the review App as native auto-merge actor, while a second trusted receipt refuses held PR 2988 with a recorded reason.",
+    "predicate": "A trusted main-branch verdict workflow receipt arms a current-head approved CARR PR with the review App as native merge-queue or auto-merge actor, while a second trusted receipt refuses held PR 2988 with a recorded reason.",
     "runner": "github-verdict-delivery.v1",
-    "expected_result": "Read-only observer returns verified with SHA-bound armed and held receipts and native review App enabled_by actor.",
+    "expected_result": "Read-only observer returns verified with SHA-bound armed and held receipts and native review App queue enqueuer or enabled_by actor.",
     "input_class": "GitHub workflow run IDs and public PR metadata; no business records",
     "deadline_seconds": 300
   }],
-  "safety": {"read_only": true, "no_sends": true, "max_requests": 9, "max_records": 250,
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 16, "max_records": 250,
              "max_runtime_seconds": 300, "max_artifact_bytes": 1048576}
 }

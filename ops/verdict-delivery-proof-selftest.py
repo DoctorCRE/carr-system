@@ -13,7 +13,8 @@ m = load_module_from_path('verdict_proof_test', str(Path(__file__).with_name('ve
 
 class Proof(unittest.TestCase):
     def setUp(self):
-        self.data = {'actions/workflows/verdict-delivery.yml': {'id': 10}}
+        self.data = {'actions/workflows/verdict-delivery.yml': {'id': 10},
+                     'queue/12': {'headRefOid': 'a' * 40, 'isInMergeQueue': False, 'mergeQueueEntry': None}}
         self.receipts = {}
         for run_id, state, number in [(1, 'armed', 12), (2, 'held', 2988)]:
             self.data[f'actions/runs/{run_id}'] = {
@@ -77,6 +78,20 @@ class Proof(unittest.TestCase):
                 target.writestr('../receipt.json', '{}')
             return buffer.getvalue()
         with self.assertRaises(ValueError): m.observe(1, 2, self.read, archive)
+
+    def test_native_queue_actor_verifies_without_auto_merge_request(self):
+        self.data['pulls/12']['auto_merge'] = None
+        self.data['queue/12'] = {'headRefOid': 'a' * 40, 'isInMergeQueue': True,
+            'mergeQueueEntry': {'enqueuer': {'login': 'doctorcre-carr-review', '__typename': 'Bot'}}}
+        self.assertEqual(self.observe()['state'], 'verified')
+        self.data['queue/12']['mergeQueueEntry']['enqueuer']['login'] = 'coordinator'
+        with self.assertRaises(ValueError): self.observe()
+
+    def test_queue_entry_cannot_verify_a_different_pr_head(self):
+        self.data['pulls/12']['auto_merge'] = None
+        self.data['queue/12'] = {'headRefOid': 'b' * 40, 'isInMergeQueue': True,
+            'mergeQueueEntry': {'enqueuer': {'login': 'doctorcre-carr-review', '__typename': 'Bot'}}}
+        with self.assertRaises(ValueError): self.observe()
 
 
 if __name__ == '__main__':
