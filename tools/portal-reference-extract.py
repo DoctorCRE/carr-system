@@ -154,20 +154,45 @@ def select(value, pointer):
     return value
 
 
+def index_segment(key, pointer):
+    if not key.isascii() or not key.isdigit() or (len(key) > 1 and key[0] == '0'):
+        fail(pointer, 'ambiguous array index')
+    return int(key)
+
+
 def assign(package, pointer, value):
     keys = parts(pointer)
     if not keys:
         fail(pointer, 'destination must name a field')
     parent = package
-    for key in keys[:-1]:
+    for position, key in enumerate(keys):
+        last = position == len(keys) - 1
         if isinstance(parent, list):
-            parent = parent[int(key)]
+            index = index_segment(key, pointer)
+            if index > len(parent):
+                fail(pointer, 'sparse array index')
+            if index == len(parent):
+                parent.append(copy.deepcopy(value) if last else ([] if keys[position + 1].isdigit() else {}))
+            elif last:
+                parent[index] = copy.deepcopy(value)
+            if not last:
+                parent = parent[index]
+        elif isinstance(parent, dict):
+            if key.isdigit():
+                fail(pointer, 'ambiguous numeric object key')
+            if last:
+                parent[key] = copy.deepcopy(value)
+            else:
+                if key not in parent:
+                    parent[key] = [] if keys[position + 1].isdigit() else {}
+                parent = parent[key]
         else:
-            parent = parent.setdefault(key, {})
-    if isinstance(parent, list):
-        parent[int(keys[-1])] = copy.deepcopy(value)
-    else:
-        parent[keys[-1]] = copy.deepcopy(value)
+            fail(pointer, 'destination conflicts with existing value')
+
+
+def destination_order(item):
+    return [(0, int(key)) if key.isascii() and key.isdigit() else (1, key)
+            for key in parts(item[0])]
 
 
 def matches(value, keys):
@@ -260,7 +285,7 @@ def extract(source, output, mapping_name, mode):
             if (file, binding) not in used and not ignored.get(file + ':' + binding, '').strip():
                 errors.append({'path': file + ':' + binding, 'message': 'unmapped constant'})
     package = {}
-    for target, spec in mapping['fields'].items():
+    for target, spec in sorted(mapping['fields'].items(), key=destination_order):
         if spec is None:
             continue
         try:

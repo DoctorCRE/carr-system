@@ -51,6 +51,45 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(before, {str(p.relative_to(self.output)): p.read_bytes() for p in self.output.rglob('*') if p.is_file()})
         self.assertEqual(self.output.stat().st_mode & 0o777, 0o700)
 
+    def test_numeric_leaf_mappings_build_center_array(self):
+        def change(mapping):
+            center = mapping['fields'].pop('/map/center')
+            for index in range(2):
+                mapping['fields'][f'/map/center/{index}'] = {
+                    **center, 'pointer': center['pointer'] + f'/{index}'}
+        self.change_mapping(change)
+        self.run_cli()
+        package = json.loads((self.output / 'market-study.json').read_text())
+        self.assertEqual(package['map']['center'], [-100.5, 40.25])
+
+    def test_nested_property_leaves_build_arrays(self):
+        data = json.loads((self.source / 'data.js').read_text().removeprefix(
+            'window.referenceData = ').removesuffix(';\n'))
+        def change(mapping):
+            original = mapping['fields'].pop('/properties')
+            for index in reversed(range(len(data['properties']))):
+                for key in data['properties'][index]:
+                    mapping['fields'][f'/properties/{index}/{key}'] = {
+                        **original, 'pointer': f'/properties/{index}/{key}'}
+        self.change_mapping(change)
+        self.run_cli()
+        package = json.loads((self.output / 'market-study.json').read_text())
+        self.assertEqual(len(package['properties']), len(data['properties']))
+        self.assertEqual(package['properties'][0]['address'], data['properties'][0]['address'])
+
+    def test_sparse_and_ambiguous_array_indices_are_refused(self):
+        for index, message in [('1', 'sparse'), ('00', 'ambiguous')]:
+            def change(mapping):
+                center = mapping['fields'].pop('/map/center', None)
+                if center is None:
+                    center = mapping['fields'].pop('/map/center/1')
+                mapping['fields'][f'/map/center/{index}'] = {**center, 'pointer': '/0'}
+            self.change_mapping(change)
+            result = self.run_cli(ok=False)
+            self.assertIn(message, str(result))
+            self.assertIn(f'/map/center/{index}', str(result))
+            self.assertFalse(self.output.exists())
+
     def test_optional_ownership_absent(self):
         shutil.rmtree(self.source)
         shutil.copytree(FIXTURES / 'ref-v', self.source)
