@@ -1,16 +1,24 @@
 """Test the declared CLI with synthetic HTTP and executable wrapper fixtures."""
 import contextlib
 import http.server
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import select
+import signal
 import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 RUNNER = Path(__file__).with_name('prove-lease-comparison-tiny-rate-stability.py')
+spec = importlib.util.spec_from_file_location('lease_proof', RUNNER)
+proof = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(proof)
 
 
 def economics(rate):
@@ -70,13 +78,11 @@ class ProofTest(unittest.TestCase):
         calls = directory / 'calls.jsonl'
         wrapper.write_text(f'''#!{sys.executable}
 import json, pathlib, sys, time
-if {mode!r} == 'timeout': time.sleep(0.3)
 assert sys.argv[1:3] == ['call', 'compare-lease-terms']
 data = json.loads(sys.argv[3])
 with pathlib.Path({str(calls)!r}).open('a') as log:
     log.write(json.dumps(data) + '\\n')
 if {mode!r} == 'failed': sys.exit(1)
-if {mode!r} == 'timeout': time.sleep(10)
 if {mode!r} == 'json': print('invalid'); sys.exit(0)
 payload = json.loads(pathlib.Path({str(directory / 'payload.json')!r}).read_text())
 print(json.dumps(payload[str(data['financing']['annual_interest_rate'])]))
@@ -129,12 +135,51 @@ print(json.dumps(payload[str(data['financing']['annual_interest_rate'])]))
 
     def test_total_deadline_stops_wrapper_without_retry(self):
         with self.fixture() as (directory, origin, requests):
-            start = time.monotonic()
-            result, calls = self.run_cli(directory, origin, 'timeout', '0.2')
-            self.assertEqual(result.returncode, 78, result.stdout)
-            self.assertLess(time.monotonic() - start, 2)
-            self.assertEqual(len(calls), 1)
+            wrapper = directory / 'sleeping-wrapper'
+            wrapper.write_text(f'''#!{sys.executable}
+import time
+print('ready', flush=True)
+time.sleep(60)
+''')
+            wrapper.chmod(0o700)
+            popen = subprocess.Popen
+            processes = []
+
+            def start_ready_wrapper(*args, **kwargs):
+                process = popen(*args, **kwargs)
+                processes.append(process)
+                self.addCleanup(process.stdout.close)
+                self.addCleanup(process.wait)
+                self.addCleanup(lambda: process.kill() if process.poll() is None else None)
+                self.assertTrue(select.select([process.stdout], [], [], 10)[0],
+                                'wrapper did not become ready')
+                self.assertEqual(process.stdout.readline(), 'ready\n')
+                return process
+
+            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 0, 29.99]))
+            with mock.patch.object(proof, 'time', clock), \
+                    mock.patch.object(proof.signal, 'setitimer'), \
+                    mock.patch.object(proof.subprocess, 'Popen', side_effect=start_ready_wrapper):
+                code, result = proof.observe(origin, wrapper, 30)
+            self.assertEqual(code, 78, result)
+            self.assertEqual(result['status'], 'unavailable')
+            self.assertEqual(result['reason'], 'TimeoutExpired')
+            self.assertEqual(len(processes), 1)
+            self.assertEqual(processes[0].returncode, -signal.SIGKILL)
             self.assertEqual(requests, ['/release'])
+
+    def test_deadline_before_startup_prevents_wrapper_calls(self):
+        with self.fixture() as (directory, origin, requests):
+            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 1]))
+            with mock.patch.object(proof, 'time', clock), \
+                    mock.patch.object(proof.signal, 'setitimer'), \
+                    mock.patch.object(proof.subprocess, 'Popen') as spawn:
+                code, result = proof.observe(origin, directory / 'unused-wrapper', 1)
+            self.assertEqual(code, 78, result)
+            self.assertEqual(result['reason'], 'Unavailable')
+            self.assertIsNone(result['release'])
+            spawn.assert_not_called()
+            self.assertEqual(requests, [])
 
 
 if __name__ == '__main__':
