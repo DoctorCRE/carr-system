@@ -75,7 +75,8 @@ legacy without guessing their split. Arbitrary input keys never become output ke
 date. Calendar requests are excluded. Known account mismatches are excluded;
 legacy requests require the state's matching `mail_ids_account` hash. Refused,
 blocked, pending, and acknowledged populations remain distinct. Acknowledged
-contact effects are requests, not messages. Explicit email_identity item IDs give
+contact effects are requests, not messages. `partial_source_identities` counts
+explicit source identities with both acknowledged and unacknowledged or refused effects. Explicit email_identity item IDs give
 retained source identities; missing identities remain counted separately. Rekeys
 may change these source identities and cannot establish a unique-message census.
 

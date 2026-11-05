@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Count explicit retained intake observations without exposing private input."""
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -98,8 +98,8 @@ def census(receipt_rows, state, account, window, now):
             receipts['malformed'] += 1
     retained = Counter(dict.fromkeys(('requests', 'acknowledged_contact_effects', 'refused', 'blocked',
                                      'pending', 'missing_source_identity', 'account_unresolved',
-                                     'excluded', 'malformed', 'source_identities'), 0))
-    sources = set()
+                                     'excluded', 'malformed', 'source_identities', 'partial_source_identities'), 0))
+    sources = defaultdict(set)
     account_matches = state.get('mail_ids_account') == hashlib.sha256(account.encode()).hexdigest()
     for request in requests.values():
         try:
@@ -138,12 +138,15 @@ def census(receipt_rows, state, account, window, now):
             retained[population] += 1
             source = identity.get('item_id')
             if isinstance(source, str) and source:
-                sources.add(source)
+                sources[source].add(population)
             else:
                 retained['missing_source_identity'] += 1
         except (KeyError, TypeError, ValueError, AttributeError):
             retained['malformed'] += 1
     retained['source_identities'] = len(sources)
+    retained['partial_source_identities'] = sum(
+        'acknowledged_contact_effects' in populations and len(populations) > 1
+        for populations in sources.values())
     horizon = window.as_of.timestamp() - (BACKFILL + UPCOMING).total_seconds() - 2 * COPY_WINDOW
     return dict(schema='email-application-census/v1',
                 window=dict(since=window.since.isoformat(), until=window.until.isoformat(), as_of=window.as_of.isoformat()),
@@ -178,8 +181,6 @@ def main(argv=None, *, now=lambda: datetime.now(timezone.utc), reads=None):
                 raise ValueError('input_limit')
             if path.suffix in ('.json', '.jsonl'):
                 files.append(path)
-            if len(files) > MAX_FILES:
-                raise ValueError('input_limit')
         def rows():
             row_count = 0
             for path in sorted(files):
@@ -202,7 +203,7 @@ def main(argv=None, *, now=lambda: datetime.now(timezone.utc), reads=None):
                                 sha256=hashlib.sha256(''.join(sorted(reads.digests)).encode()).hexdigest())
         print(json.dumps(report, sort_keys=True))
         return 0
-    except (OSError, UnicodeError, ValueError, TypeError, OverflowError):
+    except (OSError, UnicodeError, ValueError, TypeError, OverflowError, RecursionError):
         print('{"error":"census_input_invalid","schema":"email-application-census/v1"}', file=sys.stderr)
         return 2
 

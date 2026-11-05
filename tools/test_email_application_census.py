@@ -70,6 +70,7 @@ class CensusTests(unittest.TestCase):
         kept = report['counts']['retained']
         self.assertEqual([kept[k] for k in ('requests', 'acknowledged_contact_effects', 'refused', 'blocked', 'pending')],
                          [4, 1, 1, 1, 1])
+        self.assertEqual(kept['partial_source_identities'], 1)
 
     def test_rekey_legacy_malformed_mixed_calendar_and_window(self):
         self.rows = [self.row(counts=dict(emails=5)), self.row(counts=dict(run={'PRIVATE_SUBJECT': 9}, backlog={})),
