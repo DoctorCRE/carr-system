@@ -841,6 +841,12 @@
       "rule": "client-data",
       "value_sha256": "f0be891b1f61d8c54f697ce4bb0d122db2b81e8c530d757807d1b083dbad5929",
       "reason": "WR634.S1.J87 reviewed source-only Git fetch, remote-main revision readback and ancestry check. This token window contains code and Git ref names, no client record. Bound to exact file bytes and matched value hash."
+    },
+    {
+      "path": "ops/run-spool-selftest.py",
+      "sha256": "8bc3e984ac8784aca89f96a1d3702e6e974695cfdf2eeed3ca48562adebc7cbb",
+      "rule": "credential-url",
+      "reason": "Historical synthetic recorder-stderr fixture used the literal private:credential at invalid, never a live credential. The current test uses private-data canaries. Exact historical blob retained to preserve no-rebase delivery history."
     }
   ]
 }
