@@ -27,6 +27,13 @@ class SummaryTests(unittest.TestCase):
         ]:
             self.assertEqual(email_summary.generate(email, model)['status'], 'unavailable')
 
+    def test_decoder_failure_outcomes_never_reach_summary_model(self):
+        for kind in ('unknown', 'conflict', 'oversized', 'body_rejected', 'sidecar_missing', 'future_outcome'):
+            with self.subTest(kind=kind):
+                result = email_summary.generate({'body': 'Untrusted text', 'email_context': {'body_kind': kind}},
+                                                lambda _: self.fail('model called'))
+                self.assertEqual(result['provenance']['reason'], 'incomplete_capture')
+
     def test_decoded_transport_evidence_keeps_literal_raw_provenance(self):
         body = 'Please=20review=20the=20terms=20&amp;=20confirm.'
         result = email_summary.generate({'body': body}, lambda text: {

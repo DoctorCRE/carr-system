@@ -39,7 +39,7 @@ REAL_RUN = subprocess.run  # IntakeTest patches subprocess.run for the store cop
 SCHEMA = """
 CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sender_name TEXT,
   recipients TEXT, subject TEXT, message_id TEXT, body TEXT, html TEXT, body_words INTEGER,
-  html_bytes INTEGER, body_kind TEXT, sent_unix INTEGER, sent_utc TEXT, subject_inherited INTEGER,
+  html_bytes INTEGER, body_kind TEXT, body_completeness TEXT, body_outcome TEXT, sent_unix INTEGER, sent_utc TEXT, subject_inherited INTEGER,
   preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT,
   folder_links_unresolved INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTEGER NOT NULL,
@@ -99,10 +99,11 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
         con.execute('ALTER TABLE messages ADD COLUMN local_keys TEXT')
     for m in mails:
         con.execute('INSERT INTO messages(sender,sender_name,recipients,subject,body,preview,'
-                    'body_kind,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?)',
+                    'body_kind,body_completeness,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?,?)',
                     (m['sender'], m['sender_name'], m['recipients'], m['subject'],
                      m['body'] if m['body_kind'] == 'full' else '', m['body'][:200],
-                     m['body_kind'], m['sent_unix'], m['copy_key']))
+                     m['body_kind'], m.get('body_completeness', 'complete' if m['body_kind'] == 'full' else 'preview'),
+                     m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
     for row_id, m in enumerate(mails, 1):
@@ -268,8 +269,8 @@ class Fake:
         db_path.write_bytes(self.fixture.read_bytes())
         with closing(sqlite3.connect(db_path)) as con, con:
             con.execute("INSERT INTO folders VALUES(-1,7,'Sent Items','top',NULL)")
-            con.execute("INSERT INTO messages(id,sender,recipients,subject,body,body_kind,sent_unix,copy_key) "
-                        "VALUES(-1,?,'outside@example.test','Binding evidence','Synthetic binding body','full',?,?)",
+            con.execute("INSERT INTO messages(id,sender,recipients,subject,body,body_kind,body_completeness,sent_unix,copy_key) "
+                        "VALUES(-1,?,'outside@example.test','Binding evidence','Synthetic binding body','full','complete',?,?)",
                         (getattr(self.test, 'settings', None).account if hasattr(self.test, 'settings') else OWNER,
                          1, 'binding-evidence'))
             con.execute('INSERT INTO message_folders VALUES(-1,-1)')
@@ -1486,6 +1487,15 @@ class IntakeTest(unittest.TestCase):
         self.fake.email_queue[0]['body'] = second + ' ' + first
         self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
         self.assertEqual(len(records), 1)
+
+    def test_decoder_completeness_fails_closed_even_with_full_kind(self):
+        for completeness in ('unknown', 'preview', 'conflict', None):
+            with self.subTest(completeness=completeness):
+                m = dict(mail('pat@example.test', -timedelta(hours=1)),
+                         body_completeness=completeness)
+                m.update(id=1, folders=[], row_ids=[1], preview='Preview', local_keys='77')
+                self.assertFalse(intake._best_copies([m])[0]['full'])
+                self.assertEqual(intake._coverage_counts([m], {})['body_complete'], 0)
 
     def test_preview_links_wait_for_full_body(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='https://loopnet.com/Listing/12',
@@ -4955,7 +4965,7 @@ class AttachmentMetadataTest(unittest.TestCase):
         rows = [dict(mail('pat@example.test', -timedelta(hours=1), kind='preview', copy_key='same'),
                      attachments=[lease, logo]),
                 dict(mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5), copy_key='same'),
-                     attachments=[lease])]
+                     attachments=[lease], body_completeness="complete")]
         [best] = intake._best_copies(rows)
         self.assertTrue(best['full'])
         self.assertEqual(best['attachments'], [logo, lease])
