@@ -15,7 +15,7 @@ TABLES = ('doctrine_document', 'doctrine_slug_alias', 'doctrine_section',
           'doctrine_revision', 'doctrine_edge_type', 'doctrine_edge', 'doctrine_link',
           'doctrine_review_policy', 'doctrine_snapshot', 'doctrine_gate_check',
           'doctrine_concept_mapping')
-MIGRATION = ROOT / 'migrations/1156_doctrine_projection_bounded_digest.sql'
+MIGRATION = ROOT / 'migrations/1157_doctrine_projection_bounded_digest.sql'
 LEGACY = '--legacy' in sys.argv
 if LEGACY:
     sys.argv.remove('--legacy')
