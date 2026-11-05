@@ -1,6 +1,6 @@
 stateDiagram-v2
     [*] --> Capture
-    Capture --> CaptureRejected: Invalid address, source, time, or inactive party
+    Capture --> CaptureRejected: Invalid address including length limits, source, time, or inactive party
     Capture --> ContactUnconfirmed: Valid address is absent from complete stored tokens
     Capture --> ContactExact: Valid address equals a complete normalized stored token
     Capture --> CaptureFailed: Database or envelope fails
@@ -17,3 +17,4 @@ stateDiagram-v2
     %% never exact-match a substring, shared domain, display name, or malformed token
     %% never qualify from an exact contact alone without existing strong evidence
     %% capture is synchronous; it introduces no background work or teardown
+    %% address limits are 254 ASCII octets total, 64 local-part octets, and 63 octets per domain label

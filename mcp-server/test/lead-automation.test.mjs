@@ -241,3 +241,41 @@ test("capture refuses a lead filtered out by existing party contact-state checks
   await assert.rejects(()=>tools["record-lead-contact"].handler(db,human,membershipArgs),/lead_not_found/);
   assert.equal(db.capture,undefined);assert.deepEqual(db.events,[]);
 });
+
+
+test("registered capture rejects overlong addresses before exact evidence and preserves valid siblings",async()=>{
+  const maxAddress=`${"a".repeat(64)}@${"x".repeat(63)}.${"y".repeat(63)}.${"z".repeat(61)}`;
+  const addresses=[
+    [`a@${"x".repeat(63)}.test`,true],
+    [`a@${"x".repeat(64)}.test`,false],
+    [`${"a".repeat(64)}@example.test`,true],
+    [`${"a".repeat(65)}@example.test`,false],
+    [maxAddress,true],
+    [maxAddress+"z",false],
+  ];
+  assert.equal(maxAddress.length,254);
+  for(const [address,valid] of addresses){
+    const db=new Fake();db.email=`first@example.test; ${address}`;
+    const capture=()=>tools["record-lead-contact"].handler(db,human,{...membershipArgs,counterparty_address:address});
+    if(valid){
+      assert.equal((await capture()).match,"exact",address);
+      const move=plan(lead,{...contact,detail:db.capture[4],owed:db.capture[5]})[0];
+      assert.equal(move.strength,"strong");assert.equal(move.status,"applied");
+    }else{
+      await assert.rejects(capture,/invalid_counterparty_address/,address);
+      assert.equal(db.capture,undefined);assert.deepEqual(db.events,[]);
+      assert.equal((await tools["record-lead-contact"].handler(db,human,{...membershipArgs,counterparty_address:"first@example.test"})).match,"exact");
+    }
+  }
+});
+
+test("unconfirmed captured automated contact makes no stage change",async()=>{
+  const db=new Fake();db.email="first@example.test";
+  const result=await tools["record-lead-contact"].handler(db,human,{...membershipArgs,automated:true});
+  assert.equal(result.match,"unconfirmed");assert.equal(db.capture[5],"Confirm counterparty");
+  const job=new Fake();job.activities=[{...contact,id:result.activity_id,detail:db.capture[4],owed:db.capture[5]}];
+  assert.deepEqual((await tools["lead-stage-preview"].handler(job)).moves,[]);
+  const applied=await tools["advance-leads"].handler(job,human,{idempotency_key:"synthetic-unconfirmed-automated"});
+  assert.deepEqual(applied.moves,[]);assert.equal(applied.sent,false);assert.equal(job.l.stage,"new");
+  assert.deepEqual(job.events,[]);assert.deepEqual(job.drafts,[]);
+});
