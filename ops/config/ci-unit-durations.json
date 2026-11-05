@@ -277,6 +277,7 @@
     "personal-record-mutations.test.mjs": {"milliseconds": 976, "serial": false},
     "phone-call-sessions-postgres.test.mjs": {"milliseconds": 2124, "serial": true},
     "phone-call-sessions.test.mjs": {"milliseconds": 1419, "serial": false},
+    "portal-migration-runtime.test.mjs": {"milliseconds": 12380, "serial": false},
     "portal-parity-browser.test.mjs": {"milliseconds": 52736, "serial": true},
     "portal-parity.test.mjs": {"milliseconds": 4830, "serial": false},
     "post-call-action-pairs.test.mjs": {"milliseconds": 20150, "serial": true},
