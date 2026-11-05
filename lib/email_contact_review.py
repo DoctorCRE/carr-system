@@ -3,7 +3,7 @@ import hashlib
 import json
 import uuid
 
-from lib.email_contact_candidates import extract_candidates
+from lib.email_contact_candidates import extract_candidates, signature_text, evidence_input
 
 KIND = 'email_signature_observation'
 FIELDS = {'phone': 'phone', 'mobile': 'cell', 'email': 'email', 'title': 'title',
@@ -17,7 +17,9 @@ def digest(value):
 def plan(mail, contact, *, owner, account, account_id):
     snapshot = contact.contact_snapshot
     source = 'outlook-signature/' + digest([owner, account.lower(), account_id]) + '/' + digest(mail['ident'])
-    extracted = extract_candidates(mail.get('body', mail['text']), mail['sender'], source, complete=mail['full'])
+    body = (signature_text(mail['signature_html']) if mail.get('signature_html')
+            else mail.get('body', mail['text']))
+    extracted = extract_candidates(body, mail['sender'], source, complete=mail['full'])
     if extracted['ambiguity']:
         return [], extracted['ambiguity']
     requests = []
@@ -65,7 +67,7 @@ def resolve_sources(mailbox, mails, source_key, copy_window):
         groups.setdefault(mid, []).append(mail)
     def content_proof(mail):
         return digest([mail['sender'].lower(), mail.get('subject'), mail['sent_unix'],
-                       mail.get('body', mail['text']), mail.get('copy_key')])
+                       evidence_input(mail), mail.get('copy_key')])
 
     for mid, rows in groups.items():
         proofs = evidence.setdefault(mid, {})

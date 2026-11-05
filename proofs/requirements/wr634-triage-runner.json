@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR634-triage-runner",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "triage-hold-receipt-remains-unproven",
+      "predicate": "After source delivery, observe one natural evening outlook-triage receipt from the installed merged full runtime SHA. The studio-run-receipt.v1 observer must refuse the current skipped receipt, which has no planning counts. That refusal is a blocked production proof, never successful filing. Separately inspect exit 78 and the private aggregate report for zero moves and snapshot_unavailable without a producer, or capability_not_verified with independently verified observations. No mailbox coverage follows from zero input.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "BLOCKED by the pinned observer on the current skipped receipt. Production hold verification remains pending separate natural-run evidence; producer and sanctioned mover remain missing. No production completion or successful filing is asserted.",
+      "input_class": "one supplied natural-run outlook-triage receipt; read-only, no job launch or runtime refresh",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

@@ -34,9 +34,9 @@ test('every live party address comes back with its record ref, in or out of mark
     await db.connect();
     await db.query(`create table party(id integer primary key, ref text, name text, email text, org_id integer,
         merged_into integer, deleted_at timestamptz, phone text);
-      create table client(party_id integer, roster_ref text, merged_into integer);
-      create table lead(party_id integer, registry_ref text, stage text);
-      create table vendor(party_id integer, vendor_ref text, merged_into integer, out_of_market boolean);
+      create table client(id integer generated always as identity, party_id integer, roster_ref text, merged_into integer);
+      create table lead(id integer generated always as identity, party_id integer, registry_ref text, stage text);
+      create table vendor(id integer generated always as identity, party_id integer, vendor_ref text, merged_into integer, out_of_market boolean);
       insert into party values
         (1, 'P-0001', 'Pat Client', ' Pat <PAT@Client.Test> ', null, null, null, '555'),
         (2, 'P-0002', 'Far Vendor', 'far@vendor.test', null, null, null, null),
@@ -49,9 +49,9 @@ test('every live party address comes back with its record ref, in or out of mark
         (9, 'P-0009', 'Old Client', 'old@client.test', null, null, null, null),
         (10, 'P-0010', 'Notes Only', 'call the office', null, null, null, null),
         (11, 'P-0011', 'Landlord Rep', 'rep@landlord.test', null, null, null, null);
-      insert into client values (1, 'C-0101', null), (9, 'C-0109', 101);
-      insert into lead values (6, 'L-0206', 'new'), (1, 'L-0201', 'lost');
-      insert into vendor values (2, 'V-LAW-001', null, true), (4, 'V-OLD-004', null, false);
+      insert into client(party_id,roster_ref,merged_into) values (1, 'C-0101', null), (9, 'C-0109', 101);
+      insert into lead(party_id,registry_ref,stage) values (6, 'L-0206', 'new'), (1, 'L-0201', 'lost');
+      insert into vendor(party_id,vendor_ref,merged_into,out_of_market) values (2, 'V-LAW-001', null, true), (4, 'V-OLD-004', null, false);
       -- Migration 1029's view: role-less, live participants of open deals. Its filter is the view's own.
       create table v_email_deal_contact("Deal ID" uuid, "Name" text, "Email" text);
       insert into v_email_deal_contact values
@@ -65,9 +65,9 @@ test('every live party address comes back with its record ref, in or out of mark
     // The deployed reader has these column grants (0500, 0839, 0989), not table ownership.
     await db.query(`create role carr_reader;
       grant select(id,name,ref,email,merged_into,deleted_at,org_id,phone,cell,title,version) on party to carr_reader;
-      grant select(party_id,roster_ref,merged_into) on client to carr_reader;
-      grant select(party_id,registry_ref) on lead to carr_reader;
-      grant select(party_id,vendor_ref,merged_into) on vendor to carr_reader;
+      grant select(id,party_id,roster_ref,merged_into) on client to carr_reader;
+      grant select(id,party_id,registry_ref) on lead to carr_reader;
+      grant select(id,party_id,vendor_ref,merged_into) on vendor to carr_reader;
       grant select on v_email_deal_contact to carr_reader;
       set role carr_reader;`);
     const tool = TOOLS['email-match-contacts'];

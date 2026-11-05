@@ -598,6 +598,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "clear-home-waiting": {
+    "ingress_key": "mcp-tool:clear-home-waiting",
+    "source_locator": "mcp-server/src/home-waiting.ts",
+    "schema_digest": "e151e38d47cf26da7d90f57c138fa6cabe18d05574caf5640f98df41224cd125",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "clear-the-deck": {
     "ingress_key": "mcp-tool:clear-the-deck",
     "source_locator": "mcp-server/src/clear-the-deck.js",
@@ -1874,7 +1884,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "outbox-for-sender": {
     "ingress_key": "mcp-tool:outbox-for-sender",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "schema_digest": "3aa09e334ae783cfb56435758c51720cbd439f3579efca90945c95298c6b2bee",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2174,6 +2184,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-actor-roster-v1": {
+    "ingress_key": "mcp-tool:read-actor-roster-v1",
+    "source_locator": "mcp-server/src/people-directory.ts",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-assurance-health": {
     "ingress_key": "mcp-tool:read-assurance-health",
     "source_locator": "mcp-server/src/assurance-health-store.v5.ts",
@@ -2366,6 +2386,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-home-inbox-v3": {
     "ingress_key": "mcp-tool:read-home-inbox-v3",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-home-inbox-v4": {
+    "ingress_key": "mcp-tool:read-home-inbox-v4",
+    "source_locator": "mcp-server/src/home-inbox.js",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-home-inbox-v5": {
+    "ingress_key": "mcp-tool:read-home-inbox-v5",
     "source_locator": "mcp-server/src/home-inbox.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
@@ -3519,6 +3559,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "search-parties-v1": {
+    "ingress_key": "mcp-tool:search-parties-v1",
+    "source_locator": "mcp-server/src/people-directory.ts",
+    "schema_digest": "6c7dc49505694188b8c7d751a127e1bea431e2b416f11d247848516573c3d31f",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "search-tour-properties": {
     "ingress_key": "mcp-tool:search-tour-properties",
     "source_locator": "mcp-server/src/tour-property-search.js",
@@ -3533,6 +3583,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:set-doctrine-refs",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "fe2da3aa52b6ae0980c2f7da2a8efae02cd0bb92ed0ffaa9e3adacefbdad7208",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "set-home-waiting": {
+    "ingress_key": "mcp-tool:set-home-waiting",
+    "source_locator": "mcp-server/src/home-waiting.ts",
+    "schema_digest": "eaf02fb9f3e3612d0e4d49bb70035e3f111696506dede62b7b4303edf8460f33",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

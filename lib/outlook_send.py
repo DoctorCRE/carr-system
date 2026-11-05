@@ -341,7 +341,7 @@ def mail_in_mailbox(snapshot: Snapshot, mail: Mail, since: float) -> bool:
 
 
 def body_fingerprint(body: str) -> str:
-    return hashlib.sha256(' '.join(body.split()).encode()).hexdigest()
+    return hashlib.sha256(body.encode()).hexdigest()
 
 
 def _mail_confirmation(snapshot: Snapshot, mail: Mail, since: float) -> tuple[str | None, str]:
@@ -423,30 +423,50 @@ def _write_transport(item: Mail | Event, key: str, ports: Ports, record: str | N
     return result
 
 
+def reconcile_submitted(draft, *, ports: Ports) -> Result:
+    """Read Sent evidence only. Missing ledger can never enter dispatch."""
+    ports.out.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(ports.out, 0o700)
+    with open(ports.out / 'lock', 'a') as lock:
+        os.chmod(ports.out / 'lock', 0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return Result(State.PRESSED_UNCONFIRMED, 'another_write_running')
+        ledger = Ledger(ports.out / LEDGER)
+        if not ledger.states(draft.key):
+            return Result(State.PRESSED_UNCONFIRMED, 'reconciliation_ledger_missing')
+        return _reconcile(draft.mail, draft.key, ports, ledger)
+
+
+def _reconcile(item: Mail, key: str, ports: Ports, ledger: Ledger) -> Result:
+    rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
+    done = next((r for r in reversed(rows) if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
+    if done and done.get('sent_at'):
+        return Result(State.DONE, done.get('body_status', 'confirmed_in_mailbox'), sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
+    if rows[-1]['state'] in NOT_DISPATCHED:
+        return Result(State.FAILED, rows[-1]['state'])
+    body_status = 'not_in_mailbox_yet'
+    try:
+        snapshot = ports.mailbox.snapshot()
+        item_id, body_status = _mail_confirmation(snapshot, item, min(r['at'] for r in rows) - CLOCK_SKEW)
+    except Exception:
+        item_id = None
+    if item_id:
+        sent_at = _sent_time(snapshot, item_id)
+        ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id, sent_at=sent_at, body_status=body_status)
+        return Result(State.DONE, body_status, sent_item_id=item_id, sent_at=sent_at)
+    if done:
+        return Result(State.PRESSED_UNCONFIRMED, 'sent_time_unavailable')
+    if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
+        return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
+    return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
+
+
 def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger, send_requested: bool,
            submitted: bool = False) -> Result:
     if submitted and isinstance(item, Mail) and ledger.states(key):
-        rows = [r for r in map(json.loads, ledger.path.read_text().splitlines()) if r.get('key') == key]
-        done = next((r for r in reversed(rows) if r['state'] == State.DONE.value and r.get('sent_item_id')), None)
-        if done and done.get('sent_at'):
-            return Result(State.DONE, done.get('body_status', 'confirmed_in_mailbox'), sent_item_id=done['sent_item_id'], sent_at=done['sent_at'])
-        if rows[-1]['state'] in NOT_DISPATCHED:
-            return Result(State.FAILED, rows[-1]['state'])
-        body_status = 'not_in_mailbox_yet'
-        try:
-            snapshot = ports.mailbox.snapshot()
-            item_id, body_status = _mail_confirmation(snapshot, item, min(r['at'] for r in rows) - CLOCK_SKEW)
-        except Exception:
-            item_id = None
-        if item_id:
-            sent_at = _sent_time(snapshot, item_id)
-            ledger.append(key, 'send', State.DONE.value, fingerprint(item), ports.now(), item_id, sent_at=sent_at, body_status=body_status)
-            return Result(State.DONE, body_status, sent_item_id=item_id, sent_at=sent_at)
-        if done:
-            return Result(State.PRESSED_UNCONFIRMED, 'sent_time_unavailable')
-        if ports.now() - min(r['at'] for r in rows) >= DUPLICATE_WINDOW:
-            return Result(State.FAILED, f'unconfirmed_after_{DUPLICATE_WINDOW}')
-        return Result(State.PRESSED_UNCONFIRMED, 'previous_attempt_unconfirmed')
+        return _reconcile(item, key, ports, ledger)
     if send_requested and (ledger.states(key) or ledger.contains_item(fingerprint(item),
             ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0)):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')

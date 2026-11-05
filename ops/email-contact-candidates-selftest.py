@@ -50,7 +50,7 @@ class CandidatesTest(unittest.TestCase):
             self.assertIn(item['evidence'], body.splitlines())
             self.assertEqual(item['source_ref'], 'synthetic-source')
             self.assertEqual(item['sender'], 'a@example.test')
-            self.assertEqual(item['extraction_version'], 'email-contact-candidates/v1')
+            self.assertEqual(item['extraction_version'], 'email-contact-candidates/v3')
             self.assertEqual(result['version'], item['extraction_version'])
             self.assertIs(item['verified'], False)
 
@@ -329,6 +329,79 @@ class CandidatesTest(unittest.TestCase):
             self.assertIsNone(result['ambiguity'])
             self.assertEqual(len(result['identity_observations'] + result['contact_facts']), 3)
         print(f'Generated {count} display/address cases, seed {seed}')
+
+    def test_observed_non_delimited_contact_runs(self):
+        for block, expected in (
+            ('555.010.0199\nalice@example.test', {'phone': '555.010.0199'}),
+            ('M: 555-010-0199 alice@example.test', {'mobile': '555-010-0199'}),
+            ('alice@example.test | 555-010-0199', {'phone': '555-010-0199'}),
+        ):
+            body = 'Hello, please review.\nAlice Synthetic\nDirector | Example Company\n' + block
+            result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+            self.assertIsNone(result['ambiguity'])
+            fields = {x['field']: x['value'] for x in result['contact_facts']}
+            self.assertEqual(fields, {'email': 'alice@example.test', **expected})
+            self.assertFalse(result['identity_observations'])
+            for x in result['contact_facts']:
+                self.assertIn(x['evidence'], body.splitlines())
+
+    def test_non_delimited_runs_hold_competing_or_prose_or_history(self):
+        block = '555-010-0199\nalice@example.test'
+        for body in ('From: Alice Synthetic\n' + block,
+                     'Hello\nOn Monday Alice wrote:\n' + block,
+                     '> ' + block.replace('\n', '\n> '),
+                     'Please call 555-010-0199 at alice@example.test',
+                     'bob@example.test\n' + block,
+                     'Assistant contact:\nBob Synthetic\n' + block,
+                     block + '\nbob@example.test',
+                     block + '\nOther contact\n' + block,
+                     block + '\n' + '\n'.join('Body paragraph' for _ in range(13)),
+                     'alice@example.test'):
+            result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+            self.assertTrue(result['ambiguity'])
+            self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_signature_html_preserves_contact_layout_and_excludes_history(self):
+        from lib.email_contact_candidates import signature_text
+        html = ('<html><head><style>Phone: 555-010-0000</style></head><body>'
+                '<p>Hello, please review.</p><div>Alice Synthetic</div>'
+                '<table><tr><td>Director</td><td> | Example Company</td></tr>'
+                '<tr><td>555.010.0199</td></tr>'
+                '<tr><td><a href="mailto:alice@example.test">alice@example.test</a></td></tr></table>'
+                '<div>From: Bob Synthetic &lt;bob@example.test&gt;</div>'
+                '<div>555-010-0000</div><div>bob@example.test</div></body></html>')
+        text = signature_text(html)
+        self.assertIn('Director | Example Company', text)
+        result = extract_candidates(text, 'alice@example.test', 'ref', complete=True)
+        self.assertIsNone(result['ambiguity'])
+        self.assertEqual({x['field']: x['value'] for x in result['contact_facts']},
+                         {'email': 'alice@example.test', 'phone': '555.010.0199'})
+        quoted = signature_text('<p>Thanks</p><blockquote><div>555.010.0199</div>'
+                                '<div>alice@example.test</div></blockquote>')
+        self.assertTrue(extract_candidates(quoted, 'alice@example.test', 'ref', complete=True)['ambiguity'])
+        self.assertEqual(signature_text('x' * 1_000_001), '')
+
+    def test_role_ownership_in_prose_headings_and_delimited_signatures(self):
+        for context in ('For scheduling contact my assistant Bob.', 'Assistant Bob',
+                        'Assistant contact', 'Delegate Bob', 'On behalf of Bob',
+                        'Please contact my delegate Bob for scheduling.'):
+            for delimiter in ('', '-- \n'):
+                body = context + '\n' + delimiter + 'Phone: 555-0199\nEmail: alice@example.test'
+                with self.subTest(context=context, delimiter=delimiter):
+                    result = extract_candidates(body, 'alice@example.test', 'ref', complete=True)
+                    self.assertEqual(result['ambiguity'], 'competing_identity')
+                    self.assertFalse(result['contact_facts'] + result['identity_observations'])
+
+    def test_multiple_phone_ownership_and_quoted_assistant(self):
+        for block, accepted in (
+            ('Phone: 555-0101\nMobile: 555-0102\nalice@example.test', True),
+            ('555-0101\n555-0102\nalice@example.test', False),
+            ('555-0101\nalice@example.test\nBob Synthetic\n555-0199\nalice@example.test', False),
+            ('555-0101\nalice@example.test\n> Assistant Bob\n> 555-0199', True),
+        ):
+            result = extract_candidates(block, 'alice@example.test', 'ref', complete=True)
+            self.assertEqual(result['ambiguity'] is None, accepted)
+            self.assertFalse(any(x['value'] == '555-0199' for x in result['contact_facts']))
 
     def test_html_to_text_and_forwarded(self):
         from html.parser import HTMLParser

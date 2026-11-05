@@ -6,7 +6,9 @@ All identities, content, paths and relationships here are synthetic. Run
 `routing.json` supplies the existing folder-guide format and snapshots of the
 `find` verb's parties and deals. The planner reuses `RULES` from
 `lib/outlook_triage.py`. It never invokes `CarrFinder`, reads a mailbox, or moves
-mail. The existing UI triage remains unchanged until the executor slice.
+mail. The evening runner now calls this planner and the qualification contract.
+It reports holds until verified observations and an executor exist. See
+`docs/outlook-triage-runner.md` for its supplied-snapshot interface and limits.
 
 `RoutingContext.from_find_results` freezes the rule inputs. The caller supplies
 an explicit completeness assertion. The `find` verb returns fuzzy, capped

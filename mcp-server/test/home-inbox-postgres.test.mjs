@@ -5,7 +5,7 @@ import pg from 'pg';
 import { setTimeout } from 'node:timers/promises';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { HOME_INBOX_CONTRACT, HOME_INBOX_SETTLEMENT_CONTRACT } from '../src/home-inbox.js';
+import { HOME_INBOX_CONTRACT, HOME_INBOX_SETTLEMENT_CONTRACT, HOME_INBOX_COMPLETION_CONTRACT } from '../src/home-inbox.js';
 import { homeReviewReference } from '../src/home-review.js';
 import { executeRegisteredTool } from '../src/tools.js';
 
@@ -1019,4 +1019,81 @@ test('Inbox v3 auto-settlement follows canonical work and preserves reversible d
     await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
     assert.ok((await executeRegisteredTool(c,dell,'read-home-inbox-v3',{})).items.every(i=>i.source_id===id(2020)));
   });
+  await t.test('v4 exposes only proven completion instants and preserves previous snapshots',async()=>{
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    await c.query(`alter table next_action add organization_tenant_id text default 'carr-internal';
+      alter table email_proposal add send_result jsonb;
+      create table event(id uuid primary key default gen_random_uuid(),organization_tenant_id text,
+        subject_type text,subject_id uuid,verb text,field text,old_value jsonb,new_value jsonb,
+        occurred_at timestamptz,mutation_order bigint generated always as identity);
+      insert into next_action(id,owner_id,description,status,version,created_at,updated_at,subject_id)
+        values('${id(3000)}','${joe.id}','Completion statechart','open',1,now(),now(),'${id(3001)}');`);
+    const previous=await Promise.all(['read-home-inbox','read-home-inbox-v2','read-home-inbox-v3'].map(v=>executeRegisteredTool(c,joe,v,{})));
+    await c.query(readFileSync(new URL('../../migrations/1147_home_inbox_completion.sql',import.meta.url),'utf8'));
+    assert.deepEqual(await Promise.all(['read-home-inbox','read-home-inbox-v2','read-home-inbox-v3'].map(v=>executeRegisteredTool(c,joe,v,{}))),previous);
+    assert.deepEqual(JSON.parse(readFileSync(new URL('../contracts/home-inbox.v4.json',import.meta.url),'utf8')),HOME_INBOX_COMPLETION_CONTRACT);
+    const v4=()=>executeRegisteredTool(c,joe,'read-home-inbox-v4',{});
+    const completed=async n=>(await v4()).items.find(i=>i.source_id===id(n)).completed_at;
+    const event=async(verb,at,tenant='carr-internal',action=id(3000))=>c.query(`insert into event
+      (organization_tenant_id,subject_type,subject_id,verb,field,old_value,new_value,occurred_at)
+      values($1,'deal',$2,$3,case when $3='complete-deal-item' then 'deal_item' else 'status' end,'{"status":"open"}',jsonb_build_object('next_action_id',$4::text,'action_id',$4::text,'item_id',$4::text,'status',$5::text),$6)`,
+      [tenant,id(3001),verb,action,verb==='reopen-one-action'?'open':'done',at]);
+    const projected=await v4();
+    const {schema_version,...v3}=await executeRegisteredTool(c,joe,'read-home-inbox-v3',{});
+    assert.equal(projected.schema_version,'home-inbox.v4');
+    assert.deepEqual({...projected,schema_version:undefined,items:projected.items.map(({completed_at,...i})=>i)}, {...v3,schema_version:undefined});
+    assert.equal(await completed(3000),null,'open has no completion');
+    await c.query("update next_action set status='done',version=2 where id=$1",[id(3000)]);
+    assert.equal(await completed(3000),null,'legacy done cannot use updated_at');
+    await event('complete-one-action','2026-11-03T05:59:59.000000Z','other-tenant');
+    await event('complete-one-action','2026-11-03T05:59:59.000000Z','carr-internal',id(3999));
+    assert.equal(await completed(3000),null,'another tenant or action cannot prove completion');
+    await event('complete-one-action','2026-11-03T05:59:59.000000Z');
+    assert.equal(await completed(3000),'2026-11-03T05:59:59.000000Z');
+    await c.query(`insert into ops.notification values($1,$2,'next_action',$3,'completion','Later notification',null,now()+interval '1 day')`,[id(3002),joe.id,id(3000)]);
+    assert.equal(await completed(3000),'2026-11-03T05:59:59.000000Z','later notifications cannot move completion');
+    await c.query("update ops.notification set severity='failure' where id=$1",[id(3002)]);
+    assert.equal(await completed(3000),'2026-11-03T05:59:59.000000Z','notification failure does not erase canonical completion');
+    await c.query("update next_action set status='open',version=3 where id=$1",[id(3000)]);
+    await event('reopen-one-action','2026-11-03T06:00:00.000000Z');
+    assert.equal(await completed(3000),null,'reopened clears completion');
+    await c.query("update next_action set status='done',version=4 where id=$1",[id(3000)]);
+    assert.equal(await completed(3000),null,'an old completion cannot prove recompletion');
+    await event('complete-one-action','2026-11-03T06:00:01.000000Z');
+    assert.equal(await completed(3000),'2026-11-03T06:00:01.000000Z','recompletion has a new instant across Chicago midnight');
+    for(const verb of ['complete-action','complete-deal-item']) {
+      await event(verb,'2026-11-03T06:00:02.000000Z');
+      assert.equal(await completed(3000),'2026-11-03T06:00:02.000000Z',verb);
+    }
+    await c.query(`insert into capture_post_call_action(id,owner_id,description,status,accepted_at,updated_at,completed_at)
+      values($1,$2,'Completed call task','done',now(),now(),now()-interval '1 hour')`,[id(3010),joe.id]);
+    await c.query(`update email_proposal set status='sent',send_result='{"sent_at":"2026-11-02T23:30:00-06:00"}',result_recorded_at=now() where id=$1`,[id(701)]);
+    assert.equal(await completed(3010),(await c.query("select to_char(completed_at at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') at from capture_post_call_action where id=$1",[id(3010)])).rows[0].at);
+    assert.equal(await completed(701),'2026-11-03T05:30:00.000000Z','delayed Sent Items reporting uses the observed send');
+    assert.equal((await v4()).items.find(i=>i.source_id===id(701)).review_reference,null,'sent replies cannot offer inline review in v4');
+    await c.query("update email_proposal set status='pending' where id=$1",[id(701)]);
+    const pendingReply=(await v4()).items.find(i=>i.source_id===id(701));
+    assert.deepEqual(pendingReply.review_reference,homeReviewReference(pendingReply),'pending replies retain inline review in v4');
+    assert.equal(pendingReply.completed_at,null,'pending replies cannot retain sent completion evidence');
+    await c.query("update email_proposal set status='sent' where id=$1",[id(701)]);
+    await c.query("update email_proposal set result_recorded_at=now()+interval '1 day' where id=$1",[id(701)]);
+    assert.equal(await completed(701),'2026-11-03T05:30:00.000000Z','result ingestion cannot move completion');
+    await c.query("update email_proposal set send_result=null where id=$1",[id(701)]);
+    assert.equal(await completed(701),null,'legacy sent without evidence stays null');
+    await c.query("update email_proposal set send_result='{\"sent_at\":\"invalid\"}' where id=$1",[id(701)]);
+    assert.equal(await completed(701),null,'invalid legacy send evidence stays null');
+    await c.query("update capture_post_call_action set status='open' where id=$1",[id(3010)]);
+    assert.equal(await completed(3010),null,'stale call completion is hidden when open');
+    await c.query("update capture_post_call_action set status='done',completed_at='2099-11-03T06:00:00Z' where id=$1",[id(3010)]);
+    assert.equal(await completed(3010),'2099-11-03T06:00:00.000000Z','call recompletion uses the new source instant');
+    await c.query("update capture_post_call_action set completed_at=null where id=$1",[id(3010)]);
+    assert.ok((await v4()).items.filter(i=>!['next_action','capture_post_call_action','email_proposal'].includes(i.source_type)).every(i=>i.completed_at===null),'unsupported sources never infer completion');
+    await c.query('set role carr_writer');
+    assert.equal((await v4()).schema_version,'home-inbox.v4');
+    await c.query('reset role');
+    await c.query("select set_config('carr.acting_actor_slug','dell',false),set_config('carr.verified_human_actor_slug','dell',false)");
+    assert.ok((await executeRegisteredTool(c,dell,'read-home-inbox-v4',{})).items.every(i=>i.source_id===id(2020)));
+    assert.equal((await c.query("select has_function_privilege('carr_reader','ops.read_home_inbox_v4()','execute') allowed")).rows[0].allowed,false);
+  });
+
 });

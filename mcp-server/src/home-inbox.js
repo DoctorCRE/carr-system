@@ -31,8 +31,27 @@ export const HOME_INBOX_SETTLEMENT_CONTRACT = Object.freeze({
   settlement: 'Canonical done tasks, sent replies, resolved fact reviews and received tour feedback settle automatically. A future snooze and explicit un-settle take precedence. Notification completion and call-processing completion do not prove all underlying work resolved. Tour feedback resolves only for the exact share grant that received a client shortlist or comment. Versions remain the existing disposition-command authority; retry exact requests and hydrate receipts through this read.',
 });
 
+export const HOME_INBOX_COMPLETION_CONTRACT = Object.freeze({
+  ...HOME_INBOX_SETTLEMENT_CONTRACT,
+  schema_version: 'home-inbox.v4',
+  read_verb: 'read-home-inbox-v4',
+  item_fields: { ...HOME_INBOX_SETTLEMENT_CONTRACT.item_fields,
+    completed_at: 'UTC ISO-8601 instant|null; proven canonical completion, never activity or ingestion time' },
+  completion_time: 'Done ordinary tasks use the exact complete-one-action, complete-action or complete-deal-item event, superseded by reopen-one-action. Done call actions use completed_at. Sent replies use send_result.sent_at. Open work, unsupported sources and unproven legacy completions return null. Later notifications never move completion. Clients group by America/Chicago.',
+});
+
+export const HOME_INBOX_WAITING_CONTRACT = Object.freeze({
+  ...HOME_INBOX_COMPLETION_CONTRACT,
+  schema_version: 'home-inbox.v5',
+  read_verb: 'read-home-inbox-v5',
+  item_fields: { ...HOME_INBOX_COMPLETION_CONTRACT.item_fields,
+    waiting_on: 'null|{identity:{kind:party|actor,id:UUID,display_name:string|null,available:boolean},reason:string,evidence:string[],version:integer}; explicit canonical identity only, null for unknown or completed work',
+    waiting_version: 'integer; independent relationship version, 0 before the first command; pass as waiting command base_version',
+  },
+});
+
 function withAutomaticSettlement(snapshot, pendingReplyIds) {
-  return { ...snapshot, schema_version: 'home-inbox.v3', auto_settle_enabled: true,
+  return { ...snapshot, auto_settle_enabled: true,
     items: snapshot.items.map(item => {
       const auto_settled = item.source_state === 'done' && item.disposition === 'inbox' &&
         !item.explicit_unsettle && HOME_INBOX_SETTLEMENT_CONTRACT.auto_settle_source_types.includes(item.source_type);
@@ -43,30 +62,44 @@ function withAutomaticSettlement(snapshot, pendingReplyIds) {
   };
 }
 
-export const HOME_INBOX_WRITES = new Set(['snooze-home-inbox', 'settle-home-inbox', 'unsettle-home-inbox']);
+export const HOME_INBOX_WRITES = new Set(['snooze-home-inbox', 'settle-home-inbox', 'unsettle-home-inbox', 'set-home-waiting', 'clear-home-waiting']);
 export function homeInboxTools({ withEnvelope, ToolError }) {
   const unwrap = result => {
     if (result?.ok !== true) throw new ToolError({ error: result?.error || 'inbox_unavailable' });
     return result;
   };
+  const readWithSettlement = async (c, version) => {
+    const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_${version}() as result)
+      select result,array(select p.id::text from jsonb_array_elements(result->'items') i
+        join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
+        where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
+    return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
+  };
   const tools = {
+    'read-home-inbox-v5': {
+      writerConnection: true,
+      description: 'Read Home with nullable verified waiting identity, reason, evidence and independent waiting_version. Unknown is null. Merged parties resolve to survivors; deleted identities are unavailable. Completed items have no wait. Reads do not change records. Uses home-inbox.v5 with v4 completion times and v3 automatic settlement.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: c => readWithSettlement(c, 'v5'),
+    },
+
     'read-home-inbox': {
       writerConnection: true,
       description: 'Read the stable home-inbox.v1 snapshot. Refuses above 1000 items or 10000 notifications.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async c => unwrap((await c.query('select ops.read_home_inbox() as result')).rows[0]?.result),
     },
+    'read-home-inbox-v4': {
+      writerConnection: true,
+      description: 'Read Home inbox with v3 automatic settlement and nullable source-backed completed_at UTC instants for Done today. Unknown completion times remain null. Clients group by America/Chicago. Uses home-inbox.v4; v1 through v3 remain unchanged.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: c => readWithSettlement(c, 'v4'),
+    },
     'read-home-inbox-v3': {
       writerConnection: true,
       description: 'Read the Home inbox with automatic settlement of canonical done tasks, sent replies, resolved fact reviews and received tour feedback. Manual snooze and un-settle take precedence. No domain rows or dispositions are written. Uses home-inbox.v3; v1 and v2 remain unchanged.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-      handler: async c => {
-        const row = (await c.query(`with snapshot as materialized (select ops.read_home_inbox_v3() as result)
-          select result,array(select p.id::text from jsonb_array_elements(result->'items') i
-            join email_proposal p on p.id=case when i->>'source_type'='email_proposal' then (i->>'source_id')::uuid end
-            where p.status='pending') as pending_reply_ids from snapshot`)).rows[0];
-        return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
-      },
+      handler: c => readWithSettlement(c, 'v3'),
     },
     'read-home-inbox-v2': {
       writerConnection: true,
