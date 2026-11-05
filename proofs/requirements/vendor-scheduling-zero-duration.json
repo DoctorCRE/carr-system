@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR647-S4-vendor-scheduling-zero-duration",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "natural-zero-duration-withholds-candidates",
+    "predicate": "After merge and deploy, verify Worker release identity with the registered release smoke runner. Separately run python3 tools/prove-vendor-scheduling-zero-duration.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. It must observe a natural fresh authenticated timed zero-duration agenda row and unavailable scheduling with no gaps. Release smoke alone does not prove this regression. The coordinator owns this authenticated observation.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "The deployed release includes the fix and the dedicated natural-evidence runner exits 0 with eligible_records greater than zero and both assertions passing. Exit 78 or absent evidence leaves the unit landed-unproven. Exit 1 reports a contradiction. No synthetic snapshot publication is allowed.",
+    "input_class": "Natural authenticated vendor calendar and morning brief agenda. No record writes or sends. Public receipt redacts identities.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 4,
+    "max_records": 20,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}
