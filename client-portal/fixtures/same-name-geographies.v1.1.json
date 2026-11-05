@@ -1,0 +1,192 @@
+{
+  "schema": "carr.market-study.v1.1",
+  "demographics": {
+    "growth": {
+      "area_label": "Sample County",
+      "tiles": [
+        {
+          "value": "1.0%",
+          "label": "Example tile 1"
+        },
+        {
+          "value": "2.0%",
+          "label": "Example tile 2"
+        },
+        {
+          "value": "3.0%",
+          "label": "Example tile 3"
+        },
+        {
+          "value": "4.0%",
+          "label": "Example tile 4"
+        }
+      ],
+      "geographies": [
+        {
+          "name": "Springfield",
+          "series": [
+            {
+              "label": "2020",
+              "value": 10000,
+              "kind": "census"
+            },
+            {
+              "label": "2025",
+              "value": 55000,
+              "kind": "estimate"
+            },
+            {
+              "label": "2030",
+              "value": 60000,
+              "kind": "projection"
+            }
+          ],
+          "source_url": "https://example.com/illinois/population",
+          "geography_id": "src:9f32a",
+          "geography_label": "Springfield, Illinois"
+        },
+        {
+          "name": "Springfield",
+          "series": [
+            {
+              "label": "2020",
+              "value": 20000,
+              "kind": "census"
+            },
+            {
+              "label": "2025",
+              "value": 55000,
+              "kind": "estimate"
+            },
+            {
+              "label": "2030",
+              "value": 60000,
+              "kind": "projection"
+            }
+          ],
+          "source_url": "https://example.com/missouri/population",
+          "geography_id": "src:b817c",
+          "geography_label": "Springfield, Missouri"
+        }
+      ],
+      "reach_note": "Synthetic reach note.",
+      "source": [
+        {
+          "text": "Synthetic census series."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    },
+    "age": {
+      "geographies": [
+        {
+          "name": "Springfield",
+          "under_18_pct": 30,
+          "over_65_pct": 18,
+          "source_url": "https://example.com/missouri/age",
+          "geography_id": "src:b817c",
+          "geography_label": "Springfield, Missouri"
+        },
+        {
+          "name": "Springfield",
+          "under_18_pct": 20,
+          "over_65_pct": 18,
+          "source_url": "https://example.com/illinois/age",
+          "geography_id": "src:9f32a",
+          "geography_label": "Springfield, Illinois"
+        }
+      ]
+    },
+    "median_income": {
+      "geographies": [
+        {
+          "name": "Springfield",
+          "value": 65000,
+          "geography_id": "src:9f32a",
+          "geography_label": "Springfield, Illinois"
+        },
+        {
+          "name": "Springfield",
+          "value": 95000,
+          "geography_id": "src:b817c",
+          "geography_label": "Springfield, Missouri"
+        }
+      ],
+      "households_note": "Synthetic households note."
+    },
+    "income_bands": {
+      "thresholds": [
+        100000,
+        150000,
+        200000
+      ],
+      "areas": [
+        {
+          "name": "Springfield",
+          "group": "county",
+          "households": 2000,
+          "population": 55000,
+          "median": 70000,
+          "counts": {
+            "100000": 6000,
+            "150000": 2500,
+            "200000": 1040
+          },
+          "caption": "Synthetic county bands",
+          "geography_id": "src:b817c",
+          "geography_label": "Springfield, Missouri"
+        },
+        {
+          "name": "Springfield",
+          "group": "county",
+          "households": 1000,
+          "population": 55000,
+          "median": 70000,
+          "counts": {
+            "100000": 6000,
+            "150000": 2500,
+            "200000": 1040
+          },
+          "caption": "Synthetic county bands",
+          "geography_id": "src:9f32a",
+          "geography_label": "Springfield, Illinois"
+        }
+      ],
+      "combined": {
+        "label": "Study area",
+        "households": 20000,
+        "counts": {
+          "100000": 6000
+        },
+        "caption": "Synthetic combined bands"
+      },
+      "notes": [
+        {
+          "text": "Synthetic income notes."
+        },
+        {
+          "link": {
+            "label": "Example source",
+            "url": "https://example.com/source"
+          }
+        }
+      ]
+    },
+    "methodology": [
+      {
+        "text": "Synthetic methodology."
+      },
+      {
+        "link": {
+          "label": "Example source",
+          "url": "https://example.com/source"
+        }
+      }
+    ]
+  }
+}

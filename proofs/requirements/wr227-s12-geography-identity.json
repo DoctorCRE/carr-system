@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S12-geography-identity",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "geography-contract-release",
+    "predicate": "The Worker release contains the version-aware package validator. Release identity alone does not prove publication or app geography selection.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release matches the merged SHA. Product remains landed-unproven until a separately authorized same-name publication preserves IDs through the app loader after row reorder, with both releases and publication revision recorded.",
+    "input_class": "read-only release identity",
+    "deadline_seconds": 120
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 10, "max_records": 1000, "max_runtime_seconds": 180, "max_artifact_bytes": 1048576}
+}

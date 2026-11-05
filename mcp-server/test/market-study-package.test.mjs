@@ -109,3 +109,119 @@ test('a research package carrying a slug is refused in partial mode too', () => 
   pkg.slug = 'example-health';
   assert.deepEqual(paths(validateMarketStudyPackage(pkg, { mode: 'partial' })), ['/slug']);
 });
+
+const identityOverlay = JSON.parse(readFileSync(new URL('../../client-portal/fixtures/same-name-geographies.v1.1.json', import.meta.url), 'utf8'));
+function identityPackage() {
+  const pkg = copy();
+  pkg.schema = identityOverlay.schema;
+  Object.assign(pkg.demographics, structuredClone(identityOverlay.demographics));
+  return pkg;
+}
+const coreRows = pkg => [pkg.demographics.growth.geographies, pkg.demographics.age.geographies,
+  pkg.demographics.median_income.geographies, pkg.demographics.income_bands.areas];
+
+test('old schema refuses source-assigned identities rather than reinterpreting v1', () => {
+  const pkg = identityPackage();
+  pkg.schema = 'carr.market-study.v1';
+  assert.equal(validateMarketStudyPackage(pkg).ok, false);
+});
+
+test('v1.1 accepts same names and independent row order in full and partial mode', () => {
+  const pkg = identityPackage();
+  assert.deepEqual(validateMarketStudyPackage(pkg), { ok: true, errors: [] });
+  for (const group of RECORD_LAYER_GROUPS) delete pkg[group];
+  assert.deepEqual(validateMarketStudyPackage(pkg, { mode: 'partial' }), { ok: true, errors: [] });
+});
+
+for (let section = 0; section < 4; section++) {
+  for (const [name, mutate, field] of [
+    ['missing', rows => { delete rows[0].geography_id; }, 'geography_id'],
+    ['empty', rows => { rows[0].geography_id = ''; }, 'geography_id'],
+    ['duplicate', rows => { rows[1].geography_id = rows[0].geography_id; }, 'geography_id'],
+    ['missing label', rows => { delete rows[0].geography_label; }, 'geography_label'],
+  ]) {
+    test(`v1.1 refuses ${name} identity in section ${section}`, () => {
+      const pkg = identityPackage();
+      mutate(coreRows(pkg)[section]);
+      const result = validateMarketStudyPackage(pkg);
+      assert.equal(result.ok, false);
+      assert.ok(paths(result).some(path => path.endsWith(`/${field}`)), JSON.stringify(result));
+    });
+  }
+}
+
+for (let section = 1; section < 4; section++) {
+  test(`v1.1 refuses unknown, omitted and mislabeled references in section ${section}`, () => {
+    for (const mutate of [rows => { rows[0].geography_id = 'src:unknown'; }, rows => rows.pop(),
+      rows => { rows[0].geography_label = 'Wrong Springfield'; }]) {
+      const pkg = identityPackage();
+      mutate(coreRows(pkg)[section]);
+      assert.equal(validateMarketStudyPackage(pkg).ok, false);
+    }
+  });
+}
+
+test('v1.1 refuses indistinguishable labels for distinct identities', () => {
+  const pkg = identityPackage();
+  for (const rows of coreRows(pkg)) for (const row of rows) row.geography_label = 'Springfield';
+  assert.equal(validateMarketStudyPackage(pkg).ok, false);
+});
+
+test('v1.1 preserves IDs, values and sources through serialization and replacement', () => {
+  const pkg = identityPackage();
+  const before = structuredClone(pkg);
+  assert.equal(validateMarketStudyPackage(pkg).ok, true);
+  assert.deepEqual(pkg, before);
+  const wire = JSON.parse(JSON.stringify(pkg));
+  assert.deepEqual(wire, pkg);
+  for (const rows of coreRows(wire)) rows.reverse();
+  assert.equal(validateMarketStudyPackage(wire).ok, true);
+  const population = new Map(wire.demographics.growth.geographies.map(row => [row.geography_id, row]));
+  const ages = new Map(wire.demographics.age.geographies.map(row => [row.geography_id, row]));
+  const incomes = new Map(wire.demographics.median_income.geographies.map(row => [row.geography_id, row.value]));
+  assert.equal(population.get('src:9f32a').series[0].value, 10000);
+  assert.equal(population.get('src:b817c').series[0].value, 20000);
+  assert.equal(ages.get('src:9f32a').under_18_pct, 20);
+  assert.equal(ages.get('src:b817c').under_18_pct, 30);
+  assert.equal(incomes.get('src:9f32a'), 65000);
+  assert.equal(incomes.get('src:b817c'), 95000);
+  assert.equal(ages.get('src:9f32a').source_url, 'https://example.com/illinois/age');
+  for (const rows of coreRows(wire)) for (const row of rows) row.geography_id = `replacement:${row.geography_id}`;
+  assert.equal(validateMarketStudyPackage(wire).ok, true);
+  assert.equal(validateMarketStudyPackage(pkg).ok, true);
+});
+
+test('v1.1 retains optional micro-zone behavior and rejects unsupported versions', () => {
+  const pkg = identityPackage();
+  delete pkg.demographics.micro_zones;
+  assert.equal(validateMarketStudyPackage(pkg).ok, true);
+  pkg.schema = 'carr.market-study.v99';
+  assert.equal(validateMarketStudyPackage(pkg).ok, false);
+});
+
+test('v1.1 refuses blank labels and malformed source IDs without throwing', () => {
+  for (const value of [' ', 'a'.repeat(129), '<id>', null, 9]) {
+    const pkg = identityPackage();
+    pkg.demographics.growth.geographies[0].geography_id = value;
+    assert.equal(validateMarketStudyPackage(pkg).ok, false);
+  }
+  const pkg = identityPackage();
+  for (const rows of coreRows(pkg)) rows[0].geography_label = '   ';
+  assert.equal(validateMarketStudyPackage(pkg).ok, false);
+  pkg.demographics = null;
+  assert.equal(validateMarketStudyPackage(pkg).ok, false);
+});
+
+test('v1.1 validates ten times the fixture rows with isolated identities', () => {
+  const pkg = identityPackage();
+  for (const rows of coreRows(pkg)) {
+    const original = structuredClone(rows);
+    rows.length = 0;
+    for (let batch = 0; batch < 10; batch++) {
+      rows.push(...original.map(row => ({ ...row, geography_id: `${row.geography_id}:${batch}`,
+        geography_label: `${row.geography_label} study ${batch}` })));
+    }
+  }
+  assert.equal(validateMarketStudyPackage(pkg).ok, true);
+  assert.equal(validateMarketStudyPackage(null).ok, false);
+});

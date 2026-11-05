@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doctorcre.com/schemas/carr.market-study.v1.1.schema.json",
+  "title": "carr.market-study.v1.1",
+  "description": "Source-assigned core geography identities. Also requires the cross-section checks in validateMarketStudyPackage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "client",
+    "prepared",
+    "market",
+    "map",
+    "properties",
+    "purchases",
+    "developments",
+    "demographics",
+    "sources"
+  ],
+  "properties": {
+    "schema": {
+      "const": "carr.market-study.v1.1"
+    },
+    "client": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/client"
+    },
+    "prepared": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/prepared"
+    },
+    "market": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/market"
+    },
+    "map": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/map"
+    },
+    "properties": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/properties"
+    },
+    "purchases": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/purchases"
+    },
+    "developments": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/developments"
+    },
+    "context_anchors": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/context_anchors"
+    },
+    "demographics": {
+      "$ref": "#/$defs/Demographics"
+    },
+    "ownership": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/ownership"
+    },
+    "sources": {
+      "$ref": "carr.market-study.v1.schema.json#/properties/sources"
+    }
+  },
+  "$defs": {
+    "GeographyId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Opaque source-assigned identity. Never derive from names or positions. Preserve across publications of the same source geography."
+    },
+    "Demographics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "growth",
+        "age",
+        "median_income",
+        "income_bands",
+        "methodology"
+      ],
+      "properties": {
+        "growth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "area_label",
+            "tiles",
+            "geographies",
+            "reach_note",
+            "source"
+          ],
+          "properties": {
+            "area_label": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/area_label"
+            },
+            "tiles": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/tiles"
+            },
+            "geographies": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "series",
+                  "source_url",
+                  "geography_id",
+                  "geography_label"
+                ],
+                "properties": {
+                  "name": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/geographies/items/properties/name"
+                  },
+                  "series": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/geographies/items/properties/series"
+                  },
+                  "source_url": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/geographies/items/properties/source_url"
+                  },
+                  "geography_id": {
+                    "$ref": "#/$defs/GeographyId"
+                  },
+                  "geography_label": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Text"
+                  }
+                }
+              }
+            },
+            "reach_note": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/reach_note"
+            },
+            "source": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/growth/properties/source"
+            }
+          }
+        },
+        "age": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "geographies"
+          ],
+          "properties": {
+            "geographies": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "under_18_pct",
+                  "over_65_pct",
+                  "source_url",
+                  "geography_id",
+                  "geography_label"
+                ],
+                "properties": {
+                  "name": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/age/properties/geographies/items/properties/name"
+                  },
+                  "under_18_pct": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/age/properties/geographies/items/properties/under_18_pct"
+                  },
+                  "over_65_pct": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/age/properties/geographies/items/properties/over_65_pct"
+                  },
+                  "source_url": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/age/properties/geographies/items/properties/source_url"
+                  },
+                  "geography_id": {
+                    "$ref": "#/$defs/GeographyId"
+                  },
+                  "geography_label": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Text"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "median_income": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "geographies",
+            "households_note"
+          ],
+          "properties": {
+            "geographies": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "value",
+                  "geography_id",
+                  "geography_label"
+                ],
+                "properties": {
+                  "name": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/median_income/properties/geographies/items/properties/name"
+                  },
+                  "value": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/median_income/properties/geographies/items/properties/value"
+                  },
+                  "geography_id": {
+                    "$ref": "#/$defs/GeographyId"
+                  },
+                  "geography_label": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Text"
+                  }
+                }
+              }
+            },
+            "households_note": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/median_income/properties/households_note"
+            }
+          }
+        },
+        "income_bands": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "thresholds",
+            "areas",
+            "notes"
+          ],
+          "properties": {
+            "thresholds": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/income_bands/properties/thresholds"
+            },
+            "areas": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "group",
+                  "households",
+                  "counts",
+                  "caption",
+                  "geography_id",
+                  "geography_label"
+                ],
+                "properties": {
+                  "name": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/name"
+                  },
+                  "group": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/group"
+                  },
+                  "households": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/households"
+                  },
+                  "population": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/population"
+                  },
+                  "median": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/median"
+                  },
+                  "counts": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/counts"
+                  },
+                  "caption": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/IncomeArea/properties/caption"
+                  },
+                  "geography_id": {
+                    "$ref": "#/$defs/GeographyId"
+                  },
+                  "geography_label": {
+                    "$ref": "carr.market-study.v1.schema.json#/$defs/Text"
+                  }
+                }
+              }
+            },
+            "combined": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/income_bands/properties/combined"
+            },
+            "notes": {
+              "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/income_bands/properties/notes"
+            }
+          }
+        },
+        "micro_zones": {
+          "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/micro_zones"
+        },
+        "competition": {
+          "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/competition"
+        },
+        "methodology": {
+          "$ref": "carr.market-study.v1.schema.json#/$defs/Demographics/properties/methodology"
+        }
+      }
+    }
+  }
+}
