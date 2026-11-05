@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "lead-contact-address-membership",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "deployed-release-and-natural-secondary-contact",
+      "predicate": "Pin the deployed Worker release with worker release smoke, then run python3 tools/prove-lead-contact-address-membership.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. The permitted reads omit the captured address. A natural native exact-contact candidate and stable release return human_pending with exactly one Joe observation. Joe opens the original Outlook message or calendar item identified by evidence_ref beside the authenticated lead-board workspace=leads detail supplied by the coordinator. He verifies the sender, recipient or attendee equals a complete non-first semicolon-separated token in that lead email after trimming and lowercasing, and the same activity records match=exact. The coordinator brackets that observation with unchanged release_sha reads and checks lead-stage-preview evidence when present. Record only pass or contradiction and counts, no addresses or identities. Release smoke or exact metadata alone cannot prove membership.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Exit 0 with status human_pending means automated reads succeeded and the named Joe observation remains pending. eligible_records stays zero and no live-proven claim is allowed until that observation passes on the same release. Exit 78 means absent natural evidence, source/authentication failure or release drift. Exit 1 means contradiction. The coordinator retains the redacted human observation receipt with the pinned release identity.",
+      "input_class": "Authenticated read-only lead-board workspace=leads and lead-stage-preview plus one Joe observation of the original native item; twenty detail reads total, two pages per lead, no retries or business writes. Coordinator runs production proof after deployment and supplies private read context to Joe without including it in the public receipt.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 24,
+    "max_records": 20,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

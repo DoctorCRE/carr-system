@@ -1,0 +1,48 @@
+{
+  "schema": "pdf-admission.v1",
+  "source": "WR617 S6 verifyUploadBytes: %PDF- prefix and %%EOF within the final 1024 bytes",
+  "cases": [
+    {
+      "name": "truncated",
+      "prefix": "%PDF-1.7\nsynthetic",
+      "padding": 0,
+      "suffix": "",
+      "accepted": false
+    },
+    {
+      "name": "complete",
+      "prefix": "%PDF-1.7\nsynthetic\n",
+      "padding": 0,
+      "suffix": "%%EOF\n",
+      "accepted": true
+    },
+    {
+      "name": "eof_at_tail_boundary",
+      "prefix": "%PDF-1.7\n%%EOF",
+      "padding": 1019,
+      "suffix": "",
+      "accepted": true
+    },
+    {
+      "name": "eof_outside_tail",
+      "prefix": "%PDF-1.7\n%%EOF",
+      "padding": 1020,
+      "suffix": "",
+      "accepted": false
+    },
+    {
+      "name": "marker_need_not_end_file",
+      "prefix": "%PDF-1.7\n%%EOF",
+      "padding": 0,
+      "suffix": "\ntrailing",
+      "accepted": true
+    },
+    {
+      "name": "wrong_header",
+      "prefix": "not a PDF\n",
+      "padding": 0,
+      "suffix": "%%EOF",
+      "accepted": false
+    }
+  ]
+}
