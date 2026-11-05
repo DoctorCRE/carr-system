@@ -139,7 +139,8 @@ class AdmissionTest(unittest.TestCase):
         self.assertNotEqual(self.run_plan('## Production proof\nproofs/requirements/synthetic.json').returncode, 0)
 
     def test_non_product_allowlist_and_mixed_diff(self):
-        for paths in [['docs/guide.md'], ['mcp-server/test/example.test.mjs'],
+        for paths in [['tools/pstack/routing.md'], ['AGENTS.md'], ['CLAUDE.md'],
+                      ['.agents/skills/example/SKILL.md'], ['docs/guide.md'], ['mcp-server/test/example.test.mjs'],
                       ['ops/example-selftest.py'], ['ops/app-proof-observe.py'], ['.github/workflows/ci.yml']]:
             result = self.run_plan('## Production proof\nn/a: source-only verification', paths)
             self.assertEqual(result.returncode, 0, result.stdout)
@@ -150,7 +151,7 @@ class AdmissionTest(unittest.TestCase):
 
     def test_ci_implementation_declarations(self):
         for path in ['ops/ci-evidence.py', 'ops/ci-unit.py', 'ops/ci-secret.py',
-                     'ops/ci.py', 'ops/ci-pushfloor.py', 'ops/ci-dep-check.py',
+                     'ops/ci.py', 'ops/ci_scope.py', 'ops/db-acceptance-scope.py', 'ops/ci-pushfloor.py', 'ops/ci-dep-check.py',
                      'ops/ci-migration.py', 'ops/ci-migration-gates.py', 'ops/ci-node-file.mjs',
                      'ops/ci-apt.py', 'ops/ci-postgres.sh', 'ops/ci-zsh.sh']:
             with self.subTest(path=path):

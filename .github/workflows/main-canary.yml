@@ -71,7 +71,7 @@ jobs:
       matrix:
         gate_shard: [1, 2]
         classes:
-          - "pushfloor types secret binding artifact"
+          - "lint pushfloor types secret binding artifact"
           - "unit"
           - "gates"
           - "migration"
@@ -79,7 +79,7 @@ jobs:
           - "dependency"
         job_names:
           - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
-            "pushfloor types secret binding artifact": {name: "ops/ci.sh --strict --only pushfloor types secret binding artifact", classes: "pushfloor types secret binding artifact"}
+            "lint pushfloor types secret binding artifact": {name: "ops/ci.sh --strict --only lint pushfloor types secret binding artifact", classes: "lint pushfloor types secret binding artifact"}
             unit: {name: "ops/ci.sh --strict --only unit", classes: "unit"}
             gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
             gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
@@ -89,7 +89,7 @@ jobs:
         exclude:
           - {classes: "unit", gate_shard: 2}
           - {classes: "dependency", gate_shard: 2}
-          - {classes: "pushfloor types secret binding artifact", gate_shard: 2}
+          - {classes: "lint pushfloor types secret binding artifact", gate_shard: 2}
           - {classes: "hxprobe", gate_shard: 2}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 25 }}
 
