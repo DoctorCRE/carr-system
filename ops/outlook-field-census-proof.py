@@ -16,6 +16,8 @@ def main():
     parser.add_argument('--after', required=True, help='Timezone-aware observation floor set before the natural run')
     args = parser.parse_args()
     try:
+        if args.bundle.stat().st_size > 65536:
+            raise ValueError
         floor = datetime.fromisoformat(args.after)
         if floor.tzinfo is None:
             raise ValueError

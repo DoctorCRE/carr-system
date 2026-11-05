@@ -13,6 +13,19 @@ MESSAGE_COUNTERS = ('mail_account_unknown_not_stored', 'decoder_rejected',
                     'stored_not_admitted_account_ambiguous', 'stored_not_admitted_account_unresolved')
 VERSIONS = {'admission_policy': 'intake-account-v1', 'completion_predicate': 'nonempty-full-v1'}
 
+DISPOSITIONS = {
+    'observed_empty': ('legitimately_empty',),
+    'access_limited': ('protected',),
+    'repairable': ('never_requested', 'acquisition_failed', 'decode_unsupported', 'parser_or_linkage'),
+    'unresolved': ('conflict_or_overflow', 'source_unavailable'),
+    'unknown': ('unclassified',),
+}
+
+
+def dispositions(causes):
+    return {name: sum(causes[cause] for cause in members) for name, members in DISPOSITIONS.items()}
+
+
 def _digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -40,6 +53,8 @@ def build(meta, mails, bound):
                         or (name == 'recipients' and mail.get('census_recipients_status') == 'conflict')):
                     cause = 'conflict_or_overflow'
                 row['causes'][cause] += 1
+    for field in fields.values():
+        field['dispositions'] = dispositions(field['causes'])
     admitted = len(mails)
     unadmitted = sum((meta.get(key, 0) for key in ('mail_outside_selected_account', 'mail_account_ambiguous', 'mail_account_unresolved')))
     rejected = meta.get('decoder_rejected', 0)
@@ -114,10 +129,13 @@ def validate(bundle):
             raise ValueError('invalid_field_census')
         for name, counter in FIELDS.items():
             field = census['fields'][name]
-            if not set(field) == {'captured', 'raw_missing', 'causes'}:
+            if not set(field) == {'captured', 'raw_missing', 'causes', 'dispositions'}:
                 raise ValueError('invalid_field_census')
             if not set(field['causes']) == set(CAUSES):
                 raise ValueError('invalid_field_census')
+            if field['dispositions'] != dispositions(field['causes']):
+                raise ValueError('invalid_field_census')
+            nonnegative(field['dispositions'].values())
             nonnegative([field['captured'], field['raw_missing'], *field['causes'].values()])
             if not field['captured'] == counts[counter]:
                 raise ValueError('invalid_field_census')

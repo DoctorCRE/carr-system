@@ -5740,6 +5740,8 @@ class FieldCensusTest(unittest.TestCase):
         census.validate(bundle)
         self.assertEqual(bundle['census']['fields']['body']['causes']['conflict_or_overflow'], 2)
         self.assertEqual(bundle['census']['fields']['body']['causes']['unclassified'], 1)
+        self.assertEqual(bundle['census']['fields']['body']['dispositions'],
+                         dict(observed_empty=0, access_limited=0, repairable=0, unresolved=2, unknown=1))
         for field in bundle['census']['fields'].values():
             self.assertEqual(sum(field['causes'].values()), 3)
             self.assertEqual(field['causes']['legitimately_empty'], 0)
