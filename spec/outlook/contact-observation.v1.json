@@ -1,0 +1,436 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doctorcre.com/spec/outlook/contact-observation.v1.json",
+  "title": "Outlook contact observation v1",
+  "description": "Logical envelope over SQLite contact_capability and contact_observations.observation JSON. All builds are unsupported until verified layout evidence lands. IDs are strings. observed_at is snapshot time, never source modification time. Each observation is at most 65536 UTF-8 bytes. Field evidence logical_field must match its map key. No field clears or changes a canonical contact. A missing table is unsupported, never evidence of zero contacts or deletion.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "capability": {
+      "$ref": "#/$defs/capability"
+    },
+    "observations": {
+      "type": "array",
+      "maxItems": 0,
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    }
+  },
+  "required": [
+    "capability",
+    "observations"
+  ],
+  "$defs": {
+    "field": {
+      "enum": [
+        "email",
+        "phone",
+        "cell",
+        "title",
+        "name",
+        "company"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layout_evidence_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "snapshot_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "object_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "record_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "logical_field": {
+          "$ref": "#/$defs/field"
+        },
+        "span": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "length": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65536
+            }
+          },
+          "required": [
+            "offset",
+            "length"
+          ]
+        },
+        "raw_value_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "layout_evidence_id",
+        "snapshot_id",
+        "object_key",
+        "record_fingerprint",
+        "logical_field",
+        "span",
+        "raw_value_digest"
+      ]
+    },
+    "field_observation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "present"
+            },
+            "raw_value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "normalized_value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "required": [
+            "state",
+            "raw_value",
+            "normalized_value",
+            "evidence"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "empty"
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "required": [
+            "state",
+            "evidence"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "absent"
+            },
+            "evidence": {
+              "$ref": "#/$defs/evidence"
+            }
+          },
+          "required": [
+            "state",
+            "evidence"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "unknown"
+            },
+            "reason": {
+              "enum": [
+                "unsupported",
+                "unread",
+                "malformed",
+                "conflict"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "revision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "proven"
+            },
+            "fingerprint": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "ordering": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "proven"
+                    },
+                    "sequence": {
+                      "type": "string",
+                      "pattern": "^[0-9]{1,20}$"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "sequence"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "state": {
+                      "const": "unknown"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ]
+                }
+              ]
+            },
+            "identity_evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "layout_evidence_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "object_key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "owner_key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "snapshot_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "layout_evidence_id",
+                "object_key",
+                "owner_key",
+                "snapshot_id"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "fingerprint",
+            "ordering",
+            "identity_evidence"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "unknown"
+            },
+            "reason": {
+              "enum": [
+                "missing",
+                "conflicting",
+                "unsupported"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ]
+        }
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "outlook-contact-observation/v1"
+        },
+        "source_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "container_version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "outlook_build": {
+          "type": "null"
+        },
+        "layout_id": {
+          "type": "null"
+        },
+        "capability": {
+          "const": "unsupported"
+        },
+        "reason": {
+          "const": "contact_layout_unverified"
+        }
+      },
+      "required": [
+        "schema",
+        "source_digest",
+        "container_version",
+        "outlook_build",
+        "layout_id",
+        "capability",
+        "reason"
+      ]
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "outlook-contact-observation/v1"
+        },
+        "mailbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "owner": {
+              "enum": [
+                "joe",
+                "dell"
+              ]
+            },
+            "account_key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "profile_epoch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "owner",
+            "account_key",
+            "profile_epoch"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "outlook_contact_record"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "key_status": {
+              "enum": [
+                "proven",
+                "unknown",
+                "conflict"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "key",
+            "key_status"
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "decoder": {
+          "$ref": "#/$defs/capability"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 6,
+          "additionalProperties": false,
+          "properties": {
+            "email": {
+              "$ref": "#/$defs/field_observation"
+            },
+            "phone": {
+              "$ref": "#/$defs/field_observation"
+            },
+            "cell": {
+              "$ref": "#/$defs/field_observation"
+            },
+            "title": {
+              "$ref": "#/$defs/field_observation"
+            },
+            "name": {
+              "$ref": "#/$defs/field_observation"
+            },
+            "company": {
+              "$ref": "#/$defs/field_observation"
+            }
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "mailbox",
+        "source",
+        "revision",
+        "decoder",
+        "observed_at",
+        "fields"
+      ]
+    }
+  }
+}

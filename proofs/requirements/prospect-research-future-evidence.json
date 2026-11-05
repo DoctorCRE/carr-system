@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "prospect-research-future-evidence",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "research-current-evidence",
+    "predicate": "Require deployed release ancestry and separately run python3 tools/prove-prospect-research-future-evidence.py --live --timeout-seconds 30 --max-records 20 from the merged checkout. Every verified result requires found, sourced, nonexpired, nonfuture verification and no current conflict. The registered release smoke proves release identity only. The new bounded runner is required for research assertions. Zero relevant findings is coverage limited, never a natural future-finding cohort or proof of the synthetic failure path in production.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release contains the merge and the bounded research runner exits zero. Preserve separate synthetic regression evidence and live readback coverage.",
+    "input_class": "Authenticated read-only lead-board and at most 20 exact prospect-research reads. No checklist or calendar reads.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 22,
+    "max_records": 20,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

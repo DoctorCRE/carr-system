@@ -158,3 +158,50 @@ test("detaches accepted inputs and outputs", () => {
   assert.equal(first.comparison.additional_cost_of_shorter_term, 89112.3);
   assert.equal(second.long_term.base_rent_schedule[0].annual_base_rent, 45000);
 });
+
+
+test("tiny admitted rates converge to zero interest without non-finite economics", () => {
+  for (const rate of [Number.MIN_VALUE, 1e-320, 1e-20, 1e-16, 1e-12]) {
+    const input = sample();
+    input.square_feet = 1000;
+    for (const option of [input.long_term, input.short_term]) {
+      option.base_rent_per_sf = [20, 20, 20, 20, 20];
+      option.operating_expenses_per_sf = 5;
+      option.free_rent_months = option.free_opex_months = 0;
+      option.buildout_cost_per_sf = 100;
+      option.landlord_ti_per_sf = 0;
+    }
+    input.financing.annual_interest_rate = rate;
+    const out = compareLeaseTerms(input);
+    for (const option of [out.long_term, out.short_term]) {
+      assert.ok(Number.isFinite(option.total_interest_on_tenant_ti), `rate ${rate}`);
+      assert.equal(Math.abs(option.total_interest_on_tenant_ti), 0);
+      assert.equal(option.total_cost_of_buildout, 100000);
+    }
+    assert.equal(out.comparison.additional_cost_of_shorter_term, 0);
+    assert.equal(out.comparison.direction, "equivalent");
+  }
+});
+
+test("financing agrees with an independently summed discount-factor reference", () => {
+  for (const rate of [1e-9, 1e-6, 0.06, 1]) {
+    for (const years of [1, 10, 40]) {
+      const input = sample();
+      input.square_feet = 1000000;
+      input.long_term.buildout_cost_per_sf = 10000;
+      input.long_term.landlord_ti_per_sf = 0;
+      input.financing = { annual_interest_rate: rate, amortization_years: years };
+      const principal = 1e10;
+      let discountSum = 0;
+      let discount = 1;
+      for (let month = 1; month <= years * 12; month++) {
+        discount /= 1 + rate / 12;
+        discountSum += discount;
+      }
+      const expected = principal * (years * 12 / discountSum - 1);
+      const actual = compareLeaseTerms(input).long_term.total_interest_on_tenant_ti;
+      assert.ok(Number.isFinite(actual));
+      assert.ok(Math.abs(actual - expected) < 0.005, `${rate}, ${years}: ${actual} vs ${expected}`);
+    }
+  }
+});

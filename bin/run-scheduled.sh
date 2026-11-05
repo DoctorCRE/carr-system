@@ -85,7 +85,8 @@ reasons = frozenset("outside_window previous_run_active cleanup_failed store_mis
                     "request_blocked full_disk_access_required contacts_empty contacts_read_failed timeout auth_refused "
                     "key_reuse transport_oversized no_acknowledgement reply_unreadable transport_error "
                     "invalid_request subject_unresolved database_refused setup_failed calendar_lifecycle_unsupported "
-                    "email_links_read_failed email_links_pending".split())
+                    "email_links_read_failed email_links_pending ledger_binding_required ledger_binding_invalid "
+                    "ledger_binding_mismatch ledger_state_invalid receipt_failed".split())
 if sys.argv[3] != "outlook-intake":
     reasons = frozenset("processed setup_failed send_failed receipt_failed deferred outside_window previous_run_active nothing_pending user_active "
         "filed window_closed idle_time_unreadable no_usable_main_window "
@@ -132,6 +133,19 @@ if (isinstance(receipt, dict) and isinstance(counts, dict)
             and (receipt.get("runtime_behind") is None
                  or (type(receipt["runtime_behind"]) is int and 0 <= receipt["runtime_behind"] <= 1_000_000_000))):
         safe.update({k: receipt[k] for k in ("runtime_sha", "runtime_behind") if k in receipt})
+    if sys.argv[3] == "outlook-intake":
+        if receipt.get("mailbox_owner") in ("joe", "dell"):
+            safe["mailbox_owner"] = receipt["mailbox_owner"]
+        for name in ("account_digest", "binding_digest"):
+            if isinstance(receipt.get(name), str) and re.fullmatch(r"[0-9a-f]{64}", receipt[name]):
+                safe[name] = receipt[name]
+        for name in ("binding_verified", "account_verified"):
+            if type(receipt.get(name)) is bool:
+                safe[name] = receipt[name]
+        observed = receipt.get("observed_at")
+        if isinstance(observed, str) and re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})", observed):
+            safe["observed_at"] = observed
     if receipt.get("runtime_note") in ("main_unknown_locally", "history_incomplete"):
         safe["runtime_note"] = receipt["runtime_note"]
     if (isinstance(receipt.get("detail"), str) and re.fullmatch(
