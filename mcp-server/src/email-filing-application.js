@@ -15,7 +15,7 @@ export async function filingApplicationQueue(c, actor, args) {
   const limit = Math.min(args.limit ?? 25,25);
   const rows = (await c.query(`select g.generation,g.source_hash,a.id as activity_id,a.kind,
       a.summary,a.detail as body,a.email_context,coalesce(a.email_source->>'mailbox_owner',$2) as mailbox_owner,
-      d.id as deal,d.name as deal_name,d.phase,d.deal_type
+      d.id as deal,d.name as deal_name,d.phase,d.deal_type,d.version as deal_version
     from email_filing_application g join activity a on a.id=g.activity_id join deal d on d.id=g.deal_id
     where ($1::uuid is null or g.generation>$1) and ${current}
       and g.status in ('pending','claimed')

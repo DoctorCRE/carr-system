@@ -4,6 +4,7 @@ import { lockEmailIdentity, capturedEmail } from './email-identity.js';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
 import { suspected } from './untrusted-text.js';
+import { applyEmailPhase, undoEmailPhase } from './email-phase-application.js';
 const LIMIT = 200;
 const SUMMARY_VERSION = 'email-summary.v1';
 const summaryHash = row => 'sha256:' + sha256(JSON.stringify([row.summary, row.detail ?? row.body, row.email_context]));
@@ -52,7 +53,7 @@ export function resolveContact(person = {}, people, { call = false } = {}) {
     unknown: !match, internal: person.internal === true };
 }
 
-export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview }) {
+export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview, lockDealField, updateDeal, revertDeal }) {
   const fail = (error, extra = {}) => { throw new ToolError({ error, ...extra }); };
   const previewArgs = row => ({ deal: row.deal_id, activity_id: row.activity_id,
     evidence_quote: row.evidence_quote, ...KINDS[row.kind].args(row) });
@@ -616,10 +617,11 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           { required: ['kind','activity_id','evidence_quote','confidence'] }, { required: ['mode'] },
         ], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
-          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result'] },
+          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result', 'phase_undo'] },
           generation: { type: 'string', format: 'uuid' },
           application_status: { enum: ['applied','retry'] },
           source_hash: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
+          phase_base_version: { type: 'integer', minimum: 1 },
           claim_id: { type: 'string', format: 'uuid' },
           summary_status: { enum: ['available', 'unavailable'] },
           summary_text: { type: 'string', minLength: 1, maxLength: 300 },
@@ -647,6 +649,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           body: { type: 'string', minLength: 1, maxLength: 20000 },
         } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'record-email-proposal', args, async () => {
+        if (args.mode==='phase_undo') {
+          if (!args.proposal_id || !args.phase_base_version) fail('email_proposal_fields_invalid');
+          return {ok:true,phase_application:await undoEmailPhase(c,actor,args,{lockDealField,revertDeal,fail})};
+        }
         if (['application_claim','application_result'].includes(args.mode)) {
           if (!args.activity_id || !args.generation) fail('email_proposal_fields_invalid');
           const result = await filingApplicationWrite(c,actor,args,fail);
@@ -800,6 +806,9 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
               and deal_id is null and occurred_at<=now() for share`, [row.activity_id])).rows[0];
             if (!source?.detail?.includes(row.evidence_quote)) fail('email_proposal_quote_invalid');
             if (row.evidence_quote.trim().length < 10) fail('email_next_step_quote_invalid');
+          } else if (row.kind === 'phase_move' && args.generation) {
+            const source=(await c.query('select detail from activity where id=$1',[row.activity_id])).rows[0];
+            if (row.evidence_quote.trim().length<10 || !source?.detail?.includes(row.evidence_quote)) fail('email_deal_quote_invalid');
           } else await show(c, actor, row, matchingPeople);
         }
         const stored = (await c.query(`insert into email_proposal
@@ -809,12 +818,24 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           returning id,status,version,kind,deal_id,activity_id,evidence_quote,task_text,sender_role,next_date::text as next_date,owner`,
           [row.kind,row.deal_id,row.activity_id,row.evidence_quote,row.task_text,row.sender_role,row.next_date,row.owner,
             args.confidence,actor.id,draft ? args.subject : null,draft ? args.body : null,JSON.stringify(args.match_evidence ?? null)])).rows[0];
+        const phaseApplication = row.kind === 'phase_move' ? await applyEmailPhase(c,actor,args,stored,
+          {lockDealField,updateDeal,writeEvent}) : null;
+        if (phaseApplication) {
+          const {replayed,...receipt}=phaseApplication;
+          await c.query(`update email_proposal set correction_provenance=
+            coalesce(correction_provenance,'{}'::jsonb)||jsonb_build_object('email_phase',$2::jsonb)
+            where id=$1 and correction_provenance->'email_phase' is distinct from $2::jsonb`,
+            [stored.id,JSON.stringify(receipt)]);
+          const current=(await c.query('select status,version from email_proposal where id=$1',[stored.id])).rows[0];
+          Object.assign(stored,current);
+        }
         let shown=null, previewError=null;
         try { if (!draft) shown=await show(c,actor,stored,matchingPeople); }
         catch (error) { if (!(error instanceof ToolError)) throw error; previewError=error.payload?.error ?? 'preview_failed'; }
         return { ok:true,proposal_id:stored.id,status:stored.status,version:stored.version,
+          ...(phaseApplication ? {phase_application:phaseApplication} : {}),
           proposal_digest:shown?.proposal_digest ?? null,preview_error:previewError,
-          suspected_instruction:suspected(stored.evidence_quote),requires_confirmation:true };
+          suspected_instruction:suspected(stored.evidence_quote),requires_confirmation:stored.status==='pending' };
       }),
     },
     'list-email-proposals': {
@@ -1030,7 +1051,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             (select jsonb_build_object('party_id',p.id,'name',p.name,'email',null,
               'address_unavailable',true,'unknown',false,'internal',false) from party p where p.id=coalesce(
               (select party_id from client where id=a.client_id),(select party_id from vendor where id=a.vendor_id),
-              (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type
+              (select party_id from lead where id=a.lead_id))) as recorded_sender,d.id as deal,d.name as deal_name,d.phase,d.deal_type,d.version as deal_version
           from activity a left join deal d on d.id=a.deal_id
           left join v_email_non_deal_step ns on ns.activity_id=a.id
           where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and a.kind in ('email_in','email_out') and a.detail is not null and a.occurred_at<=now()

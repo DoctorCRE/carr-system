@@ -137,6 +137,8 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
                 'evidence_quote': quote, 'confidence': float(confidence)}
         if email.get('deal'):
             args['deal'] = email['deal']
+            if item['kind'] == 'phase_move' and email.get('deal_version'):
+                args['phase_base_version'] = email['deal_version']
         elif item['kind'] == 'phase_move':
             continue
         if item['kind'] == 'next_step':
@@ -166,7 +168,8 @@ def route_counts():
 
 def consume_applications(carr, classify, refusal_code, now, clock):
     """Consume one durable page. Only the server owns retry and acknowledgement state."""
-    counts = dict(application_claimed=0, application_applied=0, application_failed=0)
+    counts = dict(application_claimed=0, application_applied=0, application_failed=0,
+                  phase_applied=0, phase_review=0, phase_held=0, phase_refused=0)
     failures = 0
     try:
         page = carr('email-router-queue', {'purpose': 'applications', 'limit': MAX_EMAILS})
@@ -197,8 +200,13 @@ def consume_applications(carr, classify, refusal_code, now, clock):
                 if source.get('kind') == 'email_out' and args['kind'] != 'next_step':
                     continue
                 try:
-                    write({**args, **claimed})
+                    outcome = write({**args, **claimed})
+                    status = outcome.get('phase_application', {}).get('status')
+                    if status in ('applied', 'review', 'held') and not outcome['phase_application'].get('replayed'):
+                        counts['phase_' + status] += 1
                 except Exception as error:
+                    if args['kind'] == 'phase_move':
+                        counts['phase_refused'] += 1
                     if refusal_code(error) is None or refusal_code(error) == 'email_application_stale':
                         raise
             write({**claimed, 'mode': 'application_result', 'application_status': 'applied'})

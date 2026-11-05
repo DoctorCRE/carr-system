@@ -9,7 +9,7 @@ type ProgressRule = { instrument: RegExp; excludedInstrument?: RegExp; dealTypes
 const CONTRACT = 'email-deal-progress.v1';
 const loi = /\b(?:L\.?O\.?I\b\.?|letter of intent\b)/i;
 const leaseTypes = ['startup', 'relocation', 'expansion', 'additional_office', 'lease', 'renewal'];
-const transitions = new Map<string, { toPhase: string; rules: ProgressRule[] }>([
+export const emailPhaseTransitions = new Map<string, { toPhase: string; rules: ProgressRule[] }>([
   ['research', { toPhase: 'site_selection', rules: [{ instrument: /\btours?\b/i,
     additionalEvidence: [/\b(?:scheduled|confirmed|set)\b/i] }] }],
   ['site_selection', { toPhase: 'negotiation', rules: [{ instrument: loi, additionalEvidence: [] }] }],
@@ -43,7 +43,7 @@ export function emailDealProgressTools({ withEnvelope, writeEvent, lockDealField
         and a.kind='email_in' and a.occurred_at<=now()
       ${lock ? 'for update of d for share of a,cl,p' : ''}`, [args.deal,args.activity_id])).rows[0];
     if (!row) fail('email_deal_evidence_not_found');
-    const transition = transitions.get(row.phase);
+    const transition = emailPhaseTransitions.get(row.phase);
     const eligible = transition?.rules.filter(rule =>
       (!rule.dealTypes || rule.dealTypes.includes(row.deal_type)) &&
       rule.additionalEvidence.every(pattern => pattern.test(args.evidence_quote)));

@@ -928,6 +928,27 @@ class SummaryIntegration(unittest.TestCase):
 
 
 class DurableApplications(unittest.TestCase):
+    def test_phase_version_and_counts_exclude_replayed_effects(self):
+        source = {**email('phase', LOI), 'generation': 'phase-generation', 'deal_version': 42}
+        calls = []
+        replay = False
+        def carr(verb, args):
+            if verb == 'email-router-queue':
+                return {'emails': [source]}
+            if args.get('mode') == 'application_claim':
+                return {'generate': True, 'claim_id': 'phase-claim'}
+            if args.get('kind'):
+                calls.append(args)
+                return {'phase_application': {'status': 'applied', 'replayed': replay}}
+            return {}
+        reply = lambda *_: {'proposals': [{'kind': 'phase_move', 'evidence_quote': LOI, 'confidence': 0.99}]}
+        counts = email_router.consume_applications(carr, reply, refusal_code, NOW, lambda: NOW)
+        self.assertEqual(counts['phase_applied'], 1)
+        self.assertEqual(calls[0]['phase_base_version'], 42)
+        replay = True
+        counts = email_router.consume_applications(carr, reply, refusal_code, NOW, lambda: NOW)
+        self.assertEqual(counts['phase_applied'], 0)
+
     def test_application_refusals_and_installed_receipts_keep_their_identity(self):
         self.assertIsNotNone(email_router.REFUSAL.fullmatch('email_application_stale'))
         with patch.object(email_router, 'stamp', return_value={'runtime_sha': 'a' * 40}):

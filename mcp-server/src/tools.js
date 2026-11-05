@@ -11014,7 +11014,9 @@ registerTools(emailDealProgressTools({ withEnvelope, writeEvent, lockDealField, 
 registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, resolveEmailProposal,
   setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
-registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
+registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent, lockDealField,
+  revertDeal: (c, actor, args) => TOOLS['revert-deal-field'].handler(c, actor, args),
+  updateDeal: (c, actor, args) => TOOLS['update-deal'].handler(c, actor, args),
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
 registerTools(emailLeadProposalTools({ withEnvelope, writeEvent,
   updatePartyContact: (c, actor, args) => TOOLS["update-party-contact"].handler(c, actor, args),
