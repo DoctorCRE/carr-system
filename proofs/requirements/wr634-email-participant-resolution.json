@@ -1,14 +1,34 @@
 {
   "schema": "carr-production-proof-plan.v1",
   "requirement_id": "WR634-S1-email-participant-resolution",
-  "targets": ["worker"],
-  "assertions": [{
-    "id": "natural-participant-role-effects",
-    "predicate": "Verify deployed release identity and verb registry, then independently inspect one ordinary installed intake run's privately frozen expected participant-role cohort through reconcile-email-touches. Report counts only by source version, role type and unresolved reason. Prove exact single-party null-display-ref application and all supported roles once where naturally present, partial completion retaining unknown participants, zero new activities for previously acknowledged keys on the next ordinary run, and changed-evidence reconsideration only for affected participants. Verify contacts_empty preserves unresolved state and shared addresses remain review-required from installed read receipts where naturally present. Release smoke alone is not semantic proof. If positive natural cases are absent, retain landed-unproven status.",
-    "runner": "worker-release-smoke.v1",
-    "expected_result": "PASS for release identity and registry only; full proof requires separate natural-intake role reconciliation with zero unexplained differences and retained unresolved evidence.",
-    "input_class": "read-only deployed identity and registry plus private natural intake effect cohort; counts only; no intake launch or mailbox effects",
-    "deadline_seconds": 120
-  }],
-  "safety": {"read_only": true, "no_sends": true, "max_requests": 10, "max_records": 500, "max_runtime_seconds": 120, "max_artifact_bytes": 1048576}
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "natural-participant-role-effects",
+      "predicate": "Verify deployed release identity and verb registry, then independently inspect one ordinary installed intake run's privately frozen expected participant-role cohort through reconcile-email-touches. Report counts only by source version, role type and unresolved reason. Prove exact single-party null-display-ref application and all supported roles once where naturally present, partial completion retaining unknown participants, zero new activities for previously acknowledged keys on the next ordinary run, and changed-evidence reconsideration only for affected participants. Verify contacts_empty preserves unresolved state and shared addresses remain review-required from installed read receipts where naturally present. Release smoke alone is not semantic proof. If positive natural cases are absent, retain landed-unproven status.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "PASS for release identity and registry only; full proof requires separate natural-intake role reconciliation with zero unexplained differences and retained unresolved evidence.",
+      "input_class": "read-only deployed identity and registry plus private natural intake effect cohort; counts only; no intake launch or mailbox effects",
+      "deadline_seconds": 120
+    },
+    {
+      "id": "installed-intake-participant-receipt",
+      "predicate": "Read a natural installed intake run receipt at the deployed source revision without launching intake. Bind its private expected typed participant and canonical role cohort to J134 reconciliation counts. Verify retained unresolved reasons, null-display-ref single-party application where naturally present, every proven role once, and zero additional application for unchanged source and mapping evidence on a later ordinary receipt. A source revision or install receipt alone is insufficient; missing natural cases remain landed-unproven.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "PASS only with ordinary installed receipt and exact role effect reconciliation; no intake launch, mailbox effect or write.",
+      "input_class": "existing installed intake run receipts and privately frozen effect cohort; counts-only readback",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 500,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
 }
