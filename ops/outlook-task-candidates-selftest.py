@@ -71,6 +71,54 @@ class Candidates(unittest.TestCase):
                        (json.dumps(candidate), '70'))
             db.commit()
 
+    def test_studio_receipt_uses_validated_database_and_installed_identity(self):
+        runtime = self.root / 'runtime'
+        runtime.mkdir()
+        for name in ('tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py'):
+            target = runtime / name
+            target.parent.mkdir(exist_ok=True)
+            target.write_bytes((ROOT / name).read_bytes())
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(runtime), *args], text=True).strip()
+        git('init', '-q')
+        git('add', 'tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py')
+        git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-qm', 'fixture')
+        revision = git('rev-parse', 'HEAD')
+        source, database = self.root / 'copy.hxd', self.root / 'proof.db'
+        source.write_bytes(STORE(message()))
+        subprocess.run([str(BINARY), 'task-candidates', '--immutable-copy', str(source), str(database),
+                        '7', GENERATION, 'synthetic-build', revision], check=True, capture_output=True)
+        producer = [sys.executable, str(runtime / 'tools/outlook-task-evidence.py'), str(database),
+                    '7', GENERATION, '--studio-receipt']
+        receipt = subprocess.run(producer, text=True, capture_output=True)
+        self.assertEqual(receipt.returncode, 0, receipt.stderr)
+        prefix = 'outlook-task-evidence-receipt '
+        self.assertTrue(receipt.stdout.startswith(prefix), receipt.stdout)
+        value = json.loads(receipt.stdout[len(prefix):])
+        self.assertEqual(value['runtime_sha'], revision)
+        self.assertEqual(value['state'], 'succeeded')
+        self.assertEqual(value['counts']['candidates_admitted'], 0)
+        reader = self.root / 'pinned-reader.py'
+        reader.write_bytes(subprocess.check_output(['git', 'show',
+            'f699e1859dc87e4122501bbaba35a312607452a7:ops/studio-proof-observe.py'], cwd=ROOT))
+        receipt_file = self.root / 'receipt.txt'
+        receipt_file.write_text(receipt.stdout)
+        command = [sys.executable, str(reader), '--receipt-file', str(receipt_file), '--service',
+                   'outlook-task-evidence', '--runtime-sha', revision, '--count', 'candidates_admitted',
+                   '--minimum', '0']
+        passed = subprocess.run(command, text=True, capture_output=True)
+        self.assertEqual(passed.returncode, 0, passed.stdout)
+        failed = subprocess.run(command[:-1] + ['1'], text=True, capture_output=True)
+        self.assertEqual(failed.returncode, 1, failed.stdout)
+        for args in ([str(database), '9', GENERATION, '--studio-receipt'],):
+            rejected = subprocess.run(producer[:2] + args, text=True, capture_output=True)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertEqual(rejected.stdout, '')
+        (runtime / 'lib/outlook_task_candidates.py').write_text('# altered installed source')
+        rejected = subprocess.run(producer, text=True, capture_output=True)
+        self.assertEqual(rejected.returncode, 2)
+        self.assertEqual(rejected.stdout, '')
+
     def test_unproven_due_semantics_preserve_exact_raw_slots(self):
         for ticks294, ticks302 in ((621355968000000000 + 1793232000 * 10000000,
                                     621355968000000000 + 1793404800 * 10000000),
