@@ -3030,7 +3030,7 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual({k: json.loads(receipt)[k] for k in ('state', 'reason', 'counts')}, {'state': 'failed', 'reason': 'writes_failed',
-                                                'counts': {'run': {'writes_failed': 3}, 'backlog': {}}})
+                                                'counts': {'run': {'mail_ids': 0, 'writes_failed': 3}, 'backlog': {}}})
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
         write_settings(self.home, ROOT, model='sonnet')
@@ -4581,6 +4581,23 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertNotIn('intent', state['mail_unresolved'][ident(m)])
 
+    def test_every_receipt_includes_zero_mail_ids_when_no_snapshot_exists(self):
+        for status, reason in [('failed', 'ledger_state_invalid'), ('skipped', 'previous_run_active')]:
+            receipt = json.loads(intake.receipt_line(intake.Outcome(status, reason)).split(' ', 1)[1])
+            self.assertEqual(receipt['counts']['run']['mail_ids'], 0)
+
+    def test_failed_write_receipt_counts_retained_mail_ids(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=2), message_id='<retained@example.test>')])
+        self.fake.now = NOW + timedelta(minutes=30)
+        self.fake.fail_verbs = {'log-activity'}
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=2), message_id='<retained@example.test>'),
+                                  mail('pat@example.test', -timedelta(minutes=10), subject='Different')])
+        self.assertEqual(result.reason, 'writes_failed')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertGreater(len(state['mail_ids']), 0)
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['run']['mail_ids'], len(state['mail_ids']))
+
     def test_receipt_splits_run_deltas_from_backlog_totals(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                                   mail('stranger@example.test', -timedelta(minutes=10), subject='New inquiry')])
@@ -4603,7 +4620,7 @@ class IntakeTest(unittest.TestCase):
             'calendar_lifecycle_unsupported': 4, 'calendar_lifecycle_canceled': 2,
             'calendar_requests_quarantined': 1, 'calendar_unresolved_expired': 3})
         receipt = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])
-        self.assertEqual(receipt['counts'], {'run': {}, 'backlog': {
+        self.assertEqual(receipt['counts'], {'run': {'mail_ids': 0}, 'backlog': {
             'calendar_copies_in_store': 4, 'calendar_canceled_copies_in_store': 2,
             'calendar_write_requests_held': 1, 'calendar_expired_total': 3}})
 
