@@ -1,11 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { composeMarketStudyPackage } from '../src/market-study-composer.js';
 import { RECORD_LAYER_GROUPS, validateMarketStudyPackage } from '../src/market-study-package.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../client-portal/fixtures/example-health.market-study.json', import.meta.url), 'utf8'));
 const target = { deal_id: 'synthetic-deal', client_id: 'synthetic-client' };
+
+test('documented composer call produces the full synthetic package', () => {
+  const guide = readFileSync(new URL('../../docs/client-portal/package-composer.md', import.meta.url), 'utf8');
+  const example = guide.match(/```js\n([\s\S]*?)\n```/);
+  assert.ok(example, 'the guide must include an executable JavaScript example');
+  const run = spawnSync(process.execPath, ['--input-type=module', '--eval', example[1]], {
+    cwd: new URL('../../', import.meta.url), encoding: 'utf8', timeout: 30_000,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), { ok: true, package: fixture, errors: [] });
+});
+
 const wrap = data => ({ ...target, data: structuredClone(data) });
 function inputs() {
   const research = structuredClone(fixture);
