@@ -5,8 +5,6 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
-import re
-import subprocess
 import sys
 
 POPULATIONS = ('automatic', 'partner_confirmed', 'bulk_import', 'unclassified', 'unrelated_actor')
@@ -123,15 +121,40 @@ def json_query(sql):
     return "select coalesce(json_agg(report_row),'[]'::json) from (" + sql + ') report_row;'
 
 
-def database_read(service, sql):
-    if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', service):
-        raise ValueError('invalid service name')
-    query = "begin isolation level repeatable read read only; set local statement_timeout='30s';\n" + json_query(sql) + '\nrollback;'
-    result = subprocess.run(['psql', '-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '--dbname', 'service='+service],
-                            input=query, capture_output=True, text=True, timeout=35)
-    if result.returncode or len(result.stdout) > 65536:
-        raise ValueError('database report failed')
-    return json.loads(result.stdout)
+class ReportError(ValueError):
+    def __init__(self, step, category):
+        self.step, self.category = step, category
+        super().__init__(f'step={step} category={category}')
+
+
+def database_read(sql):
+    try:
+        import psycopg
+    except ImportError:
+        raise ReportError('database_connect', 'dependency') from None
+    dsn = os.environ.get('DATABASE_URL')
+    if not dsn:
+        raise ReportError('database_connect', 'configuration')
+    step = 'database_connect'
+    try:
+        with psycopg.connect(dsn, connect_timeout=5,
+                              options='-c default_transaction_read_only=on') as conn:
+            step = 'database_query'
+            with conn.cursor() as cur:
+                cur.execute('set transaction isolation level repeatable read read only')
+                cur.execute("set local statement_timeout='30s'")
+                cur.execute("set local lock_timeout='5s'")
+                cur.execute(json_query(sql))
+                rows = cur.fetchone()[0]
+                if len(json.dumps(rows)) > 65536:
+                    raise ReportError('database_result', 'size_limit')
+                return rows
+    except psycopg.Error as exc:
+        category = ('read_only' if exc.sqlstate == '25006' else
+                    'permission' if exc.sqlstate == '42501' else
+                    'timeout' if exc.sqlstate in ('57014', '55P03') else
+                    'connection' if step == 'database_connect' or (exc.sqlstate or '').startswith('08') else 'query')
+        raise ReportError(step, category) from None
 
 
 def write_private(path, result):
@@ -158,27 +181,39 @@ def main(argv=None, clock=lambda: datetime.now(timezone.utc)):
         parser.add_argument('--'+name, required=True)
     parser.add_argument('--mailbox-account')
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument('--service')
+    source.add_argument('--database', action='store_true', help='Use DATABASE_URL supplied by tools/db-tap.py run')
     source.add_argument('--fixture', type=Path)
     args = parser.parse_args(argv)
+    step = 'report_filters'
     try:
         def read(sql):
+            nonlocal step
             if args.fixture:
+                step = 'fixture_read'
                 with args.fixture.open('rb') as stream:
                     payload = stream.read(65537)
                 if len(payload) > 65536:
                     raise ValueError('oversized fixture')
-                return json.loads(payload)
-            return database_read(args.service, sql)
+                step = 'fixture_decode'
+                rows = json.loads(payload)
+            else:
+                rows = database_read(sql)
+            step = 'aggregate_validation'
+            return rows
         result = report(Window(args.start, args.end, args.undo_before, args.partner, args.mailbox_account), read, clock)
         result['source'] = 'synthetic' if args.fixture else 'canonical_history'
+        step = 'output_write'
         write_private(args.output, result)
         if args.fixture:
             print('Synthetic fixture report.')
         print(summary(result))
         return 0
-    except (ValueError, OSError, subprocess.SubprocessError):
-        print('Weekly quality report failed; check filters, read-service access, fixture shape, and new output path.', file=sys.stderr)
+    except ReportError as exc:
+        print(f'Weekly quality report failed step={exc.step} category={exc.category}.', file=sys.stderr)
+        return 1
+    except (ValueError, OSError) as exc:
+        category = 'filesystem' if isinstance(exc, OSError) else 'invalid_input'
+        print(f'Weekly quality report failed step={step} category={category}.', file=sys.stderr)
         return 1
 
 
