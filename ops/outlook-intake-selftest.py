@@ -324,6 +324,19 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
+    def test_legacy_unchanged_store_gets_first_census_on_natural_run(self):
+        rows = [mail(CLIENT.email, -timedelta(hours=1))]
+        self.run_intake(rows)
+        before = json.loads((self.out() / 'field-census-latest.json').read_text())
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state.pop('field_census_schema', None)
+        state_path.write_text(json.dumps(state))
+        outcome = self.run_intake(rows, touch=False)
+        after = json.loads((self.out() / 'field-census-latest.json').read_text())
+        self.assertNotEqual(outcome.reason, 'store_unchanged')
+        self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
+
     def test_natural_decode_publishes_census_before_private_cleanup(self):
         from lib.outlook_field_census import validate
         outcome = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])

@@ -2164,7 +2164,8 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     hydration_due = bool(state.get('pending_full')) and now.timestamp() >= state.get('hydration_check_at', 0)
     review_due = 'calendar_review_at' not in state or (state['calendar_review_at'] is not None
                                                       and now.timestamp() >= state['calendar_review_at'])
-    if state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
+    from lib.outlook_field_census import SCHEMA as field_census_schema
+    if state.get('field_census_schema') == field_census_schema and state.get('account_binding') == _hash(settings.account.strip().lower()) and not state.get('decoder_degraded') and state.get('folder_account_id') == settings.folder_account_id and all(name in state for name in MAIL_STORE_COUNTERS) and 'email_index_published' in state and state.get('store') == signature and not hydration_due and not review_due and not contacts_changed and state.get('signature_policy') == SIGNATURE_POLICY and state.get('attachment_policy') == 2 and not state.get('attachments_pending') and not state.get('attachments_uncached') and not pending_writes and state.get('calendar_policy') == CALENDAR_POLICY and not state.get('reads_due'):
         if state.get('pending_full'):
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
@@ -2177,6 +2178,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict, settings: OutlookSett
     try:
         with _decode(home, out, ports.decode, settings.folder_account_id, settings.account, settings) as (meta, mails, events, db, files):
             outcome = _process(out, ports, settings, state, signature, now, matcher, meta, mails, events, db, files)
+        state['field_census_schema'] = field_census_schema
         publication = meta.get('email_index_receipt', {})
         outcome.counts.update(publication)
         state['email_index_published'] = bool(publication.get('email_index_published'))
