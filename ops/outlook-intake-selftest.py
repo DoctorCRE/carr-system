@@ -1875,6 +1875,36 @@ class IntakeTest(unittest.TestCase):
         ports.copy_attachments, ports.put_object = copy, put
         return ports
 
+    def assert_pdf_proof(self, data, expected):
+        ports = self.attachment_fixture()
+        self.pdf = data
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(outcome.counts.get('attachments_pdf_stored', 0), expected)
+        receipt = json.loads(intake.receipt_line(outcome, self.repo).split(' ', 1)[1])
+        # Synthetic identity tests the reader, not installed provenance.
+        receipt['runtime_sha'] = 'a' * 40
+        path = self.repo / 'pdf-proof-receipt.txt'
+        path.write_text('outlook-intake-receipt ' + json.dumps(receipt))
+        command = [sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
+                   '--receipt-file', str(path), '--service', 'outlook-intake',
+                   '--runtime-sha', 'a' * 40, '--count', 'run.attachments_pdf_stored',
+                   '--minimum', '1']
+        observed = REAL_RUN(command, capture_output=True, text=True, timeout=10)
+        self.assertEqual(observed.returncode, 0 if expected else 1, observed.stdout + observed.stderr)
+
+    def test_pdf_proof_accepts_admitted_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1)
+
+    def test_pdf_proof_refuses_office_only(self):
+        self.assert_pdf_proof(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1synthetic Office', 0)
+
+    def test_pdf_proof_refuses_png_only(self):
+        self.assert_pdf_proof(b'\x89PNG\r\n\x1a\nsynthetic image', 0)
+
+    def test_pdf_proof_refuses_truncated_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 truncated', 0)
+
     def test_attachment_routing_reasons_do_not_hold_the_run(self):
         for scenario in ('missing_folder', 'ambiguous_folder', 'no_deal', 'duplicate_deal'):
             with self.subTest(scenario=scenario):
