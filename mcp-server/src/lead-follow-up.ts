@@ -48,9 +48,13 @@ type Finding = { flag_id: string; kind: string; found: boolean; expired: boolean
   source: string; observed_at: string; expires_on: string | null; value: unknown };
 export function researchSummary(evidence: Finding[] = [], now = Date.now()) {
   if (evidence.length > 500) throw new ToolError({ error: 'research_evidence_limit_exceeded' });
-  const current = evidence.filter(e => !e.expired &&
-    /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(e.observed_at) &&
-    isCalendarDate(e.observed_at.slice(0, 10)) && Date.parse(e.observed_at) <= now);
+  const current = evidence.filter(e => {
+    const timestamp = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d+))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(e.observed_at);
+    if (e.expired || !timestamp || !isCalendarDate(e.observed_at.slice(0, 10))) return false;
+    const submillisecond = /[1-9]/.test((timestamp[1] ?? '').slice(3));
+    const firstEligibleClock = Date.parse(e.observed_at) + (submillisecond ? 1 : 0);
+    return firstEligibleClock <= now;
+  });
   const conflict = current.some(e => e.found && (e.kind === 'discrepancy' || e.proposes_correction));
   const verified = current.some(e => e.kind === 'verified' && e.found && e.source.trim());
   return { state: conflict ? 'needs_review' : verified ? 'verified' : 'needs_research', evidence,

@@ -298,6 +298,7 @@ for (const kind of ['verified', 'discrepancy']) {
         assert.equal(result.state, eligible ? kind === 'verified' ? 'verified' : 'needs_review' : 'needs_research',
           evidence[0].observed_at);
         assert.deepEqual(result.evidence, evidence);
+        assert.equal(researchSummary(evidence, now + 1).state, kind === 'verified' ? 'verified' : 'needs_review');
       }
     });
   }

@@ -17,6 +17,7 @@ stateDiagram-v2
     note right of Future
       Every finding stays visible in evidence.
       One observed clock governs each evaluation.
+      Nonzero fractions below a millisecond wait for the next clock millisecond.
       Observations need a full timestamp with an explicit timezone.
       Malformed findings remain visible and cannot activate a conflict.
       Expiry follows the existing database policy.
