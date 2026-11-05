@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "wr442-s10-outlook-contact-decoder",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-contact-capability-refusal",
+      "predicate": "After deployment, WR442.S13.J2 must read the installed decoder SQLite export and verify contact_capability explicitly reports unsupported with an contact_layout_unverified reason, null layout_id and zero contact_observations rows. Bind the executable source digest and installer receipt to the delivered decoder contract. Verified layout support, live contact ingestion and changed party values are not established by this refusal. Separately acquire an ordinary outlook-intake canonical run at the installed full runtime SHA using studio-canonical-run.v1, count run.mail_ids minimum 1. The registered observer supplies ancillary run evidence only and cannot inspect decoder SQLite, verify its digest or attest the refusal. All decoder-specific observations remain mandatory independent evidence.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Held until installed decoder identity, explicit unsupported/no-layout capability and zero observations are independently observed. A canonical run count alone cannot pass the decoder proof. Missing installation or target-binding facts also remain held.",
+      "input_class": "Read-only installed decoder capability and observation counts, sanitized source-digest and installer identity, plus a bounded canonical outlook-intake run after delivery. No mailbox content discovery, installation, runtime refresh, job launch or canonical mutation by this builder.",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 100,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 65536
+  }
+}
