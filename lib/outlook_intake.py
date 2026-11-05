@@ -288,7 +288,7 @@ def receipt_counts(counts: dict) -> dict:
     first successful run at or after COVERAGE_CHECK_AT each local day adds
     coverage_verdict() to the run counts.
     """
-    split: dict[str, dict] = {'run': {}, 'backlog': {}}
+    split: dict[str, dict] = {'run': {'mail_ids': 0}, 'backlog': {}}
     for name, value in counts.items():
         standing = name in BACKLOG_COUNTS or name.startswith(BACKLOG_PREFIXES)
         split['backlog' if standing else 'run'][RECEIPT_NAMES.get(name, name)] = value
@@ -1983,6 +1983,7 @@ def _normal_receipt(out: Path, settings: OutlookSettings, ports: Ports,
         state = json.loads((out / STATE).read_text())
     except (OSError, ValueError):
         state = {}
+    outcome.counts['mail_ids'] = len(state.get('mail_ids', {})) if isinstance(state, dict) else 0
     outcome.monitoring = {**stamp(settings.repo), 'mailbox_owner': settings.owner,
                           'account_digest': _hash(settings.account),
                           'binding_digest': _hash(json.dumps(identity, sort_keys=True)),

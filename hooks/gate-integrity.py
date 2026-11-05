@@ -22,6 +22,8 @@ REGISTRATIONS = {
 HOOKS = REPO / "hooks"
 BASELINE = REPO / "ops/config/gate-baseline.json"
 CONTRACTS = {
+    "claude-project-settings.json": REPO / ".claude/settings.json",
+    "claude-project-mcp.json": REPO / ".mcp.json",
     "hook_runtime.py": REPO / "lib/hook_runtime.py",
     "hooks.json": REPO / "ops/config/hooks.json",
     "codex-hooks.json": REPO / "ops/config/codex-hooks.json",
@@ -222,6 +224,7 @@ def registrations(document):
 
 
 def check(document, client, repo=REPO):
+    document = json.loads(json.dumps(document).replace('${CLAUDE_PROJECT_DIR}', '{{REPO}}'))
     installed = list(registrations(document))
     errors = []
     if document.get('disableAllHooks'):
@@ -263,14 +266,14 @@ def main():
     strict = '--strict' in sys.argv
     home = Path.home()
     sources = {
-        'claude': REGISTRATIONS['claude'] if strict else Path(os.environ.get('CLAUDE_CONFIG_DIR', home / '.claude')) / 'settings.json',
+        'claude': REGISTRATIONS['claude'] if strict else REPO / '.claude/settings.json',
         'codex': REGISTRATIONS['codex'] if strict else Path(os.environ.get('CODEX_HOME', home / '.codex')) / 'hooks.json',
     }
-    repo = REPO if strict else installation_repo()
+    roots = {'claude': REPO, 'codex': REPO if strict else installation_repo()}
     errors = check_baseline()
     for client, path in sources.items():
         try:
-            errors.extend(check(json.loads(path.read_text()), client, repo=repo))
+            errors.extend(check(json.loads(path.read_text()), client, repo=roots[client]))
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             errors.append(f'{path}: {exc}')
     if errors:

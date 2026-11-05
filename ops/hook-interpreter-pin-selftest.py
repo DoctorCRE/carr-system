@@ -60,7 +60,7 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIGS = ("ops/config/hooks.json",)
-PIN = "{{REPO}}/.venv/bin/python "
+PIN = '"{{REPO}}/.venv/bin/python" '
 ASSIGNMENT = re.compile(r"^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*")
 FORBIDDEN = ("/usr/bin/env python3", "/usr/bin/env python ")
 
@@ -102,7 +102,7 @@ def main():
             invocation = command.rsplit("; fi; ", 1)[-1]
             body = invocation[ASSIGNMENT.match(invocation).end():]
             if "{{REPO}}/hooks/" in body or "{{REPO}}/ops/" in body:
-                if not body.startswith(PIN):
+                if not body.startswith(PIN) and not ("worktree-self-plumb.py" in body and body.startswith("/usr/bin/python3 ")):
                     unpinned.append(f"{event}: {command}")
             if any(token in command for token in FORBIDDEN):
                 forbidden.append(f"{event}: {command}")

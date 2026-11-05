@@ -1,236 +1,47 @@
 #!/usr/bin/env python3
-"""Selftest for the hook-path contract in the tracked .claude/settings.json.
-
-THE FAILURE THIS PINS (2026-09-27). Every hook command in the project settings
-named "${HOME}/carr-system/hooks/<x>.py". A Claude Code cloud session clones
-the repository somewhere else (it exposes the clone as $CLAUDE_PROJECT_DIR) and
-runs with a HOME that holds no carr-system checkout. python3 then exits 2
-("can't open file"), and a PreToolUse hook that exits 2 BLOCKS the call, so
-every Bash, Read, Grep and Glob call in a cloud session was refused.
-
-THE CONTRACT, per layout:
-
-  Mac layout   (the canonical hook file exists)
-      every hook runs from the canonical ~/carr-system path, never from the
-      project directory. A branch or worktree cannot swap in its own gate.
-
-  cloud layout (~/carr-system/hooks absent)
-      worktree-self-plumb.py and machine-converge.py do nothing: both act on
-      machine state (worktree symlinks, the orphan reaper, a fast-forward of
-      the canonical checkout, config-as-code install) that a container lacks.
-      The launch Card gate runs from $CLAUDE_PROJECT_DIR. A missing canonical
-      Card gate also falls back to the project copy. If both copies are missing,
-      refuse the call. Machine hooks remain optional.
-
-Each command is run exactly as written in the tracked settings file, under
-every POSIX shell present, against throwaway HOME and project directories.
-Nothing here reads the real HOME.
-"""
-from __future__ import annotations
-
+"""Every project hook resolves inside its own checkout on Mac and cloud shells."""
 import json
 import os
-import shutil
+from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+import unittest
 
-REPO = Path(__file__).resolve().parent.parent
-SETTINGS = REPO / ".claude" / "settings.json"
-SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
-MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py", "team-memory-index.py")
-KNOWN_HOOKS = MACHINE_HOOKS + ("agent-card-gate.py",)
-
-FAILURES: list[str] = []
+REPO = Path(__file__).resolve().parents[1]
+SHELLS = [s for s in ('/bin/sh', '/bin/bash', '/bin/zsh') if os.access(s, os.X_OK)]
 
 
-import pathlib, sys  # noqa: E401
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
-from lib.gate_check import Check  # noqa: E402
-
-check = Check(ok="ok   {label}", fail="FAIL {label}", failures=FAILURES)
-
-
-def wired_commands() -> list[tuple[str, str, str]]:
-    """(event, script, command) for every hook in the tracked project settings."""
-    hooks = json.loads(SETTINGS.read_text(encoding="utf-8"))["hooks"]
-    out = []
-    for event, groups in hooks.items():
-        for group in groups:
-            for hook in group.get("hooks", []):
-                command = hook["command"]
-                script = next((s for s in KNOWN_HOOKS if s in command), "")
-                out.append((event, script, command))
-    return out
-
-
-def clean_env(home: Path, project: Path | None) -> dict:
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("CLAUDE_", "DELEGATION_GATE_", "CARR_"))}
-    env["HOME"] = str(home)
-    if project is not None:
-        env["CLAUDE_PROJECT_DIR"] = str(project)
-    return env
-
-
-def run(shell: str, command: str, env: dict, payload: dict, cwd: Path):
-    return subprocess.run([shell, "-c", command], input=json.dumps(payload), env=env,
-                          cwd=str(cwd), capture_output=True, text=True, timeout=60)
+class ProjectPaths(unittest.TestCase):
+    def test_every_hook_uses_the_project_even_when_home_has_a_checkout(self):
+        document = json.loads((REPO / '.claude/settings.json').read_text())
+        with tempfile.TemporaryDirectory(prefix='carr project ') as tmp:
+            home = Path(tmp) / 'home'
+            project = Path(tmp) / 'worktree'
+            canonical = home / 'carr-system/hooks'
+            canonical.mkdir(parents=True)
+            (project / 'hooks').mkdir(parents=True)
+            (project / '.venv/bin').mkdir(parents=True)
+            (project / '.venv/bin/python').symlink_to(sys.executable)
+            for event, groups in document['hooks'].items():
+                for group in groups:
+                    for hook in group['hooks']:
+                        command = hook['command']
+                        name = re.search(r'/hooks/([\w-]+\.py)', command)[1]
+                        (canonical / name).write_text('raise SystemExit(2)')
+                        script = project / 'hooks' / name
+                        script.write_text('import sys\nprint("PROJECT:" + sys.stdin.read())\n')
+                        for shell in SHELLS:
+                            with self.subTest(event=event, name=name, shell=shell):
+                                env = {**os.environ, 'HOME': str(home), 'CLAUDE_PROJECT_DIR': str(project)}
+                                result = subprocess.run([shell, '-c', command], input='payload',
+                                    env=env, cwd=project, capture_output=True, text=True, timeout=5)
+                                self.assertEqual(result.returncode, 0, result.stderr)
+                                self.assertEqual(result.stdout.strip(), 'PROJECT:payload')
+                                self.assertEqual(result.stderr, '')
+                        script.unlink()
 
 
-def payloads(project: Path, transcript: Path) -> dict[str, list[dict]]:
-    base = {"session_id": "cloud-hook-paths-selftest", "cwd": str(project),
-            "transcript_path": str(transcript)}
-    return {
-        "PreToolUse": [dict(base, hook_event_name="PreToolUse", tool_name=tool, tool_input=inp)
-                       for tool, inp in (
-                           ("Bash", {"command": "grep -rn foo ."}),
-                           ("Read", {"file_path": str(project / "AGENTS.md")}),
-                           ("Grep", {"pattern": "foo"}),
-                           ("Glob", {"pattern": "**/*.py"}))],
-        "SessionStart": [dict(base, hook_event_name="SessionStart", source="startup")],
-    }
-
-
-def blocked(result) -> bool:
-    text = result.stdout
-    return (result.returncode == 2 or '"block"' in text or '"deny"' in text)
-
-
-def cloud_project(tmp: Path) -> Path:
-    """A copy of the repository files a cloud clone would carry for these hooks."""
-    project = tmp / "repo"
-    shutil.copytree(REPO / "hooks", project / "hooks",
-                    ignore=shutil.ignore_patterns("__pycache__"))
-    (project / 'lib').mkdir()
-    shutil.copy2(REPO / 'lib/hook_runtime.py', project / 'lib/hook_runtime.py')
-    (project / ".claude").mkdir()
-    shutil.copy2(SETTINGS, project / ".claude" / "settings.json")
-    shutil.copy2(REPO / "AGENTS.md", project / "AGENTS.md")
-    return project
-
-
-def transcript_for(tmp: Path) -> Path:
-    """A synthetic transcript for the retained project hooks."""
-    path = tmp / "transcript.jsonl"
-    rows = [{"type": "user", "message": {"role": "user", "content": "delegate the sweep"}}]
-    rows += [{"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "name": "Grep", "input": {"pattern": f"p{i}"}}]}} for i in range(3)]
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    return path
-
-
-def cloud_cases() -> None:
-    with tempfile.TemporaryDirectory() as raw:
-        tmp = Path(raw)
-        home = tmp / "root"
-        home.mkdir()
-        project = cloud_project(tmp)
-        transcript = transcript_for(tmp)
-        env = clean_env(home, project)
-        cases = payloads(project, transcript)
-        for shell in SHELLS:
-            for event, script, command in wired_commands():
-                for payload in cases.get(event, []):
-                    label = f"cloud/{os.path.basename(shell)}: {event} {script} {payload.get('tool_name', '')}".rstrip()
-                    r = run(shell, command, env, payload, project)
-                    check(f"{label} allows the call", r.returncode == 0 and not blocked(r),
-                          f"rc={r.returncode} stderr={r.stderr.strip()[-200:]!r}")
-                    if script in MACHINE_HOOKS:
-                        check(f"{label} is a no-op", r.stdout == "" and r.stderr == "",
-                              f"stdout={r.stdout[:120]!r} stderr={r.stderr[:120]!r}")
-        # The machine hooks must not have written anything under the fake HOME:
-        # no ~/.claude, no ~/.codex, no ~/.config/carr, no canonical checkout.
-        check("cloud: HOME is untouched by every hook", sorted(os.listdir(home)) == [],
-              str(sorted(os.listdir(home))))
-        # $CLAUDE_PROJECT_DIR unset, and set to a directory with no hooks at all.
-        bare = tmp / "bare"
-        bare.mkdir()
-        for label, env2 in (("unset", clean_env(home, None)), ("no hooks", clean_env(home, bare))):
-            for shell in SHELLS:
-                for event, script, command in wired_commands():
-                    payload = cases[event][0]
-                    r = run(shell, command, env2, payload, bare)
-                    check(f"cloud/{os.path.basename(shell)} project dir {label}: {event} {script} missing policy",
-                          (blocked(r) and "CARR_SAFETY_HOOK_MISSING" in r.stderr
-                           if script == "agent-card-gate.py"
-                           else r.returncode == 0 and not blocked(r)),
-                          f"rc={r.returncode} stderr={r.stderr.strip()[-200:]!r}")
-
-
-def stale_canonical_cases() -> None:
-    with tempfile.TemporaryDirectory() as raw:
-        tmp = Path(raw)
-        home = tmp / "home"
-        (home / "carr-system/hooks").mkdir(parents=True)
-        project = cloud_project(tmp)
-        for shell in SHELLS:
-            for event, script, command in wired_commands():
-                if script != "agent-card-gate.py":
-                    continue
-                result = run(shell, command, clean_env(home, project),
-                             {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-                              "tool_input": {"command": "ls"}}, project)
-                check(f"stale canonical/{Path(shell).name}: project gate allows ls",
-                      result.returncode == 0 and not blocked(result) and not result.stderr,
-                      f"rc={result.returncode} stderr={result.stderr!r}")
-
-
-STUB = """#!/usr/bin/env python3
-import sys
-sys.stdin.read()
-print("{marker}:{name}")
-sys.exit({rc})
-"""
-
-
-def mac_cases() -> None:
-    """The canonical path wins over $CLAUDE_PROJECT_DIR whenever it exists.
-
-    The project copy of each script is a hostile stand-in that would BLOCK
-    (exit 2). If any command ever preferred the project directory while the
-    canonical checkout exists, a branch could swap in its own gate.
-    """
-    with tempfile.TemporaryDirectory() as raw:
-        tmp = Path(raw)
-        home = tmp / "home"
-        canonical = home / "carr-system" / "hooks"
-        project = tmp / "worktree"
-        (project / "hooks").mkdir(parents=True)
-        canonical.mkdir(parents=True)
-        for name in KNOWN_HOOKS:
-            (canonical / name).write_text(STUB.format(marker="CANONICAL", name=name, rc=0))
-            (project / "hooks" / name).write_text(STUB.format(marker="PROJECT", name=name, rc=2))
-        env = clean_env(home, project)
-        cases = payloads(project, tmp / "absent.jsonl")
-        for shell in SHELLS:
-            for event, script, command in wired_commands():
-                payload = cases[event][0]
-                r = run(shell, command, env, payload, project)
-                label = f"mac/{os.path.basename(shell)}: {event} {script}"
-                check(f"{label} runs the canonical copy",
-                      r.returncode == 0 and f"CANONICAL:{script}" in r.stdout
-                      and "PROJECT:" not in r.stdout,
-                      f"rc={r.returncode} stdout={r.stdout.strip()!r}")
-
-
-def contract_cases() -> None:
-    commands = {(e, s): c for e, s, c in wired_commands()}
-    check("every wired hook names a known script", all(s for (_e, s) in commands))
-
-
-def main() -> int:
-    if not SHELLS:
-        print("no POSIX shell found")
-        return 78
-    contract_cases()
-    cloud_cases()
-    mac_cases()
-    stale_canonical_cases()
-    print(f"\n{'FAIL' if FAILURES else 'PASS'}: {len(FAILURES)} failure(s)")
-    return 1 if FAILURES else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    unittest.main()

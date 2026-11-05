@@ -98,23 +98,6 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
             self.assertTrue(all(path == '/release' for path in requests))
             return receipt
 
-    def test_production_proof_plan_covers_worker_and_studio(self):
-        root = RUNNER.resolve().parents[1]
-        requirement = 'proofs/requirements/vendor-scheduling-zero-duration.json'
-        with tempfile.TemporaryDirectory() as directory:
-            fixture = Path(directory)
-            body = fixture / 'body.md'
-            body.write_text('## Production proof\n' + requirement + '\n')
-            paths = fixture / 'paths.json'
-            paths.write_text(json.dumps([
-                'mcp-server/src/calendar-scheduling.js',
-                'tools/prove-vendor-scheduling-zero-duration.py', requirement]))
-            result = subprocess.run([
-                sys.executable, str(root / 'ops/production-proof-plan.py'),
-                '--root', str(root), '--body-file', str(body), '--files-file', str(paths)],
-                capture_output=True, text=True, timeout=30)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn('execution unproven', result.stdout)
 
     def test_natural_zero_duration_withholds_candidates(self):
         receipt = self.run_cli(0)

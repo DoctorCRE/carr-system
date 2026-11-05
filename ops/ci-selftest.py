@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import importlib.util
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -46,7 +47,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
+            "ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py", "ops/gitleaks.py", ".gitleaks.toml",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
@@ -113,6 +114,67 @@ def run(args, env=None, shell_cmd=None, timeout=60, root=None):
         e.update(TMPDIR=directory, TMP=directory, TEMP=directory, RUNNER_TEMP=directory)
         p = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
+
+def test_changed_path_selection():
+    import ci
+    import ci_scope as scope
+    all_classes = set(ci.CLASS_DESCRIPTIONS)
+    for path in ('docs/guide.md', 'tools/pstack/routing.md', 'AGENTS.md', 'CLAUDE.md',
+                 '.agents/skills/example/SKILL.md', 'README.md'):
+        check(f'documentation selects lint only: {path}',
+              scope.select_paths([path], all_classes) == {'lint'})
+    for path in ('ops/example.py', '.github/workflows/ci.yml', 'contracts/a.json',
+                 'migrations/123.sql', 'mcp-server/src/index.js', 'new/subsystem.py', 'package-lock.json',
+                 'practice-plugin/package-lock.json', 'practice-plugin/package.json', 'ops/README.md',
+                 'practice-plugin/bun.lock', 'practice-plugin/bun.lockb', 'practice-plugin/packages.lock.json'):
+        check(f'unknown and infrastructure select everything: {path}',
+              scope.select_paths([path], all_classes) == all_classes)
+    check('product mapping selects affected classes',
+          scope.select_paths(['practice-plugin/src/calculator.js'], all_classes)
+          == scope.PRODUCT_CLASSES)
+    check('mixed documentation and product retain product classes',
+          scope.select_paths(['README.md', 'practice-plugin/src/calculator.js'], all_classes)
+          == all_classes - {'dependency', 'hxprobe', 'migration'})
+    with ci_fixture() as root:
+        base = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        path = root / 'docs/new.md'
+        path.parent.mkdir(exist_ok=True)
+        path.write_text('New guidance\n')
+        subprocess.run(['git', 'add', 'docs/new.md'], cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Guidance'], cwd=root, env=fixture_env(), check=True)
+        head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        event = root / 'event.json'
+        event.write_text(json.dumps({'pull_request': {'base': {'sha': base}, 'head': {'sha': head}}}))
+        env = {'GITHUB_EVENT_NAME': 'pull_request', 'GITHUB_EVENT_PATH': str(event)}
+        check('real merge-base diff selects lint', scope.selection(all_classes, root=root, environ=env)['classes'] == ['lint'])
+        for event_name in ('merge_group', 'push', 'schedule', 'workflow_dispatch'):
+            check(f'{event_name} always selects full suite',
+                  set(scope.selection(all_classes, root=root, environ={**env, 'GITHUB_EVENT_NAME': event_name})['classes']) == all_classes)
+        (root / 'ops/ci-secret.py').write_text("print('synthetic secret qualification passed')\n")
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('shell controller executes lint alone for a real docs diff',
+              rc == 0 and re.search(r'ci-timing: lint=\d+s\n', output) is not None, output)
+        (root / 'ops/ci-secret.py').write_text("print('seeded credential refusal')\nraise SystemExit(1)\n")
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('documentation lint propagates credential qualification failure',
+              rc == 1 and 'seeded credential refusal' in output, output)
+        path.write_text('Guidance with trailing whitespace \n')
+        subprocess.run(['git', 'add', 'docs/new.md'], cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Whitespace defect'], cwd=root, env=fixture_env(), check=True)
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('documentation lint catches a seeded whitespace defect',
+              rc == 1 and 'diff whitespace check failed' in output, output)
+        subprocess.run(['git', 'mv', 'mcp-server/fixture.js', 'docs/renamed.md'],
+                       cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Move source into docs'], cwd=root, env=fixture_env(), check=True)
+        check('renaming product into documentation retains the old product path',
+              set(scope.selection(all_classes, root=root, base=base, environ={})['classes']) == all_classes)
+        event.write_text('{}')
+        check('malformed PR event falls back to full suite',
+              set(scope.selection(all_classes, root=root, environ=env)['classes']) == all_classes)
+        check('unavailable merge base falls back to full suite',
+              set(scope.selection(all_classes, root=root, base='missing-ref', environ={})['classes']) == all_classes)
+
 
 def test_python_controller_entrypoint():
     result = subprocess.run([sys.executable, str(REPO / "ops/ci.py"), "--list"],
@@ -475,7 +537,7 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
         (root / "ops/config/ci-check-scope.json").write_text('{}')
@@ -551,6 +613,18 @@ def test_database_scope_receipts():
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
     check("database scope skips docs-only changes", not scope.needs_full(["README.md", "docs/guide.md"]))
+
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        receipt = pathlib.Path(directory) / 'receipt.json'
+        for force in (False, True):
+            argv = ['scope', '--receipt', str(receipt)] + (['--full'] if force else [])
+            with patch.object(scope, 'classify', return_value=(False, ['docs/guide.md'], 'docs only')), \
+                 patch.object(sys, 'argv', argv), patch.dict(os.environ, {'GITHUB_OUTPUT': os.devnull}), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                rc = scope.main()
+            check(f'full CI selection overrides narrower DB scope force={force}',
+                  rc == 0 and json.loads(receipt.read_text())['full'] is force)
 
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
@@ -1374,7 +1448,7 @@ def test_hosted_draft_lifecycle():
                   and weekly['on']['schedule'] == [{'cron': '20 6 * * 1'}]
                   and 'fallow' not in jobs)
         verdict = jobs.get(verdict_name, {})
-        expected_needs = set(lanes) | ({"launchd-python39"} if filename == "ci.yml" else set())
+        expected_needs = set(lanes) | ({"select", "lint", "unit", "launchd-python39"} if filename == "ci.yml" else set())
         check(f"{filename}: verdict always evaluates and waits for every lane",
               verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == expected_needs)
         if not verdict:
@@ -1383,12 +1457,20 @@ def test_hosted_draft_lifecycle():
         needs = {name: {"result": "success"} for name in lanes}
         if "scope" in needs:
             needs["scope"]["outputs"] = {"full": "true"}
+        if filename == 'ci.yml':
+            from ci_scope import PRODUCT_CLASSES, PR_JOBS
+            needs.update({name: {'result': 'success'} for name in ('lint', 'unit', 'launchd-python39')})
+            needs['select'] = {'result': 'success', 'outputs': {
+                'classes': json.dumps(sorted(PRODUCT_CLASSES)), 'full': 'false',
+                **{job: 'true' for job in PR_JOBS}}}
+            for name in ('scope', 'classes', 'migration-fixtures'):
+                needs[name]['result'] = 'skipped'
         def context(event="pull_request", draft=False, action="synchronize", sha="a" * 40, changes=None):
             return {"github": {"workflow": wf["name"], "event_name": event,
                                "run_id": 41, "sha": sha,
                                "event": {"action": action, "changes": changes or {}, "pull_request": {
                                    "number": 12 if event == "pull_request" else None,
-                                   "draft": draft, "head": {"sha": sha}}}},
+                                   "draft": draft if event == "pull_request" else False, "head": {"sha": sha}}}},
                     "needs": needs}
         groups = []
         with tempfile.TemporaryDirectory() as directory:
@@ -1464,6 +1546,9 @@ def test_hosted_draft_lifecycle():
             for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
+                    if filename == 'ci.yml':
+                        for full_lane in ('scope', 'classes', 'migration-fixtures'):
+                            broken[full_lane]['result'] = 'success'
                     if state == "missing":
                         broken.pop(lane)
                     else:
@@ -1810,7 +1895,7 @@ def main(argv=None):
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_artifact_requires_native_rule_projection_and_tests,
+    for fn in (test_changed_path_selection, test_artifact_requires_native_rule_projection_and_tests,
                test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
                test_migration_requires_newline_terminated_verdict,

@@ -47,27 +47,44 @@ class HostedVerdict(unittest.TestCase):
                 self.assertEqual(evidence.hosted_verdict(), 0)
             self.assertIn('classes: PASSED', summary.read_text())
 
-    def test_pr_fast_lane_must_succeed(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for state, expected in [('success', 0), ('failure', 1), ('cancelled', 1), ('skipped', 1)]:
-                with self.subTest(state=state), patch.dict(os.environ,
-                    CI_EVENT='pull_request', CI_NEEDS=json.dumps({'fast': {'result': state}, 'gates': {'result': 'success'}, 'secret': {'result': 'success'}, 'unit-coverage': {'result': 'success'}}),
-                    CI_DRAFT='false', GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
-                    self.assertEqual(evidence.hosted_verdict(), expected)
+    def pr_needs(self, classes):
+        from ci_scope import required_jobs
+        jobs = ('lint', 'fast', 'gates', 'secret', 'unit', 'unit-coverage',
+                'launchd-python39', 'scope', 'classes', 'migration-fixtures')
+        required = required_jobs(classes)
+        return {'select': {'result': 'success', 'outputs': {'classes': json.dumps(classes)}},
+                **{job: {'result': 'success' if job in required else 'skipped'} for job in jobs}}
 
-    def test_shard_coverage_must_succeed_on_pr_and_merge_group(self):
+    def test_pr_selection_requires_every_selected_job(self):
+        from ci import CLASS_DESCRIPTIONS
+        from ci_scope import PRODUCT_CLASSES, required_jobs
         with tempfile.TemporaryDirectory() as directory:
-            for event in ('pull_request', 'merge_group'):
-                for state in ('failure', 'cancelled', 'skipped'):
-                    needs = {'fast': {'result': 'success'}, 'gates': {'result': 'success'}, 'secret': {'result': 'success'},
-                             'scope': {'result': 'success', 'outputs': {'full': 'true'}},
-                             'classes': {'result': 'success'},
-                             'migration-fixtures': {'result': 'success'},
-                             'unit-coverage': {'result': state}}
-                    with self.subTest(event=event, state=state), patch.dict(os.environ,
-                        CI_EVENT=event, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
-                        GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
-                        self.assertEqual(evidence.hosted_verdict(), 1)
+            for classes in (['lint'], sorted(PRODUCT_CLASSES), sorted(CLASS_DESCRIPTIONS)):
+                needs = self.pr_needs(classes)
+                for job in [None, *required_jobs(classes)]:
+                    for state in (['success'] if job is None else ['failure', 'cancelled', 'skipped']):
+                        changed = copy.deepcopy(needs)
+                        if job:
+                            changed[job]['result'] = state
+                        with self.subTest(classes=classes, job=job, state=state), patch.dict(os.environ,
+                            CI_EVENT='pull_request', CI_NEEDS=json.dumps(changed), CI_DRAFT='false',
+                            GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                            self.assertEqual(evidence.hosted_verdict(), 0 if job is None else 1)
+
+    def test_pr_selector_failure_and_unexpected_skip_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for bad in ('failed-selector', 'unknown-class', 'missing-lint', 'unexpected-job'):
+                needs = self.pr_needs(['lint'])
+                if bad == 'failed-selector':
+                    needs['select']['result'] = 'failure'
+                elif bad == 'unexpected-job':
+                    needs['gates']['result'] = 'success'
+                else:
+                    needs['select']['outputs']['classes'] = json.dumps(['unknown'] if bad == 'unknown-class' else ['unit'])
+                with self.subTest(bad=bad), patch.dict(os.environ, CI_EVENT='pull_request',
+                    CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
+                    GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
+                    self.assertEqual(evidence.hosted_verdict(), 1)
 
     def test_full_scope_rejects_skipped_fixtures_regardless_of_legacy_output(self):
         with tempfile.TemporaryDirectory() as directory:
