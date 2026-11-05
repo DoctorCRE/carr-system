@@ -50,13 +50,50 @@ test('slug-bound portal session statechart', async t => {
     await t.test('revoked and expired sessions never revive on retained replay', async () => {
       assert.deepEqual(await revoke('b'), denied);
       assert.deepEqual(await revoke(), { status: 'success' });
+      const timestamps = async () => (await c.query("select revoked_at::text,created_at::text,expires_at::text from ops.client_portal_session where digest=$1", [digest('one')])).rows[0];
+      const first = await timestamps();
+      assert.ok(first.revoked_at);
+      await c.query('select pg_sleep(0.01)');
       assert.deepEqual(await revoke(), { status: 'success' });
+      assert.deepEqual(await timestamps(), first, 'repeat revoke preserves every timestamp');
       assert.deepEqual(await read(), denied);
       assert.deepEqual(await exchange(), denied);
       await exchange('a', 'expired');
       await c.query("update ops.client_portal_session set created_at=now()-interval '192 hours',expires_at=now()-interval '24 hours' where digest=$1", [digest('expired')]);
       assert.deepEqual(await read('a', 'expired'), denied);
       assert.deepEqual(await exchange('a', 'expired'), denied);
+    });
+    await t.test('password changes atomically revoke all sessions only for that portal', async () => {
+      for (const token of ['rotation-one', 'rotation-two']) assert.equal((await exchange('a', token)).status, 'success');
+      const timestamps = async () => (await c.query("select digest,revoked_at::text,created_at::text,expires_at::text from ops.client_portal_session where portal_slug='a' order by digest")).rows;
+      const before = await timestamps();
+      const rotate = () => c.query("update ops.client_portal set password_hash=crypt(encode(digest('changed-password','sha256'),'hex'),gen_salt('bf',12)) where slug='a'");
+      await c.query("update ops.client_portal set password_hash=password_hash where slug='a'");
+      assert.deepEqual(await timestamps(), before, 'unchanged hash does not revoke');
+      await c.query('begin');
+      await rotate();
+      assert.deepEqual(await read('a', 'rotation-one'), denied, 'rotation revokes inside the password transaction');
+      await c.query('rollback');
+      assert.deepEqual(await timestamps(), before, 'rollback restores password and sessions together');
+      assert.equal((await read('a', 'rotation-one')).status, 'success');
+      await rotate();
+      const after = await timestamps();
+      for (const [i, row] of after.entries()) {
+        assert.ok(row.revoked_at, 'every existing session is revoked');
+        assert.equal(row.created_at, before[i].created_at);
+        assert.equal(row.expires_at, before[i].expires_at);
+        if (before[i].revoked_at) assert.equal(row.revoked_at, before[i].revoked_at);
+      }
+      for (const token of ['rotation-one', 'rotation-two']) {
+        assert.deepEqual(await read('a', token), denied);
+        assert.deepEqual(await exchange('a', token, 'changed-password'), denied);
+      }
+      assert.deepEqual(await exchange('a', 'old-password'), denied);
+      assert.equal((await read('b', 'b-one')).status, 'success');
+      assert.equal((await exchange('a', 'changed-session', 'changed-password')).status, 'success');
+      await c.query("update ops.client_portal set password_hash=crypt(encode(digest('password-a','sha256'),'hex'),gen_salt('bf',12)) where slug='a'");
+      assert.deepEqual(await read('a', 'changed-session'), denied);
+      assert.equal((await exchange('a', 'restored-session')).status, 'success');
     });
     await t.test('disabled portals and reassigned clients refuse live sessions', async () => {
       await exchange('a', 'live');

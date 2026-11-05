@@ -71,8 +71,11 @@ stateDiagram-v2
   Anonymous --> Active: valid password and capacity
   Active --> Active: read canonical projection
   Active --> Active: exchange replay / unchanged expiry
+  Active --> Revoked: password changed / all portal sessions revoked atomically
+  Active --> Active: password change rolled back / sessions retained
+  Active --> Active: unchanged password hash / sessions retained
   Active --> Revoked: revoke
-  Revoked --> Revoked: repeat revoke / success
+  Revoked --> Revoked: repeat revoke / success and original timestamps
   Revoked --> Revoked: exchange replay / denied
   Active --> Expired: seven days elapsed
   Expired --> Expired: read or exchange replay after cleanup / denied
@@ -86,3 +89,16 @@ shared password allowance, capacity, cleanup, indexed lookup, private grants,
 projection identity, private sentinels and database-error propagation. Structural
 assertions cover the no-cache/no-queue/no-external-call design; future adapter
 outage handling and observed 10x capacity remain unit B verification.
+
+## Password rotation regression
+
+An administrative password-hash change revokes all existing sessions for that
+portal in the same transaction. Rollback restores both password and sessions.
+Updating the hash to itself retains sessions. Existing revocation timestamps and
+fixed expiry never move. Other portals remain usable. A new digest and the new
+password can establish a new session; a revoked digest cannot be reused.
+The `password changes atomically revoke all sessions only for that portal` test
+derives these transitions from the chart and exercises administrative SQL plus
+the existing exchange/read interface. The repeated-revoke test compares exact
+PostgreSQL timestamp text across separate transactions to retain microseconds.
+No HTTP rotation interface, transport or production behavior is modeled here.
