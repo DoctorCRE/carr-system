@@ -30,7 +30,8 @@ def main():
     query.add_argument('--query', required=True, help='Literal person, email address or property phrase; no FTS operators')
     query.add_argument('--limit', type=int, default=20, help='Page size, 1 to 100')
     query.add_argument('--cursor', help='Next cursor from the same query and index generation')
-    query.add_argument('--local-excerpts', action='store_true', help='Include bounded subject and body excerpts locally')
+    query.add_argument('--local-excerpts', action='store_true',
+                       help='Include bounded subject and body excerpts labeled and fenced as untrusted data')
     args = parser.parse_args()
     try:
         if args.command == 'query':
