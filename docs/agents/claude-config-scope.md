@@ -47,7 +47,10 @@ loads the team-memory index. The project template now includes these hooks too.
 
 - `CLAUDE.md` and `.claude/settings.json` retain the name `carr`. Authentication
   diagnostics use `claude mcp get carr`; the permission allowlist retains all
-  supported connector prefixes. Scope changes do not rename tools.
+  supported connector prefixes. Scope changes do not rename tools. The former
+  Codex job launcher is absent from current tracked source; its stale reference
+  in CLAUDE.md is removed. `ops/config-as-code.py` still manages native Codex
+  configuration independently, including its carr/carr-records recognition.
 - `hooks/gate-integrity.py` reads this checkout's `.claude/settings.json`, not
   user settings or the canonical checkout's project config. It checks settings
   and `.mcp.json` hashes in addition to the hook template and script hashes.
