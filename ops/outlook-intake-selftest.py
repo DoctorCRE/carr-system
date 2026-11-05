@@ -338,6 +338,54 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual((self.out() / intake.STATE).read_bytes(), before)
                 self.assertEqual(binding_path.read_bytes(), binding)
 
+    def settings_replaced_after_admission(self, owner, changed_owner, change_account=True):
+        path = self.home / '.config/carr/outlook.json'
+        values = json.loads(path.read_text())
+        account = OWNER if owner == 'joe' else 'dell@example.test'
+        changed_account = ('dell@example.test' if changed_owner == 'dell' else OWNER) if change_account else account
+        values.update(owner=owner, account=account)
+        path.write_text(json.dumps(values))
+        original = intake._ledger_binding
+
+        def admit_then_replace(out, settings, state):
+            binding = original(out, settings, state)
+            path.write_text(json.dumps({**values, 'owner': changed_owner, 'account': changed_account}))
+            return binding
+
+        with patch.object(intake, '_ledger_binding', side_effect=admit_then_replace):
+            result = self.run_intake([mail(CLIENT.email, -timedelta(hours=1),
+                                           recipients=changed_account, local_keys='42')])
+        binding = json.loads((self.out() / 'binding.json').read_text())
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        persisted = [json.loads(r['payload'])['email_identity'] for r in state['requests'].values()
+                     if r['verb'] == 'log-activity']
+        sent = [args['email_identity'] for _, args in self.fake.writes('log-activity')]
+        self.assertEqual(binding['mailbox_owner'], owner)
+        self.assertEqual(binding['mailbox_account'], account)
+        for identity in persisted + sent:
+            self.assertEqual(identity['mailbox_owner'], owner)
+            self.assertEqual(identity['mailbox_account'], account)
+        receipt = json.loads((self.out() / 'receipt-latest.json').read_text())
+        self.assertEqual(receipt['mailbox_owner'], owner)
+        self.assertEqual(receipt['mailbox_account'], account)
+        self.assertTrue(receipt['binding_verified'])
+        self.assertIn(result.state, ('succeeded', 'failed'))
+        before = state_path.read_bytes()
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake(touch=False).reason, 'ledger_binding_mismatch')
+        self.assertEqual(state_path.read_bytes(), before)
+        self.assertFalse(self.fake.calls)
+
+    def test_settings_replaced_after_admission_joe_to_dell(self):
+        self.settings_replaced_after_admission('joe', 'dell')
+
+    def test_settings_replaced_after_admission_dell_to_joe(self):
+        self.settings_replaced_after_admission('dell', 'joe')
+
+    def test_owner_replaced_after_admission(self):
+        self.settings_replaced_after_admission('joe', 'dell', change_account=False)
+
     def test_private_normal_receipt_and_safe_projection(self):
         with patch.object(intake, 'stamp', return_value={'runtime_sha': 'a' * 40, 'runtime_behind': 0}):
             result = self.run_intake()
