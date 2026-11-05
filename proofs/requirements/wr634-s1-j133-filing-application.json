@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR634-S1-J133-filing-application",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "natural-current-generation",
+      "predicate": "Read deployed release identity, then privately bind one naturally eligible source activity to its linked open deal and completed current extraction generation. A confirmed filing needs partner-confirmed evidence; automatic filing needs verified continuity. Compare a later ordinary run for zero duplicate proposal effects. Verify real unresolved reasons and undo suppression when present. Zero eligible keeps positive proof pending; release identity alone is insufficient. Use the counts-only SQL in docs/email/durable-filing-application.md.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity verified; positive filing proof remains pending until a separately authorized readback observes a natural completed generation and later zero duplicates.",
+      "input_class": "deployed worker plus separately authorized counts-only query; never mutate or rerun intake",
+      "deadline_seconds": 60
+    },
+    {
+      "id": "installed-extraction-generation",
+      "predicate": "Read one natural installed email-router-receipt produced by ordinary outlook-intake, with full merged runtime SHA through studio-run-receipt.v1 using --service email-router --count application_applied --minimum 1. Privately correlate that source and generation with the worker proof and a later ordinary run with zero duplicate effects. No job launch or mailbox effect.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "At least one current generation applied naturally and later duplicate effects zero; missing natural work remains pending.",
+      "input_class": "one explicit natural email-router receipt from ordinary installed intake and privately bound generation; counts only",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 5,
+    "max_records": 100,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 65536
+  }
+}
