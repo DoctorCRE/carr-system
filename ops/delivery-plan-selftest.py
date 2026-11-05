@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise commit-bound delivery resolution and shared admission classification."""
-import importlib.util
+"""Exercise commit-bound delivery resolution and post-deploy requirement binding."""
 import hashlib
 import os
 import json
@@ -221,6 +220,13 @@ class DeliveryTest(unittest.TestCase):
             self.resolve(self.commit())
 
 
+
+    def test_duplicate_landed_requirement_ids_refuse(self):
+        self.requirement('proofs/requirements/first.json')
+        self.requirement('proofs/requirements/second.json')
+        self.commit()
+        with self.assertRaisesRegex(ValueError, 'duplicate requirement'):
+            self.resolve()
 
     def test_cli_stdout_respects_response_budget(self):
         for i in range(1000):
