@@ -43,10 +43,13 @@ class CensusTests(unittest.TestCase):
     def run_cli(self, *extra):
         (self.journal / 'state.json').write_text(json.dumps(self.state))
         (self.receipts / 'runs.jsonl').write_text('\n'.join(json.dumps(r) for r in self.rows))
+        before = {p.relative_to(self.root): p.read_bytes() if p.is_file() else None for p in self.root.rglob('*')}
         result = subprocess.run([sys.executable, str(CLI), '--receipts-dir', str(self.receipts),
                                  '--journal-dir', str(self.journal), '--account', ACCOUNT,
                                  '--since', SINCE, '--until', UNTIL, '--as-of', ASOF, *extra],
                                 capture_output=True, text=True)
+        after = {p.relative_to(self.root): p.read_bytes() if p.is_file() else None for p in self.root.rglob('*')}
+        self.assertEqual(before, after)
         for secret in (ACCOUNT, 'PRIVATE_SUBJECT', 'PRIVATE_BODY', 'party:synthetic', str(self.root)):
             self.assertNotIn(secret, result.stdout + result.stderr)
         return result, json.loads(result.stdout) if result.returncode == 0 else None
@@ -150,6 +153,23 @@ class CensusTests(unittest.TestCase):
         _, report = self.run_cli()
         self.assertEqual(report['counts']['receipts']['malformed'], 3)
         result, _ = self.run_cli('--journal-dir', str(self.root / 'PRIVATE_BODY'))
+        self.assertEqual(result.returncode, 2)
+
+    def test_file_count_limit(self):
+        for i in range(1000):
+            (self.receipts / f'{i}.ignored').touch()
+        result, _ = self.run_cli()
+        self.assertEqual(result.returncode, 2)
+
+    def test_row_count_limit(self):
+        self.rows = [None] * 100001
+        result, _ = self.run_cli()
+        self.assertEqual(result.returncode, 2)
+
+    def test_aggregate_byte_limit(self):
+        for i in range(4):
+            (self.receipts / f'{i}.jsonl').write_bytes(b' ' * (16 * 1024 * 1024))
+        result, _ = self.run_cli()
         self.assertEqual(result.returncode, 2)
 
 
