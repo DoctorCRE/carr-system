@@ -100,6 +100,20 @@ class ProofCLI(unittest.TestCase):
         with fixture([RATED, {**UNVERIFIED, 'won': 0}]) as (base, _):
             self.assertEqual(self.run_cli(base)[0], 1)
 
+    def test_timezone_offset_components(self):
+        for offset in ['+00:99', '-00:99', '+23:60', '-23:60', '+24:00', '-24:00']:
+            with self.subTest(offset=offset), fixture([
+                    {**RATED, 'coverage_verified_at': '2020-01-01T00:00:00' + offset},
+                    UNVERIFIED]) as (base, _):
+                code, result = self.run_cli(base)
+                self.assertEqual(code, 1)
+                self.assertEqual(result['reason'], 'rated_evidence_invalid')
+        for offset in ['+00:59', '-00:59', '+23:59', '-23:59']:
+            with self.subTest(offset=offset), fixture([
+                    {**RATED, 'coverage_verified_at': '2020-01-01T00:00:00' + offset},
+                    UNVERIFIED]) as (base, _):
+                self.assertEqual(self.run_cli(base)[0], 0)
+
     def test_missing_evidence_and_authorization(self):
         for rows in [[], [RATED], [UNVERIFIED], [None]]:
             with self.subTest(rows=rows), fixture(rows) as (base, _):
