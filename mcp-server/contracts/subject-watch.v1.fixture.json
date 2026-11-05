@@ -1,0 +1,47 @@
+{
+  "schema_version": "subject-watch-consumer-fixture.v1",
+  "source_repository": "DoctorCRE/carr-system",
+  "source_commit": "fb3bef1d9a280fe93810a52c0e9577b1f5d2547b",
+  "response_schema_version": "subject-watch.v1",
+  "baseline_schema_version": "subject-watch-baseline.v1",
+  "supported_subject_types": ["deal", "lease"],
+  "refused_subject_types": {"listing": "watch_target_not_found until a canonical listing identity and visibility contract exists"},
+  "write_request": {
+    "verb": "watch-subject-v1",
+    "arguments": {
+      "subject_type": "deal",
+      "subject_id": "00000000-0000-4000-8000-000000000001",
+      "idempotency_key": "00000000-0000-4000-8000-000000000002"
+    }
+  },
+  "watch_response": {
+    "ok": true,
+    "schema_version": "subject-watch.v1",
+    "rows_changed": 1,
+    "watch": {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "actor_id": "00000000-0000-4000-8000-000000000004",
+      "subject_type": "deal",
+      "subject_id": "00000000-0000-4000-8000-000000000001",
+      "subscribed_at": "2026-01-01T12:00:00+00:00",
+      "baseline": {
+        "schema_version": "subject-watch-baseline.v1",
+        "subject_type": "deal",
+        "subject_id": "00000000-0000-4000-8000-000000000001",
+        "version": 1
+      }
+    }
+  },
+  "read_verb": "read-subject-watch-v1",
+  "list_verb": "list-subject-watches-v1",
+  "unwatch_verb": "unwatch-subject-v1",
+  "unwatch_response": {"ok": true, "schema_version": "subject-watch.v1", "rows_changed": 1, "watch": null},
+  "semantics": {
+    "actor": "server-established active human Joe or Dell, never a request field",
+    "replay": "same key and exact payload returns replayed=true; changed actor, verb or payload refuses key_reuse",
+    "baseline": "immutable on repeated watch; fresh baseline after unwatch then watch with a new key",
+    "visibility": "read and watch refuse unknown or inaccessible targets; list omits them; unwatch still removes the caller's stale subscription",
+    "pagination": "limit 1 through 100, default 50; pass next_cursor while has_more=true; live keyset pages",
+    "notification": "no notification merely for subscribing; future producer uses canonical notification policy"
+  }
+}

@@ -198,7 +198,29 @@ metadata, verifies installed identity and existing helper/job checks, then check
 the latest 100 report rows for an actual refreshed diagnostic installation row for that exact artifact and
 attempt, including its local installation interval. An already-current report
 cannot substitute for that install event.
-It refuses unless the parent is still in progress. It performs no refresh or
+It brackets local evidence with two parent reads and refuses if the parent
+finishes or its attempt changes during readback. It performs no refresh or
 write. The unified parent's Studio waiting job belongs to the later graph slice;
 WR823.S8.J3 must also verify that job is waiting when taking this readback.
 Until those observations exist, production remains unproven.
+
+The read-only proof command brackets local verification with parent reads. Its
+observation region prevents a completed or retried parent from becoming a stale
+pending-parent success.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ReadParent
+    ReadParent --> Refused: Parent is complete or attempt differs
+    ReadParent --> ReadInstallation: Exact parent attempt is in progress
+    ReadInstallation --> Refused: Installed identity or refreshed report mismatches
+    ReadInstallation --> ConfirmParent: Installed identity and actual refresh match
+    ConfirmParent --> Refused: Parent finished or attempt changed
+    ConfirmParent --> Observed: Same parent attempt remains in progress
+```
+
+`test_cli_brackets_local_evidence_with_same_waiting_parent` covers the successful
+path. The parent completion and attempt-change tests cover the final refusal
+edges. Existing wrong-parent, installed-identity and report tests cover the
+initial and local refusal edges. This region was added after the executed race
+reproduction exposed the missing observation edge.

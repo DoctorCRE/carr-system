@@ -10,11 +10,15 @@ from lib.studio_runtime_auto_refresh import Host, released_receipt
 from lib.worker_release_receipt import github, REPOSITORY
 
 
-def observe(source, host, worker, parent):
+def waiting_parent(worker, parent):
     if parent.get('id') != worker['run_id'] or parent.get('run_attempt') != worker['run_attempt']:
         raise ValueError('parent attempt mismatch')
     if parent.get('status') != 'in_progress':
         raise ValueError('delivery parent is not still in progress')
+
+
+def observe(source, host, worker, parent):
+    waiting_parent(worker, parent)
     sha = host.installed()
     if sha != worker['source_sha']:
         raise ValueError('installed runtime differs from Worker receipt')
@@ -44,8 +48,11 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     args = parser.parse_args()
     worker = released_receipt()
-    parent = github(f'repos/{REPOSITORY}/actions/runs/{worker["run_id"]}')
-    print(json.dumps(observe(args.source, Host(args.source), worker, parent), sort_keys=True))
+    path = f'repos/{REPOSITORY}/actions/runs/{worker["run_id"]}'
+    parent = github(path)
+    result = observe(args.source, Host(args.source), worker, parent)
+    waiting_parent(worker, github(path))
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == '__main__':

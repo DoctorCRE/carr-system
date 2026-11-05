@@ -179,6 +179,39 @@ class ReadbackTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.module.observe(self.root, self.host, self.worker, RUN)
 
+    def test_cli_brackets_local_evidence_with_same_waiting_parent(self):
+        order = []
+        def parent(path):
+            order.append('parent')
+            return RUN
+        self.host.verify_current.side_effect = lambda sha: order.append('installed')
+        with patch.object(self.module, 'released_receipt', return_value=self.worker), \
+                patch.object(self.module, 'Host', return_value=self.host), \
+                patch.object(self.module, 'github', side_effect=parent), \
+                patch.object(sys, 'argv', ['studio-release-readback.py', '--source', str(self.root)]), \
+                patch('builtins.print') as output:
+            self.module.main()
+        self.assertEqual(order, ['parent', 'installed', 'parent'])
+        self.assertEqual(json.loads(output.call_args.args[0])['parent_status'], 'in_progress')
+
+    def test_parent_completion_during_local_readback_refuses(self):
+        with patch.object(self.module, 'released_receipt', return_value=self.worker), \
+                patch.object(self.module, 'Host', return_value=self.host), \
+                patch.object(self.module, 'github', side_effect=[RUN, {**RUN, 'status': 'completed'}]), \
+                patch.object(sys, 'argv', ['studio-release-readback.py', '--source', str(self.root)]), \
+                patch('builtins.print'):
+            with self.assertRaises(ValueError):
+                self.module.main()
+
+    def test_parent_attempt_change_during_local_readback_refuses(self):
+        with patch.object(self.module, 'released_receipt', return_value=self.worker), \
+                patch.object(self.module, 'Host', return_value=self.host), \
+                patch.object(self.module, 'github', side_effect=[RUN, {**RUN, 'run_attempt': 2}]), \
+                patch.object(sys, 'argv', ['studio-release-readback.py', '--source', str(self.root)]), \
+                patch('builtins.print'):
+            with self.assertRaises(ValueError):
+                self.module.main()
+
     def test_readback_bounds_local_report_records(self):
         self.path.write_text(json.dumps(self.row) + '\n' +
                              (json.dumps({**self.row, 'status': 'current'}) + '\n') * 100)
