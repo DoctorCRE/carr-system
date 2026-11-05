@@ -40,7 +40,7 @@ def fixture(template):
         command = template.replace('{{REPO}}', str(repo))
         relative = re.search(r'/(hooks|ops)/([\w-]+\.py)', command)
         script = repo / relative.group(1) / relative.group(2)
-        env = {**os.environ, 'HOME': str(home), 'CLAUDE_PROJECT_DIR': str(home / 'branch')}
+        env = {**os.environ, 'HOME': str(home), 'CLAUDE_PROJECT_DIR': str(repo)}
         def run(payload='payload'):
             return subprocess.run(['/bin/sh', '-c', command], input=payload,
                                   text=True, capture_output=True, env=env, timeout=5)
@@ -55,7 +55,7 @@ class HookCommands(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HOME': home}):
             for source, event, template in commands():
                 with self.subTest(source=source, event=event, command=template):
-                    target_root = Path(home) / 'carr-system' if source == '.claude/settings.json' else root
+                    target_root = root
                     block = {event: [{'hooks': [{'command': template}]}]}
                     self.assertEqual(installer['hook_block_script_paths'](block),
                                      [str(command_target(template, target_root).resolve())])
