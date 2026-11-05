@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from migration_source import read_migration
 
 ROOT = Path(__file__).resolve().parents[1]
-MIGRATION = ROOT / 'migrations/1152_outlook_intake_service.sql'
+MIGRATION = ROOT / 'migrations/1153_outlook_intake_service.sql'
 
 
 class IntakeRegistry(unittest.TestCase):

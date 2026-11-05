@@ -277,6 +277,8 @@ def coverage_verdict(counts: dict) -> dict:
 def receipt_counts(counts: dict) -> dict:
     """Split run deltas from standing totals, including the current mail snapshot.
 
+    mail_ids is the retained mailbox-scoped RFC Message-ID association count, not
+    a processing delta. It stays in run to match the decoder reconciliation receipt.
     stored/admitted/subject_decoded/body_complete count decoder message rows, never
     folder links. A folder's class is its top-level folder's. The per-class totals count
     a message once in each class of the selected account; stored_multi_class counts the
@@ -2071,7 +2073,7 @@ def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
             Run(ports, state, now, out, settings).full_text([])
             _save(out, state)
         counts = {**mapping_counts(state), **calendar_counts(state), 'legacy_unmatched': _legacy_unmatched(state),
-                  'emails': 0, 'skipped_automated': 0,
+                  'emails': 0, 'skipped_automated': 0, 'mail_ids': len(state.get('mail_ids', {})),
                   'email_index_failed': int(not state.get('email_index_published')),
                   'mail_rows_reusing_prior_identity': state.get('mail_rows_reusing_prior_identity', 0),
                   **{name: state.get(name, 0) for name in MAIL_STORE_COUNTERS}, **health_counts(state.get('decoder_health'))}
@@ -2206,7 +2208,7 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
                  mail_rows_reusing_prior_identity=work.counts['mail_rows_reusing_prior_identity'])
     _prune(state, now)
     _save(out, state)
-    counts.update(mapping_counts(state))  # a run that expires items reports them itself
+    counts.update(mapping_counts(state), mail_ids=len(state['mail_ids']))
     if health['failing']:
         state['decoder_alarm_delivered'] = True
         _save(out, state)

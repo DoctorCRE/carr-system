@@ -406,6 +406,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "archive-session-checkpoint-v1": {
+    "ingress_key": "mcp-tool:archive-session-checkpoint-v1",
+    "source_locator": "mcp-server/src/session-checkpoints.js",
+    "schema_digest": "382194e406895bf705925a524c7bd5f0676a4a5d5f8ae1a8578d060f7dcbb39a",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "ask-board-question": {
     "ingress_key": "mcp-tool:ask-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -2584,6 +2594,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-session-checkpoint-v1": {
+    "ingress_key": "mcp-tool:read-session-checkpoint-v1",
+    "source_locator": "mcp-server/src/session-checkpoints.js",
+    "schema_digest": "82220d46843776682fb8d25c10e745578db354f06d719677b04ab8e09867186f",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-session-identity": {
     "ingress_key": "mcp-tool:read-session-identity",
     "source_locator": "mcp-server/src/session-identity.ts",
@@ -4095,6 +4115,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:write-doctrine-section",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "ea8b7fe3aec03db033725a88ecb96847d7f5f1b6675b195263884567676da8bd",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "write-session-checkpoint-v1": {
+    "ingress_key": "mcp-tool:write-session-checkpoint-v1",
+    "source_locator": "mcp-server/src/session-checkpoints.js",
+    "schema_digest": "cebc18bf254f84b3096ee4df4215408cd1a17098bc56e95a04d61350c352d977",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
