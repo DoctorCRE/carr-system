@@ -284,7 +284,7 @@ def shell_write_verdict(command, cwd=None, _depth=0):
                     if reason:
                         return reason
         if program == 'cd':
-            if len(args) != 1:
+            if len(args) != 1 or args[0] == '-':
                 raise ValueError('cannot resolve working directory change')
             inspect(args[0])
             possible_cwds.update(os.path.realpath(os.path.join(base, args[0]))
@@ -302,11 +302,19 @@ def shell_write_verdict(command, cwd=None, _depth=0):
         if program not in writers and program not in {'echo', 'printf', 'cat', 'grep', 'rg'}:
             if any(os.path.basename(a.strip('()')) in writers for a in words):
                 raise ValueError('wrapped or compound writer; use a direct literal command')
-        if program in {'cp', 'mv', 'rsync'} and any(
-                a.startswith(('-t', '--target-directory', '--files-from', '--relative')) for a in args):
-            raise ValueError('unsupported destination option; use a final literal destination')
+        if program in {'cp', 'mv', 'rsync'}:
+            operands, options = [], True
+            for arg in args:
+                if options and arg == '--':
+                    options = False
+                elif options and arg.startswith('-') and arg != '-':
+                    if not re.fullmatch(r'-[abdfinprRuvzHLPhAX]+', arg):
+                        raise ValueError('unsupported destination option; use a final literal destination')
+                else:
+                    operands.append(arg)
+            args = operands
         if program in writers:
-            if program == 'tee' or (program == 'sed' and any(a.startswith('-i') for a in args)):
+            if program == 'tee' or (program == 'sed' and any(a.startswith(('-i', '--in-place')) for a in args)):
                 outputs.extend(a for a in args if a and not a.startswith('-'))
             elif program != 'sed' and args:
                 outputs.append(args[-1])
