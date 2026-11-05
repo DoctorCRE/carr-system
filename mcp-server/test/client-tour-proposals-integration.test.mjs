@@ -33,6 +33,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     const actor=randomUUID(),party=randomUUID(),client=randomUUID(),deal=randomUUID(),tour=randomUUID();
     const a=randomUUID(),b=randomUUID(),x=randomUUID();
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')",[actor]);
+    await c.query("insert into actor(id,slug,kind,display_name) values(gen_random_uuid(),'dell','human','Synthetic second partner')");
     await c.query("insert into client_status(slug,label) values('active','Active'); insert into deal_phase(slug,label,sort) values('research','Research',1)");
     await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'person','Synthetic client',$2,$2)",[party,actor]);
     await c.query("insert into client(id,party_id,status,created_by,updated_by) values($1,$2,'active',$3,$3)",[client,party,actor]);
@@ -119,7 +120,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.deepEqual((await list()).properties.find(p=>p.carr_property_id===b),{carr_property_id:b,name:null,address:null,property_status:null,eligible:false});
     await assert.rejects(invoke('accept-client-tour-proposal',{...unavailableArgs,idempotency_key:randomUUID()}),e=>e.payload?.error==='proposal_unresolved_property');
     await mutate('delete from ops.tour_property where id=$1',[b]);
-    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).eligible,false);
+    assert.deepEqual((await list()).properties.find(p=>p.carr_property_id===b),{carr_property_id:b,name:null,address:null,property_status:null,eligible:false});
     await assert.rejects(invoke('accept-client-tour-proposal',{...unavailableArgs,idempotency_key:randomUUID()}),e=>e.payload?.error==='proposal_unresolved_property');
     await mutate("insert into ops.tour_property values($1,'carr-internal','active')",[b]);
     await assert.rejects(invoke('list-deal-tour-proposals',{deal_id:randomUUID()}));
@@ -210,6 +211,9 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.equal((await summary()).state,'empty','disabled portals do not produce brief lines');
     await c.query("reset session authorization; update ops.client_portal set disabled_at=null where slug='synthetic'");
     await c.query("update deal set owner='dell' where id=$1",[deal]);
+    await assert.rejects(list(),'former owner cannot hydrate property labels through the proposal read');
+    const newOwnerRead=await invoke('list-deal-tour-proposals',{deal_id:deal},{slug:'dell',human:true});
+    assert.equal(newOwnerRead.proposals.length,50,'current deal owner can read the same bounded proposal page');
     assert.equal((await summary()).state,'empty','former owner cannot see proposals');
     assert.equal((await summary('dell')).items.length,1,'new owner sees the deal');
     await c.query('reset session authorization');
