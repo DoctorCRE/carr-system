@@ -95,6 +95,7 @@
     "current-work-item.test.mjs": {"milliseconds": 629, "serial": false},
     "database-transport-recovery.test.mjs": {"milliseconds": 3514, "serial": false},
     "deal-checklist-pings.test.mjs": {"milliseconds": 1025, "serial": false},
+    "deal-checklist-transaction-recovery-postgres.test.mjs": {"milliseconds": 1135, "serial": true},
     "deal-checklist.test.mjs": {"milliseconds": 315, "serial": false},
     "deal-extraction-postgres.test.mjs": {"milliseconds": 1614, "serial": true},
     "deal-files-postgres.test.mjs": {"milliseconds": 1377, "serial": true},
