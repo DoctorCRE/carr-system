@@ -16,6 +16,7 @@
     "hosted_slower_update_count": 48,
     "selected_suites": ["doc-conversation-postgres.test.mjs", "email-delivery-finding-postgres.test.mjs", "email-lifecycle-postgres.test.mjs", "home-inbox-version-guard.test.mjs", "home-review-postgres.test.mjs", "home-waiting-postgres.test.mjs", "lead-approval-queue-reader.test.mjs", "people-directory-postgres.test.mjs", "post-call-action-pairs.test.mjs", "tour-deal-access.test.mjs"]
   },
+  "watch_suite_measurement": {"card": "WR622.S1.J258", "source_sha": "faed6b131fd94675950556a56bd0ba42031657b3", "command": "CARR_CI_UNIT_SUITES=[subject-watches.test.mjs,subject-watches-postgres.test.mjs] node mcp-server/run-tests.mjs", "samples_ms": {"subject-watches-postgres.test.mjs": [2000, 2374, 2322, 2381, 2554], "subject-watches.test.mjs": [189, 206, 197, 213, 205]}, "budget_multiplier": 10, "basis": "Existing local-to-hosted conservative multiplier; preserves hosted snapshot setup and watchdog limits. Local measurements include fixture teardown. Busy 18-core host; no speedup claim.", "logs": [{"path": "/tmp/J258-watch-timings.log", "sha256": "836a3e6db1b6ede67a775323a0e9973f86163230004e4fb355bc9f5adcb1b245"}, {"path": "/tmp/J258-watch-timings-1.log", "sha256": "a8b28b26ece1aec63b9c5a8f2b67c5e723668e4c2aaac36668a22a28d501844e"}, {"path": "/tmp/J258-watch-timings-2.log", "sha256": "d8869e7806bf5cf46b79b8fe1ad94cfff9f7354e3c70c25db133593f133c8e16"}, {"path": "/tmp/J258-watch-timings-3.log", "sha256": "9324d991b142815ad1e19632984748c0dd185689a555087e98f68fc401a0a86e"}, {"path": "/tmp/J258-watch-timings-4.log", "sha256": "b1cf3e7917223bba8c850049cb6529610008ada2382df82cb934344c66fd8719"}]},
   "suites": {
     "a02-rule-enforcement-postgres.test.mjs": {"milliseconds": 3248, "serial": true},
     "a02-rule-enforcement-reader-mutants.test.mjs": {"milliseconds": 1021, "serial": false},
@@ -355,6 +356,8 @@
     "staging-loop-fixtures.test.mjs": {"milliseconds": 636, "serial": false},
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},
     "standing-context-territory.test.mjs": {"milliseconds": 5044, "serial": true},
+    "subject-watches-postgres.test.mjs": {"milliseconds": 25540, "serial": true},
+    "subject-watches.test.mjs": {"milliseconds": 2130, "serial": false},
     "suite-discovery.test.mjs": {"milliseconds": 852, "serial": false},
     "system-work-census.test.mjs": {"milliseconds": 616, "serial": false},
     "system-work-postgres.test.mjs": {"milliseconds": 909, "serial": true},
