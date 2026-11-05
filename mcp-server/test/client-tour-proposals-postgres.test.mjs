@@ -97,3 +97,20 @@ test('morning brief source obeys its published local read contract', async () =>
   assert.equal(queries[0].sql, `select * from ${contract.source.replace('(text)', '($1)')}`);
   assert.deepEqual(queries[0].params, ['joe']);
 });
+
+test('proposal property hydration remains one batch read for the bounded page', async ()=>{
+  const contract=JSON.parse(readFileSync(new URL('../../workspace/contracts/client-tour-proposals.v1.json',import.meta.url))).property_context;
+  const calls=[];
+  const properties=Array.from({length:contract.bounds.maximum_distinct_ids},(_,i)=>({...contract.fixture,carr_property_id:String(i)}));
+  const c={query:async (sql,params)=>{
+    calls.push({sql,params});
+    if (sql.includes('select owner,version')||sql.includes('select d.owner')) return {rows:[{owner:'joe',version:1}]};
+    if (sql.includes('list_client_tour_proposals')) return {rows:[{proposals:{proposals:[],properties,pending_count:0}}]};
+    return {rows:[]};
+  }};
+  const result=await toolsFor(async()=>{throw new Error('read cannot fetch portal');})['list-deal-tour-proposals'].handler(c,partner,{deal_id:'synthetic-deal'});
+  assert.deepEqual(result.properties,properties);
+  assert.equal(calls.filter(c=>c.sql.includes('list_client_tour_proposals')).length,contract.bounds.hydration_queries);
+  assert.equal(calls.length,4,'deal, authorization, transaction-local decision, and single hydrated read');
+  assert.deepEqual(Object.keys(contract.fixture).sort(),contract.fields.toSorted());
+});

@@ -1,0 +1,16 @@
+stateDiagram-v2
+  [*] --> Pending
+  Pending --> EligibleRead: Read active canonical property
+  Pending --> UnavailableRead: Read inactive, missing, or other tenant property
+  EligibleRead --> EligibleRead: Rename then read current canonical label
+  EligibleRead --> UnavailableRead: Deactivate or hide then read
+  EligibleRead --> Refused: Accept with stale cart version
+  UnavailableRead --> Refused: Accept unavailable property
+  EligibleRead --> PartiallyAccepted: Accept some choices with current version
+  EligibleRead --> Accepted: Accept all choices with current version
+  PartiallyAccepted --> UnavailableRead: Deactivate then read
+  PartiallyAccepted --> Accepted: Accept remaining eligible choices
+  PartiallyAccepted --> Dismissed: Keep current cart
+  Pending --> Dismissed: Keep current cart
+  Accepted --> Accepted: Replay identical receipt
+  Refused --> Pending: Reload without cart mutation

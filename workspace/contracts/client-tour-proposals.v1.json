@@ -15,7 +15,7 @@
   },
   "verbs": {
     "pull-client-tour-proposal": {"input": ["deal_id", "tour_id", "idempotency_key"], "output": "proposal id, state, portal_revision"},
-    "list-deal-tour-proposals": {"input": ["deal_id"], "output": "latest 50 proposals with items, choices, current difference.add/remove, expected_selection_version_id and total pending_count"},
+    "list-deal-tour-proposals": {"input": ["deal_id"], "output": "latest 50 proposals with items, choices, current difference.add/remove, expected_selection_version_id, total pending_count and one properties collection"},
     "accept-client-tour-proposal": {"input": ["deal_id", "proposal_id", "idempotency_key", "expected_selection_version_id", "mode"], "mode": ["use_theirs", "per_property"], "choices": "For per_property, a nonempty map from proposal or original-cart property UUID to desired boolean membership. Unchosen properties retain current membership.", "output": "receipt with proposal_id, state, actor, selection_version_id and portal_revision"},
     "dismiss-client-tour-proposal": {"input": ["deal_id", "proposal_id", "idempotency_key"], "output": "dismissal receipt; preserves existing shortlist and earlier accepted choices"}
   },
@@ -34,5 +34,32 @@
     "No route, public share, send, financial fields or hosting deployment is created by these verbs."
   ],
   "morning_brief": {"section": "tour_proposals","source": "ops.pending_client_tour_proposals(text)","read_role": "carr_reader","deal_limit": 20,"query_deal_limit": 21,"scope": "authenticated partner owns the deal; active portal and matching deal/client/Tour binding","states": ["ready","empty","partial","unavailable"],"changed_properties": "distinct symmetric difference of proposal IDs and current cart IDs per deal, including partially_accepted proposals","read_effects": "none; local stored pending proposals only; no portal GET, proposal import or cart mutation"},
-  "activation_dependencies": ["Portal hosting supports and authorizes the source contract", "S3 and S4 registry queue lands", "App WR586.S5.J5", "Morning brief WR586.S5.J3", "Synthetic full-schema CI then production proof under a separately authorized job"]
+  "activation_dependencies": ["Portal hosting supports and authorizes the source contract", "S3 and S4 registry queue lands", "App WR586.S5.J5", "Morning brief WR586.S5.J3", "Synthetic full-schema CI then production proof under a separately authorized job"],
+  "property_context": {
+    "collection": "properties",
+    "identity": "carr_property_id is ops.tour_property.id; tenant carr-internal",
+    "fields": [
+      "carr_property_id",
+      "name",
+      "address",
+      "property_status",
+      "eligible"
+    ],
+    "labels": "Current effective reviewed display.name and display.address assertions, ordered by effective_from then id descending. Null when absent. Portal and snapshot labels cannot authorize acceptance.",
+    "eligibility": "Current canonical row exists in carr-internal and property_status is active. Missing and other-tenant rows return null name, address and status, with eligible false.",
+    "bounds": {
+      "proposal_page": 50,
+      "ids_per_proposal_per_cart": 100,
+      "maximum_distinct_ids": 15000,
+      "hydration_queries": 1
+    },
+    "consistency": "One SQL statement snapshot for the read. Acceptance rechecks current active tenant membership and expected cart version independently.",
+    "fixture": {
+      "carr_property_id": "10000000-0000-4000-8000-000000000010",
+      "name": "Synthetic clinic",
+      "address": "Synthetic address fixture",
+      "property_status": "active",
+      "eligible": true
+    }
+  }
 }

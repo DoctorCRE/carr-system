@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR586.S5.J11-proposal-property-context",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "proposal-property-context-release",
+    "predicate": "Worker /release matches the merged revision and exposes list-deal-tour-proposals and accept-client-tour-proposal. This release smoke alone does not prove property hydration or acceptance behavior.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Exact deployed release identity and both proposal verbs are present. Product remains landed-unproven until the separate coordinator proof observes a real pending proposal canonical name absent from the current shortlist, unavailable deactivated status, and an acceptance refusal receipt bound to that release.",
+    "input_class": "read-only Worker release and registry; subsequent read-only observation of separately authorized real proposal and acceptance receipts on the required deployment host",
+    "deadline_seconds": 120
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}

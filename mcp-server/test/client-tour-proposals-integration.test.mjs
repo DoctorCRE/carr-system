@@ -23,11 +23,13 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     await c.query(`alter table deal add column owner text default 'joe';
       create table ops.tour(id uuid primary key,organization_tenant_id text,deal_id uuid references deal(id),unique(organization_tenant_id,id));
       create table ops.tour_property(id uuid primary key,organization_tenant_id text,property_status text);
+      create table ops.tour_field_assertion(id uuid primary key default gen_random_uuid(), organization_tenant_id text,property_id uuid,field_key text,value jsonb,review_state text,effective_from timestamptz default now(),effective_to timestamptz);
       create table ops.tour_selection_cart_version(id uuid primary key default gen_random_uuid(),organization_tenant_id text,tour_id uuid,selection_version integer,base_selection_version_id uuid,property_ids jsonb,selection_digest text,created_by_actor_id text,created_at timestamptz default now(),unique(organization_tenant_id,tour_id,selection_version));`);
     await c.query(definition('0429_tour_domain_route_cheat_sheet.sql','tour_server_actor_id'));
     await c.query(definition('0430_tour_delivery_data_plane.sql','append_tour_selection_cart_version'));
     await c.query(definition('1142_tour_deal_access.sql','tour_deal_visible'));
     if (!process.argv.includes('--baseline')) await c.query(readMigration('1149_client_tour_proposals.sql'));
+    if (!process.argv.includes('--baseline') && !process.argv.includes('--context-baseline')) await c.query(readMigration('1156_client_tour_proposal_property_context.sql'));
     const actor=randomUUID(),party=randomUUID(),client=randomUUID(),deal=randomUUID(),tour=randomUUID();
     const a=randomUUID(),b=randomUUID(),x=randomUUID();
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic partner')",[actor]);
@@ -86,6 +88,42 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.equal((await summary('portal')).items.length,0);
     assert.equal((await list()).pending_count,1);
     assert.deepEqual((await list()).proposals[0].difference,{add:[b],remove:[a]});
+    const mutate=async (sql,params=[])=>{
+      await c.query('reset session authorization');
+      try {await c.query(sql,params);} finally {await c.query('set session authorization carr_writer');}
+    };
+    const label=async (id,name,review='reviewed',from='now()')=>mutate(
+      `insert into ops.tour_field_assertion(organization_tenant_id,property_id,field_key,value,review_state,effective_from) values('carr-internal',$1,'display.name',$2,$3,${from})`,[id,JSON.stringify(name),review]);
+    await label(b,'New to tour');
+    await label(a,'Current shortlist');
+    await mutate("insert into ops.tour_field_assertion(organization_tenant_id,property_id,field_key,value,review_state) values('carr-internal',$1,'display.address',$2,'reviewed')",[b,JSON.stringify('Synthetic address fixture')]);
+    const context=await list();
+    assert.equal(context.properties.find(p=>p.carr_property_id===b).name,'New to tour');
+    assert.equal(context.properties.find(p=>p.carr_property_id===a).name,'Current shortlist');
+    assert.equal(context.properties.find(p=>p.carr_property_id===b).eligible,true);
+    assert.equal(context.properties.find(p=>p.carr_property_id===b).address,'Synthetic address fixture');
+    await label(b,'Future name','reviewed',"now()+interval '1 day'");
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).name,'New to tour');
+    await label(b,'Renamed building');
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).name,'Renamed building');
+    await label(b,'Unreviewed name','unreviewed');
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).name,'Renamed building');
+    await mutate("update ops.tour_property set property_status='inactive' where id=$1",[b]);
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).eligible,false);
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).property_status,'inactive');
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).name,'Renamed building','status does not turn a canonical label into authority');
+    const unavailableArgs={deal_id:deal,proposal_id:first.proposal.id,expected_selection_version_id:before,mode:'use_theirs',idempotency_key:randomUUID()};
+    await assert.rejects(invoke('accept-client-tour-proposal',unavailableArgs),e=>e.payload?.error==='proposal_unresolved_property');
+    assert.equal((await cart()).id,before);
+    await mutate("update ops.tour_property set organization_tenant_id='other-tenant',property_status='active' where id=$1",[b]);
+    assert.deepEqual((await list()).properties.find(p=>p.carr_property_id===b),{carr_property_id:b,name:null,address:null,property_status:null,eligible:false});
+    await assert.rejects(invoke('accept-client-tour-proposal',{...unavailableArgs,idempotency_key:randomUUID()}),e=>e.payload?.error==='proposal_unresolved_property');
+    await mutate('delete from ops.tour_property where id=$1',[b]);
+    assert.equal((await list()).properties.find(p=>p.carr_property_id===b).eligible,false);
+    await assert.rejects(invoke('accept-client-tour-proposal',{...unavailableArgs,idempotency_key:randomUUID()}),e=>e.payload?.error==='proposal_unresolved_property');
+    await mutate("insert into ops.tour_property values($1,'carr-internal','active')",[b]);
+    await assert.rejects(invoke('list-deal-tour-proposals',{deal_id:randomUUID()}));
+    await assert.rejects(invoke('list-deal-tour-proposals',{deal_id:deal},{slug:'outsider',human:true}));
     assert.equal((await pull()).proposal.id,first.proposal.id);
     assert.equal((await cart()).id,before);
     assert.equal(new URL(requests[0].url).pathname,'/synthetic/api/selection');
@@ -111,7 +149,7 @@ test('proposal_accept_is_the_only_path_that_changes_the_shortlist in PostgreSQL'
     assert.deepEqual(await accept(),partial);
     assert.equal((await cart()).selection_version,2);
     await assert.rejects(accept({...args,choices:{[x]:true}}));
-    await assert.rejects(accept({...args,idempotency_key:randomUUID()}));
+    await assert.rejects(accept({...args,idempotency_key:randomUUID()}),e=>e.payload?.error==='proposal_shortlist_conflict');
     const full=await accept({...args,idempotency_key:randomUUID(),mode:'use_theirs',choices:undefined,expected_selection_version_id:(await cart()).id});
     assert.equal(full.receipt.state,'accepted');
     assert.deepEqual(new Set((await cart()).property_ids),new Set([b,x]));
