@@ -7,7 +7,7 @@ const now='2026-10-01T12:00:00Z';
 const proven={coverage_verified_at:now,deals_referred:5,deals_worked:8,won:7,lost:1,first_worked_at:'2024-09-01T12:00:00Z',last_contacted_at:'2026-09-01T12:00:00Z'};
 test('trust tiers require all four criteria and never convert absent history to zero',()=>{
  assert.equal(computedTrust(proven,now),'Proven');assert.equal(computedTrust({...proven,deals_worked:3,won:2,lost:1,first_worked_at:'2025-09-01'},now),'Established');
- for(const update of [{deals_worked:2},{won:0,lost:8},{first_worked_at:'2026-09-01'},{last_contacted_at:'2025-09-01'},{last_contacted_at:'2027-09-01'}])assert.equal(computedTrust({...proven,...update},now),'Trial');
+ for(const update of [{deals_worked:2,won:1,lost:1},{won:0,lost:8},{first_worked_at:'2026-09-01'},{last_contacted_at:'2025-09-01'},{last_contacted_at:'2027-09-01'}])assert.equal(computedTrust({...proven,...update},now),'Trial');
  assert.equal(computedTrust({...proven,coverage_verified_at:null},now),'Unrated');assert.equal(computedTrust(null,now),'Unrated');
  const unknown=enrichRelationship({...proven,coverage_verified_at:null},now);assert.equal(unknown.deals_referred,null);assert.equal(unknown.deals_worked,null);assert.equal(unknown.win_rate,null);
  assert.equal(enrichRelationship({...proven,won:0,lost:0},now).win_rate,null);assert.equal(enrichRelationship(proven,now).win_rate,7/8);
@@ -77,4 +77,36 @@ test('expanded revision is opt-in; legacy consumers retain their exact payload s
  const legacy=await read(null);assert.equal(Object.hasOwn(legacy.rows[0],'relationship'),false);assert.equal(Object.hasOwn(legacy.facets,'territories'),false);
  const expanded=await read('vendor-directory.v1');assert.equal(expanded.rows[0].relationship.computed_tier,'Unrated');assert.equal(expanded.facets.territories[0].slug,'Demo North');
  assert.throws(()=>parseBusinessQuery('vendors',new URLSearchParams({contract:'unknown'}),'joe'));
+});
+
+
+test('verified statistics reject malformed attestations and impossible count domains together', () => {
+ for (const update of [
+  {coverage_verified_at:'not-a-date'}, {coverage_verified_at:'2099-01-01T00:00:00Z'},
+  {coverage_verified_at:'2026-02-30T00:00:00Z'}, {coverage_verified_at:''},
+  {lost:-1}, {won:-1}, {deals_worked:-1}, {deals_referred:-1},
+  {won:1.5}, {deals_worked:Number.MAX_SAFE_INTEGER+1}, {lost:Infinity},
+  {won:8,lost:1}, {won:undefined}, {deals_referred:NaN},
+ ]) {
+  const input={...proven,...update};
+  assert.equal(computedTrust(input,now),'Unrated',JSON.stringify(update));
+  const result=enrichRelationship(input,now);
+  for (const key of ['deals_referred','deals_worked','won','lost','win_rate']) assert.equal(result[key],null,key);
+ }
+ assert.equal(computedTrust(proven,'invalid-clock'),'Unrated');
+});
+
+test('valid history preserves tier thresholds, absent first contact, and bounded rates', () => {
+ const boundary={...proven,first_worked_at:'2024-10-01T00:00:00Z',last_contacted_at:now};
+ assert.equal(computedTrust(boundary,now),'Proven');
+ assert.equal(computedTrust({...boundary,deals_worked:3,won:1,lost:1,first_worked_at:'2025-10-01T00:00:00Z'},now),'Established');
+ for (const input of [{...proven,first_worked_at:null},{...proven,won:0,lost:0},{...proven,deals_worked:0,won:0,lost:0}]) {
+  assert.equal(computedTrust(input,now),'Trial');
+  assert.equal(enrichRelationship(input,now).win_rate,input.won+input.lost ? input.won/(input.won+input.lost) : null);
+ }
+ assert.equal(enrichRelationship({...proven,won:8,lost:0},now).win_rate,1);
+ assert.equal(computedTrust({...proven,coverage_verified_at:'2026-09-01T12:00:00.123456+00:00'},now),'Proven');
+ for (const [days, expected] of [[180,'Proven'],[181,'Established'],[365,'Established'],[366,'Trial']]) {
+  assert.equal(computedTrust({...proven,last_contacted_at:new Date(Date.parse(now)-days*86400000).toISOString()},now),expected);
+ }
 });

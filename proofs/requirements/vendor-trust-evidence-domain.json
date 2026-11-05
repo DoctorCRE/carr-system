@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR647.S6-vendor-trust-evidence-domain",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "visible-vendor-trust-evidence-domain",
+    "predicate": "After merge and deploy, the coordinator supplies out/production-proof-session.json from an already authorized browser session and executes python3 tools/prove-vendor-trust-evidence-domain.py --origin https://app.doctorcre.com --carr-origin https://api.doctorcre.com --storage-state out/production-proof-session.json --timeout-seconds 30 at the delivered revision. Require exit 0, app and CARR release identities, at least one rated and one unverified vendor, valid nonfuture coverage and coherent safe counts for every observed rated row, bounded or null win rates, and unavailable derived statistics for unverified rows. The registered worker-release-smoke.v1 runner proves release identity only. Its success cannot substitute for the new semantic CLI. Bind CARR release identity to the merged revision using the normal release ancestry check. Missing authorized session or populations leaves semantic proof blocked. No manufactured production inputs.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "The separate semantic CLI exits 0 with redacted counts and release identities. Exit 1 contradicts the invariant; exit 78 leaves it unproven. Release-only evidence is insufficient. This bounded observation does not prove malformed inputs occurred naturally or establish a full census.",
+    "input_class": "Existing authorized Playwright storage-state JSON and read-only app-proxied vendor-directory.v1 pages, capped at five pages or 100 rows. No builder production calls.",
+    "deadline_seconds": 30
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 7, "max_records": 100, "max_runtime_seconds": 30, "max_artifact_bytes": 1048576}
+}

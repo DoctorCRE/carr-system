@@ -6,25 +6,32 @@ type RelationshipFields = { deal_evidence?: DealEvidence[]; loan_programs?: stri
 // Evidence and overrides are external JSON, validated field by field below.
 type EvidenceInput = Record<string, any>;
 import { exactDealAssociations } from "./relationship-network.ts";
-// Trust uses verified deal history; missing coverage never becomes zero.
+type VerifiedStats = RelationshipStats & { coverage_verified_at: string };
+function hasVerifiedStats(stats: Partial<RelationshipStats> | null | undefined, now: string): stats is VerifiedStats {
+  const coverage = canonicalEvidenceTimestamp(stats?.coverage_verified_at);
+  const observed = canonicalEvidenceTimestamp(now);
+  if (!stats || !coverage || !observed || Date.parse(coverage) > Date.parse(observed)) return false;
+  const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  return count(stats.deals_worked) && count(stats.won) && count(stats.lost)
+    && (stats.deals_referred === undefined || count(stats.deals_referred))
+    && stats.won <= stats.deals_worked - stats.lost;
+}
 export function computedTrust(stats: Partial<RelationshipStats> | null | undefined, now: string) {
-  if (!stats?.coverage_verified_at || !Number.isInteger(stats.deals_worked) || !Number.isInteger(stats.won) || !Number.isInteger(stats.lost)) return 'Unrated';
+  if (!hasVerifiedStats(stats, now)) return 'Unrated';
   const years = stats.first_worked_at ? (Date.parse(now) - Date.parse(stats.first_worked_at)) / (365.25 * 86400000) : 0;
   const recency = stats.last_contacted_at ? (Date.parse(now) - Date.parse(stats.last_contacted_at)) / 86400000 : Infinity;
-  // Number.isInteger above establishes these optional numeric fields.
-  const resolved = stats.won! + stats.lost!;
-  // Keep the existing null comparison coercion when no outcomes are resolved.
-  const rate = resolved ? stats.won! / resolved : null;
-  if (years >= 2 && stats.deals_worked! >= 8 && rate! >= .7 && recency >= 0 && recency <= 180) return 'Proven';
-  if (years >= 1 && stats.deals_worked! >= 3 && rate! >= .5 && recency >= 0 && recency <= 365) return 'Established';
+  const resolved = stats.won + stats.lost;
+  const rate = resolved ? stats.won / resolved : 0;
+  if (years >= 2 && stats.deals_worked >= 8 && rate >= .7 && recency >= 0 && recency <= 180) return 'Proven';
+  if (years >= 1 && stats.deals_worked >= 3 && rate >= .5 && recency >= 0 && recency <= 365) return 'Established';
   return 'Trial';
 }
 export function enrichRelationship(payload: Partial<RelationshipStats> | null | undefined, now: string) {
   const stats = payload || {};
-  // Keep legacy undefined-to-NaN arithmetic for incomplete unverified payloads.
-  const verified = Boolean(stats.coverage_verified_at);
+  const verified = hasVerifiedStats(stats, now);
   return { ...stats, deals_referred: verified ? stats.deals_referred : null, deals_worked: verified ? stats.deals_worked : null,
-    win_rate: verified && stats.won! + stats.lost! > 0 ? stats.won! / (stats.won! + stats.lost!) : null,
+    won: verified ? stats.won : null, lost: verified ? stats.lost : null,
+    win_rate: verified && stats.won + stats.lost > 0 ? stats.won / (stats.won + stats.lost) : null,
     computed_tier: computedTrust(stats, now), formula_version: 'vendor-trust.v1' };
 }
 export function requireRelationshipPartner(actor: Actor, code = 'AUTHORIZATION_REFUSED') {
@@ -54,7 +61,7 @@ export function dealEvidenceEntries(value: unknown) {
 // explicit timezone. Validate the calendar before Date.parse can normalize it.
 function canonicalEvidenceTimestamp(value: unknown) {
   if (typeof value !== 'string') return null;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2}))?$/.exec(value);
+  const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2}))?$/.exec(value);
   if (!parts) return null;
   const [, y, m, d, h = '00', minute = '00', second = '00', zone = 'Z'] = parts;
   const year = Number(y), month = Number(m), day = Number(d);
