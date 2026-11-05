@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "recorded-comps-readable-deal-labels",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "natural-comps-and-release-producer",
+    "predicate": "After merge and deployment run python3 tools/prove-recorded-comps-readable-deal-labels.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30 from the delivered checkout. Require both natural_read and synthetic to pass at the full release SHA. The registered worker-release-smoke.v1 observer provides supporting release identity only; its success never substitutes for this semantic runner. Inspect at most three of ten listed conversations with 200 turns each, without creating a turn. Require a post-deployment comps table with readable Deal and Proposed on columns, deal UUID and negotiation rent sources, schema validation and canonical name comparison through get-deal-room. Historical turns do not establish current behavior. Execute the same release-pinned producer with fixed synthetic SQL ports. Exit 78 leaves the unit landed-unproven when natural evidence, release identity or authorization is unavailable.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Both required observations pass. Release smoke alone and fixture success alone never establish live proof.",
+    "input_class": "Existing authorized natural Doc conversations plus release-pinned repository producer with synthetic SQL ports. No writes or sends.",
+    "deadline_seconds": 30
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 12, "max_records": 600, "max_runtime_seconds": 30, "max_artifact_bytes": 1048576}
+}
