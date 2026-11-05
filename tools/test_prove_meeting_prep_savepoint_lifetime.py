@@ -148,5 +148,50 @@ class ProofCliTests(unittest.TestCase):
         self.assertEqual(requests, [])
 
 
+class DeadlineReceiptTests(unittest.TestCase):
+    def test_completed_observation_cannot_interrupt_receipt(self):
+        driver = r"""
+import importlib.util
+import json
+import signal
+import subprocess
+import sys
+spec = importlib.util.spec_from_file_location('proof', sys.argv[1])
+proof = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(proof)
+outcome = sys.argv[2]
+def observe(args, evidence):
+    if outcome == 'timeout':
+        raise subprocess.TimeoutExpired('synthetic wrapper', 0.2)
+    if outcome == 'contradiction':
+        raise proof.Contradiction('synthetic contradiction')
+    if outcome == 'alarm':
+        signal.raise_signal(signal.SIGALRM)
+    return {'fixture': True, 'live_proven': False}
+original_dumps = json.dumps
+def deliver_due_alarm(value):
+    if signal.getitimer(signal.ITIMER_REAL)[0] > 0:
+        signal.raise_signal(signal.SIGALRM)
+    return original_dumps(value)
+proof.observe = observe
+proof.json.dumps = deliver_due_alarm
+sys.argv = [sys.argv[1], '--origin', 'http://127.0.0.1',
+            '--call-wrapper', '/unused', '--timeout-seconds', '30']
+sys.exit(proof.main())
+"""
+        for outcome, code in [('timeout', 78), ('contradiction', 1), ('success', 0), ('alarm', 78)]:
+            with self.subTest(outcome=outcome):
+                result = subprocess.run([sys.executable, '-c', driver, str(RUNNER), outcome],
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                receipt = json.loads(result.stdout)
+                self.assertFalse(receipt['live_proven'])
+                if outcome in {'timeout', 'alarm'}:
+                    self.assertEqual(receipt['status'], 'unavailable')
+                elif outcome == 'contradiction':
+                    self.assertEqual(receipt['status'], 'contradiction')
+                self.assertEqual(result.stderr, '')
+
+
 if __name__ == '__main__':
     unittest.main()
