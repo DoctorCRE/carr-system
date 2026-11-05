@@ -30,6 +30,7 @@ mod attachment;
 mod block;
 mod body;
 mod census;
+mod task_candidate;
 mod calendar;
 mod category;
 mod contact;
@@ -592,6 +593,8 @@ const USAGE: &str = "\
 hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
 
 usage:
+  hxprobe task-candidates --immutable-copy <copy> <out.db> <account-key> <generation> <build> <revision> [after-key]
+                                     emit held task evidence and count-only census JSON
   hxprobe census --immutable-copy <copy> <files-dir> <account-key>
                                      emit count-only child-object census JSON
   hxprobe observe <copy>             emit count-only structural JSON
@@ -605,6 +608,13 @@ rewrites the file while it runs.";
 
 fn main() {
     let raw: Vec<_> = env::args_os().collect();
+    if raw.get(1).is_some_and(|arg| arg == "task-candidates") {
+        match task_candidate::run(&raw[2..]) {
+            Ok(json) => println!("{json}"),
+            Err(()) => { eprintln!("task candidate input rejected"); std::process::exit(2); }
+        }
+        return;
+    }
     if raw.get(1).is_some_and(|arg| arg == "census") {
         let result = if raw.len() == 6 && raw[2] == "--immutable-copy" {
             raw[5].to_str().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0)
