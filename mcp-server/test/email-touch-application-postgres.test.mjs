@@ -8,7 +8,8 @@ import { connectionRouteForTool } from '../src/mcp.js';
 import { ToolError } from '../src/tool-error.ts';
 import { publicError } from '../src/public-errors.ts';
 
-test('email touch refusals preserve their public codes without source payloads',()=>{
+test('email touch refusals preserve their public codes without source payloads',t=>{
+  t.mock.method(console,'error',()=>{});
   for(const code of ['email_touch_requires_email_occurrence','email_touch_role_mismatch',
     'email_touch_target_not_live','email_touch_already_applied','email_touch_occurrence_conflict',
     'email_touch_window_invalid','email_touch_duplicate_expectation']) {
@@ -86,6 +87,16 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     const recorded_end=new Date(stamp.getTime()+2000).toISOString();
     assert.equal((await call('reconcile-email-touches',{...args,recorded_start,recorded_end},'carr_writer')).counts.out_of_window,1);
     await assert.rejects(call('reconcile-email-touches',{...args,recorded_start},'carr_writer'));
+  });
+  await t.test('submillisecond source timestamps reconcile to the returned normalized occurrence',async()=>{
+    const args={...input,idempotency_key:randomUUID(),occurred_at:'2026-01-01T12:00:00.123456Z',email_touch:{...input.email_touch,source_id:randomUUID()}};
+    const result=await call('log-activity',args);
+    const effect={...result.email_application}; delete effect.activity_id;
+    assert.equal((await read([effect])).counts.applied,1);
+    const legacy={...args,idempotency_key:randomUUID(),email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()}};
+    delete legacy.email_touch;
+    await call('log-activity',legacy);
+    await assert.rejects(call('log-activity',{...legacy,idempotency_key:randomUUID(),email_touch:{...args.email_touch,source_id:randomUUID()}}),e=>e.payload?.error==='email_touch_occurrence_conflict');
   });
   await t.test('immutable evidence and dangling activity are distinct from missing',async()=>{
     await assert.rejects(c.query("update event set new_value='{}' where idempotency_key=$1",[input.idempotency_key]),/email_touch_application_immutable/);

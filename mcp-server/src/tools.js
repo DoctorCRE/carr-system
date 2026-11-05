@@ -4616,8 +4616,8 @@ export const TOOLS = {
           if (existing.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
           if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
           if (binding) {
-            const captured = (await c.query(`select occurred_at, ${FK[s.type]} as target_id from activity where id=$1`, [existing.id])).rows[0];
-            if (new Date(captured.occurred_at).toISOString() !== binding.occurred_at || captured.target_id !== s.id)
+            const captured = (await c.query(`select occurred_at=$2::timestamptz as occurrence_matches, ${FK[s.type]} as target_id from activity where id=$1`, [existing.id,binding.occurred_at])).rows[0];
+            if (!captured.occurrence_matches || captured.target_id !== s.id)
               throw new ToolError({error:'email_touch_occurrence_conflict'});
           }
           const result = { ok: true, activity_id: existing.id, subject: s,
@@ -4656,7 +4656,7 @@ export const TOOLS = {
       const r = await c.query(
         `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source, email_context, email_source, email_identity, calendar_event_key)
          values (coalesce($1::timestamptz, now()), $2, $3, $4, $5, $6, $7, 'stated', $8::jsonb, $9::jsonb, $10::jsonb, $11) returning id, occurred_at`,
-        [args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
+        [binding?.occurred_at || args.occurred_at || null, actor.id, args.kind, args.summary, args.detail || null, args.owed || null, s.id,
           args.email_context ? JSON.stringify(args.email_context) : null,
           args.email_source ? JSON.stringify(args.email_source) : null,
           emailIdentity ? JSON.stringify({ ...emailIdentity, subject: s.id }) : null, args.calendar_event_key ?? null]);
