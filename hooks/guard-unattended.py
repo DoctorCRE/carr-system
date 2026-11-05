@@ -534,52 +534,24 @@ def vault_md_write_target(cmd):
         return None                                   # fail open, same as siblings
 
 
-def corpus_render_write_target(cmd):
-    """The Bash door of the corpus-render write-block (2026-08-10, Joe's
-    instruction after the nightly chain failed on eight Drive-side edits).
-    Same deny set as the Write/Edit door — one module, hooks/corpus_renders.py —
-    so the two doors cannot drift apart (rule a8c55a47: a manual path and an
-    automated path that do the same job must be the same code).
-
-    `corpus-sync.py` itself is exempt and must be: it is the sanctioned writer
-    of every one of these files. It never names them literally, so the exemption
-    is belt-and-braces rather than load-bearing."""
+def corpus_render_write_target(cmd, cwd=None, depth=0):
+    """Classify shell write operands with the shared corpus path policy."""
+    from corpus_renders import shell_write_verdict
     try:
-        if "corpus-sync.py" in cmd:
-            return None
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from corpus_renders import paths_in_command, verdict
-        hits = paths_in_command(cmd)
-        if not hits:
-            return None
-        for spelling, real in hits.items():
-            written = False
-            idx = 0
-            while True:
-                idx = cmd.find(spelling, idx)
-                if idx < 0:
-                    break
-                if _WRITE_BEFORE_CTX.search(cmd[max(0, idx - 60):idx]):
-                    written = True
-                    break
-                idx += len(spelling)
-            if not written:
-                for clause in re.split(r"[;&|]", cmd):
-                    toks = clause.strip().split()
-                    if toks and toks[0] in ("cp", "mv", "rsync") \
-                            and clause.rstrip("\"' ").endswith(spelling):
-                        written = True
-                        break
-            if not written and re.search(
-                    r"open\(\s*[\"'][^\"']*" + re.escape(os.path.basename(spelling))
-                    + r"[\"']\s*,\s*[\"'][wa]", cmd):
-                written = True
-            if written:
-                return (f"shell write onto a corpus render — {verdict(real, 'this command')} "
-                        f"(blocked by the CARR guard, Bash door of the corpus-render block)")
-        return None
-    except Exception:
-        return None                                   # fail open, same as siblings
+        if depth > 4:
+            raise ValueError("shell substitution inspection limit exceeded")
+        for body in shell_expansions(without_shell_comments(strip_inert_text(cmd))):
+            if re.search(r"\bcd\b", cmd):
+                raise ValueError("substitution with a directory change is unsupported")
+            reason = corpus_render_write_target(body, cwd, depth + 1)
+            if reason:
+                return reason
+        reason = shell_write_verdict(cmd, cwd)
+        if reason:
+            return f"shell write onto a corpus render: {reason}"
+    except (ValueError, SyntaxError, OSError) as exc:
+        return f"Cannot inspect corpus write safely: {exc}"
+    return None
 
 
 # WIDENED 2026-08-14 BY A SWEEP, after the raw-device rule was found missing the
@@ -2593,6 +2565,9 @@ def zsh_glob_reason(cmd, invocations, depth=0):
 def check(cmd, cwd=None):
     """Normalization adds checks and can never replace the raw decision."""
     try:
+        reason = corpus_render_write_target(cmd, cwd)
+        if reason:
+            return reason
         invocations = list(executed_invocations(cmd))
         reason = _check_candidate(cmd, cwd, invocations, cmd)
         if reason:
@@ -2723,9 +2698,6 @@ def _check_candidate(cmd, cwd, invocations, shell_context):
     reason = render_write_target(cmd)
     if reason:
         return reason
-    reason = corpus_render_write_target(cmd)
-    if reason:
-        return reason
     reason = vault_md_write_target(cmd)
     if reason:
         return reason
@@ -2737,8 +2709,9 @@ from lib.hook_runtime import decision, run
 
 
 def _parse_error(exc):
-    log(f"ALLOW(parse-error) {exc}")
-    return 0
+    log(f"DENY(parse-error) {exc}")
+    print("Cannot inspect command safely: unreadable hook input.", file=sys.stderr)
+    return 2
 
 
 def _decision_error(exc):
@@ -2749,6 +2722,10 @@ def _decision_error(exc):
 
 @decision(on_error=_decision_error)
 def decide(payload):
+    if not isinstance(payload, dict) or not isinstance(
+            payload.get("tool_name") or payload.get("toolName"), str):
+        print("Cannot inspect command safely: invalid hook event.", file=sys.stderr)
+        return 2
     tool = payload.get("tool_name") or payload.get("toolName") or ""
     ti = payload.get("tool_input") or payload.get("toolInput") or {}
 
@@ -2820,10 +2797,9 @@ def decide(payload):
     # its embedded exec_command({cmd: ...}) must receive the same command
     # inspection as a native Bash call. A dict remains the Claude shape.
     cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
-    if not isinstance(cmd, str):
-        cmd = ""
-    if not cmd:
-        sys.exit(0)
+    if not isinstance(cmd, str) or not cmd.strip():
+        print("Cannot inspect command safely: shell command must be a nonempty string.", file=sys.stderr)
+        sys.exit(2)
     if native_wrapper and 'exec_command' in cmd:
         from lib.native_shell import native_commands, UninspectableCommand
         try:

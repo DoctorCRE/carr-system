@@ -56,11 +56,13 @@ back to a glob over `~/Library/CloudStorage/GoogleDrive-*/My Drive/CARR AI`, so
 it binds on his machine the moment he pulls, with no per-machine edit. His
 settings already carry the two hooks this module plugs into.
 
-FAILS OPEN ON ERROR, by deliberate inheritance from the other gates: a gate that
-wedges a session costs more than the marginal safety of failing closed on a
-single-operator machine. A parse failure logs and allows.
+The Bash door refuses uninspectable write operands. The file-tool door retains
+its existing error policy.
 """
 
+import ast
+import re
+import shlex
 import glob
 import json
 import os
@@ -205,44 +207,132 @@ def verdict(path, tool="this write"):
     )
 
 
-def command_spellings():
-    """{literal path string: realpath} for every projected render, under EVERY
-    spelling a shell command might use.
-
-    This exists because `/Users/booko/My Drive` is a symlink to the CloudStorage
-    mount, so realpath collapses two very different-looking strings into one.
-    The Write/Edit door never notices — it resolves before comparing. The Bash
-    door matches TEXT, so a command written against the CloudStorage spelling
-    would sail past a deny set holding only realpaths. guard-unattended.py
-    already carries `_VAULT_SPELLINGS` for exactly this reason; this is the same
-    problem one directory up.
-
-    DERIVED FROM render_map(), not from the manifest directly. It used to read
-    the manifest alone, and when the skills tree became a second source on
-    2026-08-10 the Write door gained those 24 files while this one silently did
-    not — caught by the selftest, which is the whole reason that test spawns the
-    real hooks instead of importing them."""
-    out = {}
-    root_spellings = [(root, os.path.realpath(root)) for root in roots().values()]
-    for real in render_map():
-        out[real] = real
-        for root, resolved in root_spellings:
-            if resolved != root and real.startswith(resolved + os.sep):
-                out[root + real[len(resolved):]] = real
-    return out
+def _shell_word(raw):
+    """Decode quoting and HOME without executing shell code."""
+    parts = re.findall(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|[^'\"\\]+", raw)
+    expanded = []
+    for part in parts:
+        if part.startswith("'") or part.startswith("\\"):
+            expanded.append(part)
+            continue
+        part = re.sub(r"\$\{HOME\}|\$HOME(?![A-Za-z0-9_])",
+                      lambda _: shlex.quote(os.path.expanduser('~')) if not part.startswith('"')
+                      else os.path.expanduser('~').replace('\\', '\\\\').replace('"', '\\\"'), part)
+        if part.startswith('~/') or part == '~':
+            part = shlex.quote(os.path.expanduser('~')) + part[1:]
+        expanded.append(part)
+    words = shlex.split(''.join(expanded))
+    if len(words) != 1:
+        raise ValueError('write operand does not resolve to one word')
+    return words[0]
 
 
-def paths_in_command(cmd):
-    """{the literal string found in the command: its realpath}, for every corpus
-    render the command names under either spelling.
+def shell_write_verdict(command, cwd=None, _depth=0):
+    """Inspect supported write operands; refuse unresolved write paths."""
+    from cmd_text import SHELL_BOUNDARIES, SHELL_REDIRECTS, strip_inert_text
+    if _depth > 4:
+        raise ValueError("nested shell inspection limit exceeded")
+    text = strip_inert_text(command).replace("-m <message>", "-m message")
+    word = r"(?:'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|[^\s'\"\\;&|<>])+"
+    tokens = re.findall(r'[;&|<>]+|\n|' + word, text)
+    cwd = os.path.realpath(cwd or os.getcwd())
+    possible_cwds = {cwd}
+    protected = render_map()
+    if not protected:
+        raise ValueError('corpus render deny set is unavailable')
 
-    Keyed by the SPELLING rather than the realpath on purpose: the caller has to
-    locate the write operator immediately before the path, and it can only do
-    that by searching for the text the command actually contains."""
-    hits = {}
-    if not isinstance(cmd, str) or not cmd:
-        return hits
-    for spelling, real in command_spellings().items():
-        if spelling in cmd:
-            hits[spelling] = real
-    return hits
+    def inspect(path):
+        if any(ch in path for ch in '$`*?[]{}') or path.startswith('~'):
+            raise ValueError('dynamic write operand; use a literal path or HOME')
+        for base in possible_cwds:
+            real = os.path.realpath(os.path.join(base, path))
+            if real in protected:
+                return verdict(real, 'this command')
+        return None
+
+    segment = []
+    for token in tokens + [';']:
+        if token not in SHELL_BOUNDARIES and token != '\n':
+            segment.append(token)
+            continue
+        words, outputs, i = [], [], 0
+        while i < len(segment):
+            raw = segment[i]
+            if raw in SHELL_REDIRECTS:
+                if i + 1 >= len(segment):
+                    raise ValueError('missing redirection target')
+                target = _shell_word(segment[i + 1])
+                if raw in {'>', '>>', '>|', '<>', '&>', '&>>'} or (
+                        raw == '>&' and not target.isdigit() and target != '-'):
+                    outputs.append(target)
+                i += 2
+            else:
+                words.append(_shell_word(raw))
+                i += 1
+        segment = []
+        if not words and not outputs:
+            continue
+        program = os.path.basename(words[0]) if words else ''
+        args = words[1:]
+        if program == 'cd':
+            if len(args) != 1:
+                raise ValueError('cannot resolve working directory change')
+            inspect(args[0])
+            possible_cwds.update(os.path.realpath(os.path.join(base, args[0]))
+                                 for base in tuple(possible_cwds))
+            if len(possible_cwds) > 32:
+                raise ValueError('working directory inspection limit exceeded')
+        if program in {'sh', 'bash', 'zsh', 'dash'}:
+            for j, arg in enumerate(args[:-1]):
+                if arg.startswith('-') and not arg.startswith('--') and 'c' in arg:
+                    for base in possible_cwds:
+                        reason = shell_write_verdict(args[j + 1], base, _depth + 1)
+                        if reason:
+                            return reason
+        writers = {'tee', 'cp', 'mv', 'rsync', 'sed'}
+        if program not in writers and program not in {'echo', 'printf', 'cat', 'grep', 'rg'}:
+            if any(os.path.basename(a.strip('()')) in writers for a in words):
+                raise ValueError('wrapped or compound writer; use a direct literal command')
+        if program in {'cp', 'mv', 'rsync'} and any(
+                a.startswith(('-t', '--target-directory', '--files-from', '--relative')) for a in args):
+            raise ValueError('unsupported destination option; use a final literal destination')
+        if program in writers:
+            if program == 'tee' or (program == 'sed' and any(a.startswith('-i') for a in args)):
+                outputs.extend(a for a in args if a and not a.startswith('-'))
+            elif program != 'sed' and args:
+                outputs.append(args[-1])
+                # A directory destination writes each source's basename too.
+                if program in {'cp', 'mv', 'rsync'}:
+                    outputs.extend(os.path.join(args[-1], os.path.basename(a))
+                                   for a in args[:-1] if a and not a.startswith('-'))
+        if program.startswith('python') and '-c' in args:
+            index = args.index('-c') + 1
+            if index >= len(args):
+                raise ValueError('missing Python command')
+            tree = ast.parse(args[index])
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Attribute) and node.func.attr in {
+                        'open', 'write_text', 'write_bytes'}:
+                    raise ValueError('indirect Python write; use a literal open path')
+                if isinstance(node.func, ast.Name) and node.func.id == 'open':
+                    mode = node.args[1] if len(node.args) > 1 else next(
+                        (k.value for k in node.keywords if k.arg == 'mode'), ast.Constant('r'))
+                    if not isinstance(mode, ast.Constant) or not isinstance(mode.value, str):
+                        raise ValueError('dynamic Python open mode')
+                    if any(c in mode.value for c in 'wax+'):
+                        path = node.args[0] if node.args else next(
+                            (k.value for k in node.keywords if k.arg == 'file'), None)
+                        if not isinstance(path, ast.Constant) or not isinstance(path.value, str):
+                            raise ValueError('dynamic Python write path')
+                        outputs.append(path.value)
+        if outputs and (re.search(r'\b(?:HOME|PWD)=', text)
+                        or any(re.match(r'[A-Za-z_][A-Za-z0-9_]*=', a) for a in words)
+                        or program in {'env', 'sudo', 'eval', 'exec', 'xargs'}):
+            raise ValueError('wrapped or assigned write context; use a direct literal command')
+        for path in outputs:
+            reason = inspect(path)
+            if reason:
+                return reason
+    return None

@@ -7,11 +7,11 @@
   "assertions": [
     {
       "id": "installed-bash-guard-home-spellings",
-      "predicate": "After merge and Studio installation, verify installed source ancestry and run the read-only Bash hook probe documented in the PR. Submit tee commands targeting a protected render through symlinked HOME and canonical HOME, and a plain read through symlinked HOME. The release smoke runner checks Worker release identity only and does not execute or attest this separate installed guard probe.",
+      "predicate": "After merge and Studio installation, verify installed source ancestry, then run python3 ops/corpus-render-gate-selftest.py from that checkout. This runnable probe starts real hook processes with a synthetic symlinked HOME and checks absolute, relative, HOME, tilde, dot, parent, and repeated-slash write spellings plus reads and malformed events. It classifies commands without executing writes. The worker-release-smoke.v1 runner checks release identity only and does not attest this separate installed-hook probe.",
       "runner": "worker-release-smoke.v1",
-      "expected_result": "Both tee commands are denied with exit 2 and the plain read is allowed with exit 0. Missing installed source identity or probe evidence leaves the behavior unproven.",
+      "expected_result": "The installed corpus-render selftest exits 0 with every case passing. Missing source ancestry or probe output leaves installed behavior unproven.",
       "input_class": "Installed hook and synthetic temporary HOME paths; commands are classified, never executed",
-      "deadline_seconds": 30
+      "deadline_seconds": 120
     }
   ],
   "safety": {
@@ -19,7 +19,7 @@
     "no_sends": true,
     "max_requests": 1,
     "max_records": 1,
-    "max_runtime_seconds": 30,
+    "max_runtime_seconds": 120,
     "max_artifact_bytes": 1048576
   }
 }

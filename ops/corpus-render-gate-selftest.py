@@ -32,7 +32,7 @@ from pathlib import Path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOKS = os.path.join(REPO, "hooks")
 sys.path.insert(0, HOOKS)
-from corpus_renders import render_map, roots, command_spellings  # noqa: E402
+from corpus_renders import render_map, roots  # noqa: E402
 
 DENY, ALLOW = 2, 0
 CASES: list[tuple[str, str, dict, int]] = []   # (label, hook, payload, expected_exit)
@@ -71,9 +71,7 @@ def build():
 
     # The unresolved CloudStorage spelling of the same file — the one that
     # realpath collapses, and the one a Bash deny set of realpaths would miss.
-    raw_drive = next((s for s, r in command_spellings().items()
-                      if r == os.path.realpath(drive_md) and s != os.path.realpath(drive_md)),
-                     drive_md)
+    raw_drive = drive_md
 
     # --- Write/Edit door -----------------------------------------------------
     CASES.append(("Write onto a Drive agent render", "record-home-gate.py",
@@ -171,12 +169,30 @@ def main():
             payload = bash(f'cat {operand}')
             payload['cwd'] = tmp
             cases.append((f"ALLOW read, {spelling}", "guard-unattended.py", payload, ALLOW))
+        for label, command, expected in (
+            ("dynamic variable", 'echo hi > "$TARGET"', DENY),
+            ("command substitution", 'echo hi > "$(printf x)"', DENY),
+            ("glob write", 'echo hi | tee /tmp/*.md', DENY),
+            ("dynamic Python write", "python3 -c 'open(path, mode).write(data)'", DENY),
+            ("wrapped writer", 'env tee "$HOME/.claude/skills/handoff/SKILL.md"', DENY),
+            ("changed HOME", 'HOME=/tmp tee "$HOME/.claude/skills/handoff/SKILL.md"', DENY),
+            ("substitution write", 'echo "$(echo hi > ~/.claude/skills/handoff/SKILL.md)"', DENY),
+            ("nested shell", "bash -c 'echo hi > ~/.claude/skills/handoff/SKILL.md'", DENY),
+            ("cd relative", 'cd linked-home && echo hi > .claude/skills/handoff/SKILL.md', DENY),
+            ("unrelated relative write", 'echo hi > scratch.md', ALLOW),
+            ("single quoted HOME is literal", "echo hi > '$HOME/.claude/skills/handoff/SKILL.md'", DENY),
+            ("sanctioned name cannot waive redirect", 'echo corpus-sync.py > ~/.claude/skills/handoff/SKILL.md', DENY),
+        ):
+            payload = bash(command)
+            payload['cwd'] = tmp
+            cases.append((label, "guard-unattended.py", payload, expected))
         for label, payload in (
             ("malformed JSON", "{"),
             ("empty input", ""),
             ("numeric command", {"tool_name": "Bash", "tool_input": {"command": 42}}),
             ("missing command", {"tool_name": "Bash", "tool_input": {}}),
             ("array event", []),
+            ("missing event fields", {}),
         ):
             cases.append((label, "guard-unattended.py", payload, DENY))
         fails.extend(check_cases(cases, str(linked_home)))
