@@ -514,6 +514,7 @@ class RouterTests(unittest.TestCase):
             return caught.exception.tool_refusal
         self.assertEqual(raised(f'TOOL ERROR {{"error":"{INVALID}"}}'), INVALID)
         self.assertTrue(email_router.REFUSAL.fullmatch(INVALID))
+        self.assertTrue(email_router.REFUSAL.fullmatch('email_not_live'))
         for stderr in (f'RPC ERROR {{"error":"{INVALID}"}}', 'RPC ERROR "unauthorized"', 'connection reset'):
             self.assertIsNone(raised(stderr), stderr)
 
@@ -1051,6 +1052,12 @@ class CommitmentApplications(unittest.TestCase):
         counts = email_router.consume_applications(carr, lambda *_: self.fail('must not extract preview'), refusal_code, NOW, lambda: NOW)
         self.assertEqual(counts['application_held'], 1)
         self.assertEqual(calls[-1]['application_status'], 'held')
+
+    def test_extracted_date_policy_eval(self):
+        for line in (ROOT / 'evals/email-next-step-dates.jsonl').read_text().splitlines():
+            case = json.loads(line)
+            result = email_router.proposals({'proposals':[case['proposal']]}, email(case['id'],case['body']),NOW.date())
+            self.assertEqual(result[0]['next_date'],case['expected_date'],case['id'])
 
     def test_missing_date_stays_missing_in_proposal(self):
         reply = {'proposals': [{**BOTH['proposals'][1], 'next_date': None}]}

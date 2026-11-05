@@ -13,7 +13,7 @@ test('email commitments apply atomically and undo refuses newer work', async t =
     const actor = {...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
     const command = async (verb,args,db=c) => {
       await db.query('begin');
-      try { await db.query('set local role carr_writer'); const r=await executeRegisteredTool(db,actor,verb,args); await db.query('commit'); return r; }
+      try { await db.query(verb === 'get-deal-room' ? 'set local role carr_reader' : 'set local role carr_writer'); const r=await executeRegisteredTool(db,actor,verb,args); await db.query('commit'); return r; }
       catch(e) {await db.query('rollback');throw e;}
     };
     const make = async ({deal=true,owner='joe',due='2026-12-01',body,context}={}) => {

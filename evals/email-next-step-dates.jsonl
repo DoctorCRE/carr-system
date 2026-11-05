@@ -1,0 +1,2 @@
+{"id":"literal-date","body":"I will review terms by 2026-12-01.","proposal":{"kind":"next_step","evidence_quote":"I will review terms by 2026-12-01.","confidence":0.99,"text":"Review terms","next_date":"2026-12-01","owner":"joe"},"expected_date":"2026-12-01"}
+{"id":"missing-date","body":"I will review the terms.","proposal":{"kind":"next_step","evidence_quote":"I will review the terms.","confidence":0.99,"text":"Review terms","next_date":null,"owner":"joe"},"expected_date":null}

@@ -73,8 +73,6 @@ export async function emailStepApplication(c, actor, args, { fail, preview, writ
   if (saved) return {ok:true,proposal_id:row.id,email_application:saved,duplicate_suppressed:true};
   if (row.status !== 'pending') fail('email_proposal_not_pending');
   const hold = reason => save({state:'review',reason,source_hash:source.source_hash});
-  if (source.email_context?.lifecycle?.state && source.email_context.lifecycle.state !== 'live')
-    return save({state:'refused',reason:'source_terminal',source_hash:source.source_hash});
   if (row.correction_provenance?.email_source_hash !== source.source_hash) return hold('source_revision');
   if (source.actor_id !== actor.id) return hold('uncertain_attribution');
   const evidenceHold = emailCommitmentHold(source,row);
