@@ -1,11 +1,15 @@
 """Candidate evidence source identity and raw revision checks."""
 import sys
 import unittest
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.email_candidate_signatures import observations
 from lib.email_contact_review import digest
+from lib.outlook_intake import Run, CarrError, _hash
 
 
 def mail(ident, keys=None, **extra):
@@ -17,6 +21,42 @@ def mail(ident, keys=None, **extra):
 
 
 class CandidateSources(unittest.TestCase):
+    def test_terminal_source_refusal_is_acknowledged_once(self):
+        calls = []
+        def refuse(verb, args):
+            calls.append(verb)
+            raise CarrError(code='email_not_live')
+        with tempfile.TemporaryDirectory() as directory:
+            run = Run(SimpleNamespace(carr=refuse), {}, datetime.now(timezone.utc), Path(directory),
+                      SimpleNamespace(timezone=timezone.utc))
+            args = {'idempotency_key': 'synthetic-request'}
+            self.assertTrue(run.write('observe-email-candidate-signatures', args, 'synthetic'))
+            self.assertTrue(run.write('observe-email-candidate-signatures', args, 'synthetic'))
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(run.state['requests']['synthetic-request']['disposition'], 'source_invalid')
+
+    def test_candidate_stage_caps_requests_and_stops_after_two_failures(self):
+        for fail, expected in [(False, 20), (True, 2)]:
+            with self.subTest(fail=fail), tempfile.TemporaryDirectory() as directory:
+                calls, mails, queued = [], [], {}
+                def append(verb, args):
+                    calls.append(verb)
+                    if fail:
+                        raise CarrError(code='timeout')
+                    return {'ok': True, 'inserted': 1}
+                for index in range(25):
+                    address = f'sender{index}@synthetic.test'
+                    source = mail(str(index), message_id=str(index), metadata_incomplete=False,
+                                  sender=address, body=mail('')['body'].replace('sender@synthetic.test', address))
+                    mails.append(source)
+                    queued[str(index)] = {'sender': _hash(address)}
+                settings = SimpleNamespace(timezone=timezone.utc, owner='joe', account='owner@internal.test',
+                                           folder_account_id=7, internal_domain='internal.test')
+                run = Run(SimpleNamespace(carr=append), {'mail_unresolved': queued}, datetime.now(timezone.utc), Path(directory), settings)
+                run.candidate_signatures(mails, SimpleNamespace(signature_contact=lambda sender: None))
+                self.assertEqual(len(calls), expected)
+                self.assertTrue(run.state['reads_due'])
+
     def test_keyless_and_keyed_representations_share_one_observation(self):
         state = {}
         first = observations([mail('keyless')], state, digest, 300)['sender@synthetic.test'][0]
