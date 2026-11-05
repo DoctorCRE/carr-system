@@ -91,7 +91,7 @@ export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
 import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.ts";
-import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,
+import { agentActorForToken, authenticatedIdentity, sessionCheckpointActorForToken, continuityActorForTokenMaps,
          serveReviewRequest, unattendedActorForToken,
          hermesActorForTokenMaps, hermesCosActorForToken } from "./identity.js";
 import { pipelineChanges } from "./dealroom.ts";
@@ -725,6 +725,8 @@ async function routeRequest(request, env, ctx) {
     if (hermesActor) return dispatch(request, env, ctx, hermesActor);
     const agentActor = agentActorFor(request, env);
     if (agentActor) return dispatch(request, env, ctx, agentActor);
+    const checkpointActor = sessionCheckpointActorForToken(request.headers.get("authorization"), env.SESSION_CHECKPOINT_TOKENS);
+    if (checkpointActor) return dispatch(request, env, ctx, checkpointActor);
     const continuityActor = continuityActorFor(request, env);
     if (continuityActor) return dispatch(request, env, ctx, continuityActor);
     const unattendedActor = unattendedActorFor(request, env);

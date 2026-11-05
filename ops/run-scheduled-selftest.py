@@ -140,6 +140,29 @@ class ScheduledRunTests(unittest.TestCase):
         self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
         self.assertNotIn('--failure-class', args)
 
+    def test_triage_holds_preserve_durable_reason_and_runtime(self):
+        reasons = ('snapshot_unavailable', 'capability_not_verified', 'executor_unavailable',
+                   'reconciliation_required', 'snapshot_invalid', 'snapshot_stale',
+                   'snapshot_producer_unavailable')
+        for reason in reasons:
+            with self.subTest(reason=reason):
+                receipt = {'state': 'skipped', 'reason': reason, 'counts': {},
+                           'runtime_sha': 'a' * 40, 'runtime_behind': 0,
+                           'private_body': 'SYNTHETIC_PRIVATE_BODY'}
+                child = self.root / 'hold.py'
+                child.write_text(f"print({('outlook-triage-receipt ' + json.dumps(receipt))!r})\n"
+                                 "raise SystemExit(78)\n")
+                result = subprocess.run(['/bin/zsh', str(self.root / 'bin/run-scheduled.sh'),
+                    'outlook-triage', 'outlook.triage', sys.executable, str(child)],
+                    cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, 78)
+                args = json.loads(self.rows()[-1][3])
+                self.assertEqual(self.rows()[-1][2], 'skipped')
+                self.assertNotIn('--failure-class', args)
+                expected = {k: v for k, v in receipt.items() if k != 'private_body'}
+                self.assertEqual(json.loads(args[args.index('--detail') + 1]), expected)
+                self.assertNotIn('SYNTHETIC_PRIVATE_BODY', args[args.index('--detail') + 1])
+
     def test_receipt_tempfile_failure_still_runs_service(self):
         (self.root / 'out').write_text('synthetic unavailable receipt directory')
         marker = self.root / 'service-ran'

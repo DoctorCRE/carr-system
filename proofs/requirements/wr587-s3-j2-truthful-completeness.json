@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR587-S3-J2-truthful-completeness",
+  "targets": [
+    "studio",
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "natural-decoder-completeness",
+      "predicate": "After independent review, merge and installation on Studio, observe one natural outlook-intake run at the full merged runtime SHA. Require a nonempty admitted count, zero rows classified full whose body equals preview, and any conflicting or oversized body held under its named outcome. Inspect decoded rows alongside the actual run receipt; receipt counts alone cannot prove the zero-row predicate.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "A successful natural intake with nonzero admitted messages and no falsely complete rows. Missing receipts, zero admitted rows or unavailable row-level evidence remain BLOCKED, never production proof.",
+      "input_class": "one supplied natural Studio outlook-intake receipt and bounded corresponding decoder evidence; coordinator performs later, observer read-only",
+      "deadline_seconds": 30
+    },
+    {
+      "id": "deployed-summary-capture-guard",
+      "predicate": "After deployment, verify the worker release identity equals the merged source SHA. Read one held incoming capture and its summary from the same activity. Require the persisted capture verdict to match the Studio observation and require summary status unavailable for preview, conflict, oversized or unknown. Release identity alone does not prove the held-summary predicate.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "The exact merged worker is live and a held captured message has no available summary. Missing held-message evidence remains BLOCKED; do not manufacture a production record.",
+      "input_class": "one natural held email activity with its capture context and summary metadata; coordinator performs later, read-only",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 4,
+    "max_records": 2,
+    "max_runtime_seconds": 90,
+    "max_artifact_bytes": 65536
+  }
+}

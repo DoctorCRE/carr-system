@@ -434,3 +434,10 @@ paths = ['''(?:^|/)db/schema\.sql$''']
 regexes = [
   '''^\ \ \ \ \ \ \ \ \ \ \ and\ e\.idempotency_key='c4ad90f7\-d8dd\-4bf3\-8785\-659bae3d3f27'$''',
 ]
+
+[[allowlists]]
+description = "SHA256 of the reviewed canonical runner credential parser source, not a credential"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(?:^|/)contracts/production-proof-plan\.v1\.json$''']
+regexes = ['''^68c27169405b12a9a41b94d3de6aa94b66eec324b8971e12c0ebc9228456919b$''']

@@ -40,6 +40,16 @@ export const HOME_INBOX_COMPLETION_CONTRACT = Object.freeze({
   completion_time: 'Done ordinary tasks use the exact complete-one-action, complete-action or complete-deal-item event, superseded by reopen-one-action. Done call actions use completed_at. Sent replies use send_result.sent_at. Open work, unsupported sources and unproven legacy completions return null. Later notifications never move completion. Clients group by America/Chicago.',
 });
 
+export const HOME_INBOX_WAITING_CONTRACT = Object.freeze({
+  ...HOME_INBOX_COMPLETION_CONTRACT,
+  schema_version: 'home-inbox.v5',
+  read_verb: 'read-home-inbox-v5',
+  item_fields: { ...HOME_INBOX_COMPLETION_CONTRACT.item_fields,
+    waiting_on: 'null|{identity:{kind:party|actor,id:UUID,display_name:string|null,available:boolean},reason:string,evidence:string[],version:integer}; explicit canonical identity only, null for unknown or completed work',
+    waiting_version: 'integer; independent relationship version, 0 before the first command; pass as waiting command base_version',
+  },
+});
+
 function withAutomaticSettlement(snapshot, pendingReplyIds) {
   return { ...snapshot, auto_settle_enabled: true,
     items: snapshot.items.map(item => {
@@ -52,7 +62,7 @@ function withAutomaticSettlement(snapshot, pendingReplyIds) {
   };
 }
 
-export const HOME_INBOX_WRITES = new Set(['snooze-home-inbox', 'settle-home-inbox', 'unsettle-home-inbox']);
+export const HOME_INBOX_WRITES = new Set(['snooze-home-inbox', 'settle-home-inbox', 'unsettle-home-inbox', 'set-home-waiting', 'clear-home-waiting']);
 export function homeInboxTools({ withEnvelope, ToolError }) {
   const unwrap = result => {
     if (result?.ok !== true) throw new ToolError({ error: result?.error || 'inbox_unavailable' });
@@ -66,6 +76,13 @@ export function homeInboxTools({ withEnvelope, ToolError }) {
     return withAutomaticSettlement(unwrap(row?.result), new Set(row.pending_reply_ids));
   };
   const tools = {
+    'read-home-inbox-v5': {
+      writerConnection: true,
+      description: 'Read Home with nullable verified waiting identity, reason, evidence and independent waiting_version. Unknown is null. Merged parties resolve to survivors; deleted identities are unavailable. Completed items have no wait. Reads do not change records. Uses home-inbox.v5 with v4 completion times and v3 automatic settlement.',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      handler: c => readWithSettlement(c, 'v5'),
+    },
+
     'read-home-inbox': {
       writerConnection: true,
       description: 'Read the stable home-inbox.v1 snapshot. Refuses above 1000 items or 10000 notifications.',

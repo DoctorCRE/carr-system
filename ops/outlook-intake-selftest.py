@@ -39,7 +39,7 @@ REAL_RUN = subprocess.run  # IntakeTest patches subprocess.run for the store cop
 SCHEMA = """
 CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sender_name TEXT,
   recipients TEXT, subject TEXT, message_id TEXT, body TEXT, html TEXT, body_words INTEGER,
-  html_bytes INTEGER, body_kind TEXT, sent_unix INTEGER, sent_utc TEXT, subject_inherited INTEGER,
+  html_bytes INTEGER, body_kind TEXT, body_completeness TEXT, body_outcome TEXT, sent_unix INTEGER, sent_utc TEXT, subject_inherited INTEGER,
   preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT,
   folder_links_unresolved INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTEGER NOT NULL,
@@ -99,10 +99,12 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
         con.execute('ALTER TABLE messages ADD COLUMN local_keys TEXT')
     for m in mails:
         con.execute('INSERT INTO messages(sender,sender_name,recipients,subject,body,preview,'
-                    'body_kind,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?)',
+                    'body_kind,body_completeness,body_outcome,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                     (m['sender'], m['sender_name'], m['recipients'], m['subject'],
                      m['body'] if m['body_kind'] == 'full' else '', m['body'][:200],
-                     m['body_kind'], m['sent_unix'], m['copy_key']))
+                     m['body_kind'], m.get('body_completeness', 'complete' if m['body_kind'] == 'full' else 'preview'),
+                     m.get('body_outcome', 'complete' if m['body_kind'] == 'full' else m['body_kind']),
+                     m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
     for row_id, m in enumerate(mails, 1):
@@ -268,8 +270,8 @@ class Fake:
         db_path.write_bytes(self.fixture.read_bytes())
         with closing(sqlite3.connect(db_path)) as con, con:
             con.execute("INSERT INTO folders VALUES(-1,7,'Sent Items','top',NULL)")
-            con.execute("INSERT INTO messages(id,sender,recipients,subject,body,body_kind,sent_unix,copy_key) "
-                        "VALUES(-1,?,'outside@example.test','Binding evidence','Synthetic binding body','full',?,?)",
+            con.execute("INSERT INTO messages(id,sender,recipients,subject,body,body_kind,body_completeness,sent_unix,copy_key) "
+                        "VALUES(-1,?,'outside@example.test','Binding evidence','Synthetic binding body','full','complete',?,?)",
                         (getattr(self.test, 'settings', None).account if hasattr(self.test, 'settings') else OWNER,
                          1, 'binding-evidence'))
             con.execute('INSERT INTO message_folders VALUES(-1,-1)')
@@ -331,6 +333,20 @@ class IntakeTest(unittest.TestCase):
         ports = self.fake.ports()
         ports.decode = self.search_decode
         return intake.run(self.repo, self.home, ports)
+
+    def test_loaded_signature_html_is_bound_to_its_message_without_changing_body(self):
+        source = mail(CLIENT.email, timedelta(hours=-1), body='Hello Pat 555-0199 pat@example.test', local_keys='101')
+        write_db(self.fake.fixture, [source])
+        html = '<p>Hello</p><p>Pat Example</p><div>555-0199</div><div>pat@example.test</div>'
+        with closing(sqlite3.connect(self.fake.fixture)) as db, db:
+            db.execute('UPDATE messages SET html=? WHERE id=1', (html,))
+        _, rows, _ = intake._load(self.fake.fixture)
+        loaded = intake._best_copies(rows)[0]
+        self.assertEqual(loaded['signature_html'], html)
+        self.assertEqual(loaded['body'], source['body'])
+        self.assertEqual(loaded['text'], source['body'])
+        self.assertEqual(loaded['local_keys'], ['101'])
+        self.assertEqual(loaded['signature_ident'], ident(source))
 
     def test_intake_run_publishes_index_then_lookup_finds_fixture_message(self):
         from lib.email_local_search import query_index
@@ -1473,6 +1489,15 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
         self.assertEqual(len(records), 1)
 
+    def test_decoder_completeness_fails_closed_even_with_full_kind(self):
+        for completeness in ('unknown', 'preview', 'conflict', None):
+            with self.subTest(completeness=completeness):
+                m = dict(mail('pat@example.test', -timedelta(hours=1)),
+                         body_completeness=completeness)
+                m.update(id=1, folders=[], row_ids=[1], preview='Preview', local_keys='77')
+                self.assertFalse(intake._best_copies([m])[0]['full'])
+                self.assertEqual(intake._coverage_counts([m], {})['body_complete'], 0)
+
     def test_preview_links_wait_for_full_body(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='https://loopnet.com/Listing/12',
                        kind='preview', copy_key='preview-links')
@@ -2219,6 +2244,66 @@ class IntakeTest(unittest.TestCase):
                                        message_id='<x@example.test>')], rejected=0)
         self.assertEqual((result.counts['mail_ids_reset'], result.counts['mail_rekeyed'], result.counts['logged']),
                          (1, 0, 1))
+
+    def test_runtime_proof_uses_retained_mail_ids_from_real_intake(self):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr823-runtime-identity.json').read_text())
+        self.assertIn('run.mail_ids minimum 1', requirement['assertions'][0]['input_class'])
+        messages = [mail(CLIENT.email, -timedelta(hours=1), message_id='<a@example.test>'),
+                    mail(LEAD.email, -timedelta(minutes=30), message_id='<b@example.test>')]
+        self.run_intake(messages[:1])
+        initial = self.run_intake(messages)
+        again = self.run_intake(messages)
+        unchanged = self.run_intake(messages, touch=False)
+        self.assertEqual(unchanged.reason, 'store_unchanged')
+        path = self.out() / intake.STATE
+        saved = json.loads(path.read_text())
+        self.assertEqual(len(saved['mail_ids']), 2)
+        del saved['mail_ids']
+        path.write_text(json.dumps(saved))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True, exist_ok=True)
+        decoder.touch(mode=0o700)
+        self.fake.calls.clear()
+        reconciled = intake.run(self.repo, self.home, self.fake.ports())
+        self.assertEqual(reconciled.reason, 'reconciled')
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(initial.counts['emails'], 1)
+        self.assertEqual(again.counts['emails'], 0)
+        for outcome in (initial, again, unchanged, reconciled):
+            with self.subTest(reason=outcome.reason):
+                receipt = intake.receipt_line(outcome, ROOT)
+                value = json.loads(receipt.split(' ', 1)[1])
+                self.assertEqual(value['counts']['run'].get('mail_ids'), 2)
+                self.assertEqual(self.observe_runtime_receipt(receipt, value['runtime_sha']), 0)
+        receipt = intake.receipt_line(initial, ROOT)
+        value = json.loads(receipt.split(' ', 1)[1])
+        for changes in ({'state': 'failed'}, {'state': 'skipped'}, {'state': 'degraded'},
+                        {'runtime_sha': '0' * 40}, {'runtime_sha': value['runtime_sha'][:9]},
+                        {'counts': {'run': {'mail_ids': True}}},
+                        {'counts': {'run': {'mail_ids': 0}}}, {'counts': {'run': {'emails': 1}}}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.observe_runtime_receipt(
+                    'outlook-intake-receipt ' + json.dumps({**value, **changes}), value['runtime_sha']), 1)
+        self.assertEqual(self.observe_runtime_receipt(receipt.replace('outlook-intake-receipt ',
+                         'email-router-receipt ', 1), value['runtime_sha']), 1)
+        no_ids = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        self.assertEqual(no_ids.counts['mail_ids'], 2, 'retained IDs survive a later snapshot')
+        empty_state = json.loads(path.read_text())
+        empty_state['mail_ids'] = {'expired@example.test': f'expired:{ts(-timedelta(days=400))}'}
+        path.write_text(json.dumps(empty_state))
+        no_ids = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        self.assertEqual(no_ids.counts['mail_ids'], 0)
+        zero = intake.receipt_line(no_ids, ROOT)
+        self.assertEqual(self.observe_runtime_receipt(zero, value['runtime_sha']), 1)
+
+    def observe_runtime_receipt(self, receipt, runtime_sha):
+        path = self.tmp / 'runtime-receipt.txt'
+        path.write_text(receipt)
+        result = REAL_RUN([sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
+                          '--receipt-file', str(path), '--service', 'outlook-intake',
+                          '--runtime-sha', runtime_sha, '--count', 'run.mail_ids', '--minimum', '1'],
+                         capture_output=True, text=True, timeout=10)
+        return result.returncode
 
     def test_unchanged_store_receipts_still_count_legacy_entries(self):
         old = mail('pat@example.test', -timedelta(hours=1), kind='preview')
@@ -2968,6 +3053,18 @@ class IntakeTest(unittest.TestCase):
         self.assertNotEqual(captured[0]['idempotency_key'], captured[1]['idempotency_key'])
         self.assertEqual([a['email_source']['mailbox_owner'] for a in captured], ['joe', 'dell'])
 
+    def test_signature_extraction_version_reloads_unchanged_store_once(self):
+        self.run_intake(touch=False)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state.pop('signature_policy', None)
+        path.write_text(json.dumps(state))
+        before = self.fake.decodes
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+
     def test_decoder_change_reloads_unchanged_store(self):
         receipt = load_settings(self.home).vendor / '.carr-build.json'
         receipt.parent.mkdir(parents=True, exist_ok=True)
@@ -3111,6 +3208,8 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([m])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['email_context'], {
+            'body_kind': 'full', 'body_completeness': 'complete',
+            'body_outcome': 'complete', 'body_truncated': False,
             'subject': 'Suite question', 'conversation_id': None,
             'sender': {'email': 'pat@example.test', 'name': 'Pat Example', 'internal': False},
             'recipients': [{'email': OWNER, 'name': None, 'kind': 'to', 'internal': True},
@@ -3549,6 +3648,19 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body=body)])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], body)
+
+    def test_held_capture_cannot_be_summarized_after_real_intake(self):
+        from lib.email_summary import generate
+        for kind in ('preview', 'conflict', 'oversized', 'unknown'):
+            with self.subTest(kind=kind):
+                m = mail('pat@example.test', -timedelta(hours=1),
+                         subject=f'Held {kind}', body='Please send the floor plan.', kind=kind)
+                self.run_intake([m])
+                payload = self.fake.writes('log-activity')[-1][1]
+                result = generate({'body': payload['detail'], 'email_context': payload['email_context']},
+                                  lambda _: self.fail('Held capture reached summary model'))
+                self.assertEqual(result['status'], 'unavailable')
+                self.assertEqual(result['provenance']['reason'], 'incomplete_capture')
 
     def test_a_preview_only_email_logs_without_a_refresh_queue(self):
         m = mail('pat@example.test', -timedelta(hours=1), body='Can we meet Thursday at ten', kind='preview')
@@ -4360,6 +4472,27 @@ class IntakeTest(unittest.TestCase):
     def codes(self):
         return [w['code'] for w in self.fake.agenda['warnings']]
 
+    def test_decoded_cancellation_reaches_published_agenda_and_review_through_intake(self):
+        events = [event(self.gid(91), timedelta(hours=2), subject='Synthetic upcoming',
+                        lifecycle=('canceled', 'outlook_canceled_subject')),
+                  event(self.gid(92), -timedelta(hours=2), subject='Synthetic recent',
+                        lifecycle=('canceled', 'outlook_canceled_subject'))]
+        self.assertEqual(self.run_intake(events=events, touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.agenda['items'], [])
+        self.assertEqual(self.fake.agenda['follow_up_reviews'], [])
+        self.assertIn({'code': 'canceled_hidden', 'count': 2}, self.fake.agenda['warnings'])
+        self.assertEqual(self.fake.writes(), [])
+        path = self.out() / intake.STATE
+        state = json.loads(path.read_text())
+        state['calendar_policy'] = 3
+        path.write_text(json.dumps(state))
+        before = self.fake.decodes
+        self.assertNotEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+        self.assertEqual(self.fake.decodes, before + 1)
+        self.assertEqual(self.fake.agenda['items'], [])
+        self.assertEqual(self.fake.agenda['follow_up_reviews'], [])
+        self.assertEqual(self.run_intake(touch=False).reason, 'store_unchanged')
+
     def test_agenda_shows_only_meetings_that_name_joe(self):
         events = [
             event(self.gid(1), timedelta(hours=2), subject='Synthetic lender call', attendees=[('Pat', 'pat@example.test')]),
@@ -4848,7 +4981,7 @@ class AttachmentMetadataTest(unittest.TestCase):
         rows = [dict(mail('pat@example.test', -timedelta(hours=1), kind='preview', copy_key='same'),
                      attachments=[lease, logo]),
                 dict(mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5), copy_key='same'),
-                     attachments=[lease])]
+                     attachments=[lease], body_completeness="complete")]
         [best] = intake._best_copies(rows)
         self.assertTrue(best['full'])
         self.assertEqual(best['attachments'], [logo, lease])

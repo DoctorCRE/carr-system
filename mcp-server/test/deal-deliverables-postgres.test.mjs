@@ -125,7 +125,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
       insert into deal values('${deal}','${deal}','joe'),('${otherDeal}','${deal}','dell')`);
     await c.query(
       await readFile(
-        new URL("../../migrations/1151_deal_deliverables.sql", import.meta.url),
+        new URL("../../migrations/1155_deal_deliverables.sql", import.meta.url),
         "utf8",
       ),
     );

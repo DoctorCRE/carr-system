@@ -7,6 +7,8 @@ import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily];
+import { homeWaitingTools } from "./home-waiting.ts";
+import { peopleDirectoryTools } from "./people-directory.ts";
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
 import { homeReviewTools } from "./home-review.js";
 import { dealUpdateResolution } from "./deal-update-resolution.js";
@@ -60,6 +62,7 @@ import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
+import { sessionCheckpointTools, SESSION_CHECKPOINT_VERBS } from './session-checkpoints.js';
 import { codexContinuityTools } from "./codex-continuity.js";
 import { incidentTools } from "./incident.js";
 import { resourceObservationTools } from "./resource-observation.v5.ts";
@@ -2910,7 +2913,7 @@ export const TOOLS = {
       // Sorting on `merged` first costs nothing — the tombstones still come back,
       // they just stop outranking the record that is actually live.
       const parties = await c.query(
-        `select display_name as name, city, specialty, org_name, ref, subject_type as kind, merged
+        `select display_name as name, city, specialty, org_name, coalesce(ref, subject_id::text) as ref, subject_type as kind, merged
          from v_ref_index
          where subject_type in ('lead','client','vendor')
            and (display_name % $1 or display_name ilike $2
@@ -2954,7 +2957,7 @@ export const TOOLS = {
                   as live_rows,
                 count(*) filter (where merged and subject_type = 'party')::int
                   as retired_aliases,
-                coalesce(array_agg(ref order by ref)
+                coalesce(array_agg(coalesce(ref, subject_id::text) order by coalesce(ref, subject_id::text))
                            filter (where not merged and subject_type = 'party'),
                          '{}'::text[]) as refs,
                 coalesce((array_agg(ref order by ref)
@@ -2963,7 +2966,7 @@ export const TOOLS = {
                          '{}'::text[]) as retired_refs,
                 count(*) filter (where not merged and subject_type <> 'party')::int
                   as live_as_role,
-                coalesce(array_agg(ref order by ref)
+                coalesce(array_agg(coalesce(ref, subject_id::text) order by coalesce(ref, subject_id::text))
                            filter (where not merged and subject_type <> 'party'),
                          '{}'::text[]) as role_refs
          from v_ref_index
@@ -4052,12 +4055,12 @@ export const TOOLS = {
 
   "email-match-contacts": {
     write: false,
-    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people. An exact address belonging to one live party also carries contact_snapshot with raw prior values, party_id, party_version and record provenance. Multiple roles for the same party are not ambiguous. Shared addresses and deal-only rows have no snapshot. company comes from the linked live org's name with its own version; unread_fields distinguishes an unread company from a read null. This is stored-value evidence, not verification of a signature observation.",
+    description: "The Outlook intake's contact list: every address written in a live party's email field, in any market, as {address, ref, name, exact}. ref is the party's client, lead or vendor ref, one row per live role, or its P- ref when it holds none. A missing display ref uses the canonical role UUID, or party UUID when it has no role. A participant of an open deal holding no client, lead or vendor role also comes back with the deal's id as ref and the deal's name (v_email_deal_contact), so its mail logs on that deal. Merged-away and deleted parties never appear. exact=false marks a role address (info, front desk, office...) sharing its field with other addresses: it may serve many people. An exact address belonging to one live party also carries contact_snapshot with raw prior values, party_id, party_version and record provenance. Multiple roles for the same party are not ambiguous. Shared addresses and deal-only rows have no snapshot. company comes from the linked live org's name with its own version; unread_fields distinguishes an unread company from a read null. This is stored-value evidence, not verification of a signature observation.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const ROLE = /^(?:front-?desk|info|office|admin|contact|reception|billing|hello|team|support|scheduling|appointments?|sales|inquiries|enquiries|referrals?|records|staff|help|general)(?:[-.+].*)?$/u;
       const rows = (await c.query(`
-        select coalesce(r.ref, p.ref) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email,
+        select coalesce(r.ref, p.ref, p.id::text) as ref, coalesce(nullif(btrim(p.name), ''), org.name, '') as name, p.email,
                p.id as party_id, p.version as party_version, p.name as party_name,
                p.phone, p.cell, p.title, p.org_id, live_org.id as company_id,
                live_org.version as company_version, live_org.name as company_name
@@ -4065,11 +4068,10 @@ export const TOOLS = {
           left join party org on org.id = p.org_id
           left join party live_org on live_org.id = p.org_id and live_org.merged_into is null and live_org.deleted_at is null
           left join lateral (
-            select roster_ref as ref from client where party_id = p.id and merged_into is null
-            union all select registry_ref from lead where party_id = p.id
-            union all select vendor_ref from vendor where party_id = p.id and merged_into is null) r on true
+            select coalesce(roster_ref, id::text) as ref from client where party_id = p.id and merged_into is null
+            union all select coalesce(registry_ref, id::text) from lead where party_id = p.id
+            union all select coalesce(vendor_ref, id::text) from vendor where party_id = p.id and merged_into is null) r on true
          where p.merged_into is null and p.deleted_at is null and p.email like '%@%'
-           and coalesce(r.ref, p.ref) is not null
         union all
         select "Deal ID"::text, coalesce("Name", ''), "Email",
                null, null, null, null, null, null, null, null, null, null from v_email_deal_contact where "Email" like '%@%'
@@ -4515,6 +4517,8 @@ export const TOOLS = {
       email_context: { type: 'object', additionalProperties: false,
         required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
           source_activity_id: { type: 'string', format: 'uuid' },
+          body_kind: { type: 'string' }, body_completeness: { type: 'string' },
+          body_outcome: { type: 'string' }, body_truncated: { type: 'boolean' },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },
@@ -9166,6 +9170,8 @@ function isUnattendedActor(actor) {
 }
 
 export async function executeRegisteredTool(client, actor, name, args = {}) {
+  if (actor?.via === "session-checkpoint-token" && !SESSION_CHECKPOINT_VERBS.includes(name))
+    throw new ToolError({ error: "not_in_profile", verb: name, profile: "session-checkpoint-v1" });
   const tool = TOOLS[name];
   if (!tool) throw new ToolError({ error: "unknown_tool", name });
   assertNoCallerAuthorityFields(args);
@@ -9326,6 +9332,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.ts",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
+  "session-checkpoints": "mcp-server/src/session-checkpoints.js",
   "incident": "mcp-server/src/incident.js",
   "engineering-runtime": "mcp-server/src/engineering-runtime.js",
   "work-portfolio": "mcp-server/src/work-portfolio.js",
@@ -10936,6 +10943,8 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
+registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
+registerTools(peopleDirectoryTools(), "mcp-server/src/people-directory.ts");
 registerTools(homeInboxTools({ withEnvelope, ToolError }), "home-inbox");
 registerTools(homeReviewTools({ ToolError, readTool: executeRegisteredTool }), "home-review");
 
@@ -11028,6 +11037,8 @@ registerTools(workflowCutoverTools({ withEnvelope, ToolError }), "workflow-cutov
 // candidate/promotion/correction/forgetting lifecycle. Memory never grants
 // authority; actor and sponsor scope are resolved by the server.
 registerTools(memoryTools({ ToolError, assertNoCallerAuthorityFields }), "memory");
+registerTools(sessionCheckpointTools(), "session-checkpoints");
+
 // Native Codex continuity is a separate, bounded surface.  It stores semantic
 // checkpoint revisions and lifecycle receipts; transcript bodies stay local to
 // the Codex adapter and Claude never reaches these verbs through its config.

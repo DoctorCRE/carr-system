@@ -163,7 +163,12 @@ test("strict aggregate runs after failed classes and requires complete successfu
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
   assert.deepEqual(gate.needs, ["fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures", "launchd-python39"]);
   assert.equal(ci.jobs["unit-coverage"].needs, "unit", "coverage must wait for the entire shard matrix");
-  assert.deepEqual(read("unit-shards.yml").jobs.unit.strategy.matrix.shard, [1, 2, 3, 4]);
+  const cardinality = spawnSync("python3", ["-c",
+    "from ci_unit_shards import COUNT; print(COUNT)"], {
+    cwd: new URL("../../ops/", import.meta.url), encoding: "utf8", timeout: 5000 });
+  assert.equal(cardinality.status, 0, cardinality.stderr);
+  assert.deepEqual(read("unit-shards.yml").jobs.unit.strategy.matrix.shard,
+    Array.from({ length: Number(cardinality.stdout.trim()) }, (_, index) => index + 1));
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);

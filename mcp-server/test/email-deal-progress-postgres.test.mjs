@@ -2914,6 +2914,57 @@ function finishSummary(source, claim, extra = {}) {
 const listedSummary = async id => (await command('list-email-proposals', { deal, status: 'pending' }, actor, 'carr_reader'))
   .proposals.find(row => row.source.activity_id === id)?.email_summary;
 
+test('real intake capture verdict survives filing and the summary queue', async () => {
+  for (const kind of ['preview', 'conflict', 'oversized', 'unknown', 'full']) {
+    const payload = JSON.parse(execFileSync('python3', ['-c', `
+import json,runpy,sys
+from datetime import timedelta
+sys.path.insert(0, 'ops')
+f=runpy.run_path('ops/outlook-intake-selftest.py')
+t=f['IntakeTest'](); t.setUp()
+try:
+    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], body='We received the LOI from the landlord.')
+    t.run_intake([m])
+    payload=t.fake.writes('log-activity')[-1][1]
+    print(json.dumps(payload))
+finally:
+    t.doCleanups()
+`, kind], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' }).trim().split('\n').at(-1));
+    const source = await command('log-activity', { ...payload, ref: clientRef, idempotency_key: randomUUID() });
+    await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
+      activity_id: source.activity_id, deal, evidence_quote: 'We received the LOI from the landlord.', confidence: 0.9 });
+    const queued = (await summaryQueue(false)).emails.find(row => row.activity_id === source.activity_id);
+    assert.deepEqual(queued.email_context, payload.email_context);
+    const generated = JSON.parse(execFileSync('python3', ['-c', `
+import json,sys
+from lib.email_summary import generate
+called=[]
+result=generate(json.load(sys.stdin), lambda _: called.append(True) or {
+    'text':'The sender reports receiving the LOI.', 'evidence':'We received the LOI from the landlord.'})
+print(json.dumps({'called': bool(called), **result}))
+`], { cwd: new URL('../..', import.meta.url), input: JSON.stringify(queued), encoding: 'utf8' }));
+    const complete = kind === 'full';
+    assert.equal(generated.called, complete);
+    assert.equal(generated.status, complete ? 'available' : 'unavailable');
+    const claim = await claimSummary(queued);
+    if (!complete) {
+      await assert.rejects(command('record-email-proposal', { idempotency_key: randomUUID(),
+        mode: 'summary_result', activity_id: queued.activity_id, source_hash: queued.source_hash,
+        claim_id: claim.claim_id, summary_status: 'available', summary_text: 'The sender reports receiving the LOI.',
+        summary_provenance: { evidence: 'We received the LOI from the landlord.' } }),
+      error => error.payload?.error === 'email_summary_incomplete_capture');
+    }
+    await command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_result',
+      activity_id: queued.activity_id, source_hash: queued.source_hash, claim_id: claim.claim_id,
+      summary_status: generated.status, ...(complete ? { summary_text: generated.text } : {}),
+      summary_provenance: generated.provenance });
+    if (!complete) {
+      await c.query("update email_message_summary set status='available',text='Stale held summary' where activity_id=$1", [source.activity_id]);
+    }
+    assert.equal((await listedSummary(source.activity_id)).status, complete ? 'available' : 'unavailable');
+  }
+});
+
 test('message summaries persist once per hash and reads reuse them without generation', async () => {
   const source = await summarySource();
   const claim = await claimSummary(source);
@@ -3099,4 +3150,75 @@ test('summary provenance can cite captured headers but cannot invent them', asyn
     summary_status: 'available', summary_text: 'The sender agrees to approve the purchase.', summary_provenance: { evidence } });
   await refuses(result('Re: Cancel the purchase?'), 'email_summary_evidence_invalid');
   assert.equal((await result('Re: Approve the purchase?')).status, 'available');
+});
+
+
+test('late Sent corrects a failed uncertain identity without reapproving or duplicating correspondence', async () => {
+  const { proposal, sentDeal } = await sentDraftFixture();
+  const submitted = await submitDraft(proposal);
+  const base = { proposal_id: proposal.proposal_id, base_version: 2, sha256: submitted.sha256 };
+  await command('record-email-sent', { ...base, idempotency_key: randomUUID(),
+    status: 'failed', reason: 'unconfirmed_after_86400' }, machineFor('joe'), 'carr_writer');
+  assert.ok(!(await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader')).drafts
+    .some(p => p.proposal_id === proposal.proposal_id));
+  const late = await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader');
+  const frozen = late.drafts.find(p => p.proposal_id === proposal.proposal_id);
+  assert.equal(frozen.version, 2);
+  assert.equal(frozen.sha256, submitted.sha256);
+  assert.ok(late.drafts.length <= 100);
+  assert.ok(!(await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('dell'), 'carr_reader')).drafts
+    .some(p => p.proposal_id === proposal.proposal_id));
+  await refuses(submitDraft(proposal, { base_version: 3 }), 'email_draft_failure_not_resubmittable');
+  const sent = { ...base, status: 'sent', sent_item_id: 'late-synthetic-' + randomUUID() };
+  const result = await command('record-email-sent', { ...sent, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer');
+  assert.equal(result.status, 'sent');
+  assert.equal((await command('record-email-sent', { ...sent, idempotency_key: randomUUID() }, machineFor('joe'), 'carr_writer')).replayed, true);
+  assert.ok(!(await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader')).drafts
+    .some(p => p.proposal_id === proposal.proposal_id));
+  const recorded = (await command('get-deal-room', { deal: sentDeal })).activities
+    .filter(a => a.email_context?.send_id === proposal.proposal_id);
+  assert.equal(recorded.length, 1);
+});
+
+
+test('uncertain reconciliation pages are bounded and never contain safe pre-dispatch failures', async () => {
+  const { proposal } = await sentDraftFixture();
+  const submitted = await submitDraft(proposal);
+  await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'failed', reason: 'aborted_before_dispatch' },
+    machineFor('joe'), 'carr_writer');
+  const page = await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader');
+  assert.ok(!page.drafts.some(p => p.proposal_id === proposal.proposal_id));
+  await refuses(command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+    base_version: 2, sha256: submitted.sha256, status: 'sent', sent_item_id: 'not-dispatched' },
+    machineFor('joe'), 'carr_writer'), 'email_draft_not_approved');
+});
+
+test('reconciliation keyset pages reach identities beyond the first hundred', async () => {
+  const ids = new Set();
+  for (let i=0; i<101; i++) {
+    const { proposal } = await sentDraftFixture();
+    const submitted = await submitDraft(proposal);
+    await command('record-email-sent', { idempotency_key: randomUUID(), proposal_id: proposal.proposal_id,
+      base_version: 2, sha256: submitted.sha256, status: 'failed', reason: 'unconfirmed_after_86400' },
+      machineFor('joe'), 'carr_writer');
+    ids.add(proposal.proposal_id);
+  }
+  const first = await command('outbox-for-sender', { mode: 'reconcile' }, machineFor('joe'), 'carr_reader');
+  assert.equal(first.drafts.length, 100);
+  assert.ok(first.next_cursor);
+  const seen = new Set(first.drafts.map(p => p.proposal_id));
+  let cursor = first.next_cursor;
+  for (let pageNumber=0; cursor && pageNumber<4; pageNumber++) {
+    const page = await command('outbox-for-sender', { mode: 'reconcile', after: cursor }, machineFor('joe'), 'carr_reader');
+    assert.ok(page.drafts.length <= 100);
+    for (const row of page.drafts) {
+      assert.ok(row.proposal_id > cursor);
+      assert.ok(!seen.has(row.proposal_id));
+      seen.add(row.proposal_id);
+    }
+    cursor = page.next_cursor;
+  }
+  assert.equal(cursor, null);
+  assert.ok([...ids].every(id => seen.has(id)));
 });
