@@ -12,8 +12,9 @@ import sys
 import tarfile
 import tempfile
 import urllib.error
-from unittest.mock import patch
+from email.message import Message
 from pathlib import Path
+from unittest.mock import call, patch
 
 REPO = Path(__file__).resolve().parent.parent
 TOOL = REPO / "tools" / "doctorcre-artifact.py"
@@ -103,16 +104,16 @@ def test_download_failures() -> None:
     payload = b"verified bytes"
 
     for status in (502, 503, 504):
-        failure = urllib.error.HTTPError(url, status, "transient", {}, None)
+        failure = urllib.error.HTTPError(url, status, "transient", Message(), None)
         with patch.object(ARTIFACT.urllib.request, "urlopen", side_effect=[failure, io.BytesIO(payload)]) as request, patch("time.sleep") as sleep:
             try:
                 result = ARTIFACT.download(url, len(payload))
             except urllib.error.HTTPError:
                 result = None
             check(f"download recovers from HTTP {status}", result == payload and request.call_count == 2)
-            check(f"download backs off after HTTP {status}", sleep.call_args_list == [((1,), {})])
+            check(f"download backs off after HTTP {status}", sleep.call_args_list == [call(1)])
 
-    failure = urllib.error.HTTPError(url, 504, "unavailable", {}, None)
+    failure = urllib.error.HTTPError(url, 504, "unavailable", Message(), None)
     with patch.object(ARTIFACT.urllib.request, "urlopen", side_effect=failure) as request, patch("time.sleep") as sleep:
         try:
             ARTIFACT.download(url, len(payload))
@@ -120,10 +121,10 @@ def test_download_failures() -> None:
             check("persistent outage preserves the error and stops after three attempts", exc is failure and request.call_count == 3)
         else:
             check("persistent outage fails closed", False)
-        check("persistent outage has two bounded backoffs", sleep.call_args_list == [((1,), {}), ((2,), {})])
+        check("persistent outage has two bounded backoffs", sleep.call_args_list == [call(1), call(2)])
 
     for status in (403, 404):
-        failure = urllib.error.HTTPError(url, status, "permanent", {}, None)
+        failure = urllib.error.HTTPError(url, status, "permanent", Message(), None)
         with patch.object(ARTIFACT.urllib.request, "urlopen", side_effect=failure) as request, patch("time.sleep") as sleep:
             try:
                 ARTIFACT.download(url, len(payload))
