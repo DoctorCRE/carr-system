@@ -115,6 +115,34 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
     def test_auth_failure_stops_without_retry_or_private_output(self):
         self.assertEqual(self.run_cli(78, fail=True)['record_reads'], 1)
 
+    def test_stdout_cap_stops_wrapper_before_oversized_output_completes(self):
+        with self.fixture() as (root, wrapper, origin, requests):
+            wrapper.write_text('#!' + sys.executable + '\n' +
+                "import pathlib, sys\n" +
+                "sys.stdout.buffer.write(b'x' * (2 * 1048576))\n" +
+                "sys.stdout.buffer.flush()\n" +
+                "pathlib.Path(__file__).with_name('oversized-completed').touch()\n")
+            result = subprocess.run([sys.executable, str(RUNNER), '--origin', origin,
+                                     '--call-wrapper', str(wrapper), '--timeout-seconds', '30'],
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 78)
+            self.assertEqual(json.loads(result.stdout)['record_reads'], 1)
+            self.assertFalse((root / 'oversized-completed').exists(),
+                             'wrapper must stop before draining two MiB')
+
+    def test_stdout_exact_byte_cap_is_allowed(self):
+        with self.fixture() as (root, wrapper, origin, requests):
+            wrapper.write_text('#!' + sys.executable + '\n' +
+                "import json, pathlib, sys\n" +
+                "root = pathlib.Path(__file__).parent\n" +
+                "value = json.dumps(json.loads((root / 'data.json').read_text())[sys.argv[2]])\n" +
+                "sys.stdout.write(value + ' ' * (1048576 - len(value.encode())))\n")
+            result = subprocess.run([sys.executable, str(RUNNER), '--origin', origin,
+                                     '--call-wrapper', str(wrapper), '--timeout-seconds', '30'],
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)['passed_assertions'], 2)
+
     def test_total_deadline_stops_slow_wrapper(self):
         self.assertLessEqual(self.run_cli(78, timeout=1, delay=10)['record_reads'], 1)
 
