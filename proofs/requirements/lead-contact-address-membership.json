@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "lead-contact-address-membership",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "deployed-release-and-natural-secondary-contact",
+      "predicate": "Pin the deployed Worker release with worker release smoke, then independently run python3 tools/prove-lead-contact-address-membership.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. Require a natural secondary-address capture with proven complete-token membership and recorded exact match in lead-board workspace detail, plus lead-stage-preview evidence when present. Release smoke alone cannot prove matching. Current public correspondence omits the captured address, so the observer refuses with exit 78 and this unit remains landed-unproven. Do not manufacture evidence or infer membership from exact metadata.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "A release identity receipt plus independent natural membership assertions are required for live-proven. Exit 78 means insufficient evidence and never completion. Exit 1 means contradiction.",
+      "input_class": "Authenticated read-only lead-board workspace=leads and lead-stage-preview, twenty detail reads total, two pages per lead, no retries or business writes. Coordinator runs production proof after deployment.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 24,
+    "max_records": 20,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}
