@@ -1,5 +1,5 @@
 {
-  "claude_config_scope_suite_measurement": {"card": "WR839.S3.J1", "suite": "ops/claude-config-scope-selftest.py", "class": "gates", "command": [".venv/bin/python", "ops/claude-config-scope-selftest.py"], "local_samples_ms": [89, 91, 86]},
+  "claude_config_scope_suite_measurement": {"card": "WR839.S3.J7", "suite": "ops/claude-config-scope-selftest.py", "class": "gates", "command": [".venv/bin/python", "ops/claude-config-scope-selftest.py"], "local_samples_ms": [475, 647, 601]},
   "field_census_suite_measurement": {"card": "WR587.S4.J6", "suite": "ops/outlook-intake-selftest.py", "class": "unit", "local_samples_ms": [55602], "basis": "Existing intake suite extended with census transitions. Measured full suite duration. No new suite."},
   "source_run": 41339293730,
   "snapshot_template_ms": 167478,

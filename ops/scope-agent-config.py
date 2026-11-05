@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Remove exact legacy CARR Claude Code user registrations after merge."""
+"""Remove CARR Claude Code and Codex user registrations after merge."""
 import argparse
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 
@@ -20,16 +21,13 @@ def cleaned(document, kind, home):
         elif 'carr' in servers:
             raise ValueError('carr user registration differs from the moved server; refusing removal')
     else:
-        legacy = json.loads((REPO / 'ops/config/claude-legacy-user-hooks.json').read_text().replace(
-            '{{REPO}}', str(home / 'carr-system')))
         for event, groups in result.get('hooks', {}).items():
             retained = []
             for group in groups:
-                scope = {k: v for k, v in group.items() if k != 'hooks'}
-                moved = [h for g in legacy.get(event, [])
-                         if {k: v for k, v in g.items() if k != 'hooks'} == scope
-                         for h in g['hooks']]
-                hooks = [h for h in group.get('hooks', []) if h not in moved]
+                hooks = [h for h in group.get('hooks', [])
+                         if not (h.get('type', 'command') == 'command' and
+                                 re.search(r'(?:^|/)carr-system/hooks/[^\s\"\';|&]+',
+                                           h.get('command', '')))]
                 if hooks or not group.get('hooks'):
                     retained.append({**group, 'hooks': hooks})
             result['hooks'][event] = retained
@@ -39,7 +37,8 @@ def cleaned(document, kind, home):
 def migrate(home, apply=False):
     plans = []
     for path, kind in [(home / '.claude.json', 'mcp'),
-                       (home / '.claude/settings.json', 'hooks')]:
+                       (home / '.claude/settings.json', 'hooks'),
+                       (home / '.codex/hooks.json', 'codex')]:
         if not path.exists():
             continue
         if path.is_symlink():
@@ -50,7 +49,7 @@ def migrate(home, apply=False):
         if result != document:
             plans.append((path, raw, result))
     for path, raw, result in plans:
-        print(f'{"REMOVE" if apply else "WOULD REMOVE"} exact legacy CARR entries from {path}')
+        print(f'{"REMOVE" if apply else "WOULD REMOVE"} CARR entries from {path}')
         if not apply:
             continue
         if path.read_bytes() != raw:

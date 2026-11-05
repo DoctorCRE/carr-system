@@ -13,8 +13,10 @@ import unittest
 from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / 'ops'))
+from git_env import fixture_env  # noqa: E402
 SOURCES = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
-           '.claude/settings.json')
+           '.claude/settings.json', '.codex/hooks.json')
 
 
 def commands():
@@ -37,13 +39,14 @@ def fixture(template):
         (repo / 'ops').mkdir()
         (repo / '.venv/bin').mkdir(parents=True)
         (repo / '.venv/bin/python').symlink_to(sys.executable)
+        subprocess.run(['git', 'init', '-q', str(repo)], check=True, env=fixture_env())
         command = template.replace('{{REPO}}', str(repo))
         relative = re.search(r'/(hooks|ops)/([\w-]+\.py)', command)
         script = repo / relative.group(1) / relative.group(2)
         env = {**os.environ, 'HOME': str(home), 'CLAUDE_PROJECT_DIR': str(repo)}
         def run(payload='payload'):
             return subprocess.run(['/bin/sh', '-c', command], input=payload,
-                                  text=True, capture_output=True, env=env, timeout=5)
+                                  text=True, capture_output=True, env=env, cwd=repo, timeout=5)
         yield script, run
 
 

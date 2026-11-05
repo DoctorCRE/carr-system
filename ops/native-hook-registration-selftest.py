@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -59,15 +60,18 @@ class SafetyHooks(unittest.TestCase):
     def test_claude_uses_project_settings_and_ignores_user_config_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
+            sys.path.insert(0, str(REPO / 'ops'))
+            from git_env import fixture_env
+            subprocess.run(['git', 'init', '-q', str(project)], check=True, env=fixture_env())
             (project / 'hooks').symlink_to(REPO / 'hooks')
             settings = project / '.claude/settings.json'
             settings.parent.mkdir()
             settings.write_text(json.dumps(self.documents()['claude']))
-            codex = project / 'codex'
+            codex = project / '.codex'
             codex.mkdir()
             (codex / 'hooks.json').write_text(json.dumps(self.documents()['codex']))
             with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(project / 'absent'),
-                                         'CODEX_HOME': str(codex)}), \
+                                         'CODEX_HOME': str(project / 'absent-codex')}), \
                     patch.object(gate, 'REPO', project), \
                     patch.object(gate, 'check_baseline', return_value=[]), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \

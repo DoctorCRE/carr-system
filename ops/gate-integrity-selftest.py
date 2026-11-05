@@ -23,11 +23,18 @@ spec.loader.exec_module(gate)
 
 
 class BaselineIntegrity(unittest.TestCase):
-    def test_linked_worktree_keeps_installed_codex_root_and_rejects_missing_hooks(self):
+    def test_linked_worktree_uses_project_codex_and_rejects_missing_hooks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             worktree = root / 'worker'
             canonical = root / 'canonical'
+            canonical.mkdir()
+            subprocess.run(['git', 'init', '-q', str(canonical)], check=True, env=fixture_env())
+            subprocess.run(['git', '-C', str(canonical), '-c', 'core.hooksPath=/dev/null',
+                            '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+                            'commit', '-qm', 'fixture', '--allow-empty'], check=True, env=fixture_env())
+            subprocess.run(['git', '-C', str(canonical), 'worktree', 'add', '-q', str(worktree)],
+                           check=True, env=fixture_env())
             codex_home = root / 'codex'
             codex_home.mkdir()
             project_settings = worktree / '.claude/settings.json'
@@ -41,10 +48,10 @@ class BaselineIntegrity(unittest.TestCase):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.touch()
             project_settings.write_text(json.dumps(project))
-            installed_codex = codex_home / 'hooks.json'
+            installed_codex = canonical / '.codex/hooks.json'
+            installed_codex.parent.mkdir()
             installed_codex.write_text(json.dumps(codex))
             with patch.object(gate, 'REPO', worktree), \
-                    patch.object(gate, 'installation_repo', return_value=canonical), \
                     patch.object(gate, 'check_baseline', side_effect=lambda: []), \
                     patch.dict(gate.os.environ, {'CODEX_HOME': str(codex_home)}), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \

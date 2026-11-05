@@ -22,6 +22,7 @@ REGISTRATIONS = {
 HOOKS = REPO / "hooks"
 BASELINE = REPO / "ops/config/gate-baseline.json"
 CONTRACTS = {
+    "codex-project-hooks.json": REPO / ".codex/hooks.json",
     "claude-project-settings.json": REPO / ".claude/settings.json",
     "claude-project-mcp.json": REPO / ".mcp.json",
     "hook_runtime.py": REPO / "lib/hook_runtime.py",
@@ -224,7 +225,7 @@ def registrations(document):
 
 
 def check(document, client, repo=REPO):
-    document = json.loads(json.dumps(document).replace('${CLAUDE_PROJECT_DIR}', '{{REPO}}'))
+    document = json.loads(json.dumps(document).replace('${CLAUDE_PROJECT_DIR}', '{{REPO}}').replace('$r/', '{{REPO}}/'))
     installed = list(registrations(document))
     errors = []
     if document.get('disableAllHooks'):
@@ -234,7 +235,7 @@ def check(document, client, repo=REPO):
             path = Path(path.replace('{{REPO}}', str(repo)))
             if not path.is_file():
                 errors.append(f'missing hook script: {path}')
-    expected = json.loads(REGISTRATIONS[client].read_text())
+    expected = json.loads(REGISTRATIONS[client].read_text().replace('$r/', '{{REPO}}/'))
     matches = [(e, g, json.loads(json.dumps(h).replace('{{REPO}}', str(repo))))
                for e, g, h in installed]
     for event, scope, hook in registrations(expected):
@@ -246,16 +247,15 @@ def check(document, client, repo=REPO):
     return errors
 
 
-def installation_repo():
-    try:
-        result = subprocess.run(
-            ['git', '-C', str(REPO), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
-            env={'PATH': os.defpath}, capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and result.stdout.strip():
-            return Path(result.stdout.strip()).parent
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return REPO
+def codex_project_hooks(repo):
+    """Codex discovers linked-worktree hooks beside the common Git directory."""
+    result = subprocess.run(
+        ['git', '-C', str(repo), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+        capture_output=True, text=True, timeout=5,
+        env={k: v for k, v in os.environ.items() if not k.startswith('GIT_')})
+    if result.returncode:
+        raise ValueError(f'cannot resolve Codex project layer for {repo}: {result.stderr.strip()}')
+    return Path(result.stdout.strip()).parent / '.codex/hooks.json'
 
 
 def main():
@@ -264,13 +264,17 @@ def main():
         names = [os.path.basename(a) for a in rest if not a.startswith('-')]
         return bless(names or None)
     strict = '--strict' in sys.argv
-    home = Path.home()
     sources = {
         'claude': REGISTRATIONS['claude'] if strict else REPO / '.claude/settings.json',
-        'codex': REGISTRATIONS['codex'] if strict else Path(os.environ.get('CODEX_HOME', home / '.codex')) / 'hooks.json',
+        'codex': REGISTRATIONS['codex'],
     }
-    roots = {'claude': REPO, 'codex': REPO if strict else installation_repo()}
+    roots = {'claude': REPO, 'codex': REPO}
     errors = check_baseline()
+    if not strict:
+        try:
+            sources['codex'] = codex_project_hooks(REPO)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            errors.append(str(exc))
     for client, path in sources.items():
         try:
             errors.extend(check(json.loads(path.read_text()), client, repo=roots[client]))
