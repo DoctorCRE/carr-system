@@ -924,7 +924,9 @@ class Matcher:
                     self.shared.add(c.email.lower())
         self.revisions = {}
         for address, rows in self.contact_rows.items():
-            evidence = {(c.exact, str(c.party_id or (c.contact_snapshot or {}).get('party_id') or ''),
+            snapshot_contact = self.signature_contact(address)
+            snapshot_party = snapshot_contact.contact_snapshot['party_id'] if snapshot_contact else None
+            evidence = {(c.exact, str(c.party_id or snapshot_party or ''),
                          c.target_type or '', c.target_id or '', c.ref) for c in rows}
             self.revisions[address] = _hash(json.dumps(sorted(evidence)))
 
