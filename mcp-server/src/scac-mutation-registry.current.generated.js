@@ -1653,6 +1653,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-subject-watches-v1": {
+    "ingress_key": "mcp-tool:list-subject-watches-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "bec2ab043cc0cb5a13a3a0e10813a525ba5a1d1f2e8d8583b0a7d39f7454e274",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-verbs": {
     "ingress_key": "mcp-tool:list-verbs",
     "source_locator": "mcp-server/src/tools.js",
@@ -2608,6 +2618,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-session-identity",
     "source_locator": "mcp-server/src/session-identity.ts",
     "schema_digest": "520a23d16b3dc32163cb982d226607eca3ee4b12f745121571a74db2267e4b7e",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-subject-watch-v1": {
+    "ingress_key": "mcp-tool:read-subject-watch-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "b98ed0339cc23ac55dd5a1a93bd341b2a9b306d439aab64003cf0fc2e87416c9",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -3961,6 +3981,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "unwatch-subject-v1": {
+    "ingress_key": "mcp-tool:unwatch-subject-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "5f758b8888f7259c179df23531eeba1fc519988ee3e702a312cd95fdc6b02cc9",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "update-deal": {
     "ingress_key": "mcp-tool:update-deal",
     "source_locator": "mcp-server/src/tools.js",
@@ -4066,6 +4096,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "watch-subject-v1": {
+    "ingress_key": "mcp-tool:watch-subject-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "5f758b8888f7259c179df23531eeba1fc519988ee3e702a312cd95fdc6b02cc9",
+    "write": true,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,
