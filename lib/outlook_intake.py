@@ -175,7 +175,7 @@ def _reply_error(reply: dict) -> str:
 
 
 def write_diagnostics(state: dict) -> list[dict]:
-    unique = {}
+    unique: dict[str, dict] = {}
     for request in state.get('requests', {}).values():
         if not request.get('acknowledged') and request.get('server_diagnostic'):
             diagnostic = request['server_diagnostic']
@@ -2248,7 +2248,7 @@ def _carr(repo: Path) -> Callable[[str, dict], dict]:
         except OSError as error:
             raise CarrError(code='transport_oversized' if error.errno == errno.E2BIG else 'transport_error') from None
         if done.returncode:
-            payload = {}
+            payload: dict | str = {}
             code, refusal = 'setup_failed' if done.returncode == 2 else 'transport_error', None
             for prefix in ('TOOL ERROR ', 'RPC ERROR '):
                 if prefix in (done.stderr or ''):
