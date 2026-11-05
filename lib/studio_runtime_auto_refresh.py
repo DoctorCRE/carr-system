@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from lib.release_reader import read
+from lib.worker_release_receipt import discover
 
 from ops.git_env import scrubbed_env
 from lib.local_jobs import append, locked, read_latest, stamp
@@ -26,22 +27,15 @@ def command(*args, timeout=60):
                           text=True, timeout=timeout, env=scrubbed_env()).stdout.strip()
 
 
-def released_sha():
+def released_receipt():
     response = read(RELEASE_URL, timeout=20)
     if response.status != 200:
         raise ValueError(f"production release HTTP {response.status}")
-    live = json.loads(response.body)
-    sha = live['git_sha']['value']
-    if not isinstance(sha, str) or not SHA.fullmatch(sha) or live.get('env', {}).get('value') != 'production':
-        raise ValueError('production release identity unavailable')
-    runs = json.loads(command('gh', 'run', 'list', '-R', 'DoctorCRE/carr-system',
-                              '--workflow', 'deploy.yml', '--status', 'success', '--limit', '20',
-                              '--json', 'displayTitle,event,headBranch,conclusion'))
-    if not any(r.get('displayTitle') == f'Production release {sha}'
-               and r.get('headBranch') == 'main' and r.get('conclusion') == 'success'
-               and r.get('event') in {'workflow_run', 'workflow_dispatch'} for r in runs):
-        raise ValueError('no successful production deploy receipt for release SHA')
-    return sha
+    return discover(json.loads(response.body))
+
+
+def released_sha():
+    return released_receipt()['source_sha']
 
 
 def save(path, state):
@@ -65,8 +59,18 @@ def tick(root, host, *, now=None):
     with locked(root / 'lock', blocking=False):
         path = root / 'state.json'
         state = json.loads(path.read_text()) if path.exists() else {'failures': {}}
+        installation_started_at = None
         def receipt(status, sha=None):
-            append(root / 'runs.jsonl', {'at': stamp(now), 'status': status, 'sha': sha})
+            row = {'at': stamp(now), 'status': status, 'sha': sha}
+            worker = getattr(host, 'worker_receipt', None)
+            if isinstance(worker, dict):
+                row['worker_receipt'] = worker
+            if status in {'current', 'refreshed'}:
+                row['installed_sha'] = sha
+            if status == 'refreshed':
+                row['installation_started_at'] = installation_started_at
+                row['installation_completed_at'] = stamp(time.time() if live_clock else now)
+            append(root / 'runs.jsonl', row)
             return status
         try:
             host.recover()
@@ -110,6 +114,7 @@ def tick(root, host, *, now=None):
         state['failures'][sha] = state['failures'].get(sha, 0) + 1
         save(path, state)
         receipt('attempt', sha)
+        installation_started_at = stamp(time.time() if live_clock else now)
         try:
             host.refresh(sha)
             if host.installed() != sha:
@@ -126,9 +131,12 @@ def tick(root, host, *, now=None):
 
 
 class Host:
-    release = staticmethod(released_sha)
+    def release(self):
+        self.worker_receipt = released_receipt()
+        return self.worker_receipt['source_sha']
 
     def __init__(self, source):
+        self.worker_receipt = None
         self.source = source.resolve()
         self.settings = load_settings()
         self.runtime = self.settings.repo

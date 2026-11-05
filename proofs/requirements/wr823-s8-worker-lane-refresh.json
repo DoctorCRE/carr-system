@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S8-worker-lane-refresh",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-source-before-parent-completion",
+      "predicate": "Read the exact Worker lane receipt and verified installed Studio identity with python3 tools/studio-release-readback.py --source /Users/booko/carr-system while the same parent run is in progress and its Studio proof job is waiting. Require source SHA, Worker version, run attempt and artifact ID to match the diagnostic installation report. The coordinator read-only proof job WR823.S8.J3 observes these facts after merge and deploy. Then use studio-canonical-run.v1 for the existing authenticated canonical installation/execution readback. Missing trusted installation interval or target association remains held. Local diagnostic reports never become canonical evidence.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Exact intended source installed while its parent still waits for Studio proof. Stay landed-unproven until observed. Hold canonical proof when trusted collector facts are missing.",
+      "input_class": "read-only fresh Worker identity, GitHub lane artifact and parent metadata, verified installed identity and explicit local diagnostic report; canonical count-only reader; no job launch",
+      "deadline_seconds": 180
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}

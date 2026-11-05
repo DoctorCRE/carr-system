@@ -44,8 +44,10 @@ jobs allow a matching SHA to report current. Otherwise the tick refuses success.
 
 One launchd calendar job wakes every five minutes. Python reads a dated local
 ledger before each run, reads production `/release` (`git_sha.value`), and checks
-for a successful `deploy.yml` run on main at that exact SHA through GitHub CLI. The workflow run name binds the actual deployed SHA,
-which can differ from the workflow_run event’s own default-branch head SHA.
+for an immutable Worker lane artifact from the trusted main `deploy.yml` workflow.
+The artifact binds the source SHA, Worker version, verb count, run and attempt.
+The parent run may still be in progress. Display titles and aggregate run
+conclusions have no role in installation eligibility.
 The existing drained wrapper owns send locks, runtime installation and recovery.
 A temporary local source clone at the released commit supplies the installers;
 shared main is never checked out or pulled by this job. The fetched remote-main
@@ -133,3 +135,70 @@ atomic replace and fsync. Alerts use the existing finding key for deduplication.
 | Discovery crash consumes reserved budget | `test_discovery_reservation_survives_crash` |
 | Open discovery still recovers runtime | `test_discovery_open_still_recovers` |
 | Counter reset permits fresh read | `test_discovery_operator_reset_allows_read` |
+
+
+## Worker lane receipt cutover for WR823.S8.J1
+
+The deploy job seals `worker-release.json` from its already verified `/release`
+readback and uploads `worker-release-<full source SHA>` before downstream waits.
+A rerun replaces its prior artifact, while each artifact ID remains immutable.
+Discovery reads at most two exact-name artifacts and accepts only the current
+attempt from the same repository's main deploy workflow. It compares production
+source SHA, Worker UUID and verb count against a fresh `/release` read. No CARR
+key or OIDC exchange is introduced. The live registry reconciliation found no
+such reader contract. Canonical CARR installation evidence remains a separate
+collector obligation. A local diagnostic report cannot satisfy that obligation.
+
+`lib/worker_release_receipt.py` owns parsing and trust checks. The existing
+reconciler still owns recovery, cooldowns and durable attempt reservations.
+Every verified `current` or `refreshed` diagnostic row now includes installed
+SHA and the Worker receipt with its run, attempt and artifact ID. A refreshed row also records the actual local install start
+and completion times. A failed
+readback never emits installed success. No generic delivery state store is added.
+
+Receipts expire after 90 days. Expiry, unavailable identity, invalid archives,
+wrong workflow, wrong attempt or mismatched release refuse installation. There
+is no stale success fallback. Each discovery has at most five GitHub requests,
+each with a 20-second timeout, and one public identity read. The existing drain
+wrapper independently rechecks eligibility before applying effects. No inner
+retry or fan-out is added. The existing discovery breaker opens after two failed
+ticks, including a missing receipt during cutover, and needs operator recovery
+after the cause is repaired. This builder never resets production state.
+
+The statechart is the chart above plus this receipt admission region.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Observe
+    Observe --> Refused: Worker identity unavailable or receipt mismatches
+    Observe --> Eligible: Matching verified Worker lane receipt
+    Eligible --> Installed: Refresh and verified installed identity match
+    Eligible --> Current: Already installed and verified
+    Eligible --> Failed: Refresh or installed readback fails
+    Failed --> Eligible: Next bounded attempt
+    Failed --> Open: Second failure
+    Refused --> Observe: Next bounded discovery
+    Refused --> DiscoveryOpen: Second discovery failure
+    DiscoveryOpen --> DiscoveryOpen: No third network read
+    Open --> Open: No third install
+    Installed --> Observe: Next calendar tick
+    Current --> Observe: Next calendar tick
+```
+
+`worker-release-receipt-selftest.py` covers admission, identity and trust refusal,
+missing and malformed artifacts, bounded reads, and sealer refusal. The automatic
+refresh selftest runs real receipt discovery through a synthetic GitHub adapter
+and the real tick while the parent remains in progress. It asserts the diagnostic
+installed SHA and artifact/run association. Existing cooldown, recovery and
+breaker tests cover the remaining transitions. No formal model proof is claimed.
+
+Production readback is `python3 tools/studio-release-readback.py --source
+/Users/booko/carr-system`. It reads fresh Worker identity, receipt and parent
+metadata, verifies installed identity and existing helper/job checks, then checks
+the latest 100 report rows for an actual refreshed diagnostic installation row for that exact artifact and
+attempt, including its local installation interval. An already-current report
+cannot substitute for that install event.
+It refuses unless the parent is still in progress. It performs no refresh or
+write. The unified parent's Studio waiting job belongs to the later graph slice;
+WR823.S8.J3 must also verify that job is waiting when taking this readback.
+Until those observations exist, production remains unproven.
