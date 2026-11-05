@@ -162,31 +162,20 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     assert.equal((await read([{...effect,original_key:randomUUID(),source_version:'2'}])).counts.tombstoned,1);
     await c.query('update party set deleted_at=null where id=$1',[party]);
   });
-});
-
-test('intake captures bare-party email and retries without duplicating its timeline', async t => {
-  const fixture = await acquireDisposablePostgres({prefix:'party-intake-',snapshot:true});
-  const c = new pg.Client(fixture.connection); await c.connect();
-  t.after(async()=>{await c.end();await fixture.close();});
-  const actor={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
-  await c.query("update actor set email='joe@example.test' where id=$1",[actor.id]);
-  const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic bare party',$1,$1) returning id",[actor.id])).rows[0].id;
-  const call=async(verb,args)=>{
-    await c.query('begin');
-    try {await c.query('set local role carr_writer');const r=await executeRegisteredTool(c,actor,verb,args);await c.query('commit');return r;}
-    catch(e){await c.query('rollback');throw e;}
-  };
-  for (const kind of ['email_in','email_out']) {
-    const args={idempotency_key:randomUUID(),ref:party,kind,summary:'Synthetic capture',
-      occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
-      email_context:{subject:'Synthetic',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}};
-    const result=await call('log-activity',args);
-    assert.equal(result.subject.type,'party');
-    assert.equal((await call('log-activity',args)).activity_id,result.activity_id);
-    assert.equal((await call('log-activity',{...args,idempotency_key:randomUUID()})).activity_id,result.activity_id);
-    const row=(await c.query('select party_id,deal_id,client_id,lead_id,vendor_id from activity where id=$1',[result.activity_id])).rows[0];
-    assert.deepEqual(row,{party_id:party,deal_id:null,client_id:null,lead_id:null,vendor_id:null});
-    const timeline=await call('catch-me-up',{ref:party});
-    assert.equal(timeline.timeline.filter(r=>r.entry_kind==='activity'&&r.verb===kind).length,1);
-  }
+  await t.test('intake captures bare-party email and retries without duplicating its timeline', async()=>{
+    const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic bare party',$1,$1) returning id",[actor.id])).rows[0].id;
+    for (const kind of ['email_in','email_out']) {
+      const args={idempotency_key:randomUUID(),ref:party,kind,summary:'Synthetic capture',
+        occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
+        email_context:{subject:'Synthetic',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}};
+      const result=await call('log-activity',args);
+      assert.equal(result.subject.type,'party');
+      assert.equal((await call('log-activity',args)).activity_id,result.activity_id);
+      assert.equal((await call('log-activity',{...args,idempotency_key:randomUUID()})).activity_id,result.activity_id);
+      const row=(await c.query('select party_id,deal_id,client_id,lead_id,vendor_id from activity where id=$1',[result.activity_id])).rows[0];
+      assert.deepEqual(row,{party_id:party,deal_id:null,client_id:null,lead_id:null,vendor_id:null});
+      const timeline=await call('catch-me-up',{ref:party});
+      assert.equal(timeline.timeline.filter(r=>r.entry_kind==='activity'&&r.verb===kind).length,1);
+    }
+  });
 });
