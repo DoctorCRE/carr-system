@@ -66,6 +66,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "acknowledge-job-result": {
+    "ingress_key": "mcp-tool:acknowledge-job-result",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "ed81840bd03629f055da6ebd95fcd2abe46591d46f48450c50cfac980223d4ed",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "acknowledge-notification": {
     "ingress_key": "mcp-tool:acknowledge-notification",
     "source_locator": "mcp-server/src/notifications.ts",
@@ -1208,6 +1218,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "62d8d08c4fbc232594ac95bdd685d3c9c25435a6210ad1006ea9361cead2a8c2",
     "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "finish-job": {
+    "ingress_key": "mcp-tool:finish-job",
+    "source_locator": "mcp-server/src/work-queue.js",
+    "schema_digest": "889835b0bc410f605a898313b386cb9feeba1dc0fa245d9f1dafdfb3a77990cc",
+    "write": true,
     "human_only": false,
     "human_caller_only": false,
     "authority_only": false,

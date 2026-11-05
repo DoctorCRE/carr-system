@@ -706,3 +706,70 @@ test('registration refuses malformed IDs and hides other tenants and private req
     assert.deepEqual(await executeRegisteredTool(c, actor, 'job-card-registration', { card_id }), { ok: true, card_id, registered: false });
   } finally { await c.query('rollback'); }
 });
+
+
+test('worker finish is durable, replayable exactly once, and acknowledged separately', async () => {
+  const work_request = await request('WR-000816');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const args = { card_id, status: 'done', result: 'Audit passed.', report_ref: '/tmp/synthetic-audit.md', idempotency_key: randomUUID() };
+  const first = await command('finish-job', args);
+  assert.equal(first.finish.status, 'done');
+  assert.equal(first.finish.result, args.result);
+  assert.equal(first.finish.report_ref, args.report_ref);
+  assert.ok(first.finish.finished_at);
+  assert.equal(first.finish.finished_by, 'joe');
+  assert.deepEqual(await command('finish-job', args), { ...first, replayed: true });
+  await assert.rejects(command('finish-job', { ...args, status: 'failed', idempotency_key: randomUUID() }), { message: 'job_already_finished' });
+  let row = (await command('work-queue')).jobs.find(row => row.card_id === card_id);
+  assert.deepEqual([row.stage, row.prs, row.finish], ['done', [], first.finish]);
+  const ack = { card_id, idempotency_key: randomUUID() };
+  const receipt = await command('acknowledge-job-result', ack);
+  assert.ok(receipt.finish.acknowledged_at);
+  assert.equal(receipt.finish.acknowledged_by, 'joe');
+  assert.deepEqual(await command('acknowledge-job-result', ack), { ...receipt, replayed: true });
+  await assert.rejects(command('acknowledge-job-result', { ...ack, idempotency_key: randomUUID() }), { message: 'job_result_already_acknowledged' });
+  row = (await command('work-queue')).jobs.find(row => row.card_id === card_id);
+  assert.deepEqual(row.finish, receipt.finish);
+  assert.equal(row.stale, false);
+});
+
+test('worker finish refuses unknown cards, invalid outcomes and unfinished acknowledgements', async () => {
+  const work_request = await request('WR-000817');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const args = { card_id, status: 'blocked', result: 'Needs source.', report_ref: '/tmp/synthetic-block.md', idempotency_key: randomUUID() };
+  await assert.rejects(command('finish-job', { ...args, card_id: 'WR817.S1.J999' }), { message: 'job_not_found' });
+  await assert.rejects(command('acknowledge-job-result', { card_id, idempotency_key: randomUUID() }), { message: 'job_not_finished' });
+  for (const change of [{ status: 'running' }, { result: 'Two\nlines' }, { result: ' ' }, { report_ref: ' ' }])
+    await assert.rejects(command('finish-job', { ...args, ...change, idempotency_key: randomUUID() }));
+  assert.equal((await command('finish-job', args)).finish.status, 'blocked');
+  const failed = await command('dispatch-job', job(work_request));
+  assert.equal((await command('finish-job', { ...args, card_id: failed.card_id, status: 'failed', idempotency_key: randomUUID() })).finish.status, 'failed');
+});
+
+test('concurrent worker finishes preserve one immutable result', async () => {
+  const work_request = await request('WR-000818');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const clients = await Promise.all(Array.from({ length: 2 }, async () => { const client = new pg.Client(connection); await client.connect(); return client; }));
+  try {
+    const results = await Promise.allSettled(clients.map((client, i) => command('finish-job', { card_id,
+      status: 'done', result: `Audit ${i}.`, report_ref: '/tmp/synthetic.md', idempotency_key: randomUUID() }, client)));
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(results.find(result => result.status === 'rejected').reason.message, 'job_already_finished');
+    const row = (await command('work-queue')).jobs.find(row => row.card_id === card_id);
+    assert.equal(row.finish.result, results.find(result => result.status === 'fulfilled').value.finish.result);
+  } finally { await Promise.all(clients.map(client => client.end())); }
+});
+
+
+test('a running worker finishes and a finished worker cannot restart', async () => {
+  const work_request = await request('WR-000819');
+  const { card_id } = await command('dispatch-job', job(work_request));
+  const start = { work_request, job: 1, repository: 'DoctorCRE/carr-system', runner_job_id: 'synthetic', idempotency_key: randomUUID() };
+  await command('dispatch-job', start);
+  const finish = { card_id, status: 'done', result: 'Proof passed.', report_ref: '/tmp/proof.md', idempotency_key: randomUUID() };
+  await command('finish-job', finish);
+  await assert.rejects(command('dispatch-job', { ...start, idempotency_key: randomUUID() }), { message: 'job_already_finished' });
+  const unstarted = await command('dispatch-job', job(work_request));
+  await command('finish-job', { ...finish, card_id: unstarted.card_id, idempotency_key: randomUUID() });
+  await assert.rejects(command('dispatch-job', { ...start, job: 2, idempotency_key: randomUUID() }), { message: 'job_already_finished' });
+});

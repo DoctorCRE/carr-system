@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S13-J6-job-finish",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "job-finish-registered-release",
+    "predicate": "The deployed Worker release matches the merged revision and its registry serves finish-job and acknowledge-job-result. Release smoke does not establish audit persistence. Before live-proven, the coordinator must read a real finished no-PR audit Card through work-queue, verify its immutable status, result and report reference, observe an unacknowledged result older than 24 hours as stale, then observe acknowledgement clearing that staleness.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Exact merged release identity and registered verbs observed. Real audit persistence, stale-result visibility and acknowledgement remain pending operational proof obligations.",
+    "input_class": "Read-only release identity and verb registry; no synthetic production writes.",
+    "deadline_seconds": 120
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 10, "max_records": 1000, "max_runtime_seconds": 180, "max_artifact_bytes": 1048576}
+}

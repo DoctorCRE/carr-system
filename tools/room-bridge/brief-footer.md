@@ -28,3 +28,7 @@ Reviewers in carr-system and doctorcre-app write a verdict file and never post a
 Before `git push` and `gh pr create`, run `./run.sh pre-pr --body <PR body file>` and fix every line it prints.
 
 Local verification requires `ops/ci.sh --only "pushfloor secret"` plus relevant selftests. The hosted required `ops/ci.sh --strict` check must pass. Unit skips locally without CARR_CI_DATABASE_URL.
+
+Worker completion is durable on the registered job Card. After saving the full report, the worker's last step is `./run.sh call finish-job` with `card_id`, `status` (`done`, `blocked` or `failed`), a one-line `result`, `report_ref`, and a UUID `idempotency_key`. Generate the key once and preserve the exact payload for any retry. This replaces the local orchestrator store-inbox push. A refused or unavailable call is a completion blocker; preserve the report and surface the failure rather than claiming the finish was recorded. Task-specific no-record-write restrictions still govern; report the pending finish to the coordinator in that case.
+
+The coordinator reads `work-queue` for worker results, acts on each, then calls `acknowledge-job-result` with `card_id` and a UUID `idempotency_key`. Results unacknowledged for 24 hours become stale independently of GitHub reads. A worker finish never establishes production delivery or completes the parent Work Request.

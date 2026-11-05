@@ -370,3 +370,24 @@ test('GitHub rate limits leave production status unknown', async () => {
     : new Response('', { status: 429 }) });
   assert.deepEqual(await read([{ repo: 'DoctorCRE/carr-system', number: 1, state: 'merged' }]), [null]);
 });
+
+
+test('worker finishes remain visible and become stale without GitHub until acknowledged', () => {
+  const at = Date.parse('2026-11-05T18:00:00Z');
+  const finished = { stage: 'closed', prs: [], status: 'done', result: 'Audit passed.', report_ref: '/tmp/audit.md',
+    finished_at: new Date(at - STALE_AFTER_MS).toISOString(), finished_by: 'joe' };
+  const row = { work_request: 'WR-000557', slice_ordinal: 1, j_number: 1, created_at: at, finished };
+  const unavailable = [{ repo: 'DoctorCRE/carr-system', state: 'unavailable', prs: [] }];
+  let view = queueView([row], unavailable, at);
+  assert.equal(view.jobs[0].stage, 'done');
+  assert.equal(view.jobs[0].finish.result, 'Audit passed.');
+  assert.equal(view.jobs[0].stale, true);
+  assert.equal(queueView([row], unavailable, at - 1).jobs[0].stale, false);
+  view = queueView([{ ...row, finished: { ...finished, acknowledged_at: new Date(at).toISOString(), acknowledged_by: 'joe' } }], unavailable, at);
+  assert.equal(view.jobs[0].stale, false);
+  const pr = { repo: 'DoctorCRE/carr-system', number: 99, state: 'open', draft: false, cards: ['WR557.S1.J1'] };
+  view = queueView([row], [{ state: 'ok', prs: [pr] }], at);
+  assert.equal(view.jobs[0].stage, 'review');
+  assert.equal(view.jobs[0].finish.result, 'Audit passed.');
+  assert.equal(view.jobs[0].stale, true);
+});

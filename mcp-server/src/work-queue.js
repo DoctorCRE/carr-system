@@ -38,9 +38,8 @@ export function queueCardId(ref, ordinal, number) {
 // A PR belongs to a job through a "Card: WRn.Sm.Jk" line in its body, and stage is derived from those PRs live.
 // Historical finished records remain readable; the queue read never writes observations.
 export const PULL_REQUEST_TTL_MS = 60_000;
-// Building is the only stage a job can stall in without anyone else holding it. Codex jobs run in hours, so a day
-// with no push to the open draft means stalled. Queued jobs wait their priority turn (dispatch-job starts nothing),
-// and review and merge wait on others, so none of those is ever stale.
+// A draft without a push or a worker result without acknowledgement is stale after a day.
+// Worker-result age comes from the store and does not depend on GitHub availability.
 export const STALE_AFTER_MS = 24 * 3_600_000;
 const CARD_LINE = /^Card:[ \t]*(WR\d+\.S\d+\.J\d+)\b/gmu;
 
@@ -252,9 +251,11 @@ export function queueView(rows, sources, at) {
     const card_id = queueCardId(row.work_request, row.slice_ordinal, row.j_number);
     const live = byCard.get(card_id) ?? [];
     const prs = live.length || !finished ? live : finished.prs;
-    const stage = live.length || !finished ? (live.length ? jobStage(live) : row.started_at ? 'running' : 'queued') : finished.stage;
+    const finish = finished?.status ? (({ stage, prs, ...result }) => result)(finished) : null;
+    const stage = live.length || !finished ? (live.length ? jobStage(live) : row.started_at ? 'running' : 'queued') : finish?.status ?? finished.stage;
     const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
-    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS,
+    return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, ...(finish ? { finish } : {}),
+      stale: (complete && at - since >= STALE_AFTER_MS) || !!(finish && !finish.acknowledged_at && at - Date.parse(finish.finished_at) >= STALE_AFTER_MS),
       pr_evidence_complete: complete && (!finished || finished.prs.every(saved => live.some(pr => pr.repo === saved.repo && pr.number === saved.number))), prs };
   });
   return { jobs, github: sources.map(({ prs, ...source }) => source) };
@@ -458,10 +459,11 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
       [], async (c, actor, args, wr) => {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
         if (starting) {
-          const row = (await c.query(`select runner_job_id,repository,job_type from ops.work_request_job
+          const row = (await c.query(`select runner_job_id,repository,job_type,finished from ops.work_request_job
             where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job])).rows[0];
           if (!row && jobFacts.some(key => args[key] == null)) refuse('job_not_found');
           if (row) {
+            if (row.finished) refuse('job_already_finished');
             if (args.job_type != null && row.job_type != null && row.job_type !== args.job_type) refuse('job_type_mismatch');
             if (row.repository != null && row.repository !== args.repository) refuse('job_repository_mismatch');
             if (row.runner_job_id != null) refuse('job_already_started');
@@ -492,6 +494,34 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
         { required: [...jobFacts, 'job_type'] },
         { required: [...jobStart, 'repository'] },
       ] }),
+    'finish-job': command('finish-job', 'Record a worker result exactly once on its registered Card. This finishes the job, not the Work Request or production delivery. Retry with the same idempotency key. A new key cannot replace a result.',
+      { card_id: text(), status: { ...text(), enum: ['done', 'blocked', 'failed'] }, result: text(500), report_ref: text(2000) },
+      ['card_id', 'status', 'result', 'report_ref'], async (c, actor, args, wr) => {
+        if (!['done', 'blocked', 'failed'].includes(args.status) || /[\r\n]/u.test(args.result)) refuse('invalid_job_result');
+        const current = (await c.query(`select finished from ops.work_request_job
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 for update`, [wr.id, args.slice, args.job])).rows[0];
+        if (!current) refuse('job_not_found');
+        if (current.finished) refuse('job_already_finished');
+        const finish = { status: args.status, result: args.result.trim(), report_ref: args.report_ref.trim(),
+          finished_at: new Date().toISOString(), finished_by: actor.slug };
+        await c.query(`update ops.work_request_job set finished=$4::jsonb,version=version+1
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`,
+        [wr.id, args.slice, args.job, JSON.stringify({ stage: 'closed', prs: [], ...finish })]);
+        return { card_id: args.card_id, finish };
+      }),
+    'acknowledge-job-result': command('acknowledge-job-result', 'Record that a coordinator acted on a worker result. Preserves the original result and clears its unacknowledged-result staleness. Does not complete a Work Request.',
+      { card_id: text() }, ['card_id'], async (c, actor, args, wr) => {
+        const current = (await c.query(`select finished from ops.work_request_job
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3 for update`, [wr.id, args.slice, args.job])).rows[0];
+        if (!current) refuse('job_not_found');
+        if (!current.finished?.status) refuse('job_not_finished');
+        if (current.finished.acknowledged_at) refuse('job_result_already_acknowledged');
+        const saved = { ...current.finished, acknowledged_at: new Date().toISOString(), acknowledged_by: actor.slug };
+        await c.query(`update ops.work_request_job set finished=$4::jsonb,version=version+1
+          where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice, args.job, JSON.stringify(saved)]);
+        const { stage, prs, ...finish } = saved;
+        return { card_id: args.card_id, finish };
+      }),
     'retitle-job': command('retitle-job', 'Rename one job card using its current base_version and optionally replace its one-sentence description. Preserve all other job facts.',
       { card_id: text(), card_title: text(80), description: text(500), base_version: positive }, ['card_id', 'card_title', 'base_version'], async (c, actor, args, wr) => {
         const current = (await c.query(`select card_title,description,version from ops.work_request_job
@@ -532,7 +562,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
         [`WR-${match[1].padStart(6, '0')}`, organizationTenantForActor(actor), Number(match[2]), Number(match[3])])).rows;
         return { ok: true, card_id: args.card_id, registered: rows.length === 1, ...rows[0] };
       } },
-    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and stage, PRs, and staleness derived from Card lines on GitHub pull requests. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
+    'work-queue': { write: false, description: 'Read all visible jobs in priority order with stable card IDs, Work Request titles, and live PR stages derived from Card lines on GitHub pull requests, and durable worker finishes. Results unacknowledged for 24 hours are stale even when GitHub is unavailable; finish-job records the result and acknowledge-job-result records acting on it. ready_to_close lists requests whose nonempty slice plan has shipped work, merged evidence for every done slice, and no open slices; completion still requires independent attestation.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       handler: async (c, actor, args) => {
         validate(args, {}, []);
