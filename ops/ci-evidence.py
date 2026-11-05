@@ -56,6 +56,21 @@ def hosted_verdict(*, drift=False):
     needs = json.loads(os.environ['CI_NEEDS'])
     fast = not drift and os.environ.get('CI_EVENT') == 'pull_request'
     lanes = ('check',) if drift else (('fast', 'gates', 'secret', 'unit-coverage') if fast else ('scope', 'classes', 'migration-fixtures', 'unit-coverage'))
+    if fast:
+        from ci import CLASS_DESCRIPTIONS
+        from ci_scope import required_jobs
+        selected = needs['select']
+        if selected['result'] != 'success':
+            return 1
+        classes = json.loads(selected['outputs']['classes'])
+        if (not isinstance(classes, list) or not classes or 'lint' not in classes
+                or len(set(classes)) != len(classes) or set(classes) - set(CLASS_DESCRIPTIONS)):
+            return 1
+        lanes = tuple(required_jobs(classes))
+        for name in set(('lint', 'fast', 'gates', 'secret', 'unit', 'unit-coverage',
+                         'launchd-python39', 'scope', 'classes', 'migration-fixtures')) - set(lanes):
+            if needs[name]['result'] != 'skipped':
+                return 1
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
     if not drift and not fast:
@@ -91,7 +106,7 @@ def canary_verdict():
 
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
-    for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci.py', 'ops/ci-unit.py',
+    for name in ('.github/workflows/ci.yml', 'ops/ci-evidence.py', 'ops/ci.sh', 'ops/ci.py', 'ops/ci_scope.py', 'ops/ci-unit.py',
                  '.github/workflows/unit-shards.yml', 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json', 'ops/config/ci-unit-durations.json', 'ops/config/hosted-suite-exceptions.json', 'ops/ci_unit_shards.py', 'mcp-server/run-tests.mjs', 'ops/ci-pushfloor.py', 'ops/ci-migration.py', 'ops/ci-gates.py', 'ops/ci-secret.py',
                  'ops/node_test_summary.py',
                  'ops/ci-node-file.mjs',
