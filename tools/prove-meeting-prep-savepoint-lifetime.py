@@ -174,10 +174,14 @@ def main():
         raise Unavailable('total deadline exceeded')
 
     signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
     evidence = {}
     try:
-        print(json.dumps(observe(args, evidence)))
+        try:
+            signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
+            result = observe(args, evidence)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        print(json.dumps(result))
         return 0
     except Contradiction as error:
         print(json.dumps({**evidence, 'status': 'contradiction', 'reason': str(error), 'live_proven': False}))
@@ -185,8 +189,6 @@ def main():
     except (Unavailable, OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
         print(json.dumps({**evidence, 'status': 'unavailable', 'live_proven': False}))
         return 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 if __name__ == '__main__':

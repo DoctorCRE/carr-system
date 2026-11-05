@@ -20,3 +20,13 @@ stateDiagram-v2
     end note
     %% never roll back a released preparation savepoint
     %% never retain ready preparation after a contained projection failure
+
+    [*] --> Observing: proof requested
+    Observing --> ReceiptReady: observation succeeds
+    Observing --> ReceiptContradiction: observation contradicts acceptance
+    Observing --> ReceiptUnavailable: wrapper or total deadline expires
+    ReceiptReady --> ReceiptEmitted: disarm deadline, emit success
+    ReceiptContradiction --> ReceiptEmitted: disarm deadline, emit contradiction
+    ReceiptUnavailable --> ReceiptEmitted: disarm deadline, emit unavailable
+    ReceiptEmitted --> [*]: exit with matching status
+    %% never interrupt a completed observation's receipt with its deadline
