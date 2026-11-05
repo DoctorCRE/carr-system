@@ -1,0 +1,23 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S7-reference-extractor",
+  "targets": ["studio"],
+  "assertions": [
+    {
+      "id": "two-reference-packages-validate-and-map",
+      "predicate": "Observe a successful portal-reference-extract Studio receipt for the exact runtime SHA with counts.extraction.validated_reference_packages >= 2. The receipt must represent read-only extraction of both authorized Studio reference copies into private output, full package validation, every applicable D and T+D row mapped, and counts and private artifact hashes only. Synthetic fixtures do not satisfy this predicate. The registered observer checks the receipt SHA and count only; coordinator verification of both private manifests remains required.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "Both authorized reference packages validate with complete applicable inventory mappings. Private manifests and artifact hashes are retained outside Git. No publish, migration, live site request, or client data in Git occurs.",
+      "input_class": "Explicitly authorized trusted Studio source folders and private mappings; read-only local extraction and private output only",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1000,
+    "max_runtime_seconds": 300,
+    "max_artifact_bytes": 1048576
+  }
+}
