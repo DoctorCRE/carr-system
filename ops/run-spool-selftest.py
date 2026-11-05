@@ -162,7 +162,7 @@ def main() -> int:
     output = io.StringIO()
     safe_line = ("ops-record: the ops schema is not on this database — "
                  "migration 0115 is unapplied here. Nothing recorded.")
-    private = "postgresql://" + "private:credential" + "@invalid/db client-payload"
+    private = "driver detail contains credential and client-payload canaries"
     stderr = safe_line + "\n" + private * 1000
     with patch.dict(os.environ, {"CARR_RUN_SPOOL_DB": private_spool}), \
             patch.object(module, "replay", return_value=subprocess.CompletedProcess(
