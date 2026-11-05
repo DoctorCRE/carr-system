@@ -23,7 +23,7 @@ spec.loader.exec_module(gate)
 
 
 class BaselineIntegrity(unittest.TestCase):
-    def test_linked_worktree_keeps_installed_codex_root_and_rejects_missing_hooks(self):
+    def test_linked_worktree_uses_project_codex_and_rejects_missing_hooks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             worktree = root / 'worker'
@@ -41,10 +41,10 @@ class BaselineIntegrity(unittest.TestCase):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.touch()
             project_settings.write_text(json.dumps(project))
-            installed_codex = codex_home / 'hooks.json'
+            installed_codex = worktree / '.codex/hooks.json'
+            installed_codex.parent.mkdir()
             installed_codex.write_text(json.dumps(codex))
             with patch.object(gate, 'REPO', worktree), \
-                    patch.object(gate, 'installation_repo', return_value=canonical), \
                     patch.object(gate, 'check_baseline', side_effect=lambda: []), \
                     patch.dict(gate.os.environ, {'CODEX_HOME': str(codex_home)}), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \

@@ -63,7 +63,7 @@ class SafetyHooks(unittest.TestCase):
             settings = project / '.claude/settings.json'
             settings.parent.mkdir()
             settings.write_text(json.dumps(self.documents()['claude']))
-            codex = project / 'codex'
+            codex = project / '.codex'
             codex.mkdir()
             (codex / 'hooks.json').write_text(json.dumps(self.documents()['codex']))
             with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(project / 'absent'),

@@ -98,8 +98,8 @@ command is safe. Unknown or edited hook registrations remain for inspection;
 a changed `carr` server causes refusal before writing anything.
 
 ```sh
-python3 ops/scope-claude-config.py
-python3 ops/scope-claude-config.py --apply
+python3 ops/scope-agent-config.py
+python3 ops/scope-agent-config.py --apply
 claude mcp get carr
 ```
 
@@ -114,3 +114,25 @@ Project approval settings apply after workspace trust. A repository cannot
 approve its own servers in an untrusted folder on recent Claude Code versions;
 workspace trust remains Claude Code's normal first-open requirement. Print and
 SDK sessions load project servers without the interactive MCP approval prompt.
+
+## Codex project hooks
+
+Codex CLI 0.166.0 supports trusted project `.codex/hooks.json` layers.
+[OpenAI's hook documentation](https://learn.chatgpt.com/docs/hooks) describes
+additive user/project loading and per-definition trust. It also specifies that
+commands run in the session cwd and recommends Git-root resolution for project
+hooks. The tracked Codex commands use that mechanism for subdirectories and
+linked worktrees. `/hooks` reviews and trusts new definitions; cleanup does not
+silently grant trust. The old untracked shared-root hooks file is historical
+evidence, not the deployed contract.
+
+`scope-agent-config.py` now previews both clients and removes exact legacy
+Codex event, matcher, and handler tuples, including their timeout and context
+limit. It retains modified or unrelated hooks and backs up each changed file
+with mode 0600 before `--apply` replaces it. Run cleanup after merge on both Macs.
+The config installer and gate-integrity check now use the checkout's Codex file
+so convergence cannot reinstall CARR hooks into user-wide configuration.
+
+Only carr-system registers these hooks. doctorcre-app and software-factory do
+not inherit CARR runtime gates. The user-level cleanup benefits all other repos
+without adding registrations there. Personal pstack configuration stays user-wide.

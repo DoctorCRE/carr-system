@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remove exact legacy CARR Claude Code user registrations after merge."""
+"""Remove exact legacy CARR Claude Code and Codex user registrations after merge."""
 import argparse
 import copy
 import json
@@ -20,8 +20,10 @@ def cleaned(document, kind, home):
         elif 'carr' in servers:
             raise ValueError('carr user registration differs from the moved server; refusing removal')
     else:
-        legacy = json.loads((REPO / 'ops/config/claude-legacy-user-hooks.json').read_text().replace(
+        name = 'codex' if kind == 'codex' else 'claude'
+        legacy = json.loads((REPO / f'ops/config/{name}-legacy-user-hooks.json').read_text().replace(
             '{{REPO}}', str(home / 'carr-system')))
+        legacy = legacy.get('hooks', legacy)
         for event, groups in result.get('hooks', {}).items():
             retained = []
             for group in groups:
@@ -39,7 +41,8 @@ def cleaned(document, kind, home):
 def migrate(home, apply=False):
     plans = []
     for path, kind in [(home / '.claude.json', 'mcp'),
-                       (home / '.claude/settings.json', 'hooks')]:
+                       (home / '.claude/settings.json', 'hooks'),
+                       (home / '.codex/hooks.json', 'codex')]:
         if not path.exists():
             continue
         if path.is_symlink():

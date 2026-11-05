@@ -167,7 +167,7 @@ OUTLOOK_INSTALLERS = {
     "com.carr.outlook-research-copy.plist": "bin/install-outlook-research-copy.sh",
 }
 HOOKS_REPO = os.path.join(REPO, "ops", "config", "hooks.json")
-CODEX_HOOKS_SRC = os.path.join(HOME, ".codex", "hooks.json")
+CODEX_HOOKS_SRC = os.path.join(REPO, ".codex", "hooks.json")
 CODEX_HOOKS_REPO = os.path.join(REPO, "ops", "config", "codex-hooks.json")
 CODEX_CONFIG = os.path.join(HOME, ".codex", "config.toml")
 CODEX_APP_SERVER_TIMEOUT_SECONDS = 15
@@ -478,6 +478,8 @@ def hook_block_script_paths(block):
                 root = re.search(r'r="([^"$]+)"', command)
                 if root:
                     command = command.replace("$r/", root.group(1) + "/")
+                elif 'r="$(git rev-parse --show-toplevel)"' in command:
+                    command = command.replace("$r/", REPO + "/")
                 for tok in re.findall(r"(/[^\s'\"]+\.(?:py|sh|mjs|js))(?=[\s'\"]|$)", command):
                     paths.add(os.path.realpath(tok))
     return sorted(paths)
@@ -486,7 +488,8 @@ def hook_block_script_paths(block):
 def installed_hook_missing_files():
     """Audit installed client and project hook commands before source deletions ship."""
     problems = []
-    for path in (SETTINGS, CODEX_HOOKS_SRC, os.path.join(REPO, ".claude", "settings.json"),
+    for path in (SETTINGS, CODEX_HOOKS_SRC, os.path.join(HOME, ".codex", "hooks.json"),
+                 os.path.join(REPO, ".claude", "settings.json"),
                  os.path.join(REPO, ".codex", "hooks.json")):
         raw = read(path)
         if raw is None:
@@ -568,9 +571,7 @@ def live_hooks_block():
 def live_codex_hooks():
     """Only the CARR-owned Codex tuples are config-as-code state.
 
-    Codex's global hooks document is shared with unrelated projects.  Comparing
-    or installing it wholesale would turn another project's hook into CARR
-    drift, then overwrite it on the next install.
+    Hooks live in the checkout; user-wide registrations are retired separately.
     """
     raw = read(CODEX_HOOKS_SRC)
     if raw is None:
@@ -588,7 +589,8 @@ def is_carr_hook_command(command):
     if not isinstance(command, str):
         return False
     candidate = command.replace("\\", "/").lower()
-    return ("/carr-system/hooks/" in candidate or
+    return ('$r/hooks/' in candidate or
+            "/carr-system/hooks/" in candidate or
             "/my drive/carr ai/hooks/" in candidate or
             "/carr-system/ops/codex-continuity-hook.py" in candidate or
             "/my drive/carr ai/ops/codex-continuity-hook.py" in candidate or
@@ -786,7 +788,7 @@ def codex_configuration_state():
     config file is different: silently skipping that partial surface could
     leave a real client ungoverned, so callers must fail visibly.
     """
-    has_hooks = os.path.exists(CODEX_HOOKS_SRC)
+    has_hooks = os.path.exists(os.path.join(HOME, ".codex", "hooks.json"))
     has_config = os.path.exists(CODEX_CONFIG)
     if has_config:
         return "configured"
@@ -870,6 +872,10 @@ def codex_app_server_request(method, params):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=2)
+        if process is not None:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
 
 
 def _codex_user_config_layer():

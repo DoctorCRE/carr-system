@@ -72,3 +72,10 @@ regardless of the window. PreCompact is the one-attempt backstop for that case.
 Its reason reaching the model during automatic compaction is unverified; Stop
 is the primary model-visible instruction channel. Rotation requests a handoff;
 it cannot guarantee that a model completes the handoff or never compacts.
+
+## Client configuration scope
+
+CARR's Claude hooks stay in `.claude/settings.json`; Codex uses `.codex/hooks.json`.
+Use `ops/scope-agent-config.py` after merge to preview retirement of exact legacy
+user registrations for both clients. Add `--apply` only for the authorized local
+cleanup. Codex hook commands resolve the current Git checkout, including worktrees.
