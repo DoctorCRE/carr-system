@@ -143,6 +143,12 @@ test('watch statechart on canonical event ingress', async t => {
   const activity=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic inbound','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,joe])).rows[0].id;
   await event('confirm-email-filing',{activity_id:activity},deal,'joe-personal');assert.equal(await count(),3);assert.equal(await count(dell),1,'cross-mailbox reply');
   await event('inherit-email-thread',{activity_id:activity},deal,'joe-personal');assert.equal(await count(),3,'reply identity deduplicates');
+  await c.query('update party set merged_into=$1 where id=$1',[party]);
+  await c.query('update deal set version=version+1 where id=$1',[deal]);await event();assert.equal(await count(),3,'merged party stays quiet');
+  await c.query('update party set merged_into=null where id=$1',[party]);
+  await c.query('update client set merged_into=$1 where id=$1',[client]);
+  await event();assert.equal(await count(),3,'merged client stays quiet');
+  await c.query('update client set merged_into=null where id=$1',[client]);
   await c.query('update party set deleted_at=now() where id=$1',[party]);
   await c.query('update deal set version=version+1 where id=$1',[deal]);await event();assert.equal(await count(),3,'deleted source');
   await c.query('update party set deleted_at=null where id=$1',[party]);
@@ -173,6 +179,7 @@ test('watch statechart on canonical event ingress', async t => {
   await watch('lease',leases[0],'joe',false);
   await c.query("update lease set expiration_on=current_date+interval '6 months' where id=any($1::uuid[])",[leases]);
   await event();assert.equal(await count(joe,'lease'),9,'unsubscribed lease stays quiet');
+  await c.query("update lease set status='superseded',expiration_on=current_date+interval '4 months' where id=$1",[leases[1]]);await event();assert.equal(await count(joe,'lease'),9,'superseded lease stays quiet');
   await c.query('delete from lease where id=$1',[leases[1]]);await event();assert.equal(await count(joe,'lease'),9,'deleted lease');
   await c.query('begin');
   try{
@@ -225,7 +232,7 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
   const frozenPython=fileURLToPath(new URL('../../.venv/bin/python',import.meta.url));
   const python=process.env.CARR_CI_PYTHON || (existsSync(frozenPython) ? frozenPython : 'python3');
   const proof=(...args)=>execFileSync(python,[fileURLToPath(new URL('../../tools/verify-subject-watch-proof.py',import.meta.url)),...args],{encoding:'utf8'});
-  for (const who of [joe,dell,agent]) await t.test(who.slug,async()=>{
+  for (const who of [joe,dell,agent]) await t.test(who.slug,async wt=>{
     const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic writer regression',$1,$1) returning id",[joe.id])).rows[0].id;
     const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,joe.id])).rows[0].id;
     const deal=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic registered writer deal','purchase','research','joe',$2,$2) returning id",[client,joe.id])).rows[0].id;
@@ -274,6 +281,27 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
     assert.deepEqual(await counts(),expected,'writer and consumer replay remain quiet');
     const replay=snapshot('replay');
     assert.deepEqual(JSON.parse(proof('verify','--before',before,'--after',after,'--replay',replay)),{watched:1,unwatched:0,replay:0});
+    await wt.test('proof captures suppression after unwatch',async()=>{
+      await call(joe,'unwatch-subject-v1',{subject_type:'deal',subject_id:deal,idempotency_key:randomUUID()});
+      try { snapshot('removed'); } finally {
+        await call(joe,'watch-subject-v1',{subject_type:'deal',subject_id:deal,idempotency_key:randomUUID()});
+      }
+    });
+    await wt.test('proof refuses a wrong destination',async()=>{
+    const badBefore=snapshot('bad-before');
+    await c.query("create function ops.watch_test_wrong_destination() returns trigger language plpgsql as $$ begin if new.dedupe_key like 'subject-watch:%' then new.deep_link='/'; end if; return new; end $$");
+    await c.query('create trigger watch_test_wrong_destination before insert on ops.notification for each row execute function ops.watch_test_wrong_destination()');
+    try {
+      await call(who,'update-deal',{...args,base_version:2,fields:{city:'Wrong destination probe'},idempotency_key:randomUUID()});
+      await call(who,'update-deal',{...controlArgs,base_version:2,fields:{city:'Wrong destination control'},idempotency_key:randomUUID()});
+      assert.equal((await c.query("select deep_link from ops.notification where subject_ref=$1 and deep_link='/'",[deal])).rowCount,2);
+      const badAfter=snapshot('bad-after');
+      assert.throws(()=>proof('verify','--before',badBefore,'--after',badAfter,'--replay',badAfter),/Command failed/,'wrong destinations fail proof');
+    } finally {
+      await c.query('drop trigger watch_test_wrong_destination on ops.notification');
+      await c.query('drop function ops.watch_test_wrong_destination()');
+    }
+    });
     const invalid=JSON.parse(readFileSync(replay,'utf8'));
     invalid.watched[0]++;
     const repeated=path.join(directory,who.slug+'-duplicate.json');
