@@ -49,21 +49,10 @@ an estimate, not a measured capacity. There is no cache to invalidate or evict,
 no fan-out, queue, or N+1 query, and no new load distribution or scaling path. Outcome-read, coverage-failed, job-exit, and disk alarms
 remain independent.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Unestablished
-    Unestablished --> Waiting: first run before deadline
-    Waiting --> Owed: deadline passes without verdict
-    Unestablished --> Fresh: actual verdict
-    Fresh --> Owed: next deadline passes without verdict
-    Owed --> Owed: intake resumes without verdict
-    Owed --> Reported: watchdog scan
-    Reported --> Reported: resumed run or lost state
-    Owed --> Fresh: late actual verdict
-    Reported --> Fresh: late actual verdict and scan
-```
+The [statechart and named transition tests](../statecharts/outlook-verdict-watchdog.md)
+define the verdict lifecycle.
 
-The table defines the same transitions.
+The table summarizes detector and reconciliation outcomes.
 
 | Observation | Transition |
 | --- | --- |

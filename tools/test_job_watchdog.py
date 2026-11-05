@@ -79,6 +79,32 @@ class WatchdogTests(unittest.TestCase):
                             'coverage_run_day': '2026-11-02', 'coverage_deadline_seconds': 19 * 3600 + 300}
         self.assertEqual(watchdog.detect(facts, datetime.fromisoformat('2026-11-02T18:00:00Z').timestamp()), [])
 
+    def test_first_run_waits_until_deadline_and_late_verdict_recovers_before_scan(self):
+        outlook = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                   'coverage_deadline_seconds': 19 * 3600 + 300}
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}
+        before = datetime.fromisoformat('2026-11-03T01:05:00Z').timestamp()
+        after = before + 1
+        self.assertEqual(watchdog.detect(facts, before), [])
+        outlook['coverage_run_day'] = '2026-11-02'
+        self.assertEqual(watchdog.detect(facts, before), [])
+        self.assertEqual([f['key'] for f in watchdog.detect(facts, after)], [watchdog.MISSING_VERDICT])
+        outlook['coverage_check_day'] = '2026-11-02'
+        self.assertEqual(watchdog.detect(facts, after), [])
+        self.assertEqual(watchdog.digest(self.root, self.config), '')
+
+    def test_first_actual_verdict_establishes_freshness_until_next_deadline(self):
+        outlook = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                   'coverage_deadline_seconds': 19 * 3600 + 300}
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        self.assertEqual(watchdog.detect(facts, now), [])
+        outlook['coverage_check_day'] = '2026-11-02'
+        self.assertEqual(watchdog.detect(facts, now), [])
+        self.assertEqual(watchdog.detect(facts, now + 86399), [])
+        self.assertEqual([f['key'] for f in watchdog.detect(facts, now + 86400)],
+                         [watchdog.MISSING_VERDICT])
+
     def test_resumed_intake_keeps_owed_verdict_until_actual_verdict(self):
         ns = runpy.run_path(str(ROOT / 'ops/outlook-intake-selftest.py'))
         intake = ns['IntakeTest']()
@@ -96,6 +122,7 @@ class WatchdogTests(unittest.TestCase):
             watchdog.reconcile(self.root, self.config, found, {'com.carr.outlook-intake'},
                                intake.fake.now.timestamp(), outlook)
             return {f['key'] for f in watchdog.active_findings(self.root, self.config)}
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
         intake.fake.now = evening + timedelta(days=2, hours=-8)
         intake.run_intake()
         self.assertIn(watchdog.MISSING_VERDICT, scan())
