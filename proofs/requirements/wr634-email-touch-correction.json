@@ -1,0 +1,14 @@
+{
+  "schema":"carr-production-proof-plan.v1",
+  "requirement_id":"WR634-S1-email-touch-correction",
+  "targets":["worker"],
+  "assertions":[{
+    "id":"release-and-natural-correction-readback",
+    "predicate":"Verify deployed full SHA and correct-email-touch registry contract. Separately observe a naturally authorized correction receipt and read its retained original application, one immutable compensation, excluded contact effect and recomputed client/lead/vendor and inherited deal dates. Exact-key retry must identify the same compensation. Release smoke alone proves identity and registry, not correction semantics. Do not manufacture production writes for proof.",
+    "runner":"worker-release-smoke.v1",
+    "expected_result":"PASS for release identity and registry only. Full proof remains pending until read-only observation of a naturally authorized correction with exact before/after dates and one compensation.",
+    "input_class":"deployed Worker identity and registry plus naturally authorized correction evidence; read-only counts and dates",
+    "deadline_seconds":120
+  }],
+  "safety":{"read_only":true,"no_sends":true,"max_requests":10,"max_records":20,"max_runtime_seconds":120,"max_artifact_bytes":1048576}
+}

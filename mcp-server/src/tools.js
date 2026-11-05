@@ -70,6 +70,7 @@ import { emailDealProgressTools } from "./email-deal-progress.ts";
 import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
+import { emailTouchCorrection } from "./email-touch-correction.js";
 import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from "./email-touch.js";
 import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.js";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
@@ -393,14 +394,14 @@ async function withEnvelope(client, actor, verb, args, fn) {
   };
   const hash = await requestHash({manifest_version: 'scac-application-mutation.v1',
     ...mutationManifestIdentity(), ...operation});
-  const applicationHash = verb === 'log-activity'
+  const applicationHash = ['log-activity','correct-email-touch'].includes(verb)
     ? await requestHash({manifest_version:'email-touch-application.v1', ...operation}) : hash;
   // Versioned writes need same-key serialization before their replay read:
   // otherwise two first calls can both see no tool_call row, and the loser
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "correct-email-touch" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -410,11 +411,12 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if (verb === "record-finding" && args.kind === "email_delivery_failure")
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))",
       [JSON.stringify([verb, args.kind, actor.id, String(args.source || "").trim()])]);
-  const prior = await client.query(verb === 'log-activity' ? `select request_hash, response, false as permanent from tool_call where idempotency_key=$1
+  const prior = await client.query(['log-activity','correct-email-touch'].includes(verb) ? `select request_hash,response,false as permanent from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')
-    union all select new_value#>>'{email_application,request_hash}' as request_hash,
-      new_value#>'{email_application,response}' as response, true as permanent from event
-      where idempotency_key=$1 and verb='log-activity' and new_value ? 'email_application'
+    union all select coalesce(new_value#>>'{email_application,request_hash}',new_value#>>'{email_correction,request_hash}'),
+      coalesce(new_value#>'{email_application,response}',new_value#>'{email_correction,response}'),true
+    from event where idempotency_key=$1 and
+      ((verb='log-activity' and new_value ? 'email_application') or verb='correct-email-touch')
     order by permanent desc limit 2` : `select request_hash, response from tool_call where idempotency_key=$1
     and ($2 or created_at > now() - interval '${REPLAY_WINDOW}')`, [key, durableReceipt(verb, key)]);
   if (prior.rows.length) {
@@ -424,7 +426,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
       return { replayed: true, ...response, event: industryEventRecord(response.event) };
     return { replayed: true, ...response };                          // A1: replay, no second write
   }
-  if (verb !== 'record-email-lifecycle' && (verb.includes('email') || args.email_context?.source_activity_id))
+  if (!['record-email-lifecycle','correct-email-touch'].includes(verb) && (verb.includes('email') || args.email_context?.source_activity_id))
     await guardEmailAction(client, args, ToolError);
   const result = await fn(applicationHash);                                        // inside the open transaction
   if (verb === "record-finding" && args.kind === "email_delivery_failure" && result.replayed) return result;
@@ -4507,6 +4509,8 @@ export const TOOLS = {
     }),
   },
 
+  "correct-email-touch": emailTouchCorrection({ToolError,withEnvelope,versionGuard,writeEvent}),
+
   "reconcile-email-touches": emailTouchReader(ToolError),
 
   "log-activity": {
@@ -4616,6 +4620,8 @@ export const TOOLS = {
         if (existing) {
           if (existing.email_context?.lifecycle?.state) throw new ToolError({ error: 'email_not_live' });
           if (existing.kind !== args.kind) throw new ToolError({ error: 'email_identity_conflict' });
+          const corrected = (await c.query('select touch_correction_key from activity where id=$1',[existing.id])).rows[0];
+          if (corrected?.touch_correction_key) throw new ToolError({error:'email_touch_already_corrected'});
           if (binding) {
             const captured = (await c.query(`select occurred_at=$2::timestamptz as occurrence_matches, ${FK[s.type]} as target_id from activity where id=$1`, [existing.id,binding.occurred_at])).rows[0];
             if (!captured.occurrence_matches || captured.target_id !== s.id)

@@ -830,6 +830,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "correct-email-touch": {
+    "ingress_key": "mcp-tool:correct-email-touch",
+    "source_locator": "mcp-server/src/tools.js",
+    "schema_digest": "c4c4075ef7fb5ad1e36782a2078e963b62488be83d11fac7a59ce0dbf7d211ab",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "correct-party-identity": {
     "ingress_key": "mcp-tool:correct-party-identity",
     "source_locator": "mcp-server/src/party-identity.js",

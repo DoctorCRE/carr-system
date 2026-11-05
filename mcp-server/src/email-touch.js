@@ -21,6 +21,7 @@ export function emailTouchBinding(args, subject, ToolError) {
 
 export async function guardEmailTouch(c, actor, binding, ToolError) {
   if (!binding) return;
+  await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify(['email-touch-source',actor.id,binding.source_id,binding.target_type,binding.target_id])]);
   const identity=[actor.id,binding.source_id,binding.source_version,binding.target_type,binding.target_id];
   await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify(['email-touch',...identity])]);
   const live=await c.query(`select 1 from v_ref_index r join party p on p.id=r.party_id
@@ -61,7 +62,7 @@ export function emailTouchReader(ToolError) {
         select value as effect from jsonb_array_elements($1::jsonb)
       ), evidence as (
         select x.effect,e.recorded_at,e.new_value#>'{email_application,binding}' as binding,
-          a.id as activity_id,a.occurred_at as activity_occurrence,a.kind,
+          a.id as activity_id,a.occurred_at as activity_occurrence,a.kind,a.touch_correction_key,
           a.email_context->>'source_activity_id' as source_reference,source.id as source_activity,
           case x.effect->>'target_type' when 'client' then a.client_id when 'lead' then a.lead_id when 'vendor' then a.vendor_id end as activity_target,
           coalesce(source.email_context,a.email_context) as email_context,
@@ -84,11 +85,12 @@ export function emailTouchReader(ToolError) {
         when activity_target::text is distinct from effect->>'target_id'
           or activity_occurrence is distinct from (effect->>'occurred_at')::timestamptz
           or kind not in ('email_in','email_out') then 'conflicting'
+        when touch_correction_key is not null then 'corrected'
         when not target_live or coalesce(email_context#>>'{lifecycle,state}','live') <> 'live' then 'tombstoned'
         else 'applied' end as disposition,effect->>'target_type' as target_type,
           effect->>'source_version' as source_version,count(*)::int as n
         from evidence group by 1,2,3`,[JSON.stringify(normalized),actor.id,organizationTenantForActor(actor),args.start,args.end,args.recorded_start||null,args.recorded_end||null])).rows;
-      const emptyCounts=()=>({expected:0,applied:0,missing:0,refused:0,dangling:0,tombstoned:0,out_of_window:0,conflicting:0});
+      const emptyCounts=()=>({expected:0,applied:0,missing:0,refused:0,dangling:0,tombstoned:0,out_of_window:0,conflicting:0,corrected:0});
       const counts={...emptyCounts(),expected:args.expected.length};
       const groups = new Map();
       for(const row of rows) {
