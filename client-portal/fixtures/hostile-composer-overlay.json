@@ -1,0 +1,41 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "partner_only": {
+          "synthetic_private": "metadata secret"
+        },
+        "partner_notes": {
+          "synthetic_private": "metadata secret"
+        },
+        "financials": {
+          "synthetic_private": "metadata secret"
+        },
+        "uploads": {
+          "synthetic_private": "metadata secret"
+        },
+        "internal_notes": {
+          "synthetic_private": "metadata secret"
+        }
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -100.45,
+          40.3
+        ],
+        "uploads": {
+          "synthetic_private": "geometry secret"
+        }
+      },
+      "partner_notes": {
+        "synthetic_private": "feature secret"
+      }
+    }
+  ],
+  "partner_only": {
+    "synthetic_private": "collection secret"
+  }
+}
