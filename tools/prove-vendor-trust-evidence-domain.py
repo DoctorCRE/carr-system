@@ -42,7 +42,7 @@ def origin(value):
 
 def timestamp(value):
     if not isinstance(value, str) or not re.fullmatch(
-            r'\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2}))?', value):
+            r'\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?', value):
         return None
     try:
         return datetime.fromisoformat(value.replace('Z', '+00:00')).replace(
