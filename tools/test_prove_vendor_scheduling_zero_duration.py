@@ -19,7 +19,7 @@ class ProofCLI(unittest.TestCase):
     @contextmanager
     def fixture(self, state='unavailable', gaps=None, rows=None, change=None, fail=False, delay=0, release_change=False, registry_owner=None):
         now = datetime.now(timezone.utc)
-        at = lambda hours: (now + timedelta(hours=hours)).isoformat()
+        at = lambda hours: (now + timedelta(hours=hours)).isoformat(timespec='milliseconds')
         section = {'state': 'ready', 'observed_at': at(0), 'notes': [],
                    'sources': {'outlook_calendar': {'state': 'ready'}}}
         vendor = {'schema': 'vendor-meetings.v1', 'items': [], 'calendar': {**section, 'scheduling': {
@@ -64,7 +64,7 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
                     registry.write_text(f"import {{ agentActorForToken }} from {json.dumps((source / 'identity.js').as_uri())};\n" +
                         f"import {{ executeRegisteredTool }} from {json.dumps((source / 'tools.js').as_uri())};\n" +
                         f"const owner = {json.dumps(registry_owner)};\n" +
-                        f"const data = {json.dumps({'vendor': vendor, 'agenda': agenda})};\n" +
+                        f"const data = {json.dumps({'agenda': agenda})};\n" +
                         "const actor = agentActorForToken('Bearer synthetic-only-token', JSON.stringify({[owner + '-local']: 'synthetic-only-token'}), 'local-token');\n" +
                         "const c = {async query(sql, params) {\n" +
                         "  if (sql.includes('with candidates')) return {rows: [{total: 0, items: []}]};\n" +

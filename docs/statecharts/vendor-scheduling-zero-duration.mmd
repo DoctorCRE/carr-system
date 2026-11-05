@@ -1,5 +1,9 @@
 stateDiagram-v2
-    [*] --> Reading: Read vendor meetings
+    [*] --> Authenticating: Read vendor meetings
+    Authenticating --> Reading: Partner or verified local wrapper reads its partner calendar
+    Authenticating --> Refused: Caller has no mailbox authority or selects a sponsor
+    Refused: Refuse before database reads
+    Refused --> [*]
     Reading --> SourceUnavailable: Calendar read fails or source is missing
     Reading --> InvalidDurationUnavailable: A displayed meeting has no duration
     Reading --> SourceUnavailable: Coverage is stale, future, malformed, or truncated
@@ -32,3 +36,4 @@ stateDiagram-v2
     ProofPassed --> [*]: Kill owned wrapper group and reap leader
     ProofContradiction --> [*]: Kill owned wrapper group and reap leader
     %% never Drain wrapper stdout beyond one MiB plus one overflow byte.
+    %% never Let caller input choose a calendar owner or turn an agent into a human.
