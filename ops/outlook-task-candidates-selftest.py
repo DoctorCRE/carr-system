@@ -14,6 +14,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'ops'))
+from git_env import fixture_env
+ENV = fixture_env()
 HELPERS = runpy.run_path(str(ROOT / 'ops/fixtures/outlook-builds/write-inputs.py'))
 STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 GENERATION = '00000000-0000-4000-8000-000000000007'
@@ -74,14 +77,14 @@ class Candidates(unittest.TestCase):
     def test_studio_receipt_uses_validated_database_and_installed_identity(self):
         runtime = self.root / 'runtime'
         runtime.mkdir()
-        for name in ('tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py'):
+        for name in ('tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py', 'ops/git_env.py'):
             target = runtime / name
             target.parent.mkdir(exist_ok=True)
             target.write_bytes((ROOT / name).read_bytes())
         def git(*args):
-            return subprocess.check_output(['git', '-C', str(runtime), *args], text=True).strip()
+            return subprocess.check_output(['git', '-C', str(runtime), *args], text=True, env=ENV).strip()
         git('init', '-q')
-        git('add', 'tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py')
+        git('add', 'tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py', 'ops/git_env.py')
         git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.test', 'commit', '-qm', 'fixture')
         revision = git('rev-parse', 'HEAD')
         source, database = self.root / 'copy.hxd', self.root / 'proof.db'
@@ -100,7 +103,7 @@ class Candidates(unittest.TestCase):
         self.assertEqual(value['counts']['candidates_admitted'], 0)
         reader = self.root / 'pinned-reader.py'
         reader.write_bytes(subprocess.check_output(['git', 'show',
-            'f699e1859dc87e4122501bbaba35a312607452a7:ops/studio-proof-observe.py'], cwd=ROOT))
+            'f699e1859dc87e4122501bbaba35a312607452a7:ops/studio-proof-observe.py'], cwd=ROOT, env=ENV))
         receipt_file = self.root / 'receipt.txt'
         receipt_file.write_text(receipt.stdout)
         command = [sys.executable, str(reader), '--receipt-file', str(receipt_file), '--service',

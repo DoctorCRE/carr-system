@@ -10,6 +10,7 @@ from contextlib import closing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.outlook_task_candidates import intake_evidence
+from ops.git_env import scrubbed_env
 
 
 def main() -> int:
@@ -25,10 +26,10 @@ def main() -> int:
         if args.studio_receipt:
             root = Path(__file__).resolve().parents[1]
             revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'],
-                                               text=True, stderr=subprocess.DEVNULL, timeout=10).strip()
+                                               text=True, stderr=subprocess.DEVNULL, timeout=10, env=scrubbed_env()).strip()
             subprocess.run(['git', '-C', str(root), 'diff', '--quiet', 'HEAD', '--',
                             'tools/outlook-task-evidence.py', 'lib/outlook_task_candidates.py',
-                            'vendor/hxprobe', 'spec/outlook', 'ops/hxstore-atlas.py'], check=True, timeout=10, stderr=subprocess.DEVNULL)
+                            'vendor/hxprobe', 'spec/outlook', 'ops/hxstore-atlas.py', 'ops/git_env.py'], check=True, timeout=10, stderr=subprocess.DEVNULL, env=scrubbed_env())
             with closing(sqlite3.connect(args.database.resolve().as_uri() + '?mode=ro', uri=True)) as db:
                 for row in db.execute('SELECT candidate_json FROM task_candidates'):
                     if json.loads(row[0])['source']['decoder_revision'] != revision:
