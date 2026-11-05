@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR636-S2-calendar-snapshot-strict-instants",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "released-calendar-instant-contract",
+    "predicate": "Run worker-release-smoke.v1 for post-deploy Worker release identity. Separately required semantic proof: python3 tools/prove-calendar-snapshot-strict-instants.py --live --timeout-seconds 30 from the merged checkout. It reads the actual release, requires source ancestry containing the merge and makes exactly one authenticated calendar-meeting-prep read with empty arguments through ./run.sh call. Validate observation, meeting, alternate and review instants, disclosed coverage gaps and actual counts. Unavailable source blocks proof. The February 31 rollover remains separately executed synthetic Node evidence, never a claimed natural production meeting.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release smoke proves identity only. Semantic proof additionally requires PASS from the new calendar runner with usable observed data and actual meeting, alternate-time and review counts. Admission and fixture success do not attest production behavior.",
+    "input_class": "Read-only actual release and one authenticated local-actor calendar read. No prospect or checklist reads, record writes, sends or synthetic production injection.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 3,
+    "max_records": 201,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}
