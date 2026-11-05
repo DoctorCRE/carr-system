@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import resource
@@ -85,14 +86,16 @@ def execute(args, receipt):
 
     def run(command, contradiction=False):
         with tempfile.TemporaryFile() as output:
-            process = subprocess.Popen(command, stdout=output, stderr=subprocess.DEVNULL,
+            process = subprocess.Popen(command, stdout=output, stderr=subprocess.DEVNULL, start_new_session=True,
                                        preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT + 1, LIMIT + 1)))
             try:
                 code = process.wait(timeout=remaining())
-            except BaseException:
-                process.kill()
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 process.wait()
-                raise
             output.seek(0)
             data = output.read(LIMIT + 1)
         if len(data) > LIMIT:
