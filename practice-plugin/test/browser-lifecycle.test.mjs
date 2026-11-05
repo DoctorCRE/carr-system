@@ -39,6 +39,7 @@ test("a failed test closes its browser without caller cleanup", { timeout: probe
   let result;
   try { await run(process.execPath, ["--test-reporter=tap", "--input-type=module", "--eval", source], { timeout: probeTimeout, env: childEnv }); }
   catch (error) { result = error; }
+  assert.equal(result?.killed, false, "the child must finish without parent-triggered cleanup");
   assert.equal(result?.code, 1, JSON.stringify({
     code: result?.code, signal: result?.signal, killed: result?.killed,
     stdout: result?.stdout, stderr: result?.stderr,
