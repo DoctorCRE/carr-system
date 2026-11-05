@@ -1875,8 +1875,17 @@ class IntakeTest(unittest.TestCase):
         ports.copy_attachments, ports.put_object = copy, put
         return ports
 
-    def assert_pdf_proof(self, data, expected):
+    def assert_pdf_proof(self, data, expected, *, existing=False):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr510-s3-pdf-admission.json').read_text())
+        self.assertIn('--count run.attachments_pdf_stored --minimum 1',
+                      requirement['assertions'][0]['predicate'])
         ports = self.attachment_fixture()
+        if existing:
+            carr = ports.carr
+            def replay(verb, args):
+                reply = carr(verb, args)
+                return {**reply, 'existing': True} if verb == 'attach-deal-file' else reply
+            ports.carr = replay
         self.pdf = data
         outcome = intake.run(self.repo, self.home, ports)
         self.assertEqual(outcome.state, 'succeeded')
@@ -1895,6 +1904,9 @@ class IntakeTest(unittest.TestCase):
 
     def test_pdf_proof_accepts_admitted_pdf(self):
         self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1)
+
+    def test_pdf_proof_accepts_existing_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1, existing=True)
 
     def test_pdf_proof_refuses_office_only(self):
         self.assert_pdf_proof(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1synthetic Office', 0)
@@ -2050,6 +2062,7 @@ class IntakeTest(unittest.TestCase):
                 terminal = status in ('too_large', 'empty', 'type_refused')
                 self.assertEqual(result.state, 'succeeded' if terminal else 'failed')
                 self.assertEqual(result.counts['attachments_' + status], 1)
+                self.assertEqual(result.counts.get('attachments_pdf_stored', 0), 0)
                 self.assertEqual(result.counts.get('attachments_unresolved', 0),
                                  int(status in ('error', 'path_refused', 'unreadable', 'path_conflict')))
                 state = json.loads((self.out() / intake.STATE).read_text())

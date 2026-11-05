@@ -15,10 +15,10 @@
   "assertions": [
     {
       "id": "release-and-natural-proof",
-      "predicate": "After installation observe a natural email attachment acquisition rejecting an incomplete PDF with type_refused and accepting a complete PDF with an EOF marker in its final 1024 bytes. Bind the observation to the installed runtime SHA. Do not launch intake, download mail or write records to manufacture evidence. Worker smoke alone does not prove installed attachment admission.",
+      "predicate": "Independently verify the installed full runtime SHA contains this merge and matches the on-disk intake source and installer receipt. Bind PROOF_RECEIPT to one explicit natural successful outlook-intake receipt from that installation and PROOF_RUNTIME_SHA to that full SHA. Run python3 ops/studio-proof-observe.py --receipt-file \"$PROOF_RECEIPT\" --service outlook-intake --runtime-sha \"$PROOF_RUNTIME_SHA\" --count run.attachments_pdf_stored --minimum 1. Only successfully filed attachments whose byte-admitted detected_type is pdf increment this counter. Office-only, image-only, truncated-only, generic stored/refused counts, missing PDF counts and mismatched source identity must refuse. Separately retain bounded private evidence from the same installed runtime of a naturally acquired incomplete PDF with a PDF header, no EOF in its final 1024 bytes, and type_refused before storage or filing. The scalar observer cannot establish that refusal or installation provenance. Without both independent observations remain landed-unproven. Do not launch intake, download mail or write records to manufacture evidence.",
       "runner": "studio-run-receipt.v1",
-      "expected_result": "Separate read-only natural installed-runtime evidence for complete and truncated PDFs; without naturally eligible examples remain landed-unproven.",
-      "input_class": "one supplied natural installed outlook-intake run receipt at the full runtime SHA plus counts-only attachment outcomes; no run launch or writes",
+      "expected_result": "PDF-specific receipt count meets minimum 1 at the independently verified installed SHA; non-PDF-only counts refuse. Independent natural truncated-PDF refusal and installation evidence are also required for live-proven.",
+      "input_class": "One explicit natural installed outlook-intake receipt, run.attachments_pdf_stored minimum 1, independent installation/source identity and bounded private incomplete-PDF refusal evidence. Read-only; no launch or writes.",
       "deadline_seconds": 120
     }
   ]
