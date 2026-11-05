@@ -1,5 +1,5 @@
 -- rollback: drop subject_watch event triggers and consumer functions before tables.
--- expand-contract: additive watch consumer; subscription contract 1152 must precede it.
+-- expand-contract: additive watch consumer; subscription contract 1154_subject_watches.sql must precede it.
 -- lock-review: new tables and short trigger installation; no business table rewrite.
 set local lock_timeout='5s';
 set local statement_timeout='30s';

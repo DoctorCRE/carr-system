@@ -254,6 +254,13 @@ def produce(source, output, settings, *, max_intents=150):
     source, output = Path(source).absolute(), Path(output).absolute()
     if source.is_symlink() or not source.is_dir():
         raise ProducerError('source_invalid')
+    root = (settings.repo / 'out').absolute()
+    if output.is_relative_to(root):
+        # Runtime installation intentionally shares out with the source checkout.
+        root, relative = root.resolve(), output.relative_to(root)
+        output = root / relative
+        if not output.parent.resolve().is_relative_to(root):
+            raise ProducerError('output_directory_invalid')
     if (output.is_relative_to(source) or
             output.parent.resolve().is_relative_to(source.resolve())):
         raise ProducerError('output_inside_source')

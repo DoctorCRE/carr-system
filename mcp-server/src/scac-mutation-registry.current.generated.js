@@ -406,6 +406,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "archive-session-checkpoint-v1": {
+    "ingress_key": "mcp-tool:archive-session-checkpoint-v1",
+    "source_locator": "mcp-server/src/session-checkpoints.js",
+    "schema_digest": "382194e406895bf705925a524c7bd5f0676a4a5d5f8ae1a8578d060f7dcbb39a",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "ask-board-question": {
     "ingress_key": "mcp-tool:ask-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
@@ -1643,6 +1653,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-subject-watches-v1": {
+    "ingress_key": "mcp-tool:list-subject-watches-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "bec2ab043cc0cb5a13a3a0e10813a525ba5a1d1f2e8d8583b0a7d39f7454e274",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-verbs": {
     "ingress_key": "mcp-tool:list-verbs",
     "source_locator": "mcp-server/src/tools.js",
@@ -1656,7 +1676,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "log-activity": {
     "ingress_key": "mcp-tool:log-activity",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "0074c0a9c651ad4ff3d2eee165e33f2fff421b7b04957c1e161960bc5c0d8d5c",
+    "schema_digest": "5509932a8c6d51e009086aff1bc9bd4005c0c0fdd7072c78907514a57d9736bc",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2584,10 +2604,30 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-session-checkpoint-v1": {
+    "ingress_key": "mcp-tool:read-session-checkpoint-v1",
+    "source_locator": "mcp-server/src/session-checkpoints.js",
+    "schema_digest": "82220d46843776682fb8d25c10e745578db354f06d719677b04ab8e09867186f",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-session-identity": {
     "ingress_key": "mcp-tool:read-session-identity",
     "source_locator": "mcp-server/src/session-identity.ts",
     "schema_digest": "520a23d16b3dc32163cb982d226607eca3ee4b12f745121571a74db2267e4b7e",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-subject-watch-v1": {
+    "ingress_key": "mcp-tool:read-subject-watch-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "b98ed0339cc23ac55dd5a1a93bd341b2a9b306d439aab64003cf0fc2e87416c9",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -3941,6 +3981,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "unwatch-subject-v1": {
+    "ingress_key": "mcp-tool:unwatch-subject-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "5f758b8888f7259c179df23531eeba1fc519988ee3e702a312cd95fdc6b02cc9",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "update-deal": {
     "ingress_key": "mcp-tool:update-deal",
     "source_locator": "mcp-server/src/tools.js",
@@ -4051,6 +4101,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "watch-subject-v1": {
+    "ingress_key": "mcp-tool:watch-subject-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "5f758b8888f7259c179df23531eeba1fc519988ee3e702a312cd95fdc6b02cc9",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "whats-new": {
     "ingress_key": "mcp-tool:whats-new",
     "source_locator": "mcp-server/src/whats-new.js",
@@ -4095,6 +4155,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:write-doctrine-section",
     "source_locator": "mcp-server/src/doctrine.js",
     "schema_digest": "ea8b7fe3aec03db033725a88ecb96847d7f5f1b6675b195263884567676da8bd",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "write-session-checkpoint-v1": {
+    "ingress_key": "mcp-tool:write-session-checkpoint-v1",
+    "source_locator": "mcp-server/src/session-checkpoints.js",
+    "schema_digest": "cebc18bf254f84b3096ee4df4215408cd1a17098bc56e95a04d61350c352d977",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

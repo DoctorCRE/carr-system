@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S8-portal-sessions",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "portal-session-release-deployed",
+      "predicate": "The deployed Worker release identity matches the merged SHA containing migration 1152_client_portal_sessions.sql. This runner proves release identity only; session SQL behavior and the public HTTP journey remain unproven until adapter integration.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "The release identity matches the merged SHA. Session isolation and revocation require a separate synthetic integration proof after the HTTP adapter lands.",
+      "input_class": "read-only release identity and verb registry",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}

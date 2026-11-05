@@ -371,6 +371,24 @@ export function agentActorForToken(authorizationHeader, agentTokensRaw, viaLabel
            ...(native_agent_verified ? { native_agent_verified: true } : {}) }, agentTokensRaw);
 }
 
+/** Dedicated provider-neutral credential. Bindings are provisioned by the server, never tool arguments. */
+export function sessionCheckpointActorForToken(header, raw) {
+  const token = bearerCredential(header);
+  if (!token || !serverHeldCredential(raw)) return null;
+  let entries;
+  try { entries = JSON.parse(raw); } catch { return null; }
+  if (!Array.isArray(entries) || entries.length > 1000) return null;
+  const matches = entries.filter(e => e && e.token === token);
+  if (matches.length !== 1) return null;
+  const entry = matches[0];
+  if (!isKnownPartner(entry.sponsor) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.authority_session) ||
+      !entry.binding || typeof entry.binding !== 'object') return null;
+  const authority = JSON.parse(JSON.stringify({ sponsor:entry.sponsor, authority_session:entry.authority_session, binding:entry.binding }));
+  return authenticateConnection({slug:entry.sponsor+'-local',display:DISPLAY[entry.sponsor+'-local'],human:false,
+    via:'session-checkpoint-token',sponsoring_human_slug:entry.sponsor,human_slug:entry.sponsor,
+    session_checkpoint_authority:authority},raw);
+}
+
 /** Match a bearer to one known sponsor in the isolated Codex continuity map. */
 export function continuityActorForTokenMaps(authorizationHeader, codexTokensRaw) {
   const token = bearerCredential(authorizationHeader);
@@ -747,7 +765,7 @@ function serverEnvironmentSecret(name) {
 const SERVER_CREDENTIAL_NAMES = Object.freeze([
   "REVIEW_TOKENS", "AGENT_TOKENS", "LOCAL_TOKENS",
   "HERMES_TOKENS", "HERMES_TOKENS_EXTRA", "HERMES_COS_TOKENS",
-  "CODEX_CONTINUITY_TOKENS",
+  "CODEX_CONTINUITY_TOKENS", "SESSION_CHECKPOINT_TOKENS",
   "UNATTENDED_TOKENS",
   "GOOGLE_CLIENT_SECRET",
 ]);

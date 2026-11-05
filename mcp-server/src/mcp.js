@@ -158,6 +158,7 @@ export const PROFILES = {
   // Native lifecycle credentials are purpose-bound server-side. They expose
   // only their own record surface even if a caller asks for ?profile=full.
   "codex-continuity": new Set(),
+  "session-checkpoint-v1": new Set(["write-session-checkpoint-v1", "read-session-checkpoint-v1", "archive-session-checkpoint-v1"]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
   // additive, carries an idempotency key, and cannot destroy or re-point an
@@ -454,6 +455,7 @@ function profileFor(request) {
  * voluntary limiter for everyone else and a no-op for these three.
  */
 export function profileForActor(actor, request) {
+  if (actor?.via === "session-checkpoint-token") return "session-checkpoint-v1";
   if (new URL(request.url).pathname === "/doc/mcp") return "doc";
   if (actor?.continuity_surface === "codex" && actor?.via === "codex-continuity-token")
     return "codex-continuity";
@@ -505,7 +507,7 @@ export function serverInstructions(profile) {
 }
 
 export function allowedIn(profile, name, tool) {
-  if (profile === "doc") return PROFILES.doc.has(name);
+  if (profile === "doc" || profile === "session-checkpoint-v1") return PROFILES[profile].has(name);
   if (profile === "full") return true;
   if (tool.fullOnly) return false;            // sensitive operational reads stay off probe/reviewer/read
   if (!tool.write) return true;              // reads are allowed in every profile
@@ -681,6 +683,7 @@ export async function executeWithTrustedPrincipal(actor, readback, requiredBundl
 // Exported for deterministic no-network identity-gate tests. It remains the
 // single normal dispatcher path; callers receive no additional route or grant.
 export async function callTool(env, actor, name, args, profile = "full") {
+  if (actor?.via === "session-checkpoint-token") profile = "session-checkpoint-v1";
   const personalScope = personalScopeForActor(actor);
   if (personalScope.status === "error") {
     throw new ToolError({ error: personalScope.error,

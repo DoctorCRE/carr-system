@@ -69,7 +69,7 @@ notification set. PostgreSQL tests replay the paths; TLC checks the finite model
 
 Verify real database transitions first, then MCP projection regressions, gates,
 and the pre-push floor. Registration is unchanged, so this unit does not add a
-registration dependency on PR 2974. The pinned subscription migration was materialized from that exact commit as an untracked local test dependency. No dependency commits are merged into the pushed branch. Tests require migration 1152 after the contract lands.
+registration dependency on PR 2974. The subscription contract has landed on main as `1154_subject_watches.sql`. This branch merges main and follows that contract with `1156_subject_watch_events.sql`.
 
 # Delivery limits
 
