@@ -74,7 +74,7 @@ esac
 
 detail="$RUN_KEY exited $rc"
 if [ -n "$receipt_file" ]; then
-  receipt="$("$PY" - "$receipt_file" "$state" "$SERVICE" <<'PY_RECEIPT'
+  receipt="$("$PY" - "$receipt_file" "$state" "$SERVICE" "$REPO" <<'PY_RECEIPT'
 import json
 import re
 import sys
@@ -137,6 +137,10 @@ if (isinstance(receipt, dict) and isinstance(counts, dict)
             r"(?:outlook-intake-copy|hxprobe) exit=(?:None|-?[0-9]{1,10}) "
             r"code=(?:exit_nonzero|permission_denied|timeout|launch_failed)", receipt["detail"])):
         safe["detail"] = receipt["detail"]
+    if sys.argv[3] == "outlook-intake" and "write_diagnostics" in receipt:
+        sys.path.insert(0, sys.argv[4])
+        from lib.write_diagnostics import public_write_diagnostics
+        safe["write_diagnostics"] = public_write_diagnostics(receipt["write_diagnostics"])
     print(json.dumps(safe, sort_keys=True))
     print(receipt["reason"])
 PY_RECEIPT

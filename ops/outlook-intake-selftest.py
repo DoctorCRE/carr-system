@@ -2442,7 +2442,7 @@ class IntakeTest(unittest.TestCase):
     def scheduled(self, outcome):
         """Feed the intake's own receipt line through bin/run-scheduled.sh and return the spool row."""
         root = self.tmp / f'scheduler-{outcome.state}'
-        for name in ('bin/run-scheduled.sh', 'tools/ops-spool.py'):
+        for name in ('bin/run-scheduled.sh', 'tools/ops-spool.py', 'lib/write_diagnostics.py'):
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, root / name)
         (root / '.venv/bin').mkdir(parents=True)
@@ -2874,6 +2874,9 @@ class IntakeTest(unittest.TestCase):
                 self.assertEqual(requests[0]['server_diagnostic'], diagnostic)
                 receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
                 self.assertEqual(receipt['write_diagnostics'], [diagnostic])
+                if returncode == 0:
+                    scheduled = self.scheduled(result)
+                    self.assertEqual(json.loads(scheduled[1])['write_diagnostics'], [diagnostic])
                 self.assertNotIn('PRIVATE-SENTINEL', json.dumps(receipt))
                 again = self.run_intake([m], touch=False)
                 self.assertEqual(json.loads(intake.receipt_line(again).split(' ', 1)[1])['write_diagnostics'], [diagnostic])

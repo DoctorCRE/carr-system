@@ -19,7 +19,7 @@ class ScheduledRunTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        for name in ("bin/run-scheduled.sh", "tools/ops-spool.py"):
+        for name in ("bin/run-scheduled.sh", "tools/ops-spool.py", "lib/write_diagnostics.py"):
             target = self.root / name
             target.parent.mkdir(exist_ok=True)
             shutil.copy2(ROOT / name, target)
@@ -46,6 +46,30 @@ class ScheduledRunTests(unittest.TestCase):
         return subprocess.run(["/bin/zsh", str(self.root / "bin/run-scheduled.sh"),
                                "outlook-intake", "outlook.intake", sys.executable, str(child)],
                               cwd=self.root, env=self.env, text=True, capture_output=True, timeout=15)
+
+    def test_scheduler_discards_private_diagnostic_fields(self):
+        receipt = {'state': 'failed', 'reason': 'writes_failed', 'counts': {},
+                   'write_diagnostics': [{'server_error_code': 'database_refused_the_statement',
+                       'hint': 'PRIVATE-SENTINEL', 'message': 'PRIVATE-SENTINEL',
+                       'correlation_id': 'PRIVATE-SENTINEL'}]}
+        result = self.invoke_intake(receipt)
+        args = json.loads(self.rows()[0][3])
+        detail = args[args.index('--detail') + 1]
+        self.assertNotIn('PRIVATE-SENTINEL', detail)
+        self.assertNotIn('PRIVATE-SENTINEL', result.stdout)
+        self.assertEqual(json.loads(detail)['write_diagnostics'], [
+            {'server_error_code': 'database_refused_the_statement'}])
+
+    def test_database_diagnostic_reaches_scheduler_spool_and_printed_receipt(self):
+        diagnostic = {'server_error_code': 'database_refused_the_statement', 'sqlstate': '42501',
+                      'correlation_id': 'd170d000-0000-4000-8000-000000000031',
+                      'hint': 'The operation could not be completed. Quote the correlation_id when reporting it.'}
+        receipt = {'state': 'failed', 'reason': 'writes_failed', 'counts': {'error_database_refused': 1},
+                   'write_diagnostics': [diagnostic]}
+        result = self.invoke_intake(receipt)
+        args = json.loads(self.rows()[0][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
+        self.assertEqual(json.loads(result.stdout.split('outlook-intake-receipt ', 1)[1]), receipt)
 
     def test_failed_intake_stderr_is_appended_to_existing_log(self):
         log = self.root / "out/run-scheduled.log"

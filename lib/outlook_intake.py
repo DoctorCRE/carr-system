@@ -101,6 +101,7 @@ import uuid
 
 from lib.calendar_agenda import (agenda, AGENDA_SCHEMA, AGENDA_DAYS, AGENDA_ATTENDEES,
                                  AGENDA_MAX_BYTES)
+from lib.write_diagnostics import refusal_diagnostic, public_write_diagnostics
 from lib import email_contact_review
 from lib.email_contact_candidates import VERSION as SIGNATURE_POLICY
 from lib import email_delivery_failure, email_links, unresolved_email
@@ -173,33 +174,13 @@ def _reply_error(reply: dict) -> str:
     return 'no_acknowledgement'
 
 
-DATABASE_HINT = 'The operation could not be completed. Quote the correlation_id when reporting it.'
-
-
-def refusal_diagnostic(reply: dict) -> dict:
-    result = {}
-    code = reply.get('error')
-    if isinstance(code, str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}', code):
-        result['server_error_code'] = code
-    sqlstate = reply.get('sqlstate')
-    if isinstance(sqlstate, str) and re.fullmatch(r'[0-9A-Z]{5}', sqlstate):
-        result['sqlstate'] = sqlstate
-    correlation = reply.get('correlation_id')
-    if isinstance(correlation, str) and re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', correlation):
-        result['correlation_id'] = correlation.lower()
-    # Only the closed public database hint is retained, never a driver hint.
-    if reply.get('hint') == DATABASE_HINT:
-        result['hint'] = DATABASE_HINT
-    return result
-
-
 def write_diagnostics(state: dict) -> list[dict]:
     unique = {}
     for request in state.get('requests', {}).values():
         if not request.get('acknowledged') and request.get('server_diagnostic'):
             diagnostic = request['server_diagnostic']
             unique.setdefault(json.dumps(diagnostic, sort_keys=True), diagnostic)
-    return list(unique.values())
+    return public_write_diagnostics(list(unique.values()))
 
 
 class CarrError(RuntimeError):
