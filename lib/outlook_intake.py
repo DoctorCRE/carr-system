@@ -925,7 +925,8 @@ class Matcher:
         self.revisions = {}
         for address, rows in self.contact_rows.items():
             snapshot_contact = self.signature_contact(address)
-            snapshot_party = snapshot_contact.contact_snapshot['party_id'] if snapshot_contact else None
+            snapshot = snapshot_contact.contact_snapshot if snapshot_contact else None
+            snapshot_party = snapshot['party_id'] if snapshot else None
             evidence = {(c.exact, str(c.party_id or snapshot_party or ''),
                          c.target_type or '', c.target_id or '', c.ref) for c in rows}
             self.revisions[address] = _hash(json.dumps(sorted(evidence)))
@@ -940,7 +941,8 @@ class Matcher:
         if not rows:
             return ParticipantResolution('automated' if automated(address) else 'missing')
         snapshot_contact = self.signature_contact(address)
-        snapshot_party = snapshot_contact.contact_snapshot['party_id'] if snapshot_contact else None
+        snapshot = snapshot_contact.contact_snapshot if snapshot_contact else None
+        snapshot_party = snapshot['party_id'] if snapshot else None
         parties = {str(c.party_id or snapshot_party) for c in rows if c.party_id or snapshot_party}
         if len(parties) > 1:
             return ParticipantResolution('ambiguous')
