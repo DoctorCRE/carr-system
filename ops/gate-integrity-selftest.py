@@ -45,7 +45,7 @@ class BaselineIntegrity(unittest.TestCase):
             installed_codex.write_text(json.dumps(codex))
             with patch.object(gate, 'REPO', worktree), \
                     patch.object(gate, 'installation_repo', return_value=canonical), \
-                    patch.object(gate, 'check_baseline', return_value=[]), \
+                    patch.object(gate, 'check_baseline', side_effect=lambda: []), \
                     patch.dict(gate.os.environ, {'CODEX_HOME': str(codex_home)}), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \
                     contextlib.redirect_stdout(io.StringIO()), \
@@ -67,8 +67,11 @@ class BaselineIntegrity(unittest.TestCase):
                         self.assertIn(f'{client}: required safety hook is not installed: '
                                       'guard-unattended.py', errors.getvalue())
                         path.write_text(json.dumps(document))
+                errors.seek(0)
+                errors.truncate()
                 with patch.object(gate.sys, 'argv', ['gate-integrity.py', '--strict']):
-                    self.assertEqual(gate.main(), 0, errors.getvalue())
+                    result = gate.main()
+                    self.assertEqual(result, 0, errors.getvalue())
 
     def test_scoped_bless_removes_only_the_named_deleted_script(self):
         with tempfile.TemporaryDirectory() as tmp:

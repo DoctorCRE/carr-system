@@ -269,11 +269,11 @@ def main():
         'claude': REGISTRATIONS['claude'] if strict else REPO / '.claude/settings.json',
         'codex': REGISTRATIONS['codex'] if strict else Path(os.environ.get('CODEX_HOME', home / '.codex')) / 'hooks.json',
     }
-    repo = REPO
+    roots = {'claude': REPO, 'codex': REPO if strict else installation_repo()}
     errors = check_baseline()
     for client, path in sources.items():
         try:
-            errors.extend(check(json.loads(path.read_text()), client, repo=repo))
+            errors.extend(check(json.loads(path.read_text()), client, repo=roots[client]))
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             errors.append(f'{path}: {exc}')
     if errors:
