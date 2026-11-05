@@ -1,3 +1,4 @@
+// Bind email contact applications to their permanent activity-event proof.
 import { organizationTenantForActor } from './identity.js';
 const ROLES = {client:'client',lead:'prospect',vendor:'vendor'};
 export const EMAIL_TOUCH_SCHEMA = {
