@@ -69,6 +69,12 @@ class CandidateSources(unittest.TestCase):
         result = observations([mail('first', ['7']), mail('second', ['8'])], {}, digest, 300)
         self.assertEqual(len(result['sender@synthetic.test']), 2)
 
+    def test_first_ambiguous_signature_is_retained_as_unverified_evidence(self):
+        source = mail('ambiguous', body=mail('')['body'].replace('sender@synthetic.test', 'other@synthetic.test'))
+        result = observations([source], {}, digest, 300)['sender@synthetic.test']
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]['extraction']['ambiguity'], 'competing_identity')
+
     def test_changed_keyless_representation_holds_retained_candidate(self):
         state = {}
         first = observations([mail('keyless')], state, digest, 300)['sender@synthetic.test'][0]
