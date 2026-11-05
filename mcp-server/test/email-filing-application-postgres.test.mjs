@@ -45,6 +45,22 @@ test('durable filing generations survive horizons and reject stale claims', asyn
       claim = race.find(r=>r.generate);
     } finally { await competing.end(); }
     assert.equal((await mode('application_claim')).generate,false);
+    const proposalArgs = {kind:'next_step',activity_id:activity,deal,generation:first.generation,
+      evidence_quote:'Please review the proposed terms.',confidence:0.9,text:'Review terms',
+      next_date:'2026-12-01',owner:'joe'};
+    const beforeCrash = await command('record-email-proposal',
+      {...proposalArgs,claim_id:claim.claim_id,idempotency_key:randomUUID()});
+    await c.query("update email_filing_application set claim_until=now()-interval '1 second' where generation=$1",[first.generation]);
+    const lostClaim = claim;
+    claim = await mode('application_claim');
+    assert.equal(claim.generate,true);
+    const replay = await command('record-email-proposal',
+      {...proposalArgs,claim_id:claim.claim_id,idempotency_key:randomUUID()});
+    assert.equal(replay.proposal_id,beforeCrash.proposal_id);
+    assert.equal((await c.query("select count(*)::int as n from email_proposal where activity_id=$1 and kind='next_step'",[activity])).rows[0].n,1);
+    await assert.rejects(mode('application_result',{claim_id:lostClaim.claim_id,application_status:'applied'}),
+      e=>e.payload?.error==='email_application_stale');
+
     await c.query('update activity set version=version+1 where id=$1',[activity]);
     assert.equal((await queue()).emails.length,0);
     await mode('application_result',{claim_id:claim.claim_id,application_status:'applied'});
