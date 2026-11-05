@@ -63,6 +63,7 @@ loud LINE in the brief, never a blocked boot.
 import json
 import os
 import re
+from pathlib import Path
 import subprocess
 import sys
 
@@ -212,6 +213,11 @@ def converge():
 
 
 def main():
+    global REPO
+    if scrubbed_env is not None:
+        common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+        if common.returncode == 0 and common.stdout.strip():
+            REPO = str(Path(common.stdout.strip()).parent)
     sys.path.insert(0, REPO)
     try:
         if scrubbed_env is None:

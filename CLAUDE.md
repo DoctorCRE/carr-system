@@ -7,7 +7,7 @@ rules for Claude Code sessions.
 
 ## "carr needs authentication" is not a reason to ask Joe to sign in
 
-Desktop sessions show the user-config `carr` server as needs_auth even while its
+Desktop sessions show the project-scoped `carr` server (`.mcp.json`) as needs_auth even while its
 CLI login works; they use the claude.ai "CARR Record Layer" connector instead.
 On that notice, check the connector (session_connectors_status) and
 `claude mcp get carr`. If both are connected, say nothing about signing in. Tell

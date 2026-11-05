@@ -136,7 +136,7 @@ def _find_vault():
 
 VAULT = _find_vault()
 
-SETTINGS = os.path.join(HOME, ".claude", "settings.json")
+SETTINGS = os.path.join(REPO_HERE, ".claude", "settings.json")
 TASKS_SRC = os.path.join(HOME, ".claude", "scheduled-tasks")
 TASKS_REPO = os.path.join(REPO, "ops", "scheduled-tasks")
 # A quarantined definition is deliberately outside Claude's active discovery
@@ -473,7 +473,7 @@ def hook_block_script_paths(block):
             continue
         for grp in groups:
             for hook in (grp or {}).get("hooks", []) or []:
-                command = os.path.expandvars(concrete(hook.get("command", "") or ""))
+                command = os.path.expandvars(concrete((hook.get("command", "") or "").replace("${CLAUDE_PROJECT_DIR}", "{{REPO}}")))
                 # Project hooks select the canonical checkout in a shell-local r.
                 root = re.search(r'r="([^"$]+)"', command)
                 if root:
@@ -1001,7 +1001,7 @@ def pairs(holds=None):
 
     hooks = live_hooks_block()
     out.append(("hooks block (settings.json)",
-                None if hooks is None else portable(json.dumps(hooks, indent=2) + "\n"),
+                None if hooks is None else portable(json.dumps(hooks, indent=2).replace("${CLAUDE_PROJECT_DIR}", "{{REPO}}") + "\n"),
                 HOOKS_REPO))
     if codex_configuration_state() == "configured":
         out.append(("Codex CARR hooks (hooks.json)", live_codex_hooks(), CODEX_HOOKS_REPO))
@@ -2104,7 +2104,7 @@ def cmd_install(apply):
         print(f"ERROR: no native hooks block at {HOOKS_REPO}. Restore it from the repository.")
         return 1
 
-    planned = json.loads(concrete(src))
+    planned = json.loads(src.replace("{{REPO}}", "${CLAUDE_PROJECT_DIR}"))
 
     # REFUSE A BLOCK WHOSE SCRIPTS ARE NOT THERE (added after 2026-08-24).
     # Settings apply on the very next prompt of every session, so a hooks block
