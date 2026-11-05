@@ -546,6 +546,17 @@ def corpus_render_write_target(cmd, cwd=None, depth=0):
             reason = corpus_render_write_target(body, cwd, depth + 1)
             if reason:
                 return reason
+        if '<<' in cmd:
+            header = strip_inert_text(cmd).split('\n', 1)[0]
+            for program, arguments in executed_invocations(header):
+                if program.startswith('python') or program in {'sh', 'bash', 'zsh', 'dash'}:
+                    body = heredoc_body(cmd)
+                    if not body or re.search(r"\bcd\b", header):
+                        raise ValueError("cannot resolve interpreter heredoc context")
+                    script = shlex.join([program, '-c', body]) if program.startswith('python') else body
+                    reason = corpus_render_write_target(script, cwd, depth + 1)
+                    if reason:
+                        return reason
         reason = shell_write_verdict(cmd, cwd)
         if reason:
             return f"shell write onto a corpus render: {reason}"
