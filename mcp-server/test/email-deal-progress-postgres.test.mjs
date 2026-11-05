@@ -2914,6 +2914,57 @@ function finishSummary(source, claim, extra = {}) {
 const listedSummary = async id => (await command('list-email-proposals', { deal, status: 'pending' }, actor, 'carr_reader'))
   .proposals.find(row => row.source.activity_id === id)?.email_summary;
 
+test('real intake capture verdict survives filing and the summary queue', async () => {
+  for (const kind of ['preview', 'conflict', 'oversized', 'unknown', 'full']) {
+    const payload = JSON.parse(execFileSync('python3', ['-c', `
+import json,runpy,sys
+from datetime import timedelta
+sys.path.insert(0, 'ops')
+f=runpy.run_path('ops/outlook-intake-selftest.py')
+t=f['IntakeTest'](); t.setUp()
+try:
+    m=f['mail']('pat@example.test', -timedelta(hours=1), kind=sys.argv[1], body='Please send the floor plan.')
+    t.run_intake([m])
+    payload=t.fake.writes('log-activity')[-1][1]
+    print(json.dumps(payload))
+finally:
+    t.doCleanups()
+`, kind], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' }).trim().split('\n').at(-1));
+    const source = await command('log-activity', { ...payload, ref: clientRef, idempotency_key: randomUUID() });
+    await command('record-email-proposal', { idempotency_key: randomUUID(), kind: 'phase_move',
+      activity_id: source.activity_id, deal, evidence_quote: 'Please send the floor plan.', confidence: 0.9 });
+    const queued = (await summaryQueue(false)).emails.find(row => row.activity_id === source.activity_id);
+    assert.deepEqual(queued.email_context, payload.email_context);
+    const generated = JSON.parse(execFileSync('python3', ['-c', `
+import json,sys
+from lib.email_summary import generate
+called=[]
+result=generate(json.load(sys.stdin), lambda _: called.append(True) or {
+    'text':'The sender requests the floor plan.', 'evidence':'Please send the floor plan.'})
+print(json.dumps({'called': bool(called), **result}))
+`], { cwd: new URL('../..', import.meta.url), input: JSON.stringify(queued), encoding: 'utf8' }));
+    const complete = kind === 'full';
+    assert.equal(generated.called, complete);
+    assert.equal(generated.status, complete ? 'available' : 'unavailable');
+    const claim = await claimSummary(queued);
+    if (!complete) {
+      await assert.rejects(command('record-email-proposal', { idempotency_key: randomUUID(),
+        mode: 'summary_result', activity_id: queued.activity_id, source_hash: queued.source_hash,
+        claim_id: claim.claim_id, summary_status: 'available', summary_text: 'The sender requests the floor plan.',
+        summary_provenance: { evidence: 'Please send the floor plan.' } }),
+      error => error.payload?.error === 'email_summary_incomplete_capture');
+    }
+    await command('record-email-proposal', { idempotency_key: randomUUID(), mode: 'summary_result',
+      activity_id: queued.activity_id, source_hash: queued.source_hash, claim_id: claim.claim_id,
+      summary_status: generated.status, ...(complete ? { summary_text: generated.text } : {}),
+      summary_provenance: generated.provenance });
+    if (!complete) {
+      await c.query("update email_message_summary set status='available',text='Stale held summary' where activity_id=$1", [source.activity_id]);
+    }
+    assert.equal((await listedSummary(source.activity_id)).status, complete ? 'available' : 'unavailable');
+  }
+});
+
 test('message summaries persist once per hash and reads reuse them without generation', async () => {
   const source = await summarySource();
   const claim = await claimSummary(source);

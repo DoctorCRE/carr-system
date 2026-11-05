@@ -99,10 +99,11 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
         con.execute('ALTER TABLE messages ADD COLUMN local_keys TEXT')
     for m in mails:
         con.execute('INSERT INTO messages(sender,sender_name,recipients,subject,body,preview,'
-                    'body_kind,body_completeness,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                    'body_kind,body_completeness,body_outcome,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                     (m['sender'], m['sender_name'], m['recipients'], m['subject'],
                      m['body'] if m['body_kind'] == 'full' else '', m['body'][:200],
                      m['body_kind'], m.get('body_completeness', 'complete' if m['body_kind'] == 'full' else 'preview'),
+                     m.get('body_outcome', 'complete' if m['body_kind'] == 'full' else m['body_kind']),
                      m['sent_unix'], m['copy_key']))
         if keyed:
             con.execute('UPDATE messages SET local_keys = ? WHERE id = last_insert_rowid()', (m.get('local_keys'),))
@@ -3645,6 +3646,19 @@ class IntakeTest(unittest.TestCase):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), body=body)])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], body)
+
+    def test_held_capture_cannot_be_summarized_after_real_intake(self):
+        from lib.email_summary import generate
+        for kind in ('preview', 'conflict', 'oversized', 'unknown'):
+            with self.subTest(kind=kind):
+                m = mail('pat@example.test', -timedelta(hours=1),
+                         subject=f'Held {kind}', body='Please send the floor plan.', kind=kind)
+                self.run_intake([m])
+                payload = self.fake.writes('log-activity')[-1][1]
+                result = generate({'body': payload['detail'], 'email_context': payload['email_context']},
+                                  lambda _: self.fail('Held capture reached summary model'))
+                self.assertEqual(result['status'], 'unavailable')
+                self.assertEqual(result['provenance']['reason'], 'incomplete_capture')
 
     def test_a_preview_only_email_logs_without_a_refresh_queue(self):
         m = mail('pat@example.test', -timedelta(hours=1), body='Can we meet Thursday at ten', kind='preview')

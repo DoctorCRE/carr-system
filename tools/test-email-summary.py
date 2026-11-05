@@ -34,6 +34,27 @@ class SummaryTests(unittest.TestCase):
                                                 lambda _: self.fail('model called'))
                 self.assertEqual(result['provenance']['reason'], 'incomplete_capture')
 
+    def test_capture_verdict_must_be_complete_and_consistent(self):
+        complete = {'body_kind': 'full', 'body_completeness': 'complete',
+                    'body_outcome': 'complete', 'body_truncated': False}
+        for field in complete:
+            for bad in (None, 'unknown', 'preview', 'conflict', 'oversized', True):
+                with self.subTest(field=field, bad=bad):
+                    called = []
+                    result = email_summary.generate({'body': 'Please review.',
+                        'email_context': {**complete, field: bad}}, lambda _: called.append(True) or {})
+                    if field == 'body_truncated' and bad is None:
+                        continue
+                    self.assertEqual(called, [])
+                    self.assertEqual(result['status'], 'unavailable')
+            partial = {k: v for k, v in complete.items() if k != field}
+            if field != 'body_truncated':
+                self.assertEqual(email_summary.generate({'body': 'Please review.', 'email_context': partial},
+                                 lambda _: self.fail('model called'))['status'], 'unavailable')
+        result = email_summary.generate({'body': 'Please review.', 'email_context': complete},
+                    lambda _: {'text': 'The sender requests review.', 'evidence': 'Please review.'})
+        self.assertEqual(result['status'], 'available')
+
     def test_decoded_transport_evidence_keeps_literal_raw_provenance(self):
         body = 'Please=20review=20the=20terms=20&amp;=20confirm.'
         result = email_summary.generate({'body': body}, lambda text: {

@@ -362,7 +362,11 @@ def email_context(mail: dict, domain: str) -> dict:
         for address in dict.fromkeys(_addresses(mail.get(field))):
             recipients.append({'email': address, 'name': None, 'kind': kind,
                                'internal': _internal(address, domain)})
-    return {'subject': mail.get('subject') or '',
+    return {'body_kind': mail.get('body_kind') or 'unknown',
+            'body_completeness': mail.get('body_completeness') or 'unknown',
+            'body_outcome': mail.get('body_outcome') or 'unknown',
+            'body_truncated': bool(mail.get('body_truncated')),
+            'subject': mail.get('subject') or '',
             'conversation_id': mail.get('conversation_id') or None,
             'sender': {'email': mail['sender'].lower(), 'name': mail.get('sender_name'),
                        'internal': _internal(mail['sender'], domain)},
