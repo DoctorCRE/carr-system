@@ -15,7 +15,13 @@ function inputs() {
     properties: fixture.properties.map(wrap),
   } };
 }
-const compose = ({ research, reviewed }) => composeMarketStudyPackage(research, reviewed, target);
+function assetEnvelopes(value) {
+  if (!value || typeof value !== 'object') return [];
+  if (value.sha256 && value.name && value.type) return [wrap(value)];
+  return Object.values(value).flatMap(assetEnvelopes);
+}
+const evidence = () => ({ research: { ...target }, assets: assetEnvelopes(fixture) });
+const compose = ({ research, reviewed, membership = evidence() }) => composeMarketStudyPackage(research, reviewed, target, membership);
 function refuses(input, stage, path) {
   const result = compose(input);
   assert.equal(result.ok, false);
@@ -74,7 +80,7 @@ for (const field of ['deal_id', 'client_id']) {
     const input = inputs();
     const scope = { ...target };
     delete scope[field];
-    const result = composeMarketStudyPackage(input.research, input.reviewed, scope);
+    const result = composeMarketStudyPackage(input.research, input.reviewed, scope, evidence());
     assert.equal(result.ok, false);
     assert.equal(result.stage, 'target');
     assert.ok(result.errors.some(error => error.path === `/${field}`));
@@ -128,3 +134,31 @@ test('composition is repeatable and independent across ten times the fixture pro
   assert.deepEqual(compose(input), compose(input));
   assert.deepEqual(compose(inputs()).package, fixture);
 });
+
+for (const field of ['partner_only', 'partner_notes', 'financials', 'uploads']) {
+  test(`drops unapproved GeoJSON metadata ${field}`, () => {
+    const input = inputs();
+    input.research.developments[0].overlay.features[0].properties[field] = { synthetic_private: 'private deal material' };
+    const before = structuredClone(input);
+    const result = compose(input);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.package.developments[0].overlay, fixture.developments[0].overlay);
+    assert.deepEqual(input, before);
+  });
+}
+for (const [label, path, mutate] of [
+  ['report', '/demographics/micro_zones/zones/0/study_pdf', i => { i.research.demographics.micro_zones.zones[0].study_pdf = foreignAsset; }],
+  ['document', '/properties/0/floorplan', i => { i.reviewed.properties[0].data.floorplan = foreignAsset; }],
+]) {
+  test(`refuses another deal's ${label}`, () => {
+    const input = inputs();
+    input.membership = evidence();
+    input.membership.assets.push({ deal_id: 'deal-b', client_id: 'client-b', data: foreignAsset });
+    mutate(input);
+    const result = compose(input);
+    assert.equal(result.ok, false);
+    assert.ok(result.errors.some(e => e.path === path && e.reason === 'asset_identity_mismatch'), JSON.stringify(result));
+    assert.equal(Object.hasOwn(result, 'package'), false);
+  });
+}
+const foreignAsset = { sha256: 'b'.repeat(64), name: 'deal-b-report.pdf', type: 'application/pdf' };
