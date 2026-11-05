@@ -167,6 +167,7 @@ OUTLOOK_INSTALLERS = {
     "com.carr.outlook-research-copy.plist": "bin/install-outlook-research-copy.sh",
 }
 HOOKS_REPO = os.path.join(REPO, "ops", "config", "hooks.json")
+# Codex discovers the common checkout layer; REPO is the canonical Git root.
 CODEX_HOOKS_SRC = os.path.join(REPO, ".codex", "hooks.json")
 CODEX_HOOKS_REPO = os.path.join(REPO, "ops", "config", "codex-hooks.json")
 CODEX_CONFIG = os.path.join(HOME, ".codex", "config.toml")

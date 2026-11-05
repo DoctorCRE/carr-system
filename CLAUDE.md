@@ -75,7 +75,8 @@ it cannot guarantee that a model completes the handoff or never compacts.
 
 ## Client configuration scope
 
-CARR's Claude hooks stay in `.claude/settings.json`; Codex uses `.codex/hooks.json`.
-Use `ops/scope-agent-config.py` after merge to preview retirement of exact legacy
+CARR's Claude hooks stay in `.claude/settings.json`; Codex loads the common checkout’s
+`.codex/hooks.json`, including linked worktrees.
+Use `ops/scope-agent-config.py` after merge to preview retirement of CARR hook script
 user registrations for both clients. Add `--apply` only for the authorized local
 cleanup. Codex hook commands resolve the current Git checkout, including worktrees.

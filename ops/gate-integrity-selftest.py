@@ -28,6 +28,13 @@ class BaselineIntegrity(unittest.TestCase):
             root = Path(tmp)
             worktree = root / 'worker'
             canonical = root / 'canonical'
+            canonical.mkdir()
+            subprocess.run(['git', 'init', '-q', str(canonical)], check=True, env=fixture_env())
+            subprocess.run(['git', '-C', str(canonical), '-c', 'core.hooksPath=/dev/null',
+                            '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+                            'commit', '-qm', 'fixture', '--allow-empty'], check=True, env=fixture_env())
+            subprocess.run(['git', '-C', str(canonical), 'worktree', 'add', '-q', str(worktree)],
+                           check=True, env=fixture_env())
             codex_home = root / 'codex'
             codex_home.mkdir()
             project_settings = worktree / '.claude/settings.json'
@@ -41,7 +48,7 @@ class BaselineIntegrity(unittest.TestCase):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.touch()
             project_settings.write_text(json.dumps(project))
-            installed_codex = worktree / '.codex/hooks.json'
+            installed_codex = canonical / '.codex/hooks.json'
             installed_codex.parent.mkdir()
             installed_codex.write_text(json.dumps(codex))
             with patch.object(gate, 'REPO', worktree), \

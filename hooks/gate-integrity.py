@@ -247,6 +247,17 @@ def check(document, client, repo=REPO):
     return errors
 
 
+def codex_project_hooks(repo):
+    """Codex discovers linked-worktree hooks beside the common Git directory."""
+    result = subprocess.run(
+        ['git', '-C', str(repo), 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+        capture_output=True, text=True, timeout=5,
+        env={k: v for k, v in os.environ.items() if not k.startswith('GIT_')})
+    if result.returncode:
+        raise ValueError(f'cannot resolve Codex project layer for {repo}: {result.stderr.strip()}')
+    return Path(result.stdout.strip()).parent / '.codex/hooks.json'
+
+
 def main():
     if '--bless' in sys.argv:
         rest = sys.argv[sys.argv.index('--bless') + 1:]
@@ -255,10 +266,15 @@ def main():
     strict = '--strict' in sys.argv
     sources = {
         'claude': REGISTRATIONS['claude'] if strict else REPO / '.claude/settings.json',
-        'codex': REGISTRATIONS['codex'] if strict else REPO / '.codex/hooks.json',
+        'codex': REGISTRATIONS['codex'],
     }
     roots = {'claude': REPO, 'codex': REPO}
     errors = check_baseline()
+    if not strict:
+        try:
+            sources['codex'] = codex_project_hooks(REPO)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            errors.append(str(exc))
     for client, path in sources.items():
         try:
             errors.extend(check(json.loads(path.read_text()), client, repo=roots[client]))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repository scoping and exact, repeatable user-config cleanup."""
+"""Repository scoping and repeatable user-config cleanup."""
 import contextlib
 import copy
 import io
@@ -30,12 +30,12 @@ class Scope(unittest.TestCase):
         self.assertEqual(project['hooks'], template)
 
 
-    def test_cleanup_is_exact_dry_by_default_backed_up_and_idempotent(self):
+    def test_cleanup_is_dry_by_default_backed_up_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             settings = home / '.claude/settings.json'
             settings.parent.mkdir()
-            legacy = json.loads((ROOT / 'ops/config/claude-legacy-user-hooks.json').read_text().replace(
+            legacy = json.loads((ROOT / 'ops/config/hooks.json').read_text().replace(
                 '{{REPO}}', str(home / 'carr-system')))
             personal = {'hooks': [{'type': 'command', 'command': 'echo personal'}]}
             legacy['Stop'].append(personal)
@@ -55,7 +55,7 @@ class Scope(unittest.TestCase):
                 self.assertEqual(MIGRATION['migrate'](home, True), 2)
                 self.assertEqual(MIGRATION['migrate'](home, True), 0)
             self.assertEqual(json.loads(settings.read_text())['hooks']['Stop'], [personal])
-            self.assertEqual(json.loads(settings.read_text())['hooks']['PreToolUse'], [altered])
+            self.assertEqual(json.loads(settings.read_text())['hooks']['PreToolUse'], [])
             self.assertEqual(json.loads(mcp.read_text())['mcpServers'], {'rea': {'url': 'other'}})
             self.assertEqual(json.loads(mcp.read_text())['oauthAccount'], {'fixture': True})
             for path, raw in before.items():
@@ -64,13 +64,13 @@ class Scope(unittest.TestCase):
                 self.assertEqual(backups[0].read_bytes(), raw)
                 self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
 
-    def test_codex_cleanup_preserves_modified_and_unrelated_hooks(self):
+    def test_codex_cleanup_removes_modified_carr_and_preserves_unrelated_hooks(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             path = home / '.codex/hooks.json'
             path.parent.mkdir()
-            legacy = json.loads((ROOT / 'ops/config/codex-legacy-user-hooks.json').read_text().replace(
-                '{{REPO}}', str(home / 'carr-system')))
+            legacy = json.loads((ROOT / 'ops/config/codex-hooks.json').read_text().replace(
+                '$r', str(home / 'carr-system')))
             personal = {'type': 'command', 'command': 'echo personal'}
             changed = copy.deepcopy(legacy['hooks']['PreToolUse'][0]['hooks'][0])
             changed['timeout'] += 1
@@ -84,10 +84,26 @@ class Scope(unittest.TestCase):
                 self.assertEqual(MIGRATION['migrate'](home, True), 1)
                 self.assertEqual(MIGRATION['migrate'](home, True), 0)
             self.assertEqual(json.loads(path.read_text())['hooks']['PreToolUse'],
-                             [{'matcher': '.*', 'hooks': [personal, changed]}])
+                             [{'matcher': '.*', 'hooks': [personal]}])
             backup, = path.parent.glob('*before-carr-scope*')
             self.assertEqual(backup.read_bytes(), before)
             self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+
+    def test_deleted_scripts_old_matchers_and_group_metadata_are_removed(self):
+        names = ('one-repo-gate', 'bash-write-gate', 'write-effect-check',
+                 'draft-export-gate', 'github-burst-guard', 'model-floor-gate',
+                 'job-watchdog-digest', 'guard-unattended')
+        for kind in ('hooks', 'codex'):
+            personal = {'type': 'command', 'command': 'python3 /other/hooks/personal.py'}
+            other = {'type': 'command', 'command': 'python3 /tmp/not-carr-system/hooks/keep.py'}
+            handlers = [{'type': 'command', 'command': f'python3 "/old home/carr-system/hooks/{name}.py"',
+                         'timeout': 999} for name in names]
+            document = {'permissions': {'allow': ['Bash(*)']}, 'theme': 'dark',
+                        'hooks': {'PreToolUse': [{'matcher': 'old', 'metadata': 'keep',
+                                                 'hooks': handlers + [personal, other]}]}}
+            expected = copy.deepcopy(document)
+            expected['hooks']['PreToolUse'][0]['hooks'] = [personal, other]
+            self.assertEqual(MIGRATION['cleaned'](document, kind, Path('/unused')), expected)
 
     @unittest.skipUnless(shutil.which('codex'), 'native Codex CLI is not installed')
     def test_native_codex_discovers_only_the_trusted_project(self):
@@ -108,6 +124,20 @@ class Scope(unittest.TestCase):
             worktree = base / 'worktree'
             subprocess.run(['git', '-C', str(project), 'worktree', 'add', '-q',
                             str(worktree)], check=True, env=fixture_env())
+            (project / '.codex/hooks.json').write_text('{"hooks":{}}')
+            gate = runpy.run_path(str(ROOT / 'hooks/gate-integrity.py'))
+            (worktree / 'hooks').symlink_to(ROOT / 'hooks')
+            (worktree / '.claude').mkdir(exist_ok=True)
+            (worktree / '.claude/settings.json').write_bytes((ROOT / '.claude/settings.json').read_bytes())
+            main = gate['main']
+            with patch.dict(main.__globals__, {'REPO': worktree, 'check_baseline': lambda: []}), \
+                    patch.object(sys, 'argv', ['gate-integrity.py']), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(), 1, 'empty common hooks must fail despite complete linked hooks')
+            (worktree / 'hooks').unlink()
+            # Installation repairs the common discovery layer, not the linked file.
+            (project / '.codex/hooks.json').write_bytes((ROOT / '.codex/hooks.json').read_bytes())
+            (worktree / '.codex/hooks.json').write_text('{"hooks":{}}')
             (project / 'nested').mkdir()
             config = '[features]\nhooks = true\n'
             for directory in (project, worktree):
@@ -120,23 +150,30 @@ class Scope(unittest.TestCase):
                                  (outside, project, project / 'nested', worktree)]})
             outside_entry, *inside = result['data']
             self.assertEqual(outside_entry['hooks'], [])
+            self.assertEqual(outside_entry['errors'], [])
+            print('native Codex outside project: 0 hooks, 0 errors')
             for entry in inside:
                 self.assertEqual(entry['errors'], [])
+                self.assertEqual(len(entry['hooks']), 7)
+                self.assertEqual({Path(h['sourcePath']).resolve() for h in entry['hooks']}, {(project / '.codex/hooks.json').resolve()})
                 command = next(h['command'] for h in entry['hooks']
                                if 'guard-unattended.py' in h.get('command', ''))
                 checkout = worktree if Path(entry['cwd']).name == 'worktree' else project
-                (checkout / 'hooks').mkdir(exist_ok=True)
-                (checkout / 'hooks/guard-unattended.py').write_text('print("NATIVE GUARD FIRED")')
+                if not (checkout / 'hooks').exists():
+                    shutil.copytree(ROOT / 'hooks', checkout / 'hooks')
+                    (checkout / 'lib').symlink_to(ROOT / 'lib')
                 fired = subprocess.run(['/bin/sh', '-c', command], cwd=entry['cwd'],
-                                       capture_output=True, text=True, timeout=5,
-                                       env=fixture_env())
-                self.assertEqual(fired.returncode, 0, fired.stderr)
-                self.assertEqual(fired.stdout.strip(), 'NATIVE GUARD FIRED')
+                                       input=json.dumps({'hook_event_name': 'PreToolUse', 'tool_name': 'exec_command',
+                                                         'cwd': entry['cwd'], 'tool_input': {'cmd': 'git push origin HEAD:main'}}),
+                                       capture_output=True, text=True, timeout=5, env={**fixture_env(), 'HOME': str(home)})
+                self.assertEqual(fired.returncode, 2, fired.stderr)
+                self.assertIn('direct push to main', fired.stderr)
+                print(f'native Codex {Path(entry["cwd"]).name}: 7 hooks from common checkout, guard denied push (exit 2)')
 
     def test_codex_installer_and_guard_use_checkout_scope(self):
         installer = runpy.run_path(str(ROOT / 'ops/config-as-code.py'))
         self.assertEqual(Path(installer['CODEX_HOOKS_SRC']),
-                         Path(installer['REPO']) / '.codex/hooks.json')
+                         Path(installer['_canonical_repo'](str(ROOT))) / '.codex/hooks.json')
         state = installer['codex_configuration_state']
         with tempfile.TemporaryDirectory() as home, patch.dict(state.__globals__,
                 {'HOME': home, 'CODEX_CONFIG': str(Path(home) / '.codex/config.toml'),

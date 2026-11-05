@@ -9,7 +9,7 @@ The retired multi-user S3 design is not used.
 `https://api.doctorcre.com/mcp`. Authentication remains Claude Code's existing
 OAuth storage; no token, header or credential is copied into Git. The allowlist,
 native rule-delivery recognition, and retained `mcp__carr__*` callers therefore
-keep their names. Codex's independently configured MCP and hooks are unchanged.
+keep their names. Codex's independently configured MCP is unchanged.
 
 `.claude/settings.json` enables `carr` through `enabledMcpjsonServers` and runs
 hooks through `CLAUDE_PROJECT_DIR`. A checkout must have its normal `.venv` runtime.
@@ -22,9 +22,9 @@ checkout rather than fast-forwarding a worker branch.
 
 ## Hook inventory
 
-The legacy user registrations are frozen in
-`ops/config/claude-legacy-user-hooks.json` solely for exact removal. They are
-not an installation source. Each registration moves into project settings.
+User cleanup identifies commands referencing a `carr-system/hooks/` script,
+including deleted scripts, older matchers and altered handler metadata.
+It does not depend on a snapshot of historical registrations.
 
 | Hook | Events | Protection |
 | --- | --- | --- |
@@ -87,14 +87,14 @@ loads the team-memory index. The project template now includes these hooks too.
   sessions outside carr-system lose the removed user hooks by design.
 - `cua-computer-use` and `rea` are personal utility MCP servers and remain
   user-wide. The cleanup preserves all other settings, plugin registrations,
-  permissions, account fields, authentication storage and modified registrations.
+  permissions, account fields, authentication storage and unrelated registrations.
 
 ## Post-merge removal
 
 Run these on each Mac from the merged carr-system checkout. The first command
-is a dry run. The second removes only the exact legacy registrations with
+is a dry run. The second removes CARR hook script registrations with
 private, uniquely named backups beside each changed file. Repeating either
-command is safe. Unknown or edited hook registrations remain for inspection;
+command is safe. Unrelated hook registrations remain for inspection;
 a changed `carr` server causes refusal before writing anything.
 
 ```sh
@@ -123,15 +123,22 @@ additive user/project loading and per-definition trust. It also specifies that
 commands run in the session cwd and recommends Git-root resolution for project
 hooks. The tracked Codex commands use that mechanism for subdirectories and
 linked worktrees. `/hooks` reviews and trusts new definitions; cleanup does not
-silently grant trust. The old untracked shared-root hooks file is historical
-evidence, not the deployed contract.
+silently grant trust.
 
-`scope-agent-config.py` now previews both clients and removes exact legacy
-Codex event, matcher, and handler tuples, including their timeout and context
-limit. It retains modified or unrelated hooks and backs up each changed file
-with mode 0600 before `--apply` replaces it. Run cleanup after merge on both Macs.
-The config installer and gate-integrity check now use the checkout's Codex file
-so convergence cannot reinstall CARR hooks into user-wide configuration.
+Installed Codex 0.166.0 discovers linked-worktree project hooks in the common
+checkout, not in the linked checkout's local file. The installer already resolves
+Git's common directory and installs that shared discovery layer. Integrity now
+checks that effective file against the session checkout's required registrations;
+a stale or empty common layer refuses even when the local file is complete.
+Commands still execute scripts from the session checkout. After merge, converge
+the common checkout and verify discovery before removing user-wide guards.
+
+`scope-agent-config.py` previews both clients and removes all command handlers
+referencing a `carr-system/hooks/` script regardless of event, matcher, metadata
+or script existence. It retains permission allow entries and unrelated hooks.
+It backs up each changed file with mode 0600 before `--apply` replaces it. Run
+cleanup after merge on both Macs. Convergence cannot reinstall CARR hooks into
+user-wide configuration.
 
 Only carr-system registers these hooks. doctorcre-app and software-factory do
 not inherit CARR runtime gates. The user-level cleanup benefits all other repos

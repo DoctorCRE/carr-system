@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -59,6 +60,9 @@ class SafetyHooks(unittest.TestCase):
     def test_claude_uses_project_settings_and_ignores_user_config_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
+            sys.path.insert(0, str(REPO / 'ops'))
+            from git_env import fixture_env
+            subprocess.run(['git', 'init', '-q', str(project)], check=True, env=fixture_env())
             (project / 'hooks').symlink_to(REPO / 'hooks')
             settings = project / '.claude/settings.json'
             settings.parent.mkdir()
