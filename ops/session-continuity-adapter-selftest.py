@@ -143,6 +143,37 @@ class Artifact(unittest.TestCase):
         self.assertEqual(self.record, before)
         self.assertEqual([v for v, _ in self.calls], ['read-session-checkpoint-v1'])
 
+    def test_missing_or_unequal_post_write_readback_refuses_protection(self):
+        faults = {
+            'missing': lambda record: None,
+            'wrong_key': lambda record: dict(record, last_write_key='different'),
+            'wrong_envelope': lambda record: dict(record, envelope=dict(record['envelope'], cursor=9)),
+            'wrong_generation': lambda record: dict(record, generation=record['generation'] + 1),
+            'archived': lambda record: dict(record, archived=True),
+        }
+        for ambiguous in (False, True):
+            for fault, corrupt in faults.items():
+                with self.subTest(ambiguous=ambiguous, readback=fault):
+                    self.record = None
+                    self.calls.clear()
+                    self.timeout = ambiguous
+                    transport = bridge.McpTransport('https://api.doctorcre.com/mcp', 'synthetic')
+
+                    def open_request(request, timeout):
+                        payload = json.loads(request.data)['params']
+                        verb, args = payload['name'], payload['arguments']
+                        result = self.call(verb, args)
+                        if verb == 'read-session-checkpoint-v1' and len(self.calls) > 1:
+                            result['record'] = corrupt(result['record'])
+                        return io.BytesIO(bridge.encoded({'result': {'structuredContent': result}}))
+
+                    with patch.object(bridge.urllib.request.OpenerDirector, 'open', side_effect=open_request):
+                        with self.assertRaisesRegex(ValueError, '^authority_readback_mismatch$'):
+                            self.run_event(call=transport)
+                    self.assertEqual([v for v, _ in self.calls], [
+                        'read-session-checkpoint-v1', 'write-session-checkpoint-v1', 'read-session-checkpoint-v1'])
+                    self.assertEqual(transport.requests, 3)
+
     def test_old_and_changed_events_do_not_write(self):
         self.run_event()
         newer = copy.deepcopy(self.event)
