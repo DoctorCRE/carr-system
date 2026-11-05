@@ -197,3 +197,38 @@ test('watch statechart on canonical event ingress', async t => {
     await event();assert.equal(await count(joe,'lease'),10);
   }finally{await c.query('rollback');}
 });
+
+
+test('registered partner and sponsored writes wake shared deal watchers', async t => {
+  const c = new pg.Client({ connectionString: dsn });
+  await c.connect(); t.after(() => c.end());
+  const actors = (await c.query("select id,slug from actor where slug in ('joe','dell','codex')")).rows;
+  const joe = { ...actors.find(a=>a.slug==='joe'), human:true };
+  const dell = { ...actors.find(a=>a.slug==='dell'), human:true };
+  const agent = { ...actors.find(a=>a.slug==='codex'), human:false, native_agent_verified:true, sponsoring_human_slug:'joe' };
+  const call = async (who,verb,args) => {
+    await c.query('begin');
+    try {
+      await c.query("select set_config('carr.acting_actor_slug',$1,true),set_config('carr.verified_human_actor_slug',$2,true),set_config('carr.organization_tenant_id','carr-internal',true)",[who.slug,who.human?who.slug:'']);
+      await c.query('set local role carr_writer');
+      const result=await executeRegisteredTool(c,who,verb,args);
+      await c.query('commit');return result;
+    } catch(e) { await c.query('rollback');throw e; }
+  };
+  for (const who of [joe,dell,agent]) await t.test(who.slug,async()=>{
+    const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic writer regression',$1,$1) returning id",[joe.id])).rows[0].id;
+    const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,joe.id])).rows[0].id;
+    const deal=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic registered writer deal','purchase','research','joe',$2,$2) returning id",[client,joe.id])).rows[0].id;
+    for(const partner of [joe,dell]) await call(partner,'watch-subject-v1',{subject_type:'deal',subject_id:deal,idempotency_key:randomUUID()});
+    const args={deal,base_version:1,fields:{city:'Synthetic changed city'},idempotency_key:randomUUID()};
+    await call(who,'update-deal',args);
+    const event=(await c.query("select id,personal_scope from event where subject_id=$1 and verb='update-deal'",[deal])).rows[0];
+    assert.equal(event.personal_scope,`${who.sponsoring_human_slug??who.slug}-personal`);
+    const counts=async()=> (await c.query("select recipient_actor,count(*)::integer n from ops.notification where subject_ref=$1 and dedupe_key like 'subject-watch:%' group by recipient_actor order by recipient_actor",[deal])).rows;
+    const expected=[joe,dell].map(a=>({recipient_actor:a.id,n:1})).sort((a,b)=>a.recipient_actor.localeCompare(b.recipient_actor));
+    assert.deepEqual(await counts(),expected,'shared deal changes wake both partners despite personal audit attribution');
+    await call(who,'update-deal',args);
+    await c.query('select ops.consume_subject_watch_event($1)',[event.id]);
+    assert.deepEqual(await counts(),expected,'writer and consumer replay remain quiet');
+  });
+});
