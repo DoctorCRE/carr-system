@@ -1,0 +1,11 @@
+stateDiagram-v2
+  [*] --> Ready
+  Ready --> Refused: Caller lacks partner authority or tenant differs
+  Ready --> Page: Search name or load actors
+  Page --> Page: Continue same query after last name and UUID
+  Page --> Ready: Change query and clear cursor
+  Page --> End: No more live matches
+  Ready --> Refused: Invalid query or cursor or page exceeds cap
+  %% never Return merged or deleted identities
+  %% never Change canonical records while reading
+  %% never Return another tenant identity

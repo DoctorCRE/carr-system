@@ -9,7 +9,9 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-COUNT = 4
+COUNT = 5
+WATCHDOG_MS = 600000
+BUDGET_MS = WATCHDOG_MS * 4 // 5
 
 
 def suite_files(root):
@@ -17,7 +19,7 @@ def suite_files(root):
                                               cwd=root, text=True))
 
 
-def estimate(files, records):
+def estimate(files, records, setup_ms=0):
     lanes = [0] * 4
     serial = 0
     for file in sorted(files):
@@ -26,18 +28,24 @@ def estimate(files, records):
             serial += record['milliseconds']
         else:
             heapq.heapreplace(lanes, lanes[0] + record['milliseconds'])
-    return serial + max(lanes)
+    return setup_ms + serial + max(lanes)
 
 
-def plan(root=ROOT):
+def durations(root=ROOT):
     timing_file = root / 'ops/config/ci-unit-durations.json'
-    measured = json.loads(timing_file.read_text())['suites'] if timing_file.exists() else {}
-    fallback = max((row['milliseconds'] for row in measured.values()), default=1000)
+    data = json.loads(timing_file.read_text()) if timing_file.exists() else {}
+    measured = data.get('suites', {})
+    fallback = max((row['milliseconds'] for row in measured.values()), default=WATCHDOG_MS)
     records = {file: measured.get(file, {'milliseconds': fallback, 'serial': True}) for file in suite_files(root)}
-    shards = [[] for _ in range(COUNT)]
+    return records, data.get('snapshot_template_ms', 0)
+
+
+def plan(root=ROOT, count=COUNT):
+    records, setup_ms = durations(root)
+    shards = [[] for _ in range(count)]
     for file in sorted(records, key=lambda file: (
             -records[file]['milliseconds'] / (1 if records[file]['serial'] else 4), file)):
-        index = min(range(COUNT), key=lambda index: (estimate(shards[index] + [file], records), len(shards[index]), index))
+        index = min(range(count), key=lambda index: (estimate(shards[index] + [file], records, setup_ms), len(shards[index]), index))
         shards[index].append(file)
     if any(not suites for suites in shards):
         raise ValueError('unit shard has zero suites')
@@ -46,7 +54,9 @@ def plan(root=ROOT):
 
 def regenerate(logs, source_run, output, root=ROOT):
     samples = {}
+    setup_samples = []
     for log in logs:
+        setup_samples.extend(map(int, re.findall(r'suite-timing: snapshot-template (\d+)ms', log.read_text())))
         for file, milliseconds in re.findall(r'suite-timing: (\S+\.test\.(?:mjs|js)) (\d+)ms', log.read_text()):
             if file in samples:
                 raise ValueError(f'duplicate suite timing: {file}')
@@ -67,17 +77,17 @@ console.log(JSON.stringify(suiteBatches(files,browsers,postgres)));"""
     batches = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', script, json.dumps(expected)],
                                                 cwd=root, text=True))
     serial = {file for batch in batches if len(batch) == 1 for file in batch}
-    data = {'source_run': source_run, 'suites': {file: {'milliseconds': samples[file], 'serial': file in serial}
+    data = {'source_run': source_run, 'snapshot_template_ms': max(setup_samples, default=0), 'suites': {file: {'milliseconds': samples[file], 'serial': file in serial}
                                               for file in expected}}
     rows = ',\n'.join(f'    {json.dumps(file)}: {json.dumps(record)}' for file, record in data['suites'].items())
-    output.write_text('{\n  "source_run": ' + str(source_run) + ',\n  "suites": {\n' + rows + '\n  }\n}\n')
+    output.write_text('{\n  "source_run": ' + str(source_run) + ',\n  "snapshot_template_ms": ' + str(data['snapshot_template_ms']) + ',\n  "suites": {\n' + rows + '\n  }\n}\n')
 
 
 def verify(receipts, root=ROOT):
     expected = plan(root)
     ids = [receipt['shard'] for receipt in receipts]
     if sorted(ids) != list(range(1, COUNT + 1)):
-        raise ValueError('require exactly one receipt for each of four shards')
+        raise ValueError(f'require exactly one receipt for each of {COUNT} shards')
     for receipt in receipts:
         actual = receipt['suites']
         if not actual:
@@ -87,7 +97,7 @@ def verify(receipts, root=ROOT):
             missing = sorted((Counter(wanted) - Counter(actual)).elements())
             extra = sorted((Counter(actual) - Counter(wanted)).elements())
             raise ValueError(f"shard {receipt['shard']} coverage mismatch: missing={missing}, unexpected={extra}")
-    print(f'Unit shard coverage: {sum(map(len, expected))} suites exactly once across four nonempty shards')
+    print(f'Unit shard coverage: {sum(map(len, expected))} suites exactly once across {COUNT} nonempty shards')
 
 
 def main():

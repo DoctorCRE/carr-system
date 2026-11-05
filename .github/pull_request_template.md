@@ -14,4 +14,9 @@ Bot-authored and Markdown-only PRs are exempt from the Card requirement.
 ## How verified
 <!-- Name the checks and any remaining limits. -->
 
+## Production proof
+<!-- Name proofs/requirements/<change>.json. For exclusively non-product paths,
+write n/a: <specific reason>. See proofs/requirements/README.md.
+Admission is not evidence that a feature works. -->
+
 Skills used: <!-- List the skills applied to this PR, or explain why none applies. -->

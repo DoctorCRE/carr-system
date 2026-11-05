@@ -47,7 +47,7 @@ class RuntimeTests(unittest.TestCase):
             target.write_text('VALUE = 2\n')
             commit()
             value = stamp(runtime)
-            self.assertEqual(value['runtime_sha'], git(runtime, 'rev-parse', '--short', 'HEAD'))
+            self.assertEqual(value['runtime_sha'], git(runtime, 'rev-parse', 'HEAD'))
             self.assertEqual(value['runtime_behind'], 1)
 
     def test_unexpected_stamp_failure_is_best_effort(self):
@@ -84,7 +84,7 @@ class RuntimeTests(unittest.TestCase):
             git('checkout', '-q', '--detach', installed)
             # The dependency can be newly added on main, so inspect both trees.
             receipt = json.loads(intake.receipt_line(intake.Outcome('succeeded', 'processed'), repo).split(' ', 1)[1])
-            self.assertEqual(receipt['runtime_sha'], git('rev-parse', '--short', 'HEAD'))
+            self.assertEqual(receipt['runtime_sha'], git('rev-parse', 'HEAD'))
             self.assertEqual(receipt['runtime_behind'], 5)
             git('checkout', '-q', '--detach', latest)
             receipt = json.loads(intake.receipt_line(intake.Outcome('succeeded', 'processed'), repo).split(' ', 1)[1])
@@ -99,6 +99,7 @@ class RuntimeTests(unittest.TestCase):
             receipt = json.loads(intake.receipt_line(intake.Outcome('succeeded', 'processed'), repo).split(' ', 1)[1])
             self.assertIsNone(receipt['runtime_behind'])
             self.assertEqual(receipt['runtime_note'], 'main_unknown_locally')
+            self.assertEqual(receipt['runtime_sha'], installed)
 
 
 if __name__ == '__main__':

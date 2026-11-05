@@ -8,6 +8,15 @@ DEFAULT_PATH = Path(__file__).resolve().parents[1] / 'ops/config/rule-cards.v1.j
 FAILURE_STATE = ('4th failed test/build/check command in the session within 30 minutes '
                  '(counter kept by the router, as hook_meter.py does; not a hook payload field)')
 
+ROUTED_EVENTS = ('PreToolUse', 'UserPromptSubmit')
+MATCHER_EVENTS = (*ROUTED_EVENTS, 'PostToolUse', 'PostToolUseFailure')
+MATCHER_PREDICATES = {
+    'tool_name_regex': lambda event: event.get('tool_name', ''),
+    'input_regex': lambda event: json.dumps(event.get('tool_input', {}), ensure_ascii=False, sort_keys=True),
+    'response_regex': lambda event: json.dumps(event.get('tool_response', {}), ensure_ascii=False, sort_keys=True),
+    'prompt_regex': lambda event: event.get('prompt', ''),
+}
+
 
 def load_cards(path=DEFAULT_PATH):
     with open(path, encoding='utf-8') as handle:
@@ -38,10 +47,15 @@ class CardSelector:
                 continue
             matchers = []
             for matcher in card['triggers']['matchers']:
+                if not isinstance(matcher.get('event'), str) or matcher['event'] not in MATCHER_EVENTS:
+                    raise ValueError(f"{card['id']}: unsupported matcher event")
+                unknown = matcher.keys() - {'event', 'router_state', *MATCHER_PREDICATES}
+                if unknown:
+                    raise ValueError(f"{card['id']}: unknown matcher keys: {', '.join(sorted(unknown))}")
                 if matcher.get('router_state') not in (None, FAILURE_STATE):
                     raise ValueError(f"{card['id']}: unknown router state")
                 compiled = {key: re.compile(value) for key, value in matcher.items()
-                            if key.endswith('_regex')}
+                            if key in MATCHER_PREDICATES}
                 matchers.append((matcher['event'], compiled, bool(matcher.get('router_state'))))
             self.routed.append((card, matchers))
         self.core.sort(key=lambda c: c['core_rank'])
@@ -52,10 +66,7 @@ class CardSelector:
 
     def select(self, event, *, now=0, inherited_rule_ids=(), cap=3):
         inherited_rule_ids = set(inherited_rule_ids)
-        fields = {'tool_name_regex': event.get('tool_name', ''),
-                  'input_regex': json.dumps(event.get('tool_input', {}), ensure_ascii=False, sort_keys=True),
-                  'response_regex': json.dumps(event.get('tool_response', {}), ensure_ascii=False, sort_keys=True),
-                  'prompt_regex': event.get('prompt', '')}
+        fields = {key: read(event) for key, read in MATCHER_PREDICATES.items()}
         matched = []
         counted_failure = False
         while self.failures and now - self.failures[0] > 1800:
@@ -96,7 +107,6 @@ class CardSelector:
 # measures exactly what the hooks send. Every live caller fails open: an error
 # here delivers no cards and never blocks a tool.
 
-ROUTED_EVENTS = ('PreToolUse', 'UserPromptSubmit')
 CORE_HEADER = ('RULE CARDS (always-on core). Each card carries a one-line yes/no '
                'acknowledgement; answer it before acting when the card applies.')
 

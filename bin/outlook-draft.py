@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
-"""Save a mailto draft in the configured Outlook application session.
-
-Use an explicit application to avoid the system mailto handler. Encode spaces
-with quote(), since Outlook preserves urlencode()'s plus signs. The AppleScript
-marks the message modified before saving, because untouched drafts disappear
-when closed. This command never sends.
-"""
+"""Create an exact Outlook draft and claim persistence only after private store readback."""
 
 import argparse
+from contextlib import closing
+from email.utils import getaddresses
+import sqlite3
 import json
 import subprocess
+import os
+import tempfile
+import time
 import sys
 import urllib.parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.outlook_settings import load_settings
-
-SCRIPT = Path(__file__).resolve().parent / "outlook-draft.applescript"
-
-# Outlook titles a compose window "<subject> • <account>". A very long subject is
-# truncated in the title bar, so match on a prefix short enough to survive that.
-TITLE_MATCH_LEN = 40
+from lib import outlook_send as send
 
 
 def as_list(value):
@@ -35,7 +30,7 @@ def build_url(payload):
     to = as_list(payload.get("to"))
     if not to:
         raise SystemExit("refusing to create a draft with no recipient")
-    q = urllib.parse.quote          # %20 for spaces — see note 2 above
+    q = urllib.parse.quote
     parts = [f"subject={q(payload.get('subject') or '')}",
              f"body={q(payload.get('body') or '')}"]
     if as_list(payload.get("cc")):
@@ -43,6 +38,83 @@ def build_url(payload):
     if as_list(payload.get("bcc")):
         parts.append("bcc=" + q(",".join(as_list(payload["bcc"]))))
     return "mailto:" + q(",".join(to), safe="@,") + "?" + "&".join(parts)
+
+
+def draft_observations(settings):
+    from lib.outlook_intake import OUT, WORK_PREFIX, _snapshot, _decoder, _load
+    if settings.folder_account_id is None:
+        raise ValueError('draft_account_identity_required')
+    out = settings.repo / OUT
+    out.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(out, 0o700)
+    with tempfile.TemporaryDirectory(prefix=WORK_PREFIX, dir=out) as folder:
+        work = Path(folder)
+        _snapshot(Path.home(), work)
+        db = work / 'store.db'
+        fd = os.open(db, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        _decoder(Path.home())(work / 'store.hxd', work / 'Files', db)
+        _, mails, _ = _load(db, settings.folder_account_id, settings.account)
+        with closing(sqlite3.connect(db)) as con:
+            raw_bodies = dict(con.execute('SELECT id, body FROM messages'))
+        return [dict(m, body=raw_bodies[m['row_ids'][0]]) for m in mails
+                if any(p.lower() == 'drafts' for p in m.get('folders', []))]
+
+
+def _recipient_addresses(value):
+    if not value:
+        return set()
+    try:
+        pairs = getaddresses([value], strict=True)
+        addresses = [address for _, address in pairs]
+        if not addresses or any(not address for address in addresses):
+            return None
+        return set(send._addresses(addresses))
+    except (ValueError, TypeError):
+        return None
+
+
+def matching_draft_ids(rows, mail):
+    # The decoder does not observe Bcc. It cannot prove a requested hidden recipient.
+    if mail.bcc:
+        return set()
+    return {str(m['local_keys']) for m in rows
+            if str(m.get('local_keys') or '').isdigit()
+            and m.get('subject') == mail.subject and m.get('body_kind') == 'full'
+            and m.get('body') == mail.body
+            and _recipient_addresses(m.get('recipients')) == set(mail.to)
+            and _recipient_addresses(m.get('cc')) == set(mail.cc)}
+
+
+def save_draft(payload, settings, leave_open=False):
+    mail = send.Mail(*(send._addresses(as_list(payload.get(k))) for k in ('to', 'cc', 'bcc')),
+                     payload.get('subject') or '', payload.get('body') or '')
+    url = build_url(payload)
+    if len(url) > 1900:
+        raise SystemExit('draft URL exceeds safe length')
+    before_drafts = {str(m.get('local_keys')) for m in draft_observations(settings)}
+    waits = send.ui.Waits()
+    pid, _ = send._main_window(waits)
+    before_windows = {w['window_id'] for w in send._cua('list_windows', {'pid': pid}).get('windows', [])}
+    opened = subprocess.run(['open', '-a', 'Microsoft Outlook', url], capture_output=True, timeout=60)
+    if opened.returncode != 0:
+        raise SystemExit('draft launch failed; persistence unverified')
+    window = send.ComposeWindow(pid, send._new_window(pid, before_windows, waits), waits)
+    if window.read() != send.fields(mail):
+        raise SystemExit('draft fields differ; persistence unverified')
+    send._cua('invoke_menu', {'pid': pid, 'window_id': window.window_id, 'path': ['File', 'Save']})
+    if not leave_open:
+        send._cua('invoke_menu', {'pid': pid, 'window_id': window.window_id, 'path': ['File', 'Close']})
+        if not send._wait(window.closed, 10, send.Ports(None, None, None, None)):
+            raise SystemExit('draft window did not close; persistence unverified')
+    deadline = time.monotonic() + 30
+    while True:
+        found = matching_draft_ids(draft_observations(settings), mail) - before_drafts
+        if len(found) == 1:
+            return next(iter(found))
+        if len(found) > 1 or time.monotonic() >= deadline:
+            raise SystemExit('draft persistence unverified')
+        time.sleep(2)
 
 
 def main():
@@ -64,27 +136,12 @@ def main():
             raise SystemExit("no input: pass flags or pipe JSON on stdin")
         payload = json.loads(raw)
 
-    load_settings()
-    url = build_url(payload)
-    if len(url) > 1900:
-        # mailto has a practical length ceiling and a silently TRUNCATED draft is
-        # far worse than a refusal: it looks finished and is not.
-        raise SystemExit(
-            f"body too long for the mailto route ({len(url)} chars of URL). "
-            f"A truncated draft would look complete and would not be. Shorten it, "
-            f"or use bin/gmail-handover.py for long text.")
-
-    subprocess.run(["open", "-a", "Microsoft Outlook", url], check=False)
-
-    title_prefix = (payload.get("subject") or "")[:TITLE_MATCH_LEN]
-    mode = "leave" if args.leave_open else "close"
-    r = subprocess.run(["osascript", str(SCRIPT), title_prefix, mode],
-                       capture_output=True, text=True)
-    out = (r.stdout or r.stderr).strip()
-    if not out.startswith("OK"):
-        raise SystemExit(f"draft may not have been saved: {out}")
-    print(f"draft saved to Drafts: {payload.get('subject')!r}"
-          + ("" if args.leave_open else " (window closed)"))
+    settings = load_settings()
+    try:
+        save_draft(payload, settings, args.leave_open)
+    except Exception as exc:
+        raise SystemExit(f'draft persistence unverified: {type(exc).__name__}') from None
+    print('draft saved to Drafts' + ('' if args.leave_open else ' (window closed)'))
 
 
 if __name__ == "__main__":

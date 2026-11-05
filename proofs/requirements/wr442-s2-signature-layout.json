@@ -1,0 +1,33 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "wr442-s2-signature-layout",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "signature-finding",
+      "predicate": "The next normal Outlook intake receipt on the installed full source SHA succeeds with counts.run.signature_recorded at least one.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "The receipt reports signature_recorded >= 1. A held or idle run does not establish positive processing.",
+      "input_class": "read-only natural intake receipt and redacted finding metadata",
+      "deadline_seconds": 300
+    },
+    {
+      "id": "calendar-cancellation",
+      "predicate": "A completed natural intake receipt on the installed full source SHA reports counts.run.calendar_agenda_published at least one. Read-only agenda comparison must separately confirm observed decoded cancellations are absent from items and follow_up_reviews.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "calendar_agenda_published >= 1 on a successful expected-runtime receipt. A window without decoded cancellations does not establish the positive cancellation case.",
+      "input_class": "read-only completed natural intake receipt",
+      "deadline_seconds": 300
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 2,
+    "max_records": 20,
+    "max_runtime_seconds": 300,
+    "max_artifact_bytes": 65536
+  }
+}

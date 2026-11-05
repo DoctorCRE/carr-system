@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "targets": [
+    "studio"
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 500,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  },
+  "requirement_id": "WR510-S3-pdf-admission",
+  "assertions": [
+    {
+      "id": "release-and-natural-proof",
+      "predicate": "After installation observe a natural email attachment acquisition rejecting an incomplete PDF with type_refused and accepting a complete PDF with an EOF marker in its final 1024 bytes. Bind the observation to the installed runtime SHA. Do not launch intake, download mail or write records to manufacture evidence. Worker smoke alone does not prove installed attachment admission.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "Separate read-only natural installed-runtime evidence for complete and truncated PDFs; without naturally eligible examples remain landed-unproven.",
+      "input_class": "one supplied natural installed outlook-intake run receipt at the full runtime SHA plus counts-only attachment outcomes; no run launch or writes",
+      "deadline_seconds": 120
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Each unit invocation owns a migrated snapshot clone.
 
 import test from "node:test";
+import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -32,8 +33,7 @@ const MUTANT_SRC = fileURLToPath(new URL("../src/", import.meta.url));
 const MUTANT_FILE = "tools.js";
 let mutantWork = null;
 function relinkMutant(source) {
-  return source.replace(/from\s+"\.\/([^"]+)"/g, (_, file) =>
-    `from "${pathToFileURL(join(MUTANT_SRC, file)).href}"`);
+  return relinkSourceImports(source, MUTANT_SRC);
 }
 async function loadForUpdateRemovedMutant() {
   if (!mutantWork) mutantWork = mkdtempSync(join(tmpdir(), "amend-closed-loop-concurrency-mutant-"));
