@@ -528,6 +528,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "capture-email-touch-journal": {
+    "ingress_key": "mcp-tool:capture-email-touch-journal",
+    "source_locator": "mcp-server/src/email-touch-journal.js",
+    "schema_digest": "72a0e6404c7ab77c5219b8e46d603c30991030d160754dbc524a23c21e65857a",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "capture-queue": {
     "ingress_key": "mcp-tool:capture-queue",
     "source_locator": "mcp-server/src/tools.js",
@@ -2908,6 +2918,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:record-email-sent",
     "source_locator": "mcp-server/src/email-proposals.js",
     "schema_digest": "ea8b7dd6cfec4367a8cad32c67819c75bee819fec10f22f9620a1de2e5ea3f26",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "record-email-touch-journal-outcome": {
+    "ingress_key": "mcp-tool:record-email-touch-journal-outcome",
+    "source_locator": "mcp-server/src/email-touch-journal.js",
+    "schema_digest": "16f13bf45f3573a1964fcaba382dcedd0f22c94cdb475d3ce3d1ec1fd5805008",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

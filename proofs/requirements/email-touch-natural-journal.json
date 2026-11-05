@@ -1,0 +1,26 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "email-touch-natural-journal",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "natural-preapplication-custody",
+      "predicate": "WR634.S3.J1 observes the first natural cohort frozen before filing after normal installed intake. Run the capture-only adapter via db-tap. Require exact immutable bytes, canonical principal and actor, installed and Worker release agreement, no runtime mutation privileges, and custody before every selected application. Then run --reconcile against deployed lineage using the exact-byte export and the PR3001 consumer. Zero eligible natural mail is waiting, never success.",
+      "runner": "email-touch-natural-journal.v1",
+      "expected_result": "Positive natural capture followed by production matched, expected=applied>0 and zero missing, dangling, conflicting, tombstoned, out_of_window, extra and orphan.",
+      "input_class": "first natural journal for installed producer and mailbox, without success filtering",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 8,
+    "max_records": 1000,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
+}

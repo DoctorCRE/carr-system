@@ -1,4 +1,5 @@
 // Register MCP tools and their shared write envelope.
+import { emailTouchJournalTools } from "./email-touch-journal.js";
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
@@ -11109,5 +11110,7 @@ for (const family of toolFamilies) {
   registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,
     versionGuard, executeRegisteredTool, canExercisePartnerAuthority, partnerAuthoritySlugForActor }), family.source);
 }
+
+registerTools(emailTouchJournalTools({ withEnvelope, ToolError }), "mcp-server/src/email-touch-journal.js");
 
 Object.freeze(TOOLS);

@@ -315,6 +315,67 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
+    def journal_ports(self):
+        import base64
+        from lib.email_touch_journal import canonical
+        ports = self.fake.ports()
+        ports.journal_identity = lambda: dict(principal_slug='joe', producer_sha='a'*40, release_sha='a'*40)
+        original = ports.carr
+        def transport(verb, args):
+            if verb == 'capture-email-touch-journal':
+                self.fake.calls.append((verb, args))
+                self.assertNotIn(args['proposals'][0]['original_key'], json.loads((self.out() / intake.STATE).read_text()).get('requests', {}))
+                start = args['proposals'][0]['occurred_at']
+                expected = [dict(source_id=args['source_id'], source_version=args['source_version'],
+                    original_key=p['original_key'], role='client', target_type='client',
+                    target_id='63400000-0000-4000-8000-000000000001', occurred_at=start) for p in args['proposals']]
+                end = (datetime.fromisoformat(start.replace('Z', '+00:00')) + timedelta(milliseconds=1)).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+                raw = canonical(dict(schema='email-touch-expectations.v1', principal_slug='joe',
+                    actor_id='63400000-0000-4000-8000-000000000002', actor_slug='joe-local', tenant='carr-internal',
+                    release_sha='a'*40, start=start, end=end, expected_count=len(expected), expected=expected))
+                digest = hashlib.sha256(raw).hexdigest()
+                return dict(ok=True, raw_base64=base64.b64encode(raw).decode(), digest=digest, reference='sha256:'+digest,
+                            actor_id='63400000-0000-4000-8000-000000000002', actor_slug='joe-local')
+            if verb == 'log-activity' and args.get('email_touch'):
+                self.assertIn('receipt', json.loads((self.out() / intake.STATE).read_text())['email_cohort'])
+                self.assertEqual(json.loads(json.loads((self.out() / intake.STATE).read_text())['requests'][args['idempotency_key']]['payload']), args)
+            return original(verb, args)
+        ports.carr = transport
+        return ports
+
+    def test_natural_journal_freezes_before_full_intake_application(self):
+        write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), local_keys='101')])
+        outcome = intake.run(self.repo, self.home, self.journal_ports())
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(state['email_cohort']['phase'], 'available')
+        verbs = [v for v, a in self.fake.calls]
+        self.assertLess(verbs.index('capture-email-touch-journal'), verbs.index('log-activity'))
+        self.assertEqual(len([1 for v,a in self.fake.calls if v=='capture-email-touch-journal']), 1)
+
+    def test_natural_journal_recovers_outcomes_before_unchanged_store_exit(self):
+        write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), local_keys='101')])
+        ports = self.journal_ports()
+        self.assertEqual(intake.run(self.repo, self.home, ports).state, 'succeeded')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        item = state['email_cohort']
+        item.update(phase='acknowledged', outcome_key=str(uuid.uuid4()), observations=[dict(
+            observation_id=str(uuid.uuid4()), original_key=item['proposals'][0]['idempotency_key'], status='acknowledged', activity_id=None, error_code=None)])
+        intake._save(self.out(), state)
+        self.fake.calls.clear()
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['email_cohort']['phase'], 'available')
+        self.assertEqual(len([1 for v,a in self.fake.calls if v=='record-email-touch-journal-outcome']), 1)
+        self.assertFalse(any(v=='log-activity' for v,a in self.fake.calls))
+
+    def test_natural_journal_preview_remains_outside_capture(self):
+        write_db(self.fake.fixture, [mail(CLIENT.email, timedelta(hours=-1), local_keys='101', kind='preview')])
+        outcome = intake.run(self.repo, self.home, self.journal_ports())
+        self.assertEqual(outcome.state, 'succeeded', outcome)
+        self.assertNotIn('email_cohort', json.loads((self.out() / intake.STATE).read_text()))
+        self.assertFalse(any(v=='capture-email-touch-journal' for v,a in self.fake.calls))
+
     def search_decode(self, source, files, target):
         self.fake.decode(source, files, target)
         with closing(sqlite3.connect(target)) as db, db:

@@ -101,6 +101,7 @@ import uuid
 
 from lib.calendar_agenda import (agenda, AGENDA_SCHEMA, AGENDA_DAYS, AGENDA_ATTENDEES,
                                  AGENDA_MAX_BYTES)
+from lib import email_touch_journal
 from lib import email_contact_review
 from lib.email_contact_candidates import VERSION as SIGNATURE_POLICY
 from lib import email_delivery_failure, email_links, unresolved_email
@@ -113,7 +114,7 @@ WORK_PREFIX = 'work-'
 WINDOW = (time(7, 0), time(19, 30))
 COVERAGE_HELD_RECIPIENTS_LIMIT = 20  # More held Sent items require human attention.
 COVERAGE_CHECK_AT = time(18, 0)  # the first successful run from here judges the day's coverage once
-WRITE_VERBS = frozenset({'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
+WRITE_VERBS = frozenset({'capture-email-touch-journal', 'record-email-touch-journal-outcome', 'log-activity', 'publish-board-snapshot', 'propose-email-lead', 'attach-deal-file',
                          'record-deal-item', 'complete-deal-item', 'drop-action', 'record-finding'})
 FLAG_ITEM_TITLE = 'Follow up flagged email'
 RECORD_REF = re.compile(r'^[CLV]-')
@@ -216,6 +217,7 @@ class Ports:
     read_unresolved: Callable[[dict, date, list, list], dict] | None = None
     put_object: Callable[[str, str, bytes], dict] | None = None
     copy_attachments: Callable[[Path, list[str]], None] | None = None
+    journal_identity: Callable[[], dict] | None = None
 
 
 @dataclass
@@ -983,6 +985,7 @@ class Run:
         self.unmatched: set[tuple[str, str, str]] = set()
         self.attempted: set[str] = set()
         self.lead_candidates: list[tuple[dict, dict]] = []
+        self.journal_result: bool | None = None
 
     def owner_key(self, verb: str, ref: str, source: str) -> str:
         legacy = key(verb, ref, source)
@@ -1032,7 +1035,7 @@ class Run:
                     self.counts['flags_closed_elsewhere'] += 1
                     _save(self.out, self.state)
                     return True
-                blocked = error.code in BLOCKED_ERRORS or (
+                blocked = (args.get('email_touch') is not None and error.tool_refusal is not None) or error.code in BLOCKED_ERRORS or (
                     verb == 'record-finding' and args.get('kind') == email_contact_review.KIND
                     and error.code in {'auth_refused', 'version_conflict'}) or (
                     verb in ('complete-deal-item', 'drop-action') and error.code == 'version_conflict')
@@ -1290,7 +1293,7 @@ class Run:
         retries: dict[str, list] = {}
         for ident, item in unresolved.items():
             retries.setdefault(item['ck'], []).append((ident, item['sent']))
-        for m in mails:
+        for m in sorted(mails, key=lambda m: (m['sent_unix'] or 0, m['ident'])):
             if m['ident'] in delivery_reports:
                 unresolved.pop(m['ident'], None)
                 continue
@@ -1367,7 +1370,7 @@ class Run:
                                                 'sender_email': m['sender'].lower(),
                                                 'subject_hash': _hash(m['subject'] or '')})
                 pending[m['ident']]['refs'] = sorted(set(pending[m['ident']]['refs']) | set(refs))
-            results = [self.write('log-activity', {
+            proposals = [{
                 'idempotency_key': self.activity_key(ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
                 'occurred_at': _iso(m['sent_unix']),
@@ -1376,7 +1379,12 @@ class Run:
                      'item_id': 'hxstore-key:' + ','.join(_store_keys(m['local_keys']))}}
                    if _store_keys(m['local_keys']) else {}),
                 **({'email_source': {'sender_email': m['sender'].lower(), 'mailbox_owner': self.settings.owner}}
-                   if not outbound else {})}, who, '' if m['full'] else 'preview_only') for ref in refs]
+                   if not outbound else {})} for ref in refs]
+            selected = self.journal_email(m, refs, proposals, missing, completed)
+            if selected is not None:
+                results = selected
+            else:
+                results = [self.write('log-activity', p, who, '' if m['full'] else 'preview_only') for p in proposals]
             completed.extend(ref for ref, ok in zip(refs, results) if ok)
             if any(results):
                 self.counts['logged'] += 1
@@ -1387,6 +1395,90 @@ class Run:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
+
+    def journal_recover(self) -> bool:
+        item = self.state.get('email_cohort')
+        candidate = self.state.get('pending_email_capture')
+        if self.journal_result is not None:
+            return self.journal_result
+        if not candidate and not item:
+            return True
+        if item and item['phase'] == 'available':
+            try:
+                email_touch_journal.verify_receipt(item['receipt'], item['meta'], item['proposals'])
+            except (ValueError, KeyError, TypeError):
+                email_touch_journal.Cohort(self.state, lambda: _save(self.out, self.state)).fail('integrity', False)
+                self.counts['writes_deferred'] += 1
+                return False
+            if not self.ports.journal_identity:
+                return True
+            try:
+                identity = self.ports.journal_identity()
+                if identity['producer_sha'] != item['meta']['producer_sha']:
+                    self.state.setdefault('email_cohort_history', []).append(item)
+                    self.state.pop('email_cohort')
+                    _save(self.out, self.state)
+                return True
+            except Exception:
+                email_touch_journal.Cohort(self.state, lambda: _save(self.out, self.state)).fail('release_unavailable', True)
+                self.counts['writes_deferred'] += 1
+                return False
+        if (item and item['phase'] == 'held') or (candidate and candidate.get('failures', 0) >= 2):
+            self.counts['writes_deferred'] += 1
+            return False
+        cohort = email_touch_journal.Cohort(self.state, lambda: _save(self.out, self.state))
+        try:
+            identity = self.ports.journal_identity() if self.ports.journal_identity else {}
+            if candidate:
+                meta = {**candidate['projection'], 'principal_slug': identity['principal_slug'],
+                        'producer_sha': identity['producer_sha'], 'execution_id': candidate['execution_id']}
+                cohort.select(meta, candidate['proposals'])
+                self.state.pop('pending_email_capture')
+                _save(self.out, self.state)
+                item = self.state['email_cohort']
+            assert item is not None
+            if identity.get('principal_slug') != item['meta']['principal_slug']:
+                return cohort.fail('principal_mismatch', False)
+        except Exception:
+            if item:
+                cohort.fail('transport_error', True)
+            elif candidate:
+                candidate['failures'] = candidate.get('failures', 0) + 1
+                _save(self.out, self.state)
+            self.counts['writes_deferred'] += 1
+            return False
+        self.journal_result = False
+        ok = cohort.recover(self.ports.carr, lambda p: self.write('log-activity', p, 'frozen email'), identity.get('release_sha'))
+        self.journal_result = ok
+        if not ok:
+            self.counts['writes_deferred'] += 1
+        return ok
+
+    def journal_email(self, mail, refs, proposals, missing, completed):
+        item = self.state.get('email_cohort')
+        candidate = self.state.get('pending_email_capture')
+        message_hash = email_touch_journal.digest(mail['ident'])
+        if ((item and item['meta']['message_hash'] == message_hash)
+                or (candidate and candidate['projection']['message_hash'] == message_hash)):
+            self.journal_recover()
+            applied = set(self.state.get('email_cohort', {}).get('applied', []))
+            return [p['idempotency_key'] in applied for p in proposals]
+        if item or candidate or not self.ports.journal_identity or missing or completed or not mail['full']:
+            return None
+        if (not _store_keys(mail['local_keys']) or self.state.get('decoder_degraded')
+                or self.counts['message_id_ambiguous'] or not 1 <= len(refs) <= 500
+                or any(not RECORD_REF.match(ref) for ref in refs)
+                or any(p['idempotency_key'] in self.state.get('requests', {}) for p in proposals)):
+            return None
+        for p in proposals:
+            p['occurred_at'] = email_touch_journal.occurrence(mail['sent_unix'])
+        self.state['pending_email_capture'] = dict(
+            projection=email_touch_journal.projection(self.settings.owner, self.settings.account, mail),
+            execution_id=str(uuid.uuid4()), proposals=proposals, failures=0)
+        _save(self.out, self.state)
+        self.journal_recover()
+        applied = set(self.state.get('email_cohort', {}).get('applied', []))
+        return [p['idempotency_key'] in applied for p in proposals]
 
     # follow-up flags
 
@@ -1860,7 +1952,8 @@ def _prune(state: dict, now: datetime) -> None:
                           if ident in held or ident in state.get('flags', {})
                           or (ident.rsplit(':', 1)[1] != 'None' and int(ident.rsplit(':', 1)[1]) >= horizon)}
     state['requests'] = {k: r for k, r in state.get('requests', {}).items()
-                         if not r['acknowledged'] or r['created_at'] >= horizon
+                         if k in {p['idempotency_key'] for p in state.get('email_cohort', {}).get('proposals', [])}
+                         or not r['acknowledged'] or r['created_at'] >= horizon
                          or (r['verb'] == 'record-finding' and json.loads(r['payload']).get('kind') == email_contact_review.KIND)
                          or (r['created_at'] >= oldest and r['verb'] == 'log-activity'
                              and json.loads(r['payload']).get('kind') == 'email_out')}
@@ -2050,6 +2143,9 @@ def _save(out: Path, state: dict) -> None:
 
 def _run(out: Path, home: Path, ports: Ports, state: dict) -> Outcome:
     settings = load_settings(home)
+    if not Run(ports, state, ports.now(), out, settings).journal_recover():
+        _save(out, state)
+        return Outcome('failed', 'email_journal_pending', {'writes_deferred': 1})
     if settings.folder_account_id is None:
         return Outcome('failed', 'folder_account_id_required')
     try:
@@ -2159,7 +2255,10 @@ def _process(out, ports, settings, state, signature, now, matcher, meta, mails, 
         _remove(files.parent)
         _quarantine_calendar_requests(state)
         _save(out, state)
-        for request in list(state.get('requests', {}).values()):
+        cohort_keys = {p['idempotency_key'] for p in state.get('email_cohort', {}).get('proposals', [])}
+        for request_key, request in list(state.get('requests', {}).items()):
+            if request_key in cohort_keys:
+                continue
             if request['verb'] in ('record-deal-item', 'complete-deal-item', 'drop-action'):
                 continue
             if (request['verb'] == 'record-finding'
@@ -2299,7 +2398,9 @@ def main() -> int:
     settings.require_repo(repo)
     settings.require_service('intake')
     carr = _carr(repo)
-    ports = Ports(carr=carr, contacts=_contacts(carr),
+    from functools import cache
+    identity = cache(lambda: email_touch_journal.runtime_identity(repo))
+    ports = Ports(carr=carr, contacts=_contacts(carr), journal_identity=identity,
                   decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
                   read_unresolved=lambda mail, today, deals, parties: unresolved_email.ask(
                       mail, today, deals, parties, settings.model))
