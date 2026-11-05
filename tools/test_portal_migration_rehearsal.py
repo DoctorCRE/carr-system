@@ -26,7 +26,7 @@ class RehearsalTests(unittest.TestCase):
         prepared = module.prepare(self.manifest)
         self.assertEqual(len(prepared), 4)
         self.assertEqual([p['kind'] for p in prepared], ['package', 'package', 'legacy', 'legacy'])
-        self.assertEqual(prepared[1]['imported'], {'version': 8, 'selections': ['active-1', 'retired-1'],
+        self.assertEqual(prepared[1]['freeze'], {'version': 8, 'selections': ['active-1', 'retired-1'],
                          'notes_by_property': {'retired-1': 'Synthetic retired note'}, 'notes': 'Synthetic legacy note'})
         self.assertEqual(self.manifest['portals'][1]['copy']['version'], 7)
 
@@ -34,7 +34,7 @@ class RehearsalTests(unittest.TestCase):
         portal = self.manifest['portals'][1]
         portal['freeze'] = copy.deepcopy(portal['copy'])
         del portal['delta']
-        self.assertEqual(module.prepare(self.manifest)[1]['imported']['version'], 7)
+        self.assertEqual(module.prepare(self.manifest)[1]['freeze']['version'], 7)
 
     def test_duplicate_slug(self):
         self.rejected(lambda m: m['portals'][1].update(slug=m['portals'][0]['slug']), 'duplicate-slug')
@@ -103,19 +103,33 @@ class RehearsalTests(unittest.TestCase):
         receipt = module.rehearse(self.manifest)
         self.assertEqual(receipt['status'], 'pending-integration')
         self.assertFalse(receipt['cutover_ready'])
-        self.assertEqual(receipt['local']['status'], 'PASS')
-        self.assertEqual(len(receipt['local']['portals']), 4)
-        self.assertTrue(all(p['stale_save_status'] == 409 for p in receipt['local']['portals']))
+        self.assertEqual(receipt['local']['status'], 'pending-integration')
+        self.assertEqual(len(receipt['local']['reference']['portals']), 4)
+        self.assertEqual(receipt['local']['steps']['portal-registration']['status'], 'PASS')
+        self.assertIn('selection-persistence', receipt['pending_steps'])
         self.assertEqual(receipt['production_proof'], 'pending')
         self.assertEqual(receipt['integration'], {'S9': 'pending', 'S10-S17': 'pending'})
 
-    def test_adapter_detects_lost_imported_notes(self):
-        portals = module.prepare(self.manifest)
-        portals[1]['imported']['notes_by_property'] = {}
-        run = module.subprocess.run(['node', str(ROOT / 'mcp-server/portal-parity/migration-fixtures.mjs')],
-                                    input=json.dumps(portals), text=True, capture_output=True, timeout=60)
-        self.assertNotEqual(run.returncode, 0)
-        self.assertIn('retain versions, retired IDs, and all notes', run.stderr)
+    def test_cli_pending_is_nonzero_and_names_steps(self):
+        run = module.subprocess.run(['python3', str(ROOT / 'tools/portal-migration-rehearsal.py'),
+                                     str(ROOT / 'client-portal/fixtures/migration-rehearsal.json')],
+                                    text=True, capture_output=True, timeout=200)
+        self.assertEqual(run.returncode, 3, run.stderr)
+        receipt = json.loads(run.stdout)
+        self.assertIn('selection-import', receipt['pending_steps'])
+        self.assertFalse(receipt['cutover_ready'])
+
+    def test_fixture_only_pass_cannot_count_as_candidate(self):
+        result = module.subprocess.CompletedProcess('node', 0, json.dumps({'status': 'PASS'}), '')
+        with mock.patch.object(module.subprocess, 'run', return_value=result):
+            self.assertEqual(module.rehearse(self.manifest)['status'], 'failed')
+
+    def test_named_candidate_failure_is_preserved(self):
+        result = module.subprocess.CompletedProcess('node', 1, '', 'portal-registration: persisted-binding')
+        with mock.patch.object(module.subprocess, 'run', return_value=result):
+            receipt = module.rehearse(self.manifest)
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertIn('portal-registration: persisted-binding', receipt['local']['error'])
 
     def test_invalid_package_fails_rehearsal(self):
         with mock.patch.object(module, 'prepare', wraps=module.prepare) as prepare:

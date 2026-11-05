@@ -1,4 +1,4 @@
-// Disposable loopback fixtures for offline rehearsal, never a production adapter.
+// Check a synthetic reference and real migration steps without production access.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { runParity } from './harness.mjs';
 import { signIn, sourceFidelity } from './http.mjs';
+import { registerCandidate, pendingSteps } from './migration-candidate.mjs';
 
 async function fixture(portal, selection) {
   selection = structuredClone(selection);
@@ -31,14 +32,6 @@ async function fixture(portal, selection) {
     response.setHeader('X-Publication-Revision', String(portal.revision));
     if (relative === 'api/selection') {
       response.setHeader('Content-Type', 'application/json');
-      if (request.method === 'PUT') {
-        let save;
-        try { save = JSON.parse(body); } catch { response.writeHead(400).end(); return; }
-        if (save.version !== selection.version) { response.writeHead(409).end(JSON.stringify(selection)); return; }
-        selection = { ...save, version: selection.version + 1 };
-        response.writeHead(200).end(JSON.stringify(selection));
-        return;
-      }
       response.end(JSON.stringify(selection));
       return;
     }
@@ -52,7 +45,7 @@ async function fixture(portal, selection) {
   return { server, base: `http://127.0.0.1:${server.address().port}${root}` };
 }
 
-export async function runMigrationFixtures(portals) {
+export async function runMigrationFixtures(portals, candidateOptions) {
   const reports = [];
   const dir = await mkdtemp(path.join(tmpdir(), 'portal-migration-fixtures-'));
   try {
@@ -61,23 +54,11 @@ export async function runMigrationFixtures(portals) {
       try {
         const reference = await fixture(portal, portal.freeze);
         servers.push(reference.server);
-        const candidate = await fixture(portal, portal.imported);
-        servers.push(candidate.server);
-        const paths = [...portal.files.map(f => f.path), ...portal.aliases.map(a => a.path), 'api/selection'];
-        const probes = { schema: 'carr.portal-parity-probes.v1', aliases: {}, allowed_differences: {},
-          probes: paths.map((name, i) => ({ id: `A-G${String(i + 1).padStart(2, '0')}`, kind: 'http', td: 'T',
-            requests: [{ method: 'GET', path: name, session: true }] })) };
-        const probesFile = path.join(dir, `probes-${index}.json`);
-        await writeFile(probesFile, JSON.stringify(probes));
-        const parity = await runParity({ stage: 2, probesFile, reference: reference.base, candidate: candidate.base, password: portal.password });
-        assert.ok(parity.ok && parity.results.every(r => r.verdict === 'PASS'), 'local parity must pass every selected row');
-        const cookie = await signIn(candidate.base, portal.password);
-        for (const name of paths) {
-          const response = await fetch(new URL(name, candidate.base), { headers: { Cookie: cookie } });
-          assert.equal(response.status, 200, 'matching errors cannot count as released files');
-          assert.equal(response.headers.get('x-publication-revision'), String(portal.revision));
-          if (name === 'api/selection') assert.deepEqual(await response.json(), portal.freeze, 'retain versions, retired IDs, and all notes');
-        }
+        const paths = [...portal.files.map(f => f.path), ...portal.aliases.map(a => a.path)];
+        const cookie = await signIn(reference.base, portal.password);
+        const selectionResponse = await fetch(new URL('api/selection', reference.base), { headers: { Cookie: cookie } });
+        assert.equal(selectionResponse.status, 200, 'reference-selection-readable');
+        assert.deepEqual(await selectionResponse.json(), portal.freeze, 'reference-selection-fidelity');
         const source = path.join(dir, `source-${index}`);
         const contents = new Map(portal.files.map(file => [file.path, file.content]));
         for (const alias of portal.aliases) contents.set(alias.path, contents.get(alias.target));
@@ -85,21 +66,9 @@ export async function runMigrationFixtures(portals) {
           await mkdir(path.dirname(path.join(source, name)), { recursive: true });
           await writeFile(path.join(source, name), content);
         }
-        const fidelity = await sourceFidelity(candidate.base, source, cookie,
-          paths.filter(p => p !== 'api/selection').map(p => new URL(p, candidate.base).pathname));
+        const fidelity = await sourceFidelity(reference.base, source, cookie,
+          paths.map(p => new URL(p, reference.base).pathname));
         assert.equal(fidelity.failed, 0, 'released bytes must match the synthetic source');
-        const stale = await fetch(new URL('api/selection', candidate.base), { method: 'PUT',
-          headers: { Cookie: cookie }, body: JSON.stringify({ ...portal.copy, version: portal.imported.version - 1 }) });
-        assert.equal(stale.status, 409, 'stale saves must conflict');
-        assert.deepEqual(await stale.json(), portal.freeze);
-        const save = () => fetch(new URL('api/selection', candidate.base), { method: 'PUT',
-          headers: { Cookie: cookie }, body: JSON.stringify(portal.imported) });
-        const accepted = await save();
-        assert.equal(accepted.status, 200, 'a current version can save');
-        assert.deepEqual(await accepted.json(), { ...portal.freeze, version: portal.freeze.version + 1 });
-        const replay = await save();
-        assert.equal(replay.status, 409, 'replaying the accepted version must conflict');
-        assert.deepEqual(await replay.json(), { ...portal.freeze, version: portal.freeze.version + 1 });
         if (portal.kind === 'package') {
           const packageFile = path.join(dir, `package-${index}.json`);
           await writeFile(packageFile, JSON.stringify(portal.package.data));
@@ -107,20 +76,26 @@ export async function runMigrationFixtures(portals) {
             packageFile, rows: 'A-S02..A-S09,V-S06' });
           assert.ok(stageOne.ok && stageOne.results.every(r => r.verdict === 'PASS'), 'packages satisfy selected canonical data rows');
         }
-        reports.push({ slug: portal.slug, revision: portal.revision, selection_version: portal.imported.version,
-          parity_rows: parity.results.length, file_hashes: fidelity.files, stale_save_status: stale.status });
+        reports.push({ slug: portal.slug, revision: portal.revision, source_selection_version: portal.freeze.version,
+          file_hashes: fidelity.files });
       } finally {
         await Promise.all(servers.map(server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); })));
       }
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
-  return { status: 'PASS', scope: 'synthetic-loopback-only', portals: reports };
+  const registration = await registerCandidate(portals, candidateOptions);
+  return { status: 'pending-integration', scope: 'disposable-synthetic-storage',
+    reference: { status: 'PASS', scope: 'reference-smoke-only', portals: reports },
+    steps: { 'portal-registration': registration, ...structuredClone(pendingSteps) } };
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
-  runMigrationFixtures(JSON.parse(input)).then(result => console.log(JSON.stringify(result)), error => {
+  runMigrationFixtures(JSON.parse(input)).then(result => {
+    console.log(JSON.stringify(result));
+    process.exitCode = 3;
+  }, error => {
     console.error(error.message);
     process.exitCode = 1;
   });

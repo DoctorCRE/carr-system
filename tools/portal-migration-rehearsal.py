@@ -85,15 +85,13 @@ def prepare(manifest):
         initial, frozen = portal['copy'], portal['freeze']
         selection(initial)
         selection(frozen)
-        imported = copy.deepcopy(initial)
         if initial != frozen:
             require(frozen['version'] > initial['version'], 'version-not-increased')
             require('delta' in portal, 'delta-required')
         if 'delta' in portal:
             delta = portal['delta']
             require(delta['from_version'] == initial['version'] and delta['selection'] == frozen, 'delta-mismatch')
-            imported = copy.deepcopy(delta['selection'])
-        prepared.append({**copy.deepcopy(portal), 'imported': imported})
+        prepared.append(copy.deepcopy(portal))
         prepared[-1]['password'] = slug
         if portal['kind'] == 'package':
             prepared[-1]['package']['data'] = data
@@ -109,12 +107,16 @@ def rehearse(manifest):
                'integration': {'S9': 'pending', 'S10-S17': 'pending'}, 'production_proof': 'pending'}
     try:
         run = subprocess.run(['node', str(ROOT / 'mcp-server/portal-parity/migration-fixtures.mjs')],
-                             input=json.dumps(portals), text=True, capture_output=True, timeout=60, check=True)
+                             input=json.dumps(portals), text=True, capture_output=True, timeout=180, check=False)
+        require(run.returncode in (0, 3), run.stderr.strip() or 'candidate-process-failed')
         receipt['local'] = json.loads(run.stdout)
-        require(receipt['local']['status'] == 'PASS', 'local-parity-failed')
+        require(run.returncode == 3 and receipt['local']['status'] == 'pending-integration', 'candidate-must-report-pending')
+        require(receipt['local']['steps']['portal-registration']['status'] == 'PASS', 'portal-registration-failed')
+        receipt['pending_steps'] = [name for name, result in receipt['local']['steps'].items()
+                                    if result['status'] == 'pending']
     except (subprocess.SubprocessError, ValueError, OSError) as error:
         receipt['status'] = 'failed'
-        receipt['local'] = {'status': 'FAIL', 'error': type(error).__name__}
+        receipt['local'] = {'status': 'FAIL', 'error': str(error) or type(error).__name__}
     return receipt
 
 
@@ -125,7 +127,7 @@ def main():
     require(args.manifest.stat().st_size <= MAX_BYTES, 'manifest-size')
     receipt = rehearse(json.loads(args.manifest.read_text()))
     print(json.dumps(receipt, sort_keys=True, indent=2))
-    return 1 if receipt['status'] == 'failed' else 0
+    return 1 if receipt['status'] == 'failed' else 3
 
 
 if __name__ == '__main__':

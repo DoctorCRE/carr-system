@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { runMigrationFixtures } from '../portal-parity/migration-fixtures.mjs';
 
@@ -17,7 +16,7 @@ test('candidate exercises real registration and names unimplemented migration st
   assert.equal(report.status, 'pending-integration');
   assert.equal(report.steps['portal-registration'].status, 'PASS');
   assert.equal(report.steps['portal-registration'].portals.length, 4);
-  for (const step of ['package-publication', 'bundle-alias-import', 'selection-import', 'selection-persistence', 'http-parity'])
+  for (const step of ['client-view-publication', 'package-publication', 'bundle-alias-import', 'selection-import', 'selection-persistence', 'http-parity'])
     assert.equal(report.steps[step].status, 'pending', step);
 });
 
@@ -36,7 +35,7 @@ test('mutating the real SQL password save fails the rehearsal by name', async ()
   await assert.rejects(runMigrationFixtures(portals(), {
     afterInstall: async c => {
       const original = (await c.query("select pg_get_functiondef('ops.register_client_portal(uuid,text,text)'::regprocedure) as source")).rows[0].source;
-      const mutated = original.replace("public.digest(p_password,'sha256')", "public.digest('broken-synthetic-password','sha256')");
+      const mutated = original.replaceAll("public.digest(p_password,'sha256')", "public.digest('broken-synthetic-password','sha256')");
       assert.notEqual(mutated, original, 'mutation must change the real password write');
       await c.query(mutated);
     },
