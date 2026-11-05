@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S20-market-study-composer",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "market-study-composer-release-deployed",
+      "predicate": "The deployed Worker release identity matches the merged SHA containing the market study composer. This runner proves release identity only; composition inside the publication workflow remains unproven until that workflow integrates the composer.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "The release identity matches the merged SHA. A later naturally partner-published study must separately prove composition, package hash, client/deal identity and canonical property IDs against recorded inputs.",
+      "input_class": "read-only release identity and verb registry",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
