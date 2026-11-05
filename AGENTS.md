@@ -342,3 +342,15 @@ CORE index. Apply the native K cards in AGENTS.md. Before acting, read the linke
 - [Apply the access Joe authorized without adding data fences. Raise live-credential custody once; explain autonomy, isolation, recovery and cost when those matter.](docs/generated-rules/core.md#f673326b).
 - [K04](docs/generated-rules/core.md#fa217e48).
 <!-- carr-native-rules:end -->
+
+## Pull request approval
+
+Approval is GitHub required review by the CARR review App
+(`doctorcre-carr-review[bot]`), separate from required source CI. GitHub dismisses
+stale approvals after pushes and requires approval of the latest push. The
+coordinator submits the independent reviewer's verdict as a native App review.
+
+The retired custom approval policy in generated rule `7bb0a3ed` is superseded by
+Joe's removal instruction (`27810f4f`). Its size exemptions and Actions-variable
+checks no longer apply. Card admission and PR-title skip-CI checks are not CI
+requirements; do not recreate them. Historical rule snapshots remain provenance.

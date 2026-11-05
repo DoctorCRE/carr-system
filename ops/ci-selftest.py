@@ -1451,7 +1451,7 @@ def test_hosted_draft_lifecycle():
                               **context(event=event), "github": {**context(event=event)["github"], "run_id": 42}}))
                 check("CI different workflows use independent groups",
                       groups[0] != evaluate(wf["concurrency"]["group"], {
-                          **context(), "github": {**context()["github"], "workflow": "Review gate"}}))
+                          **context(), "github": {**context()["github"], "workflow": "Another workflow"}}))
             check(f"{filename}: different PRs have independent groups",
                   groups[0] != evaluate(wf["concurrency"]["group"], {
                       **context(), "github": {**context()["github"], "event": {"pull_request": {"number": 13}}}}))

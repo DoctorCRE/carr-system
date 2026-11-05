@@ -1,6 +1,5 @@
 Card: WRn.Sn.Jn
 
-Bot-authored and Markdown-only PRs are exempt from the Card requirement.
 
 ## What changed
 <!-- Describe the user-visible change or repair. -->

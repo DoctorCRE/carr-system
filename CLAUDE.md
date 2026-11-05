@@ -3,7 +3,8 @@
 # Claude Code rules
 
 `AGENTS.md`, imported above, holds every shared rule. This file adds only the
-rules for Claude Code sessions.
+rules for Claude Code sessions. Pull request approval follows GitHub required
+review by the CARR review App, as described in AGENTS.md.
 
 ## "carr needs authentication" is not a reason to ask Joe to sign in
 

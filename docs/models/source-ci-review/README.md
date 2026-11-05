@@ -8,7 +8,7 @@ The data shape is `carr-source-ci-review-candidate.v1`. A candidate names the re
 
 ### Grounding
 
-`ci.yml` has a source aggregate named `ops/ci.sh --strict`. Its run is separate from `review-gate.yml`. The review gate consumes native reviews and cannot launch work. The coordinator calls CARR `dispatch-job` and T3 `delegate_task`. Generic job state and launcher code belong in software-factory. CARR retains Card authority. Current placement section `3bb51d3e-2661-4ea2-a585-053540545b5d@3`, delivery policy `52880de2-ab90-4673-b046-b74f900aa2de@7`, and delivery-one-graph section `343eb0e4-3809-48a2-a32b-438098238b3f@1` were read for this design.
+`ci.yml` has a source aggregate named `ops/ci.sh --strict`. GitHub required review by the CARR review App supplies approval independently of source CI. The coordinator calls CARR `dispatch-job` and T3 `delegate_task`. Generic job state and launcher code belong in software-factory. CARR retains Card authority. Current placement section `3bb51d3e-2661-4ea2-a585-053540545b5d@3`, delivery policy `52880de2-ab90-4673-b046-b74f900aa2de@7`, and delivery-one-graph section `343eb0e4-3809-48a2-a32b-438098238b3f@1` were read for this design.
 
 ### Design fork
 
@@ -76,4 +76,4 @@ After the consumer and signed transport ship, a normal PR must cause exactly one
 
 ## Safeguards that must survive
 
-Workers hold no review or merge authority. Reviewer independence and CI as merge gate remain mandatory. No force-push, rebase, retarget, review submission, or merge operation exists here. Card admission and bounded retry remain consumer requirements. Existing source CI and review-gate definitions stay unchanged.
+Workers hold no review or merge authority. Reviewer independence and CI as merge gate remain mandatory. No force-push, rebase, retarget, review submission, or merge operation exists here. Card admission and bounded retry remain consumer requirements. Source CI remains separate from GitHub required review by the CARR review App.
