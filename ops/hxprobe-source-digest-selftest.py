@@ -29,6 +29,7 @@ class ReceiptTests(unittest.TestCase):
         (self.root / 'spec/outlook').mkdir(parents=True)
         (self.root / 'ops').mkdir()
         (self.root / 'spec/outlook/hxstore-atlas.json').write_text('{}\n')
+        (self.root / 'spec/outlook/contact-observation.v1.json').write_text('{}\n')
         (self.root / 'ops/hxstore-atlas.py').write_text('# generator\n')
         (self.crate / 'src').mkdir()
         (self.crate / 'src/main.rs').write_text('fn main() {}\n')
@@ -115,7 +116,8 @@ if args[0] == 'build':
                 self.assertEqual((self.vendor / '.carr-build.json').read_bytes(), old_receipt)
 
     def test_every_build_input_changes_the_digest(self):
-        for path in ('vendor/hxprobe/build.rs', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py'):
+        for path in ('vendor/hxprobe/build.rs', 'spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py',
+                     'spec/outlook/contact-observation.v1.json'):
             with self.subTest(path=path):
                 before = gate.digest(self.crate)
                 source = self.root / path
