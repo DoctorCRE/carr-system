@@ -39,6 +39,29 @@ class AutoRefreshTests(unittest.TestCase):
         rows = [json.loads(s) for s in (self.root / 'runs.jsonl').read_text().splitlines()]
         self.assertTrue(any(r['status'] == 'refreshed' and r['sha'] == A for r in rows))
 
+    def test_failed_install_retries_to_success_without_false_installation_report(self):
+        def refresh(sha):
+            if self.host.refresh.call_count == 1:
+                raise RuntimeError('first install failed')
+            self.host.installed.return_value = sha
+        self.host.refresh.side_effect = refresh
+        self.assertEqual(self.run_tick(), 'failed')
+        row = json.loads((self.root / 'runs.jsonl').read_text().splitlines()[-1])
+        self.assertNotIn('installed_sha', row)
+        self.assertEqual(self.run_tick(10600), 'refreshed')
+        row = json.loads((self.root / 'runs.jsonl').read_text().splitlines()[-1])
+        self.assertEqual(row['installed_sha'], A)
+
+    def test_unavailable_worker_identity_probes_open_discovery(self):
+        self.host.release.side_effect = released_sha
+        with patch('lib.studio_runtime_auto_refresh.read', return_value=SimpleNamespace(status=200, body=b'{}')) as read:
+            self.assertEqual(self.run_tick(), 'refused')
+            self.assertEqual(self.run_tick(10300), 'open')
+            self.assertEqual(self.run_tick(10600), 'open')
+            self.assertEqual(read.call_count, 3)
+        self.host.refresh.assert_not_called()
+        self.host.alert.assert_called_with(None, 10600)
+
     def test_two_failures_open_breaker_no_third_attempt(self):
         self.host.refresh.side_effect = RuntimeError('failed')
         self.assertEqual(self.run_tick(), 'failed')
@@ -72,7 +95,7 @@ class AutoRefreshTests(unittest.TestCase):
         self.assertEqual(self.run_tick(11200), 'open')
         self.assertEqual(self.host.refresh.call_count, 2)
 
-    def test_discovery_403_opens_breaker_and_alerts_without_third_request(self):
+    def test_discovery_403_opens_breaker_and_probes_at_next_interval(self):
         self.host.release.side_effect = HTTPError('http://localhost/release', 403, 'Forbidden', {}, None)
         real = object.__new__(Host)
         real.source = self.root
@@ -80,7 +103,7 @@ class AutoRefreshTests(unittest.TestCase):
         self.assertEqual(self.run_tick(), 'refused')
         self.assertEqual(self.run_tick(10300), 'open')
         self.assertEqual(self.run_tick(10600), 'open')
-        self.assertEqual(self.host.release.call_count, 2)
+        self.assertEqual(self.host.release.call_count, 3)
         self.host.refresh.assert_not_called()
         rows = (self.root / 'out/watchdog/orchestrator-inbox.jsonl').read_text().splitlines()
         self.assertEqual(len(rows), 1)
@@ -99,24 +122,23 @@ class AutoRefreshTests(unittest.TestCase):
         for now in (10000, 10300):
             with self.assertRaises(SystemExit):
                 self.run_tick(now)
-        self.assertEqual(self.run_tick(10600), 'open')
-        self.assertEqual(self.host.release.call_count, 2)
-        self.host.alert.assert_called_with(None, 10600)
+        with self.assertRaises(SystemExit):
+            self.run_tick(10600)
+        self.assertEqual(self.host.release.call_count, 3)
+        self.assertEqual(json.loads((self.root / 'state.json').read_text())['discovery_failures'], 2)
 
     def test_discovery_open_still_recovers(self):
         (self.root / 'state.json').write_text(json.dumps({'failures': {}, 'discovery_failures': 2}))
+        self.host.release.side_effect = ValueError('still unavailable')
         self.assertEqual(self.run_tick(), 'open')
         self.host.recover.assert_called_once()
-        self.host.release.assert_not_called()
+        self.host.release.assert_called_once()
 
-    def test_discovery_operator_reset_allows_read(self):
+    def test_discovery_next_valid_receipt_closes_open_circuit(self):
         path = self.root / 'state.json'
         path.write_text(json.dumps({'failures': {}, 'discovery_failures': 2}))
-        self.assertEqual(self.run_tick(), 'open')
-        state = json.loads(path.read_text())
-        state['discovery_failures'] = 0
-        path.write_text(json.dumps(state))
-        self.assertEqual(self.run_tick(10300), 'refreshed')
+        self.assertEqual(self.run_tick(), 'refreshed')
+        self.assertEqual(json.loads(path.read_text())['discovery_failures'], 0)
 
     def test_crash_after_install_reconciles_to_current(self):
         def crash(sha):
@@ -160,7 +182,7 @@ class AutoRefreshTests(unittest.TestCase):
 
     def test_slow_discovery_does_not_shorten_attempt_cooldown(self):
         self.host.refresh.side_effect = RuntimeError('failure')
-        with patch('lib.studio_runtime_auto_refresh.time.time', side_effect=[10000, 10080]):
+        with patch('lib.studio_runtime_auto_refresh.time.time', side_effect=[10000, 10080, 10080]):
             self.assertEqual(tick(self.root, self.host), 'failed')
         self.assertEqual(self.run_tick(10600), 'cooldown')
         self.assertEqual(self.host.refresh.call_count, 1)
@@ -270,8 +292,7 @@ class ReleaseTests(unittest.TestCase):
                 allowed = self.headers.get('User-Agent') == 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
                 self.send_response(200 if allowed else 403)
                 self.end_headers()
-                self.wfile.write(json.dumps({'git_sha': {'value': A},
-                                            'env': {'value': 'production'}}).encode())
+                self.wfile.write(json.dumps({'git_sha': {'value': A}}).encode())
 
             def log_message(self, *_args):
                 pass
@@ -280,41 +301,56 @@ class ReleaseTests(unittest.TestCase):
         thread = Thread(target=server.serve_forever)
         thread.start()
         try:
-            runs = [{'displayTitle': f'Production release {A}', 'headBranch': 'main',
-                     'event': 'workflow_run', 'conclusion': 'success'}]
             with patch('lib.studio_runtime_auto_refresh.RELEASE_URL',
                        f'http://127.0.0.1:{server.server_port}/release'), \
-                    patch('lib.studio_runtime_auto_refresh.command', return_value=json.dumps(runs)):
+                    patch('lib.studio_runtime_auto_refresh.discover', return_value={'source_sha': A}) as discover:
                 self.assertEqual(released_sha(), A)
+                discover.assert_called_once_with({'git_sha': {'value': A}})
         finally:
             server.shutdown()
             thread.join()
             server.server_close()
 
-    def release(self, live=None, runs=None):
-        live = live if live is not None else {'git_sha': {'value': A}, 'env': {'value': 'production'}}
-        runs = runs if runs is not None else [{'displayTitle': f'Production release {A}',
-                   'headBranch': 'main', 'event': 'workflow_run', 'conclusion': 'success'}]
-        with patch('lib.studio_runtime_auto_refresh.read', return_value=SimpleNamespace(status=200, body=json.dumps(live).encode())), \
-                patch('lib.studio_runtime_auto_refresh.command', return_value=json.dumps(runs)):
-            return released_sha()
-
-    def test_exact_successful_release(self):
-        self.assertEqual(self.release(), A)
-
-    def test_wrong_environment_sha_missing_and_failed_deploy_refuse(self):
-        for live in ({'git_sha': {'value': A}, 'env': {'value': 'staging'}},
-                     {'git_sha': {'value': 'main'}, 'env': {'value': 'production'}}):
-            with self.assertRaises(ValueError):
-                self.release(live=live)
-        for field, value in [('displayTitle', f'Production release {B}'), ('headBranch', 'feature'),
-                             ('conclusion', 'failure'), ('event', 'pull_request')]:
-            runs = [{'displayTitle': f'Production release {A}', 'headBranch': 'main',
-                     'event': 'workflow_run', 'conclusion': 'success', field: value}]
-            with self.assertRaises(ValueError):
-                self.release(runs=runs)
-        with self.assertRaises(ValueError):
-            self.release(runs=[])
+    def test_lane_receipt_refreshes_while_parent_is_in_progress(self):
+        from lib.worker_release_receipt import seal, REPOSITORY
+        import io
+        import zipfile
+        live = {'git_sha': {'value': A}, 'worker_version': {'id': '11111111-1111-4111-8111-111111111111'},
+                'env': {'value': 'production'}, 'verb_count': 410}
+        receipt = seal(live, A, live['worker_version']['id'], 410, 42, 1)
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, 'w') as archive:
+            archive.writestr('worker-release.json', json.dumps(receipt))
+        parent = {'id': 42, 'run_attempt': 1, 'status': 'in_progress', 'conclusion': None,
+                  'path': '.github/workflows/deploy.yml', 'event': 'workflow_run', 'head_branch': 'main',
+                  'repository': {'full_name': REPOSITORY}, 'head_repository': {'full_name': REPOSITORY}}
+        def api(path, *, binary=False):
+            if binary:
+                return data.getvalue()
+            if '/workflows/deploy.yml/runs?' in path:
+                return {'workflow_runs': [parent]}
+            if '/artifacts?' in path:
+                return {'artifacts': [{'id': 7, 'name': f'worker-release-{A}', 'expired': False,
+                                      'size_in_bytes': 1000, 'workflow_run': {'id': 42}}]}
+            return parent
+        from lib.worker_release_receipt import discover as real_discover
+        with tempfile.TemporaryDirectory() as temporary:
+            host = object.__new__(Host)
+            host.worker_receipt = None
+            host.recover = Mock()
+            host.installed = Mock(return_value=B)
+            host.refresh = Mock(side_effect=lambda sha: setattr(host.installed, 'return_value', sha))
+            host.verify_current = Mock()
+            with patch('lib.studio_runtime_auto_refresh.read', return_value=SimpleNamespace(status=200, body=json.dumps(live).encode())), \
+                    patch('lib.studio_runtime_auto_refresh.discover', side_effect=lambda live: real_discover(live, api=api)):
+                self.assertEqual(tick(Path(temporary), host, now=10000), 'refreshed')
+            row = json.loads((Path(temporary) / 'runs.jsonl').read_text().splitlines()[-1])
+            self.assertEqual(row['installed_sha'], A)
+            self.assertIn('installation_started_at', row)
+            self.assertIn('installation_completed_at', row)
+            self.assertEqual(row['worker_receipt']['run_id'], 42)
+            self.assertEqual(row['worker_receipt']['artifact_id'], 7)
+            self.assertEqual(parent['status'], 'in_progress')
 
     def test_network_failure_refuses(self):
         with patch('lib.studio_runtime_auto_refresh.read', side_effect=TimeoutError()):

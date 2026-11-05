@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "email-retained-application-census",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "retained-application-counts",
+    "predicate": "Bind PROOF_RECEIPT to one explicit installed outlook-intake service receipt with full merged runtime SHA in PROOF_RUNTIME_SHA. Run the pinned observer: python3 ops/studio-proof-observe.py --receipt-file \"$PROOF_RECEIPT\" --service outlook-intake --runtime-sha \"$PROOF_RUNTIME_SHA\" --count run.emails --minimum 1. Bind PROOF_RECEIPTS and PROOF_JOURNAL to one frozen receipt export directory and state.json snapshot directory, PROOF_ACCOUNT to its account, and PROOF_SINCE, PROOF_UNTIL and PROOF_AS_OF to a bounded offset-bearing window and observation time. Run: python3 tools/email-application-census.py --receipts-dir \"$PROOF_RECEIPTS\" --journal-dir \"$PROOF_JOURNAL\" --account \"$PROOF_ACCOUNT\" --since \"$PROOF_SINCE\" --until \"$PROOF_UNTIL\" --as-of \"$PROOF_AS_OF\". Record input digests. Independently sample journal entries and compare acknowledged, refused, blocked, pending and source identity counts. Verify latest-only backlog, repeated attempts counted once, calendar, account and window exclusions, partial legacy or pruned history, and no private content on stdout or stderr. The observer supplies supporting runtime evidence only. Census execution and independent sampling are required for live-proven.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "Counts match independent source samples and history remains partial. Receipt-only evidence leaves semantic proof BLOCKED. No complete inbox application claim follows.",
+    "input_class": "One bounded explicit installed intake export and state snapshot; no launch, refresh, mailbox read, write or send",
+    "deadline_seconds": 60
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 1, "max_records": 1000, "max_runtime_seconds": 60, "max_artifact_bytes": 1048576}
+}

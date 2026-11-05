@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR823-S7-studio-collector-outbox",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "trusted-studio-execution-binding",
+      "predicate": "An actual authorized Studio installation and natural non-send Outlook intake execution are independently collected and bound to a canonical execution UUID, exact runtime SHA, registered host and command, helper, plists and clean executable bytes. The newest canonical run must succeed and have run.mail_ids >= 1. Outbox acknowledgement alone never proves this predicate. This first transport-only part leaves missing collector and ingestion facts held.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "live-proven only after canonical trusted collection and binding exist. Caller JSON, stale installation, wrong host or command, duplicate run, failed newest run and zero semantic count cannot pass. This transport-only part remains held and unproven.",
+      "input_class": "canonical read-only acquisition of actual authorized non-send Studio execution and independently verified installation; never caller-supplied JSON or outbox rows",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1000,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

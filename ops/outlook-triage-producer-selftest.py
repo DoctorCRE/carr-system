@@ -38,7 +38,8 @@ class ProducerTest(unittest.TestCase):
                 INSERT INTO message_folders VALUES(1,1),(2,2),(3,3);
             ''')
         self.settings = SimpleNamespace(account='owner@example.test',folder_account_id=7,
-                                        deal_prefix='Deals/',vendor_prefix='Vendors/')
+                                        deal_prefix='Deals/',vendor_prefix='Vendors/',
+                                        repo=self.root / 'runner')
 
     def test_actual_decoded_shape_roundtrips_with_honest_holds(self):
         snapshot, counts = project(self.db, self.settings, 'Deals/Test', 'a'*64, 'b'*64)
@@ -342,6 +343,53 @@ class InvocationTest(unittest.TestCase):
         output.chmod(0o600)
         parsed = read_snapshot(output,self.settings,150)
         self.assertEqual(len(plan_triage(*parsed[:4]).moves),1)
+
+    def installed_output(self):
+        from lib import outlook_triage as runner
+        repo = self.root / 'installed'
+        repo.mkdir()
+        shared = self.root / 'shared-out'
+        shared.mkdir()
+        (repo / 'out').symlink_to(shared, target_is_directory=True)
+        self.settings.repo = repo
+        return repo, shared, repo / runner.OUT / 'snapshot.json'
+
+    def test_installed_out_symlink_publishes_current_observations(self):
+        source, _ = self.prepare_copy()
+        repo, shared, output = self.installed_output()
+        outcome, report = self.combined(source, repo)
+        self.assertEqual(report.planning['snapshot'], 'validated')
+        self.assertEqual(report.planning['observed'], 2)
+        self.assertEqual(report.planning['moved'], 0)
+        value = json.loads(output.read_text())
+        self.assertEqual(len(value['observations']), 2)
+        self.assertEqual(value['provenance']['manifest_sha256'], value['snapshot_digest'])
+        self.assertEqual(output.resolve(), shared / 'outlook-triage/snapshot.json')
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(output.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_installed_out_cannot_redirect_publication_into_source(self):
+        source, _ = self.prepare_copy()
+        repo, _, output = self.installed_output()
+        (repo / 'out').unlink()
+        (repo / 'out').symlink_to(source, target_is_directory=True)
+        before = {p.name: p.read_bytes() for p in source.iterdir()}
+        with self.assertRaisesRegex(ProducerError, 'output_inside_source'):
+            produce(source, output, self.settings)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in source.iterdir()})
+
+    def test_installed_output_symlink_escape_is_refused(self):
+        source, _ = self.prepare_copy()
+        _, shared, output = self.installed_output()
+        outside = self.root / 'outside'
+        outside.mkdir(mode=0o700)
+        sentinel = outside / output.name
+        sentinel.write_bytes(b'retained evidence')
+        (shared / 'outlook-triage').symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ProducerError, 'output_directory_invalid'):
+            produce(source, output, self.settings)
+        self.assertEqual(sentinel.read_bytes(), b'retained evidence')
+        self.assertEqual(list(outside.iterdir()), [sentinel])
 
     def test_current_attempt_and_independent_retry(self):
         from lib import outlook_triage as runner
