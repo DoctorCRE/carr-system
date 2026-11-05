@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Read-only local watchdog behavior through its collection and scan interfaces."""
 import json
+import contextlib
+import io
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import os
 from pathlib import Path
 import plistlib
+import runpy
+from datetime import timedelta
 import subprocess
 import sys
 import tempfile
@@ -14,6 +18,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
+sys.path.insert(0, str(ROOT / "ops"))
 import job_watchdog as watchdog
 
 
@@ -31,6 +36,231 @@ class WatchdogTests(unittest.TestCase):
         (self.plists / "com.carr.fixture.plist").write_bytes(plistlib.dumps({
             "Label": "com.carr.fixture", "StartCalendarInterval": {"Minute": 0},
             "StandardErrorPath": str(self.log)}))
+
+    def test_verdict_deadline_and_calendar_days(self):
+        outlook = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                   'coverage_deadline_seconds': 19 * 3600 + 300,
+                   'coverage_run_day': '2026-10-30', 'coverage_check_day': '2026-10-30'}
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}
+        for clock, missing in (
+                ('2026-11-01T00:05:00Z', False),
+                ('2026-11-01T00:05:01Z', True),  # Saturday 19:05 CDT
+                ('2026-11-02T01:05:01Z', True)):  # Sunday 19:05 CST
+            with self.subTest(clock=clock):
+                keys = [f['key'] for f in watchdog.detect(facts, datetime.fromisoformat(clock).timestamp())]
+                self.assertEqual('job_degraded:outlook:coverage_verdict_missing' in keys, missing)
+        outlook.update(coverage_check_day='2026-11-01', coverage_run_day='2026-11-01')
+        for clock, missing in (('2026-11-03T01:05:00Z', False), ('2026-11-03T01:05:01Z', True)):
+            self.assertEqual(bool(watchdog.detect(facts, datetime.fromisoformat(clock).timestamp())), missing)
+
+    def test_verdict_spring_dst_and_current_schedule_contract(self):
+        schedule = plistlib.loads(watchdog.OUTLOOK_CALENDAR.read_bytes())['StartCalendarInterval']
+        self.assertTrue(all(set(slot) == {'Hour', 'Minute'} for slot in schedule))
+        self.assertEqual(max((slot['Hour'], slot['Minute']) for slot in schedule), (19, 0))
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': {
+            'timezone': 'America/Chicago', 'reply_draft_count': 1,
+            'coverage_deadline_seconds': 19 * 3600 + self.config['thresholds']['scan_grace_seconds'],
+            'coverage_run_day': '2026-03-07', 'coverage_check_day': '2026-03-07'}}
+        for clock, missing in (('2026-03-09T00:05:00Z', False), ('2026-03-09T00:05:01Z', True)):
+            self.assertEqual(bool(watchdog.detect(facts, datetime.fromisoformat(clock).timestamp())), missing)
+
+    def test_verdict_legacy_first_install_and_invalid_days(self):
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        for days, missing in (({}, False), ({'coverage_run_day': '2026-11-02'}, True),
+                              ({'coverage_check_day': '2026-11-01'}, True),
+                              ({'coverage_check_day': '2026-11-02'}, False),
+                              ({'coverage_check_day': 'bad'}, True),
+                              ({'coverage_check_day': '2026-11-03'}, True),
+                              ({'coverage_run_day': 42}, True)):
+            with self.subTest(days=days):
+                facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': {
+                    'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                    'coverage_deadline_seconds': 19 * 3600 + 300, **days}}
+                self.assertEqual(bool(watchdog.detect(facts, now)), missing)
+        facts['outlook'] = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                            'coverage_run_day': '2026-11-02', 'coverage_deadline_seconds': 19 * 3600 + 300}
+        self.assertEqual(watchdog.detect(facts, datetime.fromisoformat('2026-11-02T18:00:00Z').timestamp()), [])
+
+    def test_first_run_waits_until_deadline_and_late_verdict_recovers_before_scan(self):
+        outlook = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                   'coverage_deadline_seconds': 19 * 3600 + 300}
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}
+        before = datetime.fromisoformat('2026-11-03T01:05:00Z').timestamp()
+        after = before + 1
+        self.assertEqual(watchdog.detect(facts, before), [])
+        outlook['coverage_run_day'] = '2026-11-02'
+        self.assertEqual(watchdog.detect(facts, before), [])
+        self.assertEqual([f['key'] for f in watchdog.detect(facts, after)], [watchdog.MISSING_VERDICT])
+        outlook['coverage_check_day'] = '2026-11-02'
+        self.assertEqual(watchdog.detect(facts, after), [])
+        self.assertEqual(watchdog.digest(self.root, self.config), '')
+
+    def test_first_actual_verdict_establishes_freshness_until_next_deadline(self):
+        outlook = {'timezone': 'America/Chicago', 'reply_draft_count': 1,
+                   'coverage_deadline_seconds': 19 * 3600 + 300}
+        facts = {'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        self.assertEqual(watchdog.detect(facts, now), [])
+        outlook['coverage_check_day'] = '2026-11-02'
+        self.assertEqual(watchdog.detect(facts, now), [])
+        self.assertEqual(watchdog.detect(facts, now + 86399), [])
+        self.assertEqual([f['key'] for f in watchdog.detect(facts, now + 86400)],
+                         [watchdog.MISSING_VERDICT])
+
+    def test_resumed_intake_keeps_owed_verdict_until_actual_verdict(self):
+        ns = runpy.run_path(str(ROOT / 'ops/outlook-intake-selftest.py'))
+        intake = ns['IntakeTest']()
+        intake.setUp()
+        self.addCleanup(intake.doCleanups)
+        intake.coverage_run([ns['mail']('pat@example.test', -timedelta(hours=1), subject='Complete')])
+        state_path = intake.out() / ns['intake'].STATE
+        evening = intake.fake.now
+        def scan():
+            state = json.loads(state_path.read_text())
+            outlook = {**state, 'timezone': str(ns['load_settings'](intake.home).timezone),
+                       'reply_draft_count': 1, 'coverage_deadline_seconds': 19 * 3600 + 300}
+            found = watchdog.detect({'jobs': [], 'disk_free_percent': 50, 'outlook': outlook},
+                                    intake.fake.now.timestamp())
+            watchdog.reconcile(self.root, self.config, found, {'com.carr.outlook-intake'},
+                               intake.fake.now.timestamp(), outlook)
+            return {f['key'] for f in watchdog.active_findings(self.root, self.config)}
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = evening + timedelta(days=2, hours=-8)
+        intake.run_intake()
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = evening + timedelta(days=2, minutes=30)
+        intake.run_intake()
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+
+    def test_no_prior_verdict_survives_resumed_intake_and_fresh_ledger(self):
+        ns = runpy.run_path(str(ROOT / 'ops/outlook-intake-selftest.py'))
+        intake = ns['IntakeTest']()
+        intake.setUp()
+        self.addCleanup(intake.doCleanups)
+        intake.fake.now = datetime.fromisoformat('2026-10-20T16:00:00Z')
+        intake.coverage_run([ns['mail']('pat@example.test', -timedelta(hours=1), subject='Complete')],
+                            evening=False)
+        state_path = intake.out() / ns['intake'].STATE
+        settings = SimpleNamespace(repo=intake.out().parents[1], account='fixture@example.test',
+                                   timezone=ns['load_settings'](intake.home).timezone,
+                                   transport_environment=lambda: {})
+        def scan():
+            with patch.object(watchdog, 'load_settings', return_value=settings), \
+                 patch.object(watchdog.subprocess, 'run', side_effect=OSError('offline')):
+                outlook = watchdog.collect_outlook(self.config)
+            found = watchdog.detect({'jobs': [], 'disk_free_percent': 50, 'outlook': outlook},
+                                    intake.fake.now.timestamp())
+            watchdog.reconcile(self.root, self.config, found, {'com.carr.outlook-intake'},
+                               intake.fake.now.timestamp(), outlook)
+            return {f['key'] for f in watchdog.active_findings(self.root, self.config)}
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = datetime.fromisoformat('2026-10-21T16:00:00Z')
+        intake.run_intake()
+        self.assertIsNone(json.loads(state_path.read_text()).get('coverage_check_day'))
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        self.assertIn(watchdog.MISSING_VERDICT, scan())
+        intake.fake.now = datetime.fromisoformat('2026-10-21T23:30:00Z')
+        intake.run_intake()
+        self.assertNotIn(watchdog.MISSING_VERDICT, scan())
+
+    def test_completed_scan_receipt_passes_registered_observer(self):
+        contract = json.loads((ROOT / 'contracts/production-proof-plan.v1.json').read_text())
+        runner = contract['x-runners']['studio-run-receipt.v1']
+        observer = self.root / 'observer.py'
+        observer.write_bytes(subprocess.check_output(
+            ['git', 'show', runner['revision'] + ':' + runner['path']], cwd=ROOT))
+        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+        output = io.StringIO()
+        with patch.object(watchdog, 'collect', return_value={'jobs': [], 'disk_free_percent': 50}), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        receipt = self.root / 'scan.receipt'
+        receipt.write_text(output.getvalue())
+        result = subprocess.run([sys.executable, str(observer), '--receipt-file', str(receipt),
+            '--service', 'job-watchdog', '--runtime-sha', revision, '--count', 'scans', '--minimum', '1'],
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        ledger = watchdog.read_latest(self.root / self.config['paths']['scan_ledger'])['scan']
+        self.assertEqual(ledger['runtime_sha'], revision)
+
+    def test_scan_without_runtime_identity_cannot_prove_success(self):
+        output = io.StringIO()
+        with patch.object(watchdog, 'collect', return_value={'jobs': [], 'disk_free_percent': 50}), \
+             patch.object(watchdog, 'git_run', side_effect=OSError('git unavailable')), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        receipt = json.loads(output.getvalue().split(' ', 1)[1])
+        self.assertIsNone(receipt['runtime_sha'])
+        self.assertEqual(receipt['counts']['scans'], 1)
+        ledger = watchdog.read_latest(self.root / self.config['paths']['scan_ledger'])['scan']
+        self.assertEqual(ledger['status'], 'completed')
+        self.assertIsNone(ledger['runtime_sha'])
+
+    def test_failed_or_lock_skipped_scan_emits_no_success_receipt(self):
+        for error, result in ((OSError('unavailable'), 1), (BlockingIOError(), 0)):
+            with self.subTest(error=type(error).__name__):
+                output = io.StringIO()
+                target = 'collect' if result else 'locked'
+                with patch.object(watchdog, target, side_effect=error), \
+                     contextlib.redirect_stdout(output):
+                    self.assertEqual(watchdog.scan(self.root, self.config), result)
+                self.assertEqual(output.getvalue(), '')
+
+    def test_transport_timeout_preserves_local_failed_and_missing_verdicts(self):
+        state = self.root / 'out/outlook-intake/state.json'
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps({'coverage_run_day': '2026-11-01', 'coverage_failed': True}))
+        settings = SimpleNamespace(repo=self.root, account='fixture@example.test', timezone='America/Chicago',
+                                   transport_environment=lambda: {})
+        with patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=subprocess.TimeoutExpired('fixture', 30)):
+            outlook = watchdog.collect_outlook(self.config)
+        self.assertEqual(outlook['coverage_deadline_seconds'], 19 * 3600 + 300)
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        keys = {f['key'] for f in watchdog.detect({'jobs': [], 'disk_free_percent': 50, 'outlook': outlook}, now)}
+        self.assertEqual(keys, {'job_degraded:outlook:coverage_failed',
+                               'job_degraded:outlook:coverage_verdict_missing',
+                               'job_degraded:outlook:outcome_read_failed'})
+
+    def test_local_missed_verdict_survives_transport_failure_and_recovers(self):
+        state = self.root / 'out/outlook-intake/state.json'
+        state.parent.mkdir(parents=True)
+        state.write_text(json.dumps({'coverage_run_day': '2026-11-01',
+                                     'coverage_check_day': '2026-11-01', 'coverage_failed': False}))
+        settings = SimpleNamespace(repo=self.root, account='fixture@example.test', timezone='America/Chicago',
+                                   transport_environment=lambda: {})
+        launch = subprocess.CompletedProcess([], 0, 'PID Status Label\n- 0 com.carr.outlook-intake\n', '')
+        unavailable = subprocess.CompletedProcess([], 1, '', '')
+        now = datetime.fromisoformat('2026-11-03T01:05:01Z').timestamp()
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=[launch, unavailable] * 2), \
+             patch.object(watchdog.shutil, 'disk_usage', return_value=(100, 95, 5)), \
+             patch.object(watchdog.time, 'time', return_value=now):
+            for _ in range(2):
+                self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        active = watchdog.active_findings(self.root, self.config)
+        self.assertEqual({f['key'] for f in active}, {'job_degraded:outlook:coverage_verdict_missing',
+            'job_degraded:outlook:outcome_read_failed', 'disk_low:local'})
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        path = self.root / self.config['paths']['findings']
+        self.assertEqual(len(path.read_text().splitlines()), 3)
+        # A lost state read is not proof of recovery.
+        state.unlink()
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', return_value=launch), \
+             patch.object(watchdog.time, 'time', return_value=now):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        self.assertIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
+        state.write_text(json.dumps({'coverage_run_day': '2026-11-03', 'coverage_check_day': '2026-11-03'}))
+        later = datetime.fromisoformat('2026-11-04T00:30:00Z').timestamp()
+        with patch.object(watchdog, 'SOURCE', self.source), patch.object(watchdog, 'load_settings', return_value=settings), \
+             patch.object(watchdog.subprocess, 'run', side_effect=[launch, unavailable]), \
+             patch.object(watchdog.time, 'time', return_value=later):
+            self.assertEqual(watchdog.scan(self.root, self.config), 0)
+        self.assertNotIn('daily coverage verdict missing', watchdog.digest(self.root, self.config))
 
     def test_outcome_alarms_reach_findings_and_digest_then_clear(self):
         base = {'jobs': [], 'disk_free_percent': 50, 'outlook': {

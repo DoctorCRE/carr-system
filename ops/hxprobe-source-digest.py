@@ -25,7 +25,8 @@ CRATE = Path(__file__).resolve().parents[1] / 'vendor/hxprobe'
 RECEIPT = '.carr-build.json'
 DECODER = 'hxprobe/target/release/hxprobe'
 NOT_SOURCE = {'UPSTREAM.md', 'LICENSE', '.gitignore', '.DS_Store'}
-EXTERNAL_INPUTS = ('spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py')
+EXTERNAL_INPUTS = ('spec/outlook/hxstore-atlas.json', 'ops/hxstore-atlas.py',
+                   'spec/outlook/contact-observation.v1.json')
 
 
 def sha256(path: Path) -> str:

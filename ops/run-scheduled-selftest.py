@@ -78,6 +78,29 @@ class ScheduledRunTests(unittest.TestCase):
         args = json.loads(self.rows()[0][3])
         self.assertEqual(json.loads(args[args.index('--detail') + 1]), receipt)
 
+    def test_binding_projection_survives_without_private_account(self):
+        safe = dict(mailbox_owner='dell', account_digest='a' * 64,
+                    binding_digest='b' * 64, binding_verified=True, account_verified=True,
+                    observed_at='2026-11-05T12:00:00+00:00')
+        receipt = dict(state='succeeded', reason='processed', counts={}, **safe,
+                       mailbox_account='private@example.test', folder_account_id=7)
+        result = self.invoke_intake(receipt, code=0)
+        args = json.loads(self.rows()[-1][3])
+        detail = json.loads(args[args.index('--detail') + 1])
+        self.assertEqual(detail, dict(state='succeeded', reason='processed', counts={}, **safe))
+        self.assertNotIn('private@example.test', result.stdout + result.stderr + json.dumps(self.rows()))
+
+    def test_invalid_binding_projection_is_stripped(self):
+        receipt = dict(state='failed', reason='ledger_binding_mismatch', counts={},
+                       mailbox_owner='private@example.test', account_digest='private@example.test',
+                       binding_digest='private@example.test', observed_at='private@example.test',
+                       binding_verified='private@example.test', account_verified=1)
+        result = self.invoke_intake(receipt)
+        args = json.loads(self.rows()[-1][3])
+        self.assertEqual(json.loads(args[args.index('--detail') + 1]),
+                         dict(state='failed', reason='ledger_binding_mismatch', counts={}))
+        self.assertNotIn('private@example.test', result.stdout + result.stderr + json.dumps(self.rows()))
+
     def test_runtime_fields_reach_ops_detail(self):
         for behind in (3, None):
             receipt = {"state": "succeeded", "reason": "processed", "counts": {},
