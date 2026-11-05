@@ -80,7 +80,15 @@ test('installed lifecycle handles candidate-only sources and terminal retries',a
   assert.equal((await call('record-email-lifecycle',args)).replayed,true);
   const page=await read();
   assert.ok(page.observations.find(o=>o.source_id==='b'.repeat(64)).invalidated_at);
-  await assert.rejects(append([observation('b','d')]));
+  const held = await append([observation('b','d')]);
+  assert.equal(held.inserted,0);
+  assert.equal(held.source_invalid,true);
+  const other = await call('propose-email-lead',{address:'alias@synthetic.test',summary:'Synthetic request',first_seen_at:'2026-10-01T12:00:00Z',message_ref:'synthetic-alias'});
+  const terminal = await call('observe-email-candidate-signatures',{address:'alias@synthetic.test',mailbox_account:'synthetic@example.test',observations:[observation('b','d')]});
+  assert.equal(terminal.source_invalid,true);
+  const otherEvidence=await executeRegisteredTool(c,actor,'read-email-candidate-signatures',{pool_id:other.pool_id});
+  assert.equal(otherEvidence.source_invalid,true);
+  assert.equal(otherEvidence.observations.length,0);
 });
 test('decline persists and ownership protects readback',async () => {
   await c.query("update candidate_pool set status='declined',declined_at=now(),declined_by=$1,decline_reason='Synthetic' where id=$2",[actor.id,pool]);

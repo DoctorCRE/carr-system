@@ -59,7 +59,7 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
           [`email-sha256:${owner}:${sha256(address)}`])).rows[0];
         if (!row) fail('email_candidate_not_found');
         if (row.status!=='pool') return {ok:true,contract:'email-candidate-signatures.v1',pool_id:row.id,status:row.status,inserted:0,candidate_version:row.version,evidence_version:row.evidence_version};
-        let inserted=0, changed=false;
+        let inserted=0, duplicates=0, held=0, changed=false;
         for (const observation of args.observations) {
           if (JSON.stringify(observation.extraction).length>20000 || claimsVerification(observation.extraction) || Date.parse(observation.observed_at)>Date.now()+300000)
             fail('email_candidate_evidence_invalid');
@@ -68,7 +68,14 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
             and coalesce(email_context#>>'{lifecycle,state}','live')<>'live'
             union all select 1 from email_candidate_signature where mailbox_owner=$1 and mailbox_account=$2
               and (item_ids && $3::text[] or source_id=$4) and lifecycle is not null limit 1`,[owner,args.mailbox_account,observation.item_ids,observation.source_id])).rows.length;
-          if (terminal) fail('email_not_live');
+          if (terminal) {
+            const invalidated=await c.query(`update email_candidate_signature set invalidated_at=now(),invalid_reason='terminal_source'
+              where pool_id=$1 and mailbox_account=$2 and source_id=$3 and invalidated_at is null returning id`,
+              [row.id,args.mailbox_account,observation.source_id]);
+            changed ||= !row.source_invalid || invalidated.rows.length>0;
+            held++;
+            continue;
+          }
           const invalidated=await c.query(`update email_candidate_signature set invalidated_at=now(),invalid_reason='source_revision'
             where mailbox_owner=$1 and mailbox_account=$2 and source_id=$3 and (raw_digest<>$4 or pool_id<>$5)
               and invalidated_at is null returning id,pool_id`,
@@ -82,8 +89,12 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
           if (existing) {
             const equal=(await c.query('select $1::jsonb=$2::jsonb as equal',[existing.extraction,observation.extraction])).rows[0].equal;
             if (!equal && !observation.extraction.ambiguity) fail('email_candidate_observation_conflict');
-            if (observation.extraction.ambiguity) await c.query(`update email_candidate_signature
-              set invalidated_at=coalesce(invalidated_at,now()),invalid_reason=coalesce(invalid_reason,'source_representation_conflict') where id=$1`,[existing.id]);
+            if (observation.extraction.ambiguity) {
+              const invalidated=await c.query(`update email_candidate_signature set invalidated_at=now(),invalid_reason='source_representation_conflict'
+                where id=$1 and invalidated_at is null returning id`,[existing.id]);
+              changed ||= invalidated.rows.length>0;
+              held++;
+            } else duplicates++;
             await c.query(`update email_candidate_signature set item_ids=array(select distinct unnest(item_ids||$2::text[])) where id=$1`,[existing.id,observation.item_ids]);
             continue;
           }
@@ -97,10 +108,10 @@ export function candidateSignatureTools({withEnvelope,writeEvent}) {
           await c.query(`update candidate_pool set version=version+1,evidence_version=evidence_version+1,
             source_invalid=source_invalid or $2,updated_by=$3,updated_at=now() where id=$1`,[row.id,changed,actor.id]);
           await writeEvent(c,actor,'observe-email-candidate-signatures','candidate_pool',row.id,
-            {new:{inserted,source_invalid:row.source_invalid||changed,evidence_version:row.evidence_version+1},cause:'ingest_email',idempotency_key:args.idempotency_key});
+            {new:{inserted,held_sources:held,source_invalid:row.source_invalid||changed,evidence_version:row.evidence_version+1},cause:'ingest_email',idempotency_key:args.idempotency_key});
         }
         return {ok:true,contract:'email-candidate-signatures.v1',pool_id:row.id,status:row.status,inserted,
-          duplicates_suppressed:args.observations.length-inserted,source_invalid:row.source_invalid||changed,
+          duplicates_suppressed:duplicates,held_sources:held,source_invalid:row.source_invalid||changed,
           candidate_version:row.version+Number(Boolean(inserted||changed)),evidence_version:row.evidence_version+Number(Boolean(inserted||changed))};
       })
     },

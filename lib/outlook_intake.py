@@ -151,7 +151,7 @@ ERROR_CODES = CLOSED_ELSEWHERE | frozenset({'timeout', 'auth_refused', 'key_reus
                          'no_acknowledgement', 'reply_unreadable', 'transport_error',
                          'invalid_request', 'subject_unresolved', 'database_refused',
                          'setup_failed', 'contacts_empty', 'contacts_read_failed',
-                         'agenda_version_conflict', 'version_conflict', 'email_delivery_filing_changed', 'email_not_live'})
+                         'agenda_version_conflict', 'version_conflict', 'email_delivery_filing_changed'})
 BLOCKED_ERRORS = frozenset({'key_reuse', 'transport_oversized', 'invalid_request', 'subject_unresolved'})
 
 
@@ -159,7 +159,7 @@ def _reply_error(reply: dict) -> str:
     error = reply.get('error')
     if error == 'board_version_conflict':
         return 'agenda_version_conflict'
-    if error in ('key_reuse', 'version_conflict', 'email_delivery_filing_changed', 'email_not_live', *CLOSED_ELSEWHERE):
+    if error in ('key_reuse', 'version_conflict', 'email_delivery_filing_changed', *CLOSED_ELSEWHERE):
         return error
     if error in ('unauthorized', 'forbidden'):
         return 'auth_refused'
@@ -1021,11 +1021,6 @@ class Run:
                 if not isinstance(reply, dict) or reply.get('ok') is not True:
                     raise CarrError(code=_reply_error(reply) if isinstance(reply, dict) else 'reply_unreadable')
             except CarrError as error:
-                if verb == 'observe-email-candidate-signatures' and error.code == 'email_not_live':
-                    request.update(acknowledged=True, disposition='source_invalid', retry_at=None, error_code=error.code)
-                    self.counts['candidate_signature_source_invalid'] = self.counts.get('candidate_signature_source_invalid', 0) + 1
-                    _save(self.out, self.state)
-                    return True
                 if (verb == 'propose-email-lead' or (verb == 'log-activity' and args.get('summary') == 'Links from matched email')) and error.code in BLOCKED_ERRORS:
                     request.update(acknowledged=True, disposition='refused', outcome='refused',
                                    retry_at=None, error_code=error.code)
@@ -1053,7 +1048,7 @@ class Run:
             if verb == 'propose-email-lead':
                 request['outcome'] = 'proposed' if reply.get('proposed') is True else str(reply.get('reason'))
             if verb == 'observe-email-candidate-signatures':
-                for field in ('inserted', 'duplicates_suppressed'):
+                for field in ('inserted', 'duplicates_suppressed', 'held_sources'):
                     self.counts['candidate_signature_' + field] = self.counts.get('candidate_signature_' + field, 0) + reply.get(field, 0)
             if verb == 'log-activity':
                 request['activity_id'] = reply.get('activity_id')

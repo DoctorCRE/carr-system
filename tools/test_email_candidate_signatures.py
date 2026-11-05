@@ -21,19 +21,20 @@ def mail(ident, keys=None, **extra):
 
 
 class CandidateSources(unittest.TestCase):
-    def test_terminal_source_refusal_is_acknowledged_once(self):
+    def test_terminal_source_hold_is_acknowledged_once(self):
         calls = []
-        def refuse(verb, args):
+        def hold(verb, args):
             calls.append(verb)
-            raise CarrError(code='email_not_live')
+            return {'ok': True, 'inserted': 0, 'source_invalid': True, 'held_sources': 1}
         with tempfile.TemporaryDirectory() as directory:
-            run = Run(SimpleNamespace(carr=refuse), {}, datetime.now(timezone.utc), Path(directory),
+            run = Run(SimpleNamespace(carr=hold), {}, datetime.now(timezone.utc), Path(directory),
                       SimpleNamespace(timezone=timezone.utc))
             args = {'idempotency_key': 'synthetic-request'}
             self.assertTrue(run.write('observe-email-candidate-signatures', args, 'synthetic'))
             self.assertTrue(run.write('observe-email-candidate-signatures', args, 'synthetic'))
             self.assertEqual(len(calls), 1)
-            self.assertEqual(run.state['requests']['synthetic-request']['disposition'], 'source_invalid')
+            self.assertEqual(run.state['requests']['synthetic-request']['disposition'], 'acknowledged')
+            self.assertEqual(run.counts['candidate_signature_held_sources'], 1)
 
     def test_candidate_stage_caps_requests_and_stops_after_two_failures(self):
         for fail, expected in [(False, 20), (True, 2)]:
