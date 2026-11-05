@@ -50,9 +50,9 @@ export async function filingApplicationWrite(c, actor, args, fail) {
     return {ok:true,generate:true,...claimed};
   }
   if (!row.claim_active || row.claim_id!==args.claim_id) fail('email_application_stale');
-  if (!['applied','retry'].includes(args.application_status)) fail('email_proposal_fields_invalid');
-  const status = args.application_status==='applied' ? 'applied' : row.attempts>=3 ? 'exhausted' : 'pending';
+  if (!['applied','retry','held'].includes(args.application_status)) fail('email_proposal_fields_invalid');
+  const status = args.application_status==='held' ? 'needs_review' : args.application_status==='applied' ? 'applied' : row.attempts>=3 ? 'exhausted' : 'pending';
   await c.query(`update email_filing_application set status=$2,reason=$3,claim_id=null,claim_until=null
-    where generation=$1`,[row.generation,status,status==='exhausted' ? 'retry_exhausted' : null]);
+    where generation=$1`,[row.generation,status,status==='needs_review' ? 'incomplete_source' : status==='exhausted' ? 'retry_exhausted' : null]);
   return {ok:true,status,generation:row.generation};
 }

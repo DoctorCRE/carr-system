@@ -140,9 +140,9 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
         elif item['kind'] == 'phase_move':
             continue
         if item['kind'] == 'next_step':
-            text, due = (item.get('text') or '').strip(), item.get('next_date') or today.isoformat()
+            text, due = (item.get('text') or '').strip(), item.get('next_date')
             try:
-                date.fromisoformat(due)
+                date.fromisoformat(due) if due else None
             except (TypeError, ValueError):
                 continue
             if not text:
@@ -162,6 +162,43 @@ def proposals(reply: dict, email: dict, today: date) -> list[dict]:
 def route_counts():
     return {k: 0 for k in ('emails', 'routed', 'model_failed', 'abandoned', 'recorded', 'refused',
                              'dropped', 'write_failed', 'queue_failed', 'more', 'out_of_time', 'inherited', 'contact_only')}
+
+
+def complete_body(source):
+    context = source.get('email_context') or {}
+    return (context.get('body_kind') == 'full' and context.get('body_completeness') == 'complete'
+            and context.get('body_outcome') == 'complete' and not context.get('body_truncated'))
+
+
+def consume_next_steps(carr, now, clock, refusal_code=lambda _: None):
+    counts = dict(next_step_applied=0, next_step_review=0, next_step_refused=0,
+                  next_step_duplicate=0, next_step_failed=0)
+    try:
+        page = carr('email-router-queue', {'purpose': 'next_steps', 'limit': MAX_EMAILS})
+    except Exception:
+        counts['next_step_failed'] += 1
+        return counts
+    failures = 0
+    for row in page.get('proposals', [])[:MAX_EMAILS]:
+        if clock() >= now + BUDGET or failures >= 2:
+            break
+        try:
+            result = carr('record-email-proposal', {'mode': 'apply_next_step',
+                'proposal_id': row['proposal_id'], 'idempotency_key': str(uuid.uuid4())})
+            state = result.get('email_application', {}).get('state')
+            if result.get('duplicate_suppressed'):
+                counts['next_step_duplicate'] += 1
+            elif state in ('applied', 'review', 'refused'):
+                counts['next_step_' + state] += 1
+            failures = 0
+        except Exception as error:
+            if refusal_code(error):
+                counts['next_step_refused'] += 1
+            else:
+                counts['next_step_failed'] += 1
+                failures += 1
+    counts['next_step_circuit_open'] = int(failures >= 2)
+    return counts
 
 
 def consume_applications(carr, classify, refusal_code, now, clock):
@@ -192,6 +229,11 @@ def consume_applications(carr, classify, refusal_code, now, clock):
                 continue
             counts['application_claimed'] += 1
             claimed = {**binding, 'claim_id': claim['claim_id']}
+            if not complete_body(source):
+                write({**claimed, 'mode': 'application_result', 'application_status': 'held'})
+                counts.setdefault('application_held', 0)
+                counts['application_held'] += 1
+                continue
             reply = classify(source, now.date())
             for args in proposals(reply, source, now.date()):
                 if source.get('kind') == 'email_out' and args['kind'] != 'next_step':
@@ -344,6 +386,10 @@ def route(carr: Callable[[str, dict], dict], classify: Callable[[dict, date], di
             source = email if email.get('deal') or not deal else next(
                 {**email, 'deal': deal, 'deal_name': item.get('name'), 'phase': item.get('phase'),
                  'deal_type': item.get('deal_type')} for item in queue['open_deals'] if item['id'] == deal)
+            if not complete_body(source):
+                counts.setdefault('incomplete_held', 0)
+                counts['incomplete_held'] += 1
+                continue
             reply = classify(source, now.date())
         except Exception as error:
             model_failed(error)
@@ -398,11 +444,14 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
         try:
             started = time.monotonic()
             bounded_clock = clock or (lambda: now + timedelta(seconds=time.monotonic() - started))
-            application_counts = consume_applications(carr, classify, refusal_code, now, bounded_clock)
+            next_counts = consume_next_steps(carr, now, bounded_clock, refusal_code)
+            application_counts = (dict(application_claimed=0, application_failed=0, application_circuit_open=1)
+                if next_counts.get('next_step_circuit_open') else consume_applications(carr, classify, refusal_code, now, bounded_clock))
             remaining = MAX_EMAILS - application_counts['application_claimed']
             counts = route_counts() if application_counts.get('application_circuit_open') or remaining <= 0 else route(
                 carr, classify, refusal_code, state, now, bounded_clock, account=account, max_emails=remaining)
             counts.update(application_counts)
+            counts.update(next_counts)
             if not application_counts.get('application_circuit_open'):
                 try:
                     maintenance = carr('record-email-proposal', {'mode': 'expire_blocked', 'idempotency_key': str(uuid.uuid4()),
@@ -422,7 +471,7 @@ def run(out: Path, carr: Callable[[str, dict], dict], classify: Callable[[dict, 
                         counts['summary_failed'] = 1
         finally:
             _save(out, state)
-    failed = counts.get('application_failed') or counts['model_failed'] or counts['write_failed'] or counts['queue_failed'] or counts.get('maintenance_failed')
+    failed = counts.get('next_step_failed') or counts.get('application_failed') or counts['model_failed'] or counts['write_failed'] or counts['queue_failed'] or counts.get('maintenance_failed')
     return ('failed' if failed else 'succeeded'), counts
 
 

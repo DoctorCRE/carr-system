@@ -1113,7 +1113,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "email-router-queue": {
     "ingress_key": "mcp-tool:email-router-queue",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "a0992444d172f3513b9f166c0d566b256be39d5bc6e37643a301ec921e5f5402",
+    "schema_digest": "d10c23b1b2d57d9753f5cca07f4f3f59af92ec1eab7357d1b480b679192539f9",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2877,7 +2877,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-email-proposal": {
     "ingress_key": "mcp-tool:record-email-proposal",
     "source_locator": "mcp-server/src/email-proposals.js",
-    "schema_digest": "03c0dbe8cbd2b0c016dbd091c3862e3e72d91c145277a0260b861446ae080f3f",
+    "schema_digest": "89ce00608da2767d8078ad4e96adee15d4c101acfc5571395b7ea61325b45ce3",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

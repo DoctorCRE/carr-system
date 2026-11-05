@@ -397,7 +397,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if ((verb === "record-email-proposal" && ["apply_next_step","undo_next_step"].includes(args.mode)) || (verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
@@ -2573,7 +2573,7 @@ async function completedRetainedStep(c, dealId, candidateIds, firstStepEventId) 
       limit 1 /* call-outcome:undo-step-completed-prior */`, [dealId, candidateIds, firstStepEventId])).rows.length > 0;
 }
 
-async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
+async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args, undoVerb = "undo-call-change") {
   // Same lock order as resolve-candidate's apply: the checklist first, so a
   // partner completing one of the call's items waits for (or beats) the undo.
   await c.query("select pg_advisory_xact_lock(hashtextextended('deal-items:' || $1,0)) /* call-outcome:undo-items-lock */", [dealId]);
@@ -2624,7 +2624,7 @@ async function undoAppliedNextStep(c, actor, dealId, candidate, keys, args) {
     await c.query("insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) /* call-outcome:undo-step-note */",
       [dealId, priorStep, actor.id]);
   for (const [field, before, after] of [["next_step", candidate.payload.text, priorStep], ["next_date", candidate.payload.next_date ?? null, priorDate]])
-    await writeEvent(c, actor, "undo-call-change", "deal", dealId, {
+    await writeEvent(c, actor, undoVerb, "deal", dealId, {
       field, old: { [field]: before },
       new: { [field]: after, ...(field === "next_step" && priorStep === null && shown !== null ? { superseded_action_ids: [] } : {}) },
       recorded_at_after_lock: true, idempotency_key: args.idempotency_key });
@@ -11013,6 +11013,7 @@ registerTools(emailNextStepTools({ withEnvelope, writeEvent, lockDealField, reso
   setNextStep: (c, actor, args) => TOOLS["set-next-step"].handler(c, actor, args),
   setNextAction: (c, actor, args) => TOOLS["set-next-action"].handler(c, actor, args) }), "email-next-step");
 registerTools(emailProposalTools({ ToolError, withEnvelope, writeEvent,
+  write: executeRegisteredTool, undoPlan: undoAppliedNextStep,
   preview: (c, actor, verb, args) => TOOLS[verb].handler(c, actor, args) }), "email-proposals");
 registerTools(emailLeadProposalTools({ withEnvelope, writeEvent,
   updatePartyContact: (c, actor, args) => TOOLS["update-party-contact"].handler(c, actor, args),

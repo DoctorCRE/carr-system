@@ -1,4 +1,5 @@
 // Expose and resolve email-derived proposals.
+import { emailStepApplication, emailStepQueue } from './email-step-application.js';
 import { filingApplicationQueue, filingApplicationWrite, lockFilingApplication } from './email-filing-application.js';
 import { lockEmailIdentity, capturedEmail } from './email-identity.js';
 import { sha256 } from './sha256.ts';
@@ -47,7 +48,7 @@ export function resolveContact(person = {}, people, { call = false } = {}) {
     unknown: !match, internal: person.internal === true };
 }
 
-export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview }) {
+export function emailProposalTools({ ToolError, withEnvelope, writeEvent, preview, write, undoPlan }) {
   const fail = (error, extra = {}) => { throw new ToolError({ error, ...extra }); };
   const previewArgs = row => ({ deal: row.deal_id, activity_id: row.activity_id,
     evidence_quote: row.evidence_quote, ...KINDS[row.kind].args(row) });
@@ -605,15 +606,15 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'record-email-proposal': {
       write: true,
-      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance, and need no deal. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. mode=repair_match revalidates and reclassifies exactly one pending matching proposal at base_version, retaining its source quote and recording classification history. match_evidence stores diagnostic scores and candidates. mode=summary_claim reserves one incoming source hash for at most three generation attempts with a five minute lease. mode=summary_result stores grounded text or honest unavailability for that claim. This operation never files or sends email.',
+      description: 'Store email match, progress, next-step, or reply-draft proposals for partner review. Matching kinds use sender_role and possible_new_deal may omit deal. Reply drafts retain proposed subject, body, and mailbox provenance, and need no deal. Non-deal next steps use the activity-linked subject. mode=expire_blocked rechecks up to 200 mailbox-owned pending proposals aged 30 days from creation and dismisses only those whose preview is still blocked, retaining evidence and the reason. mode=repair_match revalidates and reclassifies exactly one pending matching proposal at base_version, retaining its source quote and recording classification history. match_evidence stores diagnostic scores and candidates. mode=summary_claim reserves one incoming source hash for at most three generation attempts with a five minute lease. mode=summary_result stores grounded text or honest unavailability for that claim. mode=apply_next_step evaluates one stored commitment against complete source, verified filing, explicit owner/date and current plan, then applies atomically or saves a review hold. mode=undo_next_step is a human partner correction for an untouched application; deal corrections require base_version. Both use proposal_id, never a call candidate ID. This operation never files or sends email.',
       inputSchema: { type: 'object', additionalProperties: false,
         required: ['idempotency_key'], anyOf: [
           { required: ['kind','activity_id','evidence_quote','confidence'] }, { required: ['mode'] },
         ], properties: {
           idempotency_key: { type: 'string', minLength: 1, maxLength: 200 },
-          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result'] },
+          mode: { enum: ['expire_blocked', 'repair_match', 'summary_claim', 'summary_result', 'application_claim', 'application_result', 'apply_next_step', 'undo_next_step'] },
           generation: { type: 'string', format: 'uuid' },
-          application_status: { enum: ['applied','retry'] },
+          application_status: { enum: ['applied','retry','held'] },
           source_hash: { type: 'string', pattern: '^sha256:[a-f0-9]{64}$' },
           claim_id: { type: 'string', format: 'uuid' },
           summary_status: { enum: ['available', 'unavailable'] },
@@ -635,13 +636,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           evidence_quote: { type: 'string', minLength: 1, maxLength: 2000 },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
           text: { type: 'string', minLength: 1, maxLength: 500 },
-          next_date: { type: 'string', format: 'date' },
+          next_date: { type: ['string','null'], format: 'date' },
           owner: { type: 'string', enum: ['joe', 'dell'] },
           sender_role: { type: 'string', enum: ROLES },
           subject: { type: 'string', minLength: 1, maxLength: 998 },
           body: { type: 'string', minLength: 1, maxLength: 20000 },
         } },
       handler: (c, actor, args) => withEnvelope(c, actor, 'record-email-proposal', args, async () => {
+        if (['apply_next_step','undo_next_step'].includes(args.mode)) return emailStepApplication(c,actor,args,{fail,preview,write,undoPlan,writeEvent});
         if (['application_claim','application_result'].includes(args.mode)) {
           if (!args.activity_id || !args.generation) fail('email_proposal_fields_invalid');
           const result = await filingApplicationWrite(c,actor,args,fail);
@@ -701,7 +703,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           if (Object.keys(args).some(key => !['mode','cursor','idempotency_key'].includes(key))) fail('email_proposal_fields_invalid');
           const owner = senderOwner(actor);
           const rows = (await c.query(`select p.*,p.next_date::text as next_date from email_proposal p join activity a on a.id=p.activity_id
-            where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and p.status='pending' and (p.deferred_until is null or p.deferred_until<=now()) and p.created_at<=now()-interval '30 days'
+            where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and p.status='pending' and (p.deferred_until is null or p.deferred_until<=now()) and not(p.kind='next_step' and (p.next_date is null or coalesce(p.correction_provenance,'{}') ? 'email_application')) and p.created_at<=now()-interval '30 days'
               and (a.email_source->>'mailbox_owner'=$1 or (a.email_source is null and a.actor_id=$2))
               and ($3::uuid is null or (p.created_at,p.id)>(select created_at,id from email_proposal where id=$3))
             order by p.created_at,p.id limit 201 for update of p skip locked`, [owner,actor.id,args.cursor ?? null])).rows;
@@ -734,7 +736,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if ((!step && !draft && (args.kind === 'possible_new_deal') !== !args.deal) || (matching && !ROLES.includes(args.sender_role)) ||
             (!matching && args.sender_role !== undefined) ||
             (args.kind === 'file_to_deal' && args.text !== undefined) ||
-            (step ? (!args.text || !args.next_date || args.subject !== undefined || args.body !== undefined)
+            (step ? (!args.text || args.subject !== undefined || args.body !== undefined)
               : !matching && !draft && ['text','next_date','owner'].some(k => args[k] !== undefined)) ||
             (draft ? (typeof args.subject !== 'string' || typeof args.body !== 'string')
               : args.subject !== undefined || args.body !== undefined)) fail('email_proposal_fields_invalid');
@@ -788,7 +790,16 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         if (args.proposal_id !== undefined || args.base_version !== undefined) fail('email_proposal_fields_invalid');
         const existing = (await c.query(`select 1 from email_proposal where kind=$1 and deal_id is not distinct from $2::uuid
           and activity_id=$3 for update`, [row.kind,row.deal_id,row.activity_id])).rows.length > 0;
-        if (!existing && !draft) {
+        if (!existing && step && !row.next_date) {
+          const source = (await c.query(`select a.detail from activity a where a.id=$1
+            and a.kind in ('email_in','email_out') and a.occurred_at<=now()
+            and (($2::uuid is null and a.deal_id is null) or exists(select 1 from deal d
+              where d.id=$2 and (a.deal_id=d.id or (a.deal_id is null and a.client_id=d.client_id))))`,
+            [row.activity_id,row.deal_id])).rows[0];
+          if (!source?.detail?.includes(row.evidence_quote) || row.evidence_quote.trim().length<10)
+            fail('email_proposal_quote_invalid');
+        }
+        if (!existing && !draft && (!step || row.next_date)) {
           if (step && !row.deal_id) {
             const source = (await c.query(`select detail from activity where id=$1 and kind in ('email_in','email_out')
               and deal_id is null and occurred_at<=now() for share`, [row.activity_id])).rows[0];
@@ -797,12 +808,14 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
           } else await show(c, actor, row, matchingPeople);
         }
         const stored = (await c.query(`insert into email_proposal
-          (kind,deal_id,activity_id,evidence_quote,task_text,sender_role,next_date,owner,confidence,created_by,draft_subject,draft_body,match_evidence)
-          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+          (kind,deal_id,activity_id,evidence_quote,task_text,sender_role,next_date,owner,confidence,created_by,draft_subject,draft_body,match_evidence,correction_provenance)
+          values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,case when $1='next_step' then jsonb_build_object(
+            'email_source_hash',public.email_filing_source_hash((select a from activity a where id=$3)),
+            'generation',$14::text) else null end)
           on conflict (kind,deal_id,activity_id) do update set kind=excluded.kind
           returning id,status,version,kind,deal_id,activity_id,evidence_quote,task_text,sender_role,next_date::text as next_date,owner`,
           [row.kind,row.deal_id,row.activity_id,row.evidence_quote,row.task_text,row.sender_role,row.next_date,row.owner,
-            args.confidence,actor.id,draft ? args.subject : null,draft ? args.body : null,JSON.stringify(args.match_evidence ?? null)])).rows[0];
+            args.confidence,actor.id,draft ? args.subject : null,draft ? args.body : null,JSON.stringify(args.match_evidence ?? null),args.generation ?? null])).rows[0];
         let shown=null, previewError=null;
         try { if (!draft) shown=await show(c,actor,stored,matchingPeople); }
         catch (error) { if (!(error instanceof ToolError)) throw error; previewError=error.payload?.error ?? 'preview_failed'; }
@@ -813,7 +826,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'list-email-proposals': {
       write: false,
-      description: 'With mode=lead_proposals, return pending outlook-intake lead candidates only for the authenticated partner mailbox, with sender name, domain and address, stored structured reading, current deal/contact names, pool and party versions, and evidence_quote_untrusted=true. limit defaults to 25; cursor pages oldest first and remains valid after resolution. Rejects status/deal arguments. not_business rows never appear; not_business_count counts distinct recorded exclusions over the mailbox recorded lifetime, without reconstructing older local-only exclusions. Ownerless legacy candidates are excluded. With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals. include_non_deal=true also returns next steps without a deal; legacy callers omit it until their review UI supports contact subjects. List all supported proposals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Pending matching items additionally return current suggested_deals and nullable stored match_evidence regardless of age. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
+      description: 'With mode=lead_proposals, return pending outlook-intake lead candidates only for the authenticated partner mailbox, with sender name, domain and address, stored structured reading, current deal/contact names, pool and party versions, and evidence_quote_untrusted=true. limit defaults to 25; cursor pages oldest first and remains valid after resolution. Rejects status/deal arguments. not_business rows never appear; not_business_count counts distinct recorded exclusions over the mailbox recorded lifetime, without reconstructing older local-only exclusions. Ownerless legacy candidates are excluded. With mode=recent_outcomes, return partner-scoped recorded reply outcomes newest first, without body or addresses; limit defaults to 20 and max 50, cursor pages by result time and ID. Historical outcomes with no result time are excluded. Otherwise list email proposals for Home across deals. include_non_deal=true also returns next steps without a deal; legacy callers omit it until their review UI supports contact subjects. List all supported proposals, or only the optional deal UUID, oldest first. Status defaults to pending; select confirmed, dismissed, approved_to_send, sent or failed to read resolved proposals. Reply drafts include subject, body and owner in reply_draft, send_result with the outcome, and nullable result_recorded_at when the outcome was recorded. Pending drafts also include exact to/cc arrays for verified human Joe or Dell. Missing source/copy addresses set preview_error and disable confirm_verb; machine callers receive no pending recipient addresses. Submit must echo the displayed arrays through submit-email-draft. Pending matching items additionally return current suggested_deals and nullable stored match_evidence regardless of age. Every item includes its status, kind, deal, confidence, source email sender, subject, quote, activity_id and suspected_instruction warning. Pending items have a fresh preview and confirm_verb; confirm with the preview fields or dismiss with dismiss-email-proposal and the version. A stale pending item has preview null and preview_error. Resolved items have email_application with state, reason, undo binding and source_changed flag. Resolved items have resolution (resolved_at, resolved_by actor ID, reason), the stored proposed_next_step when applicable, and null confirm_verb, preview and preview_error. Phase history retains the quote; exact phase changes remain in deal history. Without limit, refuses above 200 matching proposals. For pagination, pass limit and then next_cursor until more is false; a cursor remains valid after resolution, but must belong to the selected deal when deal is supplied.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         proposal_id: { type: 'string', format: 'uuid', description: 'Exact mailbox-owned reply draft for Home review; cannot combine with filters or paging.' },
         deal: { type: 'string', format: 'uuid' },
@@ -881,11 +894,13 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const { rows } = await c.query(`select p.id,p.version,p.kind,p.status,p.resolved_at,p.resolved_by,
             p.resolution_reason,p.match_evidence,p.disposition,p.resolution_note,p.deferred_until,p.correction_provenance,p.deal_id,d.name as deal_name,
             p.activity_id,p.evidence_quote,p.task_text,p.sender_role,p.next_date::text as next_date,p.owner,
-            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.detail,a.email_context,a.occurred_at,
+            p.confidence::float8 as confidence,p.draft_subject,p.draft_body,p.submitted_email,p.send_result,p.result_recorded_at,a.summary,a.detail,a.email_context,a.occurred_at,public.email_filing_source_hash(a) as current_source_hash,
+            coalesce((select u.eligible from v_email_step_undo u where u.proposal_id=p.id),false) as undo_eligible,
+            coalesce(a.email_context#>>'{lifecycle,state}','live') as source_lifecycle,
             ($6::text is not null and (a.email_source->>'mailbox_owner'=$6 or
               (a.email_source is null and a.actor_id=$7::uuid))) as summary_owned
           from email_proposal p left join deal d on d.id=coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id) join activity a on a.id=p.activity_id
-          where coalesce(a.email_context#>>'{lifecycle,state}','live')='live' and p.status=$4
+          where (coalesce(a.email_context#>>'{lifecycle,state}','live')='live' or p.correction_provenance ? 'email_application') and p.status=$4
             and ($8::uuid is null or (p.id=$8 and p.kind='reply_draft' and p.owner=$6 and a.email_source->>'mailbox_owner'=$6))
             and ($8::uuid is not null or p.status<>'pending' or p.deferred_until is null or p.deferred_until<=now()) and ($5 or p.kind<>'next_step' or p.deal_id is not null)
             and ($3::uuid is null or coalesce((p.correction_provenance->>'target_deal')::uuid,p.deal_id)=$3) and ($1::uuid is null or (p.created_at,p.id) >
@@ -933,6 +948,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
             resolution: pending ? null : { resolved_at: new Date(row.resolved_at).toISOString(),
               resolved_by: row.resolved_by, reason: row.resolution_reason },
             ...(row.kind === 'reply_draft' ? { reply_draft: { subject: row.draft_subject, body: row.draft_body, owner: row.owner, ...recipients }, submitted_email: row.submitted_email, send_result: row.send_result, result_recorded_at: row.result_recorded_at ? new Date(row.result_recorded_at).toISOString() : null } : {}),
+            email_application: row.correction_provenance?.email_application ? { ...row.correction_provenance.email_application,
+              source_changed: row.correction_provenance.email_application.source_hash !== row.current_source_hash,
+              source_terminal: row.source_lifecycle !== 'live',
+              undo_eligible: row.source_lifecycle === 'live' && row.correction_provenance.email_application.state === 'applied' && row.undo_eligible } : null,
             proposed_next_step: row.kind === 'next_step'
               ? { text: row.task_text, next_date: row.next_date, owner: row.owner } : null,
             suspected_instruction: suspected(row.evidence_quote),
@@ -946,10 +965,10 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
     },
     'email-router-queue': {
       write: false,
-      description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=summaries pages pending-card incoming sources by UUID without the proposal age limit; pending_only=false pages all incoming sources recorded within three days independently of proposals. It returns source_hash for summary_claim and performs no generation. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
+      description: 'Router input for WR-000441: captured inbound and outbound emails recorded in the last 1-7 days (default 3) and sent within 30 days, oldest first, including unfiled mail, with resolved participants, filed history and all open deals, and not in exclude (the activity ids the router already handled). An email with some proposals stored stays queued until the router excludes it, so a partly written email is retried; record-email-proposal upserts per kind, deal and email. Returns at most limit emails (1-200, default 25) and more=true when others wait, so a long queue drains over runs. Returns the email body as untrusted data for classification into record-email-proposal. purpose=next_steps reads up to 25 mailbox-owned pending next-step IDs without an age limit, excluding evaluated holds and terminal sources. purpose=links instead pages already-filed inbound and outbound email by activity UUID without an age window, returning its latest associated hydrated text and confirmed deal. Pass next_cursor as after until more=false. purpose=summaries pages pending-card incoming sources by UUID without the proposal age limit; pending_only=false pages all incoming sources recorded within three days independently of proposals. It returns source_hash for summary_claim and performs no generation. purpose=outcomes requires account and returns only mailbox-scoped first and last email_in recorded_at and reply_draft count since the first filing, across all proposal statuses. The first inbound filing is the observed journey live marker. No email content is returned.',
       inputSchema: { type: 'object', additionalProperties: false,
         properties: { days: { type: 'integer', minimum: 1, maximum: 7 },
-          purpose: { enum: ['links', 'outcomes', 'summaries', 'applications'] },
+          purpose: { enum: ['links', 'outcomes', 'summaries', 'applications', 'next_steps'] },
           pending_only: { type: 'boolean' }, account: { type: 'string', format: 'email', maxLength: 320 }, after: { type: 'string', format: 'uuid' },
           limit: { type: 'integer', minimum: 1, maximum: LIMIT },
           exclude: { type: 'array', maxItems: 5000, items: { type: 'string', format: 'uuid' } } } },
@@ -957,6 +976,7 @@ export function emailProposalTools({ ToolError, withEnvelope, writeEvent, previe
         const limit = args.limit ?? 25;
         // The age window's start follows the server clock, so tests on a fixed clock stay in range.
         const clock = new Date().toISOString();
+        if (args.purpose === 'next_steps') return emailStepQueue(c,_actor,args);
         if (args.purpose === 'applications') return filingApplicationQueue(c,_actor,args);
         if (args.purpose === 'summaries') {
           if (Object.keys(args).some(key => !['purpose','limit','after','pending_only'].includes(key))) fail('email_proposal_fields_invalid');

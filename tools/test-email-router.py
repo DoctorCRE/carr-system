@@ -39,7 +39,7 @@ BOTH = {'proposals': [
 def email(activity: str, body: str) -> dict:
     return {'activity_id': activity, 'deal': DEAL, 'deal_name': 'Synthetic coastal purchase',
             'phase': 'site_selection', 'deal_type': 'purchase', 'summary': 'Email from Synthetic Landlord: LOI',
-            'body': body, 'occurred_at': '2026-10-26T14:00:00Z'}
+            'body': body, 'email_context': {'body_kind':'full','body_completeness':'complete','body_outcome':'complete'}, 'occurred_at': '2026-10-26T14:00:00Z'}
 
 
 class Refused(Exception):
@@ -62,6 +62,8 @@ class Server:
 
     def __call__(self, verb: str, args: dict) -> dict:
         self.calls.append((verb, args))
+        if verb == 'email-router-queue' and args.get('purpose') == 'next_steps':
+            return {'proposals': []}
         if verb == 'email-router-queue' and args.get('purpose') == 'applications':
             return {'emails': []}
         if verb == 'email-router-queue':
@@ -627,6 +629,7 @@ class MatchingTests(unittest.TestCase):
                      'conversation_id': 'conversation', 'occurred_at': '2026-10-26T14:00:00Z',
                      'sender': {'email': 'vendor@example.test', 'party_id': 'vendor', 'role': 'lender'},
                      'recipients': [{'email': 'broker@example.test', 'internal': True}],
+                     'email_context': {'body_kind':'full','body_completeness':'complete','body_outcome':'complete'},
                      'body': 'The property is available for your practice.'}, **changes)
 
     def prior(self, **changes):
@@ -985,6 +988,8 @@ class DurableApplications(unittest.TestCase):
         def carr(verb, args):
             calls.append(args)
             if verb == 'email-router-queue':
+                if args.get('purpose') == 'next_steps':
+                    return {'proposals': []}
                 self.assertEqual(args.get('purpose'), 'applications')
                 return {'emails': sources}
             if args.get('mode') == 'application_claim':
@@ -1016,6 +1021,40 @@ class DurableApplications(unittest.TestCase):
         result = email_router.consume_applications(carr, lambda *_: self.fail('stale model call'), refusal_code, NOW, lambda: NOW)
         self.assertEqual(result['application_failed'], 1)
         self.assertFalse(any(a.get('mode') == 'application_result' for a in calls))
+
+class CommitmentApplications(unittest.TestCase):
+    def test_partial_success_failure_circuit_and_budget(self):
+        calls = []
+        def carr(verb, args):
+            calls.append(args)
+            if verb == 'email-router-queue':
+                return {'proposals': [{'proposal_id': str(i)} for i in range(30)]}
+            if args['proposal_id'] == '0':
+                return {'email_application': {'state': 'applied'}}
+            raise TimeoutError()
+        result = email_router.consume_next_steps(carr, NOW, lambda: NOW)
+        self.assertEqual((result['next_step_applied'], result['next_step_failed'], result['next_step_circuit_open']), (1, 2, 1))
+        self.assertEqual(len(calls), 4)
+        calls.clear()
+        email_router.consume_next_steps(carr, NOW, lambda: NOW + email_router.BUDGET)
+        self.assertEqual(len(calls), 1)
+
+    def test_incomplete_durable_source_is_never_extracted(self):
+        calls = []
+        def carr(verb, args):
+            calls.append(args)
+            if verb == 'email-router-queue':
+                return {'emails': [{**email('preview', ASK), 'email_context': {'body_kind':'preview'}, 'generation':'g'}]}
+            if args.get('mode') == 'application_claim':
+                return {'generate': True, 'claim_id':'c'}
+            return {}
+        counts = email_router.consume_applications(carr, lambda *_: self.fail('must not extract preview'), refusal_code, NOW, lambda: NOW)
+        self.assertEqual(counts['application_held'], 1)
+        self.assertEqual(calls[-1]['application_status'], 'held')
+
+    def test_missing_date_stays_missing_in_proposal(self):
+        reply = {'proposals': [{**BOTH['proposals'][1], 'next_date': None}]}
+        self.assertIsNone(email_router.proposals(reply, email('undated', ASK), NOW.date())[0]['next_date'])
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR634-S1-J136-email-next-steps",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "natural-email-commitment",
+      "predicate": "Use the counts-only cohort SQL and private sibling readback in docs/email/commitment-application.md on ordinary natural intake. Observe at least one clear commitment on the correct canonical plan/task with source-linked application event and live readback. Repeat the frozen cohort after the next ordinary pass: zero changed siblings, dangling actions or duplicate application events. Read undo eligibility only. Zero natural eligible retains pending proof.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Natural canonical effect and invariant counts verified; no manufactured write or undo.",
+      "input_class": "deployed worker plus separately authorized counts-only query; never mutate or rerun intake",
+      "deadline_seconds": 60
+    },
+    {
+      "id": "installed-next-step-application",
+      "predicate": "Observe a natural installed email-router receipt with full merged runtime SHA using studio-run-receipt.v1, --service email-router --count next_step_applied --minimum 1. Read all next_step and extraction counters without content and bind privately to the worker proof.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "At least one next_step_applied in natural intake; positive proof remains pending otherwise.",
+      "input_class": "one explicit natural email-router receipt from ordinary installed intake and privately bound generation; counts only",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 5,
+    "max_records": 100,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 65536
+  }
+}
