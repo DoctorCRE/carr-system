@@ -12,6 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('plan', ROOT / 'ops/production-proof-plan.py')
+assert spec is not None and spec.loader is not None
 plan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plan)
 
