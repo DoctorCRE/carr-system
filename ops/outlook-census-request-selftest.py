@@ -39,7 +39,7 @@ class CensusRequestTest(unittest.TestCase):
         again = self.request()
         self.assertEqual((again.returncode, again.stdout, again.stderr),
                          (2, '', 'coverage_census_request_failed=exists\n'))
-        def snapshot(home, work):
+        def snapshot(home, work, settings=None):
             (work / 'store.hxd').write_bytes(b'synthetic')
             (work / 'Files').mkdir()
         decoder = Path(self.temp.name) / 'synthetic-decoder'
