@@ -212,7 +212,7 @@ class LocalKeyExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp)
             (out / 'coverage-census.request').touch(mode=0o600)
-            def snapshot(home, work):
+            def snapshot(home, work, settings=None):
                 (work / 'store.hxd').write_bytes(STORE(message(100, subject='PRIVATE-SUBJECT',
                     sender='private@example.test', sender_name='PRIVATE-NAME') + body(100, html='PRIVATE-BODY')
                     + body(998, html='PRIVATE-BODY') + recipient(999, 201, TO, 'private@example.test')))
@@ -242,7 +242,7 @@ class LocalKeyExportTests(unittest.TestCase):
             decoder.write_text('#!' + sys.executable + '\nimport time\ntime.sleep(30)\n')
             decoder.chmod(0o700)
             (out / 'coverage-census.request').touch(mode=0o600)
-            def snapshot(home, work):
+            def snapshot(home, work, settings=None):
                 (work / 'store.hxd').write_bytes(b'synthetic')
                 (work / 'Files').mkdir()
             def fail_decode(*args):
