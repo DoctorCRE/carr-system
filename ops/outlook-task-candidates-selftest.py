@@ -60,6 +60,67 @@ class Candidates(unittest.TestCase):
             self.cursor = db.execute('select resume_after_key from task_context').fetchone()[0]
         return receipt, rows
 
+    def mutate_candidate(self, change):
+        with closing(sqlite3.connect(self.root / 'evidence.db')) as db:
+            candidate = json.loads(db.execute('select candidate_json from task_candidates').fetchone()[0])
+            change(candidate)
+            candidate.pop('candidate_digest')
+            candidate['candidate_digest'] = hashlib.sha256(json.dumps(
+                candidate, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+            db.execute('update task_candidates set candidate_json=? where local_key=?',
+                       (json.dumps(candidate), '70'))
+            db.commit()
+
+    def test_unproven_due_semantics_preserve_exact_raw_slots(self):
+        for ticks294, ticks302 in ((621355968000000000 + 1793232000 * 10000000,
+                                    621355968000000000 + 1793404800 * 10000000),
+                                   (621355968000000000 + 1793232000 * 10000000 + 5000000, 0),
+                                   (0x2bca2875f4373fff, 0x2bca2875f4373fff)):
+            with self.subTest(ticks294=ticks294):
+                data = bytearray(detail())
+                struct.pack_into('<Q', data, 10 + 294, ticks294)
+                struct.pack_into('<Q', data, 10 + 302, ticks302)
+                receipt, rows = self.decode(message(classifier='IPM.Note') + data)
+                self.assertEqual(rows[0]['due'], {'state': 'unknown', 'value': 'date_semantics_unverified'})
+                spans = rows[0]['unresolved_spans']
+                self.assertEqual([(s['object_offset'], s['raw_value']) for s in spans],
+                                 [(294, {'state': 'known', 'value': str(ticks294)}),
+                                  (302, {'state': 'known', 'value': str(ticks302)})])
+                self.assertEqual(receipt['candidates_admitted'], 0)
+
+    def test_intake_rejects_interpretation_without_observed_provenance(self):
+        from lib.outlook_task_candidates import intake_evidence
+        def forged(c):
+            c['kind'] = 'mail_flag'
+            c['due'] = {'state': 'known', 'value': {'kind': 'date_only', 'date': '2026-10-31'}}
+            c['provenance'] = []
+        self.decode(message())
+        self.mutate_candidate(forged)
+        with self.assertRaises(ValueError):
+            intake_evidence(self.root / 'evidence.db', '7', GENERATION)
+
+    def test_receipt_rejects_hostile_names_and_missing_counters(self):
+        for key in ('Synthetic private title', 'Subject: private', 'Joe Example',
+                    'candidates_seen'):
+            with self.subTest(key=key):
+                self.decode(message())
+                with closing(sqlite3.connect(self.root / 'evidence.db')) as db:
+                    original = db.execute('select receipt_json from task_census').fetchone()[0]
+                    receipt = json.loads(original)
+                    if key == 'candidates_seen':
+                        receipt.pop(key)
+                    else:
+                        receipt[key] = 1
+                    db.execute('update task_census set receipt_json=? where receipt_json=?',
+                               (json.dumps(receipt), original))
+                    db.commit()
+                done = subprocess.run([sys.executable, str(ROOT / 'tools/outlook-task-evidence.py'),
+                                       str(self.root / 'evidence.db'), '7', GENERATION],
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, 2)
+                self.assertEqual(done.stdout, '')
+                self.assertNotIn(key, done.stderr)
+
     def test_nonmail_classifier_is_visible_but_never_verified(self):
         receipt, rows = self.decode(message())
         self.assertEqual(len(rows), 1)
