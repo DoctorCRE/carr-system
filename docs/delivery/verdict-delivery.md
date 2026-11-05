@@ -24,7 +24,7 @@ The workflow serializes events for each PR or check SHA. Different event keys ma
 
 Each event handles at most 20 PRs and makes at most 100 gh calls before refusing further work. Each collection contains fewer than 100 results; larger collections fail closed. Required check count is bounded to 100. Each external call has a 30-second process timeout, and review-submit's HTTP calls have 20-second timeouts. Workflow timeout is five minutes. There are no automatic retries. The first external error opens the breaker for that run. Failed runs and artifacts are the diagnostic receipt; no separate send occurs. At ten times event load, API quota and redundant read work are the first constraints. There is no cache, eviction policy, database access, or per-check network lookup except App ID resolution once per distinct producer.
 
-A comment ID is the intake key. Identical verdict bodies at a head deduplicate even if publication returned an ambiguous response. An existing native auto-merge request or native queue entry avoids another arm. Missing facts refuse rather than serving stale success. Recovery starts a fresh event after diagnosis. No automatic retry loop is installed.
+A comment ID is the intake key. Admission scans every prior App review at the current head, including dismissed and superseded reviews. A consumed intake is refused regardless of its decision or report text. An older comment is also refused once a newer intake has won. A genuinely new approval after changes may submit. Identical verdict bodies at a head deduplicate even if publication returned an ambiguous response. An existing native auto-merge request or native queue entry avoids another arm. Missing facts refuse rather than serving stale success. Recovery starts a fresh event after diagnosis. No automatic retry loop is installed.
 
 ## Statechart
 
@@ -34,6 +34,7 @@ stateDiagram-v2
     Received --> Refused: Invalid report or untrusted transport
     Received --> Held: Hold exists
     Received --> HeadMoved: Reviewed head changed
+    Received --> Refused: Intake consumed or superseded by newer intake
     Received --> Submitted: Native App review created
     Submitted --> ApprovedCurrentHead: Approval event matches current head
     Submitted --> Refused: Changes requested or approval absent

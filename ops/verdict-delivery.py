@@ -140,12 +140,17 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
         marker = f'Verdict-Intake: {intake_id}'
         expected_state = 'APPROVED' if report.decision == 'approve' else 'CHANGES_REQUESTED'
         app_reviews = sorted((r for r in reviews if r.get('user', {}).get('login') == app_login
-                              and r.get('state') in {'APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'}),
+                              and r.get('commit_id') == sha),
                              key=lambda r: r.get('submitted_at') or '')
-        duplicate = any(r.get('user', {}).get('login') == app_login and r.get('commit_id') == sha
-                        and r.get('state') == expected_state
-                        and (marker in r.get('body', '').splitlines()
-                             or r.get('body', '').rsplit('\nVerdict-Intake: ', 1)[0] == report.body)
+        consumed = {int(match[1]) for r in app_reviews
+                    for line in r.get('body', '').splitlines()
+                    if (match := re.fullmatch(r'Verdict-Intake: ([1-9][0-9]*)', line))}
+        if intake_id in consumed:
+            return state('refused', 'Verdict intake already consumed at this head')
+        if any(previous > intake_id for previous in consumed):
+            return state('refused', 'Newer verdict intake already consumed at this head')
+        duplicate = any(r.get('state') == expected_state
+                        and r.get('body', '').rsplit('\nVerdict-Intake: ', 1)[0] == report.body
                         for r in app_reviews[-1:])
         if not duplicate:
             current = read(f'pulls/{number}')
