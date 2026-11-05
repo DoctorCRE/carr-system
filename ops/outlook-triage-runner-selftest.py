@@ -253,7 +253,8 @@ class RunnerTest(unittest.TestCase):
         payload = json.loads(receipt.read_text().split(' ', 1)[1])
         self.assertEqual(payload['state'], 'skipped')
         self.assertEqual(payload['runtime_sha'], 'a' * 40)
-        self.assertEqual(payload['counts'], {})
+        self.assertEqual(payload['counts']['run'], dict(snapshot_validated=False, observed=0,
+                         moved=0, held=False, exit_code=78))
         observer = subprocess.run([sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
                                    '--receipt-file', str(receipt), '--service', 'outlook-triage',
                                    '--runtime-sha', 'a' * 40, '--count', 'run.planned', '--minimum', '1'],

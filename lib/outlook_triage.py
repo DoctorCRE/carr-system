@@ -204,7 +204,8 @@ def _minute(moment: datetime) -> clock:
 
 def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits(),
         now_fn: Callable[[], datetime] = lambda: datetime.now(load_settings().timezone),
-        research_copy: Path | None = None, *, proof_window: bool = False) -> Outcome:
+        research_copy: Path | None = None, *, proof_window: bool = False,
+        report: Report | None = None) -> Outcome:
     """Admit evening planning or one explicit 180-second proof attempt."""
     load_settings(home).require_repo(repo)
     if research_copy is not None and not research_copy.is_absolute():
@@ -221,7 +222,10 @@ def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: L
         return Outcome('timed_out', 'window_closed')
     folder = repo / OUT
     day = now.strftime('%Y-%m-%d')
-    outcome, report = _triage(repo, home, limits, lambda: now_fn() >= close, research_copy)
+    outcome, attempt = _triage(repo, home, limits, lambda: now_fn() >= close, research_copy)
+    if report is None:
+        report = Report()
+    report.planning, report.moved, report.left = attempt.planning, attempt.moved, attempt.left
     safe_report = not any(p.is_symlink() for p in (folder, *folder.parents))
     if research_copy is not None:
         safe_report = safe_report and not folder.resolve().is_relative_to(Path(research_copy).resolve())
@@ -273,15 +277,21 @@ def main(argv=None) -> int:
                         help='admit one non-send planning proof now, bounded to 180 real seconds')
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parents[1]
+    report = Report()
     try:
         load_settings().require_service('triage')
         outcome = run(repo, Path.home(), datetime.now(load_settings().timezone), research_copy=args.copy,
-                      proof_window=args.proof_window)
+                      proof_window=args.proof_window, report=report)
     except (OSError, ValueError):
         outcome = Outcome('skipped', 'snapshot_producer_unavailable')
         print('outlook-triage skipped snapshot_producer_unavailable observed=0 planned=0 held=0 moved=0')
-    print(receipt_line('outlook-triage', outcome.state, outcome.reason, {}, Path(__file__).resolve().parents[1]))
-    return EXIT[outcome.state]
+    exit_code = EXIT[outcome.state]
+    counts = dict(snapshot_validated=report.planning.get('snapshot') == 'validated',
+                  observed=report.planning.get('observed', 0), moved=len(report.moved),
+                  held=outcome.state == 'skipped' and outcome.reason in
+                  ('capability_not_verified', 'executor_unavailable'), exit_code=exit_code)
+    print(receipt_line('outlook-triage', outcome.state, outcome.reason, {'run': counts}, repo))
+    return exit_code
 
 
 if __name__ == '__main__':
