@@ -63,11 +63,11 @@ class FixtureTest(unittest.TestCase):
     def test_six_unrunnable_shapes(self):
         original = copy.deepcopy(self.value)
         mutations = [
-            ('command', lambda a: a['execution'].pop('command')),
+            ('missing or unknown fields', lambda a: a['execution'].pop('command')),
             ('passing fixture', lambda a: a['execution']['checks'][0].update(value=0)),
             ('fixture interface', lambda a: a.update(runner='studio-run-receipt.v1')),
             ('fixture', lambda a: a['execution'].update(fixture_pass='proofs/fixtures/waiting-job.json')),
-            ('receipt_source', lambda a: a['execution'].pop('receipt_source')),
+            ('missing or unknown fields', lambda a: a['execution'].pop('receipt_source')),
             ('ancestry', lambda a: a['execution']['checks'][0].update(path='source_sha', value='a'*40)),
         ]
         for message, mutate in mutations:

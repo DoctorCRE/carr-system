@@ -261,7 +261,7 @@
       ],
       "fixture_interface": "receipt-predicate.v1",
       "sources": {
-        "ops/production-proof-plan.py": "4ad11da1b10dfa85a98b92571cfe83cd2ab1fbb4755193cf259a3b9a73846662"
+        "ops/production-proof-plan.py": "eb1c836a8318c9e22529bcd4bfd0a6893fbd1621f693f2e7498f4c9ca400bc96"
       }
     }
   },

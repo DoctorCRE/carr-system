@@ -171,7 +171,7 @@ def admission(body, paths, root, contract):
             'state': 'deferred' if deferred else 'fixtures-verified',
             'fixture_runs': len(results) - deferred, 'deferred_assertions': deferred}))
     if non_product:
-        return 'non-product declaration accepted (admission only); ' + '; '.join(results)
+        return 'non-product declaration accepted (admission only)' + ('; ' + '; '.join(results) if results else '')
     return 'proof declaration accepted (admission only; execution unproven); ' + '; '.join(results)
 
 
