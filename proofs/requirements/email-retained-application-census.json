@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "email-retained-application-census",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "retained-application-counts",
+    "predicate": "Run the merged census read-only on one explicit frozen installed intake receipt export and state.json snapshot with account, bounded offset-bearing window and as-of. Record input digests. Independently sample journal entries and compare acknowledged, refused, blocked, pending and source identity counts. Verify latest-only backlog, repeated attempts counted once, calendar exclusion and partial legacy or pruned history. The pinned receipt observer supplies supporting runtime evidence only. Separate census execution and independent sampling are required for live-proven.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "Counts match independent source samples and history remains partial. Receipt-only evidence leaves semantic proof BLOCKED. No complete inbox application claim follows.",
+    "input_class": "One bounded explicit installed intake export and state snapshot; no launch, refresh, mailbox read, write or send",
+    "deadline_seconds": 60
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 1, "max_records": 1000, "max_runtime_seconds": 60, "max_artifact_bytes": 1048576}
+}
