@@ -185,18 +185,27 @@ def database_read(selected):
 def main(argv=None, *, clock=lambda: datetime.now(timezone.utc), read=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--requests', required=True)
-    parser.add_argument('--account', required=True)
+    account = parser.add_mutually_exclusive_group(required=True)
+    account.add_argument('--account')
+    account.add_argument('--account-file', help='Private UTF-8 file containing one exact mailbox account')
     parser.add_argument('--start', required=True)
     parser.add_argument('--end', required=True)
     parser.add_argument('--fixture', help='Synthetic snapshot JSON, without a database connection')
     args = parser.parse_args(argv)
     try:
+        fixed_account = args.account
+        if args.account_file:
+            with Path(args.account_file).open('rb') as stream:
+                value = stream.read(256)
+            if len(value) > 255:
+                raise ValueError('account_too_large')
+            fixed_account = value.decode('utf-8').strip()
         state = load_private(args.requests)
         port = read or database_read
         if args.fixture:
             snapshot = load_private(args.fixture)['rows']
             port = lambda _: snapshot
-        result = prove(state, port, args.account, args.start, args.end, clock)
+        result = prove(state, port, fixed_account, args.start, args.end, clock)
     except Exception as exc:
         print(json.dumps(dict(ok=False, reason='proof_unavailable', error_type=type(exc).__name__)))
         return 2

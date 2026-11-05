@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location('last_touch_proof', ROOT / 'tools/email-last-touch-proof.py')
+assert spec is not None and spec.loader is not None
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 NOW = datetime(2026, 11, 4, tzinfo=timezone.utc)
@@ -234,6 +235,19 @@ class PostgresTests(unittest.TestCase):
                              '--account',ACCOUNT,'--start',START,'--end',END], clock=lambda: NOW)
         self.assertEqual(rc, 1)
         self.assertEqual(json.loads(output.getvalue())['mismatches'], 0)
+
+    def test_private_account_file_keeps_account_out_of_command_arguments(self):
+        state_path, fixture_path = self.pg.root / 'private-requests.json', self.pg.root / 'private-snapshot.json'
+        account_path = self.pg.root / 'account.txt'
+        state_path.write_text(json.dumps({'requests': {'one': request()}}))
+        fixture_path.write_text(json.dumps({'rows': [row()]}))
+        account_path.write_text(ACCOUNT + '\n')
+        with patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()) as output:
+            rc = proof.main(['--requests',str(state_path),'--fixture',str(fixture_path),
+                             '--account-file',str(account_path),'--start',START,'--end',END], clock=lambda: NOW)
+        self.assertEqual(rc, 1)
+        self.assertEqual(json.loads(output.getvalue())['mismatches'], 0)
+        self.assertNotIn(ACCOUNT, output.getvalue())
 
 
 if __name__ == '__main__':

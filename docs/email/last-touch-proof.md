@@ -24,10 +24,10 @@ Counts cover unique active targets in the retained request population. They do n
 
 ## Run the command
 
-Use the installed checkout and an explicitly retained intake state file. No mailbox is read. Supply an explicit account and offset-bearing window. The command uses `DATABASE_URL` supplied by the existing read-only database wrapper.
+Use the installed checkout and an explicitly retained intake state file. No mailbox is read. Supply an explicit account and offset-bearing window. `--account-file` reads one exact account from an explicit private UTF-8 file of at most 255 bytes. `--account` accepts the same value directly for synthetic fixtures. The command uses `DATABASE_URL` supplied by the existing read-only database wrapper.
 
 ```sh
-.venv/bin/python tools/db-tap.py run tools/email-last-touch-proof.py --requests /tmp/email-last-touch-proof-private.json --account joe.bookout@carr.us --start 2026-10-28T00:00:00-05:00 --end 2026-11-04T00:00:00-06:00
+.venv/bin/python tools/db-tap.py run tools/email-last-touch-proof.py --requests /tmp/email-last-touch-proof-private.json --account-file /tmp/email-last-touch-account.txt --start 2026-10-28T00:00:00-05:00 --end 2026-11-04T00:00:00-06:00
 ```
 
 The coordinator must verify the account and choose a naturally populated bounded window from retained evidence. The example window is not evidence that examples exist. Never manufacture an email to make proof pass. A synthetic fixture contains a `rows` list in the snapshot shape returned by `SQL` and uses `--fixture FILE` instead of a database.
