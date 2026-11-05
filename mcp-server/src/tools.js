@@ -4517,6 +4517,8 @@ export const TOOLS = {
       email_context: { type: 'object', additionalProperties: false,
         required: ['subject', 'conversation_id', 'sender', 'recipients'], properties: {
           source_activity_id: { type: 'string', format: 'uuid' },
+          body_kind: { type: 'string' }, body_completeness: { type: 'string' },
+          body_outcome: { type: 'string' }, body_truncated: { type: 'boolean' },
           subject: { type: 'string' }, conversation_id: { type: ['string', 'null'] },
           sender: { type: 'object', additionalProperties: false, required: ['email', 'internal'],
             properties: { email: { type: 'string' }, name: { type: ['string', 'null'] }, internal: { type: 'boolean' } } },

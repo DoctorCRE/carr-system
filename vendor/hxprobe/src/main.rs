@@ -180,6 +180,8 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              -- holds only Outlook's ~255-character cache of it. Most messages
              -- are preview-only: that is the format, not a parse failure.
              body_kind    TEXT,
+             body_completeness TEXT,
+             body_outcome TEXT,
              sent_unix    INTEGER,   -- send time (Date), message slot +718
              sent_utc     TEXT,
              subject_inherited INTEGER, -- always 0: subjects are never borrowed
@@ -406,12 +408,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             .prepare(
                 "INSERT INTO messages
                    (block,sender,sender_name,recipients,subject,message_id,body,
-                    html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
+                    html,body_words,html_bytes,body_kind,body_completeness,body_outcome,sent_unix,sent_utc,
                     subject_inherited,preview,body_source,copies,copy_key,local_keys,
                     flag_status,flag_due_unix,flag_completed_unix,moved_to_other,pinned,received_unix,
                     folder_links_unresolved)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),0,?13,?14,?15,NULL,?16,?17,?18,?19,?20,?21,?22,?23)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,
+                         datetime(?14,'unixepoch'),0,?15,?16,?17,NULL,?18,?19,?20,?21,?22,?23,?24,?25)",
             )
             .expect("prepare");
 
@@ -438,7 +440,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 r.html,
                 r.body.split_whitespace().count() as i64,
                 r.html.as_ref().map(|h| h.len() as i64),
-                if r.html.is_some() { "full" } else { "preview" },
+                r.completeness.kind(r.outcome),
+                r.completeness.as_str(),
+                r.outcome,
                 m.sent_unix,
                 m.preview,
                 r.body_source,
@@ -682,34 +686,127 @@ fn main() {
 }
 
 /// One exported message row: the decoded object plus its resolved body and folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Completeness { Unknown, Preview, Complete, Conflict }
+
+impl Completeness {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown", Self::Preview => "preview",
+            Self::Complete => "complete", Self::Conflict => "conflict",
+        }
+    }
+    fn kind(self, outcome: &'static str) -> &'static str {
+        match self {
+            Self::Complete => "full", Self::Conflict => "conflict",
+            Self::Preview => "preview", Self::Unknown => outcome,
+        }
+    }
+}
+
 struct Row<'a> {
     key: u64,
     m: &'a message::Message,
     html: Option<String>,
     body: String,
     body_source: Option<&'static str>,
+    completeness: Completeness,
+    outcome: &'static str,
     folder: Option<u64>,
 }
 
 impl<'a> Row<'a> {
     fn new(key: u64, m: &'a message::Message, sidecars: &mut body::Sidecars, folders: &folder::Index) -> Self {
-        let mut found = None;
+        let mut candidates = std::collections::BTreeMap::new();
+        let mut failure = None;
         for b in &m.bodies {
-            found = match b {
-                message::Body::Html(html) => Some((html.clone(), "inline")),
-                message::Body::Sidecar(path) => sidecars.html(path).map(|html| (html, "efm")),
+            let (decoded, source) = match b {
+                message::Body::Html(html) => (Ok(html.clone()), "inline"),
+                message::Body::Sidecar(path) => {
+                    let decoded = sidecars.resolve(path);
+                    if decoded.is_ok() { sidecars.linked += 1; } else { sidecars.rejected += 1; }
+                    (decoded, "efm")
+                }
             };
-            if found.is_some() {
-                break;
+            match decoded {
+                Ok(html) => { candidates.entry(html).or_insert(source); }
+                Err(reason) => { failure = Some(reason); }
             }
         }
-        let (html, body_source) = found.map_or((None, None), |(h, s)| (Some(h), Some(s)));
+        let conflict = candidates.len() > 1;
+        let (mut html, mut body_source) = if !conflict && failure.is_none() && m.body_rejected == 0 {
+            candidates.into_iter().next().map_or((None, None), |(h, s)| (Some(h), Some(s)))
+        } else { (None, None) };
+        if html.as_ref().is_some_and(|h| !h.trim_start().starts_with('<') || !h.trim_end().ends_with('>')
+                                    || !h.contains("</")) {
+            failure = Some("body_format_unverified");
+        }
         let mut body = html.as_deref().map(body::html_to_text).unwrap_or_default();
-        if body.split_whitespace().count() < 3 {
-            body = m.preview.clone().unwrap_or(body);
+        let (completeness, outcome) = if conflict {
+            (Completeness::Conflict, "conflict")
+        } else if let Some(reason) = failure {
+            (Completeness::Unknown, reason)
+        } else if m.body_rejected > 0 {
+            (Completeness::Unknown, "body_rejected")
+        } else if html.is_some() && !body.is_empty() && m.preview.as_deref() != Some(body.as_str()) {
+            (Completeness::Complete, "complete")
+        } else if m.preview.as_ref().is_some_and(|p| !p.is_empty()) {
+            (Completeness::Preview, "preview")
+        } else {
+            (Completeness::Unknown, "body_absent")
+        };
+        if completeness != Completeness::Complete {
+            html = None;
+            body_source = None;
+            body = m.preview.clone().unwrap_or_default();
         }
         // The folder must be a catalogued folder of the message's own account.
         let folder = m.folder.filter(|f| folders.folders.get(f).is_some_and(|x| Some(x.account_id) == m.account));
-        Row { key, m, html, body, body_source, folder }
+        Row { key, m, html, body, body_source, completeness, outcome, folder }
+    }
+}
+
+#[cfg(test)]
+mod completeness_tests {
+    use super::*;
+    fn row(m: &message::Message) -> Row<'_> {
+        Row::new(1, m, &mut body::Sidecars::default(), &folder::Index::default())
+    }
+    #[test]
+    fn conflicting_inline_bodies_are_held() {
+        let m = message::Message { bodies: vec![message::Body::Html("<p>longer old body</p>".into()),
+            message::Body::Html("<p>new</p>".into())], ..Default::default() };
+        let r = row(&m);
+        assert!(r.html.is_none(), "conflicting revisions must never select a body");
+    }
+    #[test]
+    fn preview_equality_and_unverified_format_do_not_establish_completeness() {
+        for (html, preview, expected) in [
+            ("<p>Same text</p>", "Same text", Completeness::Preview),
+            ("decoded gzip payload", "Preview", Completeness::Unknown),
+            ("<p> </p>", "Preview", Completeness::Preview),
+        ] {
+            let m = message::Message { bodies: vec![message::Body::Html(html.into())],
+                preview: Some(preview.into()), ..Default::default() };
+            let r = row(&m);
+            assert_eq!(r.completeness, expected);
+            assert!(r.html.is_none());
+            assert_eq!(r.body, preview);
+        }
+    }
+    #[test]
+    fn duplicate_candidates_agree_but_unreadable_candidates_hold() {
+        let mut m = message::Message { bodies: vec![message::Body::Html("<p>Yes.</p>".into()); 2],
+            ..Default::default() };
+        assert_eq!(row(&m).completeness, Completeness::Complete);
+        m.bodies.push(message::Body::Sidecar("~/Files/missing.dat".into()));
+        assert_eq!(row(&m).outcome, "sidecar_missing");
+        assert!(row(&m).html.is_none());
+    }
+    #[test]
+    fn short_html_keeps_its_own_text() {
+        let m = message::Message { bodies: vec![message::Body::Html("<p>Yes.</p>".into())],
+            preview: Some("Different preview text".into()), ..Default::default() };
+        assert_eq!(row(&m).body, "Yes.");
     }
 }
