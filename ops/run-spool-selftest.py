@@ -10,13 +10,14 @@ to put them. The spool queues locally and a scheduled flusher replays through
 the REAL tools/ops-record.py (rule a8c55a47: the flusher must not grow a second
 copy of ops-record's checks).
 
-SAME NO-MOCK DISCIPLINE as ops/run-scheduled-selftest.py: every check drives
-the real tools/ops-spool.py as a subprocess, against a throwaway spool file
+CLI checks drive the real tools/ops-spool.py as a subprocess against a
+throwaway spool file
 (CARR_RUN_SPOOL_DB — the default lives under the shared out/, which is
 production state) and, where a database is needed to FAIL, a loopback port that
 refuses instantly. The deterministic-refusal check feeds the real ops-record a
 row it really refuses (a failed state with no failure class, its own documented
-rc=2), not a stub that pretends to.
+rc=2), not a stub that pretends to. Process-result fixtures additionally
+exercise private stderr redaction and configuration retry diagnostics.
 
 WHAT IS DELIBERATELY NOT COVERED HERE: the full staging round trip — wrapper →
 spool → flush → a real ops.run row read back — lives in
