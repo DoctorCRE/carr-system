@@ -51,6 +51,9 @@ test('journal custody, replay, privilege denials and append-only outcomes in Pos
   const outcome={idempotency_key:randomUUID(),reference:first.reference,observations:[{observation_id:randomUUID(),original_key:key,status:'uncertain',activity_id:null,error_code:'timeout'}]};
   const record=()=>tools['record-email-touch-journal-outcome'].handler(db,{id:actor,slug:'joe-local'},outcome);
   assert.equal((await record()).ok,true); assert.equal((await record()).ok,true);
+  const malformed={...outcome.observations[0],observation_id:randomUUID(),status:null};
+  await assert.rejects(db.query('select ops.record_email_touch_journal_outcome($1,$2::jsonb,$3)',
+   [first.reference,JSON.stringify([malformed]),liveRelease]),/outcome_invalid/);
   outcome.observations[0].status='acknowledged';
   await assert.rejects(record(),/conflict/);
   liveRelease='f'.repeat(40);

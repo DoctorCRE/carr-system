@@ -160,7 +160,9 @@ begin
  if j.producer_sha is distinct from p_release then raise exception 'email_journal_release_mismatch'; end if;
  perform pg_advisory_xact_lock(hashtextextended(d,0));
  for o in select value from jsonb_array_elements(p_observations) loop
-  if (select count(*) from jsonb_object_keys(o))<>5 or o->>'status' not in ('acknowledged','uncertain','refused')
+  if (select count(*) from jsonb_object_keys(o))<>5
+   or not o ?& array['observation_id','original_key','status','activity_id','error_code']
+   or o->>'status' is null or o->>'status' not in ('acknowledged','uncertain','refused')
    or (o->>'error_code' is not null and o->>'error_code' !~ '^[a-z][a-z0-9_]{0,63}$')
    or not exists(select 1 from jsonb_array_elements(convert_from(j.raw,'UTF8')::jsonb->'expected') e where e->>'original_key'=o->>'original_key') then raise exception 'email_journal_outcome_invalid'; end if;
   perform (o->>'activity_id')::uuid;
