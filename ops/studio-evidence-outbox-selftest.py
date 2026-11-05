@@ -124,6 +124,70 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(result['acknowledged'], 20)
         self.assertEqual(result['pending'], 980)
 
+    def test_enqueue_during_slow_flush(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+        box = Outbox(self.path)
+        box.enqueue(self.capture)
+        started, release = Event(), Event()
+        def slow(claim, digest, **kwargs):
+            started.set()
+            self.assertTrue(release.wait(15))
+            return self.ack(claim, digest, **kwargs)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            flushing = pool.submit(box.flush, slow)
+            self.assertTrue(started.wait(5))
+            producer = pool.submit(box.enqueue, replace(self.capture, run_id=str(uuid4())))
+            try:
+                self.assertEqual(producer.result(timeout=12), 'pending')
+            finally:
+                release.set()
+            flushing.result()
+        self.assertEqual(box.flush(self.ack)['acknowledged'], 2)
+
+    def test_concurrent_flushers_do_not_duplicate_delivery(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+        box = Outbox(self.path)
+        box.enqueue(self.capture)
+        started, release = Event(), Event()
+        sent = []
+        def send(claim, digest, **kwargs):
+            sent.append(claim.run_id)
+            started.set()
+            self.assertTrue(release.wait(5))
+            return self.ack(claim, digest, **kwargs)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(box.flush, send)
+            self.assertTrue(started.wait(5))
+            second = pool.submit(box.flush, send)
+            release.set()
+            first.result()
+            second.result()
+        self.assertEqual(sent, [self.capture.run_id])
+
+    def test_capacity_includes_terminal_rows(self):
+        box = Outbox(self.path)
+        for _ in range(1000):
+            box.enqueue(replace(self.capture, run_id=str(uuid4())))
+        box.flush(self.ack)
+        def refuse(*args, **kwargs):
+            raise Refused()
+        box.flush(refuse)
+        with self.assertRaises(OverflowError):
+            box.enqueue(self.capture)
+
+    def test_success_resets_transport_failures(self):
+        box = Outbox(self.path)
+        box.enqueue(self.capture)
+        def offline(*args, **kwargs):
+            raise TimeoutError()
+        box.flush(offline)
+        box.flush(self.ack)
+        box.enqueue(replace(self.capture, run_id=str(uuid4())))
+        self.assertFalse(box.flush(offline)['paused'])
+        self.assertEqual(box.flush(self.ack)['acknowledged'], 2)
+
     def test_concurrent_identical_producers_converge(self):
         from concurrent.futures import ThreadPoolExecutor
         Outbox(self.path)

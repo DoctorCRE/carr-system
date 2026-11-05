@@ -12,7 +12,7 @@ The data shape is a frozen `Capture` binding a canonical execution UUID to one i
 
 Alternative A extended the existing generic run spool. That spool owns recorder argv, not installation associations, and is held by open PR #2980. Alternative B uses an isolated SQLite outbox with immutable execution keys. B keeps queue recovery local and leaves the run recorder contract unchanged. No production adapter or command accepts caller JSON as evidence.
 
-SQLite transactions serialize concurrent enqueue and flush operations. A flush holds a write transaction across its bounded batch to prevent concurrent flushers from racing. At normal load one producer and one flusher suffice. At ten times load the serialized transport is the first limit. Storage caps at 1,000 retained claims, including acknowledged and refused rows, then refuses visibly. There is no automatic eviction of audit history. No caching, fan-out, N+1 database reads or production Postgres writes occur in this part.
+A separate per-outbox file lock serializes flush and recovery operations. SQLite write transactions cover only each durable result, so producers can stage claims while transport calls run. At normal load one producer and one flusher suffice. At ten times load the serialized transport is the first limit. Storage caps at 1,000 retained claims, including acknowledged and refused rows, then refuses visibly. There is no automatic eviction of audit history. No caching, fan-out, N+1 database reads or production Postgres writes occur in this part.
 
 The queue persists before any network operation. Timeout or connection failure leaves the same immutable key pending. Two consecutive transport failures persistently open the breaker. A diagnosed recovery explicitly resets it. A lost acknowledgement replays the same key and digest. Deterministic ingestion refusals remain visible and do not block later rows. A mismatched acknowledgement opens the breaker immediately. Missing facts, runtime drift, target mismatch and malformed intervals refuse staging. No failure falls back to local success.
 
@@ -31,6 +31,7 @@ The callback is an internal transport seam, not authentication. Supplying an arb
 stateDiagram-v2
     [*] --> Pending: Valid claim is durably staged
     Pending --> Pending: Identical claim is staged again
+    Pending --> Pending: Another claim is staged during delivery
     Pending --> Refused: CARR refuses the claim
     Pending --> Acknowledged: Matching canonical acknowledgement arrives
     Pending --> Pending: Transport fails once or process exits before commit

@@ -3,9 +3,10 @@
 The future authenticated transport must deduplicate by execution UUID and digest,
 verify the producer and local readbacks, and enforce its supplied timeout.
 """
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import os
@@ -123,46 +124,51 @@ class Outbox:
                          (capture.run_id, payload, digest, 'pending'))
         return 'pending'
 
+    @contextmanager
+    def _flush_lock(self):
+        fd = os.open(str(self.path) + '.flush.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
     def resume(self):
         """Explicit diagnosed recovery, never automatically reset on restart."""
-        with closing(self._connect()) as conn, conn:
+        with self._flush_lock(), closing(self._connect()) as conn, conn:
             conn.execute('UPDATE breaker SET failures=0 WHERE id=1')
 
     def flush(self, send):
-        """Send at most 20 rows. Matching acknowledgement only means delivery.
-
-        The transport enforces timeout=5 and authenticates the receiver. A process
-        exit before commit replays identical keys, including remotely accepted rows.
-        """
-        with closing(self._connect()) as conn, conn:
-            conn.execute('BEGIN IMMEDIATE')
+        """Send at most 20 rows, replaying identical keys after interrupted delivery."""
+        with self._flush_lock(), closing(self._connect()) as conn:
             failures = conn.execute('SELECT failures FROM breaker WHERE id=1').fetchone()[0]
-            if failures < 2:
-                rows = conn.execute("SELECT run_id,payload,digest FROM claims WHERE state='pending' ORDER BY rowid LIMIT 20").fetchall()
-                for run_id, payload, digest in rows:
-                    if hashlib.sha256(payload.encode()).hexdigest() != digest:
-                        raise ValueError('stored claim digest mismatch')
-                    claim = Capture.decode(payload)
+            rows = conn.execute("SELECT run_id,payload,digest FROM claims WHERE state='pending' ORDER BY rowid LIMIT 20").fetchall() if failures < 2 else []
+            for run_id, payload, digest in rows:
+                if hashlib.sha256(payload.encode()).hexdigest() != digest:
+                    raise ValueError('stored claim digest mismatch')
+                claim = Capture.decode(payload)
+                state, receipt = None, None
+                try:
+                    ack = send(claim, digest, timeout=5)
+                except Refused:
+                    state, failures = 'refused', 0
+                except (OSError, TimeoutError):
+                    failures += 1
+                else:
                     try:
-                        ack = send(claim, digest, timeout=5)
-                    except Refused:
-                        conn.execute("UPDATE claims SET state='refused' WHERE run_id=?", (run_id,))
-                        failures = 0
-                    except (OSError, TimeoutError):
-                        failures += 1
-                        break
+                        matched = (isinstance(ack, Acknowledgement) and ack.run_id == run_id
+                                   and ack.digest == digest and str(UUID(ack.receipt_id)) == ack.receipt_id)
+                    except (ValueError, TypeError, AttributeError):
+                        matched = False
+                    if matched:
+                        state, receipt, failures = 'acknowledged', ack.receipt_id, 0
                     else:
-                        try:
-                            matched = (isinstance(ack, Acknowledgement) and ack.run_id == run_id
-                                       and ack.digest == digest and str(UUID(ack.receipt_id)) == ack.receipt_id)
-                        except (ValueError, TypeError, AttributeError):
-                            matched = False
-                        if not matched:
-                            failures = 2
-                            break
-                        conn.execute("UPDATE claims SET state='acknowledged',receipt_id=? WHERE run_id=?",
-                                     (ack.receipt_id, run_id))
-                        failures = 0
-                conn.execute('UPDATE breaker SET failures=? WHERE id=1', (failures,))
+                        failures = 2
+                with conn:
+                    if state:
+                        conn.execute('UPDATE claims SET state=?,receipt_id=? WHERE run_id=?', (state, receipt, run_id))
+                    conn.execute('UPDATE breaker SET failures=? WHERE id=1', (failures,))
+                if not state:
+                    break
             counts = dict(conn.execute('SELECT state,count(*) FROM claims GROUP BY state').fetchall())
         return {key: counts.get(key, 0) for key in ('acknowledged', 'refused', 'pending')} | {'paused': failures >= 2}
