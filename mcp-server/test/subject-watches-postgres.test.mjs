@@ -236,7 +236,18 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
     };
     const before=snapshot('before');
     const args={deal,base_version:1,fields:{city:'Synthetic changed city'},idempotency_key:randomUUID()};
-    await call(who,'update-deal',args);
+    if(who.slug==='joe'){
+      const busy=new pg.Client({connectionString:dsn});await busy.connect();
+      try {
+        await busy.query('begin');
+        await busy.query('select * from ops.subject_watch_scan_cursor where singleton for update');
+        await c.query('set statement_timeout=500');
+        await call(who,'update-deal',args);
+      } finally {
+        await c.query('set statement_timeout=0');
+        await busy.query('rollback');await busy.end();
+      }
+    } else await call(who,'update-deal',args);
     const event=(await c.query("select id,personal_scope from event where subject_id=$1 and verb='update-deal'",[deal])).rows[0];
     assert.equal(event.personal_scope,`${who.sponsoring_human_slug??who.slug}-personal`);
     const counts=async()=> (await c.query("select recipient_actor,count(*)::integer n from ops.notification where subject_ref=$1 and dedupe_key like 'subject-watch:%' group by recipient_actor order by recipient_actor",[deal])).rows;
