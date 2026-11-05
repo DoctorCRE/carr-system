@@ -361,6 +361,25 @@ class AdmissionTest(unittest.TestCase):
             capture_output=True, text=True, timeout=10, env=fixture_env())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_wr823_canonical_proof_rejects_empty_mail_ids(self):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr823-s2-canonical-intake-run.json').read_text())
+        assertion = next(a for a in requirement['assertions'] if a['id'] == 'next-installed-intake-canonical-run')
+        match = re.search(r'run\.mail_ids minimum (\d+)', assertion['predicate'])
+        self.assertIsNotNone(match)
+        minimum = match.group(1)
+        contract = json.loads((ROOT / module().CONTRACT_PATH).read_text())
+        observer = self.root / 'observer.py'
+        observer.write_bytes(runner_source(contract['x-runners']['studio-run-receipt.v1']))
+        receipt = self.root / 'receipt.txt'
+        receipt.write_text('outlook-intake-receipt ' + json.dumps({
+            'state': 'succeeded', 'runtime_sha': 'a' * 40, 'counts': {'run': {'mail_ids': 0}}}))
+        result = subprocess.run([sys.executable, str(observer), '--receipt-file', str(receipt),
+            '--runtime-sha', 'a' * 40, '--service', 'outlook-intake',
+            '--count', 'run.mail_ids', '--minimum', minimum],
+            capture_output=True, text=True, timeout=10, env=fixture_env())
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('receipt count does not meet declared minimum', result.stdout)
+
     def test_placeholder_and_duplicate_sections(self):
         for body in ['## Production proof\nn/a:', '## Production proof\nn/a: TODO',
                      '## Production proof\n<!-- n/a: docs -->',
