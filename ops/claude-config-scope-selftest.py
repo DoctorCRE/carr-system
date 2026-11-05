@@ -137,6 +137,11 @@ class Scope(unittest.TestCase):
         installer = runpy.run_path(str(ROOT / 'ops/config-as-code.py'))
         self.assertEqual(Path(installer['CODEX_HOOKS_SRC']),
                          Path(installer['REPO']) / '.codex/hooks.json')
+        state = installer['codex_configuration_state']
+        with tempfile.TemporaryDirectory() as home, patch.dict(state.__globals__,
+                {'HOME': home, 'CODEX_CONFIG': str(Path(home) / '.codex/config.toml'),
+                 'CODEX_HOOKS_SRC': str(ROOT / '.codex/hooks.json')}):
+            self.assertEqual(state(), 'absent')
         doc = json.loads((ROOT / '.codex/hooks.json').read_text())
         self.assertEqual(doc, json.loads((ROOT / 'ops/config/codex-hooks.json').read_text()))
         command = next(h['command'] for g in doc['hooks']['PreToolUse'] for h in g['hooks']

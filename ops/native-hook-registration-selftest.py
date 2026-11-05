@@ -67,7 +67,7 @@ class SafetyHooks(unittest.TestCase):
             codex.mkdir()
             (codex / 'hooks.json').write_text(json.dumps(self.documents()['codex']))
             with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(project / 'absent'),
-                                         'CODEX_HOME': str(codex)}), \
+                                         'CODEX_HOME': str(project / 'absent-codex')}), \
                     patch.object(gate, 'REPO', project), \
                     patch.object(gate, 'check_baseline', return_value=[]), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \
