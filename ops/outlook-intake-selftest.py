@@ -315,6 +315,127 @@ class IntakeTest(unittest.TestCase):
         copier.start()
         self.addCleanup(copier.stop)
 
+    def test_ledger_identity_change_refuses_before_replay(self):
+        self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        for request in state['requests'].values():
+            request['acknowledged'] = False
+            request['retry_at'] = 0
+        state_path.write_text(json.dumps(state))
+        before = state_path.read_bytes()
+        binding_path = self.out() / 'binding.json'
+        binding = binding_path.read_bytes() if binding_path.exists() else None
+        path = self.home / '.config/carr/outlook.json'
+        original = json.loads(path.read_text())
+        for changes in ({'owner': 'dell'}, {'account': 'other@example.test'}):
+            with self.subTest(changes=changes):
+                path.write_text(json.dumps({**original, **changes}))
+                self.fake.calls.clear()
+                result = self.run_intake(touch=False)
+                self.assertEqual((result.state, result.reason), ('failed', 'ledger_binding_mismatch'))
+                self.assertFalse(self.fake.calls)
+                self.assertEqual((self.out() / intake.STATE).read_bytes(), before)
+                self.assertEqual(binding_path.read_bytes(), binding)
+
+    def test_private_normal_receipt_and_safe_projection(self):
+        with patch.object(intake, 'stamp', return_value={'runtime_sha': 'a' * 40, 'runtime_behind': 0}):
+            result = self.run_intake()
+        private = json.loads((self.out() / 'receipt-latest.json').read_text())
+        self.assertEqual(private['runtime_sha'], 'a' * 40)
+        self.assertEqual(private['mailbox_owner'], 'joe')
+        self.assertEqual(private['mailbox_account'], OWNER)
+        self.assertEqual(private['folder_account_id'], 7)
+        self.assertTrue(private['binding_verified'])
+        self.assertTrue(private['account_verified'])
+        self.assertEqual(private['observed_at'], NOW.isoformat())
+        binding = json.loads((self.out() / 'binding.json').read_text())
+        self.assertEqual(private['binding_digest'], intake._hash(json.dumps(binding, sort_keys=True)))
+        self.assertEqual(stat.S_IMODE((self.out() / 'receipt-latest.json').stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE((self.out() / 'binding.json').stat().st_mode), 0o600)
+        safe = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertNotIn(OWNER, json.dumps(safe))
+        self.assertEqual(safe['binding_digest'], private['binding_digest'])
+        self.assertEqual(safe['mailbox_owner'], 'joe')
+
+    def test_legacy_binding_requires_identity_evidence(self):
+        self.out().mkdir(parents=True)
+        path = self.out() / intake.STATE
+        path.write_text(json.dumps({'requests': {}}))
+        before = path.read_bytes()
+        result = self.run_intake()
+        self.assertEqual(result.reason, 'ledger_binding_required')
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(self.fake.calls)
+
+    def test_matching_legacy_binding_preserves_request_keys(self):
+        self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        path = self.out() / intake.STATE
+        before = json.loads(path.read_text())['requests']
+        (self.out() / 'binding.json').unlink()
+        self.assertEqual(self.run_intake(touch=False).state, 'succeeded')
+        self.assertEqual(json.loads(path.read_text())['requests'], before)
+
+    def test_corrupt_state_never_reinitializes_bound_ledger(self):
+        self.run_intake()
+        (self.out() / intake.STATE).write_text('{broken')
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake().reason, 'ledger_state_invalid')
+        self.assertFalse(self.fake.calls)
+
+    def test_private_receipt_failure_is_a_failed_run(self):
+        original = intake._private_write
+        def write(path, text):
+            if path.name == 'receipt-latest.json':
+                raise OSError('PRIVATE')
+            return original(path, text)
+        with patch.object(intake, '_private_write', side_effect=write):
+            result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'receipt_failed'))
+
+    def test_binding_survives_state_removal_and_corruption(self):
+        self.run_intake()
+        binding = self.out() / 'binding.json'
+        before = binding.read_bytes()
+        (self.out() / intake.STATE).unlink()
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual(binding.read_bytes(), before)
+        binding.write_text('{broken')
+        self.fake.calls.clear()
+        self.assertEqual(self.run_intake().reason, 'ledger_binding_invalid')
+        self.assertFalse(self.fake.calls)
+
+    def test_unchanged_and_outside_window_runs_leave_receipts(self):
+        self.run_intake()
+        self.run_intake(touch=False)
+        self.assertEqual(json.loads((self.out() / 'receipt-latest.json').read_text())['reason'], 'store_unchanged')
+        self.fake.now = NOW.replace(hour=3)
+        self.assertEqual(self.run_intake(touch=False).reason, 'outside_window')
+        self.assertEqual(json.loads((self.out() / 'receipt-latest.json').read_text())['reason'], 'outside_window')
+
+    def test_changed_owner_is_refused_before_legacy_reconciliation(self):
+        self.run_intake()
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state.pop('mail_ids')
+        state_path.write_text(json.dumps(state))
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True, exist_ok=True)
+        decoder.touch(mode=0o700)
+        path = self.home / '.config/carr/outlook.json'
+        path.write_text(json.dumps({**json.loads(path.read_text()), 'owner': 'dell'}))
+        before = self.fake.decodes
+        self.assertEqual(self.run_intake().reason, 'ledger_binding_mismatch')
+        self.assertEqual(self.fake.decodes, before)
+
+    def test_existing_private_files_are_narrowed_on_next_run(self):
+        self.run_intake()
+        for name in ('binding.json', 'receipt-latest.json'):
+            (self.out() / name).chmod(0o644)
+        self.run_intake(touch=False)
+        for name in ('binding.json', 'receipt-latest.json'):
+            self.assertEqual(stat.S_IMODE((self.out() / name).stat().st_mode), 0o600)
+
     def search_decode(self, source, files, target):
         self.fake.decode(source, files, target)
         with closing(sqlite3.connect(target)) as db, db:
@@ -1348,6 +1469,7 @@ class IntakeTest(unittest.TestCase):
                       m['sent_unix'])[0], 'sent': m['sent_unix'], 'recipients_unknown': True,
                       'participants': {}} for m in held}
         self.out().mkdir(parents=True)
+        intake._ledger_binding(self.out(), load_settings(self.home), {})
         (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
         result = self.coverage_run([])
         self.assertEqual((result.state, result.reason), ('failed', 'coverage_failed'))
@@ -1368,6 +1490,7 @@ class IntakeTest(unittest.TestCase):
             ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
             unresolved[ident(m)] = {'ck': ck, 'sent': m['sent_unix'], **extra}
         self.out().mkdir(parents=True)
+        intake._ledger_binding(self.out(), load_settings(self.home), {})
         (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
         result = self.run_intake([held, stale])
         self.assertEqual(result.counts['unresolved_expired'], 1)
@@ -2246,6 +2369,11 @@ class IntakeTest(unittest.TestCase):
                          (1, 0, 1))
 
     def test_runtime_proof_uses_retained_mail_ids_from_real_intake(self):
+        original_stamp = intake.stamp
+        source_stamp = original_stamp(ROOT)
+        context = patch.object(intake, 'stamp', return_value=source_stamp)
+        context.start()
+        self.addCleanup(context.stop)
         requirement = json.loads((ROOT / 'proofs/requirements/wr823-runtime-identity.json').read_text())
         self.assertIn('run.mail_ids minimum 1', requirement['assertions'][0]['input_class'])
         messages = [mail(CLIENT.email, -timedelta(hours=1), message_id='<a@example.test>'),
@@ -2548,7 +2676,11 @@ class IntakeTest(unittest.TestCase):
                 state, detail, args = self.scheduled(outcome)
                 self.assertEqual(state, outcome.state)
                 self.assertNotRegex(detail, r'^outlook\.intake exited', 'the scheduler rejected a real receipt')
-                self.assertEqual(json.loads(detail), json.loads(intake.receipt_line(outcome).split(' ', 1)[1]))
+                expected = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])
+                if expected.get('runtime_sha') is None:
+                    expected.pop('runtime_sha', None)
+                    expected.pop('runtime_behind', None)
+                self.assertEqual(json.loads(detail), expected)
                 if outcome.state == 'failed':
                     self.assertEqual(args[args.index('--failure-class') + 1], outcome.reason)
 
@@ -2678,6 +2810,7 @@ class IntakeTest(unittest.TestCase):
 
     def test_orphan_calendar_requests_are_quarantined_before_replay(self):
         self.out().mkdir(parents=True)
+        intake._ledger_binding(self.out(), load_settings(self.home), {})
         requests = {}
         for verb, kind, origin in [('log-activity', 'meeting', 'legacy'),
                                    ('set-next-action', None, 'event|legacy')]:
@@ -2805,11 +2938,13 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(intake.main(), 0, 'a failed router step never changes the intake result')
         self.assertEqual(order, ['intake', 'router'])
         self.assertEqual(models, ['sonnet'])
-        for reason in ('outside_window', 'previous_run_active'):
+        for reason in ('outside_window', 'previous_run_active', 'ledger_binding_required',
+                       'ledger_binding_invalid', 'ledger_binding_mismatch', 'ledger_state_invalid', 'receipt_failed'):
+            state = 'skipped' if reason in ('outside_window', 'previous_run_active') else 'failed'
             with patch.object(intake, 'load_settings', return_value=settings), patch.object(type(settings), 'require_repo'), \
-                    patch.object(intake, 'run', return_value=intake.Outcome('skipped', reason)), \
+                    patch.object(intake, 'run', return_value=intake.Outcome(state, reason)), \
                     patch.object(email_router, 'step') as step, patch('sys.stdout'):
-                self.assertEqual(intake.main(), 78)
+                self.assertEqual(intake.main(), intake.EXIT[state])
             step.assert_not_called()
 
     def test_a_router_that_cannot_import_or_raises_never_changes_the_intake_result(self):
@@ -3782,6 +3917,7 @@ class IntakeTest(unittest.TestCase):
             result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
             self.assertEqual((result.state, result.reason), ('skipped', 'outside_window'), when)
             self.assertEqual(intake.EXIT[result.state], 78)
+        self.assertEqual(receipt.read_text(), 'active writer receipt')
         self.assertEqual((self.fake.decodes, self.fake.calls), (0, []))
         self.assertFalse((self.out() / intake.STATE).exists())
         self.fake.now = datetime(2026, 10, 20, 7, 0, tzinfo=local)
@@ -4065,6 +4201,7 @@ class IntakeTest(unittest.TestCase):
             ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
             unresolved[ident(m)] = {'ck': ck, 'sent': m['sent_unix'], 'participants': {m['sender']: 'missing'}}
         self.out().mkdir(parents=True)
+        intake._ledger_binding(self.out(), load_settings(self.home), {})
         (self.out() / intake.STATE).write_text(json.dumps({'mail_unresolved': unresolved}))
         result = self.run_intake([old, recent])
         self.assertEqual(result.state, 'succeeded')
@@ -4314,6 +4451,7 @@ class IntakeTest(unittest.TestCase):
         legacy = intake.key('propose-email-lead', intake._hash('early@practice.test'), 'sender')
         ck = intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[0]
         self.out().mkdir(parents=True)
+        intake._ledger_binding(self.out(), load_settings(self.home), {})
         (self.out() / intake.STATE).write_text(json.dumps({
             'mail_unresolved': {ident(m): {'ck': ck, 'sent': m['sent_unix'], 'intent': 'business', 'summary': 'old'}},
             'requests': {legacy: {'verb': 'propose-email-lead', 'payload': '{}', 'acknowledged': True,
@@ -4450,6 +4588,8 @@ class IntakeTest(unittest.TestCase):
 
     def test_a_held_lock_skips(self):
         self.out().mkdir(parents=True)
+        receipt = self.out() / 'receipt-latest.json'
+        receipt.write_text('active writer receipt')
         with open(self.out() / 'lock', 'w') as held:
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
             result = intake.run(self.repo, self.home, self.fake.ports())

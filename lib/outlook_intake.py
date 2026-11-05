@@ -224,6 +224,7 @@ class Outcome:
     reason: str
     counts: dict = field(default_factory=dict)
     detail: str = ''
+    monitoring: dict = field(default_factory=dict)
 
 
 FOLDER_CLASSES = {
@@ -298,7 +299,7 @@ def receipt_line(outcome: Outcome, repo: Path | None = None) -> str:
     """The machine receipt bin/run-scheduled.sh validates and records."""
     reason = 'full_disk_access_required' if outcome.reason.startswith('grant Full Disk Access') else outcome.reason
     receipt = {'state': outcome.state, 'reason': reason, 'counts': receipt_counts(outcome.counts),
-               **stamp(repo or Path(__file__).resolve().parents[1])}
+               **(outcome.monitoring or stamp(repo or Path(__file__).resolve().parents[1]))}
     if outcome.detail:
         receipt['detail'] = outcome.detail
     return 'outlook-intake-receipt ' + json.dumps(receipt)
@@ -1946,6 +1947,55 @@ def _reconcile(out: Path, home: Path, ports: Ports, settings: OutlookSettings, s
     return Outcome('succeeded', 'reconciled', {**work.counts, 'mail_ids': len(state['mail_ids'])})
 
 
+def _mailbox_identity(settings: OutlookSettings) -> dict:
+    return {'schema': 'outlook-ledger-binding/v1', 'mailbox_owner': settings.owner,
+            'mailbox_account': settings.account}
+
+
+def _ledger_binding(out: Path, settings: OutlookSettings, state: dict) -> dict:
+    binding = _mailbox_identity(settings)
+    path = out / 'binding.json'
+    try:
+        retained = json.loads(path.read_text())
+    except FileNotFoundError:
+        if state and (state.get('filing_account') != _hash(
+                f'{settings.owner}|{settings.account}|{settings.folder_account_id}')
+                or state.get('account_binding') != _hash(settings.account)):
+            raise ValueError('ledger_binding_required') from None
+        _private_write(path, json.dumps(binding))
+    except (ValueError, OSError):
+        raise ValueError('ledger_binding_invalid') from None
+    else:
+        if retained != binding:
+            raise ValueError('ledger_binding_mismatch')
+        os.chmod(path, 0o600)
+    return binding
+
+
+def _normal_receipt(out: Path, settings: OutlookSettings, ports: Ports,
+                    outcome: Outcome, binding: dict | None) -> Outcome:
+    identity = _mailbox_identity(settings)
+    try:
+        state = json.loads((out / STATE).read_text())
+    except (OSError, ValueError):
+        state = {}
+    outcome.monitoring = {**stamp(settings.repo), 'mailbox_owner': settings.owner,
+                          'account_digest': _hash(settings.account),
+                          'binding_digest': _hash(json.dumps(identity, sort_keys=True)),
+                          'binding_verified': binding == identity,
+                          'account_verified': binding == identity and isinstance(state, dict)
+                              and state.get('account_binding') == _hash(settings.account)
+                              and state.get('folder_account_id') == settings.folder_account_id,
+                          'observed_at': ports.now().isoformat()}
+    private = json.loads(receipt_line(outcome, settings.repo).split(' ', 1)[1])
+    private.update(mailbox_account=settings.account, folder_account_id=settings.folder_account_id)
+    try:
+        _private_write(out / 'receipt-latest.json', json.dumps(private))
+    except OSError:
+        outcome.state, outcome.reason = 'failed', 'receipt_failed'
+    return outcome
+
+
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
     settings = load_settings(home)
     settings.require_repo(repo)
@@ -1958,77 +2008,96 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return Outcome('skipped', 'previous_run_active')
+        binding = None
         try:
             try:
                 state = json.loads((out / STATE).read_text())
-            except (OSError, ValueError):
+            except FileNotFoundError:
                 state = {}
-            reconcile = (out / STATE).is_file() and 'mail_ids' not in state and os.access(settings.decoder, os.X_OK)
-            if not reconcile and not in_window(ports.now()):
-                return Outcome('skipped', 'outside_window')
-            for stale in out.glob(WORK_PREFIX + '*'):
-                _remove(stale)
-            if reconcile:
-                return _reconcile(out, home, ports, settings, state)
-            filing_account = _hash(f'{settings.owner}|{settings.account}|{settings.folder_account_id}')
-            if state.get('filing_account') != filing_account:
-                for name in ('filing_observed_at', 'last_email_in_filed_at'):
-                    state.pop(name, None)
-                state['filing_account'] = filing_account
-            outcome = _run(out, home, ports, state)
-            if outcome.state != 'succeeded':
-                if outcome.state == 'degraded':
-                    return _filing_outcome(out, state, outcome, ports.now(), settings)
-                return outcome
-            state = json.loads((out / STATE).read_text())
-            work = Run(ports, state, ports.now(), out, settings)
+            if not isinstance(state, dict):
+                raise ValueError('ledger_state_invalid')
+        except (OSError, ValueError):
+            outcome = Outcome('failed', 'ledger_state_invalid')
+        else:
             try:
-                linked = work.file_links()
-            except CarrError:
-                return Outcome('failed', 'email_links_read_failed', outcome.counts)
-            delivery = work.file_delivery_failures()
-            flagged = work.apply_flags()
-            for name, count in work.counts.items():
-                outcome.counts[name] = outcome.counts.get(name, 0) + count
-            for code in ERROR_CODES:
-                outcome.counts['error_' + code] = sum(
-                    not r['acknowledged'] and r.get('error_code') == code for r in state.get('requests', {}).values())
-            _save(out, state)
-            if not linked:
-                return Outcome('failed', 'email_links_pending', outcome.counts)
-            if not delivery:
-                return Outcome('failed', 'delivery_failures_pending', outcome.counts)
-            if not flagged:
-                return Outcome('failed', 'flags_pending', outcome.counts)
-            if work.counts['links_filed']:
-                outcome.reason = 'processed'
-            local = ports.now().astimezone(settings.timezone)
-            today = local.date()
-            previous_day = (today - timedelta(days=1)).isoformat()
-            last_run = state.get('coverage_run_day') or state.get('coverage_check_day')
-            missed = bool(last_run and last_run <= previous_day and state.get('coverage_check_day', '') < previous_day)
-            state['coverage_run_day'] = today.isoformat()
-            if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != today.isoformat():
-                state['coverage_check_day'] = today.isoformat()
-                shortfalls = coverage_verdict(outcome.counts)
-                held = int(outcome.counts.get('unresolved_recipients_unknown', 0) > COVERAGE_HELD_RECIPIENTS_LIMIT)
-                failed = any(shortfalls.values()) or held or missed
-                outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed),
-                                      coverage_held_recipients_over_limit=held)
+                binding = _ledger_binding(out, settings, state)
+            except ValueError as error:
+                outcome = Outcome('failed', str(error))
+            except OSError:
+                outcome = Outcome('failed', 'ledger_binding_invalid')
             else:
-                failed = missed
-            if missed:
-                outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
-            if outcome.counts.get('coverage_checked') or missed:
-                state['coverage_failed'] = bool(failed)
-            _save(out, state)
-            if failed:
-                outcome.state, outcome.reason = 'failed', 'coverage_failed'
-            return _filing_outcome(out, state, outcome, ports.now(), settings)
-        except CleanupError:
-            return Outcome('failed', 'cleanup_failed')
+                try:
+                    outcome = _execute(out, home, ports, settings, state)
+                except CleanupError:
+                    outcome = Outcome('failed', 'cleanup_failed')
+        return _normal_receipt(out, settings, ports, outcome, binding)
     finally:
         os.close(fd)
+
+
+def _execute(out: Path, home: Path, ports: Ports, settings: OutlookSettings, state: dict) -> Outcome:
+    reconcile = (out / STATE).is_file() and 'mail_ids' not in state and os.access(settings.decoder, os.X_OK)
+    if not reconcile and not in_window(ports.now()):
+        return Outcome('skipped', 'outside_window')
+    for stale in out.glob(WORK_PREFIX + '*'):
+        _remove(stale)
+    if reconcile:
+        return _reconcile(out, home, ports, settings, state)
+    filing_account = _hash(f'{settings.owner}|{settings.account}|{settings.folder_account_id}')
+    if state.get('filing_account') != filing_account:
+        for name in ('filing_observed_at', 'last_email_in_filed_at'):
+            state.pop(name, None)
+        state['filing_account'] = filing_account
+    outcome = _run(out, home, ports, state)
+    if outcome.state != 'succeeded':
+        if outcome.state == 'degraded':
+            return _filing_outcome(out, state, outcome, ports.now(), settings)
+        return outcome
+    state = json.loads((out / STATE).read_text())
+    work = Run(ports, state, ports.now(), out, settings)
+    try:
+        linked = work.file_links()
+    except CarrError:
+        return Outcome('failed', 'email_links_read_failed', outcome.counts)
+    delivery = work.file_delivery_failures()
+    flagged = work.apply_flags()
+    for name, count in work.counts.items():
+        outcome.counts[name] = outcome.counts.get(name, 0) + count
+    for code in ERROR_CODES:
+        outcome.counts['error_' + code] = sum(
+            not r['acknowledged'] and r.get('error_code') == code for r in state.get('requests', {}).values())
+    _save(out, state)
+    if not linked:
+        return Outcome('failed', 'email_links_pending', outcome.counts)
+    if not delivery:
+        return Outcome('failed', 'delivery_failures_pending', outcome.counts)
+    if not flagged:
+        return Outcome('failed', 'flags_pending', outcome.counts)
+    if work.counts['links_filed']:
+        outcome.reason = 'processed'
+    local = ports.now().astimezone(settings.timezone)
+    today = local.date()
+    previous_day = (today - timedelta(days=1)).isoformat()
+    last_run = state.get('coverage_run_day') or state.get('coverage_check_day')
+    missed = bool(last_run and last_run <= previous_day and state.get('coverage_check_day', '') < previous_day)
+    state['coverage_run_day'] = today.isoformat()
+    if local.time() >= COVERAGE_CHECK_AT and state.get('coverage_check_day') != today.isoformat():
+        state['coverage_check_day'] = today.isoformat()
+        shortfalls = coverage_verdict(outcome.counts)
+        held = int(outcome.counts.get('unresolved_recipients_unknown', 0) > COVERAGE_HELD_RECIPIENTS_LIMIT)
+        failed = any(shortfalls.values()) or held or missed
+        outcome.counts.update(shortfalls, coverage_checked=1, coverage_failed=int(failed),
+                              coverage_held_recipients_over_limit=held)
+    else:
+        failed = missed
+    if missed:
+        outcome.counts.update(coverage_missed_verdict=1, coverage_failed=1)
+    if outcome.counts.get('coverage_checked') or missed:
+        state['coverage_failed'] = bool(failed)
+    _save(out, state)
+    if failed:
+        outcome.state, outcome.reason = 'failed', 'coverage_failed'
+    return _filing_outcome(out, state, outcome, ports.now(), settings)
 
 
 def _filing_outcome(out: Path, state: dict, outcome: Outcome, now: datetime, settings: OutlookSettings) -> Outcome:
@@ -2306,7 +2375,9 @@ def main() -> int:
     outcome = run(repo, home, ports)
     print(status_line(outcome))
     print(receipt_line(outcome, settings.repo))
-    if outcome.reason not in ('outside_window', 'previous_run_active', 'reconciled', 'reconcile_failed'):
+    if outcome.reason not in ('outside_window', 'previous_run_active', 'reconciled', 'reconcile_failed',
+                              'ledger_binding_required', 'ledger_binding_invalid', 'ledger_binding_mismatch',
+                              'ledger_state_invalid', 'receipt_failed'):
         try:
             from lib import email_router
             email_router.step(repo, settings)
