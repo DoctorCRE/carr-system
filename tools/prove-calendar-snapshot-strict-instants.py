@@ -11,12 +11,13 @@ import subprocess
 import sys
 import tempfile
 import time
+from proof_release import read_release, release_revision
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BYTES = 1048576
 STAMP = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?(?:Z|[+-]([0-9]{2}):?([0-9]{2}))\Z')
 FIXTURE = {
-    'release': {'git_sha': '1' * 40},
+    'release': {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': '1' * 40}},
     'expected_revision': '1' * 40,
     'calendar': {'state': 'partial', 'observed_at': '2026-03-02T10:00:00Z',
                  'sources': {'outlook_calendar': {'state': 'partial'}},
@@ -133,13 +134,11 @@ def main():
                 calendar_command = [sys.executable, '-c', 'import sys; print(sys.argv[1])', json.dumps(fixture['calendar'])]
         else:
             expected = args.expected_revision or command(['git', 'rev-parse', 'HEAD'], deadline).strip()
-            release = json.loads(command(['curl', '--fail', '--silent', '--show-error', '--max-time', str(max(0.001, deadline - time.monotonic())),
-                                          '--max-filesize', str(MAX_BYTES), 'https://api.doctorcre.com/release'], deadline))
+            release = read_release(lambda argv: command(argv, deadline), lambda: deadline - time.monotonic())
             calendar_command = [str(ROOT / 'run.sh'), 'call', 'calendar-meeting-prep', '{}']
             now = datetime.now(timezone.utc)
-        deployed = release.get('git_sha')
+        deployed = release_revision(release)
         require(isinstance(expected, str) and re.fullmatch('[a-f0-9]{40}', expected), 'invalid expected revision')
-        require(isinstance(deployed, str) and re.fullmatch('[a-f0-9]{40}', deployed), 'missing release identity')
         if args.fixture:
             require(expected == deployed, 'fixture release revision mismatch')
         else:

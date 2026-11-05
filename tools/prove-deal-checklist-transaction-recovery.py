@@ -9,11 +9,10 @@ import json
 import os
 import signal
 from pathlib import Path
-import re
 import subprocess
 import sys
 import time
-import urllib.request
+from proof_release import read_release, release_revision
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,13 +89,8 @@ def prove(args):
         if args.scenario == 'wrong-release':
             release['git_sha']['value'] = 'invalid'
     else:
-        with urllib.request.urlopen('https://api.doctorcre.com/release', timeout=remaining()) as response:
-            release = json.loads(response.read(1048577))
-        remaining()
-    require(isinstance(release, dict) and release.get('ok') is True and
-            release.get('env', {}).get('value') == 'production', 'release_invalid')
-    revision = release.get('git_sha', {}).get('value', '')
-    require(isinstance(revision, str) and re.fullmatch('[0-9a-f]{40}', revision), 'release_invalid')
+        release = read_release(process, remaining)
+    revision = release_revision(release)
     process(['git', 'merge-base', '--is-ancestor', expected, revision])
     board = call('deal-room-board', {'workspace': 'all'})
     require(board.get('schema_version') == 'local-deals-board.v2' and isinstance(board.get('deals'), list), 'board_invalid')

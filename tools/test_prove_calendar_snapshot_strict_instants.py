@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from proof_release import read_release, release_revision, MAX_BYTES
 
 RUNNER = Path(__file__).with_name('prove-calendar-snapshot-strict-instants.py')
 SPEC = importlib.util.spec_from_file_location('calendar_proof', RUNNER)
@@ -17,6 +18,22 @@ SPEC.loader.exec_module(PROOF)
 
 
 class ProofCLI(unittest.TestCase):
+    def test_shared_reader_refuses_bad_identity_status_and_size(self):
+        recorded = json.loads(RUNNER.with_name('fixtures').joinpath('proof-release-production.json').read_text())
+        for payload in ({}, [], None, {'ok': False},
+                        {**recorded, 'env': {'value': 'staging'}},
+                        {**recorded, 'git_sha': {'value': 'x' * 40}},
+                        {**recorded, 'git_sha': 'a' * 40}):
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                release_revision(payload)
+        for response in (json.dumps(recorded) + '\n302', 'not JSON\n200',
+                         'x' * (MAX_BYTES + 5)):
+            with self.subTest(response=response[:30]), self.assertRaises(ValueError):
+                read_release(lambda argv: response, lambda: 1)
+        for budget in (0, -1, float('nan'), float('inf')):
+            with self.subTest(budget=budget), self.assertRaises(ValueError):
+                read_release(lambda argv: self.fail('expired read executed'), lambda: budget)
+
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(RUNNER), *args], capture_output=True, text=True, timeout=5)
 
@@ -104,14 +121,14 @@ class ProofCLI(unittest.TestCase):
                         observed_at=PROOF.datetime.now(PROOF.timezone.utc).isoformat(),
                         sources={'outlook_calendar': {'state': 'ready'}})
         expected, deployed = '1' * 40, '2' * 40
-        replies = [json.dumps({'git_sha': deployed}), '', json.dumps(calendar)]
+        replies = [json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': deployed}}) + '\n200', '', json.dumps(calendar)]
         with patch.object(sys, 'argv', [str(RUNNER), '--live', '--timeout-seconds', '30', '--expected-revision', expected]), patch.object(PROOF, 'command', side_effect=replies) as execute:
             self.assertEqual(PROOF.main(), 0)
             commands = [call.args[0] for call in execute.call_args_list]
             self.assertEqual(commands[0][-1], 'https://api.doctorcre.com/release')
             self.assertEqual(commands[1], ['git', 'merge-base', '--is-ancestor', expected, deployed])
             self.assertEqual(commands[2], [str(PROOF.ROOT / 'run.sh'), 'call', 'calendar-meeting-prep', '{}'])
-        with patch.object(sys, 'argv', [str(RUNNER), '--live', '--expected-revision', expected]), patch.object(PROOF, 'command', side_effect=[json.dumps({'git_sha': deployed}), ValueError('unrelated release')]) as execute:
+        with patch.object(sys, 'argv', [str(RUNNER), '--live', '--expected-revision', expected]), patch.object(PROOF, 'command', side_effect=[json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': deployed}}) + '\n200', ValueError('unrelated release')]) as execute:
             self.assertEqual(PROOF.main(), 1)
             self.assertEqual(execute.call_count, 2)
 

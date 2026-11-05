@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S1-J345-proof-release-reads",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "released-proof-runners-reach-record-reads",
+    "predicate": "After deploy, run worker-release-smoke.v1 for release identity. Separately run python3 tools/prove-deal-checklist-transaction-recovery.py --live --timeout-seconds 30 --max-records 3 and python3 tools/prove-calendar-snapshot-strict-instants.py --live --timeout-seconds 30 from the merged checkout. Both must exit zero after proving the release contains that checkout and validating their actual behavior reads.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Both semantic runners exit zero with actual deal, record, calendar and meeting counts. Release smoke attests identity only. Fixture results do not attest production behavior.",
+    "input_class": "Public production release and read-only authenticated deal and calendar reads through the existing local actor wrapper. No induced failures or writes.",
+    "deadline_seconds": 60
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 8,
+    "max_records": 204,
+    "max_runtime_seconds": 60,
+    "max_artifact_bytes": 1048576
+  }
+}

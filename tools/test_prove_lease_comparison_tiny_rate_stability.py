@@ -48,7 +48,7 @@ class ProofTest(unittest.TestCase):
                 self.send_response(status)
                 self.end_headers()
                 self.wfile.write(json.dumps(release if release is not None else
-                                            dict(git_sha='a' * 40)).encode())
+                                            dict(ok=True, env=dict(value='production'), git_sha=dict(value='a' * 40))).encode())
 
             def log_message(self, *args):
                 pass
@@ -109,7 +109,7 @@ print(json.dumps(payload[str(data['financing']['annual_interest_rate'])]))
                     self.assertEqual(call[side], dict(label=f'{years} Year Lease', term_years=years,
                         base_rent_per_sf=[20]*5, operating_expenses_per_sf=5, free_rent_months=0,
                         free_opex_months=0, buildout_cost_per_sf=100, landlord_ti_per_sf=0))
-            self.assertEqual(json.loads(result.stdout)['release']['git_sha'], 'a'*40)
+            self.assertEqual(json.loads(result.stdout)['release']['git_sha']['value'], 'a'*40)
 
     def test_contradictions(self):
         for mode in ('null', 'infinity', 'wrong', 'ordinary'):
@@ -147,6 +147,8 @@ time.sleep(60)
             processes = []
 
             def start_ready_wrapper(*args, **kwargs):
+                if args[0][0] == 'curl':
+                    return popen(*args, **kwargs)
                 process = popen(*args, **kwargs)
                 processes.append(process)
                 self.addCleanup(process.stdout.close)
@@ -157,7 +159,7 @@ time.sleep(60)
                 self.assertEqual(process.stdout.readline(), 'ready\n')
                 return process
 
-            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 0, 29.99]))
+            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 0, 0, 0, 29.99]))
             with mock.patch.object(proof, 'time', clock), \
                     mock.patch.object(proof.signal, 'setitimer'), \
                     mock.patch.object(proof.subprocess, 'Popen', side_effect=start_ready_wrapper):

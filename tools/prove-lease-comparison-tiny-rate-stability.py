@@ -8,7 +8,7 @@ from pathlib import Path
 import signal
 import subprocess
 import time
-import urllib.request
+from proof_release import read_release
 
 
 class Unavailable(Exception):
@@ -74,15 +74,8 @@ def observe(origin, wrapper, timeout):
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
-        request = urllib.request.Request(origin.rstrip("/") + "/release", method="GET")
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                return None
-        with urllib.request.build_opener(NoRedirect).open(request, timeout=remaining()) as response:
-            release = json.loads(response.read(65537))
-        if (not isinstance(release, dict) or not isinstance(release.get("git_sha"), str)
-                or len(release["git_sha"]) != 40):
-            raise Unavailable("release identity unavailable")
+        release = read_release(lambda argv: subprocess.check_output(
+            argv, timeout=remaining(), stderr=subprocess.DEVNULL).decode(), remaining, origin)
         results = []
         for rate in (1e-20, 0, 0.06):
             process = subprocess.Popen(
@@ -111,7 +104,7 @@ def observe(origin, wrapper, timeout):
                                    "zero and ordinary controls match"])
     except AssertionError as error:
         return 1, dict(status="contradiction", release=release, reason=str(error))
-    except (Unavailable, OSError, ValueError, subprocess.TimeoutExpired) as error:
+    except (Unavailable, OSError, ValueError, subprocess.SubprocessError) as error:
         return 78, dict(status="unavailable", release=release, reason=type(error).__name__)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
