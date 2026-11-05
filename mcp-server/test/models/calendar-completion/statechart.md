@@ -39,7 +39,7 @@ break first. Resolution reads contacts once and canonical role targets once,
 without a query per attendee. Role writes are bounded by the 50-attendee evidence
 limit. Resolution has no cache. The locked snapshot is the evidence authority.
 There are no external calls, so external timeouts, rate caps and breakers are
-n/a. Database locks and statements inherit the Worker transaction limits. Queues
+n/a. Database lock waits are bounded at five seconds and statements at ten seconds. Queues
 are n/a because confirmation is synchronous.
 
 The event lock serializes confirmations and the snapshot share lock excludes

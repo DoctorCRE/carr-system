@@ -26,6 +26,8 @@ before(async () => {
     source_revision:revision,canonical_event_identity:key+'b'.repeat(48),
     attendees:[{email:'attendee@example.test'}],attendee_count:1,state:'needs_review',prompt:'Confirm meeting' };
   await c.query('update party set email=$1 where id=$2',['attendee@example.test',party]);
+  await c.query(`insert into activity(actor_id,kind,summary,deal_id,calendar_event_key,occurred_at)
+    values($1,'meeting','Existing confirmed deal meeting',$2,$3,$4)`,[actor.id,deal,key,end]);
   await c.query(`insert into board_snapshot(organization_tenant_id,sponsoring_human_slug,board_id,snapshot_json,updated_by_actor_id)
     values($1,'joe','calendar-agenda',$2::jsonb,$3)`,[organizationTenantForActor(actor),JSON.stringify({schema:'carr-calendar-agenda.v1',observed_at:new Date().toISOString(),items:[],follow_up_reviews:[review]}),actor.id]);
 });
@@ -40,6 +42,7 @@ async function log(key, ref = deal) {
 }
 test('meeting confirmation deduplicates across request keys', async () => {
   const first = await log('0000000000000000');
+  assert.equal(first.deduped,true,'existing deal meeting is reconciled while missing role touches are applied');
   const retry = await log('0000000000000000');
   assert.equal(retry.activity_id, first.activity_id);
   assert.equal(retry.deduped, true);
