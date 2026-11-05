@@ -88,7 +88,7 @@ def observe(args, receipt):
 
     receipt['release_sha'] = release()
     vendor = call('read-vendor-meetings', {'view': 'research', 'limit': 1})
-    agenda = call('morning-brief', {}).get('calendar')
+    agenda = call('morning-brief', {}).get('sections', {}).get('calendar')
     if release() != receipt['release_sha']:
         receipt['status'] = 'release_changed'
         return 78
