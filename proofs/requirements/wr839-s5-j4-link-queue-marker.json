@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "wr839-s5-j4-link-queue-marker",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "link-body-notice",
+      "predicate": "After deployment, bind a private receipt to the observed /release identity containing this merge. From the authorized installed checkout run umask 077; mkdir -p out/proofs/wr839-s5-j4; ./run.sh call email-router-queue '{\"purpose\":\"links\",\"limit\":200}' > out/proofs/wr839-s5-j4/payload.json 2> out/proofs/wr839-s5-j4/notice.txt then python3 ops/email-link-marker-proof.py --payload out/proofs/wr839-s5-j4/payload.json --notice out/proofs/wr839-s5-j4/notice.txt. The capture makes one read-only request with no retry and at most 200 rows. Run the checker only after successful capture. It must observe at least one nonempty body and every body path in the actual MCP notice. Never substitute a recomputed marker, local test or release identity alone. Empty queue, missing notice, old release or unbound capture stays unproven. Print counts only; keep mailbox artifacts private. The worker did not run production.",
+      "runner": "worker-email-link-marker.v1",
+      "expected_result": "Exit 0, ok=true, bodies>=1, unmarked=0, with a matching deployed release and private capture receipt. Exit 1 refuses missing bodies or notices.",
+      "input_class": "private deployed local-verb payload and actual MCP notice; synthetic files only during build",
+      "deadline_seconds": 60,
+      "deferred": {
+        "blocking_unit": "wr839-s5-j4-link-queue-marker receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 2,
+    "max_records": 200,
+    "max_runtime_seconds": 60,
+    "max_artifact_bytes": 1048576
+  }
+}

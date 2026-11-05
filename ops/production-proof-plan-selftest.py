@@ -64,6 +64,23 @@ def runner_source(runner, root=ROOT):
     return source.stdout
 
 
+def admission_repository(root):
+    """Borrow immutable local observer objects without checking out runtime files."""
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=root, env=fixture_env(),
+                                       text=True, stderr=subprocess.PIPE).strip()
+    if (root / '.git').exists():
+        return
+    git('init', '-q')
+    objects = subprocess.check_output(['git', 'rev-parse', '--git-path', 'objects'],
+        cwd=ROOT, env=fixture_env(), text=True).strip()
+    (root / '.git/objects/info/alternates').write_text(str((ROOT / objects).resolve()) + '\n')
+    head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT,
+        env=fixture_env(), text=True).strip()
+    git('update-ref', 'HEAD', head)
+    git('read-tree', head)
+
+
 class AdmissionTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -88,8 +105,11 @@ class AdmissionTest(unittest.TestCase):
 
     def run_plan(self, body, files=None):
         self.body.write_text(body)
-        if files is not None:
-            self.files.write_text(json.dumps(files))
+        admission_repository(self.root)
+        files = list(files if files is not None else json.loads(self.files.read_text()))
+        if 'proofs/requirements/synthetic.json' in body:
+            files.append('proofs/requirements/synthetic.json')
+        self.files.write_text(json.dumps(files))
         return subprocess.run([sys.executable, str(PROGRAM), '--root', str(self.root),
                                '--body-file', str(self.body), '--files-file', str(self.files)],
                               capture_output=True, text=True, timeout=20,
@@ -200,6 +220,7 @@ class AdmissionTest(unittest.TestCase):
         self.assertNotEqual(self.run_plan(body, paths).returncode, 0)
 
     def app_policy(self):
+        admission_repository(self.root)
         plan = module()
         contract = json.loads((ROOT / plan.CONTRACT_PATH).read_text())
         contract['x-required-targets'] = dict(contract['x-required-targets'], app=['*'])
@@ -215,7 +236,7 @@ class AdmissionTest(unittest.TestCase):
     def test_app_product_admission_and_borrowed_target_refusals(self):
         plan, contract = self.app_policy()
         body = '## Production proof\nproofs/requirements/synthetic.json'
-        paths = ['src/ui/home/bulk-controls.tsx']
+        paths = ['src/ui/home/bulk-controls.tsx', 'proofs/requirements/synthetic.json']
         result = plan.admission(body, paths, self.root, contract)
         self.assertIn('admission only; execution unproven', result)
         for target, runner in [('worker', 'worker-release-smoke.v1'),
@@ -233,13 +254,13 @@ class AdmissionTest(unittest.TestCase):
 
     def test_app_missing_invalid_and_unsafe_declarations_refused(self):
         plan, contract = self.app_policy()
-        paths = ['src/ui/home/bulk-controls.tsx']
+        paths = ['src/ui/home/bulk-controls.tsx', 'proofs/requirements/synthetic.json']
         for body in ['', '## Production proof\n', '## Production proof\nn/a: app change']:
             with self.subTest(body=body), self.assertRaises(ValueError):
                 plan.admission(body, paths, self.root, contract)
         body = '## Production proof\nproofs/requirements/synthetic.json'
         self.manifest.unlink()
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaisesRegex(ValueError, 'deleted requirement'):
             plan.admission(body, paths, self.root, contract)
         self.manifest.write_text('{')
         with self.assertRaises(ValueError):
@@ -480,7 +501,8 @@ class AdmissionTest(unittest.TestCase):
         git('mv', 'runtime.py', 'docs/runtime.md')
         git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'rename')
         paths = git('diff', '--name-only', '--no-renames', base, 'HEAD').splitlines()
-        self.assertEqual(plan.product_paths(paths, json.loads((ROOT / plan.CONTRACT_PATH).read_text())), ['runtime.py'])
+        with self.assertRaisesRegex(ValueError, 'unclassified'):
+            plan.product_paths(paths, json.loads((ROOT / plan.CONTRACT_PATH).read_text()))
 
 
 class AppObserverTest(unittest.TestCase):
@@ -707,7 +729,7 @@ class EventScopeTest(unittest.TestCase):
         self.env = fixture_env()
         self.env.update(GIT_AUTHOR_NAME='Synthetic', GIT_AUTHOR_EMAIL='synthetic@example.com',
                         GIT_COMMITTER_NAME='Synthetic', GIT_COMMITTER_EMAIL='synthetic@example.com')
-        self.git('init', '-q')
+        admission_repository(self.root)
         (self.root / 'contracts').mkdir()
         (self.root / module().CONTRACT_PATH).write_text('{}')
         self.commit('rollout', [module().CONTRACT_PATH])

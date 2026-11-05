@@ -1,0 +1,41 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR442-S14-mailbox-binding",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-ledger-private-identity",
+      "predicate": "During WR442.S17.J1 after deployment, read each owning machine's ordinary private receipt-latest.json, retained binding.json and local settings without starting intake or changing the ledger. Require the installed full source revision to contain this change. Compare mailbox_owner, mailbox_account and folder_account_id with that machine's settings, recompute account_digest and binding_digest from the installed identity shape, and require binding_verified and account_verified to be true. Keep addresses and folder identities private. The registered Studio observer is ancillary and cannot validate these identity fields; retain the independent private comparison and emit only pass/fail counts. Missing installation or identity evidence holds this assertion.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Both installed ledgers match their intended owner and canonical mailbox, with matching digests and true verification flags. No private address appears in shared evidence. Admission and canonical run observations alone do not prove identity binding.",
+      "input_class": "Read-only private receipt, binding and settings comparison on each owning machine after normal deployment; no mailbox contents or mutations.",
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR442-S14-mailbox-binding receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    },
+    {
+      "id": "canonical-monitoring-and-ordinary-replay",
+      "predicate": "During WR442.S17.J1, independently acquire canonical outlook-intake runs from the normal installed schedule for the exact installed revision and observation interval on each owning machine. Require a successful ordinary run with counts.run.mail_ids minimum 1. Independently observe at least one naturally occurring replay of an existing request key and verify its canonical actor attribution against the intended partner. Compare monitoring mailbox_owner, account_digest, binding_digest, binding_verified, account_verified and observed_at with the private receipt for the same run; verify no mailbox_account or folder_account_id is published. Use the registered canonical Studio observer with count run.mail_ids and minimum 1 as ancillary run evidence. This retained mail-ID count does not itself prove replay. Independently retain actor attribution and sanitized projection checks, which that observer does not establish. Do not invoke intake, replay, recorder or spool flush. Missing canonical rows, ordinary replay or unavailable identity projection remains held rather than inferred from local success.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Normal installed replay is observed for each intended partner with matching canonical actor, installed revision and sanitized monitoring fields. Local binding verification never substitutes for authenticated partner authority.",
+      "input_class": "Bounded read-only canonical run acquisition and existing ordinary replay receipts after deployment; no sends or record writes.",
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR442-S14-mailbox-binding receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 4,
+    "max_records": 100,
+    "max_runtime_seconds": 240,
+    "max_artifact_bytes": 1048576
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR227.S21-synthetic-migration-rehearsal",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "rehearsal-source-release-identity",
+      "predicate": "The deployed Worker release contains the merged rehearsal preparation revision. This read proves release identity only. S21 staging acceptance and production portal migration behavior remain unproven.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity matches the merged revision. A separate read-only proof after staging and eventual cutover must open every existing portal address with an authorized session, read one file and Tour List, and match publication and retained selection version to the release and migration receipt. Synthetic tests never satisfy that proof.",
+      "input_class": "read-only Worker release identity; no portal passwords or client data",
+      "deadline_seconds": 120,
+      "deferred": {
+        "blocking_unit": "WR227.S21-synthetic-migration-rehearsal receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}

@@ -15,6 +15,10 @@ spec = importlib.util.spec_from_file_location('plan', ROOT / 'ops/production-pro
 assert spec is not None and spec.loader is not None
 plan = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(plan)
+fixture_spec = importlib.util.spec_from_file_location('admission_test', ROOT / 'ops/production-proof-plan-selftest.py')
+assert fixture_spec is not None and fixture_spec.loader is not None
+admission_test = importlib.util.module_from_spec(fixture_spec)
+fixture_spec.loader.exec_module(admission_test)
 
 
 class FixtureTest(unittest.TestCase):
@@ -46,8 +50,9 @@ class FixtureTest(unittest.TestCase):
     def admit(self):
         path = self.root / 'proofs/requirements/test.json'
         path.write_text(json.dumps(self.value))
+        admission_test.admission_repository(self.root)
         return plan.admission('## Production proof\nproofs/requirements/test.json',
-                              ['lib/outlook_intake.py'], self.root, self.contract)
+                              ['lib/outlook_intake.py', 'proofs/requirements/test.json'], self.root, self.contract)
 
     def test_good_and_bad_fixture_execute(self):
         self.assertIn('fixture executed', self.admit())
@@ -119,7 +124,7 @@ class FixtureTest(unittest.TestCase):
         self.value['safety']['max_artifact_bytes'] = 65536
         runner = self.contract['x-runners']['receipt-predicate.v1']
         runner['sources']['ops/production-proof-plan.py'] = '0'*64
-        with self.assertRaisesRegex(ValueError, 'source binding'):
+        with self.assertRaisesRegex(ValueError, 'source (binding|digest)'):
             self.admit()
 
     def test_every_checked_in_requirement_has_a_runnable_or_named_deferred_plan(self):
@@ -140,7 +145,7 @@ class FixtureTest(unittest.TestCase):
         def git(*args):
             return subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', *args],
                 cwd=self.root, env=env, text=True, stderr=subprocess.PIPE).strip()
-        git('init', '-q')
+        admission_test.admission_repository(self.root)
         git('commit', '--allow-empty', '-qm', 'merge')
         merge = git('rev-parse', 'HEAD')
         git('commit', '--allow-empty', '-qm', 'descendant release')

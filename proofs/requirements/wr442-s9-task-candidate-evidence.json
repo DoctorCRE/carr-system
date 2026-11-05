@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR442-S9-J6-task-candidate-evidence",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-task-census-with-zero-admissions",
+      "predicate": "Execute the bash block in docs/models/outlook-task-candidates/production-proof.md with the explicitly supplied enrolled immutable copy, account, generation, build, installed checkout and merged change SHA. The fresh task-candidates run and tools/outlook-task-evidence.py --studio-receipt produce $PROOF_DIR/task-census.receipt from a validated read-only database, never arbitrary stdout. The producer requires candidates_admitted, candidates_supported, reviews_pending and writes_acknowledged exactly zero. Independently verify installed HEAD contains the merged change, then use the registry-pinned reader: python3 \"$PROOF_DIR/studio-proof-observe.py\" --receipt-file \"$PROOF_DIR/task-census.receipt\" --service outlook-task-evidence --runtime-sha \"$RUNTIME_SHA\" --count blocks_verified --minimum 1. Require at least one CRC-verified block and the separate exact-zero validator assertion. A minimum check alone cannot prove zero. Any command failure is BLOCKED. Incomplete coverage remains explicit in counts; this proves the held census only, never natural task correctness or CARR admission.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "OBSERVED only after fresh census, successful account/generation and installed revision checks, exact-zero validation, and at least one verified block.",
+      "input_class": "One enrolled immutable copy; supplied account, generation and Outlook build; clean installed checkout containing merged change; new private proof directory. Only count-only receipt leaves Studio.",
+      "deadline_seconds": 300,
+      "deferred": {
+        "blocking_unit": "WR442-S9-J6-task-candidate-evidence receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 3,
+    "max_records": 1000,
+    "max_runtime_seconds": 300,
+    "max_artifact_bytes": 1048576
+  }
+}

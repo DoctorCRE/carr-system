@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR39.S15-lease-comparison-tiny-rate-stability",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "lease-comparison-release",
+      "predicate": "Observe the deployed Worker release containing the merged change and the compare-lease-terms registry entry with worker-release-smoke.v1. This registered smoke proves identity and availability only. Separately required after deploy: python3 tools/prove-lease-comparison-tiny-rate-stability.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. The new observer reads /release once and runs compare-lease-terms at rates 1e-20, 0 and 0.06 with the exact synthetic 1000 SF inputs. All declared economic outputs must be finite, tiny interest must converge to zero within cent rounding, and the ordinary control must match 33224.60. Source admission and the registered smoke cannot establish this arithmetic predicate. Keep the product landed-unproven until the separate observer passes and the emitted release identity is reconciled to the merged release.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release and registry smoke pass, followed by mandatory separate observer exit 0 with release identity and all finite/convergence/control assertions. Exit 1 contradicts the math; exit 78 leaves proof blocked. Builders make no production calls.",
+      "input_class": "Synthetic read-only lease comparison and deployed release identity",
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR39.S15-lease-comparison-tiny-rate-stability receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 4,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

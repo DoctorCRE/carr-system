@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR839-S8-native-hook-integrity",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-per-hook-registration-proof",
+      "predicate": "The read-only proof job WR839.S8.J3 runs python3 -B ops/native-hook-registration-selftest.py from the exact installed source revision. Require intact registry acceptance, individual Claude and Codex deletion refusal naming client/event/script, empty-home refusal, and unrelated-hook acceptance. Mutations use temporary synthetic config homes. Also run the installed checker against temporary copies of installed hook blocks, then remove each required registration from those copies and require nonzero exit naming its event and script. The registered studio-canonical-run.v1 runner observes the resulting canonical run and installation only; it does not launch arbitrary commands. Hold canonical proof until trusted installation and execution receipts exist. Fixture success alone is not installed proof.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Installed checker accepts intact configs and rejects each required hook deletion with its event and script. Hold the unit landed-unproven until trusted installed execution evidence exists.",
+      "input_class": "read-only installed source and hook blocks, temporary synthetic config homes, bounded canonical observation; no live hook mutation or send",
+      "deadline_seconds": 240,
+      "deferred": {
+        "blocking_unit": "WR839-S8-native-hook-integrity receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 100,
+    "max_runtime_seconds": 240,
+    "max_artifact_bytes": 1048576
+  }
+}

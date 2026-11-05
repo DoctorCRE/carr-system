@@ -202,12 +202,29 @@
   },
   "x-runner-source-binding": "Registry CI validates either an ancestor revision/path or a sources map of repository-local paths to SHA256 at tested HEAD. Content bindings include the entry path and its local dependency closure; squash preserves their identity. Never fall back from a refused revision. Neither binding attests installation or execution.",
   "x-runners": {
+    "email-touch-cohort-reconcile.v1": {
+      "path": "ops/email-touch-cohort-proof.py",
+      "targets": [
+        "worker"
+      ],
+      "sources": {
+        "ops/email-touch-cohort-proof.py": "4720a27ce261b6373de88d6defd78594943007bf0d74af900a88a29d94f5fbfb",
+        "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
+      }
+    },
     "app-release-live-walk.v1": {
       "path": "ops/app-proof-observe.py",
       "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
       "targets": [
         "app"
       ]
+    },
+    "worker-email-link-marker.v1": {
+      "path": "ops/email-link-marker-proof.py",
+      "targets": ["worker"],
+      "sources": {
+        "ops/email-link-marker-proof.py": "eceef3abaa2eb898c368094f3b3e707e70f05491d60e5d637bcd0019e22ba94b"
+      }
     },
     "worker-release-smoke.v1": {
       "path": "ops/release-smoke.py",
@@ -244,7 +261,7 @@
       ],
       "fixture_interface": "receipt-predicate.v1",
       "sources": {
-        "ops/production-proof-plan.py": "11616065d6dce96691c7104d500dc6d4ece19132769228554d6f233829c7d871"
+        "ops/production-proof-plan.py": "4ad11da1b10dfa85a98b92571cfe83cd2ab1fbb4755193cf259a3b9a73846662"
       }
     }
   },
@@ -261,34 +278,17 @@
     ]
   },
   "x-non-product-paths": [
-    "docs/**",
-    "test/**",
-    "mcp-server/test/**",
-    "README.md",
-    ".github/**",
-    "ops/*-selftest.py",
-    "tools/test-*.py",
-    "tools/test_*.py",
-    "ops/ci.sh",
-    "ops/ci-gates.py",
-    "ops/ci-evidence.py",
-    "ops/ci-unit.py",
-    "ops/ci-secret.py",
-    "ops/ci_unit_shards.py",
-    "ops/node_test_summary.py",
-    "ops/config/ci-unit-durations.json",
-    "ops/ci.py",
-    "ops/ci-pushfloor.py",
-    "ops/ci-dep-check.py",
-    "ops/ci-migration.py",
-    "ops/ci-migration-gates.py",
-    "ops/ci-node-file.mjs",
-    "ops/ci-apt.py",
-    "ops/ci-postgres.sh",
-    "ops/ci-zsh.sh",
-    "ops/production-proof-plan.py",
-    "contracts/production-proof-plan.v1.json",
-    "proofs/requirements/**",
-    "ops/app-proof-observe.py"
+    "docs/**", "test/**", "mcp-server/test/**", "README.md",
+    ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
+    "ops/ci.sh", "ops/ci-gates.py",
+    "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
+    "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",
+    "ops/ci.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
+    "ops/source-ci-review.py",
+    "ops/ci-migration.py", "ops/ci-migration-gates.py", "ops/ci-node-file.mjs",
+    "ops/ci-apt.py", "ops/ci-postgres.sh", "ops/ci-zsh.sh", "ops/production-proof-plan.py",
+    "contracts/production-proof-plan.v1.json", "proofs/requirements/**", "ops/app-proof-observe.py",
+    "ops/delivery_plan.py", "ops/delivery-plan.py",
+    "contracts/delivery-plan.v1.json", "contracts/delivery-inventory.v1.json"
   ]
 }

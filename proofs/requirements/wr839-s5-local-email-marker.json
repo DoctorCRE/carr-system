@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR839-S5-local-email-marker",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-local-search-excerpts-marked",
+      "predicate": "After merge and installed-runtime refresh, run one authorized read-only local email search through the installed tools/email-local-search.py with local excerpts and limit 1. Capture output privately and verify every non-null subject/body string starts with the installed lib.fence DATA_SENTENCE and email opening fence and ends with its closing fence. Verify no earlier canonical closing tag survives inside each string. Require at least one non-null excerpt. Record the exact installed source revision and emit only counts. A Studio receipt observer is ancillary; an intake publication receipt alone never proves the query marker. If a matching canonical query receipt is unavailable, keep that observer held and retain the direct installed CLI observation separately. Never fabricate a receipt or substitute synthetic evidence for this production observation.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "The installed query returns at least one marked excerpt and zero unmarked non-null fields, with no mail content printed. Admission alone is not execution or Live proof.",
+      "input_class": "One authorized installed local email search; retained private publication, no mailbox mutation or send; count-only evidence.",
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR839-S5-local-email-marker receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

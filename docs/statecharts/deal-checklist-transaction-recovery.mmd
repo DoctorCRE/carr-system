@@ -1,0 +1,16 @@
+stateDiagram-v2
+    [*] --> begin_owned_savepoint: Caller transaction
+    [*] --> read_optional_sources: Autocommit caller
+    begin_owned_savepoint --> read_optional_sources: Owned savepoint created
+    begin_owned_savepoint --> propagate_error: Savepoint creation fails
+    read_optional_sources --> ready: All optional reads succeed
+    read_optional_sources --> ready: Request storage absent at discovery
+    read_optional_sources --> unavailable_after_rollback: Missing relation, roll back owned scope
+    read_optional_sources --> propagate_error: Other error, roll back owned scope
+    ready --> release_owned_savepoint: Release owned scope if transactional
+    unavailable_after_rollback --> release_owned_savepoint: Release owned scope if transactional
+    release_owned_savepoint --> [*]: Return truthful checklist, caller can read deal
+    propagate_error --> [*]: Release owned scope if created, throw original error
+    %% never Return unavailable with the caller transaction still aborted.
+    %% never Roll back or release a caller-owned savepoint.
+    %% never Treat permission or unexpected errors as unavailable.

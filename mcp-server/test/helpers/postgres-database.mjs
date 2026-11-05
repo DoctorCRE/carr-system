@@ -31,7 +31,7 @@ export async function postgresDatabase(prefix) {
     const data = path.join(fixture.root, 'data');
     await fixture.run(path.join(bin, 'initdb'), ['-D', data, '-U', 'fixture', '--auth=trust', '--no-locale']);
     await fixture.run(path.join(bin, 'pg_ctl'), ['-D', data, '-l', path.join(fixture.root, 'server.log'),
-      '-o', `-k ${fixture.root} -h 127.0.0.1 -p ${port}`, '-w', 'start']);
+      '-o', `-c unix_socket_directories= -h 127.0.0.1 -p ${port}`, '-w', 'start']);
     client = new pg.Client({ connectionString: `postgresql://fixture@127.0.0.1:${port}/postgres` });
     await client.connect();
     return { client, close };

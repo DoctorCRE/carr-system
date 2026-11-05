@@ -7,11 +7,11 @@
   "assertions": [
     {
       "id": "weekly-automatic-effect-cohort-and-linked-undos",
-      "predicate": "After delivery, run python3 tools/email-weekly-quality.py --start 2026-10-26T00:00:00-05:00 --end 2026-11-02T00:00:00-06:00 --undo-before 2026-11-03T00:00:00-06:00 --partner joe --service carr_quality_reader --output /tmp/email-quality-private.json through an existing authorized read service. Independently reconcile the automatic inherit-email-thread denominator and distinct original-event undo numerator to canonical event and filing history using REPORT_SQL filters. Require numerator <= denominator, exact five percent at_threshold and greater than five percent above_threshold, separate confirmed/import populations, and null corrected misses. An empty automatic denominator is no_evidenced_population and cannot establish a quality score. Retain the window, cutoff, source revision and private output as the operational receipt. Source tests are not production proof. The registered studio-run-receipt.v1 observer may check only a supplied actual email-weekly-quality receipt with a full runtime SHA and counts. It must remain BLOCKED while that receipt is absent. It cannot establish SQL reconciliation or convert this manual proof plan into a receipt. The coordinator must retain independent canonical reconciliation evidence in addition to any observer result.",
+      "predicate": "After delivery, run .venv/bin/python tools/db-tap.py run tools/email-weekly-quality.py --start 2026-10-26T00:00:00-05:00 --end 2026-11-02T00:00:00-06:00 --undo-before 2026-11-03T00:00:00-06:00 --partner joe --database --output /tmp/email-quality-private.json through the existing sanctioned Studio db-tap run route, which supplies DATABASE_URL privately with read-only defaults. Independently reconcile the automatic inherit-email-thread denominator and distinct original-event undo numerator to canonical event and filing history using REPORT_SQL filters. Require numerator <= denominator, exact five percent at_threshold and greater than five percent above_threshold, separate confirmed/import populations, and null corrected misses. An empty automatic denominator is no_evidenced_population and cannot establish a quality score. Retain the window, cutoff, source revision and private output as the operational receipt. Source tests are not production proof. The registered studio-run-receipt.v1 observer may check only a supplied actual email-weekly-quality receipt with a full runtime SHA and counts. It must remain BLOCKED while that receipt is absent. It cannot establish SQL reconciliation or convert this manual proof plan into a receipt. The coordinator must retain independent canonical reconciliation evidence in addition to any observer result.",
       "runner": "studio-run-receipt.v1",
       "expected_result": "A bounded read-only report with independently reconciled numerator and denominator, or an explicit failed read or no_evidenced_population result. No autonomous policy writes. The registered observer remains BLOCKED without an actual operational receipt; its count comparison alone does not prove reporting semantics.",
       "input_class": "One explicit completed weekly canonical email filing cohort owned by Joe, observed through an exclusive fixed undo cutoff. No mailbox reads or sends.",
-      "deadline_seconds": 35,
+      "deadline_seconds": 100,
       "deferred": {
         "blocking_unit": "WR634-S1-J142-email-weekly-quality-report receipt producer and registered full-predicate evaluator",
         "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
@@ -21,9 +21,9 @@
   "safety": {
     "read_only": true,
     "no_sends": true,
-    "max_requests": 1,
+    "max_requests": 2,
     "max_records": 5,
-    "max_runtime_seconds": 35,
+    "max_runtime_seconds": 100,
     "max_artifact_bytes": 65536
   }
 }

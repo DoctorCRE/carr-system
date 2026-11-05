@@ -1,0 +1,29 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S1-artifact-download-retries",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "released-retry-source-and-hosted-artifact-check",
+      "predicate": "After merge, use worker-release-smoke.v1 to verify the normal public Worker release identity contains the retry change. Separately observe the hosted strict fast job on the merged source successfully retrieve and verify the pinned DoctorCRE release artifact. Require its downloader selftest to pass transient recovery, bounded exhaustion, permanent-error refusal, and integrity checks. The registered runner proves release identity only. Missing hosted evidence leaves retry delivery unproven.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release ancestry contains this change and hosted strict fast checks pass on that source. Release smoke alone does not prove retries. The next strict fast runs on PRs 3000 and 3001 are downstream observations, not proof of source identity.",
+      "input_class": "public release identity and hosted CI logs for the deployed source; no business records or sends",
+      "deadline_seconds": 30,
+      "deferred": {
+        "blocking_unit": "WR622-S1-artifact-download-retries receipt producer and registered full-predicate evaluator",
+        "reason": "This prose assertion has no structured invocation and paired fixture receipts. Its current runner does not evaluate the complete declared predicate."
+      }
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 20,
+    "max_records": 1,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
+}
