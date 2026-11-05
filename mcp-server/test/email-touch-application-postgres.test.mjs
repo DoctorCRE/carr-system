@@ -179,7 +179,7 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     }
   });
   await t.test('concurrent party capture and merge preserve mail in either lock order',async t=>{
-    for (const mergeFirst of [true,false]) await t.test(mergeFirst ? 'merge first refuses stale capture and retry succeeds' : 'capture first waits then merge transfers mail',async()=>{
+    for (const mergeFirst of [true,false]) await t.test(mergeFirst ? 'merge first redirects retained capture and retry succeeds' : 'capture first waits then merge transfers mail',async()=>{
       const parties=(await c.query(`insert into party(kind,name,created_by,updated_by,created_at)
         values('person','Synthetic concurrent survivor',$1,$1,'2025-01-01'),
               ('person','Synthetic concurrent loser',$1,$1,'2026-01-01') returning id`,[actor.id])).rows;
@@ -222,9 +222,8 @@ test('email touch permanent applications and bounded reconciliation', async t =>
           assert.equal((await merge()).ok,true);
           release();
           const result=await pending;
-          assert.equal(result.error?.payload?.error,'email_touch_target_not_live','stale capture must refuse after merge commits');
-          assert.equal(publicError(result.error,{}).error,'email_touch_target_not_live');
-          assert.equal((await query('select count(*)::int n from tool_call where idempotency_key=$1',[args.idempotency_key])).rows[0].n,0);
+          assert.equal(result.value?.ok,true,'retained capture follows the survivor after merge commits');
+          assert.equal(result.value.subject.id,survivor);
         } else {
           const pid=(await peer.query('select pg_backend_pid() pid')).rows[0].pid;
           merging=merge();
@@ -239,7 +238,7 @@ test('email touch permanent applications and bounded reconciliation', async t =>
           assert.equal((await merging).activities_moved,1);
         }
         c.query=query;
-        const retried=await call('log-activity',mergeFirst ? {...args,ref:survivor} : args);
+        const retried=await call('log-activity',args);
         assert.equal(retried.ok,true);
         assert.equal((await query('select party_id from activity where id=$1',[retried.activity_id])).rows[0].party_id,survivor);
         assert.equal((await query('select count(*)::int n from activity where party_id=$1',[loser])).rows[0].n,0);
