@@ -18,9 +18,9 @@ const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" +
 function expression(value, github, success = true, inputs = { shard_trial: false }, cancelled = false) {
   if (value === undefined) return success && !cancelled;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base\.ref)|inputs\.shard_trial|needs\.scope\.outputs\.full|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
+  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base(?:\.ref)?)|inputs\.shard_trial|needs\.scope\.outputs\.full|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false|null)+$/, `unsupported expression: ${raw}`);
   const safe = raw.replace(/github(?:\.[a-zA-Z_]+)+/g, path =>
-    JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? ""));
+    JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? null));
   const result = runInNewContext(safe, { inputs, needs: { scope: { outputs: { full: "true" } } }, always: () => true, cancelled: () => cancelled }, { timeout: 1000 });
   // Actions implicitly adds success() unless a status function is present.
   return raw.includes("always()") || raw.includes("cancelled()") || success ? result : false;
@@ -74,8 +74,19 @@ for (const file of files) {
     assert.equal(current.cancel, true);
     for (const action of ["opened", "reopened", "ready_for_review", "converted_to_draft"]) {
       const transition = policy(workflow, context("pull_request", action, 9, 3));
-      assert.equal(transition.cancel, true);
+      assert.equal(transition.cancel, file !== "ci.yml" || ["ready_for_review", "converted_to_draft"].includes(action));
       assert.equal(transition.group, current.group);
+    }
+    if (file === "ci.yml") {
+      for (const changes of [{}, { body: { from: "old proof" } }, { title: { from: "old title" } },
+        { base: { ref: { from: "main" } } }]) {
+        const edited = context("pull_request", "edited");
+        edited.event.changes = changes;
+        const result = policy(workflow, edited);
+        assert.equal(result.triggers, true);
+        assert.equal(result.group, current.group);
+        assert.equal(result.cancel, Object.hasOwn(changes, "base"));
+      }
     }
     assert.equal(policy(workflow, context("pull_request", "synchronize", 9, 2)).group, current.group);
     assert.notEqual(policy(workflow, context("pull_request", "opened", 10)).group, current.group);
@@ -147,7 +158,7 @@ test("same-head proof edits rerun the complete PR lane without scheduling doc dr
   assert.equal(edited.triggers, true);
   assert.deepEqual(edited.runnable, CI_PR_JOBS);
   assert.equal(edited.group, previous.group);
-  assert.equal(edited.cancel, true);
+  assert.equal(edited.cancel, false);
   const draftEvent = context("pull_request", "edited");
   draftEvent.event.pull_request.draft = true;
   assert.deepEqual(policy(ci, draftEvent).runnable, ["checks"]);

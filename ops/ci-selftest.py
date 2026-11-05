@@ -1383,11 +1383,12 @@ def test_hosted_draft_lifecycle():
         needs = {name: {"result": "success"} for name in lanes}
         if "scope" in needs:
             needs["scope"]["outputs"] = {"full": "true"}
-        def context(event="pull_request", draft=False, action="synchronize", sha="a" * 40):
+        def context(event="pull_request", draft=False, action="synchronize", sha="a" * 40, changes=None):
             return {"github": {"workflow": wf["name"], "event_name": event,
                                "run_id": 41, "sha": sha,
-                               "event": {"action": action, "pull_request": {
-                                   "number": 12, "draft": draft, "head": {"sha": sha}}}},
+                               "event": {"action": action, "changes": changes or {}, "pull_request": {
+                                   "number": 12 if event == "pull_request" else None,
+                                   "draft": draft, "head": {"sha": sha}}}},
                     "needs": needs}
         groups = []
         with tempfile.TemporaryDirectory() as directory:
@@ -1422,6 +1423,35 @@ def test_hosted_draft_lifecycle():
             check(f"{filename}: same PR uses one concurrency group across readiness and synchronize",
                   len(set(groups + [evaluate(wf["concurrency"]["group"], context(sha="b" * 40))])) == 1
                   and evaluate(wf["concurrency"]["cancel-in-progress"], context()))
+            if filename == "ci.yml":
+                cancel = wf["concurrency"]["cancel-in-progress"]
+                for action, changes, expected in (
+                        ("opened", {}, False), ("reopened", {}, False),
+                        ("edited", {}, False),
+                        ("edited", {"body": {"from": "old proof"}}, False),
+                        ("edited", {"title": {"from": "old title"}}, False),
+                        ("edited", {"base": {"ref": {"from": "main"}}}, True),
+                        ("synchronize", {}, True), ("ready_for_review", {}, True),
+                        ("converted_to_draft", {}, True)):
+                    ctx = context(action=action, changes=changes)
+                    check(f"CI {action} changes={list(changes)} cancellation={expected}",
+                          evaluate(cancel, ctx) == expected)
+                for actions in (("ready_for_review", "edited", "edited"),
+                                ("ready_for_review", "edited", "synchronize")):
+                    sequence = [context(action=action) for action in actions]
+                    check(f"CI sequence {actions} shares the active PR group",
+                          {evaluate(wf["concurrency"]["group"], ctx) for ctx in sequence} == {groups[0]})
+                    check(f"CI sequence {actions} preserves metadata queue then source invalidation",
+                          [evaluate(cancel, ctx) for ctx in sequence]
+                          == [True, False, actions[-1] == "synchronize"])
+                for event in ("merge_group", "schedule", "workflow_dispatch"):
+                    check(f"CI {event} groups are unique per run",
+                          evaluate(wf["concurrency"]["group"], context(event=event))
+                          != evaluate(wf["concurrency"]["group"], {
+                              **context(event=event), "github": {**context(event=event)["github"], "run_id": 42}}))
+                check("CI different workflows use independent groups",
+                      groups[0] != evaluate(wf["concurrency"]["group"], {
+                          **context(), "github": {**context()["github"], "workflow": "Review gate"}}))
             check(f"{filename}: different PRs have independent groups",
                   groups[0] != evaluate(wf["concurrency"]["group"], {
                       **context(), "github": {**context()["github"], "event": {"pull_request": {"number": 13}}}}))
