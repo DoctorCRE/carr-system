@@ -1,0 +1,141 @@
+{
+  "schema": "carr-delivery-inventory.v1",
+  "repository": "DoctorCRE/carr-system",
+  "environment": "production",
+  "lanes": {
+    "database": {
+      "paths": [
+        "migrations/**",
+        "db/**",
+        "domain.sql"
+      ],
+      "targets": [
+        "worker"
+      ],
+      "required_proofs": [
+        "schema-ledger",
+        "worker-release"
+      ]
+    },
+    "worker": {
+      "paths": [
+        "mcp-server/**",
+        "client-portal/**",
+        "dealroom/**",
+        "shared/**",
+        "src/**",
+        "workflows/**"
+      ],
+      "targets": [
+        "worker"
+      ],
+      "required_proofs": [
+        "worker-release",
+        "declared-assertions"
+      ]
+    },
+    "studio": {
+      "paths": [
+        "lib/**",
+        "bin/**",
+        "tools/**",
+        "ops/launchd/**",
+        "vendor/**",
+        "vendor-patches/**",
+        "spec/outlook/**",
+        ".agents/**",
+        ".claude/**",
+        "claude-tree/**",
+        "practice-plugin/**",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "run.sh",
+        "requirements*.txt",
+        "requirements.lock",
+        ".python-version",
+        "exporters/**",
+        "fill-engine/**",
+        "generators/**",
+        "templates/**",
+        "video/**"
+      ],
+      "targets": [
+        "studio"
+      ],
+      "required_proofs": [
+        "studio-install",
+        "studio-semantic-run"
+      ]
+    },
+    "control": {
+      "paths": [
+        "ops/**",
+        "hooks/**",
+        "contracts/**",
+        ".github/**",
+        "proofs/**",
+        "evals/**",
+        "test/**",
+        "spec/**",
+        "specs/**",
+        "security/**",
+        "baselines/**",
+        "phase0/**",
+        "pipelines/**",
+        "scripts/**",
+        "workspace/**",
+        ".gitattributes",
+        ".gitignore",
+        ".gitleaks.toml",
+        ".gitmodules",
+        ".nvmrc",
+        "mypy.ini",
+        "renovate.json",
+        "skills-lock.json",
+        "t3.json"
+      ],
+      "targets": [],
+      "required_proofs": [
+        "source-conformance"
+      ]
+    },
+    "docs": {
+      "paths": [
+        "docs/**",
+        "audits/**",
+        "design/**",
+        "deliverables/**",
+        "runbooks/**",
+        "roadmap-revisions/**",
+        "corpus/**",
+        "control-room/**",
+        "README.md",
+        "RECOVERY.md",
+        "SUMMARY.md",
+        "secrets-inventory.md",
+        "backups-public-key.txt",
+        "manifest*.tsv"
+      ],
+      "targets": [],
+      "required_proofs": [
+        "committed-content"
+      ]
+    },
+    "app": {
+      "paths": [],
+      "targets": [
+        "app"
+      ],
+      "required_proofs": [
+        "downstream-app-compatibility"
+      ]
+    }
+  },
+  "reader": {
+    "schema": "carr-delivery-plan-read.v1",
+    "transport": "local-git-read-only",
+    "oidc_exchange": "unproven-unprovisioned",
+    "includes_business_payloads": false,
+    "execution_attested": false
+  }
+}
