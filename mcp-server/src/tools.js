@@ -76,7 +76,8 @@ import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
 import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalendarDealSuggestions, addCalendarConfirmations } from "./brief-calendar.js";
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
-import { actionLinkTools } from "./action-links.js";
+import { actionLinkTools, buildActionLink } from "./action-links.js";
+import { DRAFT_ELIGIBILITY_SQL } from "./lead-draft-eligibility.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
@@ -3737,6 +3738,17 @@ export const TOOLS = {
         return { items: value.candidates, claimable: value.claimable,
           needs_contact_count: value.needs_contact_count };
       });
+      const leadDrafts = await section(async () => {
+        const { rows } = await c.query(
+          `select d.id, d.lead_id, d.revision, p.name,
+                  to_jsonb(d.scheduled_for)#>>'{}' as scheduled_for, d.time_zone
+             from lead_contact_draft d join lead l on l.id=d.lead_id
+             join party p on p.id=l.party_id join actor a on a.id=d.owner_id
+            where a.slug=$1 and d.approved_at is null and (${DRAFT_ELIGIBILITY_SQL})
+            order by d.scheduled_for,d.id limit 20`, [scope.sponsor]);
+        return { items: rows.map(row => ({ ...row,
+          action_link: buildActionLink({ kind: "lead_draft", id: row.id }) })) };
+      });
       const deals = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "deal-room-board", { workspace: "all" });
         // deal-room-board is shared by design; the personal morning composite is
@@ -3846,7 +3858,7 @@ export const TOOLS = {
         calendar = { state: "unavailable", reason: "source_unavailable", items: [] };
       }
       const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
-        today, ...(calendar ? { calendar } : {}), claim_card: claimCard, deals, loops, renewals,
+        today, ...(calendar ? { calendar } : {}), claim_card: claimCard, lead_drafts: leadDrafts, deals, loops, renewals,
         assurance_cadence: assuranceCadence, costs };
       const coverage = {
         schema: "morning-brief-coverage.v1", count_scope: "returned_rows_only",

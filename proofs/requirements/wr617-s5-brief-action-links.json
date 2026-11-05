@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617.S5-brief-action-links",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "brief-and-resolver-deployed",
+    "predicate": "The deployed Worker release matches the merged SHA and exposes morning-brief and resolve-action-link. This smoke establishes deployment only. A separate read-only proof must observe Joe opening a real brief link to its exact current draft, a stale refusal, CARR and app release identities, and unchanged approval and send state.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Release identity matches the merged SHA and both morning-brief and resolve-action-link are in the verb registry. Product stays landed-unproven until the separate real-link observation.",
+    "input_class": "read-only release identity and verb registry",
+    "deadline_seconds": 120
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 1048576
+  }
+}
