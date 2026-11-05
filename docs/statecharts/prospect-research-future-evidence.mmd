@@ -1,0 +1,22 @@
+stateDiagram-v2
+    [*] --> NoCurrent
+    state "No current evidence. Research needed." as NoCurrent
+    state "Current sourced verification. Verified." as Verified
+    state "Current conflict. Review needed." as Conflict
+    state "Future evidence only. Research needed." as Future
+    state "Expired evidence only. Research needed." as Expired
+    NoCurrent --> Future: A finding has a future observation
+    Future --> Verified: The clock reaches a sourced verification
+    Future --> Conflict: The clock reaches a discrepancy
+    NoCurrent --> Verified: A sourced verification is observed at or before the clock
+    Verified --> Conflict: A current discrepancy is recorded
+    Conflict --> Verified: The discrepancy expires and verification remains current
+    Verified --> Expired: All current findings expire
+    Expired --> Verified: A current sourced verification is recorded
+    NoCurrent --> NoCurrent: Invalid observation, nothing found, or no source
+    note right of Future
+      Every finding stays visible in evidence.
+      One observed clock governs each evaluation.
+      Expiry follows the existing database policy.
+    end note
+    %% never A future or invalid observation establishes verification or an active discrepancy.
