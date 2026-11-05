@@ -178,6 +178,81 @@ test('email touch permanent applications and bounded reconciliation', async t =>
       assert.equal(timeline.timeline.filter(r=>r.entry_kind==='activity'&&r.verb===kind).length,1);
     }
   });
+  await t.test('concurrent party capture and merge preserve mail in either lock order',async t=>{
+    for (const mergeFirst of [true,false]) await t.test(mergeFirst ? 'merge first refuses stale capture and retry succeeds' : 'capture first waits then merge transfers mail',async()=>{
+      const parties=(await c.query(`insert into party(kind,name,created_by,updated_by,created_at)
+        values('person','Synthetic concurrent survivor',$1,$1,'2025-01-01'),
+              ('person','Synthetic concurrent loser',$1,$1,'2026-01-01') returning id`,[actor.id])).rows;
+      const [survivor,loser]=parties.map(row=>row.id);
+      const capture=ref=>({idempotency_key:randomUUID(),ref,kind:'email_in',summary:'Synthetic concurrent capture',
+        occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
+        email_context:{subject:'Synthetic concurrency',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}});
+      await call('log-activity',capture(survivor));
+      await call('log-activity',capture(survivor));
+      const peer=new pg.Client(fixture.connection); await peer.connect();
+      const query=c.query.bind(c);
+      let release,paused;
+      const gate=new Promise(resolve=>{release=resolve;});
+      const reached=new Promise(resolve=>{paused=resolve;});
+      c.query=async(sql,params)=>{
+        const result=await query(sql,params);
+        if (mergeFirst
+          ? sql==='select subject_type, subject_id from v_ref_index where subject_id=$1 limit 2' && params[0]===loser
+          : typeof sql==='string' && sql.includes('insert into activity (') && params[6]===loser) {
+          paused(); await gate;
+        }
+        return result;
+      };
+      const args=capture(loser);
+      const pending=call('log-activity',args).then(value=>({value}),error=>({error}));
+      const merge=async()=>{
+        await peer.query('begin');
+        try {
+          await peer.query("set local statement_timeout='5s'");
+          await peer.query('set local role carr_writer');
+          const result=await executeRegisteredTool(peer,actor,'confirm-merge',{idempotency_key:randomUUID(),
+            survivor_party:survivor,merged_party:loser,match_basis:'exact synthetic shared email'});
+          await peer.query('commit'); return result;
+        } catch(error) { await peer.query('rollback'); throw error; }
+      };
+      let merging;
+      try {
+        await Promise.race([reached,pending.then(()=>{throw new Error('capture ended before concurrency gate');})]);
+        if (mergeFirst) {
+          assert.equal((await merge()).ok,true);
+          release();
+          const result=await pending;
+          assert.equal(result.error?.payload?.error,'email_touch_target_not_live','stale capture must refuse after merge commits');
+          assert.equal(publicError(result.error,{}).error,'email_touch_target_not_live');
+          assert.equal((await query('select count(*)::int n from tool_call where idempotency_key=$1',[args.idempotency_key])).rows[0].n,0);
+        } else {
+          const pid=(await peer.query('select pg_backend_pid() pid')).rows[0].pid;
+          merging=merge();
+          let blocked=false;
+          for(let attempt=0;attempt<100 && !blocked;attempt++) {
+            blocked=(await query('select cardinality(pg_blocking_pids($1))>0 blocked',[pid])).rows[0].blocked;
+            if(!blocked) await new Promise(resolve=>setTimeout(resolve,10));
+          }
+          assert.equal(blocked,true,'merge waits for the in-flight capture transaction');
+          release();
+          assert.equal((await pending).value?.ok,true);
+          assert.equal((await merging).activities_moved,1);
+        }
+        c.query=query;
+        const retried=await call('log-activity',mergeFirst ? {...args,ref:survivor} : args);
+        assert.equal(retried.ok,true);
+        assert.equal((await query('select party_id from activity where id=$1',[retried.activity_id])).rows[0].party_id,survivor);
+        assert.equal((await query('select count(*)::int n from activity where party_id=$1',[loser])).rows[0].n,0);
+        assert.equal((await call('catch-me-up',{ref:survivor})).timeline.filter(row=>row.entry_kind==='activity').length,3);
+        assert.equal((await call('log-activity',{...args,idempotency_key:randomUUID(),ref:survivor})).activity_id,retried.activity_id);
+      } finally {
+        release(); c.query=query;
+        await pending;
+        if(merging) await merging.catch(()=>{});
+        await peer.end();
+      }
+    });
+  });
   await t.test('party merge preserves captured mail and mailbox replay on the survivor',async()=>{
     const parties=(await c.query(`insert into party(kind,name,created_by,updated_by,created_at)
       values('person','Synthetic older party',$1,$1,'2025-01-01'),
