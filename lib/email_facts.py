@@ -51,7 +51,8 @@ def adapt_email_facts(source: EmailFactSource, output: dict) -> dict:
         if reason:
             dispositions[key] = reason
             continue
-        observation = {name: field[name] for name in ('fact_key', 'value', 'unit', 'expense_basis') if name in field}
+        observation: dict[str, object] = {name: field[name]
+            for name in ('fact_key', 'value', 'unit', 'expense_basis') if name in field}
         observation.update(id=key, method='text_layer', extractor_version=VERSION,
             confidence_tier='human_review', source={
                 'document_ref': f'email:{source.activity_id}:{source.source_version}',

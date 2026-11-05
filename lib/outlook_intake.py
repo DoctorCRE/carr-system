@@ -1527,9 +1527,9 @@ class Run:
     def prepare_attachments(self, mails: list[dict], matcher: Matcher, db: Path, files: Path) -> list[tuple[str, dict, dict, bytes]]:
         from lib import outlook_attachments as att
 
-        cutoff = int((self.now - UNRESOLVED_DAYS).timestamp())
+        outcome_cutoff = int((self.now - UNRESOLVED_DAYS).timestamp())
         outcomes = {key: value for key, value in self.state.get('attachment_outcomes', {}).items()
-                    if value['at'] >= cutoff}
+                    if value['at'] >= outcome_cutoff}
         self.state['attachment_outcomes'] = outcomes
         for outcome in outcomes.values():
             key = 'attachments_distinct_' + outcome['status']
