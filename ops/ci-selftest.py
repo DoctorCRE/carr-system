@@ -1576,7 +1576,7 @@ def test_hosted_draft_lifecycle():
                   isinstance(matrix["exclude"], list))
 
 
-def test_hosted_zsh_setup_does_not_refresh_working_indexes():
+def test_hosted_zsh_setup_qualifies_shell():
     wf = _hosted_workflow()
     setup = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Install zsh")
     check("hosted zsh setup uses the shared installer", setup["run"] == "ops/ci-zsh.sh")
@@ -1584,121 +1584,64 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
         for job in _hosted_workflow(filename)["jobs"].values():
             for step in job.get("steps", []):
                 if step.get("name") == "Install zsh":
-                    check(f"{filename} bounds zsh setup", step.get("timeout-minutes") == 12)
+                    check(f"{filename} bounds zsh setup", step.get("timeout-minutes") == 7)
     _exercise_zsh_installer()
 
 
 def _exercise_zsh_installer():
-    with tempfile.TemporaryDirectory(prefix="ci-zsh-setup-") as tmp:
-        fixture = pathlib.Path(tmp)
-        scripts = {
-            "zsh": '#!/bin/sh\n[ "$CI_SETUP_FIXTURE" = preinstalled ]\n',
-            "sudo": '#!/bin/sh\nexec "$@"\n',
-            "timeout": "#!" + sys.executable + "\n" + '''
-import os, sys
-assert sys.argv[1] == "--kill-after=5s"
-assert 0 < int(sys.argv[2].removesuffix("s")) <= 180
-os.execvp(sys.argv[3], sys.argv[3:])
-''',
-            "apt-cache": "#!" + sys.executable + "\n" + '''
-import hashlib, os, signal, sys
-if os.environ["CI_SETUP_FIXTURE"] == "metadata-deadline":
-    os.kill(os.getppid(), signal.SIGALRM)
-if os.environ["CI_SETUP_FIXTURE"] in ("metadata-error", "publish-error"):
-    sys.exit(2)
-print("Package: zsh\\nVersion: 1\\nArchitecture: amd64\\nSHA256: " +
-      hashlib.sha256(b"trusted-zsh-package").hexdigest())
-''',
-            "apt-get": "#!" + sys.executable + "\n" + '''
-import json, os, pathlib, sys
-log = pathlib.Path(os.environ["CI_SETUP_CALLS"])
-calls = json.loads(log.read_text()) if log.exists() else []
-args = sys.argv[1:]
-calls.append(args)
-log.write_text(json.dumps(calls))
-mode = os.environ["CI_SETUP_FIXTURE"]
-root = pathlib.Path(next(a.split("=", 1)[1] for a in args if a.startswith("Dir::Cache::archives=")))
-archive = root / "zsh_1_amd64.deb"
-if "--download-only" in args:
-    sys.exit(100)
-if "update" in args:
-    sys.exit(100 if mode == "refresh-failed" else 0)
-if "--no-download" in args:
-    original = pathlib.Path(os.environ["ZSH_ARCHIVE_DIR"]) / archive.name
-    if mode == "cache-replaced":
-        original.write_bytes(b"altered-zsh-package")
-    assert archive.read_bytes() == b"trusted-zsh-package"
-    assert root != original.parent
-    assert archive.stat().st_mode & 0o777 == 0o444
-    sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
-if mode == "timed-out":
-    sys.exit(124)
-if mode == "native-error":
-    sys.exit(42)
-if mode in ("cached", "cache-replaced"):
-    sys.exit("network must not be used on a verified cache hit")
-if mode in ("unavailable", "refresh-failed") or (mode == "stale" and not any("update" in c for c in calls)):
-    sys.exit(100)
-if not archive.exists():
-    archive.write_bytes(b"trusted-zsh-package")
-''',
-        }
-        for name, source in scripts.items():
-            path = fixture / name
-            path.write_text(source)
-            path.chmod(0o755)
-        for mode, expected, success in (
-            ("preinstalled", [], True),
-            ("cached", ["offline"], True),
-            ("cached-timed-out", ["offline"], False),
-            ("cache-replaced", ["offline"], True),
-            ("cold", ["install"], True),
-            ("tampered", ["install"], True),
-            ("partial-cache", ["offline", "install"], True),
-            ("stale", ["install", "update", "install"], True),
-            ("unavailable", ["install", "update", "install"], False),
-            ("refresh-failed", ["install", "update"], False),
-            ("metadata-error", [], False),
-            ("metadata-deadline", [], False),
-            ("timed-out", ["install"], False),
-            ("native-error", ["install"], False),
-            ("publish-error", ["install"], False),
-            ("old-version", ["install"], True),
-            ("symlink", ["install"], True),
-        ):
-            archives = fixture / mode
-            archives.mkdir()
-            archive = archives / "zsh_1_amd64.deb"
-            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline"):
-                archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
-            if mode == "old-version":
-                archive.rename(archives / "zsh_2_amd64.deb")
-            if mode == "symlink":
-                target = fixture / "external.deb"
-                target.write_bytes(b"trusted-zsh-package")
-                archive.symlink_to(target)
-            log = fixture / (mode + ".json")
-            env = scrubbed_env()
-            env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
-                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode, TMPDIR=str(fixture),
-                       ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0")
-            ran = subprocess.run(["bash", str(REPO / "ops/ci-zsh.sh")],
-                                 cwd=fixture, env=env, capture_output=True, text=True, timeout=15)
-            check(f"zsh {mode} cleans up after setup", not any(fixture.glob("carr-zsh.*")))
-            calls = json.loads(log.read_text()) if log.exists() else []
-            actions = [("download" if "--download-only" in c else "offline" if "--no-download" in c
-                        else "update" if "update" in c else "install") for c in calls]
-            check(f"zsh {mode} follows the package-manager path", actions == expected, actions)
-            check(f"zsh {mode} propagates setup success or failure", (ran.returncode == 0) == success,
-                  {"rc": ran.returncode, "stderr": ran.stderr})
-            for call in calls:
-                private = pathlib.Path(next(a.split("=", 1)[1] for a in call if a.startswith("Dir::Cache::archives=")))
-                check(f"zsh {mode} removes private archives", not private.exists())
-            if mode == "tampered":
-                check("zsh quarantines unauthenticated cache bytes",
-                      (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
-            if mode in ("cold", "stale", "partial-cache"):
-                check(f"zsh {mode} publishes authenticated cache bytes", archive.is_file() and archive.read_bytes() == b"trusted-zsh-package")
+    import importlib.util
+    from unittest.mock import patch
+    spec = importlib.util.spec_from_file_location("ci_zsh", REPO / "ops/ci_zsh.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    for mode in ("cold", "warm-corrupt", "unavailable", "missing-zsh", "timeout"):
+        calls = []
+        def run(command, **kwargs):
+            calls.append(command)
+            if mode in ("unavailable", "timeout"):
+                raise subprocess.CalledProcessError(100 if mode == "unavailable" else 124, command)
+            if mode == "missing-zsh" and command[0] == "/bin/zsh":
+                raise FileNotFoundError(command[0])
+            return subprocess.CompletedProcess(command, 0)
+        with tempfile.TemporaryDirectory() as directory:
+            archive = pathlib.Path(directory) / "zsh_1_amd64.deb"
+            archive.write_bytes(b"corrupt")
+            with patch.dict(os.environ, ZSH_ARCHIVE_DIR=directory), patch.object(setup.subprocess, "run", side_effect=run):
+                try:
+                    success = setup.main() == 0
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    success = False
+            check(f"zsh {mode} requires actual capability", success == (mode in ("cold", "warm-corrupt")))
+            check(f"zsh {mode} never consumes restored archives", archive.read_bytes() == b"corrupt"
+                  and not any("Dir::Cache" in arg or "--no-download" == arg for c in calls for arg in c))
+            if success:
+                check(f"zsh {mode} executes the actual shebang interpreter", calls[-1] == ["/bin/zsh", "--version"])
+                check(f"zsh {mode} uses bounded signed acquisition", len(calls) == 3
+                      and all(c[:3] == ["timeout", "--kill-after=5s", "180s"] for c in calls[:-1])
+                      and not any("--allow-unauthenticated" in c for c in calls))
+            elif mode in ("unavailable", "timeout"):
+                check(f"zsh {mode} stops before testing", len(calls) == 1)
+
+    with tempfile.TemporaryDirectory(prefix="zsh-subprocess-") as temporary:
+        root = pathlib.Path(temporary)
+        for name, source in {
+            'timeout': '#!' + sys.executable + '\nimport os,sys\nos.execvp(sys.argv[3], sys.argv[3:])\n',
+            'sudo': '#!' + sys.executable + '\nimport os,sys\nos.execvp(sys.argv[1], sys.argv[1:])\n',
+            'apt-get': '#!' + sys.executable + '\nimport os,pathlib,sys\np=pathlib.Path(os.environ["CALLS"]);p.write_text(p.read_text()+"apt\\n" if p.exists() else "apt\\n")\nsys.exit(int(os.environ["APT_EXIT"]))\n',
+        }.items():
+            tool = root / name
+            tool.write_text(source)
+            tool.chmod(0o755)
+        for status in (0, 100):
+            log = root / str(status)
+            result = subprocess.run(['bash', str(REPO / 'ops/ci-zsh.sh')],
+                env={**scrubbed_env(), 'PATH': str(root) + os.pathsep + os.environ['PATH'],
+                     'CALLS': str(log), 'APT_EXIT': str(status)},
+                capture_output=True, text=True, timeout=10)
+            check(f"zsh subprocess apt={status} stops or qualifies /bin/zsh",
+                  (result.returncode == 0) == (status == 0), result.stderr)
+            check(f"zsh subprocess apt={status} never retries",
+                  log.read_text().splitlines() == ['apt'] * (2 if status == 0 else 1))
 
 
 def test_worktree_python_selection():
@@ -1786,7 +1729,7 @@ def main(argv=None):
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
                test_push_floor_reports_missing_atlas_packages_without_blaming_registry,
-               test_hosted_zsh_setup_does_not_refresh_working_indexes,
+               test_hosted_zsh_setup_qualifies_shell,
                ):
         try:
             fn()
