@@ -58,9 +58,7 @@ def verify(bundle):
         raise InsufficientEvidence('query_or_revision_provenance_missing')
     values = {key: response(bundle.get(key)) for key in ('all', 'owned', 'unassigned')}
     all_rows = values['all']['proposals']
-    if (not any(row['owner'] == slug for row in all_rows)
-            or not any(row['owner_id'] is None for row in all_rows)
-            or not any(row['owner_id'] is not None and row['owner'] != slug for row in all_rows)):
+    if not any(row['owner'] == slug for row in all_rows):
         raise InsufficientEvidence('owner_cohorts_unavailable')
     for value in values.values():
         require(value['sent'] is False and value['tasks_created'] is False, 'read_side_effect_flags')

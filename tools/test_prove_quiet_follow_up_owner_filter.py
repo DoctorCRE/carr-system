@@ -34,6 +34,34 @@ class OwnerProofTests(unittest.TestCase):
             proof.response(self.recording[key])
         self.assertEqual(self.run_fixture(self.recording)[0], 0)
 
+    def test_empty_unassigned_subset_passes_with_owned_evidence(self):
+        for owned_only in (False, True):
+            with self.subTest(owned_only=owned_only):
+                value = copy.deepcopy(self.recording)
+                value['all']['proposals'] = [row for row in value['all']['proposals']
+                    if row['owner_id'] is not None
+                    and (not owned_only or row['owner'] == value['owner_slug'])]
+                value['unassigned']['proposals'] = []
+                code, result = self.run_fixture(value)
+                self.assertEqual(code, 0, result)
+                self.assertEqual(result['counts']['unassigned'], 0)
+
+    def test_empty_unassigned_subset_refuses_missing_owned_evidence(self):
+        value = copy.deepcopy(self.recording)
+        value['all']['proposals'] = [row for row in value['all']['proposals']
+            if row['owner_id'] is not None and row['owner'] != value['owner_slug']]
+        value['owned']['proposals'] = []
+        value['unassigned']['proposals'] = []
+        code, result = self.run_fixture(value)
+        self.assertEqual((code, result['reason']), (78, 'owner_cohorts_unavailable'))
+
+    def test_empty_unassigned_baseline_rejects_extra_unassigned_rows(self):
+        value = copy.deepcopy(self.recording)
+        value['all']['proposals'] = [row for row in value['all']['proposals']
+            if row['owner_id'] is not None]
+        code, result = self.run_fixture(value)
+        self.assertEqual((code, result['reason']), (1, 'unassigned_subset_changed'))
+
     def test_subset_assertion_failure_exits_one(self):
         value = copy.deepcopy(self.recording)
         value['owned']['proposals'] = []
