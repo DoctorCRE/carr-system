@@ -200,8 +200,8 @@ class ProofCLI(unittest.TestCase):
             self.assertEqual(self.run_cli(base, domain='other.invalid')[0], 78)
 
     def test_total_timeout(self):
-        with fixture(delay=0.3) as (base, requests):
-            self.assertEqual(self.run_cli(base, timeout=0.1)[0], 78)
+        with fixture(delay=2) as (base, requests):
+            self.assertEqual(self.run_cli(base, timeout=1)[0], 78)
             self.assertEqual(len(requests), 3)
 
     def test_bounded_pagination(self):
