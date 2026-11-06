@@ -78,7 +78,7 @@
     ]
   },
   "tools/prove-recorded-comps-readable-deal-labels.py": {
-    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "sha256": "a142fc0a375a9f0d701a981514e3cf31b7dc84ab6dcfa4be87387601b3df8914",
     "commands": [
       "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
       "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"

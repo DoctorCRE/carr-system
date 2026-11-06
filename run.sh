@@ -166,7 +166,7 @@ case "${1:-}" in
       "export [--only <target>] [--bootstrap]|" \
       "call [--branch <name>] <verb> '<json args>'|" \
       "call-mode [serve|state|start|stop]|" \
-      "pre-pr [--body <file>]|" \
+      "pre-pr|" \
       "ci dispatch main-canary.yml|deploy.yml [--ref main] [--dry-run]|" \
       "local-db-ci [--class migration|strict] [--port N]|" \
       "portal-parity --stage N [--rows <ids>] (see --help)|" \

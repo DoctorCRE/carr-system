@@ -277,7 +277,6 @@
     "unused-file:test/situation-retrieval.test.mjs",
     "unused-file:test/sponsor-runtime.test.mjs",
     "unused-file:test/staging-journey-preflight.test.mjs",
-    "unused-file:test/staging-loop-fixtures.test.mjs",
     "unused-file:test/standing-context-query-batch.test.mjs",
     "unused-file:test/system-work-census.test.mjs",
     "unused-file:test/system-work-postgres.test.mjs",

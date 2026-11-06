@@ -1432,8 +1432,7 @@ def test_hosted_draft_lifecycle():
         verdict = jobs.get(verdict_name, {})
         expected_needs = set(lanes) | ({"select", "lint", "unit", "launchd-python39"} if filename == "ci.yml" else set())
         check(f"{filename}: verdict always evaluates and waits for every lane",
-              (verdict.get("if") == "${{ always() }}" if filename != "ci.yml" else
-               verdict.get("if") == "${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}")
+              verdict.get("if") == "${{ always() }}"
               and set(verdict.get("needs", [])) == expected_needs)
         if not verdict:
             continue
