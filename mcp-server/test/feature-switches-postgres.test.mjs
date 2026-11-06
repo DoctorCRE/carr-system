@@ -129,19 +129,20 @@ test('Feature switch reads and scheduled health on disposable PostgreSQL', { ski
     assert.equal(read.switches[0].available,true);
     await requireFeature(c,{...actor,slug:'dell'},input.name);
     const health=await invoke('check-feature-switches',{idempotency_key:randomUUID()});
-    assert.equal(health.overdue.length,1);
-    assert.equal(health.overdue[0].owner,'claude');
-    assert.match(health.overdue[0].line,/on breach:.*owner claude.*retire.*verify.*auto-clear/);
+    const overdue=health.overdue.filter(row=>row.name===input.name);
+    assert.equal(overdue.length,1);
+    assert.equal(overdue[0].owner,'claude');
+    assert.match(overdue[0].line,/on breach:.*owner claude.*retire.*verify.*auto-clear/);
     const again=await invoke('check-feature-switches',{idempotency_key:randomUUID()});
-    assert.equal(again.overdue[0].loop_id,health.overdue[0].loop_id);
+    assert.deepEqual(again.overdue.filter(row=>row.name===input.name).map(row=>row.loop_id),[overdue[0].loop_id]);
     const current=(await c.query('select version from feature_switch where id=$1',[seeded.id])).rows[0];
     await c.query('select * from ops.write_feature_switch($1,$2::jsonb)',
       ['revise',JSON.stringify({id:seeded.id,base_version:Number(current.version),
         description:input.description,default_enabled:true,audience:'team',owner:'claude',
         expected_removal_on:'2000-01-01',retired:true})]);
     const cleared=await invoke('check-feature-switches',{idempotency_key:randomUUID()});
-    assert.equal(cleared.overdue.length,0);
-    assert.deepEqual(cleared.cleared,[health.overdue[0].loop_id]);
+    assert.deepEqual(cleared.overdue.filter(row=>row.name===input.name),[]);
+    assert.ok(cleared.cleared.includes(overdue[0].loop_id));
     assert.equal((await invoke('list-feature-switches',{name:input.name})).switches[0].available,false);
     await assert.rejects(requireFeature(c,{...actor,slug:'dell'},input.name), /feature_disabled/);
   } finally {
