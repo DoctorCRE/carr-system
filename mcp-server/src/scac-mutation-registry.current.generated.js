@@ -2484,6 +2484,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-mail-needs-partner": {
+    "ingress_key": "mcp-tool:read-mail-needs-partner",
+    "source_locator": "mcp-server/src/mail-needs-partner.ts",
+    "schema_digest": "c8dec6e9c30b02bb06ab67685d4d3fad6dd8e11c19d933e2e5880cad36c35941",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-market-terms": {
     "ingress_key": "mcp-tool:read-market-terms",
     "source_locator": "mcp-server/src/market-terms.ts",

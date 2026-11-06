@@ -1,0 +1,10 @@
+{
+  "unit": "mail-needs-partner",
+  "card": "WR648.S1.J1",
+  "contract": "mail-needs-partner.v1",
+  "fixture_command": "python3 tools/prove-mail-needs-partner.py --fixture tools/fixtures/mail-needs-partner.json",
+  "production_command": "python3 tools/prove-mail-needs-partner.py --production --natural",
+  "production_status": "insufficient_evidence_until_origin_bound_sessions_and_contemporaneous_canonical_read_are_available",
+  "claims": ["pending_recorded_proposal", "explicit_priority_reason", "existing_review_command_reference", "other_partner_exclusion"],
+  "not_claimed": ["delivered", "replied", "production_proven"]
+}

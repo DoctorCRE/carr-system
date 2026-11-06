@@ -1,3 +1,5 @@
+import { mailNeedsPartnerOwner, parseMailNeedsPartnerQuery, parseMailNeedsPartnerResponse } from "./mail-needs-partner.ts";
+const MAIL_NEEDS_PARTNER_PATH = "/api/v1/intelligence/mail-needs-partner";
 // Browser entrypoint for the configured production app host (with a narrow
 // legacy Deal Room compatibility door).
 //
@@ -1095,7 +1097,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       // The business read is the ONLY addition to that surface, and it is
       // admitted by an exact path parser rather than a prefix.
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
-          url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
+          url.pathname !== MAIL_NEEDS_PARTNER_PATH && url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           url.pathname !== PHONE_CALL_PREFIX && !url.pathname.startsWith(PHONE_CALL_PREFIX + '/') &&
           !url.pathname.startsWith(DELIVERABLE_PREFIX + '/') &&
@@ -1125,7 +1127,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       const session = await sessionFor(request, env, dependencies);
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
-        if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+        if (url.pathname === MAIL_NEEDS_PARTNER_PATH || url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || url.pathname.startsWith(DELIVERABLE_PREFIX) || APP_FACT_ROUTES.has(url.pathname) ||
             url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/') ||
             isBusinessApiPath(url.pathname)) {
@@ -1196,6 +1198,9 @@ async function handleRequest(request, env, ctx, dependencies) {
         response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
+      else if (url.pathname === MAIL_NEEDS_PARTNER_PATH) {
+        response = await mailNeedsPartnerResponse(request, env, session, dependencies);
+      }
       else if (APP_FACT_ROUTES.has(url.pathname)) {
         response = await appFactResponse(request, env, session, dependencies);
       } else if (url.pathname === JEV_DEAL_READING_PATH) {
@@ -1239,4 +1244,31 @@ export function isDealroomRequest(request, env) {
 
 export function isLegacyDealroomRequest(request, env) {
   return requestMatchesDealroomOrigin(request, legacyDealroomOrigin(env));
+}
+
+async function mailNeedsPartnerResponse(request, env, session, dependencies) {
+  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+  const params = new URL(request.url).searchParams;
+  let args;
+  try {
+    if ([...params.keys()].length !== new Set(params.keys()).size) throw Error();
+    const query = Object.fromEntries(params);
+    if (Object.hasOwn(query, 'limit')) {
+      if (!/^[1-9][0-9]*$/.test(query.limit)) throw Error();
+      query.limit = Number(query.limit);
+    }
+    args = parseMailNeedsPartnerQuery(query);
+  } catch { return json({ error: 'mail_needs_partner_arguments_invalid' }, 400); }
+  try { mailNeedsPartnerOwner(session.actor); }
+  catch { return json({error: 'mail_needs_partner_unauthorized'}, 403); }
+  const refusal = await verbRequestBudgetRefusal(env, session.actor, session.key);
+  if (refusal) return refusal;
+  try {
+    const result = parseMailNeedsPartnerResponse(await (dependencies.mailNeedsPartnerCaller || callTool)(
+      env, session.actor, 'read-mail-needs-partner', { limit: args.limit, ...(args.cursor ? {cursor: args.cursor} : {}) }));
+    return json(result, result.state === 'unavailable' ? 503 : 200);
+  } catch (error) {
+    const code = error?.payload?.error;
+    return json({error: code || 'DEPENDENCY_UNAVAILABLE'}, code === 'mail_needs_partner_unauthorized' ? 403 : code ? 400 : 503);
+  }
 }

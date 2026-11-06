@@ -27,7 +27,12 @@
   "portal_session_suite_measurement": {"card": "WR617.S4.J5", "source_sha": "c7b3ed7e8333e67163124f4938bf6bef794b97c5", "hosted_run": 41955790078, "suite": "client-portal-session-postgres.test.mjs", "milliseconds": 16754, "log_sha256": "e3d40adf825edcabde40de1d74ff3fa52dfc28b776e67023c4fbfe17b8940cdb", "basis": "Observed hosted canonical runner duration; replaces unmeasured-suite fallback. Retains hosted setup floor, five shards and watchdog headroom."},
   "calendar_strict_instants_suite_measurement": {"card": "WR636.S2.J3", "source_sha": "8dcbddb181558116caf6e46dbe0293bddf044c5a", "hosted_run": 42006466357, "suite": "calendar-strict-instants.test.mjs", "milliseconds": 288, "log_sha256": "1002f7383ef9d653ad19d8c0d2b7d104587cb3b98bb1c5efa93d33aadfc8a657", "basis": "Observed successful hosted canonical runner duration. suiteBatches places this pure suite in the parallel bulk pool. Retains hosted setup floor, five shards and watchdog headroom."},
   "composer_suite_measurement": {"card": "WR227.S20.J2", "source_sha": "f92cf8f5a20ffc35ffa1285c936e3604426897c7", "hosted_run": 41977490875, "suite": "market-study-composer.test.mjs", "milliseconds": 741, "serial": false, "log_sha256": "70cf0dbf59e2cbc696ac11f768185957c05937b1aa8ee8a6c7cd04e4c4a0b910", "basis": "Observed hosted canonical runner duration; replaces unmeasured-suite fallback. Retains hosted setup floor, five shards and watchdog headroom."},
+  "mail_needs_partner_suite_measurement": {"card": "WR648.S1.J1", "local_samples_ms": {"mail-needs-partner.test.mjs": 350, "mail-needs-partner-route.test.mjs": 335, "mail-needs-partner-postgres.test.mjs": 1185}, "proof_python_ms": 1246, "basis": "Per-suite process elapsed, synthetic disposable PostgreSQL, no production reads."},
   "suites": {
+    "mail-needs-partner.test.mjs": {"milliseconds": 350, "serial": false},
+    "mail-needs-partner-route.test.mjs": {"milliseconds": 335, "serial": false},
+    "mail-needs-partner-postgres.test.mjs": {"milliseconds": 1185, "serial": true},
+
     "a02-rule-enforcement-postgres.test.mjs": {"milliseconds": 3248, "serial": true},
     "a02-rule-enforcement-reader-mutants.test.mjs": {"milliseconds": 1021, "serial": false},
     "a02-rule-enforcement-reader.test.mjs": {"milliseconds": 216, "serial": false},
