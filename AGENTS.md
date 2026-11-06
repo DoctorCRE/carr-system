@@ -200,7 +200,7 @@ To catch up with main, merge origin/main into the branch. This overrides the
 rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
 `full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
 
-Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Workers push, report, stop; only the coordinator arms merges after independent current-head approval and green CI. CI results reach the orchestrator as app events. Merges and verified deploys reach
+Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Workers push, report; coordinators arm merges after independent current-head [native approval](docs/models/source-ci-review/README.md) and green CI. CI emits events. Merges and verified deploys reach
 the coordinator as idempotent PR comments.
 
 Do not commit on main either. `ops/githooks/pre-commit` refuses it, because a
@@ -343,21 +343,6 @@ CORE index. Apply the native K cards in AGENTS.md. Before acting, read the linke
 - [Apply the access Joe authorized without adding data fences. Raise live-credential custody once; explain autonomy, isolation, recovery and cost when those matter.](docs/generated-rules/core.md#f673326b).
 - [K04](docs/generated-rules/core.md#fa217e48).
 <!-- carr-native-rules:end -->
-
-## Pull request approval
-
-Approval is GitHub required review by the CARR review App
-(`doctorcre-carr-review[bot]`), separate from required source CI. GitHub dismisses
-stale approvals after pushes and requires approval of the latest push. The
-coordinator submits the independent reviewer's verdict as a native App review
-through `ops/review-submit.py` (also reached by `./run.sh review-pr` and
-`bin/review-pr`). That helper remains supported. Do not import the retired
-approval evaluator or invoke its deleted workflow from delivery automation.
-
-The retired custom approval policy in generated rule `7bb0a3ed` is superseded by
-Joe's removal instruction (`27810f4f`). Its size exemptions and Actions-variable
-checks no longer apply. Card admission and PR-title skip-CI checks are not CI
-requirements; do not recreate them. Historical rule snapshots remain provenance.
 
 Claude Code CARR configuration is project-scoped. `.mcp.json` keeps the server
 name `carr`; `.claude/settings.json` pre-approves it and owns CARR hooks. Hooks

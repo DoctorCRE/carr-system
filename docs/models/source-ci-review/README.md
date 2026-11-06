@@ -77,3 +77,19 @@ After the consumer and signed transport ship, a normal PR must cause exactly one
 ## Safeguards that must survive
 
 Workers hold no review or merge authority. Reviewer independence and CI as merge gate remain mandatory. No force-push, rebase, retarget, review submission, or merge operation exists here. Card admission and bounded retry remain consumer requirements. Source CI remains separate from GitHub required review by the CARR review App.
+
+## Pull request approval
+
+Approval is GitHub required review by the CARR review App
+(`doctorcre-carr-review[bot]`), separate from required source CI. GitHub dismisses
+stale approvals after pushes and requires approval of the latest push. The
+coordinator submits the independent reviewer's verdict as a native App review
+through `ops/review-submit.py` (also reached by `./run.sh review-pr` and
+`bin/review-pr`). That helper remains supported. Do not import the retired
+approval evaluator or invoke its deleted workflow from delivery automation.
+
+The retired custom approval policy in generated rule `7bb0a3ed` is superseded by
+Joe's removal instruction (`27810f4f`). Its size exemptions and Actions-variable
+checks no longer apply. Card admission and PR-title skip-CI checks are not CI
+requirements; do not recreate them. Historical rule snapshots remain provenance.
+
