@@ -689,7 +689,7 @@ for (const email of [
 for (const email of [
   "clinic.test", "Contact clinic.test for details", "person@notclinic.test", "person@clinic.test.invalid",
   '"clinic.test" <person@other.test>', '"person@clinic.test" <person@other.test>',
-  '"Morgan, person@clinic.test" <person@other.test>', "person@other.test; clinic.test",
+  '"Morgan, person@clinic.test" <person@other.test>', "person@other.test; clinic.test", 'Alex <person@clinic.test.invalid',
 ]) {
   test(`domain without recorded address refuses in ${email}`, async () => {
     const fake = new Fake(basePlan({ email }));
@@ -722,4 +722,106 @@ test("secondary domain exact replay returns receipt without correction; changed 
   assertNoCorrection(fake);
   await assert.rejects(call(fake, { ...args, fields: { name: "Another Name" } }), e => e.payload.error === "key_reuse");
   assertNoCorrection(fake);
+});
+
+test("secondary domain keeps city, source, confidence and version checks", async () => {
+  const evidence = { ...confirmedEvidence, confidence: "medium", corroborating_field: "email_domain", corroborating_value: "clinic.test" };
+  const plan = () => basePlan({ email: "first@other.test; person@clinic.test" });
+  assert.deepEqual((await call(new Fake(plan()), { fields: { name: "Alex Morgan" }, evidence })).updated, ["name"]);
+  for (const [overrides, expected] of [
+    [{ evidence: { ...evidence, city: "Mobile" } }, "identity_evidence_required"],
+    [{ evidence: { ...evidence, confidence: "low" } }, "identity_evidence_required"],
+    [{ evidence: { ...evidence, confirmed: false } }, "identity_evidence_required"],
+    [{ source: " " }, "missing_source"],
+    [{ base_version: 3 }, "version_conflict"],
+  ]) {
+    const fake = new Fake(plan());
+    await assert.rejects(call(fake, { fields: { name: "Alex Morgan" }, evidence, ...overrides }), e => e.payload.error === expected);
+    assertNoCorrection(fake);
+  }
+});
+
+test("identity proof CLI consumes registered read replies and refuses missing event observations", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const { spawn, execFileSync } = await import("node:child_process");
+  const { createServer } = await import("node:http");
+  const root = resolve(import.meta.dirname, "../..");
+  const dir = await mkdtemp(join(tmpdir(), "WR647-S11-J1-"));
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const run = flags => new Promise((resolveRun, reject) => {
+    const child = spawn("python3", [join(root, "tools/prove-identity-domain-recorded-addresses.py"), ...flags], { cwd: root });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", value => stdout += value);
+    child.stderr.on("data", value => stderr += value);
+    child.on("error", reject);
+    child.on("close", code => resolveRun({ code, stdout, stderr }));
+  });
+  let releaseReads = 0, drift = false;
+  const server = createServer((request, response) => {
+    if (request.url !== "/release") { response.writeHead(404).end(); return; }
+    releaseReads++;
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ ok: true, git_sha: { value: drift && releaseReads > 1 ? "f".repeat(40) : head } }));
+  });
+  await new Promise(resolveListen => server.listen(0, "127.0.0.1", resolveListen));
+  try {
+    const party = { id: TARGET, ref: "P-0301", name: "Alex Morgan", specialty: null, city: "Pensacola", state: "FL", contact_state: "active", evidence: [] };
+    const researchDb = { query: async () => ({ rows: [party] }) };
+    const research = await TOOLS["prospect-research"].handler(researchDb, joe, { subject: "P-0301" });
+    const historyDb = new Fake({
+      "select subject_id from v_ref_index where subject_type='party' and ref ilike $1": [{ subject_id: TARGET }],
+      "from v_subject_timeline": [{ entry_kind: "event", occurred_at: "2026-11-05T12:00:00Z", actor: "joe",
+        verb: "correct-party-identity", summary: "name", detail: null, owed: null }],
+    });
+    const history = await TOOLS["catch-me-up"].handler(historyDb, joe, { ref: "P-0301", limit: 100 });
+    assert.equal(history.subject.id, TARGET);
+    const replies = { "prospect-research": research, "catch-me-up": history };
+    const wrapper = join(dir, "wrapper");
+    const python = execFileSync("which", ["python3"], { encoding: "utf8" }).trim();
+    const script = `#!${python}\nimport json, sys, time\nfrom pathlib import Path\nmode = Path(__file__).with_name('mode').read_text()\nif mode == 'timeout': time.sleep(2)\nif mode == 'unavailable': sys.exit(1)\nassert sys.argv[1] == 'call'\nargs = json.loads(sys.argv[3])\nassert args.get('subject', args.get('ref')) == 'P-0301'\nprint(json.dumps(json.loads(Path(__file__).with_name('replies.json').read_text())[sys.argv[2]]))\n`;
+    await writeFile(wrapper, script, { mode: 0o700 });
+    const receipt = join(dir, "receipt.json");
+    await writeFile(receipt, JSON.stringify({ schema: "identity-domain-recorded-addresses-receipt.v1",
+      event_id: OTHER, party_ref: "P-0301", party_id: TARGET, correction_release_git_sha: head,
+      field: "name", corrected_value: "Alex Morgan", evidence_domain: "clinic.test",
+      stored_before_email: "first@other.test; person@clinic.test" }));
+    await writeFile(join(dir, "mode"), "normal");
+    await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
+    const flags = ["--origin", `http://127.0.0.1:${server.address().port}`, "--call-wrapper", wrapper, "--receipt", receipt, "--timeout-seconds", "5"];
+    const matched = await run(flags);
+    assert.equal(matched.code, 78, matched.stdout + matched.stderr);
+    assert.match(matched.stdout, /read_contract_omits_event_id/);
+    const output = JSON.parse(matched.stdout);
+    assert.equal(output.wrapper_reads, 2);
+    assert.equal(output.release_reads, 2);
+    for (const sensitive of [TARGET, OTHER, "clinic.test", "Alex Morgan", "P-0301", "person@clinic.test"])
+      assert.ok(!matched.stdout.includes(sensitive), sensitive);
+    replies["prospect-research"] = { ...research, name: "Different Name" };
+    await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
+    const contradiction = await run(flags);
+    assert.equal(contradiction.code, 1, contradiction.stdout);
+    assert.match(contradiction.stdout, /stored_corrected_value_differs/);
+    replies["prospect-research"] = research;
+    await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
+    drift = true; releaseReads = 0;
+    const changed = await run(flags);
+    assert.equal(changed.code, 78);
+    assert.match(changed.stdout, /release_changed/);
+    drift = false;
+    for (const mode of ["unavailable", "timeout"]) {
+      await writeFile(join(dir, "mode"), mode);
+      const unavailable = await run([...flags.slice(0, -1), "0.2"]);
+      assert.equal(unavailable.code, 78, unavailable.stdout + unavailable.stderr);
+    }
+    const missing = await run(flags.map(v => v === receipt ? join(dir, "absent.json") : v));
+    assert.equal(missing.code, 78);
+    assert.equal(JSON.parse(missing.stdout).wrapper_reads, 0);
+    assert.equal((await run([...flags.slice(0, -1), "31"])).code, 2);
+    assert.equal((await run(["--help"])).code, 0);
+  } finally {
+    await new Promise(resolveClose => server.close(resolveClose));
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -57,9 +57,14 @@ function storedIdentifierMatches(field, value, before) {
   switch (field) {
     case "email_domain": {
       const domain = normalizedText(value);
-      const stored = typeof before.email === "string" ? before.email.trim().split("@") : [];
-      return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(domain)
-        && stored.length === 2 && Boolean(stored[0]) && normalizedText(stored[1]) === domain;
+      const stored = typeof before.email === "string"
+        ? (before.email.match(/(?:"[^"]*"|[^,;"])+/g) ?? []).flatMap(entry => {
+          const address = entry.includes("<") ? (entry.includes(">") ? entry.slice(entry.indexOf("<") + 1, entry.indexOf(">")) : "") : entry;
+          return address.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [];
+        })
+        : [];
+      return /^[\p{L}\p{M}\p{N}](?:[\p{L}\p{M}\p{N}.-]*[\p{L}\p{M}\p{N}])?\.[\p{L}\p{M}]{2,}$/u.test(domain)
+        && stored.some(address => address.slice(address.indexOf("@") + 1).toLowerCase() === domain);
     }
     case "phone": {
       const phone = phoneIdentifier(value);
