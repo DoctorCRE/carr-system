@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Behavioral headless runner tests; no model, login, launchd, or record writes."""
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -219,8 +221,10 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         def launch(cmd, **kwargs):
             return subprocess.CompletedProcess(cmd, 113 if cmd[1] == 'print' else 0)
         with patch.dict(launchd_hold.DEFINITION_ONLY, {'com.carr.headless.test-task.plist': 'awaiting its slice'}):
-            with self.assertRaises(ValueError):
+            with redirect_stdout(io.StringIO()) as output, self.assertRaises(ValueError):
                 self._install(launch)
+        self.assertEqual(output.getvalue(),
+                         'FAIL install test-task: ValueError; retry selected batch to reconcile\n')
         self.assertFalse((self.home/'Library/LaunchAgents/com.carr.headless.test-task.plist').exists())
 
     def test_denial_event_fails_promptly(self):
@@ -411,7 +415,10 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
             code = 113 if cmd[1] in ('print', 'bootout') else (5 if state['fail'] else 0)
             if kwargs.get('check') and code: raise subprocess.CalledProcessError(code, cmd)
             return subprocess.CompletedProcess(cmd, code)
-        with self.assertRaises(subprocess.CalledProcessError): self._install(launch)
+        with redirect_stdout(io.StringIO()) as output, self.assertRaises(subprocess.CalledProcessError):
+            self._install(launch)
+        self.assertEqual(output.getvalue(),
+                         'FAIL install test-task: CalledProcessError; retry selected batch to reconcile\n')
         state['fail'] = False
         self.assertEqual(self._install(launch), 0)
         from lib.headless_tasks import install_main

@@ -26,7 +26,7 @@ def migrate_snapshot(schema, dsn):
         raise RuntimeError('snapshot migrations failed: ' + (result.stdout + result.stderr)[-4000:])
 
 
-def start_snapshot(fixture, binaries, schema, source=None, *, template=False, migrate=False):
+def start_snapshot(fixture, binaries, schema, source=None, *, socket_directory, template=False, migrate=False):
     data = fixture.root / 'data'
     if source:
         source = Path(source)
@@ -38,10 +38,10 @@ def start_snapshot(fixture, binaries, schema, source=None, *, template=False, mi
                     check=True, capture_output=True, text=True, timeout=120)
     fixture.register(data)
     fixture.run([binaries / 'pg_ctl', '-D', data, '-l', fixture.root / 'server.log',
-                 '-o', f"-k {fixture.root} -h ''", '-w', 'start'],
+                 '-o', f"-k {socket_directory} -h ''", '-w', 'start'],
                 check=True, capture_output=True, text=True, timeout=120)
     if not source:
-        connection = ['-h', fixture.root, '-U', 'carr_ci']
+        connection = ['-h', socket_directory, '-U', 'carr_ci']
         fixture.run([binaries / 'createdb', *connection, 'carr_ci'],
                     check=True, capture_output=True, text=True, timeout=120)
         fixture.run([binaries / 'psql', *connection, '-d', 'carr_ci', '-X',
@@ -49,7 +49,7 @@ def start_snapshot(fixture, binaries, schema, source=None, *, template=False, mi
                     check=True, capture_output=True, text=True, timeout=120)
     if migrate:
         from urllib.parse import quote
-        migrate_snapshot(schema, f'postgresql://carr_ci@localhost/carr_ci?host={quote(str(fixture.root), safe="")}')
+        migrate_snapshot(schema, f'postgresql://carr_ci@localhost/carr_ci?host={quote(str(socket_directory), safe="")}')
     if template:
         fixture.run([binaries / 'pg_ctl', '-D', data, '-m', 'fast', '-w', 'stop'],
                     check=True, capture_output=True, text=True, timeout=120)

@@ -202,18 +202,6 @@ class Collection(unittest.TestCase):
         self.assertNotIn("private instructions", result)
         self.assertNotIn("execute me", result)
 
-    def test_collector_is_development_tooling_in_proof_contract(self):
-        import json
-        root = pathlib.Path(__file__).resolve().parents[1]
-        contract = json.loads((root / "contracts/production-proof-plan.v1.json").read_text())
-        spec = importlib.util.spec_from_file_location("proof_plan", root / "ops/production-proof-plan.py")
-        assert spec is not None and spec.loader is not None
-        proof_plan = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(proof_plan)
-        result = proof_plan.admission(
-            "## Production proof\nn/a: Source evidence collector grants no runtime or launch authority.",
-            ["ops/source-ci-review.py"], root, contract)
-        self.assertEqual(result, "non-product declaration accepted (admission only)")
 
 
 class WorkflowSecurity(unittest.TestCase):

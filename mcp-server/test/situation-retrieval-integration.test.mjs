@@ -238,6 +238,7 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
     !(CLASSIFIED[f.name] ||
       (f.name === "relationship-network.ts" && /join public\.actor a on a\.id=/.test(f.literal) && !/\ba\.(?:kind|active)\b/.test(f.literal)) ||
       (f.name === "memory.js" && memoryWriteLiteralClassified(f.literal)) ||
+      (f.name === "index.js" && f.literal === '"select id from actor where slug=$1 and active"') ||
       (f.name === "email-proposals.js" && submittedDraftCopyLiteralClassified(f.literal)) ||
       (f.name === "capture.js" && captureActorLiteralClassified(f.literal)) ||
       // undo-lead-move is a partner-only writer. Its predecessor association

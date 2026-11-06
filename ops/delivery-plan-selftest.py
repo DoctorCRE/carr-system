@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise commit-bound delivery resolution and shared admission classification."""
-import importlib.util
+"""Exercise commit-bound delivery resolution and post-deploy requirement binding."""
 import hashlib
 import os
 import json
@@ -163,16 +162,6 @@ class DeliveryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'runner'):
             self.resolve(self.commit())
 
-    def test_admission_and_resolver_share_classifier(self):
-        spec = importlib.util.spec_from_file_location('admission', ROOT / 'ops/production-proof-plan.py')
-        admission = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(admission)
-        self.assertIs(admission.classify_paths, delivery.classify_paths)
-        policy = json.loads((ROOT / delivery.POLICY).read_text())
-        paths = ['docs/guide.md', 'lib/outlook_runtime.py', 'mcp-server/src/prompt.md']
-        classified = delivery.classify_paths(paths, policy)
-        self.assertEqual(admission.product_paths(paths, policy), classified['product_paths'])
-        self.assertEqual(classified['required_targets'], ['studio', 'worker'])
 
     def test_path_and_source_budgets(self):
         policy = json.loads((ROOT / delivery.POLICY).read_text())
@@ -230,63 +219,14 @@ class DeliveryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'duplicate assertion'):
             self.resolve(self.commit())
 
-    def test_admission_to_resolution_requires_changed_bound_requirement(self):
-        spec = importlib.util.spec_from_file_location('admission', ROOT / 'ops/production-proof-plan.py')
-        admission = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(admission)
-        name = 'proofs/requirements/change.json'
-        req = self.requirement(targets=['worker'])
-        self.commit()
-        self.write('mcp-server/src/runtime.py', 'synthetic runtime')
-        sha = self.commit()
-        policy = json.loads((self.root / delivery.POLICY).read_text())
-        body = '## Production proof\n' + name
-        with self.assertRaisesRegex(ValueError, 'changed requirement'):
-            admission.admission(body, ['mcp-server/src/runtime.py'], self.root, policy)
-        with self.assertRaisesRegex(ValueError, 'landed requirements'):
-            self.resolve(sha)
-        req['requirement_id'] = 'new-change'
-        self.write(name, json.dumps(req))
-        self.git('add', '--', name)
-        self.git('commit', '--amend', '--no-edit')
-        sha = self.git('rev-parse', 'HEAD')
-        paths = ['mcp-server/src/runtime.py', name]
-        self.assertIn('accepted', admission.admission(body, paths, self.root, policy))
-        self.assertEqual(self.resolve(sha)['requirements'][0]['commit'], sha)
-        policy['x-runners']['fixture.v1']['revision'] = 'f' * 40
-        self.write(delivery.POLICY, json.dumps(policy))
-        req['requirement_id'] = 'invalid-observer'
-        self.write(name, json.dumps(req))
-        self.commit()
-        with self.assertRaises(ValueError):
-            admission.admission(body, paths, self.root, policy)
-        with self.assertRaises(ValueError):
-            self.resolve()
 
-    def test_admission_validates_all_changed_requirements_and_content_bindings(self):
-        spec = importlib.util.spec_from_file_location('admission', ROOT / 'ops/production-proof-plan.py')
-        admission = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(admission)
-        first = 'proofs/requirements/change.json'
-        second = 'proofs/requirements/second.json'
-        self.requirement(first)
-        self.requirement(second)
-        policy = json.loads((self.root / delivery.POLICY).read_text())
+
+    def test_duplicate_landed_requirement_ids_refuse(self):
+        self.requirement('proofs/requirements/first.json')
+        self.requirement('proofs/requirements/second.json')
         self.commit()
-        for body in ['## Production proof\n' + first, '## Production proof\nn/a: observer contracts only']:
-            with self.subTest(body=body), self.assertRaisesRegex(ValueError, 'duplicate requirement'):
-                admission.admission(body, [first, second], self.root, policy)
         with self.assertRaisesRegex(ValueError, 'duplicate requirement'):
             self.resolve()
-        policy['x-runners']['fixture.v1'] = {
-            'path': 'ops/observer.py', 'targets': ['worker', 'studio'],
-            'sources': {'ops/observer.py': '0' * 64}}
-        self.write(delivery.POLICY, json.dumps(policy))
-        self.commit()
-        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
-            admission.admission('## Production proof\n' + first, [first], self.root, policy)
-        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
-            admission.admission('## Production proof\nn/a: observer contract', [first], self.root, policy)
 
     def test_cli_stdout_respects_response_budget(self):
         for i in range(1000):

@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> Candidate: Read call outcomes
+    Candidate --> Exact: Same deal and owner, open, same normalized text
+    Candidate --> Related: Different text or owner, open task on deal
+    Candidate --> NoMatch: No eligible open task on deal
+    Exact --> Recheck: Accept task
+    Related --> Recheck: Accept task
+    NoMatch --> Recheck: Accept task
+    Recheck --> Reused: Exact task remains eligible
+    Recheck --> Created: No eligible exact task
+    Reused --> Reused: Replay accepted candidate
+    Exact --> Recheck: Task changed after preview
+    note right of Exact
+      Collapse ECMAScript whitespace, trim edges, lowercase.
+      Preserve recipients and documents in the comparison key.
+      Keep current date unless candidate states an explicit date.
+    end note
+    %% never merge different owners, deals, recipients, documents or closed tasks
+    %% never replace an existing date with a defaulted date

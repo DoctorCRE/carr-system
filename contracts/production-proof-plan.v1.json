@@ -60,7 +60,9 @@
         "worker"
       ],
       "sources": {
-        "ops/email-touch-cohort-proof.py": "4720a27ce261b6373de88d6defd78594943007bf0d74af900a88a29d94f5fbfb",
+        "ops/email-touch-cohort-proof.py": "2918cea6a98b702fb9300c8fa632471e42cf5e45d221319c665bbde464707ca3",
+        "lib/release_reader.py": "96d016ca767847e6569669259cd15fe369c07e53a972d43578e40cc55fcde6b2",
+        "lib/release-reader-marker.json": "29028978ca9edb73d49b2c947f33ebe60252dbc2de19ecff31aeb63f9ebff1ee",
         "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
       }
     },
@@ -97,15 +99,16 @@
   },
   "x-required-targets": {"worker": ["mcp-server/**", "migrations/**"], "studio": ["lib/outlook*.py", "bin/install-outlook-*", "bin/refresh-outlook-runtime", "ops/launchd/com.carr.outlook-*.plist"]},
   "x-non-product-paths": [
-    "docs/**", "test/**", "mcp-server/test/**", "README.md",
+    "docs/**", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md",
+    ".agents/skills/**", "tools/pstack/*.md", "test/**", "mcp-server/test/**", "README.md",
     ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
     "ops/ci.sh", "ops/ci-gates.py",
     "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
     "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",
-    "ops/ci.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
+    "ops/ci.py", "ops/ci_scope.py", "ops/db-acceptance-scope.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
     "ops/source-ci-review.py",
     "ops/ci-migration.py", "ops/ci-migration-gates.py", "ops/ci-node-file.mjs",
-    "ops/ci-apt.py", "ops/ci-postgres.sh", "ops/ci-zsh.sh", "ops/production-proof-plan.py",
+    "ops/ci-apt.py", "ops/ci-postgres.sh", "ops/ci-zsh.sh", "ops/ci_zsh.py",
     "contracts/production-proof-plan.v1.json", "proofs/requirements/**", "ops/app-proof-observe.py",
     "ops/delivery_plan.py", "ops/delivery-plan.py",
     "contracts/delivery-plan.v1.json", "contracts/delivery-inventory.v1.json"
