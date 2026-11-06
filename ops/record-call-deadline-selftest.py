@@ -50,16 +50,36 @@ time.sleep(20)
             ready = root / "ready"
             parent = root / "run.sh"
             parent.write_text(f"#!{sys.executable}\n" +
-                              "import subprocess,sys,time\n" +
+                              "import subprocess,sys,time\ntime.sleep(0.6)\n" +
                               f"subprocess.Popen([sys.executable,{str(child)!r},{str(address)!r},{str(ready)!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n" +
                               "time.sleep(20)\n")
             parent.chmod(0o700)
-            started = time.monotonic()
-            previous_handler = signal.signal(signal.SIGALRM, expire)
-            try:
-                with patch.object(record_call, "RUN_SH", parent):
+            popen = subprocess.Popen
+            started = None
+
+            def start_when_ready(*args, **kwargs):
+                nonlocal started
+                proc = popen(*args, **kwargs)
+                try:
+                    until = time.monotonic() + 10
+                    while not ready.exists():
+                        if proc.poll() is not None or time.monotonic() >= until:
+                            self.fail("descendant did not start")
+                        time.sleep(0.01)
+                    started = time.monotonic()
                     if interrupt:
                         signal.setitimer(signal.ITIMER_REAL, 0.4)
+                    return proc
+                except BaseException:
+                    record_call._stop_process_group(proc)
+                    proc.wait()
+                    raise
+
+            previous_handler = signal.signal(signal.SIGALRM, expire)
+            try:
+                with patch.object(record_call, "RUN_SH", parent), \
+                        patch.object(subprocess, "Popen", start_when_ready):
+                    if interrupt:
                         with self.assertRaises(StageExpired):
                             record_call.call_verb("synthetic-read", {}, timeout=10,
                                                   env={"HOME": directory, "PATH": "/usr/bin:/bin"})
@@ -67,6 +87,7 @@ time.sleep(20)
                         result = record_call.call_verb("synthetic-read", {}, timeout=0.4,
                                                        env={"HOME": directory, "PATH": "/usr/bin:/bin"})
                         self.assertEqual(result.kind, record_call.TRANSIENT)
+                self.assertIsNotNone(started)
                 self.assertLess(time.monotonic() - started, 2)
                 self.assertTrue(ready.exists(), "descendant started before timeout")
                 stopped = False
