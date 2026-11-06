@@ -11,16 +11,20 @@ registered readers omit event identity and old/new evidence, so cannot exit 0.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import signal
 import subprocess
+import sys
 import time
 import urllib.parse
-import urllib.request
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib import release_reader
+
 MAX_BYTES = 65536
 
 
@@ -30,11 +34,6 @@ class Unavailable(Exception):
 
 class Contradiction(Exception):
     pass
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args):
-        raise Unavailable('release_redirect')
 
 
 def digest(value):
@@ -53,17 +52,36 @@ def observe(args):
         return value
 
     def process(command):
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=remaining())
-        remaining()
-        if result.returncode or len(result.stdout) > MAX_BYTES:
-            raise Unavailable('process_or_auth_unavailable')
-        return result.stdout.decode()
+        child = None
+        try:
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+            try:
+                child = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, start_new_session=True)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+            stdout, _stderr = child.communicate(timeout=remaining())
+            remaining()
+            if child.returncode or len(stdout) > MAX_BYTES:
+                raise Unavailable('process_or_auth_unavailable')
+            return stdout.decode()
+        finally:
+            if child is not None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait()
+                child.stdout.close()
+                child.stderr.close()
 
     def release():
         output['release_reads'] += 1
-        with urllib.request.build_opener(NoRedirect()).open(
-                args.origin.rstrip('/') + '/release', timeout=remaining()) as response:
-            raw = response.read(MAX_BYTES + 1)
+        response = release_reader.read(args.origin.rstrip('/') + '/release', timeout=remaining())
+        remaining()
+        if response.status != 200:
+            raise Unavailable('release_http_unavailable')
+        raw = response.body
         if len(raw) > MAX_BYTES:
             raise Unavailable('release_size')
         value = json.loads(raw)

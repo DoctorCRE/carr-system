@@ -58,9 +58,9 @@ function storedIdentifierMatches(field, value, before) {
     case "email_domain": {
       const domain = normalizedText(value);
       const stored = typeof before.email === "string"
-        ? (before.email.match(/(?:"[^"]*"|[^,;"])+/g) ?? []).flatMap(entry => {
-          const address = entry.includes("<") ? (entry.includes(">") ? entry.slice(entry.indexOf("<") + 1, entry.indexOf(">")) : "") : entry;
-          return address.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [];
+        ? (before.email.match(/(?:"[^"]*"|[^,;])+/g) ?? []).flatMap(entry => {
+          const address = (entry.trim().match(/^(?:"[^"]*"|[^<>]*)<([^<>]+)>$/u)?.[1] ?? entry).trim();
+          return address.match(/^[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+$/u) ?? [];
         })
         : [];
       return /^[\p{L}\p{M}\p{N}](?:[\p{L}\p{M}\p{N}.-]*[\p{L}\p{M}\p{N}])?\.[\p{L}\p{M}]{2,}$/u.test(domain)

@@ -687,6 +687,9 @@ for (const email of [
 }
 
 for (const email of [
+  '"person@clinic.test', 'person@clinic.test"',
+  "Please ask person@clinic.test for details", '"person@clinic.test"',
+  "person@clinic.test trailing prose", "prose <person@clinic.test> trailing prose",
   "clinic.test", "Contact clinic.test for details", "person@notclinic.test", "person@clinic.test.invalid",
   '"clinic.test" <person@other.test>', '"person@clinic.test" <person@other.test>',
   '"Morgan, person@clinic.test" <person@other.test>', "person@other.test; clinic.test", 'Alex <person@clinic.test.invalid',
@@ -741,8 +744,8 @@ test("secondary domain keeps city, source, confidence and version checks", async
   }
 });
 
-test("identity proof CLI consumes registered read replies and refuses missing event observations", async () => {
-  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+test("identity proof CLI consumes registered read replies and refuses missing event observations", async t => {
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join, resolve } = await import("node:path");
   const { spawn, execFileSync } = await import("node:child_process");
@@ -750,8 +753,8 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
   const root = resolve(import.meta.dirname, "../..");
   const dir = await mkdtemp(join(tmpdir(), "WR647-S11-J1-"));
   const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-  const run = flags => new Promise((resolveRun, reject) => {
-    const child = spawn("python3", [join(root, "tools/prove-identity-domain-recorded-addresses.py"), ...flags], { cwd: root });
+  const run = (flags, runner = join(root, "tools/prove-identity-domain-recorded-addresses.py")) => new Promise((resolveRun, reject) => {
+    const child = spawn("python3", [runner, ...flags], { cwd: root });
     let stdout = "", stderr = "";
     child.stdout.on("data", value => stdout += value);
     child.stderr.on("data", value => stderr += value);
@@ -759,9 +762,11 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
     child.on("close", code => resolveRun({ code, stdout, stderr }));
   });
   let releaseReads = 0, drift = false;
+  const agents = [];
   const server = createServer((request, response) => {
     if (request.url !== "/release") { response.writeHead(404).end(); return; }
     releaseReads++;
+    agents.push(request.headers["user-agent"]);
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ ok: true, git_sha: { value: drift && releaseReads > 1 ? "f".repeat(40) : head } }));
   });
@@ -780,7 +785,7 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
     const replies = { "prospect-research": research, "catch-me-up": history };
     const wrapper = join(dir, "wrapper");
     const python = execFileSync("which", ["python3"], { encoding: "utf8" }).trim();
-    const script = `#!${python}\nimport json, sys, time\nfrom pathlib import Path\nmode = Path(__file__).with_name('mode').read_text()\nif mode == 'timeout': time.sleep(2)\nif mode == 'unavailable': sys.exit(1)\nassert sys.argv[1] == 'call'\nargs = json.loads(sys.argv[3])\nassert args.get('subject', args.get('ref')) == 'P-0301'\nprint(json.dumps(json.loads(Path(__file__).with_name('replies.json').read_text())[sys.argv[2]]))\n`;
+    const script = `#!${python}\nimport json, sys, time, subprocess\nfrom pathlib import Path\nmode = Path(__file__).with_name('mode').read_text()\nif mode in ('descendant', 'late-descendant'):\n p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n Path(__file__).with_name('child.pid').write_text(str(p.pid))\n if mode == 'late-descendant': print('{}', flush=True)\n time.sleep(60)\nif mode == 'timeout': time.sleep(2)\nif mode == 'unavailable': sys.exit(1)\nassert sys.argv[1] == 'call'\nargs = json.loads(sys.argv[3])\nassert args.get('subject', args.get('ref')) == 'P-0301'\nprint(json.dumps(json.loads(Path(__file__).with_name('replies.json').read_text())[sys.argv[2]]))\n`;
     await writeFile(wrapper, script, { mode: 0o700 });
     const receipt = join(dir, "receipt.json");
     await writeFile(receipt, JSON.stringify({ schema: "identity-domain-recorded-addresses-receipt.v1",
@@ -814,6 +819,47 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
       await writeFile(join(dir, "mode"), mode);
       const unavailable = await run([...flags.slice(0, -1), "0.2"]);
       assert.equal(unavailable.code, 78, unavailable.stdout + unavailable.stderr);
+    }
+    await t.test("release transport uses the shared production User-Agent", () => {
+      assert.ok(agents.length > 0);
+      assert.ok(agents.every(agent => agent === "doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)"), JSON.stringify(agents));
+    });
+    const lateLaunch = join(dir, "late-launch.py");
+    await writeFile(lateLaunch, `import importlib.util, sys, time
+spec = importlib.util.spec_from_file_location('proof', ${JSON.stringify(join(root, "tools/prove-identity-domain-recorded-addresses.py"))})
+proof = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(proof)
+launch = proof.subprocess.Popen
+def delayed(command, **kwargs):
+ child = launch(command, **kwargs)
+ if command[0] == ${JSON.stringify(wrapper)}: time.sleep(0.7)
+ return child
+proof.subprocess.Popen = delayed
+sys.exit(proof.main())
+`);
+    for (const mode of ["descendant", "late-descendant", "late-launch"]) {
+      await t.test(`deadline cleans up owned ${mode} process tree`, async () => {
+        await writeFile(join(dir, "mode"), mode === "late-launch" ? "descendant" : mode);
+        let pid;
+        try {
+          const started = performance.now();
+          const timed = await run([...flags.slice(0, -1), "0.5"], mode === "late-launch" ? lateLaunch : undefined);
+          assert.equal(timed.code, 78, timed.stdout + timed.stderr);
+          assert.ok(performance.now() - started < 2000, "proof exceeded bounded acquisition cleanup");
+          pid = Number(await readFile(join(dir, "child.pid"), "utf8"));
+          let alive = true;
+          for (let attempt = 0; attempt < 100; attempt++) {
+            try { process.kill(pid, 0); } catch (error) {
+              if (error.code !== "ESRCH") throw error;
+              alive = false; break;
+            }
+            await new Promise(done => setTimeout(done, 10));
+          }
+          assert.equal(alive, false, `owned descendant ${pid} survived timeout`);
+        } finally {
+          if (pid) { try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+        }
+      });
     }
     const missing = await run(flags.map(v => v === receipt ? join(dir, "absent.json") : v));
     assert.equal(missing.code, 78);
