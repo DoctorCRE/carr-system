@@ -61,7 +61,7 @@ def main() -> int:
           and bool(preparation.get("unblock_condition")))
     workload = preparation.get("selected_workload", {})
     check("one synthetic Tour product check is selected with an exact source and tree",
-          workload.get("repository") == "jbookout/doctorcre-app"
+          workload.get("repository") == "DoctorCRE/doctorcre-app"
           and workload.get("command_argv") ==
               ["node", "--test", "test/tours-search-cart.test.mjs"]
           and all(re.fullmatch(r"[0-9a-f]{40}", str(workload.get(key, "")))

@@ -17,9 +17,12 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from pathlib import Path
 
-# Published identities stay stable across repository transfers.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.repository_identity import canonical_repository, repository_for_name, repository_lookup_name
+
+# Published record IDs stay stable; GitHub names come from the registry.
 REPOSITORIES = {"jbookout/carr-system": "DoctorCRE/carr-system",
-                "jbookout/doctorcre-app": "jbookout/doctorcre-app"}
+                "jbookout/doctorcre-app": repository_for_name("doctorcre-app")}
 GIT_MIN_FREE_BYTES = 512 * 1024 * 1024
 GIT_PACK_LIMIT_BYTES = 128 * 1024 * 1024
 LIMITED_GIT = """import os, resource, sys
@@ -70,7 +73,7 @@ PR_QUERY = """query($owner: String!, $name: String!, $history: String, $updates:
 
 def pull_requests(repo, now, previous, read):
     state = copy.deepcopy(previous or {})
-    owner, name = REPOSITORIES[repo].split('/')
+    owner, name = (repository_lookup_name(repo) or REPOSITORIES[repo]).split('/')
     result = read(['api', 'graphql', '-f', 'query=' + PR_QUERY,
                    '-f', 'owner=' + owner, '-f', 'name=' + name,
                    '-F', 'history=' + (state.get('history') or 'null'),
@@ -152,7 +155,7 @@ def local_branches(repo, root, now):
             subprocess.run(['git', 'init', '--bare', str(mirror)], capture_output=True,
                            text=True, timeout=30, check=True)
             git('fetch', '--no-tags', '--no-auto-maintenance', '--filter=tree:0',
-                'https://github.com/' + REPOSITORIES[repo] + '.git', '+refs/heads/*:refs/heads/*')
+                'https://github.com/' + (repository_lookup_name(repo) or REPOSITORIES[repo]) + '.git', '+refs/heads/*:refs/heads/*')
             main = git('rev-parse', 'refs/heads/main')
             rows = []
             refs = git('for-each-ref', '--sort=refname', '--format=%(refname:strip=2)\t%(objectname)\t%(committerdate:iso-strict)', 'refs/heads/')
@@ -199,7 +202,7 @@ def collect_github(now, read=github_json, suggestions=None, *, state=None, git_r
             if index and read is github_json: time.sleep(2)
             prs, next_state = pull_requests(repo, now, state.get(repo), read)
             for pr in prs:
-                pr_heads.append({'repository':repo,'branch':pr['headRefName']})
+                pr_heads.append({'repository':canonical_repository(repo) or REPOSITORIES[repo],'branch':pr['headRefName']})
                 pr_work_refs.update(pr['work_refs'])
                 completed = bool(pr['mergedAt'])
                 if pr['state'] != 'OPEN' and not completed: continue
@@ -212,13 +215,13 @@ def collect_github(now, read=github_json, suggestions=None, *, state=None, git_r
                 name, date, sha = branch['name'], branch['date'], branch['sha']
                 items.append({'id':f'{repo}:branch:{name}','kind':'remote_branch','title':name,'state':'unmerged',
                     'opened_at':date,'last_activity_at':date,'owner':None,'version':sha,
-                    'completed':False,'cancelled':False,'link':f'https://github.com/{REPOSITORIES[repo]}/tree/{quote(name,safe="")}',
+                    'completed':False,'cancelled':False,'link':f'https://github.com/{repository_lookup_name(repo) or REPOSITORIES[repo]}/tree/{quote(name,safe="")}',
                     'identity':{},'suggested_triage':(suggestions or {}).get(name) if repo.endswith('/carr-system') else None})
             state[repo] = next_state
             complete = next_state['history_complete'] and next_state['updates_complete']
-            coverage.append({'repository':repo,'complete':complete,'reason':None if complete else 'github_history_pending'})
+            coverage.append({'repository':canonical_repository(repo) or REPOSITORIES[repo],'complete':complete,'reason':None if complete else 'github_history_pending'})
         except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
-            coverage.append({'repository':repo,'complete':False,'reason':'github_read_failed'})
+            coverage.append({'repository':canonical_repository(repo) or REPOSITORIES[repo],'complete':False,'reason':'github_read_failed'})
     return {'schema':'system-work-external.v1','observed_at':now.isoformat(),
             'complete':all(c['complete'] for c in coverage),'completed_pr_history':True,'coverage':coverage,'pr_heads':pr_heads,'pr_work_refs':sorted(pr_work_refs),'items':items}
 
