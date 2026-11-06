@@ -2207,7 +2207,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "quiet-follow-ups": {
     "ingress_key": "mcp-tool:quiet-follow-ups",
     "source_locator": "mcp-server/src/lead-follow-up.ts",
-    "schema_digest": "037640c2932ce4804d4d9b08127658569bd28b6d5b48c49f35e9e92f538881c7",
+    "schema_digest": "4bb030736a9bfff0959ce5e7e9e81693ab8ba6d5dc161815ebfc1460778b72c8",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
