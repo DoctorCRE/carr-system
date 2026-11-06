@@ -207,7 +207,11 @@ jobs:
           elif [ "${{ matrix.classes }}" = migration ]; then
             # Shard 2 takes the independent fixtures off the critical path;
             # core plus fixtures is exactly --migration-part all.
-            python ops/local-pg-ci.py --class migration --migration-part "${{ matrix.gate_shard == 1 && 'core' || 'fixtures' }}"
+            if [ "${{ matrix.gate_shard }}" = 1 ]; then
+              python ops/local-pg-ci.py --class migration --migration-part core
+            else
+              ops/ci.sh --strict --only migration --migration-part fixtures
+            fi
           else
             ops/ci.sh --strict --only "${{ matrix.classes }}" --unit-part practice
           fi

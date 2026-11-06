@@ -117,7 +117,9 @@ class Controls(unittest.TestCase):
         self.assertIn('@postgres:5432/', run['env']['CARR_CI_DATABASE_URL'])
         canary = workflow('main-canary.yml')['jobs']['classes']['steps']
         run = next(step for step in canary if step.get('name') == "Run this group's check classes")
-        self.assertIn('python ops/local-pg-ci.py --class migration', run['run'])
+        self.assertIn('python ops/local-pg-ci.py --class migration --migration-part core', run['run'])
+        self.assertIn('ops/ci.sh --strict --only migration --migration-part fixtures', run['run'])
+        self.assertNotIn('local-pg-ci.py --class migration --migration-part fixtures', run['run'])
 
     def test_native_candidate_event_contract(self):
         wf = workflow()
