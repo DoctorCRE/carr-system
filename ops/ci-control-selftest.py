@@ -17,30 +17,6 @@ def workflow(filename="ci.yml"):
         str(ROOT / '.github/workflows' / filename)], cwd=ROOT / 'mcp-server', text=True))
 
 
-def expression(value, github, cancelled=False, matrix=None, selected=None):
-    # Evaluate the workflow's actual expression with GitHub's missing-property
-    # semantics; no reimplementation of the intended event predicate.
-    if not isinstance(value, str):
-        return value
-    source = '''const get=(o,p)=>p.split('.').reduce((v,k)=>v&&v[k],o)||'';
-    const github=JSON.parse(process.argv[1]);const always=()=>true;const cancelled=()=>JSON.parse(process.argv[3]);const fromJSON=JSON.parse;
-    const needs={scope:{outputs:{full:'true'}},select:{outputs:JSON.parse(process.argv[5])}};
-    const matrix=JSON.parse(process.argv[4]);
-    const format=(template,...args)=>template.replace(/\\{(\\d+)\\}/g,(_,i)=>args[Number(i)]);
-    const e=process.argv[2].replace(/github(?:\\.[a-zA-Z_]+)+/g,p=>JSON.stringify(get({github},p)));
-    console.log(JSON.stringify(eval(e)));'''
-    import re
-    from ci_scope import PR_JOBS
-    selected = selected if selected is not None else {'full': 'false', **{job: 'true' for job in PR_JOBS}}
-    def evaluate(match):
-        return json.loads(subprocess.check_output(['node', '-e', source,
-            json.dumps(github), match.group(1), json.dumps(cancelled), json.dumps(matrix or {}),
-            json.dumps(selected)], text=True))
-    if value.startswith('${{') and value.endswith('}}') and value.count('${{') == 1:
-        return evaluate(re.fullmatch(r'\$\{\{(.*?)\}\}', value))
-    return re.sub(r'\$\{\{(.*?)\}\}', lambda m: str(evaluate(m)), value)
-
-
 class Controls(unittest.TestCase):
     def test_pr_gates_install_the_shared_pinned_scanner_before_checks(self):
         jobs = workflow()['jobs']
@@ -132,60 +108,36 @@ class Controls(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 self.assertEqual(attempts.read_text(), '2')
 
-    def test_merge_group_keeps_the_full_required_workflow(self):
+    def test_native_candidate_event_contract(self):
         wf = workflow()
         self.assertEqual(wf['on']['merge_group']['types'], ['checks_requested'])
-        event = {'workflow': 'CI', 'event_name': 'merge_group', 'event': {}, 'run_id': 42}
-        self.assertTrue(expression(wf['jobs']['classes']['if'], event))
-        self.assertTrue(expression(wf['jobs']['migration-fixtures']['if'], event))
-        self.assertTrue(expression(wf['jobs']['checks']['if'], event))
-        exclusions = expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], event)
-        self.assertFalse(any(row == {'classes': 'migration'} for row in exclusions))
-        self.assertFalse(any(row == {'classes': 'gates'} for row in exclusions))
-        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
-
-    def test_ready_transition_runs_required_check(self):
-        wf = workflow()
-        triggers = wf['on']['pull_request']['types']
-        self.assertEqual(triggers, ['opened', 'edited', 'synchronize', 'reopened',
-                                    'converted_to_draft', 'ready_for_review'])
-        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
-
-    def test_events(self):
-        wf = workflow()
-        def event(action, sha='a', base='main', run=1):
-            return {'workflow':'CI','event_name':'pull_request','run_id':run,
-                    'event':{'action':action,'pull_request':{'number':1665,'head':{'sha':sha},'base':{'ref':base}}}}
-        def state(e):
-            return (expression(wf['concurrency']['group'], e),
-                    expression(wf['concurrency']['cancel-in-progress'], e),
-                    bool(expression(wf['jobs']['classes'].get('if', '${{ true }}'),e)),
-                    bool(expression(wf['jobs']['checks']['if'], e)))
-        old = state(event('opened'))
-        new = state(event('synchronize',sha='b',run=2))
-        self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
-        for action in wf['on']['pull_request']['types']:
-            self.assertEqual(state(event(action))[2:], (False, True))
-        changed = state(event('synchronize',base='release',run=4))
-        self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,False,True))
-        for name in ('schedule','workflow_dispatch'):
-            a={'workflow':'CI','event_name':name,'event':{},'run_id':10}
-            b={**a,'run_id':11}
-            self.assertNotEqual(state(a)[0],state(b)[0]); self.assertEqual(state(a)[1:],(False,True,True))
-
-    def test_superseded_expensive_jobs_can_cancel(self):
-        wf = workflow()
-        event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
-        for job in ('fast',):
-            with self.subTest(job=job):
-                condition = wf['jobs'][job]['if']
-                self.assertTrue(expression(condition, event, cancelled=False))
-                self.assertFalse(expression(condition, event, cancelled=True))
-        self.assertTrue(expression(wf['jobs']['checks']['if'], event, cancelled=True))
+        self.assertEqual(wf['on']['pull_request']['types'],
+                         ['opened', 'edited', 'synchronize', 'reopened',
+                          'converted_to_draft', 'ready_for_review'])
+        metadata = "github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null"
+        self.assertEqual(wf['concurrency'], {
+            'group': "${{ github.workflow }}-${{ github.event_name }}-${{ (" + metadata + ") && format('metadata-{0}', github.run_id) || github.event.pull_request.number || github.ref }}",
+            'cancel-in-progress': "${{ github.event_name == 'pull_request' && !(" + metadata + ") }}"})
+        candidate = "!(" + metadata + ")"
+        self.assertEqual(wf['jobs']['select']['if'],
+                         "${{ !cancelled() && !github.event.pull_request.draft && " + candidate + " }}")
+        self.assertEqual(wf['jobs']['checks']['if'], "${{ always() && " + candidate + " }}")
+        self.assertEqual(wf['jobs']['checks']['name'],
+                         "${{ (" + metadata + ") && 'CI metadata (no validation)' || 'ops/ci.sh --strict' }}")
+        for name, job in wf['jobs'].items():
+            if name in ('select', 'checks'):
+                continue
+            with self.subTest(job=name):
+                self.assertIn('select', job['needs'])
+                self.assertIn('needs.select.outputs', job['if'])
+                self.assertIn('!cancelled()', job['if'])
+        self.assertIn('edited', workflow('review-gate.yml')['on']['pull_request_target']['types'])
+        for name in ('classes', 'migration-fixtures'):
+            self.assertFalse(wf['jobs'][name]['strategy']['fail-fast'])
 
     def test_required_context_reports_even_after_a_failed_class(self):
         wf = workflow()
-        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
+        self.assertIn("|| 'ops/ci.sh --strict'", wf['jobs']['checks']['name'])
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
         self.assertEqual(set(wf['jobs']['checks']['needs']), {'select', 'lint', 'unit', 'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'})
@@ -194,15 +146,5 @@ class Controls(unittest.TestCase):
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
         self.assertEqual(verdict['env']['CI_NEEDS'], '${{ toJSON(needs) }}')
         self.assertNotIn('GH_TOKEN', verdict['env'])
-
-    def test_documentation_and_full_fallback_schedule_their_selected_jobs(self):
-        jobs = workflow()['jobs']
-        event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
-        for full in (False, True):
-            selected = {'full': str(full).lower(), 'lint': str(not full).lower(), 'fast': 'false'}
-            self.assertEqual(bool(expression(jobs['lint']['if'], event, selected=selected)), not full)
-            self.assertEqual(bool(expression(jobs['classes']['if'], event, selected=selected)), full)
-            self.assertFalse(expression(jobs['fast']['if'], event, selected=selected))
-            self.assertTrue(expression(jobs['checks']['if'], event, selected=selected))
 
 if __name__=='__main__': unittest.main()

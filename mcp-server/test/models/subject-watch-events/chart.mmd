@@ -1,0 +1,11 @@
+---
+title: "Watched record notifications"
+---
+stateDiagram-v2
+  s0: Quiet
+  s1: Unsubscribed
+  s2: Notified
+  [*] --> s0
+  s0 --> s1: unsubscribe
+  s0 --> s2: consume source
+  s2 --> s1: unsubscribe

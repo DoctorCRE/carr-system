@@ -15,10 +15,11 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.release_reader import read as read_http
+from proof_release import release_revision
 MAX_BYTES = 1048576
 STAMP = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?(?:Z|[+-]([0-9]{2}):?([0-9]{2}))\Z')
 FIXTURE = {
-    'release': {'git_sha': '1' * 40},
+    'release': {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': '1' * 40}},
     'expected_revision': '1' * 40,
     'calendar': {'state': 'partial', 'observed_at': '2026-03-02T10:00:00Z',
                  'sources': {'outlook_calendar': {'state': 'partial'}},
@@ -139,9 +140,8 @@ def main():
             release = json.loads(response.body)
             calendar_command = [str(ROOT / 'run.sh'), 'call', 'calendar-meeting-prep', '{}']
             now = datetime.now(timezone.utc)
-        deployed = release.get('git_sha')
+        deployed = release_revision(release)
         require(isinstance(expected, str) and re.fullmatch('[a-f0-9]{40}', expected), 'invalid expected revision')
-        require(isinstance(deployed, str) and re.fullmatch('[a-f0-9]{40}', deployed), 'missing release identity')
         if args.fixture:
             require(expected == deployed, 'fixture release revision mismatch')
         else:

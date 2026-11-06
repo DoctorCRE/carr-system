@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Active
+    Active --> Preview: Preview with literal captured email
+    Active --> Refused: Preview a terminal deal
+    Preview --> Confirmed: Joe confirms unchanged active deal
+    Preview --> Refused: Deal becomes terminal before confirmation
+    Preview --> Stale: Evidence or digest changes
+    Confirmed --> Confirmed: Replay same key after terminal transition
+    [*] --> NonDeal: Preview linked client, lead or vendor
+    NonDeal --> Confirmed: Joe confirms linked action
+    %% never Terminal refusal writes an action, next-step note or event.
+    %% never Changed evidence confirms an earlier digest.

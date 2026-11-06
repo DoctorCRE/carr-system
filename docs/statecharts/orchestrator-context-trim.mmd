@@ -1,0 +1,22 @@
+stateDiagram-v2
+    state "Read bootstrap output" as Capture
+    state "Complete output in context" as Small
+    state "File path, size and hash in context" as Large
+    state "Capture failed visibly" as Failed
+    [*] --> Capture
+    Capture --> Small: At most 40,000 bytes
+    Capture --> Large: More than 40,000 bytes
+    Capture --> Failed: Read or storage fails
+
+    state "Select current rules and cards" as Select
+    state "Full fresh rules and cards" as Full
+    state "One line referencing prior pack" as Reference
+    state "Existing diagnostics or refusal" as Guard
+    state "No receipt" as Silent
+    [*] --> Select
+    Select --> Full: Unseen rule or card
+    Select --> Reference: Complete repeat at PreToolUse
+    Select --> Guard: Selection incomplete or fails
+    Select --> Silent: No matching rules or cards
+    Reference --> Full: Context, corpus or agent changes
+    Reference --> Full: Newly applicable rule or card

@@ -578,9 +578,25 @@ class InvocationTest(unittest.TestCase):
             with redirect_stdout(io.StringIO()) as capture:
                 self.assertEqual(runner.main(['--copy',str(source)]), 78)
             self.assertIn('observed=2 planned=0 held=2 moved=0', capture.getvalue())
+            receipt = json.loads(next(line.split(' ', 1)[1] for line in capture.getvalue().splitlines()
+                                      if line.startswith('outlook-triage-receipt ')))
+            self.assertEqual(receipt['counts']['run'], dict(snapshot_validated=True,
+                             observed=2, moved=0, held=True, exit_code=78))
+            import subprocess
+            receipt_path = self.root / 'attempt-receipt.txt'
+            receipt_path.write_text('outlook-triage-receipt ' + json.dumps(receipt))
+            observed = subprocess.run([sys.executable, str(Path(__file__).resolve().parent /
+                                      'studio-triage-containment-observe.py'),
+                                      '--receipt-file', str(receipt_path), '--runtime-sha', 'a' * 40],
+                                     capture_output=True, text=True, timeout=10)
+            self.assertEqual(observed.returncode, 0, observed.stdout + observed.stderr)
             with redirect_stdout(io.StringIO()) as capture:
                 self.assertEqual(runner.main([]), 78)
             self.assertIn('snapshot_producer_unavailable', capture.getvalue())
+            receipt = json.loads(next(line.split(' ', 1)[1] for line in capture.getvalue().splitlines()
+                                      if line.startswith('outlook-triage-receipt ')))
+            self.assertEqual(receipt['counts']['run'], dict(snapshot_validated=False,
+                             observed=0, moved=0, held=False, exit_code=78))
             before = {str(p.relative_to(repo)):p.read_bytes() for p in repo.rglob('*') if p.is_file()}
             with redirect_stdout(io.StringIO()) as capture:
                 self.assertEqual(runner.main(['--copy',str(repo)]), 78)
