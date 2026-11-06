@@ -85,7 +85,7 @@
     ]
   },
   "tools/prove-vendor-scheduling-zero-duration.py": {
-    "sha256": "270e15167affb568f88e8b39a9aa2228d263c61254bbaed87fde25b3cdc2ac90",
+    "sha256": "b5403589e2032203445bd651fbfb4fc9da40e825dd70cb6187c60d25aca2ce2b",
     "commands": [
       "declared --call-wrapper call read-vendor-meetings/morning-brief"
     ]
