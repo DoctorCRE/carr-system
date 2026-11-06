@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Observe natural exact task cohorts without accepting tasks or writing records."""
 import argparse
-from datetime import date
+from calendar import monthrange
 import json
 import os
 from pathlib import Path
@@ -39,7 +39,17 @@ def object_json(raw):
 
 
 def valid_date(value):
-    return value is None or (isinstance(value, str) and date.fromisoformat(value).isoformat() == value)
+    if value is None or value in ('infinity', '-infinity'):
+        return True
+    if not isinstance(value, str):
+        return False
+    match = re.fullmatch(r'([0-9]{4,7})-([0-9]{2})-([0-9]{2})( BC)?', value)
+    if not match:
+        return False
+    year, month, day = map(int, match.group(1, 2, 3))
+    if year == 0 or not 1 <= month <= 12:
+        return False
+    return 1 <= day <= monthrange(1 - year if match.group(4) else year, month)[1]
 
 
 def inspect(value, receipt):
@@ -76,7 +86,7 @@ def inspect(value, receipt):
                         or not isinstance(task.get('id'), str)
                         or not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', task['id'])
                         or task.get('source') not in {'next_action', 'capture_post_call_action'}
-                        or task.get('owner') not in {'joe', 'dell'} or not valid_date(task.get('due_on'))):
+                        or not isinstance(task.get('owner'), str) or not valid_date(task.get('due_on'))):
                     raise Unavailable('invalid_contract')
                 text = task['description']
                 edges = text[:len(text) - len(text.lstrip(SPACE))] + text[len(text.rstrip(SPACE)):]

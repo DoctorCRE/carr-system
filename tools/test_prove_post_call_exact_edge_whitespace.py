@@ -22,13 +22,16 @@ class ProofCLI(unittest.TestCase):
     def setUpClass(cls):
         cls.folder = tempfile.TemporaryDirectory()
         fixture = Path(cls.folder.name) / 'response.json'
+        contract_fixture = Path(cls.folder.name) / 'contract-response.json'
         result = subprocess.run([shutil.which('node'), '--test', 'mcp-server/test/post-call-followups.test.mjs'],
-                                cwd=ROOT, env={**os.environ, 'POST_CALL_EDGE_FIXTURE_OUTPUT': str(fixture)},
+                                cwd=ROOT, env={**os.environ, 'POST_CALL_EDGE_FIXTURE_OUTPUT': str(fixture),
+                                                          'POST_CALL_EDGE_CONTRACT_FIXTURE_OUTPUT': str(contract_fixture)},
                                 capture_output=True, text=True, timeout=240)
         if result.returncode:
             cls.folder.cleanup()
             raise AssertionError(result.stdout + result.stderr)
         cls.response = json.loads(fixture.read_text())
+        cls.contract_response = json.loads(contract_fixture.read_text())
         source = ROOT / 'mcp-server/src/release.js'
         module = Path(cls.folder.name) / 'release.mjs'
         module.write_text(f"import {{ buildRelease }} from {json.dumps(source.as_uri())};\n" +
@@ -140,6 +143,18 @@ assert sys.argv[1:] == ['call', 'read-call-outcomes', '{}']
         receipt = self.run_cli(0)
         self.assertEqual(receipt['eligible_cohorts'], 1)
         self.assertEqual(receipt['assertions'], {'exact_identity_and_owner': True, 'preserved_date_context': True})
+
+    def test_registered_unrelated_owners_and_postgres_dates_pass(self):
+        from unittest.mock import patch
+        with patch.object(self, 'response', self.contract_response):
+            receipt = self.run_cli(0)
+        self.assertEqual(receipt['inspected_cards'], 2)
+        self.assertEqual(receipt['eligible_cohorts'], 1)
+        self.assertTrue(all(receipt['assertions'].values()))
+
+    def test_malformed_task_owner_and_date_are_unavailable(self):
+        for change in [{'owner': None}, {'owner': 7}, {'due_on': 'not-a-date'}, {'due_on': '2027-02-30'}]:
+            self.assertEqual(self.run_cli(78, mutate=lambda c: c['existing_action_comparison']['exact_match'].update(change))['status'], 'invalid_contract')
 
     def test_related_exact_cohort_is_contradiction(self):
         def related(card):

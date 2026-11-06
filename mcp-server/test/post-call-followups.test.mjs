@@ -104,6 +104,30 @@ test('call outcomes preview current action matches and acceptance rechecks them'
         assert.ok(stored.item_bullets.includes('Keep survey date'));
       });
     }
+    await caseTest('proof context accepts all actor owners and PostgreSQL task dates', async () => {
+      const helper = (await c.query("insert into actor(slug,kind,display_name) values('synthetic-helper','automation','Synthetic helper') returning id")).rows[0].id;
+      const exact = await proposal('Review exact survey');
+      await seed('next_action', exact, '\tReview exact survey\n');
+      const related = await proposal('Review helper survey');
+      for (const [i, due] of ['infinity', '-infinity', '10000-01-01', '0001-01-01 BC'].entries()) {
+        const source = i === 0 ? 'next_action' : 'capture_post_call_action';
+        const task = source === 'next_action'
+          ? (await c.query("insert into next_action(subject_type,subject_id,owner_id,description,status,created_by) values('deal',$1,$2,$3,'open',$4) returning id",
+            [deal, helper, '\tReview helper survey\n', actor.id])).rows[0].id
+          : await seed(source, related, '\tReview helper survey\n', helper);
+        await c.query(`update ${source} set due_on=$1::date where id=$2`, [due, task]);
+      }
+      const observation = await command('read-call-outcomes');
+      const call = observation.calls.find(call => call.session_id === session);
+      const cards = call.open_cards.filter(card => [exact, related].includes(card.candidate_id));
+      assert.equal(cards.find(card => card.candidate_id === exact).existing_action_comparison.status, 'exact_match');
+      const context = cards.find(card => card.candidate_id === related).existing_action_comparison;
+      assert.equal(context.status, 'related_open_tasks');
+      assert.deepEqual(context.related_open_tasks.filter(task => task.owner === 'synthetic-helper')
+        .map(task => task.due_on).sort(), ['infinity', '-infinity', '10000-01-01', '0001-01-01 BC'].sort());
+      if (process.env.POST_CALL_EDGE_CONTRACT_FIXTURE_OUTPUT) writeFileSync(process.env.POST_CALL_EDGE_CONTRACT_FIXTURE_OUTPUT,
+        JSON.stringify({ ...observation, calls: [{ ...call, applied: [], open_cards: cards }] }));
+    });
     for (const [label, source, text, owner, status, structured] of [
       ['different owner', 'next_action', 'Review owner survey', dell, 'open', true],
       ['completed', 'capture_post_call_action', 'Review completed survey', actor.id, 'done', true],
