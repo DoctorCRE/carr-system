@@ -216,7 +216,7 @@ class Blotato:
         digest = hashlib.sha256(data).hexdigest()
         status, raw = self.send('POST', API + '/media/uploads', {'Content-Type': 'application/json'},
                                 json.dumps({'filename': f'{digest[:16]}{path.suffix}'}).encode())
-        answer = json.loads(raw) if status == 200 else {}
+        answer = json.loads(raw) if status in (200, 201) else {}
         put_url = answer.get('presignedUrl') or answer.get('uploadUrl')
         public = answer.get('publicUrl') or answer.get('url')
         if not (put_url and public):

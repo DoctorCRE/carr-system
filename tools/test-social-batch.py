@@ -66,6 +66,7 @@ class FakeBlotato:
         self.listing_status = 200
         self.listing_body = None
         self.lose_create_response = False
+        self.upload_status = 200
         self.created = 0
 
     def __call__(self, method, url, headers, data):
@@ -85,7 +86,7 @@ class FakeBlotato:
         if url == sb.API + '/media/uploads' and method == 'POST':
             name = json.loads(data)['filename']
             upload = RECORDED['media_upload']
-            return 200, json.dumps({'presignedUrl': upload['presignedUrl'] + name,
+            return self.upload_status, json.dumps({'presignedUrl': upload['presignedUrl'] + name,
                                     'publicUrl': upload['publicUrl'] + name}).encode()
         if url.startswith(RECORDED['media_upload']['presignedUrl']) and method == 'PUT':
             self.blobs[url.rsplit('/', 1)[1]] = data
@@ -184,6 +185,13 @@ class SocialBatchTest(unittest.TestCase):
         batch = json.loads((self.ctx.out / '2026-11-02/batch.json').read_text())
         self.assertEqual(len(batch['posts']), 13)
         self.assertTrue(all(p['readback'] == 'scheduled' and p['media_verified'] for p in batch['posts']))
+
+    def test_upload_accepts_201_created(self):
+        # Blotato answered POST /v2/media/uploads with 201 on 2026-11-06.
+        self.fake.upload_status = 201
+        result = sb.submit(self.drafts(), self.ctx)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['summary'], 'SOCIAL_BATCH_SCHEDULED n=13 verified=13')
 
     # -- acceptance 1: a covered week -------------------------------------------
     def test_covered_week_has_zero_open_slots_and_submit_refuses(self):
