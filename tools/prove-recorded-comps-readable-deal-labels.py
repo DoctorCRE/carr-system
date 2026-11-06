@@ -26,49 +26,72 @@ class Unavailable(Exception):
     pass
 
 
+class ProofFailed(Exception):
+    pass
+
+
+def require(predicate, condition):
+    if not condition:
+        raise ProofFailed(predicate)
+
+
 def stamp(value):
     return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
 
 
 def check_table(table):
     columns = {c['key']: c for c in table['columns']}
-    assert columns['deal']['label'] == 'Deal'
-    assert columns['proposed_on'] == {'key': 'proposed_on', 'label': 'Proposed on', 'type': 'date'}
-    assert columns['rent']['label'] == 'Proposed rent ($/SF/year)'
-    assert 0 < len(table['rows']) <= 200
+    require('natural.deal-column', columns['deal']['label'] == 'Deal')
+    require('natural.proposed-on-column', columns['proposed_on'] == {'key': 'proposed_on', 'label': 'Proposed on', 'type': 'date'})
+    require('natural.rent-column', columns['rent']['label'] == 'Proposed rent ($/SF/year)')
+    require('natural.row-budget', 0 < len(table['rows']) <= 200)
     for row in table['rows']:
-        assert isinstance(row['deal']['value'], str) and row['deal']['value'].strip()
-        assert not UUID.fullmatch(row['deal']['value'])
-        assert UUID.fullmatch(row['deal']['source']['record_id'])
-        assert UUID.fullmatch(row['rent']['source']['record_id'])
-        assert row['proposed_on']['value'] is None or re.fullmatch(r'\d{4}-\d{2}-\d{2}', row['proposed_on']['value'])
+        name = row['deal']['value']
+        require('natural.deal-readable', isinstance(name, str) and bool(name.strip()) and not UUID.fullmatch(name))
+        require('natural.deal-source', isinstance(row['deal']['source']['record_id'], str) and UUID.fullmatch(row['deal']['source']['record_id']))
+        require('natural.rent-source', isinstance(row['rent']['source']['record_id'], str) and UUID.fullmatch(row['rent']['source']['record_id']))
+        date = row['proposed_on']['value']
+        require('natural.proposed-on-value', date is None or isinstance(date, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', date))
 
 
 SYNTHETIC = r'''
-import assert from 'node:assert/strict';
-import {recordedCompsTable,validateAnswerBlocks} from './answer-blocks.mjs';
+import {isDeepStrictEqual} from 'node:util';
+function require(predicate, condition) {
+ if (!condition) throw new Error(predicate);
+}
+try {
+const {recordedCompsTable,validateAnswerBlocks}=await import('./answer-blocks.mjs');
 class ToolError extends Error {}
 const id='11111111-1111-4111-8111-111111111111';
 const negotiation='22222222-2222-4222-8222-222222222222';
 let calls=0;
 const c={query:async(sql,args)=>{
  calls++;
- assert.deepEqual(args,[[id]]);
- assert.match(sql,/join public\.deal/);
- assert.match(sql,/order by n.proposed_on desc, n.id limit 200/);
+ require('synthetic.query-arguments',isDeepStrictEqual(args,[[id]]));
+ require('synthetic.deal-join',typeof sql==='string' && /join public\.deal/.test(sql));
+ require('synthetic.query-order-and-budget',typeof sql==='string' && /order by n.proposed_on desc, n.id limit 200/.test(sql));
  return {rows:[{missing:false,comps:[{id:negotiation,deal_id:id,deal_name:'Synthetic Harbor',proposed_on:'2026-11-01',side:'landlord',rate_norm_sf_yr:'28.5'}]}]};
 }};
 const table=await recordedCompsTable(c,[id],ToolError);
-assert.equal(calls,1);
-assert.equal(table.rows[0].deal.value,'Synthetic Harbor');
-assert.equal(table.rows[0].deal.source.record_id,id);
-assert.equal(table.rows[0].proposed_on.value,'2026-11-01');
-assert.equal(table.rows[0].rent.source.record_id,negotiation);
-assert.equal(table.rows[0].rent.value,28.5);
-validateAnswerBlocks([table],ToolError);
+require('synthetic.query-count',calls===1);
+require('synthetic.deal-name',table.rows[0].deal.value==='Synthetic Harbor');
+require('synthetic.deal-source',table.rows[0].deal.source.record_id===id);
+require('synthetic.proposed-on',table.rows[0].proposed_on.value==='2026-11-01');
+require('synthetic.rent-source',table.rows[0].rent.source.record_id===negotiation);
+require('synthetic.rent-value',table.rows[0].rent.value===28.5);
+try { validateAnswerBlocks([table],ToolError); } catch { throw new Error('synthetic.schema'); }
 const blocks=JSON.parse(process.argv[2]);
-validateAnswerBlocks(blocks,ToolError);
-console.log('synthetic and natural schema passed');
+try { validateAnswerBlocks(blocks,ToolError); } catch { throw new Error('natural.schema'); }
+console.log(JSON.stringify({passed:true}));
+} catch (error) {
+ if (error.code==='ERR_MODULE_NOT_FOUND') {
+  console.log(JSON.stringify({predicate:'synthetic.runtime-dependencies',unavailable:true}));
+  process.exit(78);
+ }
+ const predicate=/^(synthetic|natural)\.[a-z-]+$/.test(error.message) ? error.message : 'synthetic.execution';
+ console.log(JSON.stringify({predicate}));
+ process.exitCode=1;
+}
 '''
 
 
@@ -98,14 +121,24 @@ def execute(args, receipt):
             raise Unavailable('response exceeds budget')
         if code:
             if contradiction:
-                raise AssertionError('producer contradiction')
-            raise Unavailable('command unavailable')
+                try:
+                    result = json.loads(data)
+                    predicate = result['predicate']
+                except (ValueError, KeyError, TypeError):
+                    raise ProofFailed('synthetic.execution') from None
+                if not isinstance(predicate, str) or not re.fullmatch(r'(synthetic|natural)\.[a-z-]+', predicate):
+                    raise ProofFailed('synthetic.execution')
+                if code == 78 and result.get('unavailable') is True:
+                    receipt['predicate'] = predicate
+                    raise Unavailable('producer runtime dependency unavailable')
+                raise ProofFailed(predicate)
+            raise Unavailable(f'command exited {code}')
         return data
 
     def get(url):
         response = read_http(url, timeout=remaining(), max_bytes=LIMIT)
         if response.status != 200:
-            raise Unavailable('HTTP status unavailable')
+            raise Unavailable(f'HTTP status {response.status}')
         data = response.body
         if len(data) > LIMIT:
             raise Unavailable('HTTP response exceeds budget')
@@ -115,7 +148,8 @@ def execute(args, receipt):
     def call(verb, value):
         nonlocal calls
         calls += 1
-        assert calls <= 8
+        receipt['wrapper_calls'] = calls
+        require('wrapper.request-budget', calls <= 8)
         data = json.loads(run([args.call_wrapper, 'call', verb, json.dumps(value)]))
         if 'content' in data:
             data = json.loads(data['content'][0]['text'])
@@ -123,6 +157,7 @@ def execute(args, receipt):
             raise Unavailable('read authorization unavailable')
         return data
 
+    receipt['predicate'] = 'release.identity'
     release = json.loads(get(args.origin.rstrip('/') + '/release'))
     sha = release.get('git_sha', {}).get('value')
     if not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{40}', sha):
@@ -137,6 +172,7 @@ def execute(args, receipt):
     except (ValueError, TypeError):
         raise Unavailable('release timestamp invalid') from None
     receipt.update({'release_sha': sha, 'natural_read': 'unavailable', 'synthetic': 'unavailable', 'sources': {}})
+    receipt['predicate'] = 'release.sources'
     sources = {}
     for path in ('src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'):
         data = get(f'https://raw.githubusercontent.com/DoctorCRE/carr-system/{sha}/mcp-server/{path}')
@@ -147,6 +183,7 @@ def execute(args, receipt):
     key = 'node_modules/@cfworker/json-schema'
     if local_lock['packages'][key] != released_lock['packages'][key]:
         raise Unavailable('validator dependency differs from release')
+    receipt['predicate'] = 'natural.conversation-response'
     blocks = []
     conversations = call('list-doc-conversations', {'limit': 10})['conversations']
     for conversation in conversations[:3]:
@@ -156,6 +193,7 @@ def execute(args, receipt):
                 continue
             for block in turn.get('answer_blocks', [])[:8]:
                 if block.get('type') == 'table.v1' and block.get('id') == 'comps' and block.get('rows'):
+                    receipt['predicate'] = 'natural.table-shape'
                     check_table(block)
                     blocks = [block]
                     break
@@ -165,18 +203,22 @@ def execute(args, receipt):
             break
     if blocks:
         row = blocks[0]['rows'][0]
+        receipt['predicate'] = 'natural.canonical-response'
         room = call('get-deal-room', {'deal': row['deal']['source']['record_id']})
-        assert room['name'] == row['deal']['value'], 'canonical deal name differs'
+        require('natural.canonical-deal-name', room['name'] == row['deal']['value'])
         receipt['natural_read'] = 'passed'
+    receipt['predicate'] = 'synthetic.execution'
     with tempfile.TemporaryDirectory(prefix='.comps-proof-', dir=ROOT / 'mcp-server') as temp:
         folder = Path(temp)
         (folder / 'answer-blocks.mjs').write_bytes(sources['src/answer-blocks.js'])
         (folder / 'answer-blocks.v1.schema.json').write_bytes(sources['src/answer-blocks.v1.schema.json'])
         (folder / 'check.mjs').write_text(SYNTHETIC)
         result = run(['node', str(folder / 'check.mjs'), json.dumps(blocks)], contradiction=True)
-        assert b'synthetic and natural schema passed' in result
+        require('synthetic.completion', json.loads(result).get('passed') is True)
     receipt['synthetic'] = 'passed'
-    receipt['wrapper_calls'] = calls
+    receipt['predicate'] = 'natural-comps-and-release-producer' if blocks else 'natural.post-deployment-table'
+    if not blocks:
+        receipt['reason'] = 'no qualifying post-deployment table'
     print(json.dumps(receipt, sort_keys=True))
     return 0 if blocks else 78
 
@@ -196,15 +238,24 @@ def main():
         raise Unavailable('total deadline exceeded')
     signal.signal(signal.SIGALRM, timeout)
     signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
-    receipt = {'natural_read': 'unavailable', 'synthetic': 'unavailable'}
+    receipt = {'natural_read': 'unavailable', 'synthetic': 'unavailable', 'predicate': 'release.identity'}
     try:
         return execute(args, receipt)
-    except (AssertionError, KeyError, TypeError, ValueError) as error:
+    except ProofFailed as error:
+        receipt['predicate'] = str(error)
+        receipt['contradiction'] = 'predicate failed'
+        if str(error).startswith('natural.'):
+            receipt['natural_read'] = 'failed'
+        elif str(error).startswith('synthetic.'):
+            receipt['synthetic'] = 'failed'
+        print(json.dumps(receipt, sort_keys=True))
+        return 1
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError) as error:
         receipt['contradiction'] = type(error).__name__
         print(json.dumps(receipt, sort_keys=True))
         return 1
     except (Unavailable, OSError, subprocess.TimeoutExpired) as error:
-        receipt['reason'] = type(error).__name__
+        receipt['reason'] = str(error) if isinstance(error, Unavailable) else type(error).__name__
         print(json.dumps(receipt, sort_keys=True))
         return 78
     finally:
