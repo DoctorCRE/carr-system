@@ -6,12 +6,20 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 from orchestrator_session import transcript_snapshot
 TOKEN_FIELDS = ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens')
 HANDOFF = '''Rotate this orchestrator now before context compaction.
 Use write-doctrine-section through the record layer to write team-memory section
 handoff/orchestrator-latest with this session's attach_id and current base_version.
+Start with a HANDOFF-HEADER v1 of at most 2,000 bytes containing status, retiring
+T3 thread id, blockers, next action, and paths to detailed state and job reports.
+Put the complete running-job inventory in the body below that header.
+Successors read the header first. Capture each bootstrap command's stdout with
+set -o pipefail; <command> | python3 hooks/orchestrator-rotation.py --bootstrap-capture out/bootstrap
+Results over 40,000 bytes stay in a private file; only its path, size and SHA-256
+enter context. Inspect needed sections from that file. Required source reads still apply.
 Include program status, exact branches and PRs, decisions, next actions, and EVERY
 running delegated job with its task id and the thread/link each will report to.
 Include your retiring T3 thread id in both the handoff and successor prompt.
@@ -83,7 +91,37 @@ def decide(event):
         return {'decision': 'block', 'reason': HANDOFF}
 
 
+def capture_bootstrap(directory):
+    """Stream opaque bootstrap output to disk before deciding what enters context."""
+    directory = Path(directory).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    size = 0
+    checksum = hashlib.sha256()
+    with tempfile.NamedTemporaryFile(dir=directory, prefix='bootstrap-', suffix='.txt',
+                                     delete=False) as output:
+        path = Path(output.name)
+        try:
+            while chunk := sys.stdin.buffer.read(65536):
+                output.write(chunk)
+                size += len(chunk)
+                checksum.update(chunk)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+    if size <= 40000:
+        try:
+            sys.stdout.buffer.write(path.read_bytes())
+        finally:
+            path.unlink()
+    else:
+        print(json.dumps({'schema': 'orchestrator-bootstrap/v1', 'path': str(path),
+                          'bytes': size, 'sha256': checksum.hexdigest()}, separators=(',', ':')))
+    return 0
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == '--bootstrap-capture':
+        return capture_bootstrap(sys.argv[2])
     try:
         result = decide(json.load(sys.stdin))
     except (OSError, ValueError, TypeError, KeyError, AttributeError):

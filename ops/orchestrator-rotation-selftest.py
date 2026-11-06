@@ -43,6 +43,45 @@ class Rotation(unittest.TestCase):
     def allowed(self, result):
         self.assertEqual((result.returncode, result.stdout), (0, ''), result.stderr)
 
+    def capture(self, data, directory=None):
+        return subprocess.run([sys.executable, HOOK, '--bootstrap-capture',
+                               str(directory or self.home / 'bootstrap')],
+                              input=data, capture_output=True, timeout=5)
+
+    def test_bootstrap_capture_small_and_exact_boundary(self):
+        for data in (b'', b'x' * 40000):
+            result = self.capture(data)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, data)
+        self.assertEqual(list((self.home / 'bootstrap').iterdir()), [])
+
+    def test_bootstrap_capture_large_is_lossless_and_private(self):
+        import hashlib
+        data = ('🩺' * 12000).encode()
+        result = self.capture(data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['bytes'], len(data))
+        self.assertEqual(receipt['sha256'], hashlib.sha256(data).hexdigest())
+        path = Path(receipt['path'])
+        self.assertTrue(path.is_absolute())
+        self.assertEqual(path.read_bytes(), data)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertLess(len(result.stdout), 1000)
+        second = json.loads(self.capture(data).stdout)
+        self.assertNotEqual(receipt['path'], second['path'])
+
+    def test_bootstrap_capture_failure_is_not_success(self):
+        self.assertNotEqual(self.capture(b'x' * 40001, self.transcript).returncode, 0)
+
+    def test_handoff_has_bounded_header_and_capture_command(self):
+        reason = json.loads(self.run_hook().stdout)['reason']
+        self.assertIn('--bootstrap-capture', reason)
+        self.assertIn('40,000 bytes', reason)
+        self.assertIn('HANDOFF-HEADER v1', reason)
+        self.assertIn('2,000 bytes', reason)
+        self.assertIn('Required source reads still apply', reason)
+
     def test_below(self):
         self.write(499999)
         self.allowed(self.run_hook())
