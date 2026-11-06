@@ -54,29 +54,20 @@ class Controls(unittest.TestCase):
         wf = workflow()
         setup = next(step for step in wf['jobs']['classes']['steps']
                      if 'actions/setup-node@' in step.get('uses', ''))
-        self.assertFalse(setup['with']['package-manager-cache'])
-        cache = workflow('../actions/ci-downloads/action.yml')
-        self.assertIn('$ImageOS-$ImageVersion', cache['runs']['steps'][0]['run'])
-        npm, pip = cache['runs']['steps'][1:]
-        for step, locks in ((npm, ('.nvmrc', 'mcp-server/package-lock.json', 'practice-plugin/package-lock.json')),
-                            (pip, ('.python-version', 'requirements.lock'))):
-            key = step['with']['key']
-            self.assertIn('${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.identity }}', key)
-            for lock in locks:
-                self.assertIn(lock, key)
-            self.assertNotIn('restore-keys', step['with'])
         for filename in ('ci.yml', 'main-canary.yml', 'unit-shards.yml'):
             for job in workflow(filename)['jobs'].values():
-                steps = job.get('steps', [])
-                setups = [step for step in steps if 'actions/setup-node@' in step.get('uses', '')
-                          or 'actions/setup-python@' in step.get('uses', '')]
-                if not setups:
-                    continue
-                with self.subTest(workflow=filename, job=job.get('name')):
-                    self.assertTrue(all('cache' not in step['with'] for step in setups))
-                    restore = next(step for step in steps if step.get('uses') == './.github/actions/ci-downloads')
-                    self.assertGreater(steps.index(restore), steps.index(setups[-1]))
-                    self.assertEqual(restore.get('if'), setups[-1].get('if'))
+                for step in job.get('steps', []):
+                    uses = step.get('uses', '')
+                    if 'actions/setup-node@' in uses:
+                        self.assertEqual(step['with']['cache'], 'npm')
+                        self.assertEqual(step['with']['cache-dependency-path'].splitlines(),
+                                         ['mcp-server/package-lock.json', 'practice-plugin/package-lock.json'])
+                    if 'actions/setup-python@' in uses:
+                        self.assertEqual(step['with']['cache'], 'pip')
+                        self.assertEqual(step['with']['cache-dependency-path'], 'requirements.lock')
+                    self.assertNotEqual(uses, './.github/actions/ci-downloads')
+                    self.assertNotIn('zsh-debs', json.dumps(step))
+        self.assertFalse((ROOT / '.github/actions/ci-downloads/action.yml').exists())
         install = next(step for step in wf['jobs']['classes']['steps']
                        if step.get('name') == 'Install Node dependencies')
         commands = install['run'].splitlines()
@@ -98,7 +89,7 @@ class Controls(unittest.TestCase):
         for step in job['steps']:
             self.assertNotIn('needs.scope', json.dumps(step))
 
-    def test_postgres_install_is_bounded_and_retries_once(self):
+    def test_postgres_launcher_bounds_one_official_acquisition(self):
         installs = [step for filename in ('ci.yml', 'main-canary.yml')
                     for job in workflow(filename)['jobs'].values() for step in job.get('steps', [])
                     if step.get('name') == 'Install PostgreSQL 17']
@@ -116,21 +107,19 @@ class Controls(unittest.TestCase):
             root = Path(directory)
             timeout = root / 'timeout'
             timeout.write_text('#!' + sys.executable + "\n"
-                "import os,pathlib,sys\n"
-                "p=pathlib.Path(os.environ['ATTEMPTS'])\n"
-                "n=int(p.read_text())+1 if p.exists() else 1\n"
-                "p.write_text(str(n))\n"
-                "assert sys.argv[1:3] == ['--kill-after=5s','110s'] and sys.argv[-1] == '--postgres-attempt' and sys.argv[-2].endswith('/ci-apt.py')\n"
-                "sys.exit({'timeout':124,'failure':1,'missing':127}.get(os.environ['INSTALL_RESULT'], 1 if n==1 else 0))\n")
+                "import pathlib,sys,os\n"
+                "p=pathlib.Path(os.environ['ATTEMPTS']);p.write_text(p.read_text()+'1' if p.exists() else '1')\n"
+                "assert sys.argv[1:3] == ['--kill-after=5s','240s'] and sys.argv[-1] == '--provision-postgres'\n"
+                "sys.exit(int(os.environ['INSTALL_RESULT']))\n")
             timeout.chmod(0o755)
-            for mode, expected in [('retry-success', 0), ('timeout', 1), ('failure', 1), ('missing', 1)]:
-                attempts = root / (mode + '-attempts')
+            for code in (0, 1, 100, 124, 127):
+                attempts = root / str(code)
                 result = subprocess.run(['bash', 'ops/ci-postgres.sh'], cwd=ROOT,
                     env={**os.environ, 'PATH': directory + os.pathsep + os.environ['PATH'],
-                         'ATTEMPTS': str(attempts), 'INSTALL_RESULT': mode},
+                         'ATTEMPTS': str(attempts), 'INSTALL_RESULT': str(code)},
                     capture_output=True, text=True, timeout=20)
-                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                self.assertEqual(attempts.read_text(), '2')
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                self.assertEqual(attempts.read_text(), '1')
 
     def test_merge_group_keeps_the_full_required_workflow(self):
         wf = workflow()

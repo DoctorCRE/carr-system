@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
-# Keep workflow callers stable; provisioning logic lives in tested Python.
-exec python3 "$(dirname "$0")/ci-apt.py" --provision-postgres "$@"
+# Keep pinned consumers stable with one bounded acquisition.
+exec timeout --kill-after=5s 240s python3 "$(dirname "$0")/ci-apt.py" --provision-postgres "$@"
