@@ -1,0 +1,34 @@
+stateDiagram-v2
+    [*] --> Capture
+    Capture --> CaptureRejected: Invalid address including length limits, source, time, or inactive party
+    Capture --> ContactUnconfirmed: Valid address is absent from complete stored tokens
+    Capture --> ContactExact: Valid address equals a complete normalized stored token
+    Capture --> CaptureFailed: Database or envelope fails
+    CaptureFailed --> [*]: Caller receives failure
+    CaptureRejected --> [*]: No activity is written
+    ContactUnconfirmed --> StageProposed: Eligible factual contact needs confirmation
+    ContactExact --> StageProposed: Other strong evidence is missing
+    ContactExact --> StageAppliedWithExistingStrongEvidence: Existing stage policy accepts all evidence
+    ContactExact --> NoStageChange: Automated, delayed future, unrelated, or stale evidence
+    ContactUnconfirmed --> NoStageChange: Evidence is ineligible
+    StageProposed --> [*]: Human approval remains required
+    StageAppliedWithExistingStrongEvidence --> [*]: Existing job records provenance and sends nothing
+    NoStageChange --> [*]
+    %% never exact-match a substring, shared domain, display name, or malformed token
+    %% never qualify from an exact contact alone without existing strong evidence
+    %% capture is synchronous; it introduces no background work or teardown
+    %% address limits are 254 ASCII octets total, 64 local-part octets, and 63 octets per domain label
+
+    state ProductionObservation {
+        [*] --> ReadNaturalContact
+        ReadNaturalContact --> ProofRefused: Source unavailable, empty, unconfirmed or deadline exhausted
+        ReadNaturalContact --> ProofContradiction: Strong preview disagrees with recorded evidence
+        ReadNaturalContact --> CheckReleaseAgain: Bounded natural contact reads finish
+        CheckReleaseAgain --> ProofRefused: Release changed
+        CheckReleaseAgain --> HumanObservationPending: Stable release and native exact contact candidate
+        HumanObservationPending --> [*]: Joe compares original Outlook item with workspace detail on same release
+        ProofRefused --> [*]
+        ProofContradiction --> [*]
+    }
+    %% human_pending is not live-proven; eligible_records remains zero
+    %% never infer captured-address membership from exact metadata alone

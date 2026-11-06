@@ -1,6 +1,7 @@
 """Test the declared CLI with synthetic HTTP and executable wrapper fixtures."""
 import contextlib
 import http.server
+from proof_release_fixture import ReleaseFixtureHandler
 import importlib.util
 import json
 from pathlib import Path
@@ -42,8 +43,8 @@ class ProofTest(unittest.TestCase):
     @contextlib.contextmanager
     def fixture(self, release=None, status=200):
         requests = []
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append(self.path)
                 self.send_response(status)
                 self.end_headers()

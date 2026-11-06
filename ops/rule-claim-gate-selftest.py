@@ -363,8 +363,9 @@ class RuleClaimGateTest(unittest.TestCase):
         managed = json.loads((REPO / 'ops/config/hooks.json').read_text())['Stop']
         self.assertEqual(sum('rule-claim-gate.py' in hook['command']
                              for group in managed for hook in group['hooks']), 1)
-        # A second project-level entry made every Mac Stop run the gate twice.
-        self.assertNotIn('rule-claim-gate.py', (REPO / '.claude/settings.json').read_text())
+        project = json.loads((REPO / '.claude/settings.json').read_text())['hooks']['Stop']
+        self.assertEqual(sum('rule-claim-gate.py' in hook['command']
+                             for group in project for hook in group['hooks']), 1)
 
     def test_string_assistant_content_still_blocks(self):
         self.assertEqual(self.run_hook(self.turn(message('assistant', "I'll remember.")))

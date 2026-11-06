@@ -1,0 +1,93 @@
+{
+  "schema_version": "deal-deliverables.v1",
+  "unit": "wr586-s3-deliverables",
+  "audience": "authenticated partner",
+  "tenant": "server-derived carr-internal",
+  "authorization": "current business.read_deal policy and active partner actor; browser session rechecked before effects and downloads",
+  "verbs": {
+    "list-deal-deliverables": {
+      "write": false,
+      "required": ["deal_id"]
+    },
+    "start-deal-deliverable": {
+      "write": true,
+      "required": [
+        "idempotency_key",
+        "deal_id",
+        "filename",
+        "mime",
+        "bytes",
+        "sha256"
+      ]
+    },
+    "finalize-deal-deliverable": {
+      "write": true,
+      "required": ["idempotency_key", "deal_id", "deliverable_id"]
+    },
+    "set-deal-deliverable-visibility": {
+      "write": true,
+      "required": [
+        "idempotency_key",
+        "deal_id",
+        "deliverable_id",
+        "expected_version",
+        "visibility"
+      ]
+    }
+  },
+  "browser": {
+    "base_path": "/api/v1/deal-deliverables/{deal_id}",
+    "routes": {
+      "GET {base_path}": "list-deal-deliverables",
+      "POST {base_path}": "start-deal-deliverable",
+      "PUT {base_path}/{deliverable_id}/bytes": "bounded verified upload",
+      "POST {base_path}/{deliverable_id}/finalize": "finalize-deal-deliverable",
+      "POST {base_path}/{deliverable_id}/visibility": "set-deal-deliverable-visibility",
+      "GET {base_path}/{deliverable_id}/download": "authorized attachment response"
+    },
+    "json_body": "verb arguments except path-bound deal_id and deliverable_id",
+    "upload_content_type": "application/octet-stream",
+    "mutation_headers": [
+      "Origin matching app host",
+      "Sec-Fetch-Site: same-origin",
+      "X-Carr-CSRF from /auth/session"
+    ],
+    "credentials": "existing HttpOnly partner session cookie",
+    "upload_receipt": [
+      "deliverable_id",
+      "state=verified",
+      "sha256",
+      "mime",
+      "bytes"
+    ],
+    "download": "attachment with private no-store caching, nosniff, no bearer URL"
+  },
+  "lifecycle": ["started", "uploading", "verified", "finalized"],
+  "visibility": {
+    "default": "private",
+    "values": ["private", "shared"],
+    "shared": "designated publishable; actual client publication belongs to slice 4"
+  },
+  "concurrency": "deal reservation advisory lock; upload and finalization row locks; visibility expected_version compare under row lock; finalization replay returns existing without another event",
+  "retention": "files kept with the deal record; unused started reservations expire after 24 hours; no file deletion operation",
+  "policy_source": "mcp-server/src/deal-deliverables.js DELIVERABLE_POLICY",
+  "transport_policy_source": "mcp-server/src/deal-deliverables-web.js DELIVERABLE_IO_POLICY",
+  "refusals": [
+    "deliverable_body_timeout",
+    "deliverable_storage_timeout",
+    "deliverable_storage_unavailable",
+    "deliverable_rate_limited",
+    "deliverable_denied",
+    "session_revoked",
+    "upload_size_refused",
+    "unsupported_mime",
+    "hash_mismatch",
+    "deliverable_quota_exceeded",
+    "deliverable_upload_conflict",
+    "deliverable_upload_expired",
+    "deliverable_not_verified",
+    "deliverable_not_finalized",
+    "version_conflict"
+  ],
+  "content_validation": "PDF, PNG, JPEG, WebP and HEIC signatures; legacy Office compound container signatures and stream markers; OOXML ZIP central directory and required package members. Content validation does not claim malware scanning."
+}

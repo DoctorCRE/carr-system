@@ -82,7 +82,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
               'name': 'ops/ci.sh --strict --only migration --migration-part fixtures', 'classes': 'migration'})
     check('main fallback and CI share the MCP shard workflow and coverage gate; both run practice-plugin separately',
           workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix']['shard'] == list(range(1, COUNT + 1))
-          and pr['jobs']['unit-coverage']['needs'] == 'unit'
+          and pr['jobs']['unit-coverage']['needs'] == ['select', 'unit']
           and 'unit-coverage' in pr['jobs']['checks']['needs']
           and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])
           and any('--unit-part practice' in step.get('run', '') for step in classes['steps'])

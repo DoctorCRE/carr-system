@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -34,7 +35,7 @@ class SafetyHooks(unittest.TestCase):
                 for gi, group in enumerate(groups):
                     for hi, hook in enumerate(group.get('hooks', [])):
                         counts[client] += 1
-                        name = hook['command'].split('/')[-1]
+                        name = hook['command'].split('/')[-1].strip(chr(34))
                         for mutation in ('delete', 'matcher', 'command', 'timeout', 'type', 'async', 'event'):
                             with self.subTest(client=client, event=event, hook=name, mutation=mutation):
                                 document = copy.deepcopy(original)
@@ -54,42 +55,30 @@ class SafetyHooks(unittest.TestCase):
                                 self.assertIn(f'{client}: required safety hook is not installed:', errors)
                                 self.assertIn(name, errors)
                                 self.assertIn(event, errors)
-        self.assertEqual(counts, {'claude': 12, 'codex': 7})
+        self.assertEqual(counts, {'claude': 16, 'codex': 7})
 
-    def test_effective_config_homes(self):
-        (REPO / 'scratchpad').mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=REPO / 'scratchpad') as tmp:
-            home = Path(tmp)
-            sources = {'claude': home / '.claude/settings.json',
-                       'codex': home / '.codex/hooks.json'}
-            for client, document in self.documents().items():
-                sources[client].parent.mkdir()
-                sources[client].write_text(json.dumps(document).replace('{{REPO}}', str(REPO)))
-            with patch.dict(os.environ, {'HOME': str(home)}, clear=True), \
-                    patch.object(gate, 'check_baseline', side_effect=lambda: []), \
-                    patch.object(gate, 'installation_repo', return_value=REPO), \
+    def test_claude_uses_project_settings_and_ignores_user_config_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            sys.path.insert(0, str(REPO / 'ops'))
+            from git_env import fixture_env
+            subprocess.run(['git', 'init', '-q', str(project)], check=True, env=fixture_env())
+            (project / 'hooks').symlink_to(REPO / 'hooks')
+            settings = project / '.claude/settings.json'
+            settings.parent.mkdir()
+            settings.write_text(json.dumps(self.documents()['claude']))
+            codex = project / '.codex'
+            codex.mkdir()
+            (codex / 'hooks.json').write_text(json.dumps(self.documents()['codex']))
+            with patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': str(project / 'absent'),
+                                         'CODEX_HOME': str(project / 'absent-codex')}), \
+                    patch.object(gate, 'REPO', project), \
+                    patch.object(gate, 'check_baseline', return_value=[]), \
                     patch.object(gate.sys, 'argv', ['gate-integrity.py']), \
                     contextlib.redirect_stdout(io.StringIO()), \
-                    contextlib.redirect_stderr(io.StringIO()) as errors:
-                self.assertEqual(gate.main(), 0, errors.getvalue())
-                for client, variable in [('claude', 'CLAUDE_CONFIG_DIR'), ('codex', 'CODEX_HOME')]:
-                    for missing in (False, True):
-                        with self.subTest(client=client, missing=missing):
-                            selected = home / f'{client}-selected-{missing}'
-                            if not missing:
-                                selected.mkdir()
-                            with patch.dict(os.environ, {variable: str(selected)}):
-                                self.assertEqual(gate.main(), 1)
-                                self.assertIn(str(selected), errors.getvalue())
-                    selected = home / f'{client}-valid'
-                    selected.mkdir()
-                    (selected / sources[client].name).write_text(sources[client].read_text())
-                    sources[client].write_text('{}')
-                    with patch.dict(os.environ, {variable: str(selected)}):
-                        self.assertEqual(gate.main(), 0, errors.getvalue())
-                    sources[client].write_text((selected / sources[client].name).read_text())
-                for source in sources.values():
-                    source.unlink()
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(gate.main(), 0)
+                settings.unlink()
                 self.assertEqual(gate.main(), 1)
 
     def test_unrelated_hooks_and_group_order_are_preserved(self):

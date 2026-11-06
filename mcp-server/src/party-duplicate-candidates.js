@@ -30,18 +30,24 @@ export function partyDuplicateCandidateTools() {
             || Object.keys(cursor).length !== 2 || !UUID.test(cursor.left_id) || !UUID.test(cursor.right_id)
             || cursor.left_id.toLowerCase() >= cursor.right_id.toLowerCase()))
           throw new ToolError({ error: 'invalid_duplicate_report_cursor' });
-        const { rows } = await c.query(`with live as (
+        const snapshot = (await c.query(`
           select id,ref,name,kind,
-            case when btrim(email,E' \\t\\r\\n') ~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]+$'
-              then lower(btrim(email,E' \\t\\r\\n')) end email_key,
+            email,
             nullif(lower(btrim(regexp_replace(name,'\\s+',' ','g'))),'') name_key,
             case when kind='person' and btrim(npi) ~ '^[0-9]{10}$' then btrim(npi) end npi_key,
             array(select case when length(digits)=11 then substring(digits from 2) else digits end
               from (select raw,regexp_replace(raw,'[^0-9]','','g') digits from unnest(array[phone,cell]) raw) p
               where raw ~ '^[+()0-9 .-]+$' and digits ~ '^1?[0-9]{10}$') phone_keys
-          from public.party where merged_into is null and deleted_at is null
+          from public.party where merged_into is null and deleted_at is null`)).rows;
+        const live = snapshot.map(({ email, ...row }) => ({ ...row,
+          email_keys: [...new Set((email?.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
+            .map(address => address.toLowerCase()))] }));
+        const { rows } = await c.query(`with live as (
+          select * from jsonb_to_recordset($4::jsonb) as p(id uuid,ref text,name text,kind text,
+            email_keys text[],name_key text,npi_key text,phone_keys text[])
         ), keys as (
-          select id,kind,'same_email' code,email_key match_key from live where email_key is not null
+          select id,kind,'same_email' code,email_key match_key
+            from live cross join lateral unnest(email_keys) email_key
           union all select id,kind,'same_npi',npi_key from live where npi_key is not null
           union all select id,kind,'same_name_phone',jsonb_build_array(name_key,phone)::text
             from live cross join lateral unnest(phone_keys) phone where name_key is not null
@@ -54,7 +60,7 @@ export function partyDuplicateCandidateTools() {
           jsonb_build_object('id',a.id,'ref',a.ref,'name',a.name,'kind',a.kind) as left,
           jsonb_build_object('id',b.id,'ref',b.ref,'name',b.name,'kind',b.kind) as right
           from pairs join live a on a.id=left_id join live b on b.id=right_id
-          order by left_id,right_id`, [cursor?.left_id ?? null,cursor?.right_id ?? null,limit+1]);
+          order by left_id,right_id`, [cursor?.left_id ?? null,cursor?.right_id ?? null,limit+1,JSON.stringify(live)]);
         const page = rows.slice(0, limit);
         const last = page.at(-1);
         const hasMore = rows.length > limit;

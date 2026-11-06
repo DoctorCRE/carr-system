@@ -9,11 +9,11 @@ from pathlib import Path
 import re
 import signal
 import sys
-from urllib.request import urlopen
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 ROLES = {'client':'client', 'lead':'prospect', 'vendor':'vendor'}
 FIELDS = {'source_id', 'source_version', 'original_key', 'role', 'target_type', 'target_id', 'occurred_at'}
 COUNTS = ('expected', 'applied', 'missing', 'dangling', 'conflicting', 'tombstoned',
@@ -178,8 +178,9 @@ def reconcile(journal, events, activities):
 
 def live_release():
     try:
-        with urlopen('https://api.doctorcre.com/release', timeout=5) as response:
-            data = response.read(65537)
+        response = read_http('https://api.doctorcre.com/release', timeout=5, max_bytes=65536)
+        require(response.status == 200, 'release_unavailable')
+        data = response.body
         require(len(data) <= 65536, 'release_unavailable')
         release = json.loads(data)
         require(release.get('ok') is True and release['env']['value'] == 'production', 'release_unavailable')

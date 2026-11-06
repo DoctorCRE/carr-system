@@ -47,7 +47,45 @@ def unsupported_zip() -> bytes:
     return bytes(data)
 
 
+def pdf_admission_cases():
+    contract = json.loads((ROOT / 'spec/outlook/pdf-admission.v1.json').read_text())
+    for case in contract['cases']:
+        data = case['prefix'].encode() + b'x' * case['padding'] + case['suffix'].encode()
+        yield case['name'], data, case['accepted']
+
+
 class DetectTest(unittest.TestCase):
+    def test_pdf_admission_matches_phone_tail_rule(self):
+        for name, data, accepted in pdf_admission_cases():
+            with self.subTest(name=name):
+                self.assertEqual(att.detect(data), 'pdf' if accepted else None)
+
+    @unittest.skipUnless((ROOT / 'mcp-server/src/deal-document-upload.ts').exists(),
+                         'pending WR617 S6 upload staging integration')
+    def test_same_pdf_bytes_on_phone_admission(self):
+        script = """
+import { verifyUploadBytes } from './mcp-server/src/deal-document-upload.ts';
+import { createHash } from 'node:crypto';
+const cases = JSON.parse(process.argv[1]);
+for (const row of cases) {
+    const bytes = Buffer.from(row.base64, 'base64');
+    let accepted = true;
+    try {
+        await verifyUploadBytes(bytes, { filename: 'synthetic.pdf', declared_mime: 'application/pdf',
+            bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+    } catch (error) {
+        if (!String(error).includes('upload_format_refused')) throw error;
+        accepted = false;
+    }
+    if (accepted !== row.accepted) throw new Error(row.name);
+}
+"""
+        import base64
+        cases = [dict(name=name, base64=base64.b64encode(data).decode(), accepted=accepted)
+                 for name, data, accepted in pdf_admission_cases()]
+        subprocess.run(['node', '--input-type=module', '-e', script, json.dumps(cases)],
+                       cwd=ROOT, check=True, capture_output=True, text=True)
+
     def test_hostile_zip_headers_are_not_documents(self):
         with self.assertRaises(NotImplementedError):
             zipfile.ZipFile(io.BytesIO(unsupported_zip())).namelist()
@@ -119,6 +157,14 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o700)
         self.assertEqual(found['Lease.docx']['detected_type'], 'docx')
         self.assertEqual(found['Lease.docx']['declared_type'], 'application/msword')
+
+    def test_incomplete_pdf_is_refused_before_storage(self):
+        self.add('truncated.pdf', b'%PDF-1.7\nsynthetic')
+        out = self.root / 'out'
+        [result] = att.extract(self.db, self.files, out, messages={1})
+        self.assertEqual(result['status'], 'type_refused')
+        self.assertIsNone(result['stored'])
+        self.assertFalse(out.exists())
 
     def test_declared_type_and_extension_never_decide(self):
         self.add('site-plan.pdf', b'MZ\x90\x00not a pdf')

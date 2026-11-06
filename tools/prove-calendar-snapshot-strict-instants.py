@@ -13,6 +13,8 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 MAX_BYTES = 1048576
 STAMP = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?(?:Z|[+-]([0-9]{2}):?([0-9]{2}))\Z')
 FIXTURE = {
@@ -31,7 +33,6 @@ FIXTURE = {
 def require(condition, message):
     if not condition:
         raise ValueError(message)
-
 
 def instant(value):
     require(isinstance(value, str), 'instant must be a string')
@@ -133,8 +134,9 @@ def main():
                 calendar_command = [sys.executable, '-c', 'import sys; print(sys.argv[1])', json.dumps(fixture['calendar'])]
         else:
             expected = args.expected_revision or command(['git', 'rev-parse', 'HEAD'], deadline).strip()
-            release = json.loads(command(['curl', '--fail', '--silent', '--show-error', '--max-time', str(max(0.001, deadline - time.monotonic())),
-                                          '--max-filesize', str(MAX_BYTES), 'https://api.doctorcre.com/release'], deadline))
+            response = read_http('https://api.doctorcre.com/release', timeout=max(0.001, deadline - time.monotonic()), max_bytes=MAX_BYTES)
+            require(response.status == 200 and len(response.body) <= MAX_BYTES, 'release_unavailable')
+            release = json.loads(response.body)
             calendar_command = [str(ROOT / 'run.sh'), 'call', 'calendar-meeting-prep', '{}']
             now = datetime.now(timezone.utc)
         deployed = release.get('git_sha')

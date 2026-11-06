@@ -17,7 +17,7 @@ export async function capturedEmail(c, identity, subject = null) {
   const rows = (await c.query(`select id,kind,email_context from activity
     where email_identity->>'mailbox_owner'=$1 and email_identity->>'mailbox_account'=$2
       and email_identity->>'item_id'=$3
-      and ($4::text is null or email_identity->>'subject'=$4 or email_context->>'send_id' is not null)
+      and ($4::text is null or email_identity->>'subject'=$4 or party_id::text=$4 or email_context->>'send_id' is not null)
     order by (email_context->'lifecycle' is not null) desc,occurred_at,id limit 1`, [identity.mailbox_owner, identity.mailbox_account, identity.item_id, subject])).rows;
   return rows[0];
 }

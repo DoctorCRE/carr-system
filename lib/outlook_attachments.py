@@ -42,8 +42,8 @@ OOXML = (('word/', 'docx'), ('xl/', 'xlsx'), ('ppt/', 'pptx'))
 
 
 def detect(data: bytes) -> str | None:
-    """A short type name from the leading bytes (and, for ZIP, the member names)."""
-    if data.startswith(b'%PDF-'):
+    """A short type name from byte signatures, PDF tail, or ZIP member names."""
+    if data.startswith(b'%PDF-') and b'%%EOF' in data[-1024:]:
         return 'pdf'
     if data.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
         return 'ole'

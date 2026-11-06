@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool } from '../src/tools.js';
+import { agentActorForToken } from '../src/identity.js';
 
 const NOW = Date.parse('2030-01-07T12:00:00Z');
 const JOE = { slug: 'joe', human: true, via: 'oauth-google' };
@@ -55,6 +56,8 @@ for (const [name, calendar] of [
   ['invalid warning container', snapshot([], { warnings: {} })],
   ['null warning container', snapshot([], { warnings: null })],
   ['invalid warning count', snapshot([], { warnings: [{ code: 'responses_unverified', count: 0 }] })],
+  ['zero-duration timed entry', snapshot([meeting(1, 1)])],
+  ['zero-duration timed entry outside rolling window', snapshot([meeting(30, 30)])],
   ['zero-duration all-day entry', snapshot([meeting(2, 2, { all_day: true })])],
   ['invalid warning', snapshot([], { warnings: [null] })],
   ['projection cap', snapshot(Array.from({ length: 100 }, () => meeting(40, 41)))],
@@ -120,4 +123,53 @@ test('scheduling uses the authenticated calendar scope and rejects caller-select
   await assert.rejects(executeRegisteredTool(invalid, JOE, 'read-vendor-meetings', { scheduling_window: {} }));
   await assert.rejects(executeRegisteredTool(invalid, JOE, 'read-vendor-meetings', { sponsor: 'other' }));
   assert.equal(invalid.queries.length, 0);
+});
+
+for (const offset of [1, 30]) test(`zero-duration timed meeting at ${offset} hours stays in the agenda`, async () => {
+  const calendar = snapshot([meeting(offset, offset, { organizer: { email: 'vendor@example.test' } })]);
+  const c = client(calendar);
+  const query = c.query;
+  c.query = async (sql, params) => sql.includes('with candidates')
+    ? { rows: [{ total: 1, items: [{ contact: { email: 'vendor@example.test' } }] }] }
+    : query(sql, params);
+  const result = await read(c);
+  assert.equal(result.calendar.state, 'ready');
+  assert.equal(result.items[0].possible_meetings.length, 1);
+  assert.equal(result.items[0].possible_meetings[0].start, at(offset));
+  assert.equal(result.items[0].possible_meetings[0].end, at(offset));
+  assert.equal(result.calendar.scheduling.state, 'unavailable');
+  assert.equal(result.calendar.scheduling.reason, 'calendar_coverage_insufficient');
+  assert.deepEqual(result.calendar.scheduling.items, []);
+});
+
+for (const owner of ['joe', 'dell']) test(`${owner} local wrapper reads scheduling from its authenticated sponsor`, async () => {
+  const actor = agentActorForToken('Bearer synthetic-local-token',
+    JSON.stringify({ [`${owner}-local`]: 'synthetic-local-token' }), 'local-token');
+  assert.equal(actor.human, false);
+  const c = client(snapshot([meeting(1, 1)]));
+  const result = await executeRegisteredTool(c, actor, 'read-vendor-meetings', { view: 'research', limit: 1 });
+  assert.equal(result.calendar.scheduling.state, 'unavailable');
+  assert.deepEqual(result.calendar.scheduling.items, []);
+  assert.deepEqual(c.queries.find(q => q.sql.includes('from board_snapshot')).params,
+    ['carr-internal', owner, 'calendar-agenda']);
+});
+
+for (const [name, actor] of [
+  ['unverified local machine', { slug: 'joe-local', human: false, sponsoring_human_slug: 'joe' }],
+  ['mismatched local sponsor', { slug: 'joe-local', human: false, native_agent_verified: true, sponsoring_human_slug: 'dell' }],
+  ['non-human partner slug', { slug: 'joe', human: false }],
+  ['other verified sponsored agent', agentActorForToken('Bearer synthetic-agent-token', JSON.stringify({ codex: 'synthetic-agent-token' }), 'local-token')],
+]) test(`${name} cannot read vendor calendars`, async () => {
+  const c = client();
+  await assert.rejects(read(c, actor), error => error.payload.error === 'AUTHORIZATION_REFUSED');
+  assert.equal(c.queries.length, 0);
+});
+
+for (const owner of ['joe', 'dell']) test(`${owner} local wrapper cannot select another calendar`, async () => {
+  const actor = agentActorForToken('Bearer synthetic-local-token',
+    JSON.stringify({ [`${owner}-local`]: 'synthetic-local-token' }), 'local-token');
+  const c = client();
+  await assert.rejects(executeRegisteredTool(c, actor, 'read-vendor-meetings', { sponsor: owner === 'joe' ? 'dell' : 'joe' }),
+    error => error.payload.error === 'caller_authority_field_forbidden');
+  assert.equal(c.queries.length, 0);
 });

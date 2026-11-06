@@ -309,11 +309,68 @@ class IntakeTest(unittest.TestCase):
         live = self.store.parent / 'Files' / 'S0' / '845' / 'EFMData'
         live.mkdir(parents=True)
         (live / '7.dat').write_bytes(b'gzip-body')
+        from lib import outlook_field_census
+        bind_generation = outlook_field_census.binding
+        fixture_decoder = self.tmp / 'synthetic-decoder'
+        fixture_decoder.write_bytes(b'synthetic-decoder-revision')
+        binding_patch = patch.object(outlook_field_census, 'binding',
+            side_effect=lambda copy, files, mailbox, started, decoder=None:
+                bind_generation(copy, files, mailbox, started, fixture_decoder))
+        binding_patch.start()
+        self.addCleanup(binding_patch.stop)
         self.fake = Fake(self)
         self.fake.fixture = self.tmp / 'fixture.db'
         copier = patch('subprocess.run', side_effect=self.copy_snapshot)
         copier.start()
         self.addCleanup(copier.stop)
+
+    def test_legacy_unchanged_store_gets_first_census_on_natural_run(self):
+        rows = [mail(CLIENT.email, -timedelta(hours=1))]
+        self.run_intake(rows)
+        before = json.loads((self.out() / 'field-census-latest.json').read_text())
+        state_path = self.out() / intake.STATE
+        state = json.loads(state_path.read_text())
+        state.pop('field_census_schema', None)
+        state_path.write_text(json.dumps(state))
+        outcome = self.run_intake(rows, touch=False)
+        after = json.loads((self.out() / 'field-census-latest.json').read_text())
+        self.assertNotEqual(outcome.reason, 'store_unchanged')
+        self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
+
+    def test_captured_source_revision_refreshes_census_with_schema_intact(self):
+        from lib.outlook_field_census import SCHEMA, validate
+        rows = [mail(CLIENT.email, -timedelta(hours=1))]
+        self.run_intake(rows)
+        before = validate(json.loads((self.out() / 'field-census-latest.json').read_text()))
+        self.assertEqual(before['census']['fields']['body']['raw_missing'], 0)
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertEqual(state['field_census_schema'], SCHEMA)
+        cached = self.run_intake(rows, touch=False)
+        self.assertEqual(cached.reason, 'store_unchanged')
+        self.assertEqual(json.loads((self.out() / 'field-census-latest.json').read_text()), before)
+        rows[0]['body'] = ''
+        rows[0]['body_kind'] = 'preview'
+        outcome = self.run_intake(rows)
+        after = validate(json.loads((self.out() / 'field-census-latest.json').read_text()))
+        self.assertNotEqual(outcome.reason, 'store_unchanged')
+        self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
+        self.assertNotEqual(before['binding']['commitment'], after['binding']['commitment'])
+        self.assertEqual(before['census']['population'], after['census']['population'])
+        self.assertEqual(after['census']['fields']['body']['captured'],
+                         before['census']['fields']['body']['captured'] - 1)
+        self.assertEqual(after['census']['fields']['body']['raw_missing'], 1)
+        self.assertEqual(after['census']['fields']['body']['causes']['unclassified'], 1)
+        self.assertEqual(after['receipt']['counts']['body_complete'], outcome.counts['body_complete'])
+        self.assertEqual(json.loads((self.out() / intake.STATE).read_text())['field_census_schema'], SCHEMA)
+
+    def test_natural_decode_publishes_census_before_private_cleanup(self):
+        from lib.outlook_field_census import validate
+        outcome = self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
+        bundle = validate(json.loads((self.out() / 'field-census-latest.json').read_text()))
+        self.assertEqual(bundle['receipt']['counts']['admitted'], outcome.counts['admitted'])
+        self.assertEqual(bundle['census']['fields']['body']['captured'], outcome.counts['body_complete'])
+        self.assertEqual(list(self.out().glob(intake.WORK_PREFIX + '*')), [])
+        self.assertEqual((self.out() / 'field-census-latest.json').stat().st_mode & 0o777, 0o600)
 
     def test_ledger_identity_change_refuses_before_replay(self):
         self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
@@ -1826,7 +1883,7 @@ class IntakeTest(unittest.TestCase):
             CREATE TABLE message_folders(message_id INTEGER, folder_id INTEGER);
             INSERT INTO message_keys VALUES(1,100);
         """)
-        self.pdf = b'%PDF-1.7 synthetic attachment'
+        self.pdf = b'%PDF-1.7 synthetic attachment\n%%EOF\n'
         self.cache_path = '~/Files/S0/845/Attachments/1/Lease.pdf'
         con.execute('INSERT INTO attachments VALUES(7,100,?,1,?,?,?)',
                     ('Lease.pdf', 'image/png', len(self.pdf), self.cache_path))
@@ -1874,6 +1931,48 @@ class IntakeTest(unittest.TestCase):
         ports = self.fake.ports()
         ports.copy_attachments, ports.put_object = copy, put
         return ports
+
+    def assert_pdf_proof(self, data, expected, *, existing=False):
+        requirement = json.loads((ROOT / 'proofs/requirements/wr510-s3-pdf-admission.json').read_text())
+        self.assertIn('--count run.attachments_pdf_stored --minimum 1',
+                      requirement['assertions'][0]['predicate'])
+        ports = self.attachment_fixture()
+        if existing:
+            carr = ports.carr
+            def replay(verb, args):
+                reply = carr(verb, args)
+                return {**reply, 'existing': True} if verb == 'attach-deal-file' else reply
+            ports.carr = replay
+        self.pdf = data
+        outcome = intake.run(self.repo, self.home, ports)
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertEqual(outcome.counts.get('attachments_pdf_stored', 0), expected)
+        receipt = json.loads(intake.receipt_line(outcome, self.repo).split(' ', 1)[1])
+        # Synthetic identity tests the reader, not installed provenance.
+        receipt['runtime_sha'] = 'a' * 40
+        path = self.repo / 'pdf-proof-receipt.txt'
+        path.write_text('outlook-intake-receipt ' + json.dumps(receipt))
+        command = [sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
+                   '--receipt-file', str(path), '--service', 'outlook-intake',
+                   '--runtime-sha', 'a' * 40, '--count', 'run.attachments_pdf_stored',
+                   '--minimum', '1']
+        observed = REAL_RUN(command, capture_output=True, text=True, timeout=10)
+        self.assertEqual(observed.returncode, 0 if expected else 1, observed.stdout + observed.stderr)
+
+    def test_pdf_proof_accepts_admitted_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1)
+
+    def test_pdf_proof_accepts_existing_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 complete\n%%EOF\n', 1, existing=True)
+
+    def test_pdf_proof_refuses_office_only(self):
+        self.assert_pdf_proof(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1synthetic Office', 0)
+
+    def test_pdf_proof_refuses_png_only(self):
+        self.assert_pdf_proof(b'\x89PNG\r\n\x1a\nsynthetic image', 0)
+
+    def test_pdf_proof_refuses_truncated_pdf(self):
+        self.assert_pdf_proof(b'%PDF-1.7 truncated', 0)
 
     def test_attachment_routing_reasons_do_not_hold_the_run(self):
         for scenario in ('missing_folder', 'ambiguous_folder', 'no_deal', 'duplicate_deal'):
@@ -2020,6 +2119,7 @@ class IntakeTest(unittest.TestCase):
                 terminal = status in ('too_large', 'empty', 'type_refused')
                 self.assertEqual(result.state, 'succeeded' if terminal else 'failed')
                 self.assertEqual(result.counts['attachments_' + status], 1)
+                self.assertEqual(result.counts.get('attachments_pdf_stored', 0), 0)
                 self.assertEqual(result.counts.get('attachments_unresolved', 0),
                                  int(status in ('error', 'path_refused', 'unreadable', 'path_conflict')))
                 state = json.loads((self.out() / intake.STATE).read_text())
@@ -2521,7 +2621,7 @@ class IntakeTest(unittest.TestCase):
         del saved['mail_ids']
         path.write_text(json.dumps(saved))
         decoder = load_settings(self.home).decoder
-        decoder.parent.mkdir(parents=True)
+        decoder.parent.mkdir(parents=True, exist_ok=True)
         decoder.touch(mode=0o700)
         self.fake.calls.clear()
         self.fake.now = NOW.replace(hour=3)
@@ -2544,7 +2644,7 @@ class IntakeTest(unittest.TestCase):
         del saved['mail_ids']
         path.write_text(json.dumps(saved))
         decoder = load_settings(self.home).decoder
-        decoder.parent.mkdir(parents=True)
+        decoder.parent.mkdir(parents=True, exist_ok=True)
         decoder.touch(mode=0o700)
         self.fake.calls.clear()
         with patch.object(intake, '__file__', str(self.repo / 'lib/outlook_intake.py')), \
@@ -2987,7 +3087,7 @@ class IntakeTest(unittest.TestCase):
             self.assertEqual(intake.main(), 1)
         receipt = stdout.getvalue().split('outlook-intake-receipt ', 1)[1]
         self.assertEqual({k: json.loads(receipt)[k] for k in ('state', 'reason', 'counts')}, {'state': 'failed', 'reason': 'writes_failed',
-                                                'counts': {'run': {'writes_failed': 3}, 'backlog': {}}})
+                                                'counts': {'run': {'mail_ids': 0, 'writes_failed': 3}, 'backlog': {}}})
 
     def test_main_runs_the_router_after_intake_releases_its_lock_without_changing_the_result(self):
         write_settings(self.home, ROOT, model='sonnet')
@@ -4538,6 +4638,23 @@ class IntakeTest(unittest.TestCase):
         state = json.loads((self.out() / intake.STATE).read_text())
         self.assertNotIn('intent', state['mail_unresolved'][ident(m)])
 
+    def test_every_receipt_includes_zero_mail_ids_when_no_snapshot_exists(self):
+        for status, reason in [('failed', 'ledger_state_invalid'), ('skipped', 'previous_run_active')]:
+            receipt = json.loads(intake.receipt_line(intake.Outcome(status, reason)).split(' ', 1)[1])
+            self.assertEqual(receipt['counts']['run']['mail_ids'], 0)
+
+    def test_failed_write_receipt_counts_retained_mail_ids(self):
+        self.run_intake([mail('pat@example.test', -timedelta(hours=2), message_id='<retained@example.test>')])
+        self.fake.now = NOW + timedelta(minutes=30)
+        self.fake.fail_verbs = {'log-activity'}
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=2), message_id='<retained@example.test>'),
+                                  mail('pat@example.test', -timedelta(minutes=10), subject='Different')])
+        self.assertEqual(result.reason, 'writes_failed')
+        state = json.loads((self.out() / intake.STATE).read_text())
+        self.assertGreater(len(state['mail_ids']), 0)
+        receipt = json.loads(intake.receipt_line(result).split(' ', 1)[1])
+        self.assertEqual(receipt['counts']['run']['mail_ids'], len(state['mail_ids']))
+
     def test_receipt_splits_run_deltas_from_backlog_totals(self):
         result = self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                                   mail('stranger@example.test', -timedelta(minutes=10), subject='New inquiry')])
@@ -4560,7 +4677,7 @@ class IntakeTest(unittest.TestCase):
             'calendar_lifecycle_unsupported': 4, 'calendar_lifecycle_canceled': 2,
             'calendar_requests_quarantined': 1, 'calendar_unresolved_expired': 3})
         receipt = json.loads(intake.receipt_line(outcome).split(' ', 1)[1])
-        self.assertEqual(receipt['counts'], {'run': {}, 'backlog': {
+        self.assertEqual(receipt['counts'], {'run': {'mail_ids': 0}, 'backlog': {
             'calendar_copies_in_store': 4, 'calendar_canceled_copies_in_store': 2,
             'calendar_write_requests_held': 1, 'calendar_expired_total': 3}})
 
@@ -5633,6 +5750,160 @@ class LoadObjectFieldsTest(unittest.TestCase):
         self.db = Path(self.tmp.name) / 'legacy.sqlite'
         write_db(self.db, [mail('pat@example.test', -timedelta(hours=1), subject='Legacy topic')])
         self.assertEqual(self.load()[1][0]['subject'], 'Legacy topic')
+
+
+class FieldCensusTest(unittest.TestCase):
+    def fixture(self, directory):
+        from lib import outlook_field_census as census
+        db = Path(directory) / 'fixture.db'
+        rows = [mail(None, timedelta(), subject='', body='', recipients=None),
+                mail(None, timedelta(), subject='', body='', recipients=None, kind='conflict'),
+                mail(None, timedelta(), subject='', body='', recipients=None, kind='oversized'),
+                mail(None, timedelta(), subject='', body='', recipients=None)]
+        rows[3]['folder_account'] = 8
+        rows[1]['body_completeness'] = 'conflict'
+        rows[1]['body_outcome'] = 'conflict'
+        rows[2]['body_outcome'] = 'oversized'
+        write_db(db, rows, rejected=2)
+        with sqlite3.connect(db) as con:
+            con.execute('INSERT INTO message_folders VALUES(1,7)')
+        meta, admitted, _ = intake._load(db, account_id=7)
+        decoder = Path(directory) / 'decoder-fixture'
+        decoder.write_bytes(b'synthetic-decoder-revision')
+        binding = census.binding(db, Path(directory) / 'Files', 'private-mailbox',
+                                 '2026-11-05T00:00:00+00:00', decoder)
+        return census.build(meta, admitted, binding), meta
+
+    def test_measuring_to_held_and_conflict_preserves_deficits(self):
+        from lib import outlook_field_census as census
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, meta = self.fixture(directory)
+        census.validate(bundle)
+        self.assertEqual(bundle['census']['fields']['body']['causes']['conflict_or_overflow'], 2)
+        self.assertEqual(bundle['census']['fields']['body']['causes']['unclassified'], 1)
+        self.assertEqual(bundle['census']['fields']['body']['dispositions'],
+                         dict(observed_empty=0, access_limited=0, repairable=0, unresolved=2, unknown=1))
+        for field in bundle['census']['fields'].values():
+            self.assertEqual(sum(field['causes'].values()), 3)
+            self.assertEqual(field['causes']['legitimately_empty'], 0)
+            self.assertEqual(field['causes']['never_requested'], 0)
+        self.assertEqual(bundle['census']['population'],
+                         dict(decoded=4, admitted=3, unadmitted=1, rejected=2, observed=6))
+        self.assertEqual(intake.coverage_verdict(meta)['coverage_text_shortfall'], 3)
+
+    def test_new_source_revision_remeasures_held_fields(self):
+        from lib import outlook_field_census as census
+        with tempfile.TemporaryDirectory() as directory:
+            before, _ = self.fixture(directory)
+            db = Path(directory) / 'fixture.db'
+            with sqlite3.connect(db) as con:
+                con.execute("UPDATE messages SET body='synthetic', body_kind='full', "
+                            "body_completeness='complete' WHERE id=1")
+            meta, rows, _ = intake._load(db, account_id=7)
+            bound = census.binding(db, Path(directory) / 'Files', 'private-mailbox',
+                                   '2026-11-05T00:00:00+00:00', Path(directory) / 'decoder-fixture')
+            after = census.build(meta, rows, bound)
+        self.assertNotEqual(before['binding']['generation'], after['binding']['generation'])
+        self.assertNotEqual(before['binding']['commitment'], after['binding']['commitment'])
+        self.assertEqual(after['census']['fields']['body']['captured'], 1)
+        self.assertEqual(after['census']['fields']['body']['raw_missing'], 2)
+
+    def test_typed_recipient_conflict_is_counted_once(self):
+        from lib import outlook_field_census as census
+        with tempfile.TemporaryDirectory() as directory:
+            self.fixture(directory)
+            db = Path(directory) / 'fixture.db'
+            with sqlite3.connect(db) as con:
+                con.executescript("""
+                    CREATE TABLE message_keys(message_id INTEGER, local_key INTEGER);
+                    CREATE TABLE message_objects(local_key INTEGER, subject TEXT,
+                        conversation_id TEXT, recipients_status TEXT);
+                    INSERT INTO message_keys VALUES(1,101);
+                    INSERT INTO message_objects VALUES(101,NULL,NULL,'conflict');
+                """)
+            meta, rows, _ = intake._load(db, account_id=7)
+            bound = census.binding(db, Path(directory) / 'Files', 'private-mailbox',
+                                   '2026-11-05T00:00:00+00:00', Path(directory) / 'decoder-fixture')
+            bundle = census.build(meta, rows, bound)
+        self.assertEqual(bundle['census']['fields']['recipients']['causes']['conflict_or_overflow'], 1)
+        self.assertEqual(bundle['census']['fields']['recipients']['causes']['unclassified'], 2)
+
+    def test_generation_mismatch_and_bad_counts_are_refused(self):
+        from lib import outlook_field_census as census
+        import copy
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, _ = self.fixture(directory)
+        for mutate in (lambda b: b['receipt'].update(generation='other'),
+                       lambda b: b['census']['fields']['body'].update(raw_missing=-1),
+                       lambda b: b.update(schema='future'),
+                       lambda b: b['binding'].pop('decoder_revision'),
+                       lambda b: b['receipt']['counts'].update(body_complete=1)):
+            bad = copy.deepcopy(bundle)
+            mutate(bad)
+            with self.assertRaises(ValueError):
+                census.validate(bad)
+
+    def test_receipt_subpopulations_cannot_exceed_source_population(self):
+        from lib import outlook_field_census as census
+        import copy
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, _ = self.fixture(directory)
+        for counts, causes in (
+                (dict(stored=5), dict(other_stored_unadmitted=2)),
+                (dict(mail_account_unknown_not_stored=1), dict(unknown_account=1)),
+                (dict(stored=4, stored_not_admitted_account_ambiguous=1), dict(ambiguous=1)),
+                (dict(stored=4, stored_not_admitted_account_unresolved=1), dict(unresolved=1))):
+            with self.subTest(counts=counts):
+                bad = copy.deepcopy(bundle)
+                bad['receipt']['counts'].update(counts)
+                bad['census']['message_causes'].update(causes)
+                with self.assertRaises(ValueError):
+                    census.validate(bad)
+
+    def test_proof_cli_refuses_inconsistent_population(self):
+        import copy
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, _ = self.fixture(directory)
+            target = Path(directory) / 'field-census-latest.json'
+            command = [sys.executable, str(ROOT / 'ops/outlook-field-census-proof.py'),
+                       str(target), '--after', '2026-11-04T00:00:00+00:00']
+            for population in (
+                    dict(decoded=10002, admitted=3, unadmitted=9999, rejected=777, observed=10779),
+                    dict(decoded=4, admitted=3, unadmitted=1, rejected=777, observed=781),
+                    dict(decoded=10002, admitted=3, unadmitted=9999, rejected=2, observed=10004),
+                    dict(decoded=3, admitted=3, unadmitted=0, rejected=2, observed=5)):
+                with self.subTest(population=population):
+                    bad = copy.deepcopy(bundle)
+                    bad['census']['population'] = population
+                    target.write_text(json.dumps(bad))
+                    result = REAL_RUN(command, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 1, 'inconsistent population must fail proof')
+                    self.assertEqual(result.stdout, '')
+                    self.assertEqual(result.stderr, 'field_census_proof_failed\n')
+
+    def test_atomic_publication_crash_and_proof_cli(self):
+        from lib import outlook_field_census as census
+        with tempfile.TemporaryDirectory() as directory:
+            bundle, _ = self.fixture(directory)
+            target = Path(directory) / 'field-census-latest.json'
+            census.publish(target, bundle)
+            previous = target.read_bytes()
+            with patch('os.replace', side_effect=OSError):
+                with self.assertRaises(OSError):
+                    census.publish(target, bundle)
+            self.assertEqual(target.read_bytes(), previous)
+            command = [sys.executable, str(ROOT / 'ops/outlook-field-census-proof.py'),
+                       str(target), '--after', '2026-11-04T00:00:00+00:00']
+            passed = REAL_RUN(command, capture_output=True, text=True)
+            self.assertEqual(passed.returncode, 0, 'proof must accept a valid aggregate contract')
+            self.assertEqual(json.loads(passed.stdout)['accounting_differences'], 0)
+            stale = REAL_RUN(command[:-1] + ['2099-01-01T00:00:00+00:00'], capture_output=True)
+            self.assertEqual(stale.returncode, 1)
+            bundle['receipt']['generation'] = 'mixed'
+            target.write_text(json.dumps(bundle))
+            failed = REAL_RUN(command, capture_output=True, text=True)
+            self.assertEqual(failed.returncode, 1)
+            self.assertNotIn('private-mailbox', previous.decode() + passed.stdout + failed.stdout + failed.stderr)
 
 
 if __name__ == '__main__':
