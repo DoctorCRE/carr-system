@@ -92,4 +92,3 @@ The retired custom approval policy in generated rule `7bb0a3ed` is superseded by
 Joe's removal instruction (`27810f4f`). Its size exemptions and Actions-variable
 checks no longer apply. Card admission and PR-title skip-CI checks are not CI
 requirements; do not recreate them. Historical rule snapshots remain provenance.
-
