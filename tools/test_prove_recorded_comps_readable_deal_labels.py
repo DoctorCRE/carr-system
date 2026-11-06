@@ -140,7 +140,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 time.sleep(3.2)
                 self.assertFalse((folder / 'escaped').exists(),
                                  'wrapper descendant performed work after proof exit')
-            self.assertLessEqual(len(requests), 4)
+            self.assertLessEqual(len(requests), 4, requests)
             return result
 
     def test_pass(self):
@@ -165,6 +165,32 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             with self.subTest(mode=mode):
                 result = self.invoke(mode)
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                expected = {'uuid': 'natural.deal-readable', 'name': 'natural.canonical-deal-name', 'producer': 'synthetic.deal-name'}[mode]
+                self.assertEqual(json.loads(result.stdout)['predicate'], expected)
+
+    def test_named_table_predicates(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('comps_proof', RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        cases = [
+            ('natural.deal-column', lambda t: t['columns'][0].update(label='Wrong')),
+            ('natural.proposed-on-column', lambda t: t['columns'][1].update(type='text')),
+            ('natural.rent-column', lambda t: t['columns'][2].update(label='Wrong')),
+            ('natural.row-budget', lambda t: t.update(rows=[])),
+            ('natural.deal-readable', lambda t: t['rows'][0]['deal'].update(value='')),
+            ('natural.deal-readable', lambda t: t['rows'][0]['deal'].update(value=ID)),
+            ('natural.deal-source', lambda t: t['rows'][0]['deal']['source'].update(record_id='bad')),
+            ('natural.rent-source', lambda t: t['rows'][0]['rent']['source'].update(record_id='bad')),
+            ('natural.proposed-on-value', lambda t: t['rows'][0]['proposed_on'].update(value='bad')),
+        ]
+        for predicate, mutate in cases:
+            with self.subTest(predicate=predicate):
+                table = json.loads(json.dumps(TABLE))
+                mutate(table)
+                with self.assertRaises(runner.ProofFailed) as failure:
+                    runner.check_table(table)
+                self.assertEqual(str(failure.exception), predicate)
 
     def test_timeout_terminates_wrapper_descendants(self):
         result = self.invoke('timeout', timeout_seconds=2)
