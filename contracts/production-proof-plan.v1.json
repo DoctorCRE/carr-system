@@ -88,7 +88,7 @@
     },
     "app-release-live-walk.v1": {
       "path": "ops/app-proof-observe.py",
-      "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
+      "sources": {"ops/app-proof-observe.py": "a5673ab8783aa158a77684dab47cb39ac84a83c80eeeeda8e1b25e9669dbe97f"},
       "targets": ["app"]
     },
     "worker-email-link-marker.v1": {
