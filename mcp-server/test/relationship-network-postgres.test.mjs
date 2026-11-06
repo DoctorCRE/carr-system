@@ -241,7 +241,9 @@ test('W14 PostgreSQL: per-deal attribution, every role row, and one association 
       await link(db,actor,{from_party:source,to_party:target,via_party:vp,kind:'referred',deal_id:won,note:'Demo vendor sent this practice'});
       assert.equal(referredDeals(await network(db),vp).length,1);
       assert.equal((await directory(vid)).deals_referred,null,'a new exact association invalidates verified coverage');
-      await db.query('update public.vendor set deal_history_verified_at=now()+interval \'1 second\' where id=$1',[vid]);
+      await db.query('update public.vendor set deal_history_verified_at=$2 where id=$1',[vid,new Date(asOf().getTime()+1000).toISOString()]);
+      assert.equal((await directory(vid)).deals_referred,null,'future coverage cannot verify the referral');
+      await db.query('update public.vendor set deal_history_verified_at=$2 where id=$1',[vid,asOf().toISOString()]);
       assert.equal((await directory(vid)).deals_referred,1);
     });
 
