@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, writeFile, rm, readFile, readdir } from 'node:fs/promises';
 import { unlinkSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,8 +34,12 @@ test('CI-service snapshots clone named databases on the provided service and cle
   const savedKey = process.env.CARR_TEST_PG_SNAPSHOT_KEY;
   const savedSnapshot = process.env.CARR_TEST_PG_SNAPSHOT;
   let template, first, second, client;
+  const matchingDatabases = async () => (await service.client.query(
+    "select datname from pg_database where datname ~ '^(deal_items|mcp_snapshot)_' order by datname")).rows;
+  const beforeDatabases = new Set();
   const base = service.dsn;
   try {
+    for (const { datname } of await matchingDatabases()) beforeDatabases.add(datname);
     process.env.CARR_CI_DATABASE_URL = base;
     delete process.env.CARR_TEST_PG_SNAPSHOT;
     template = await acquireDisposablePostgres({ prefix: 'mcp-snapshot-', template: true });
@@ -72,9 +77,72 @@ test('CI-service snapshots clone named databases on the provided service and cle
     if (savedKey === undefined) delete process.env.CARR_TEST_PG_SNAPSHOT_KEY; else process.env.CARR_TEST_PG_SNAPSHOT_KEY = savedKey;
     if (savedSnapshot === undefined) delete process.env.CARR_TEST_PG_SNAPSHOT; else process.env.CARR_TEST_PG_SNAPSHOT = savedSnapshot;
     try {
-      assert.deepEqual((await service.client.query("select datname from pg_database where datname ~ '^(deal_items|mcp_snapshot)_'")).rows, []);
+      assert.deepEqual((await matchingDatabases()).filter(({ datname }) => !beforeDatabases.has(datname)), [],
+        'suite-created snapshot databases must be removed');
       assert.equal(failures.length, 0, failures.map(error => error.message).join('\n'));
     } finally { await service.close(); }
+  }
+});
+
+test('snapshot cleanup preserves runner templates and rejects a leaked suite database', async () => {
+  let bin;
+  for (const config of ['pg_config', '/opt/homebrew/opt/postgresql@17/bin/pg_config', '/usr/lib/postgresql/17/bin/pg_config']) {
+    try {
+      const { stdout } = await promisify(execFile)(config, ['--bindir']);
+      if (existsSync(path.join(stdout.trim(), 'postgres'))) { bin = stdout.trim(); break; }
+    } catch { /* Try the supported installations. */ }
+  }
+  assert.ok(bin, 'cleanup proof requires PostgreSQL');
+  const cluster = await acquireDisposablePostgres({ prefix: 'snapshot-cleanup-proof-', pgCtl: path.join(bin, 'pg_ctl') });
+  const socket = createServer();
+  await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
+  const port = socket.address().port;
+  await new Promise(resolve => socket.close(resolve));
+  const admin = new pg.Client({ connectionString: `postgresql://fixture@127.0.0.1:${port}/postgres` });
+  const directory = await mkdtemp(path.join(tmpdir(), 'snapshot-cleanup-proof-'));
+  const runner = `mcp_snapshot_${randomUUID().replaceAll('-', '')}`;
+  const leaked = `deal_items_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const data = path.join(cluster.root, 'data');
+    await cluster.run(path.join(bin, 'initdb'), ['-D', data, '-U', 'fixture', '--auth=trust', '--no-locale']);
+    await cluster.run(path.join(bin, 'pg_ctl'), ['-D', data, '-l', path.join(cluster.root, 'server.log'),
+      '-o', `-c unix_socket_directories= -h 127.0.0.1 -p ${port}`, '-w', 'start']);
+    await admin.connect();
+    await admin.query(`create database "${runner}"`);
+    const hook = path.join(directory, 'leak.mjs');
+    const pgModule = new URL('../node_modules/pg/lib/index.js', import.meta.url).href;
+    await writeFile(hook, `import pg from ${JSON.stringify(pgModule)};
+const query = pg.Client.prototype.query;
+pg.Client.prototype.query = async function(sql, ...args) {
+  if (typeof sql === 'string' && sql.startsWith('create table snapshot_private_marker')) {
+    const admin = new pg.Client({ connectionString: process.env.CARR_CI_DATABASE_URL });
+    try {
+      await admin.connect();
+      await query.call(admin, 'create database "${leaked}"');
+    } finally { await admin.end(); }
+  }
+  return query.call(this, sql, ...args);
+};`);
+    const env = { ...process.env,
+      CARR_CI_DATABASE_URL: `postgresql://fixture@127.0.0.1:${port}/postgres` };
+    delete env.NODE_TEST_CONTEXT;
+    const run = extra => promisify(execFile)(process.execPath,
+      [...extra, '--test', '--test-reporter=tap', '--test-name-pattern=^CI-service snapshots clone', fileURLToPath(import.meta.url)],
+      { env, timeout: 240000, maxBuffer: 4 * 1024 * 1024 });
+    const passing = await run([]);
+    assert.match(passing.stdout, /# pass 1/);
+    await assert.rejects(run(['--import', hook]), error => {
+      assert.equal(error.code, 1);
+      assert.match(error.stdout + error.stderr, new RegExp(leaked));
+      return true;
+    });
+    const remaining = (await admin.query(
+      'select datname from pg_database where datname = any($1) order by datname', [[runner, leaked]])).rows;
+    assert.equal(remaining.length, 2, 'both the preserved template and deliberately leaked database exist');
+  } finally {
+    try { await admin.end(); } finally {
+      try { await cluster.close(); } finally { await rm(directory, { recursive: true, force: true }); }
+    }
   }
 });
 

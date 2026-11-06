@@ -202,6 +202,21 @@ class LaunchdMainPathTests(unittest.TestCase):
         with patch.object(installer.os, "lstat", side_effect=unreadable):
             self.assert_runtime_refused({"ProgramArguments": [str(self.repo / "ops/progress-board-render.sh")]})
 
+    def test_repository_discovery_crosses_container_mount_boundaries(self):
+        run = subprocess.run
+        boundary = subprocess.CompletedProcess([], 128, '',
+            'fatal: not a git repository (or any parent up to mount point /)\n'
+            'Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).')
+
+        def mounted(argv, **kwargs):
+            if argv[-2:] == ['rev-parse', '--show-toplevel'] and kwargs['env'].get('GIT_DISCOVERY_ACROSS_FILESYSTEM') != '1':
+                return boundary
+            return run(argv, **kwargs)
+
+        with patch.object(installer.subprocess, 'run', side_effect=mounted):
+            self.test_non_repository_existing_and_missing_paths_are_allowed()
+            self.assert_runtime_refused({'ProgramArguments': [str(self.feature / 'ops/progress-board-render.sh')]})
+
     def test_non_repository_system_path_is_allowed(self):
         body = plistlib.dumps({"ProgramArguments": ["/bin/bash", "--version"]}).decode()
         self.assertIsNone(installer.launchd_path_refusal(body))
