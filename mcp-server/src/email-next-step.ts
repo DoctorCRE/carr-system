@@ -57,7 +57,7 @@ export function emailNextStepTools({ withEnvelope, writeEvent, lockDealField, se
         a.id as activity_id,a.version as activity_version,a.summary,a.detail,a.occurred_at
       from deal d join v_deal_room_board b on b.id=d.id join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
       join activity a on a.id=$2 and (a.deal_id=d.id or (a.deal_id is null and a.client_id=d.client_id))
-      where d.id=$1 and d.phase<>'closed' and cl.merged_into is null and p.merged_into is null and p.deleted_at is null
+      where d.id=$1 and d.phase<>'closed' and d.closed_on is null and d.invoiced_on is null and cl.merged_into is null and p.merged_into is null and p.deleted_at is null
         and a.kind in ('email_in','email_out') and a.occurred_at<=now()
       ${lock ? 'for update of d for share of a,cl,p' : ''}`, [args.deal,args.activity_id])).rows[0];
     if (!row) fail('email_next_step_evidence_not_found');

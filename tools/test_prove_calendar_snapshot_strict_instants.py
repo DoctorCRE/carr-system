@@ -17,6 +17,9 @@ PROOF = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROOF)
 
 
+RECORDED_RELEASE = json.loads(RUNNER.with_name('fixtures').joinpath('proof-release-production.json').read_text())
+
+
 class ProofCLI(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(RUNNER), *args], capture_output=True, text=True, timeout=5)
@@ -34,6 +37,25 @@ class ProofCLI(unittest.TestCase):
         counts = json.loads(result.stdout)
         self.assertEqual([counts[k] for k in ('meetings', 'reviews', 'alternate_times', 'calendar_reads')], [1, 1, 1, 1])
         self.assertEqual(counts['mode'], 'fixture')
+
+    def test_recorded_production_release_shape(self):
+        value = copy.deepcopy(PROOF.FIXTURE)
+        value['release'] = RECORDED_RELEASE
+        value['expected_revision'] = RECORDED_RELEASE['git_sha']['value']
+        result = self.fixture(value)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_invalid_production_identity_prevents_calendar_read(self):
+        for release in ({}, [], None,
+                        {**RECORDED_RELEASE, 'ok': False},
+                        {**RECORDED_RELEASE, 'env': {'value': 'staging'}},
+                        {**RECORDED_RELEASE, 'git_sha': {'value': 'x' * 40}},
+                        {**RECORDED_RELEASE, 'git_sha': 'a' * 40}):
+            with self.subTest(release=release):
+                response = SimpleNamespace(status=200, body=json.dumps(release).encode())
+                with patch.object(sys, 'argv', [str(RUNNER), '--live', '--expected-revision', '1' * 40]), patch.object(PROOF, 'read_http', return_value=response), patch.object(PROOF, 'command') as execute:
+                    self.assertEqual(PROOF.main(), 1)
+                    execute.assert_not_called()
 
     def test_invalid_contracts_fail(self):
         for target in ('observed_at', 'start', 'end', 'alternate', 'review_start', 'review_end'):
@@ -99,7 +121,7 @@ class ProofCLI(unittest.TestCase):
                         sources={'outlook_calendar': {'state': 'ready'}})
         expected, deployed = '1' * 40, '2' * 40
         replies = ['', json.dumps(calendar)]
-        release = SimpleNamespace(status=200, body=json.dumps({'git_sha': deployed}).encode())
+        release = SimpleNamespace(status=200, body=json.dumps({**RECORDED_RELEASE, 'git_sha': {'value': deployed}}).encode())
         with patch.object(sys, 'argv', [str(RUNNER), '--live', '--timeout-seconds', '30', '--expected-revision', expected]), patch.object(PROOF, 'command', side_effect=replies) as execute, patch.object(PROOF, 'read_http', return_value=release) as transport:
             self.assertEqual(PROOF.main(), 0)
             commands = [call.args[0] for call in execute.call_args_list]
