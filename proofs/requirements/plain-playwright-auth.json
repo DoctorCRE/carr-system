@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S2-plain-playwright-auth",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "production-login-isolation",
+      "predicate": "Verify deployed Worker release ancestry with worker-release-smoke.v1. Separately read GET /auth/e2e-session on production and require 404 with no session cookie. Credentialed staging exchange and signed-in tests remain pending Access provisioning and staging restoration.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity verified and production refuses the staging-only login route. This does not attest a passing staging suite.",
+      "input_class": "Read-only release and unauthenticated GET; no session exchange, fixture seeding, business writes or sends.",
+      "deadline_seconds": 30
+    },
+    {
+      "id": "installed-fixture-producer-retired",
+      "predicate": "Use studio-canonical-run.v1 to bind the installed checkout to this source and observe that tools/staging-home-fixture.py is absent. A receipt alone does not prove retirement; inspect the installed tree and require no executable staging journey producer references.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Installed checkout contains the merge and the retired Home fixture producer is absent. Workflow metadata remains explicitly pending PR 710.",
+      "input_class": "Read-only installed source and canonical run receipt. No fixture execution, database access or credential reads.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 5,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

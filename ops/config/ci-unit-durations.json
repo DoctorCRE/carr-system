@@ -373,7 +373,6 @@
     "snapshot-service-postgres.test.mjs": {"milliseconds": 251409, "serial": true},
     "sponsor-runtime.test.mjs": {"milliseconds": 776, "serial": false},
     "staging-journey-preflight.test.mjs": {"milliseconds": 402, "serial": false},
-    "staging-loop-fixtures.test.mjs": {"milliseconds": 636, "serial": false},
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},
     "standing-context-territory.test.mjs": {"milliseconds": 5044, "serial": true},
     "subject-watches-postgres.test.mjs": {"milliseconds": 25540, "serial": true},
