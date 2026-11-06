@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -59,9 +60,11 @@ class ProductIntegrationTest(unittest.TestCase):
         ], cwd=ROOT, text=True)
         tree = module.Tree(ROOT)
         self.assertEqual(tree.verbs, set(json.loads(registry)))
-        findings = [module.check(tree, claim) for claim in module.extract(
-            tree, 'README.md', 'Use verb `call-verb` and verb `read-cre-lifecycle`. Use verb `admit-journey-one-minimum-receipt`.')]
-        self.assertEqual([f['target'] for f in findings if f], ['admit-journey-one-minimum-receipt'])
+        with patch.object(module, 'git', side_effect=AssertionError('history accessed')):
+            findings = [module.check(tree, claim) for claim in module.extract(
+                tree, 'README.md', 'Use verb `call-verb` and verb `read-cre-lifecycle`. '
+                'Use verb `admit-journey-one-minimum-receipt`. Read `scripts/known-bad-reference.py`.')]
+        self.assertEqual([f['target'] for f in findings if f], ['admit-journey-one-minimum-receipt', 'scripts/known-bad-reference.py'])
 
     def test_registry_dependencies_installed_before_scan(self):
         workflow = yaml.load((ROOT / '.github/workflows/doc-drift.yml').read_text(), Loader=yaml.BaseLoader)
