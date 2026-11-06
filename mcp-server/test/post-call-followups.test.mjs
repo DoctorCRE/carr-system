@@ -1,5 +1,6 @@
 // Tests read-only pending call follow-up snapshots.
 import test from 'node:test';
+import { writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { allowedIn, connectionRouteForTool } from '../src/mcp.js';
 import { TOOLS, executeRegisteredTool, assertRegisteredToolInput } from '../src/tools.js';
@@ -82,7 +83,14 @@ test('call outcomes preview current action matches and acceptance rechecks them'
         const id = await proposal(`${edge}Review\t synthetic   survey${edge}`, '2027-02-02', defaulted);
         const action = await seed(source, id, `${edge}REVIEW   SYNTHETIC\nSURVEY${edge}`);
         await c.query(`update ${source} set item_bullets='["Keep concrete recipient", "Keep survey date"]'::jsonb where id=$1`, [action]);
-        const before = await preview(id);
+        const observation = await command('read-call-outcomes');
+        if (process.env.POST_CALL_EDGE_FIXTURE_OUTPUT && source === 'next_action' && defaulted) {
+          const call = observation.calls.find(call => call.session_id === session);
+          writeFileSync(process.env.POST_CALL_EDGE_FIXTURE_OUTPUT, JSON.stringify({ ...observation,
+            calls: [{ ...call, applied: [], open_cards: call.open_cards.filter(card => card.candidate_id === id) }] }));
+        }
+        const before = observation.calls.find(call => call.session_id === session).open_cards
+          .find(card => card.candidate_id === id).existing_action_comparison;
         assert.equal(before.status, 'exact_match');
         assert.equal(before.exact_match.id, action);
         assert.equal(before.date_effect.reason, defaulted ? 'defaulted_date' : 'stated_date');
