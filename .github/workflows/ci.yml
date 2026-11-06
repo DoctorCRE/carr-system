@@ -290,6 +290,9 @@ jobs:
 
 
     steps:
+      - name: Temporary WR622.S13.J72 failed dependency proof
+        if: matrix.classes == 'dependency'
+        run: exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Migration identity and historical snapshot proofs read pinned commits.
