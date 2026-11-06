@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from proof_release_fixture import ReleaseFixtureHandler
 import json
+import importlib.util
 import shutil
 from pathlib import Path
 import subprocess
@@ -11,14 +12,19 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
 
 RUNNER = Path(__file__).with_name('prove-vendor-scheduling-zero-duration.py')
+SPEC = importlib.util.spec_from_file_location('vendor_proof', RUNNER)
+PROOF = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(PROOF)
 SHA = 'a' * 40
 
 
 class ProofCLI(unittest.TestCase):
     @contextmanager
-    def fixture(self, state='unavailable', gaps=None, rows=None, change=None, fail=False, delay=0, release_change=False, registry_owner=None):
+    def fixture(self, state='unavailable', gaps=None, rows=None, change=None, fail=False, release_change=False, registry_owner=None):
         now = datetime.now(timezone.utc)
         at = lambda hours: (now + timedelta(hours=hours)).isoformat(timespec='milliseconds')
         section = {'state': 'ready', 'observed_at': at(0), 'notes': [],
@@ -50,14 +56,14 @@ class ProofCLI(unittest.TestCase):
                 root = Path(folder)
                 (root / 'data.json').write_text(json.dumps({'read-vendor-meetings': vendor, 'morning-brief': agenda}))
                 wrapper = root / 'wrapper'
-                wrapper.write_text('#!' + sys.executable + '\n' + '''import json, pathlib, sys, time
+                wrapper.write_text('#!' + sys.executable + '\n' + '''import json, pathlib, sys
 root = pathlib.Path(__file__).parent
 with (root / 'calls.jsonl').open('a') as stream:
     stream.write(json.dumps(sys.argv[1:]) + '\\n')
 assert sys.argv[1] == 'call'
 assert sys.argv[2] in {'read-vendor-meetings', 'morning-brief'}
 assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[2] == 'read-vendor-meetings' else {})
-''' + f'time.sleep({delay})\n' + ('print("PRIVATE AUTH FAILURE", file=sys.stderr)\nsys.exit(1)\n' if fail else
+''' + ('print("PRIVATE AUTH FAILURE", file=sys.stderr)\nsys.exit(1)\n' if fail else
                     "print(json.dumps(json.loads((root / 'data.json').read_text())[sys.argv[2]]))\n"))
                 if registry_owner:
                     source = RUNNER.parent.parent / 'mcp-server' / 'src'
@@ -173,7 +179,61 @@ assert json.loads(sys.argv[3]) == ({'view': 'research', 'limit': 1} if sys.argv[
             self.assertEqual(json.loads(result.stdout)['passed_assertions'], 2)
 
     def test_total_deadline_stops_slow_wrapper(self):
-        self.assertLessEqual(self.run_cli(78, timeout=1, delay=10)['record_reads'], 1)
+        process = MagicMock()
+        process.pid = 123456789
+        selector = MagicMock()
+        selector.select.return_value = []
+        clock = SimpleNamespace(monotonic=lambda: 100)
+        reply = SimpleNamespace(status=200, body=json.dumps({'git_sha': {'value': SHA}}).encode())
+        with patch.object(PROOF, 'time', clock), patch.object(PROOF, 'read_http', return_value=reply), \
+                patch.object(PROOF.signal, 'setitimer'), \
+                patch.object(PROOF.subprocess, 'Popen', return_value=process), \
+                patch.object(PROOF.selectors, 'DefaultSelector') as select, \
+                patch.object(PROOF.os, 'killpg') as kill, \
+                patch.object(sys, 'argv', [str(RUNNER), '--origin', 'http://127.0.0.1',
+                                         '--call-wrapper', '/synthetic', '--timeout-seconds', '1']):
+            process.__enter__.return_value = process
+            select.return_value.__enter__.return_value = selector
+            self.assertEqual(PROOF.main(), 78)
+            selector.select.assert_called_once_with(timeout=1)
+            kill.assert_called_once_with(process.pid, PROOF.signal.SIGKILL)
+            process.__exit__.assert_called_once()
+
+    def test_native_alarm_stops_ready_wrapper_and_reaps_it(self):
+        with self.fixture() as (root, wrapper, origin, requests):
+            wrapper.write_text('#!' + sys.executable + '\n' +
+                "import os, pathlib, signal\n" +
+                "root = pathlib.Path(__file__).parent\n" +
+                "(root / 'pid.tmp').write_text(str(os.getpid()))\n" +
+                "(root / 'pid.tmp').replace(root / 'pid')\n" +
+                "os.kill(os.getppid(), signal.SIGALRM)\n" +
+                "signal.pause()\n")
+            result = subprocess.run([sys.executable, str(RUNNER), '--origin', origin,
+                                     '--call-wrapper', str(wrapper)],
+                                    capture_output=True, text=True, timeout=35)
+            self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)['record_reads'], 1)
+            pid = int((root / 'pid').read_text())
+            with self.assertRaises(ProcessLookupError):
+                PROOF.os.kill(pid, 0)
+
+    def test_native_alarm_adapter_restores_handler_and_disarms(self):
+        previous = PROOF.signal.getsignal(PROOF.signal.SIGALRM)
+        with patch.object(sys, 'argv', [str(RUNNER), '--origin', 'http://127.0.0.1',
+                                      '--call-wrapper', '/synthetic']), \
+                patch.object(PROOF, 'observe', side_effect=lambda *_: PROOF.signal.raise_signal(PROOF.signal.SIGALRM)):
+            self.assertEqual(PROOF.main(), 78)
+        self.assertEqual(PROOF.signal.getsignal(PROOF.signal.SIGALRM), previous)
+        self.assertEqual(PROOF.signal.getitimer(PROOF.signal.ITIMER_REAL), (0, 0))
+
+    def test_expiry_during_disarm_returns_insufficient_and_restores_handler(self):
+        with patch.object(sys, 'argv', [str(RUNNER), '--origin', 'http://127.0.0.1',
+                                      '--call-wrapper', '/synthetic']), \
+                patch.object(PROOF, 'observe', return_value=0), \
+                patch.object(PROOF.signal, 'signal', return_value=PROOF.signal.SIG_DFL) as handler, \
+                patch.object(PROOF.signal, 'setitimer', side_effect=[None, TimeoutError()]):
+            self.assertEqual(PROOF.main(), 78)
+            self.assertEqual(handler.call_args.args, (PROOF.signal.SIGALRM, PROOF.signal.SIG_DFL))
 
 
 if __name__ == '__main__':
