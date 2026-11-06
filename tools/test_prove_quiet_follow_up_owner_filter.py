@@ -12,6 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'tools/prove-quiet-follow-up-owner-filter.py'
 spec = importlib.util.spec_from_file_location('quiet_owner_proof', RUNNER)
+assert spec is not None and spec.loader is not None
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 
