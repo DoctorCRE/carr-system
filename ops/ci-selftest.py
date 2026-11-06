@@ -537,7 +537,7 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci.py", "ops/proof-transport-check.py", "ops/ci_scope.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
         (root / "ops/config/ci-check-scope.json").write_text('{}')
