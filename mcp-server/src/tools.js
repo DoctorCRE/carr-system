@@ -7,6 +7,9 @@ import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
+const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
+  .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
@@ -28,6 +31,7 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementReplyTools } from "./requirement-replies.js";
 import { requirementRequestTools } from "./requirement-requests.js";
+import { dealDeliverableTools } from "./deal-deliverables.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -1390,7 +1394,7 @@ async function nextRenderSeq(client, blockId) {
   return r.rows[0].n;
 }
 
-const FK = { deal: "deal_id", client: "client_id", lead: "lead_id", vendor: "vendor_id" };
+const FK = { deal: "deal_id", client: "client_id", lead: "lead_id", vendor: "vendor_id", party: "party_id" };
 
 // [ORDER 18] How many intro-graph edges `find` returns per query. A cap, not a
 // page: find answers "who is this and who do we know through them", and the whole
@@ -4086,8 +4090,7 @@ export const TOOLS = {
          order by 1`)).rows;
       const matches = rows.flatMap(row => {
         const { ref, name, email } = row;
-        const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
-          .map(address => address.toLowerCase()))];
+        const found = recordedEmailAddresses(email);
         return found.map(address => ({ row, contact: { address, ref, name,
           exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) } }));
       });
@@ -4124,19 +4127,17 @@ export const TOOLS = {
     }, required: ["emails"] },
     handler: async (c, _actor, args) => {
       if (!Array.isArray(args.emails) || !args.emails.length || args.emails.length > 50 ||
-          args.emails.some(email => typeof email !== "string" || !/^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/.test(email.trim())))
+          args.emails.some(email => typeof email !== "string" || !mailRecipientAddress.test(email.trim())))
         throw new ToolError({ error: "invalid_mail_recipients" });
       const emails = [...new Set(args.emails.map(email => email.trim().toLowerCase()))].sort();
-      const recipients = (await c.query(`
-        select wanted.email, exists (
-          select 1 from party p
-          where lower(btrim(p.email)) = wanted.email
-            and (p.contact_state = 'do_not_contact' or exists (
-              select 1 from lead l where l.party_id = p.id
-                and (l.suppressed or l.stage = 'do_not_contact')
-            ))
-        ) as blocked
-        from unnest($1::text[]) as wanted(email) order by wanted.email`, [emails])).rows;
+      const restricted = (await c.query(`
+        select distinct p.email from party p
+        where p.contact_state = 'do_not_contact' or exists (
+          select 1 from lead l where l.party_id = p.id
+            and (l.suppressed or l.stage = 'do_not_contact')
+        )`)).rows;
+      const blocked = new Set(restricted.flatMap(row => recordedEmailAddresses(row.email)));
+      const recipients = emails.map(email => ({ email, blocked: blocked.has(email) }));
       return { recipients };
     },
   },
@@ -4595,6 +4596,18 @@ export const TOOLS = {
       if (args.calendar_event_key !== undefined && (typeof args.calendar_event_key !== 'string' || !/^[0-9a-f]{16}$/.test(args.calendar_event_key)))
         throw new ToolError({ error: 'calendar_event_key_invalid', hint: 'calendar_event_key must be exactly 16 lowercase hexadecimal characters' });
       const s = await resolveSubject(c, args.ref);
+      if (s.type === 'party') {
+        // Retained requests keep their original ref. Lock only the current
+        // survivor, so following merge pointers cannot invert endpoint locks.
+        const party = (await c.query(`with recursive target as (
+          select id,merged_into from party where id=$1
+          union select p.id,p.merged_into from party p join target t on p.id=t.merged_into
+        ) select p.id,p.merged_into,p.deleted_at from party p join target t on t.id=p.id
+          where t.merged_into is null for share of p`, [s.id])).rows[0];
+        if (!party || party.merged_into || party.deleted_at)
+          throw new ToolError({error:'email_touch_target_not_live'});
+        s.id = party.id;
+      }
       const binding = emailTouchBinding(args, s, ToolError);
       await guardEmailTouch(c, actor, binding, ToolError);
       if (args.calendar_event_key !== undefined) {
@@ -6760,7 +6773,8 @@ export const TOOLS = {
            (select count(distinct rf.kind) from record_flag rf where rf.subject_type='party' and rf.subject_id=p.id
              and rf.kind in ('verified','address','phone','email','npi','specialty') and coalesce(rf.value->>'found','true') <> 'false') as verified_identity_fields,
            ((select count(*) from activity a
-               where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=p.id)
+               where a.party_id=p.id
+                  or exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=p.id)
                   or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=p.id)
                   or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=p.id)
                   or exists(select 1 from deal d join client cl on cl.id=d.client_id
@@ -6779,7 +6793,8 @@ export const TOOLS = {
         `/* merge_orphan_sweep */
          select 'party_link' as attachment, count(*)::int as count from party_link where from_party=$1 or to_party=$1 or via_party=$1
          union all select 'activity', count(*)::int from activity a
-           where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=$1)
+           where a.party_id=$1
+              or exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=$1)
               or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=$1)
               or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=$1)
               or exists(select 1 from deal d join client cl on cl.id=d.client_id
@@ -6862,6 +6877,11 @@ export const TOOLS = {
         if (r.rows.length) moved[t] = r.rows.length;
       }
 
+      const activities = await c.query(
+        `update activity set party_id=$1, updated_by=$2 where party_id=$3 returning id`,
+        [args.survivor_party, actor.id, args.merged_party]);
+      const activitiesMoved = activities.rows.length;
+
       await c.query("update party set merged_into=$1, updated_by=$2 where id=$3",
         [args.survivor_party, actor.id, args.merged_party]);
 
@@ -6877,14 +6897,14 @@ export const TOOLS = {
       // The stated basis rides the event: a merge is permanent, so the reason it
       // was allowed has to outlive the session that gave it.
       await writeEvent(c, actor, "confirm-merge", "party", args.merged_party,
-        { new: { merged_into: args.survivor_party, roles_moved: moved, match_basis: basis,
+        { new: { merged_into: args.survivor_party, roles_moved: moved, activities_moved: activitiesMoved, match_basis: basis,
                  survivorship: { business_ref: !!preferred.has_business_ref,
                    verified_identity_fields: Number(preferred.verified_identity_fields || 0),
                    linked_records: Number(preferred.linked_records || 0), created_at: preferred.created_at },
                  orphan_sweep: sweep.rows,
                  ...(args.same_person_because ? { same_person_because: args.same_person_because } : {}) },
           idempotency_key: args.idempotency_key });
-      return { ok: true, roles_moved: moved, match_basis: basis, orphan_sweep: sweep.rows,
+      return { ok: true, roles_moved: moved, activities_moved: activitiesMoved, match_basis: basis, orphan_sweep: sweep.rows,
                duplicate_roles_on_survivor: dup.rows.length ? dup.rows : undefined };
     }),
   },
@@ -10940,6 +10960,7 @@ registerTools(dealItemTools({ withEnvelope, writeEvent, resolveSubject,
 registerTools(actionClosureTools({ withEnvelope, writeEvent, canExercisePartnerAuthority }), "action-closure");
 registerTools(requirementReplyTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-replies");
 registerTools(requirementRequestTools({ withEnvelope, writeEvent, resolveSubject }), "requirement-requests");
+registerTools(dealDeliverableTools({ withEnvelope, writeEvent }), "mcp-server/src/deal-deliverables.js");
 registerTools(dealFileTools({ withEnvelope, writeEvent, resolveSubject }), "deal-files");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement

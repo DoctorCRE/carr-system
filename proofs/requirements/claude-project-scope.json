@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR839-S3-claude-project-scope",
+  "targets": [
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "installed-project-scope",
+      "predicate": "After merge and explicit cleanup on each Mac, independently observe the installed checkout revision, exact project hooks and MCP configuration, absence of exact legacy user entries, carr discovery in carr-system and its worktree, and no CARR discovery in Life AI. Preserve existing OAuth state and personal servers. This source PR alone does not prove installation.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Hold until an independently bound canonical Studio execution records the installed revision and successful scoping observations on each Mac. Synthetic cleanup tests and hosted CI alone do not pass installation proof.",
+      "input_class": "read-only canonical Studio execution and independently verified installation after coordinator runs the approved cleanup; never caller-authored success JSON",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 4,
+    "max_records": 20,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
+}

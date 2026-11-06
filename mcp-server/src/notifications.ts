@@ -13,25 +13,70 @@
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
 import type { ToolError as ToolErrorClass } from "./tool-error.ts";
 
-// Preserve partial database JSON validation; unchecked fields remain untyped.
-type ProjectionFacts = Record<string, any> | null | undefined;
+type Delivery = { channel: "in_app" | "device"; state: "pending" | "delivered" | "suppressed_quiet_hours" | "failed" };
+type Notification = {
+  id: string; severity: "action_required" | "completion" | "failure";
+  reason: string; subject_type: string; subject_ref: string; deep_link: string;
+  created_at: string; read_at: string | null; delivery: Delivery[];
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === "string" && value.replace(/^ +| +$/g, "").length > 0;
+}
+
+function isDelivery(value: unknown): value is Delivery {
+  return isObject(value) && (value.channel === "in_app" || value.channel === "device")
+    && typeof value.state === "string"
+    && ["pending", "delivered", "suppressed_quiet_hours", "failed"].includes(value.state);
+}
+
+function isNotification(value: unknown): value is Notification {
+  return isObject(value) && typeof value.id === "string"
+    && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.id)
+    && typeof value.severity === "string"
+    && ["action_required", "completion", "failure"].includes(value.severity)
+    && isText(value.reason) && Array.from(value.reason).length <= 500
+    && isText(value.subject_type) && isText(value.subject_ref)
+    && typeof value.deep_link === "string" && value.deep_link.length <= 301
+    && /^\/([A-Za-z0-9._~-][A-Za-z0-9._~/-]*)?$/.test(value.deep_link)
+    && isText(value.created_at) && (value.read_at === null || isText(value.read_at))
+    && Array.isArray(value.delivery) && value.delivery.every(isDelivery)
+    && new Set(value.delivery.map(entry => entry.channel)).size === value.delivery.length;
+}
+
+function isPreferenceFacts(value: unknown): value is {
+  ok: true; exists: boolean; device_opt_in: boolean; quiet_hours_start: string | null;
+  quiet_hours_end: string | null; timezone: string; version: number; quiet_now: boolean;
+} {
+  return isObject(value) && value.ok === true && typeof value.exists === "boolean"
+    && typeof value.device_opt_in === "boolean" && typeof value.quiet_now === "boolean"
+    && (value.quiet_hours_start === null || isText(value.quiet_hours_start))
+    && (value.quiet_hours_end === null || isText(value.quiet_hours_end))
+    && (value.quiet_hours_start === null) === (value.quiet_hours_end === null)
+    && isText(value.timezone) && typeof value.version === "number"
+    && Number.isSafeInteger(value.version) && value.version >= 1;
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Pure shaper over ops.notification_preference_facts. */
-export function notificationPreferenceProjection(prefs: ProjectionFacts, ToolError: typeof ToolErrorClass) {
-  if (!prefs || typeof prefs !== "object" || prefs.ok !== true) {
+export function notificationPreferenceProjection(prefs: unknown, ToolError: typeof ToolErrorClass) {
+  if (!isPreferenceFacts(prefs)) {
     throw new ToolError({ error: "notification_preferences_unavailable" });
   }
   return {
     ok: true,
-    exists: prefs.exists === true,
-    device_opt_in: prefs.device_opt_in === true,
-    quiet_hours_start: prefs.quiet_hours_start ?? null,
-    quiet_hours_end: prefs.quiet_hours_end ?? null,
-    timezone: prefs.timezone ?? "UTC",
-    version: prefs.version ?? 1,
-    quiet_now: prefs.quiet_now === true,
+    exists: prefs.exists,
+    device_opt_in: prefs.device_opt_in,
+    quiet_hours_start: prefs.quiet_hours_start,
+    quiet_hours_end: prefs.quiet_hours_end,
+    timezone: prefs.timezone,
+    version: prefs.version,
+    quiet_now: prefs.quiet_now,
   };
 }
 
@@ -43,18 +88,23 @@ export function notificationPreferenceProjection(prefs: ProjectionFacts, ToolErr
  * snapshot and cannot disagree about the preference row. It is OUTPUT-ONLY:
  * notification-feed's inputSchema does not move for it.
  */
-export function notificationFeedProjection(facts: ProjectionFacts, prefs: ProjectionFacts, ToolError: typeof ToolErrorClass) {
-  if (!facts || typeof facts !== "object" || facts.ok !== true) {
+export function notificationFeedProjection(facts: unknown, prefs: unknown, ToolError: typeof ToolErrorClass) {
+  if (!isObject(facts) || facts.ok !== true || typeof facts.unread_count !== "number"
+      || !Number.isSafeInteger(facts.unread_count) || facts.unread_count < 0
+      || !Array.isArray(facts.notifications) || !facts.notifications.every(isNotification)
+      || facts.notifications.length > 200
+      || new Set(facts.notifications.map(row => row.id)).size !== facts.notifications.length
+      || facts.notifications.filter(row => row.read_at === null).length > facts.unread_count) {
     throw new ToolError({ error: "notification_feed_unavailable" });
   }
   // The feed must not stop working because the preference door did: an absent
   // or malformed prefs answer yields false and never throws.
-  const quietNow = !!prefs && typeof prefs === "object" && prefs.quiet_now === true;
+  const quietNow = isPreferenceFacts(prefs) && prefs.quiet_now;
   return {
     ok: true,
-    unread_count: facts.unread_count ?? 0,
+    unread_count: facts.unread_count,
     quiet_now: quietNow,
-    notifications: (Array.isArray(facts.notifications) ? facts.notifications : []).map(row => ({
+    notifications: facts.notifications.map(row => ({
       id: row.id,
       severity: row.severity,
       reason: row.reason,
@@ -62,18 +112,10 @@ export function notificationFeedProjection(facts: ProjectionFacts, prefs: Projec
       subject_ref: row.subject_ref,
       deep_link: row.deep_link,
       created_at: row.created_at,
-      read_at: row.read_at ?? null,
-      delivery: (Array.isArray(row.delivery) ? row.delivery : [])
-        .map((entry: Record<string, any>) => ({ channel: entry.channel, state: entry.state })),
-      // A DISJUNCTION OF TWO HONEST FACTS. The first term is AC-PREF-FEED's
-      // clause: quiet hours across the current instant mark the affected rows.
-      // The second preserves what the store already knows -- a device push
-      // suppressed at mint time (0521:216-219) stays marked after the window
-      // ends, because that is a fact about what happened and not a fact about
-      // now.
+      read_at: row.read_at,
+      delivery: row.delivery.map((entry) => ({ channel: entry.channel, state: entry.state })),
       quiet_suppressed: quietNow
-        || (Array.isArray(row.delivery) ? row.delivery : [])
-          .some((entry: Record<string, any>) => entry?.state === "suppressed_quiet_hours"),
+        || row.delivery.some(entry => entry.state === "suppressed_quiet_hours"),
     })),
   };
 }

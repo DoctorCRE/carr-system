@@ -4,6 +4,7 @@ import { ToolError } from './tool-error.ts';
 import { organizationTenantForActor } from './identity.js';
 import { CALENDAR_AGENDA_BOARD, calendarSection } from './brief-calendar.js';
 import { calendarScheduling } from './calendar-scheduling.js';
+import { mailboxOwnerForActor } from './partner-authority.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ZERO = '00000000-0000-0000-0000-000000000000';
@@ -52,7 +53,7 @@ select (select count(*)::int from filtered) as total,
     'category',category,'category_label',category_label,'service_coverage',territory,'reason',reason,'missing',missing
   ) order by vendor_id,coalesce(contact_id,'${ZERO}'::uuid)),'[]'::jsonb) as items from page`;
 
-async function vendorCalendar(c, actor, items, now) {
+async function vendorCalendar(c, actor, owner, items, now) {
   for (const item of items) item.possible_meetings = [];
   const unavailable = { state: 'unavailable', reason: 'source_unavailable',
     scheduling: calendarScheduling(null, null, now) };
@@ -60,7 +61,7 @@ async function vendorCalendar(c, actor, items, now) {
   try {
     const { rows } = await c.query(`select snapshot_json from board_snapshot
       where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
-    [organizationTenantForActor(actor), actor.slug, CALENDAR_AGENDA_BOARD]);
+    [organizationTenantForActor(actor), owner, CALENDAR_AGENDA_BOARD]);
     const snapshot = rows[0]?.snapshot_json;
     const section = calendarSection(snapshot, now);
     if (!section) {
@@ -97,7 +98,8 @@ export function vendorMeetingTools() {
         cursor: { type: 'string', minLength: 1, maxLength: 2000 },
       } },
       handler: async (c, actor, args = {}) => {
-        if (!['joe', 'dell'].includes(actor?.slug)) throw new ToolError({ error: 'AUTHORIZATION_REFUSED' });
+        const owner = mailboxOwnerForActor(actor);
+        if (!owner) throw new ToolError({ error: 'AUTHORIZATION_REFUSED' });
         const invalid = () => { throw new ToolError({ error: 'vendor_meetings_query_invalid' }); };
         if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(k => !['view','q','limit','cursor'].includes(k))) invalid();
         const now = new Date();
@@ -118,7 +120,7 @@ export function vendorMeetingTools() {
         const has_more = result.items.length > limit;
         const items = result.items.slice(0,limit);
         const last = items.at(-1);
-        const calendar = await vendorCalendar(c, actor, items, now);
+        const calendar = await vendorCalendar(c, actor, owner, items, now);
         return { schema: 'vendor-meetings.v1', view, total: result.total, items, has_more, calendar,
           next_cursor: has_more ? btoa(encodeURIComponent(JSON.stringify({ v:1,view,q,after:[last.vendor_id,last.contact?.id || ZERO] }))) : null,
           consistency: 'live_keyset; restart after record changes' };

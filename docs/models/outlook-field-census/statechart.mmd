@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> Measuring
+    Cached --> Measuring: Census schema is missing or changed
+    Measuring --> Held: Missing field lacks decisive evidence
+    Measuring --> Held: Conflict or overflow is proved
+    Measuring --> Captured: Shared predicate accepts field
+    Held --> Measuring: Next source generation arrives
+    Captured --> Measuring: Next source generation arrives
+    Measuring --> Published: Aggregate equations reconcile
+    Measuring --> Refused: Generation or counts disagree
+    Published --> Published: Interrupted replacement preserves previous bundle

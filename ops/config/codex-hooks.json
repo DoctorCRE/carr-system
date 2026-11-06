@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/rule-pack-preuse-reselection.py\"}}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/rule-pack-preuse-reselection.py\"",
             "timeout": 20,
             "additionalContextLimit": 10000
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/guard-unattended.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/guard-unattended.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/guard-unattended.py\"}}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/guard-unattended.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/guard-unattended.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/guard-unattended.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/guard-unattended.py\"}}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/guard-unattended.py\"",
             "timeout": 15
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/record-home-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/record-home-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/record-home-gate.py\"}}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/record-home-gate.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/record-home-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/record-home-gate.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/record-home-gate.py\"}}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/record-home-gate.py\"",
             "timeout": 10
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/lint-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/lint-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/lint-gate.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/lint-gate.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/lint-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/lint-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/lint-gate.py\"}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/lint-gate.py\"",
             "timeout": 40
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/gate-integrity.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/gate-integrity.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/gate-integrity.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/gate-integrity.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/gate-integrity.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/gate-integrity.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/gate-integrity.py\"}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/gate-integrity.py\"",
             "timeout": 15,
             "additionalContextLimit": 5000
           }
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/rule-pack-preuse-reselection.py\"",
             "timeout": 20,
             "additionalContextLimit": 10000
           }
@@ -75,7 +75,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "command": "r=\"$(git rev-parse --show-toplevel)\" || exit 1; if [ ! -f \"$r/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script $r/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 \"$r/hooks/rule-pack-preuse-reselection.py\"",
             "timeout": 20,
             "additionalContextLimit": 10000
           }
