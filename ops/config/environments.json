@@ -99,7 +99,7 @@
         {
           "hostname": "app.doctorcre.com",
           "worker": "doctorcre-app",
-          "repository": "jbookout/doctorcre-app"
+          "repository": "DoctorCRE/doctorcre-app"
         }
       ],
       "secrets": {
