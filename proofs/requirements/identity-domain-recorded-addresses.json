@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "identity-domain-recorded-addresses",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "natural-recorded-secondary-domain-correction",
+      "predicate": "After release smoke, run python3 tools/prove-identity-domain-recorded-addresses.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --receipt out/production/identity-domain-recorded-addresses.json --timeout-seconds 30. The private receipt must come from a naturally authorized correction after deployment. Require release ancestry, retained correction event identity, independent email-domain evidence from stored-before secondary addresses and the currently corrected value. Timeline summary prose never proves correction evidence.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Exit 0 only for a fully matched natural correction. Current prospect-research and catch-me-up contracts omit event identity, old/new evidence and stored-before addresses, so the observer exits 78 and leaves this product landed-unproven. A contradictory current value exits 1. Missing receipt, ambiguity, unavailable reads, timeout or release drift exit 78. Release smoke alone is not product proof.",
+      "input_class": "Read-only naturally authorized private correction receipt plus authenticated exact-party prospect-research and catch-me-up reads. No writes, proof seed, sends, retries or invented event fields. Receipt schema and hashing are documented in the observer module docstring.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 8,
+    "max_records": 1,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 65536
+  }
+}

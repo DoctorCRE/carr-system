@@ -665,3 +665,214 @@ test("regional ISP and other consumer mail domains never count as corroboration"
     e => e.payload.error === "identity_evidence_required", domain);
   }
 });
+
+for (const email of [
+  "first@other.test; person@clinic.test",
+  "first@other.test, person@clinic.test",
+  '"Morgan, Alex" <first@other.test>; Alex <Person@CLINIC.test>',
+  "person@clinic.test; PERSON@CLINIC.test",
+  "前田@other.test; 医師@clinic.test",
+  "first@other.test; 医師@医院.test",
+]) {
+  test(`recorded secondary domain corroborates name and firm in ${email}`, async () => {
+    const domain = email.includes("医院") ? "医院.test" : "clinic.test";
+    for (const fields of [{ name: "Alex Morgan" }, { org: "Harbor Point Legal" }]) {
+      const fake = new Fake(basePlan({ email }));
+      const evidence = { ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: domain };
+      const out = await call(fake, { fields, evidence });
+      assert.deepEqual(out.updated, Object.keys(fields));
+      assert.deepEqual(JSON.parse(fake.events()[0][1][7]).evidence, evidence);
+    }
+  });
+}
+
+for (const email of [
+  '"person@clinic.test', 'person@clinic.test"',
+  "Please ask person@clinic.test for details", '"person@clinic.test"',
+  "person@clinic.test trailing prose", "prose <person@clinic.test> trailing prose",
+  "clinic.test", "Contact clinic.test for details", "person@notclinic.test", "person@clinic.test.invalid",
+  '"clinic.test" <person@other.test>', '"person@clinic.test" <person@other.test>',
+  '"Morgan, person@clinic.test" <person@other.test>', "person@other.test; clinic.test", 'Alex <person@clinic.test.invalid',
+]) {
+  test(`domain without recorded address refuses in ${email}`, async () => {
+    const fake = new Fake(basePlan({ email }));
+    await assert.rejects(call(fake, { fields: { name: "Alex Morgan" }, evidence: {
+      ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: "clinic.test" } }),
+    e => e.payload.error === "identity_evidence_required");
+    assertNoCorrection(fake);
+  });
+}
+
+for (const domain of ["gmail.com", "carr.us", "mail.carr.us"]) {
+  test(`secondary ${domain} remains refused`, async () => {
+    const fake = new Fake(basePlan({ email: `first@clinic.test; person@${domain}` }));
+    await assert.rejects(call(fake, { fields: { org: "Harbor Point Legal" }, evidence: {
+      ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: domain } }),
+    e => e.payload.error === "identity_evidence_required");
+    assertNoCorrection(fake);
+  });
+}
+
+test("secondary domain exact replay returns receipt without correction; changed action refuses", async () => {
+  const fake = new Fake(basePlan({ email: "first@other.test; person@clinic.test" }));
+  const args = { fields: { name: "Alex Morgan" }, evidence: {
+    ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: "clinic.test" } };
+  const out = await call(fake, args);
+  const receipt = fake.writes("insert into tool_call")[0][1];
+  fake.plan["select request_hash, response"] = [{ request_hash: receipt[3], response: out }];
+  fake.calls = [];
+  assert.deepEqual(await call(fake, args), { replayed: true, ...out });
+  assertNoCorrection(fake);
+  await assert.rejects(call(fake, { ...args, fields: { name: "Another Name" } }), e => e.payload.error === "key_reuse");
+  assertNoCorrection(fake);
+});
+
+test("secondary domain keeps city, source, confidence and version checks", async () => {
+  const evidence = { ...confirmedEvidence, confidence: "medium", corroborating_field: "email_domain", corroborating_value: "clinic.test" };
+  const plan = () => basePlan({ email: "first@other.test; person@clinic.test" });
+  assert.deepEqual((await call(new Fake(plan()), { fields: { name: "Alex Morgan" }, evidence })).updated, ["name"]);
+  for (const [overrides, expected] of [
+    [{ evidence: { ...evidence, city: "Mobile" } }, "identity_evidence_required"],
+    [{ evidence: { ...evidence, confidence: "low" } }, "identity_evidence_required"],
+    [{ evidence: { ...evidence, confirmed: false } }, "identity_evidence_required"],
+    [{ source: " " }, "missing_source"],
+    [{ base_version: 3 }, "version_conflict"],
+  ]) {
+    const fake = new Fake(plan());
+    await assert.rejects(call(fake, { fields: { name: "Alex Morgan" }, evidence, ...overrides }), e => e.payload.error === expected);
+    assertNoCorrection(fake);
+  }
+});
+
+test("identity proof CLI consumes registered read replies and refuses missing event observations", async t => {
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const { spawn, execFileSync } = await import("node:child_process");
+  const { createServer } = await import("node:http");
+  const root = resolve(import.meta.dirname, "../..");
+  const dir = await mkdtemp(join(tmpdir(), "WR647-S11-J1-"));
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const run = (flags, runner = join(root, "tools/prove-identity-domain-recorded-addresses.py")) => new Promise((resolveRun, reject) => {
+    const child = spawn("python3", [runner, ...flags], { cwd: root });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", value => stdout += value);
+    child.stderr.on("data", value => stderr += value);
+    child.on("error", reject);
+    child.on("close", code => resolveRun({ code, stdout, stderr }));
+  });
+  let releaseReads = 0, drift = false;
+  const agents = [];
+  const server = createServer((request, response) => {
+    if (request.url !== "/release") { response.writeHead(404).end(); return; }
+    releaseReads++;
+    agents.push(request.headers["user-agent"]);
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ ok: true, git_sha: { value: drift && releaseReads > 1 ? "f".repeat(40) : head } }));
+  });
+  await new Promise(resolveListen => server.listen(0, "127.0.0.1", resolveListen));
+  try {
+    const party = { id: TARGET, ref: "P-0301", name: "Alex Morgan", specialty: null, city: "Pensacola", state: "FL", contact_state: "active", evidence: [] };
+    const researchDb = { query: async () => ({ rows: [party] }) };
+    const research = await TOOLS["prospect-research"].handler(researchDb, joe, { subject: "P-0301" });
+    const historyDb = new Fake({
+      "select subject_id from v_ref_index where subject_type='party' and ref ilike $1": [{ subject_id: TARGET }],
+      "from v_subject_timeline": [{ entry_kind: "event", occurred_at: "2026-11-05T12:00:00Z", actor: "joe",
+        verb: "correct-party-identity", summary: "name", detail: null, owed: null }],
+    });
+    const history = await TOOLS["catch-me-up"].handler(historyDb, joe, { ref: "P-0301", limit: 100 });
+    assert.equal(history.subject.id, TARGET);
+    const replies = { "prospect-research": research, "catch-me-up": history };
+    const wrapper = join(dir, "wrapper");
+    const python = execFileSync("which", ["python3"], { encoding: "utf8" }).trim();
+    const script = `#!${python}\nimport json, sys, time, subprocess\nfrom pathlib import Path\nmode = Path(__file__).with_name('mode').read_text()\nif mode in ('descendant', 'late-descendant'):\n p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n Path(__file__).with_name('child.pid').write_text(str(p.pid))\n if mode == 'late-descendant': print('{}', flush=True)\n time.sleep(60)\nif mode == 'timeout': time.sleep(2)\nif mode == 'unavailable': sys.exit(1)\nassert sys.argv[1] == 'call'\nargs = json.loads(sys.argv[3])\nassert args.get('subject', args.get('ref')) == 'P-0301'\nprint(json.dumps(json.loads(Path(__file__).with_name('replies.json').read_text())[sys.argv[2]]))\n`;
+    await writeFile(wrapper, script, { mode: 0o700 });
+    const receipt = join(dir, "receipt.json");
+    await writeFile(receipt, JSON.stringify({ schema: "identity-domain-recorded-addresses-receipt.v1",
+      event_id: OTHER, party_ref: "P-0301", party_id: TARGET, correction_release_git_sha: head,
+      field: "name", corrected_value: "Alex Morgan", evidence_domain: "clinic.test",
+      stored_before_email: "first@other.test; person@clinic.test" }));
+    await writeFile(join(dir, "mode"), "normal");
+    await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
+    const flags = ["--origin", `http://127.0.0.1:${server.address().port}`, "--call-wrapper", wrapper, "--receipt", receipt, "--timeout-seconds", "5"];
+    const matched = await run(flags);
+    assert.equal(matched.code, 78, matched.stdout + matched.stderr);
+    assert.match(matched.stdout, /read_contract_omits_event_id/);
+    const output = JSON.parse(matched.stdout);
+    assert.equal(output.wrapper_reads, 2);
+    assert.equal(output.release_reads, 2);
+    for (const sensitive of [TARGET, OTHER, "clinic.test", "Alex Morgan", "P-0301", "person@clinic.test"])
+      assert.ok(!matched.stdout.includes(sensitive), sensitive);
+    replies["prospect-research"] = { ...research, name: "Different Name" };
+    await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
+    const contradiction = await run(flags);
+    assert.equal(contradiction.code, 1, contradiction.stdout);
+    assert.match(contradiction.stdout, /stored_corrected_value_differs/);
+    replies["prospect-research"] = research;
+    await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
+    drift = true; releaseReads = 0;
+    const changed = await run(flags);
+    assert.equal(changed.code, 78);
+    assert.match(changed.stdout, /release_changed/);
+    drift = false;
+    for (const mode of ["unavailable", "timeout"]) {
+      await writeFile(join(dir, "mode"), mode);
+      const unavailable = await run([...flags.slice(0, -1), "0.2"]);
+      assert.equal(unavailable.code, 78, unavailable.stdout + unavailable.stderr);
+    }
+    await t.test("release transport uses the shared production User-Agent", () => {
+      assert.ok(agents.length > 0);
+      assert.ok(agents.every(agent => agent === "doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)"), JSON.stringify(agents));
+    });
+    const lateLaunch = join(dir, "late-launch.py");
+    await writeFile(lateLaunch, `import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('proof', ${JSON.stringify(join(root, "tools/prove-identity-domain-recorded-addresses.py"))})
+proof = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(proof)
+launch = proof.subprocess.Popen
+def delayed(command, **kwargs):
+ child = launch(command, **kwargs)
+ if Path(command[0]).resolve() == Path(${JSON.stringify(wrapper)}).resolve():
+  time.sleep(0.7)
+  Path(__file__).with_name('late.marker').write_text('acquired')
+ return child
+proof.subprocess.Popen = delayed
+sys.exit(proof.main())
+`);
+    for (const mode of ["descendant", "late-descendant", "late-launch"]) {
+      await t.test(`deadline cleans up owned ${mode} process tree`, async () => {
+        await writeFile(join(dir, "mode"), mode === "late-launch" ? "descendant" : mode);
+        await rm(join(dir, "child.pid"), { force: true });
+        let pid;
+        try {
+          const started = performance.now();
+          const timed = await run([...flags.slice(0, -1), "0.5"], mode === "late-launch" ? lateLaunch : undefined);
+          assert.equal(timed.code, 78, timed.stdout + timed.stderr);
+          assert.ok(performance.now() - started < 2000, "proof exceeded bounded acquisition cleanup");
+          if (mode === "late-launch") assert.equal(await readFile(join(dir, "late.marker"), "utf8"), "acquired");
+          pid = Number(await readFile(join(dir, "child.pid"), "utf8"));
+          let alive = true;
+          for (let attempt = 0; attempt < 100; attempt++) {
+            try { process.kill(pid, 0); } catch (error) {
+              if (error.code !== "ESRCH") throw error;
+              alive = false; break;
+            }
+            await new Promise(done => setTimeout(done, 10));
+          }
+          assert.equal(alive, false, `owned descendant ${pid} survived timeout`);
+        } finally {
+          if (pid) { try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+        }
+      });
+    }
+    const missing = await run(flags.map(v => v === receipt ? join(dir, "absent.json") : v));
+    assert.equal(missing.code, 78);
+    assert.equal(JSON.parse(missing.stdout).wrapper_reads, 0);
+    assert.equal((await run([...flags.slice(0, -1), "31"])).code, 2);
+    assert.equal((await run(["--help"])).code, 0);
+  } finally {
+    await new Promise(resolveClose => server.close(resolveClose));
+    await rm(dir, { recursive: true, force: true });
+  }
+});

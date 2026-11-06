@@ -7,6 +7,9 @@ import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
+const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
+  .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
@@ -4087,8 +4090,7 @@ export const TOOLS = {
          order by 1`)).rows;
       const matches = rows.flatMap(row => {
         const { ref, name, email } = row;
-        const found = [...new Set((email.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
-          .map(address => address.toLowerCase()))];
+        const found = recordedEmailAddresses(email);
         return found.map(address => ({ row, contact: { address, ref, name,
           exact: found.length === 1 || !ROLE.test(address.split('@')[0].replaceAll('_', '-')) } }));
       });
@@ -4125,19 +4127,17 @@ export const TOOLS = {
     }, required: ["emails"] },
     handler: async (c, _actor, args) => {
       if (!Array.isArray(args.emails) || !args.emails.length || args.emails.length > 50 ||
-          args.emails.some(email => typeof email !== "string" || !/^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/.test(email.trim())))
+          args.emails.some(email => typeof email !== "string" || !mailRecipientAddress.test(email.trim())))
         throw new ToolError({ error: "invalid_mail_recipients" });
       const emails = [...new Set(args.emails.map(email => email.trim().toLowerCase()))].sort();
-      const recipients = (await c.query(`
-        select wanted.email, exists (
-          select 1 from party p
-          where lower(btrim(p.email)) = wanted.email
-            and (p.contact_state = 'do_not_contact' or exists (
-              select 1 from lead l where l.party_id = p.id
-                and (l.suppressed or l.stage = 'do_not_contact')
-            ))
-        ) as blocked
-        from unnest($1::text[]) as wanted(email) order by wanted.email`, [emails])).rows;
+      const restricted = (await c.query(`
+        select distinct p.email from party p
+        where p.contact_state = 'do_not_contact' or exists (
+          select 1 from lead l where l.party_id = p.id
+            and (l.suppressed or l.stage = 'do_not_contact')
+        )`)).rows;
+      const blocked = new Set(restricted.flatMap(row => recordedEmailAddresses(row.email)));
+      const recipients = emails.map(email => ({ email, blocked: blocked.has(email) }));
       return { recipients };
     },
   },
