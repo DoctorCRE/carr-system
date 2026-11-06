@@ -36,6 +36,8 @@ class ParityTest(unittest.TestCase):
         self.settings_path = write_settings(self.home, self.repo, owner='joe',
                                             account='broker@carr.us', internal_domain='carr.us')
         self.settings = load_settings(self.home)
+        self.settings.decoder.parent.mkdir(parents=True, exist_ok=True)
+        self.settings.decoder.write_bytes(b'synthetic-decoder-revision')
         self.store = self.settings.profile / 'HxStore.hxd'
         self.store.parent.mkdir(parents=True)
         self.store.write_bytes(b'synthetic-store')

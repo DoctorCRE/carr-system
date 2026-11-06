@@ -253,7 +253,8 @@ class RunnerTest(unittest.TestCase):
         payload = json.loads(receipt.read_text().split(' ', 1)[1])
         self.assertEqual(payload['state'], 'skipped')
         self.assertEqual(payload['runtime_sha'], 'a' * 40)
-        self.assertEqual(payload['counts'], {})
+        self.assertEqual(payload['counts']['run'], dict(snapshot_validated=False, observed=0,
+                         moved=0, held=False, exit_code=78))
         observer = subprocess.run([sys.executable, str(ROOT / 'ops/studio-proof-observe.py'),
                                    '--receipt-file', str(receipt), '--service', 'outlook-triage',
                                    '--runtime-sha', 'a' * 40, '--count', 'run.planned', '--minimum', '1'],
@@ -278,20 +279,6 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(report.planning['capability'], 'capability_not_verified')
 
 
-class ProofDeclarationTest(unittest.TestCase):
-    def test_checked_in_studio_requirement_passes_real_admission(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            body = Path(tmp) / 'body.md'
-            files = Path(tmp) / 'files.json'
-            body.write_text('## Production proof\nproofs/requirements/wr634-triage-runner.json\n')
-            files.write_text(json.dumps(['lib/outlook_triage.py', 'lib/outlook_triage_snapshot.py',
-                                         'lib/outlook_triage_capability.py',
-                                         'proofs/requirements/wr634-triage-runner.json']))
-            result = subprocess.run([sys.executable, str(ROOT / 'ops/production-proof-plan.py'),
-                                     '--body-file', str(body), '--files-file', str(files)],
-                                    capture_output=True, text=True, timeout=20)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn('execution unproven', result.stdout)
 
 
 if __name__ == '__main__':

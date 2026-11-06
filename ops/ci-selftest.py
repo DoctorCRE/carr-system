@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import importlib.util
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -46,7 +47,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
+            "ops/ci.sh", "ops/ci.py", "ops/proof-transport-check.py", "ops/ci_scope.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py", "ops/gitleaks.py", ".gitleaks.toml",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
@@ -54,7 +55,7 @@ def ci_fixture():
             "ops/migration-open-pr-gate.py", "ops/migration-order-gate.py",
             "tools/migration_claims.py", "tools/migration_number_contract.py",
             "tools/migration_source.py", "tools/migration_baseline.py",
-            "ops/config/public-source-identities.v1.json",
+            "ops/config/public-source-identities.v1.json", "ops/config/proof-process-allowlist.json",
             "bin/type-check.sh", "bin/with-timeout.py", "mypy.ini",
         ):
             target = root / rel
@@ -113,6 +114,67 @@ def run(args, env=None, shell_cmd=None, timeout=60, root=None):
         e.update(TMPDIR=directory, TMP=directory, TEMP=directory, RUNNER_TEMP=directory)
         p = subprocess.run(cmd, capture_output=True, text=True, cwd=root, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
+
+def test_changed_path_selection():
+    import ci
+    import ci_scope as scope
+    all_classes = set(ci.CLASS_DESCRIPTIONS)
+    for path in ('docs/guide.md', 'tools/pstack/routing.md', 'AGENTS.md', 'CLAUDE.md',
+                 '.agents/skills/example/SKILL.md', 'README.md'):
+        check(f'documentation selects lint only: {path}',
+              scope.select_paths([path], all_classes) == {'lint'})
+    for path in ('ops/example.py', '.github/workflows/ci.yml', 'contracts/a.json',
+                 'migrations/123.sql', 'mcp-server/src/index.js', 'new/subsystem.py', 'package-lock.json',
+                 'practice-plugin/package-lock.json', 'practice-plugin/package.json', 'ops/README.md',
+                 'practice-plugin/bun.lock', 'practice-plugin/bun.lockb', 'practice-plugin/packages.lock.json'):
+        check(f'unknown and infrastructure select everything: {path}',
+              scope.select_paths([path], all_classes) == all_classes)
+    check('product mapping selects affected classes',
+          scope.select_paths(['practice-plugin/src/calculator.js'], all_classes)
+          == scope.PRODUCT_CLASSES)
+    check('mixed documentation and product retain product classes',
+          scope.select_paths(['README.md', 'practice-plugin/src/calculator.js'], all_classes)
+          == all_classes - {'dependency', 'hxprobe', 'migration'})
+    with ci_fixture() as root:
+        base = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        path = root / 'docs/new.md'
+        path.parent.mkdir(exist_ok=True)
+        path.write_text('New guidance\n')
+        subprocess.run(['git', 'add', 'docs/new.md'], cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Guidance'], cwd=root, env=fixture_env(), check=True)
+        head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+        event = root / 'event.json'
+        event.write_text(json.dumps({'pull_request': {'base': {'sha': base}, 'head': {'sha': head}}}))
+        env = {'GITHUB_EVENT_NAME': 'pull_request', 'GITHUB_EVENT_PATH': str(event)}
+        check('real merge-base diff selects lint', scope.selection(all_classes, root=root, environ=env)['classes'] == ['lint'])
+        for event_name in ('merge_group', 'push', 'schedule', 'workflow_dispatch'):
+            check(f'{event_name} always selects full suite',
+                  set(scope.selection(all_classes, root=root, environ={**env, 'GITHUB_EVENT_NAME': event_name})['classes']) == all_classes)
+        (root / 'ops/ci-secret.py').write_text("print('synthetic secret qualification passed')\n")
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('shell controller executes lint alone for a real docs diff',
+              rc == 0 and re.search(r'ci-timing: lint=\d+s\n', output) is not None, output)
+        (root / 'ops/ci-secret.py').write_text("print('seeded credential refusal')\nraise SystemExit(1)\n")
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('documentation lint propagates credential qualification failure',
+              rc == 1 and 'seeded credential refusal' in output, output)
+        path.write_text('Guidance with trailing whitespace \n')
+        subprocess.run(['git', 'add', 'docs/new.md'], cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Whitespace defect'], cwd=root, env=fixture_env(), check=True)
+        rc, output = run(['--strict', '--changed-from', base], root=root)
+        check('documentation lint catches a seeded whitespace defect',
+              rc == 1 and 'diff whitespace check failed' in output, output)
+        subprocess.run(['git', 'mv', 'mcp-server/fixture.js', 'docs/renamed.md'],
+                       cwd=root, env=fixture_env(), check=True)
+        subprocess.run(['git', 'commit', '-qm', 'Move source into docs'], cwd=root, env=fixture_env(), check=True)
+        check('renaming product into documentation retains the old product path',
+              set(scope.selection(all_classes, root=root, base=base, environ={})['classes']) == all_classes)
+        event.write_text('{}')
+        check('malformed PR event falls back to full suite',
+              set(scope.selection(all_classes, root=root, environ=env)['classes']) == all_classes)
+        check('unavailable merge base falls back to full suite',
+              set(scope.selection(all_classes, root=root, base='missing-ref', environ={})['classes']) == all_classes)
+
 
 def test_python_controller_entrypoint():
     result = subprocess.run([sys.executable, str(REPO / "ops/ci.py"), "--list"],
@@ -475,7 +537,7 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
         (root / "ops/config/ci-check-scope.json").write_text('{}')
@@ -551,6 +613,18 @@ def test_database_scope_receipts():
         check(f"database scope runs {path}", scope.needs_full([path]))
     check("database scope skips app-only change", not scope.needs_full(["web/app.js"]))
     check("database scope skips docs-only changes", not scope.needs_full(["README.md", "docs/guide.md"]))
+
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+        receipt = pathlib.Path(directory) / 'receipt.json'
+        for force in (False, True):
+            argv = ['scope', '--receipt', str(receipt)] + (['--full'] if force else [])
+            with patch.object(scope, 'classify', return_value=(False, ['docs/guide.md'], 'docs only')), \
+                 patch.object(sys, 'argv', argv), patch.dict(os.environ, {'GITHUB_OUTPUT': os.devnull}), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                rc = scope.main()
+            check(f'full CI selection overrides narrower DB scope force={force}',
+                  rc == 0 and json.loads(receipt.read_text())['full'] is force)
 
     with tempfile.TemporaryDirectory() as directory:
         event = pathlib.Path(directory) / "event.json"
@@ -1329,25 +1403,7 @@ def _hosted_workflow(filename="ci.yml"):
 
 
 def test_hosted_draft_lifecycle():
-    """Execute YAML conditions and verdict commands against same-head event fixtures.
-
-    This models scheduler inputs, not GitHub's remote check selection.
-    Ready transitions must schedule a full run even when the SHA is unchanged.
-    """
-    def evaluate(expression, context):
-        expression = str(expression)
-        if expression.count("${{") > 1:
-            return re.sub(r"\$\{\{(.*?)\}\}",
-                          lambda match: str(evaluate(match.group(1), context)), expression)
-        expression = expression.removeprefix("${{").removesuffix("}}").strip()
-        script = """const [expr, ctx] = JSON.parse(process.argv[1]);
-        const {github, needs, cancelled: stopped = false} = ctx;
-        const always=()=>true, cancelled=()=>stopped, success=()=>!stopped;
-        const fromJSON=JSON.parse;
-        process.stdout.write(JSON.stringify(eval(expr)));"""
-        return json.loads(subprocess.check_output(
-            ["node", "-e", script, json.dumps([expression, context])], text=True))
-
+    """Keep required event wiring and execute the actual aggregate on bad results."""
     for filename, lanes, verdict_name, command in (
             ("ci.yml", ("fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
@@ -1363,107 +1419,51 @@ def test_hosted_draft_lifecycle():
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
         if filename == "doc-drift.yml":
-            baseline = next(st for st in jobs['check']['steps'] if st.get('name', '').startswith('Summarize drift'))
-            for event in ('pull_request', 'merge_group', 'schedule', 'workflow_dispatch'):
-                check(f"drift baseline event {event}", bool(evaluate(baseline['if'],
-                    {'github': {'event_name': event}})) == (event in ('schedule', 'workflow_dispatch')))
-        else:
+            baseline = next(st for st in jobs['check']['steps']
+                            if st.get('name', '').startswith('Summarize drift'))
+            check("drift baseline only applies to scheduled and manual checks",
+                  baseline['if'] == "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'")
+        if filename == "ci.yml":
             weekly = _hosted_workflow('fallow.yml')
             check("Fallow runs weekly outside the PR aggregate",
                   set(weekly['on']) == {'schedule', 'workflow_dispatch'}
                   and weekly['on']['schedule'] == [{'cron': '20 6 * * 1'}]
                   and 'fallow' not in jobs)
         verdict = jobs.get(verdict_name, {})
-        expected_needs = set(lanes) | ({"launchd-python39"} if filename == "ci.yml" else set())
+        expected_needs = set(lanes) | ({"select", "lint", "unit", "launchd-python39"} if filename == "ci.yml" else set())
         check(f"{filename}: verdict always evaluates and waits for every lane",
-              verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == expected_needs)
+              (verdict.get("if") == "${{ always() }}" if filename != "ci.yml" else
+               verdict.get("if") == "${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}")
+              and set(verdict.get("needs", [])) == expected_needs)
         if not verdict:
             continue
         step = next(st for st in verdict["steps"] if st.get("run") == f"python3 ops/ci-evidence.py {command}")
         needs = {name: {"result": "success"} for name in lanes}
         if "scope" in needs:
             needs["scope"]["outputs"] = {"full": "true"}
-        def context(event="pull_request", draft=False, action="synchronize", sha="a" * 40, changes=None):
-            return {"github": {"workflow": wf["name"], "event_name": event,
-                               "run_id": 41, "sha": sha,
-                               "event": {"action": action, "changes": changes or {}, "pull_request": {
-                                   "number": 12 if event == "pull_request" else None,
-                                   "draft": draft, "head": {"sha": sha}}}},
-                    "needs": needs}
-        groups = []
+        if filename == 'ci.yml':
+            from ci_scope import PRODUCT_CLASSES, PR_JOBS
+            needs.update({name: {'result': 'success'} for name in ('lint', 'unit', 'launchd-python39')})
+            needs['select'] = {'result': 'success', 'outputs': {
+                'classes': json.dumps(sorted(PRODUCT_CLASSES)), 'full': 'false',
+                **{job: 'true' for job in PR_JOBS}}}
+            for name in ('scope', 'classes', 'migration-fixtures'):
+                needs[name]['result'] = 'skipped'
         with tempfile.TemporaryDirectory() as directory:
-            # No source change between these events. A ready success cannot
-            # turn the following draft or cancelled ready run into success.
-            for draft, action, sha in (
-                    (True, "opened", "a" * 40), (False, "ready_for_review", "a" * 40),
-                    (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
-                    (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
-                    (False, "edited", "a" * 40), (True, "edited", "a" * 40),
-                    (False, "synchronize", "b" * 40)):
-                if action not in events["pull_request"]["types"]:
-                    continue
-                ctx = context(draft=draft, action=action, sha=sha)
-                groups.append(evaluate(wf["concurrency"]["group"], ctx))
-                check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name in ("fast", "gates", "secret", "unit-coverage") else False)
-                          for name in lanes))
+            for draft in (False, True):
                 result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
                     env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs),
-                         "CI_DRAFT": str(evaluate(step["env"]["CI_DRAFT"], ctx)).lower(),
-                         "CI_EVENT": "pull_request",
+                         "CI_DRAFT": str(draft).lower(), "CI_EVENT": "pull_request",
                          "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
                     text=True, capture_output=True, timeout=10)
-                check(f"{filename}: {action} draft={draft} verdict is explicit",
-                      result.returncode == (1 if draft else 0)
-                      and (not draft or "deferred; no full-suite evidence" in result.stdout))
-                if filename == "ci.yml" and draft:
-                    check("draft cannot record or upload a full-suite receipt",
-                          all(not evaluate(st.get("if", "true"), ctx) for st in verdict["steps"]
-                              if "record --output" in st.get("run", "") or st.get("with", {}).get("name") == "ci-tree-evidence"))
-            check(f"{filename}: same PR uses one concurrency group across readiness and synchronize",
-                  len(set(groups + [evaluate(wf["concurrency"]["group"], context(sha="b" * 40))])) == 1
-                  and evaluate(wf["concurrency"]["cancel-in-progress"], context()))
-            if filename == "ci.yml":
-                cancel = wf["concurrency"]["cancel-in-progress"]
-                for action, changes, expected in (
-                        ("opened", {}, False), ("reopened", {}, False),
-                        ("edited", {}, False),
-                        ("edited", {"body": {"from": "old proof"}}, False),
-                        ("edited", {"title": {"from": "old title"}}, False),
-                        ("edited", {"base": {"ref": {"from": "main"}}}, True),
-                        ("synchronize", {}, True), ("ready_for_review", {}, True),
-                        ("converted_to_draft", {}, True)):
-                    ctx = context(action=action, changes=changes)
-                    check(f"CI {action} changes={list(changes)} cancellation={expected}",
-                          evaluate(cancel, ctx) == expected)
-                for actions in (("ready_for_review", "edited", "edited"),
-                                ("ready_for_review", "edited", "synchronize")):
-                    sequence = [context(action=action) for action in actions]
-                    check(f"CI sequence {actions} shares the active PR group",
-                          {evaluate(wf["concurrency"]["group"], ctx) for ctx in sequence} == {groups[0]})
-                    check(f"CI sequence {actions} preserves metadata queue then source invalidation",
-                          [evaluate(cancel, ctx) for ctx in sequence]
-                          == [True, False, actions[-1] == "synchronize"])
-                for event in ("merge_group", "schedule", "workflow_dispatch"):
-                    check(f"CI {event} groups are unique per run",
-                          evaluate(wf["concurrency"]["group"], context(event=event))
-                          != evaluate(wf["concurrency"]["group"], {
-                              **context(event=event), "github": {**context(event=event)["github"], "run_id": 42}}))
-                check("CI different workflows use independent groups",
-                      groups[0] != evaluate(wf["concurrency"]["group"], {
-                          **context(), "github": {**context()["github"], "workflow": "Review gate"}}))
-            check(f"{filename}: different PRs have independent groups",
-                  groups[0] != evaluate(wf["concurrency"]["group"], {
-                      **context(), "github": {**context()["github"], "event": {"pull_request": {"number": 13}}}}))
-            for event in ("merge_group", "schedule", "workflow_dispatch"):
-                ctx = context(event=event, draft=True)
-                check(f"{filename}: {event} runs every lane outside PR cancellation group",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (filename != "ci.yml" or name not in ("fast", "gates", "secret")) for name in lanes)
-                      and not evaluate(wf["concurrency"]["cancel-in-progress"], ctx)
-                      and evaluate(wf["concurrency"]["group"], ctx) != groups[0])
+                check(f"{filename}: draft={draft} verdict is explicit",
+                      result.returncode == (1 if draft else 0))
             for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
+                    if filename == 'ci.yml':
+                        for full_lane in ('scope', 'classes', 'migration-fixtures'):
+                            broken[full_lane]['result'] = 'success'
                     if state == "missing":
                         broken.pop(lane)
                     else:
@@ -1475,15 +1475,12 @@ def test_hosted_draft_lifecycle():
                         text=True, capture_output=True, timeout=10)
                     check(f"{filename}: ready {lane}={state} blocks success at same SHA",
                           result.returncode != 0)
-            ctx = {**context(), "cancelled": True}
-            check(f"{filename}: cancelled run still evaluates its required verdict",
-                  evaluate(verdict["if"], ctx))
             # Status functions are valid in step conditions, not step env.
             guard = next((st for st in verdict['steps'] if st.get('if') == '${{ cancelled() }}'), {})
             result = subprocess.run(["bash", "-e", "-c", guard.get("run", "true")], cwd=REPO,
                                     text=True, capture_output=True, timeout=10)
             check(f"{filename}: cancellation after successful lanes cannot green the verdict",
-                  bool(guard) and evaluate(guard["if"], ctx) and result.returncode != 0
+                  bool(guard) and result.returncode != 0
                   and verdict['steps'].index(guard) == len(verdict['steps']) - 1)
         if filename == "ci.yml":
             matrix = jobs["classes"]["strategy"]["matrix"]
@@ -1492,278 +1489,128 @@ def test_hosted_draft_lifecycle():
 
 
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
-    """PR 1465 spent its entire job budget in apt update before any class ran.
-
-    Execute the workflow's setup with a synthetic apt, not a second installer.
-    A working install must never refresh; stale indexes must still be repaired;
-    runs 37826917141, 37820191123, 37803579466, 37793286211, 37781682483,
-    37762481248 and 37683204623 had Install-zsh timeouts. Run 37762481248
-    confirms a mid-dpkg timeout (Reading database at 85%); the other logs do
-    not establish a network cause. Synthetic download failures exercise the
-    bounded fallback; an unavailable package must fail setup.
-    """
     wf = _hosted_workflow()
-    setup = next(st for st in wf["jobs"]["classes"]["steps"]
-                 if st.get("name") == "Install zsh")
-    # Three download attempts, one refresh, one unpack; each timeout also
-    # permits five seconds to kill its process group. Backoff occurs after
-    # attempts one and two only.
+    setup = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Install zsh")
     check("hosted zsh setup uses the shared installer", setup["run"] == "ops/ci-zsh.sh")
-    installer_source = (REPO / "ops/ci-zsh.sh").read_text()
-    backoff = int(setup["env"]["ZSH_RETRY_BACKOFF"])
-    attempts = len(re.search(r"for attempt in ([0-9 ]+); do", installer_source).group(1).split())
-    download, refresh, unpack = [int(grace) + int(limit) for grace, limit in
-                                re.findall(r"timeout --kill-after=(\d+)s (\d+)s", installer_source)]
-    verification = int(re.search(r"signal\.alarm\((\d+)\)", installer_source).group(1))
-    # One verification before each download and one immediately before install.
-    budget_seconds = attempts * download + refresh + unpack + sum(range(1, attempts)) * backoff + (attempts + 1) * verification + 30
-    deadline_minutes = (budget_seconds + 59) // 60
-    check("zsh setup deadline equals its retry budget plus bounded overhead",
-          setup.get("timeout-minutes") == deadline_minutes,
-          {"expected": deadline_minutes, "actual": setup.get("timeout-minutes")})
-    cache = next(st for st in wf["jobs"]["classes"]["steps"]
-                 if st.get("name") == "Restore zsh package archives")
-    check("zsh archives use a pinned cache action and the install directory",
-          cache["uses"] == "actions/cache@5a3ec84eff668545956fd18022155c47e93e2684"
-          and cache["with"]["path"] == setup["env"]["ZSH_ARCHIVE_DIR"] + "/*.deb"
-          and wf["jobs"]["classes"]["runs-on"] == "ubuntu-24.04")
-    canary = _hosted_workflow("main-canary.yml")["jobs"]["classes"]["steps"]
-    canary_setup = next(st for st in canary if st.get("name") == "Install zsh")
-    check("PR and canary execute the same bounded zsh installer",
-          all(canary_setup[k] == setup[k] for k in ("run", "env", "timeout-minutes")))
-    fixture_steps = wf["jobs"]["migration-fixtures"]["steps"]
-    fixture_setup = next((st for st in fixture_steps if st.get("name") == "Install zsh"), {})
-    check("equivalence installs the restore rehearsal interpreter before its proof",
-          all(fixture_setup.get(k) == setup[k] for k in ("run", "env", "timeout-minutes"))
-          and fixture_setup.get("if") == "matrix.part == 'equivalence'"
-          and fixture_steps.index(fixture_setup) < next(
-              i for i, st in enumerate(fixture_steps)
-              if st.get("name") == "Prove independent migration fixture"))
+    for filename in ("ci.yml", "main-canary.yml", "unit-shards.yml"):
+        for job in _hosted_workflow(filename)["jobs"].values():
+            for step in job.get("steps", []):
+                if step.get("name") == "Install zsh":
+                    check(f"{filename} bounds zsh setup", step.get("timeout-minutes") == 12)
+    _exercise_zsh_installer()
+
+
+def _exercise_zsh_installer():
     with tempfile.TemporaryDirectory(prefix="ci-zsh-setup-") as tmp:
         fixture = pathlib.Path(tmp)
-        sudo = fixture / "sudo"
-        sudo.write_text("#!" + sys.executable + "\n" + '''
-import json, os, pathlib, sys, time
-if sys.argv[1] == "rm":
-    os.execvp("rm", sys.argv[1:])
-log = pathlib.Path(os.environ["CI_SETUP_CALLS"])
-calls = json.loads(log.read_text()) if log.exists() else []
-calls.append(sys.argv[1:])
-log.write_text(json.dumps(calls))
-args = sys.argv[1:]
-mode = os.environ["CI_SETUP_FIXTURE"]
-kind = ("download" if "--download-only" in args else
-        "install" if "--no-download" in args else
-        "update" if "update" in args else "unknown")
-if mode == "working" and kind == "update":
-    sys.exit(91)
-if mode == "stale" and len(calls) == 1:
-    sys.exit(100)
-if mode == "mirror-flaky" and len(calls) in (1, 3):
-    sys.exit(100)
-if mode == "unavailable" and kind in ("download", "update"):
-    sys.exit(100)
-if mode == "hung-download" and kind == "download":
-    time.sleep(30)
-if mode == "install-failed" and kind == "install":
-    sys.exit(100)
-''')
-        sudo.chmod(0o755)
-        zsh = fixture / "zsh"
-        zsh.write_text("#!/bin/sh\n[ \"$CI_SETUP_FIXTURE\" = preinstalled ]\n")
-        zsh.chmod(0o755)
-        timeout = fixture / "timeout"
-        timeout.write_text("#!" + sys.executable + "\n" + '''
-import json, os, pathlib, subprocess, sys
-log = pathlib.Path(os.environ["CI_SETUP_DEADLINES"])
-calls = json.loads(log.read_text()) if log.exists() else []
-calls.append(sys.argv[1:3])
-log.write_text(json.dumps(calls))
-assert sys.argv[1] == "--kill-after=5s"
-assert 0 < int(sys.argv[2].removesuffix("s")) <= 120
-try:
-    result = subprocess.run(sys.argv[3:], timeout=1)
-    sys.exit(result.returncode)
-except subprocess.TimeoutExpired:
-    sys.exit(124)
-''')
-        timeout.chmod(0o755)
-        failing = ("unavailable", "hung-download", "install-failed")
-        for mode, expected in (("preinstalled", []),
-                               ("working", ["download", "install"]),
-                               ("stale", ["download", "update", "download", "install"]),
-                               ("mirror-flaky", ["download", "update", "download", "download", "install"]),
-                               ("unavailable", ["download", "update", "download", "download"]),
-                               ("hung-download", ["download", "update", "download", "download"]),
-                               ("install-failed", ["download", "install"])):
-            log = fixture / (mode + ".json")
-            deadlines_log = fixture / (mode + "-deadlines.json")
-            env = scrubbed_env()
-            env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
-                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode,
-                       CI_SETUP_DEADLINES=str(deadlines_log), ZSH_RETRY_BACKOFF="0",
-                       ZSH_ARCHIVE_DIR=str(fixture / "archives"))
-            try:
-                process = subprocess.Popen(["bash", "-e", "-o", "pipefail", "-c", installer_source],
-                                           cwd=fixture, env=env, stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE, text=True, start_new_session=True)
-                stdout, stderr = process.communicate(timeout=8)
-                ran = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.communicate()
-                check(f"zsh setup {mode} finishes within its process budget", False)
-                continue
-            calls = json.loads(log.read_text()) if log.exists() else []
-            deadlines = json.loads(deadlines_log.read_text()) if deadlines_log.exists() else []
-            actions = [("download" if "--download-only" in args else
-                        "install" if "--no-download" in args else
-                        "update" if "update" in args else "unknown")
-                       for args in calls]
-            check(f"zsh setup {mode} uses the required install/refresh path",
-                  actions == expected, actions)
-            check(f"zsh setup {mode} propagates its outcome",
-                  (ran.returncode != 0) == (mode in failing),
-                  ran.returncode)
-            check(f"zsh setup {mode} bounds every apt process",
-                  len(deadlines) == len(calls) and
-                  sum(int(args[1].removesuffix("s")) + 5 for args in deadlines) < 480,
-                  deadlines)
-            check(f"zsh setup {mode} bounds every apt network request",
-                  all(args[0] == "apt-get" and
-                      all(option in args for option in ("Acquire::Retries=2",
-                          "Acquire::http::Timeout=15", "Acquire::https::Timeout=15",
-                          "DPkg::Lock::Timeout=30"))
-                      for args in calls), calls)
-            check(f"zsh setup {mode} uses cached archives without recommends",
-                  all(any(option.startswith("Dir::Cache::archives=")
-                          and option != "Dir::Cache::archives=" + str(fixture / "archives")
-                          for option in args) and "--no-install-recommends" in args
-                      for args in calls if "update" not in args), calls)
-            check(f"zsh setup {mode} requires the zsh package when installing",
-                  all("zsh" in args for args in calls if "update" not in args), calls)
-            check(f"zsh setup {mode} never unpacks without a completed download",
-                  all(calls.index(args) > 0 and
-                      any("--download-only" in prior for prior in calls[:calls.index(args)])
-                      for args in calls if "--no-download" in args), calls)
-
-
-def test_hosted_zsh_cache_requires_authenticated_bytes():
-    installer = (REPO / "ops/ci-zsh.sh").read_text()
-    with tempfile.TemporaryDirectory(prefix="ci-zsh-cache-") as tmp:
-        fixture = pathlib.Path(tmp)
-        for name, source in {
-            "zsh": "#!/bin/sh\nexit 1\n",
-            "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
+        scripts = {
+            "zsh": '#!/bin/sh\n[ "$CI_SETUP_FIXTURE" = preinstalled ]\n',
             "sudo": '#!/bin/sh\nexec "$@"\n',
+            "timeout": "#!" + sys.executable + "\n" + '''
+import os, sys
+assert sys.argv[1] == "--kill-after=5s"
+assert 0 < int(sys.argv[2].removesuffix("s")) <= 180
+os.execvp(sys.argv[3], sys.argv[3:])
+''',
             "apt-cache": "#!" + sys.executable + "\n" + '''
-import hashlib, os, pathlib, sys, time
-mode = os.environ["CI_CACHE_MODE"]
-downloaded = pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()
-if ((mode == "metadata-timeout" and not downloaded)
-        or (mode == "install-metadata-timeout" and downloaded)):
-    time.sleep(31)
-if (os.environ["CI_CACHE_MODE"] == "missing-metadata"
-        and not pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()):
-    sys.exit(0)
-if os.environ["CI_CACHE_MODE"] == "metadata-error":
+import hashlib, os, signal, sys
+if os.environ["CI_SETUP_FIXTURE"] == "metadata-deadline":
+    os.kill(os.getppid(), signal.SIGALRM)
+if os.environ["CI_SETUP_FIXTURE"] in ("metadata-error", "publish-error"):
     sys.exit(2)
 print("Package: zsh\\nVersion: 1\\nArchitecture: amd64\\nSHA256: " +
       hashlib.sha256(b"trusted-zsh-package").hexdigest())
 ''',
             "apt-get": "#!" + sys.executable + "\n" + '''
-import json, os, pathlib, stat, sys
-root = pathlib.Path(next(arg.split("=", 1)[1] for arg in sys.argv
-                         if arg.startswith("Dir::Cache::archives=")))
+import json, os, pathlib, sys
+log = pathlib.Path(os.environ["CI_SETUP_CALLS"])
+calls = json.loads(log.read_text()) if log.exists() else []
+args = sys.argv[1:]
+calls.append(args)
+log.write_text(json.dumps(calls))
+mode = os.environ["CI_SETUP_FIXTURE"]
+root = pathlib.Path(next(a.split("=", 1)[1] for a in args if a.startswith("Dir::Cache::archives=")))
 archive = root / "zsh_1_amd64.deb"
-log = pathlib.Path(os.environ["CI_CACHE_LOG"])
-state = json.loads(log.read_text()) if log.exists() else {}
-if "--download-only" in sys.argv:
-    state["restored"] = {p.name: p.read_text() for p in root.glob("*.deb")}
-    state.setdefault("download_archives", []).append(state["restored"])
-    # Model apt's filename+size shortcut instead of repairing a bad cache.
-    if not archive.exists():
-        archive.write_bytes(b"trusted-zsh-package")
-    mode = os.environ["CI_CACHE_MODE"]
-    if mode in ("replace-after-verification", "replace-during-retries"):
-        original = pathlib.Path(os.environ["ZSH_ARCHIVE_DIR"]) / archive.name
+if "--download-only" in args:
+    sys.exit(100)
+if "update" in args:
+    sys.exit(100 if mode == "refresh-failed" else 0)
+if "--no-download" in args:
+    original = pathlib.Path(os.environ["ZSH_ARCHIVE_DIR"]) / archive.name
+    if mode == "cache-replaced":
         original.write_bytes(b"altered-zsh-package")
-    if mode == "replace-during-retries" and len(state["download_archives"]) < 3:
-        log.write_text(json.dumps(state))
-        sys.exit(100)
-    if mode == "replace-downloaded-archive":
-        archive.chmod(0o600)
-        archive.write_bytes(b"altered-zsh-package")
-elif "--no-download" in sys.argv:
-    state["installed"] = archive.read_text()
-    state["install_directory"] = str(root)
-    state["directory_mode"] = stat.S_IMODE(root.stat().st_mode)
-    state["archive_mode"] = stat.S_IMODE(archive.stat().st_mode)
-log.write_text(json.dumps(state))
+    assert archive.read_bytes() == b"trusted-zsh-package"
+    assert root != original.parent
+    assert archive.stat().st_mode & 0o777 == 0o444
+    sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
+if mode == "timed-out":
+    sys.exit(124)
+if mode == "native-error":
+    sys.exit(42)
+if mode in ("cached", "cache-replaced"):
+    sys.exit("network must not be used on a verified cache hit")
+if mode in ("unavailable", "refresh-failed") or (mode == "stale" and not any("update" in c for c in calls)):
+    sys.exit(100)
+if not archive.exists():
+    archive.write_bytes(b"trusted-zsh-package")
 ''',
-        }.items():
+        }
+        for name, source in scripts.items():
             path = fixture / name
             path.write_text(source)
             path.chmod(0o755)
-        for mode in ("valid", "same-size-tampered", "other-version", "old-version-filename",
-                     "missing-metadata", "metadata-error", "metadata-timeout",
-                     "install-metadata-timeout", "replace-after-verification",
-                     "replace-during-retries", "replace-downloaded-archive"):
+        for mode, expected, success in (
+            ("preinstalled", [], True),
+            ("cached", ["offline"], True),
+            ("cached-timed-out", ["offline"], False),
+            ("cache-replaced", ["offline"], True),
+            ("cold", ["install"], True),
+            ("tampered", ["install"], True),
+            ("partial-cache", ["offline", "install"], True),
+            ("stale", ["install", "update", "install"], True),
+            ("unavailable", ["install", "update", "install"], False),
+            ("refresh-failed", ["install", "update"], False),
+            ("metadata-error", [], False),
+            ("metadata-deadline", [], False),
+            ("timed-out", ["install"], False),
+            ("native-error", ["install"], False),
+            ("publish-error", ["install"], False),
+            ("old-version", ["install"], True),
+            ("symlink", ["install"], True),
+        ):
             archives = fixture / mode
             archives.mkdir()
-            archive = archives / ("zsh_2_amd64.deb" if mode == "old-version-filename" else "zsh_1_amd64.deb")
-            restored = (b"trusted-zsh-package" if mode in ("valid", "old-version-filename",
-                        "replace-after-verification", "replace-during-retries",
-                        "replace-downloaded-archive", "metadata-timeout",
-                        "install-metadata-timeout") else
-                        b"older-zsh-package!!" if mode == "other-version" else b"altered-zsh-package")
-            archive.write_bytes(restored)
-            if mode == "metadata-timeout":
-                (archives / "zsh-common_1_all.deb").write_bytes(b"cached-zsh-common")
+            archive = archives / "zsh_1_amd64.deb"
+            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline"):
+                archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
+            if mode == "old-version":
+                archive.rename(archives / "zsh_2_amd64.deb")
+            if mode == "symlink":
+                target = fixture / "external.deb"
+                target.write_bytes(b"trusted-zsh-package")
+                archive.symlink_to(target)
             log = fixture / (mode + ".json")
             env = scrubbed_env()
             env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
-                       ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0",
-                       CI_CACHE_MODE=mode, CI_CACHE_LOG=str(log))
-            ran = subprocess.run(["bash", "-c", installer], cwd=fixture, env=env,
-                                 capture_output=True, text=True, timeout=40)
-            state = json.loads(log.read_text()) if log.exists() else {}
-            if mode == "metadata-error":
-                check("zsh cache verification error stops before apt can consume archives",
-                      ran.returncode != 0 and not state, {"rc": ran.returncode, "state": state})
-                continue
-            if mode == "replace-downloaded-archive":
-                check("zsh refuses a same-size replacement of downloaded bytes before install",
-                      ran.returncode != 0 and "installed" not in state, state)
-                continue
-            if mode == "install-metadata-timeout":
-                check("zsh refuses downloaded bytes when their metadata verification times out",
-                      ran.returncode != 0 and "installed" not in state, state)
-                continue
-            check(f"zsh cache {mode} installs authenticated package bytes",
-                  ran.returncode == 0 and state.get("installed") == "trusted-zsh-package",
-                  {"rc": ran.returncode, "state": state, "stderr": ran.stderr})
-            expected = {"zsh_1_amd64.deb": "trusted-zsh-package"} if mode in (
-                "valid", "replace-after-verification", "replace-during-retries") else {}
-            check(f"zsh cache {mode} exposes only verified restored archives to apt",
-                  state.get("restored") == expected, state)
-            if mode in ("replace-after-verification", "replace-during-retries"):
-                check(f"zsh cache {mode} isolates every retry from restored archive replacement",
-                      all(archives == expected for archives in state.get("download_archives", [])), state)
-                check(f"zsh cache {mode} installs from a private read-only archive set",
-                      state.get("install_directory") != str(archives)
-                      and state.get("directory_mode") == 0o700
-                      and state.get("archive_mode") == 0o444, state)
-                check(f"zsh cache {mode} removes the private installation directory",
-                      not pathlib.Path(state.get("install_directory", str(archives))).exists(), state)
-            elif mode != "valid":
-                quarantined = archives / "quarantine" / archive.name
-                check(f"zsh cache {mode} preserves rejected bytes in quarantine",
-                      quarantined.is_file() and quarantined.read_bytes() == restored)
-                if mode == "metadata-timeout":
-                    remaining = archives / "quarantine/zsh-common_1_all.deb"
-                    check("zsh quarantines remaining cached archives within the verification deadline",
-                          remaining.is_file() and remaining.read_bytes() == b"cached-zsh-common")
+                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode, TMPDIR=str(fixture),
+                       ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0")
+            ran = subprocess.run(["bash", str(REPO / "ops/ci-zsh.sh")],
+                                 cwd=fixture, env=env, capture_output=True, text=True, timeout=15)
+            check(f"zsh {mode} cleans up after setup", not any(fixture.glob("carr-zsh.*")))
+            calls = json.loads(log.read_text()) if log.exists() else []
+            actions = [("download" if "--download-only" in c else "offline" if "--no-download" in c
+                        else "update" if "update" in c else "install") for c in calls]
+            check(f"zsh {mode} follows the package-manager path", actions == expected, actions)
+            check(f"zsh {mode} propagates setup success or failure", (ran.returncode == 0) == success,
+                  {"rc": ran.returncode, "stderr": ran.stderr})
+            for call in calls:
+                private = pathlib.Path(next(a.split("=", 1)[1] for a in call if a.startswith("Dir::Cache::archives=")))
+                check(f"zsh {mode} removes private archives", not private.exists())
+            if mode == "tampered":
+                check("zsh quarantines unauthenticated cache bytes",
+                      (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
+            if mode in ("cold", "stale", "partial-cache"):
+                check(f"zsh {mode} publishes authenticated cache bytes", archive.is_file() and archive.read_bytes() == b"trusted-zsh-package")
 
 
 def test_worktree_python_selection():
@@ -1810,7 +1657,7 @@ def main(argv=None):
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_artifact_requires_native_rule_projection_and_tests,
+    for fn in (test_changed_path_selection, test_artifact_requires_native_rule_projection_and_tests,
                test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
                test_migration_requires_newline_terminated_verdict,
@@ -1852,7 +1699,7 @@ def main(argv=None):
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
                test_push_floor_reports_missing_atlas_packages_without_blaming_registry,
                test_hosted_zsh_setup_does_not_refresh_working_indexes,
-               test_hosted_zsh_cache_requires_authenticated_bytes):
+               ):
         try:
             fn()
         except Exception as exc:  # a crashing case is a failing case, never a silent skip

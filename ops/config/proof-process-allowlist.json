@@ -1,0 +1,106 @@
+{
+  "tools/prove-calendar-snapshot-strict-instants.py": {
+    "sha256": "c73f3c539ce420105400d294d1f33bf69cc5240e5e8a8b5e5c9d8d1443cfb424",
+    "commands": [
+      "repository run.sh call calendar-meeting-prep",
+      "declared fixture wrapper call calendar-meeting-prep",
+      "fixture sys.executable -c prints JSON argv",
+      "git rev-parse HEAD",
+      "git merge-base --is-ancestor"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-deal-checklist-transaction-recovery.py": {
+    "sha256": "21275c25234ab2b3576baa723e2f128b46c2c7bd0f5a7876eb1f465d088dc503",
+    "commands": [
+      "repository run.sh call deal-checklist",
+      "fixture sys.executable this runner --fixture-verb scenario deal-checklist",
+      "git rev-parse --verify revision^{commit}",
+      "git merge-base --is-ancestor"
+    ]
+  },
+  "tools/prove-duplicate-candidates-address-membership.py": {
+    "sha256": "5ce41fbe2752312bb2f538cc3ee2e11b7169da7cd5394795707bb85ca781ec59",
+    "commands": [
+      "declared --call-wrapper call email-match-contacts/prospect-research/party-duplicate-candidates"
+    ]
+  },
+  "tools/prove-identity-domain-recorded-addresses.py": {
+    "sha256": "15ce1802214c4ac85dadb97c2e3b136f8e74e097c0a633b854315394090a1cd8",
+    "commands": [
+      "declared --call-wrapper call prospect-research/catch-me-up",
+      "git log -1 --format=%H -- mcp-server/src/party-identity.js",
+      "git merge-base --is-ancestor"
+    ]
+  },
+  "tools/prove-lead-contact-address-membership.py": {
+    "sha256": "6e1b81b5ea76c5f5b1052d7b86c97e9b04a21c82fe392c03e469e2f3db1aa6f7",
+    "commands": [
+      "declared --call-wrapper call lead-board/lead-stage-preview"
+    ]
+  },
+  "tools/prove-lease-comparison-tiny-rate-stability.py": {
+    "sha256": "5a38c9968e8e7aad48c19c7aa985d08ea667cbf711f6e961bae9390bbeecc89d",
+    "commands": [
+      "declared --call-wrapper call compare-lease-terms"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-mail-policy-multiple-recorded-addresses.py": {
+    "sha256": "f6e0c1165c23bccc67d6e8668e0733a0d5c0d822d0a88e23c09b614a2f33edc2",
+    "commands": [
+      "declared --call-wrapper call email-match-contacts/prospect-research/mail-contact-policy"
+    ]
+  },
+  "tools/prove-notification-feed-evidence-integrity.py": {
+    "sha256": "a14ed416e99f91550e1b762204b991686ef884e72a3110af4ad77c0b862ec257",
+    "commands": [
+      "declared --call-wrapper call notification-feed/read-notification-preferences",
+      "git log/show/merge-base with fixed read-only arguments",
+      "node --experimental-strip-types --input-type=module -e REPLAY with registered projection source"
+    ]
+  },
+  "tools/prove-post-call-exact-edge-whitespace.py": {
+    "sha256": "2b3b90de0700eba9fd3e88b63aa0c4b6598e09409990587e5cbba6d408c9d545",
+    "commands": [
+      "declared --call-wrapper call read-call-outcomes"
+    ]
+  },
+  "tools/prove-prospect-research-future-evidence.py": {
+    "sha256": "6019d8566cd0deec0d84556780f6739b06dd0f130d9d29e26c196b635017dd73",
+    "commands": [
+      "repository run.sh call read-only verbs",
+      "declared fixture Python --stub"
+    ]
+  },
+  "tools/prove-recorded-comps-readable-deal-labels.py": {
+    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "commands": [
+      "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
+      "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"
+    ]
+  },
+  "tools/prove-vendor-scheduling-zero-duration.py": {
+    "sha256": "270e15167affb568f88e8b39a9aa2228d263c61254bbaed87fde25b3cdc2ac90",
+    "commands": [
+      "declared --call-wrapper call read-vendor-meetings/morning-brief"
+    ]
+  },
+  "tools/prove-meeting-prep-savepoint-lifetime.py": {
+    "sha256": "8b8a651f5da52a2a1b54160a89d8bebd6adf79dc23b4cb49497cd59db4f41568",
+    "commands": [
+      "declared --call-wrapper call calendar-meeting-prep {}",
+      "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
+    ]
+  },
+  "tools/prove-email-next-step-closed-date.py": {
+    "sha256": "d27da0ae34a094d9a21b9504b51b2880a1019f4d3f1a03a3c047df036df94ba7",
+    "commands": [
+      "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
+    ]
+  }
+}

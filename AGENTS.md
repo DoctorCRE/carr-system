@@ -200,7 +200,8 @@ To catch up with main, merge origin/main into the branch. This overrides the
 rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
 `full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
 
-Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Workers push, report, stop; only the coordinator arms merges after independent current-head approval and green CI. CI results reach the orchestrator as app events.
+Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Workers push, report, stop; only the coordinator arms merges after independent current-head approval and green CI. CI results reach the orchestrator as app events. Merges and verified deploys reach
+the coordinator as idempotent PR comments.
 
 Do not commit on main either. `ops/githooks/pre-commit` refuses it, because a
 commit on main in `~/carr-system` strands there (nine unpushed commits took an
@@ -342,3 +343,17 @@ CORE index. Apply the native K cards in AGENTS.md. Before acting, read the linke
 - [Apply the access Joe authorized without adding data fences. Raise live-credential custody once; explain autonomy, isolation, recovery and cost when those matter.](docs/generated-rules/core.md#f673326b).
 - [K04](docs/generated-rules/core.md#fa217e48).
 <!-- carr-native-rules:end -->
+
+Claude Code CARR configuration is project-scoped. `.mcp.json` keeps the server
+name `carr`; `.claude/settings.json` pre-approves it and owns CARR hooks. Hooks
+resolve through `CLAUDE_PROJECT_DIR` in each checkout, including T3 worktrees.
+User settings retain personal MCP servers and preferences. After merge, use
+`python3 ops/scope-agent-config.py` to preview removal of legacy user copies.
+
+Codex CARR hooks load from the common checkout's `.codex/hooks.json`, including
+linked worktrees. The installer targets this layer; integrity checks it against
+this checkout's contract. Commands use `git rev-parse --show-toplevel` from the
+session cwd. Review and trust project hooks in Codex `/hooks`; changed hooks
+need trust again. User-wide hooks are additive. After merge,
+`python3 ops/scope-agent-config.py` previews CARR hook removal from both clients'
+user files. `--apply` saves private backups and preserves unrelated registrations.

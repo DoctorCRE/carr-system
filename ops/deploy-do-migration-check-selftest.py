@@ -15,6 +15,9 @@ class Check(unittest.TestCase):
         domains = ['api.example.test'] if domains is None else domains
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.headers.get('User-Agent') != 'carr-deploy-migration-check/1':
+                    self.send_error(403)
+                    return
                 data = {'success': response_ok, 'result': [{'service': 'carr-mcp', 'environment': 'production', 'hostname': domain} for domain in domains]}
                 if pages is not None:
                     from urllib.parse import parse_qs, urlparse

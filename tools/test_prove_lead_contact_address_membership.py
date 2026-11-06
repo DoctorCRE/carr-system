@@ -1,5 +1,6 @@
 """Exercise the proof CLI using only a synthetic wrapper and local HTTP origin."""
 import http.server
+from proof_release_fixture import ReleaseFixtureHandler
 import json
 from pathlib import Path
 import subprocess
@@ -34,8 +35,8 @@ else:
             wrapper.chmod(0o700)
             releases = []
 
-            class Handler(http.server.BaseHTTPRequestHandler):
-                def do_GET(self):
+            class Handler(ReleaseFixtureHandler):
+                def release_GET(self):
                     releases.append(self.path)
                     sha = 'b' if mode == 'release-change' and len(releases) > 1 else 'a'
                     self.send_response(200)

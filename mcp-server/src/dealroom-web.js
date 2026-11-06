@@ -33,6 +33,7 @@ import { readDealWithJev } from "./jev-deal-reading.ts";
 import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.ts";
 import { bearerCredential } from "./bearer.ts";
+import { DELIVERABLE_PREFIX } from "./deal-deliverables.js";
 import { PHONE_CALL_PREFIX, phoneCallByteLimit } from "./phone-call-sessions.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
@@ -1093,10 +1094,11 @@ async function handleRequest(request, env, ctx, dependencies) {
           url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           url.pathname !== PHONE_CALL_PREFIX && !url.pathname.startsWith(PHONE_CALL_PREFIX + '/') &&
+          !url.pathname.startsWith(DELIVERABLE_PREFIX + '/') &&
           !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
       // Home, Clients and Vendors are one workspace surface and share its flag.
       if ((url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-           url.pathname === ATLAS_GRAPH_PATH || APP_FACT_ROUTES.has(url.pathname) ||
+           url.pathname === ATLAS_GRAPH_PATH || url.pathname.startsWith(DELIVERABLE_PREFIX) || APP_FACT_ROUTES.has(url.pathname) ||
            isBusinessApiPath(url.pathname) ||
            BUSINESS_VIEW_PATHS.has(url.pathname) || url.pathname === BUSINESS_ASSET_PATH ||
            APP_DOCUMENT_PATHS.has(url.pathname)) &&
@@ -1120,7 +1122,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
-            url.pathname === ATLAS_GRAPH_PATH || APP_FACT_ROUTES.has(url.pathname) ||
+            url.pathname === ATLAS_GRAPH_PATH || url.pathname.startsWith(DELIVERABLE_PREFIX) || APP_FACT_ROUTES.has(url.pathname) ||
             url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/') ||
             isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
@@ -1137,6 +1139,16 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname === "/auth/session") {
         response = request.method === "GET" ? await systemWorkSession(session, dependencies)
           : json({ error: "method_not_allowed" }, 405);
+      } else if (url.pathname.startsWith(DELIVERABLE_PREFIX + '/')) {
+        if (request.method !== 'GET') {
+          if (!sameOrigin(request, env) || request.headers.get('sec-fetch-site') !== 'same-origin' ||
+              !equalStrings(request.headers.get('x-carr-csrf'), session.csrfToken)) return json({error:'forbidden'},403);
+        }
+        response = dependencies.deliverablesHandler
+          ? await dependencies.deliverablesHandler(request, env, session.actor, async () => {
+            const current = await sessionFor(request, env, dependencies);
+            return !!current && current.key === session.key && current.actor.slug === session.actor.slug;
+          }) : json({error:'deliverable_unavailable'},503);
       } else if (url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/')) {
         if (!['GET', 'POST', 'PUT'].includes(request.method)) return json({ error: 'method_not_allowed' }, 405);
         if (request.method !== 'GET') {

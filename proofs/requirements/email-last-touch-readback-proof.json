@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR634-S1-J141-email-last-touch-readback-proof",
+  "targets": ["studio"],
+  "assertions": [{
+    "id": "bounded-email-contact-readback",
+    "predicate": "After merge and installation, the coordinator executes tools/email-last-touch-proof.py against one private retained acknowledged-request input, one fixed account and a window of at most 31 days. Require zero correspondence mismatches, zero projection mismatches, zero unknown identities and naturally existing corroborated client, lead and vendor examples. Keep exclusions, missing targets and dangling targets separate. Include a vendor excluded by the quiet reader when present; absent examples are unproven. The registered Studio observer can attest a supplied successful run receipt count corroborated_requests >= 3 at the full installed SHA, but cannot execute this command or replace its detailed JSON evidence. Without that receipt and command evidence this requirement remains unproven.",
+    "runner": "studio-run-receipt.v1",
+    "expected_result": "Command exits zero with all three corroborated examples and no mismatches, unknown identities, missing targets or dangling targets. Exclusions are reported separately. The observer remains BLOCKED without a real receipt; source admission is not production proof.",
+    "input_class": "A coordinator-retained private intake state and an explicitly bounded real account/window. Run from the installed checkout: .venv/bin/python tools/db-tap.py run tools/email-last-touch-proof.py --requests /tmp/email-last-touch-proof-private.json --account-file /tmp/email-last-touch-account.txt --start 2026-10-28T00:00:00-05:00 --end 2026-11-04T00:00:00-06:00 . Verify the supplied account and window against retained evidence before executing. Observe only a real supplied receipt with count corroborated_requests and minimum 3; do not fabricate one or launch intake.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1000,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

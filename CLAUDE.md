@@ -7,12 +7,12 @@ rules for Claude Code sessions.
 
 ## "carr needs authentication" is not a reason to ask Joe to sign in
 
-Desktop sessions show the user-config `carr` server as needs_auth even while its
+Desktop sessions show the project-scoped `carr` server (`.mcp.json`) as needs_auth even while its
 CLI login works; they use the claude.ai "CARR Record Layer" connector instead.
 On that notice, check the connector (session_connectors_status) and
 `claude mcp get carr`. If both are connected, say nothing about signing in. Tell
 Joe once, naming which, only if one is down. Never remove the `carr` server:
-the allowlist, gates and Codex job launcher depend on its name.
+the allowlist, gates and retained tool prefixes depend on its name.
 
 ## A capture-verb denial has a fallback door
 
@@ -72,3 +72,11 @@ regardless of the window. PreCompact is the one-attempt backstop for that case.
 Its reason reaching the model during automatic compaction is unverified; Stop
 is the primary model-visible instruction channel. Rotation requests a handoff;
 it cannot guarantee that a model completes the handoff or never compacts.
+
+## Client configuration scope
+
+CARR's Claude hooks stay in `.claude/settings.json`; Codex loads the common checkout’s
+`.codex/hooks.json`, including linked worktrees.
+Use `ops/scope-agent-config.py` after merge to preview retirement of CARR hook script
+user registrations for both clients. Add `--apply` only for the authorized local
+cleanup. Codex hook commands resolve the current Git checkout, including worktrees.

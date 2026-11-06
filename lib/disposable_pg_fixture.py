@@ -415,18 +415,19 @@ if __name__ == '__main__':
         binaries = postgres_bin_dir() if args.snapshot or args.snapshot_template else None
         if binaries:
             args.pg_ctl = str(binaries / 'pg_ctl')
-        with DisposablePostgres(args.prefix, args.pg_ctl, directory=args.directory) as fixture:
+        with tempfile.TemporaryDirectory(prefix='pg-', dir='/tmp') as socket_directory, \
+                DisposablePostgres(args.prefix, args.pg_ctl, directory=args.directory) as fixture:
             if args.data_name:
                 fixture.register(fixture.root / args.data_name)
             if binaries:
                 from postgres_snapshot_fixture import start_snapshot
                 start_snapshot(fixture, binaries, snapshot_schema, args.snapshot_copy,
-                               template=args.snapshot_template, migrate=migrate)
+                               socket_directory=socket_directory, template=args.snapshot_template, migrate=migrate)
             if binaries:
                 from urllib.parse import quote
                 print(json.dumps({'root': str(fixture.root),
-                    'connection': {'host': str(fixture.root), 'user': 'carr_ci', 'database': 'carr_ci'},
-                    'dsn': f'postgresql://carr_ci@localhost/carr_ci?host={quote(str(fixture.root), safe="")}',
+                    'connection': {'host': socket_directory, 'user': 'carr_ci', 'database': 'carr_ci'},
+                    'dsn': f'postgresql://carr_ci@localhost/carr_ci?host={quote(socket_directory, safe="")}',
                     'snapshot': str(fixture.root / 'data'), 'key': key}), flush=True)
             else:
                 print(fixture.root, flush=True)

@@ -4,6 +4,9 @@ import sys
 from pathlib import Path
 import unittest
 import tempfile
+import json
+import os
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -34,21 +37,53 @@ class SnapshotIsolation(unittest.TestCase):
             self.assertNotEqual(original, snapshot_key(schema))
             self.assertNotEqual(snapshot_key(schema), snapshot_key(schema, baseline=True))
 
+    def test_supervised_snapshot_connects_and_cleans_up_under_long_root(self):
+        binaries = postgres_bin_dir()
+        with postgres_fixture_group(), tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory) / ('long-ci-root-' * 10)
+            parent.mkdir()
+            environment = {key: value for key, value in os.environ.items()
+                           if key != 'CARR_CI_DATABASE_URL'}
+            command = [sys.executable, '-u', str(ROOT / 'lib/disposable_pg_fixture.py'),
+                       '--supervise', '--snapshot', '--snapshot-baseline',
+                       '--directory', str(parent), '--prefix', 'snapshot-long-']
+            with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, env=environment) as process:
+                try:
+                    line = process.stdout.readline()
+                    if not line:
+                        self.fail(process.stderr.read())
+                    metadata = json.loads(line)
+                    result = subprocess.run([binaries / 'psql', metadata['dsn'], '-XAt',
+                                             '-c', 'select 42'], check=True,
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.stdout.strip(), '42')
+                    socket = Path(metadata['connection']['host'])
+                    self.assertGreater(len(str(Path(metadata['root']) / '.s.PGSQL.5432').encode()), 107)
+                    self.assertTrue((socket / '.s.PGSQL.5432').exists())
+                finally:
+                    process.stdin.close()
+                    process.wait(timeout=60)
+                self.assertEqual(process.returncode, 0, process.stderr.read())
+                self.assertFalse(Path(metadata['root']).exists())
+                self.assertFalse(socket.exists())
+
     def test_copies_have_independent_roles_memberships_grants_and_data(self):
         binaries = postgres_bin_dir()
-        with postgres_fixture_group(), DisposablePostgres('snapshot-proof-', binaries / 'pg_ctl') as template:
+        with postgres_fixture_group(), tempfile.TemporaryDirectory(prefix='pg-', dir='/tmp') as sockets, \
+                DisposablePostgres('snapshot-proof-', binaries / 'pg_ctl') as template:
             schema = template.root / 'seed.sql'
             schema.write_text('create role snapshot_reader; create role snapshot_group; '
                               'create table seeded(value text); insert into seeded values (\'original\'); '
                               'grant select on seeded to snapshot_reader;')
-            start_snapshot(template, binaries, schema, template=True)
+            start_snapshot(template, binaries, schema, socket_directory=sockets, template=True)
             source = template.root / 'data'
             schema.write_text('select 1 / 0;')  # Copies must reuse the prepared snapshot, never replay SQL.
             for changed in (True, False):
                 with DisposablePostgres('snapshot-copy-', binaries / 'pg_ctl') as copy:
-                    start_snapshot(copy, binaries, schema, source)
+                    start_snapshot(copy, binaries, schema, source, socket_directory=sockets)
                     def query(sql):
-                        return copy.run([binaries / 'psql', '-h', copy.root, '-U', 'carr_ci',
+                        return copy.run([binaries / 'psql', '-h', sockets, '-U', 'carr_ci',
                                          '-d', 'carr_ci', '-XAt', '-v', 'ON_ERROR_STOP=1', '-c', sql],
                                         check=True, capture_output=True, text=True).stdout.strip()
                     self.assertEqual(query('select value from seeded'), 'original')
@@ -64,7 +99,7 @@ class SnapshotIsolation(unittest.TestCase):
                               "revoke select on seeded from snapshot_reader; grant create on database carr_ci to snapshot_reader; "
                               "update seeded set value='changed'")
                     with self.assertRaisesRegex(ValueError, 'must be stopped'):
-                        start_snapshot(template, binaries, schema, copy.root / 'data')
+                        start_snapshot(template, binaries, schema, copy.root / 'data', socket_directory=sockets)
             self.assertFalse((source / 'postmaster.pid').exists())
 
 

@@ -162,4 +162,128 @@ test('email touch permanent applications and bounded reconciliation', async t =>
     assert.equal((await read([{...effect,original_key:randomUUID(),source_version:'2'}])).counts.tombstoned,1);
     await c.query('update party set deleted_at=null where id=$1',[party]);
   });
+  await t.test('intake captures bare-party email and retries without duplicating its timeline', async()=>{
+    const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic bare party',$1,$1) returning id",[actor.id])).rows[0].id;
+    for (const kind of ['email_in','email_out']) {
+      const args={idempotency_key:randomUUID(),ref:party,kind,summary:'Synthetic capture',
+        occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
+        email_context:{subject:'Synthetic',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}};
+      const result=await call('log-activity',args);
+      assert.equal(result.subject.type,'party');
+      assert.equal((await call('log-activity',args)).activity_id,result.activity_id);
+      assert.equal((await call('log-activity',{...args,idempotency_key:randomUUID()})).activity_id,result.activity_id);
+      const row=(await c.query('select party_id,deal_id,client_id,lead_id,vendor_id from activity where id=$1',[result.activity_id])).rows[0];
+      assert.deepEqual(row,{party_id:party,deal_id:null,client_id:null,lead_id:null,vendor_id:null});
+      const timeline=await call('catch-me-up',{ref:party});
+      assert.equal(timeline.timeline.filter(r=>r.entry_kind==='activity'&&r.verb===kind).length,1);
+    }
+  });
+  await t.test('concurrent party capture and merge preserve mail in either lock order',async t=>{
+    for (const mergeFirst of [true,false]) await t.test(mergeFirst ? 'merge first redirects retained capture and retry succeeds' : 'capture first waits then merge transfers mail',async()=>{
+      const parties=(await c.query(`insert into party(kind,name,created_by,updated_by,created_at)
+        values('person','Synthetic concurrent survivor',$1,$1,'2025-01-01'),
+              ('person','Synthetic concurrent loser',$1,$1,'2026-01-01') returning id`,[actor.id])).rows;
+      const [survivor,loser]=parties.map(row=>row.id);
+      const capture=ref=>({idempotency_key:randomUUID(),ref,kind:'email_in',summary:'Synthetic concurrent capture',
+        occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
+        email_context:{subject:'Synthetic concurrency',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}});
+      await call('log-activity',capture(survivor));
+      await call('log-activity',capture(survivor));
+      const peer=new pg.Client(fixture.connection); await peer.connect();
+      const query=c.query.bind(c);
+      let release,paused;
+      const gate=new Promise(resolve=>{release=resolve;});
+      const reached=new Promise(resolve=>{paused=resolve;});
+      c.query=async(sql,params)=>{
+        const result=await query(sql,params);
+        if (mergeFirst
+          ? sql==='select subject_type, subject_id from v_ref_index where subject_id=$1 limit 2' && params[0]===loser
+          : typeof sql==='string' && sql.includes('insert into activity (') && params[6]===loser) {
+          paused(); await gate;
+        }
+        return result;
+      };
+      const args=capture(loser);
+      const pending=call('log-activity',args).then(value=>({value}),error=>({error}));
+      const merge=async()=>{
+        await peer.query('begin');
+        try {
+          await peer.query("set local statement_timeout='5s'");
+          await peer.query('set local role carr_writer');
+          const result=await executeRegisteredTool(peer,actor,'confirm-merge',{idempotency_key:randomUUID(),
+            survivor_party:survivor,merged_party:loser,match_basis:'exact synthetic shared email'});
+          await peer.query('commit'); return result;
+        } catch(error) { await peer.query('rollback'); throw error; }
+      };
+      let merging;
+      try {
+        await Promise.race([reached,pending.then(()=>{throw new Error('capture ended before concurrency gate');})]);
+        if (mergeFirst) {
+          assert.equal((await merge()).ok,true);
+          release();
+          const result=await pending;
+          assert.equal(result.value?.ok,true,'retained capture follows the survivor after merge commits');
+          assert.equal(result.value.subject.id,survivor);
+        } else {
+          const pid=(await peer.query('select pg_backend_pid() pid')).rows[0].pid;
+          merging=merge();
+          let blocked=false;
+          for(let attempt=0;attempt<100 && !blocked;attempt++) {
+            blocked=(await query('select cardinality(pg_blocking_pids($1))>0 blocked',[pid])).rows[0].blocked;
+            if(!blocked) await new Promise(resolve=>setTimeout(resolve,10));
+          }
+          assert.equal(blocked,true,'merge waits for the in-flight capture transaction');
+          release();
+          assert.equal((await pending).value?.ok,true);
+          assert.equal((await merging).activities_moved,1);
+        }
+        c.query=query;
+        const retried=await call('log-activity',args);
+        assert.equal(retried.ok,true);
+        assert.equal((await query('select party_id from activity where id=$1',[retried.activity_id])).rows[0].party_id,survivor);
+        assert.equal((await query('select count(*)::int n from activity where party_id=$1',[loser])).rows[0].n,0);
+        assert.equal((await call('catch-me-up',{ref:survivor})).timeline.filter(row=>row.entry_kind==='activity').length,3);
+        assert.equal((await call('log-activity',{...args,idempotency_key:randomUUID(),ref:survivor})).activity_id,retried.activity_id);
+      } finally {
+        release(); c.query=query;
+        await pending;
+        if(merging) await merging.catch(()=>{});
+        await peer.end();
+      }
+    });
+  });
+  await t.test('party merge preserves captured mail and mailbox replay on the survivor',async()=>{
+    const parties=(await c.query(`insert into party(kind,name,created_by,updated_by,created_at)
+      values('person','Synthetic older party',$1,$1,'2025-01-01'),
+            ('person','Synthetic captured party',$1,$1,'2026-01-01') returning id`,[actor.id])).rows;
+    const [older,survivor]=parties.map(row=>row.id);
+    const capture=ref=>({idempotency_key:randomUUID(),ref,kind:'email_in',summary:`Synthetic merge capture ${ref}`,
+      occurred_at:'2026-01-01T12:00:00Z',email_identity:{mailbox_owner:'joe',mailbox_account:'joe@example.test',item_id:randomUUID()},
+      email_context:{subject:'Synthetic merge',conversation_id:null,sender:{email:'sender@example.test',internal:false},recipients:[]}});
+    const args=capture(survivor);
+    await call('log-activity',args);
+    await call('log-activity',{...capture(survivor),kind:'email_out'});
+    const merge={idempotency_key:randomUUID(),survivor_party:older,merged_party:survivor,match_basis:'exact synthetic shared email'};
+    await assert.rejects(call('confirm-merge',merge),e=>e.payload?.error==='wrong_merge_survivor' && e.payload?.required_survivor===survivor);
+    const incoming=capture(older);
+    const moved=await call('log-activity',incoming);
+    const result=await call('confirm-merge',{...merge,idempotency_key:randomUUID(),survivor_party:survivor,merged_party:older});
+    assert.equal(result.activities_moved,1);
+    assert.equal(result.orphan_sweep.find(row=>row.attachment==='activity').count,1);
+    const event=(await c.query("select new_value from event where verb='confirm-merge' and subject_id=$1 order by recorded_at desc limit 1",[older])).rows[0].new_value;
+    assert.equal(event.activities_moved,1);
+    assert.equal(event.survivorship.linked_records,2);
+    const timeline=(await call('catch-me-up',{ref:survivor})).timeline.filter(row=>row.entry_kind==='activity');
+    assert.equal(timeline.length,3);
+    assert.ok(timeline.some(row=>row.summary===incoming.summary));
+    const stored=(await c.query('select party_id,email_identity from activity where id=$1',[moved.activity_id])).rows[0];
+    assert.equal(stored.party_id,survivor);
+    assert.equal(stored.email_identity.subject,older);
+    assert.equal((await call('log-activity',incoming)).activity_id,moved.activity_id);
+    assert.equal((await call('log-activity',{...incoming,idempotency_key:randomUUID(),ref:survivor})).activity_id,moved.activity_id);
+    assert.equal((await call('log-activity',{...incoming,idempotency_key:randomUUID()})).activity_id,moved.activity_id);
+    assert.equal((await c.query('select count(*)::int as count from activity where party_id=$1',[survivor])).rows[0].count,3);
+    assert.equal((await c.query('select count(*)::int as count from activity where party_id=$1',[older])).rows[0].count,0);
+  });
+
 });

@@ -15,6 +15,7 @@ WIRING = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
 
 
 def command_target(command, repo):
+    command = command.removeprefix('r="$(git rev-parse --show-toplevel)" || exit 1; ')
     # Current templates end their missing-file guard before the invocation.
     prefix, separator, invocation = command.rpartition('; fi; ')
     if not separator:

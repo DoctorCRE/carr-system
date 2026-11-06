@@ -1,0 +1,36 @@
+---
+title: "Deal deliverables"
+---
+stateDiagram-v2
+  s0: absent
+  s1: Session revoked
+  s2: started
+  s3: expired
+  s4: uploading
+  s5: verified
+  s6: Private
+  s7: Private, downloaded
+  s8: Shared
+  s9: Shared, downloaded
+  [*] --> s0
+  s0 --> s1: Session revoked
+  s0 --> s2: Partner starts upload
+  s2 --> s1: Session revoked
+  s2 --> s3: Unused reservation expires
+  s2 --> s4: Partner sends bytes
+  s3 --> s1: Session revoked
+  s4 --> s2: Rejected bytes roll back reservation
+  s4 --> s1: Session revoked
+  s4 --> s5: Bytes, size, content and hash verified
+  s5 --> s1: Session revoked
+  s5 --> s6: Partner finalizes privately
+  s6 --> s1: Session revoked
+  s6 --> s7: Partner downloads
+  s6 --> s8: Partner changes visibility with current version
+  s7 --> s1: Session revoked
+  s7 --> s9: Partner changes visibility with current version
+  s8 --> s1: Session revoked
+  s8 --> s6: Partner changes visibility with current version
+  s8 --> s9: Partner downloads
+  s9 --> s1: Session revoked
+  s9 --> s7: Partner changes visibility with current version
