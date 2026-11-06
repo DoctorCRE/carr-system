@@ -30,7 +30,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: write
     if: >-
       (github.event_name == 'workflow_run'
         && github.event.workflow_run.conclusion == 'success'
@@ -41,6 +40,8 @@ jobs:
       || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      sha: ${{ env.SHA }}
     environment: production
     env:
       SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -79,7 +80,6 @@ jobs:
           fetch-depth: 0
 
       - name: Refuse to roll production back to an older commit
-        id: previous_release
         shell: bash
         run: |
           set -o pipefail
@@ -88,7 +88,6 @@ jobs:
             echo "::error::could not read the commit production serves from $RELEASE_URL; refusing to deploy blind."
             exit 1
           fi
-          echo "sha=$live" >> "$GITHUB_OUTPUT"
           if [ "$live" != "$SHA" ] && git merge-base --is-ancestor "$SHA" "$live" 2>/dev/null; then
             echo "::error::production already serves $live, which contains $SHA. Roll back with a revert on main, not by re-running an old deploy."
             exit 1
@@ -236,14 +235,6 @@ jobs:
           echo "::error::$RELEASE_URL did not report git_sha $SHA, version $VERSION_ID, env production and $VERBS verbs within two minutes."
           exit 1
 
-      - name: Comment on newly shipped PRs
-        timeout-minutes: 2
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PREVIOUS_SHA: ${{ steps.previous_release.outputs.sha }}
-        run: python3 ops/pr-release-comments.py deploy
-
       - name: Seal verified Worker lane receipt
         run: |
           python tools/worker-release-receipt.py --release release.json \
@@ -382,3 +373,27 @@ jobs:
           done
           echo "::error::$RELEASE_URL did not report git_sha $SHA, env staging and $VERBS verbs within two minutes."
           exit 1
+
+  notify:
+    needs: [deploy, staging]
+    if: >-
+      always() && needs.deploy.result == 'success' && (needs.staging.result == 'success' || needs.staging.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: production-pr-comments
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      SHA: ${{ needs.deploy.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Comment on shipped PRs after required deploy jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/pr-release-comments.py deploy
