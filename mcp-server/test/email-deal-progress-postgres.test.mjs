@@ -1,7 +1,7 @@
 // Test email-sourced deal progress proposals and confirmation in PostgreSQL.
 import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { execFileSync } from 'node:child_process';
@@ -684,22 +684,49 @@ test('next-step proposals require a literal email quote on the selected client a
     error => error.payload?.error === 'email_next_step_evidence_not_found');
 });
 
-test('email next-step proposals refuse closed and invoiced deals', async () => {
-  const source = await email(askQuote);
-  const args = nextStepArgs(source.activity_id);
-  await setPhase('closed');
-  await assert.rejects(command('preview-email-next-step', args),
-    error => error.payload?.error === 'email_next_step_evidence_not_found');
-  await setPhase('site_selection');
-  const proposal = await command('preview-email-next-step', args);
-  await c.query("update deal set invoiced_on='2026-01-01' where id=$1", [deal]);
-  try {
-    await assert.rejects(command('preview-email-next-step', args),
-      error => error.payload?.error === 'email_next_step_evidence_not_found');
-    await assert.rejects(confirmStep(proposal),
-      error => error.payload?.error === 'email_next_step_evidence_not_found');
-  } finally { await c.query('update deal set invoiced_on=null where id=$1', [deal]); }
-});
+for (const terminal of ['phase', 'closed_on', 'invoiced_on']) {
+  test(`email next-step ${terminal} independently refuses preview and confirmation without writes`, async () => {
+    const source = await email(askQuote);
+    const args = nextStepArgs(source.activity_id);
+    const proposal = await command('preview-email-next-step', args);
+    const assignment = terminal === 'phase' ? "phase='closed'" : `${terminal}='2026-01-01'`;
+    await c.query(`update deal set ${assignment} where id=$1`, [deal]);
+    const snapshot = async () => ({
+      actions: (await c.query('select * from next_action where subject_id=$1 order by id', [deal])).rows,
+      steps: (await c.query('select * from deal_note where deal_id=$1 order by id', [deal])).rows,
+      events: (await command('get-deal-room', { deal })).events,
+    });
+    try {
+      const before = await snapshot();
+      const errors = [];
+      for (const operation of [() => command('preview-email-next-step', args, actor, 'carr_reader'),
+        () => confirmStep(proposal, {}, actor, 'carr_writer')]) {
+        try { await operation(); errors.push(null); } catch (error) { errors.push(error.payload?.error); }
+      }
+      assert.deepEqual(errors, ['email_next_step_evidence_not_found', 'email_next_step_evidence_not_found']);
+      assert.deepEqual(await snapshot(), before);
+    } finally {
+      await c.query("update deal set phase='site_selection',closed_on=null,invoiced_on=null where id=$1", [deal]);
+    }
+  });
+  test(`confirmed email next-step replay survives ${terminal} without another write`, async () => {
+    const source = await email(askQuote);
+    const proposal = await command('preview-email-next-step', nextStepArgs(source.activity_id));
+    const key = randomUUID();
+    const confirmed = await confirmStep(proposal, { idempotency_key: key });
+    const assignment = terminal === 'phase' ? "phase='closed'" : `${terminal}='2026-01-01'`;
+    await c.query(`update deal set ${assignment} where id=$1`, [deal]);
+    try {
+      const before = await command('get-deal-room', { deal });
+      const replay = await confirmStep(proposal, { idempotency_key: key });
+      assert.equal(replay.replayed, true);
+      assert.equal(replay.next_action_id, confirmed.next_action_id);
+      assert.deepEqual(await command('get-deal-room', { deal }), before);
+    } finally {
+      await c.query("update deal set phase='site_selection',closed_on=null,invoiced_on=null where id=$1", [deal]);
+    }
+  });
+}
 
 const router = () => ({ ...actor, human: false, slug: 'codex', native_agent_verified: true, sponsoring_human_slug: 'joe' });
 // The shared database outgrows one 200-row page, so read the whole queue.
@@ -3221,4 +3248,33 @@ test('reconciliation keyset pages reach identities beyond the first hundred', as
   }
   assert.equal(cursor, null);
   assert.ok([...ids].every(id => seen.has(id)));
+});
+
+
+test('email next-step proof fixtures use registered response contracts', async () => {
+  const source = await email(askQuote);
+  await c.query('update activity set deal_id=$2 where id=$1', [source.activity_id, deal]);
+  const activeDeal = (await c.query(`insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by)
+    select 'Synthetic active proof',client_id,deal_type,phase,owner,created_by,updated_by from deal where id=$1 returning id`, [deal])).rows[0].id;
+  const activeSource = await email(askQuote);
+  await c.query('update activity set deal_id=$2 where id=$1', [activeSource.activity_id, activeDeal]);
+  const activeRoom = await command('get-deal-room', { deal: activeDeal });
+  const selected = activeRoom.activities.find(a => ['email_in','email_out'].includes(a.kind) && a.detail?.trim().length >= 10);
+  const active = await command('preview-email-next-step', { ...nextStepArgs(selected.id),
+    deal: activeDeal, evidence_quote: selected.detail.slice(0,2000) });
+  const activeBoard = await command('deal-room-board', { workspace: 'all' });
+  await c.query("update deal set closed_on='2026-01-01' where id=$1", [deal]);
+  try {
+    const closedRoom = await command('get-deal-room', { deal });
+    const closedBoard = await command('deal-room-board', { workspace: 'all' });
+    let refusal;
+    await assert.rejects(command('preview-email-next-step', nextStepArgs(source.activity_id)), error => {
+      refusal = error.payload;
+      return refusal?.error === 'email_next_step_evidence_not_found';
+    });
+    assert.equal(active.contract, 'email-next-step.v1');
+    assert.equal(closedRoom.schema_version, 'deal-timeline.v1');
+    if (process.env.CARR_EMAIL_NEXT_STEP_FIXTURE) writeFileSync(process.env.CARR_EMAIL_NEXT_STEP_FIXTURE,
+      JSON.stringify({ deal, active, activeRoom, activeBoard, closedRoom, closedBoard, refusal }));
+  } finally { await c.query('update deal set closed_on=null where id=$1', [deal]); }
 });
