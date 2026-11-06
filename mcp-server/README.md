@@ -48,7 +48,6 @@ No workflow needs a generation step to make a runtime import resolve.
 | `main-canary.yml` | The same canonical CI classes, plus `ops/ci-evidence.py` evidence handling. |
 | `deploy.yml`, production and staging | Locked dependency install, candidate sealing, `ops/verb-count.sh`, migration runner, Wrangler build and Worker release readback. Production writes were not executed in this audit. |
 | `fallow.yml` | Static import analysis after dependency install; no generated runtime input remains. |
-| `review-gate.yml` | Python review gate and its selftests; no tools import identified in the entry points. |
 | `edge-liveness.yml` | Python incident-delivery entry point; no local tools import identified. |
 | `backup-nightly.yml` | Backup/status Python and shell entry points; no local tools import identified. No backup, restore, send or production operation was executed. |
 | Worker runtime | `src/index.js`, `src/mcp.js`, `src/release.js`, `src/dealroom-web.js`, `src/atlas-inventory-graph.v5.js` import tools directly. Wrangler bundles their static graph. |

@@ -19,7 +19,7 @@ artifacts; the ledger was removed during the machinery purge. Its
 GitHub runs below remain the source for inspecting individual failures.
 
 For a new failure, run `bin/ci-why <pr> [--repo owner/name]` (or `--run <run-id>`): it prints
-each failed step and about 40 lines around its first error, and names a review-gate-only failure.
+each failed step and about 40 lines around its first error.
 
 The collector keys new entries by repository, run ID, and attempt. Every log
 and metadata request passes the inventoried `--attempt`; returned metadata must

@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.loadpy import load_module_from_path
 
-gate = load_module_from_path('delivery_review_gate', str(ROOT / 'ops/review-gate.py'))
 REPO = 'DoctorCRE/carr-system'
 APP = 'doctorcre-carr-review[bot]'
+SKIP_CI = re.compile(r'\[(skip ci|ci skip|no ci|skip actions|actions skip)\]', re.I)
 REQUESTS = 0
 MAX_REQUESTS = 100
 HOLDS = {2988: 'Explicit hold awaiting Joe; WR823.S14.J1 must not arm this PR'}
@@ -27,6 +27,31 @@ class Verdict:
     sha: str
     reviewer: str
     body: str
+
+
+def review_failure(pr, reviews, reviewer_login):
+    if reviewer_login and not reviewer_login.endswith("[bot]"):
+        return "CARR_REVIEW_APP_LOGIN must name an App bot ending in [bot]"
+    if SKIP_CI.search(pr.get("title") or ""):
+        return "Remove skip-CI markers from the PR title"
+    latest = {}
+    for review in sorted(reviews, key=lambda r: r.get("submitted_at") or ""):
+        user = (review.get("user") or {}).get("login")
+        state = review.get("state")
+        if user and state in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            latest[user.lower()] = review
+    current_review = latest.get(reviewer_login.lower(), {}) if reviewer_login else {}
+    if current_review.get("state") == "CHANGES_REQUESTED" and current_review.get("commit_id") == pr["head"]["sha"]:
+        return "App requested changes at this head; resolve findings and resubmit via ops/review-submit.py"
+    if not reviewer_login:
+        return "Missing CARR_REVIEW_APP_LOGIN; review-required PR cannot pass"
+    author = (pr.get("user") or {}).get("login", "").lower()
+    if (reviewer_login.lower() != author and (current_review.get("user") or {}).get("type") == "Bot"
+            and current_review.get("state") == "APPROVED" and current_review.get("commit_id") == pr["head"]["sha"]):
+        if [line for line in (current_review.get("body") or "").splitlines() if line.startswith("Reviewed-SHA:")] != [f'Reviewed-SHA: {pr["head"]["sha"]}']:
+            return f"App approval body needs exactly one line 'Reviewed-SHA: {pr['head']['sha']}'; resubmit via ops/review-submit.py"
+        return None
+    return "Current-head App approval required; submit via ops/review-submit.py"
 
 
 def parse_verdict(body):
@@ -125,7 +150,7 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
             write({'kind': 'submit', 'number': number, 'decision': report.decision,
                    'sha': sha, 'body': report.body + '\n' + marker})
             return state('submitted', 'Native App review bound to the reviewed SHA')
-    failure = gate.review_failure(pr, reviews, app_login)
+    failure = review_failure(pr, reviews, app_login)
     if failure:
         return state('refused', failure)
     if not arm_enabled:
@@ -139,7 +164,7 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
     if held(current, number) or not ready(current):
         return state('held', 'PR became held or unavailable before arming')
     # Reviews can change without a push. Re-read immediately before the write.
-    if gate.review_failure(current, collection(read(f'pulls/{number}/reviews?per_page=100')), app_login):
+    if review_failure(current, collection(read(f'pulls/{number}/reviews?per_page=100')), app_login):
         return state('refused', 'Approval changed before arming')
     if current.get('auto_merge'):
         return state('armed', 'Native auto-merge already enabled')
