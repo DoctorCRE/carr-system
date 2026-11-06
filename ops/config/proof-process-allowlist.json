@@ -90,5 +90,12 @@
       "declared --call-wrapper call calendar-meeting-prep {}",
       "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
     ]
+  },
+  "tools/prove-client-anniversary-read.py": {
+    "sha256": "7774379a09a41ad88f7e816e4486fd48b7c4db274f13be01f0fdc69ba0ba698d",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e PARSER with JSON stdin through parseClientAnniversaryResponse",
+      "git merge-base --is-ancestor merged unit SHA deployed release SHA"
+    ]
   }
 }
