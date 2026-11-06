@@ -17,6 +17,8 @@ class CloseTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         (self.root / 'bin').mkdir()
+        (self.root / 'lib').mkdir()
+        shutil.copyfile(ROOT / 'lib/repository_identity.py', self.root / 'lib/repository_identity.py')
         contract = self.root / 'mcp-server/src/progress-address.v1.json'
         contract.parent.mkdir(parents=True)
         shutil.copyfile(ROOT / 'mcp-server/src/progress-address.v1.json', contract)
@@ -164,6 +166,14 @@ else:
         refs = json.loads(result.stdout)['calls'][0]['args']['change_refs']
         self.assertEqual(len(refs), 2)
         self.assertIn(dict(pr_url=app['url'], merge_commit_sha='c' * 40), refs)
+
+    def test_app_repository_url_alias_and_refusals(self):
+        for repository in ('DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app',
+                           'DoctorCRE/unrelated', 'someone/doctorcre-app'):
+            self.extra_repos = {'jbookout/doctorcre-app': [dict(body='Card: WR557.S5.J2', state='MERGED',
+                url=f'https://github.com/{repository}/pull/321', mergeCommit=dict(oid='c' * 40))]}
+            result, _ = self.run_close('WR557.S5')
+            self.assertEqual(result.returncode, 0 if repository.endswith('/doctorcre-app') and repository.startswith(('DoctorCRE/', 'jbookout/')) else 1, result.stderr)
 
     def test_truncated_search_refuses_before_writes(self):
         self.prs *= 1000

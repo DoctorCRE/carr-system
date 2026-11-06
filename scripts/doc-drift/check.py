@@ -13,6 +13,9 @@ from urllib.parse import unquote, urlparse
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from lib.repository_identity import canonical_repository
+
 SCHEMA = 'doc-drift/v1'
 PATH = re.compile(r'(?<![\w/:])(?:\./|\.\./|~/|/)?(?:[\w.@*<>${}-]+/)+[\w.@*<>${}-]*(?:/)?')
 LINK = re.compile(r'\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)')
@@ -157,7 +160,7 @@ class Tree:
             return raw, 'vault, quarantine, or git reference outside source tree'
         if raw.startswith('@'):
             return raw, 'package name, not a repository file'
-        if raw.startswith('jbookout/'):
+        if canonical_repository(raw) is not None or raw.startswith('jbookout/'):
             return raw, 'cross-repository name'
         if raw.startswith(('github.com/', 'node_modules/', 'dist/', 'out/', '.venv/', '.claude/')) or '/.qualification' in raw or '/.venv' in raw:
             return raw, 'external source or generated artifact'

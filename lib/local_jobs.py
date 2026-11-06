@@ -29,8 +29,16 @@ def command(argv, config, cwd=None):
 
 
 def repository_roots(config=None):
+    sys.path.insert(0, str(SOURCE))
+    from lib.repository_identity import canonical_repository
     config = config or load_config(SOURCE / "ops/config/local-jobs.json")
-    return {repo: Path(config["repository_roots"][repo]).expanduser() for repo in config["repositories"]}
+    roots = {}
+    for repo in config["repositories"]:
+        canonical = canonical_repository(repo)
+        if canonical is None:
+            raise ValueError(f"Unregistered repository: {repo}")
+        roots[canonical] = Path(config["repository_roots"][repo]).expanduser()
+    return roots
 
 
 def protected_branch(config, name):

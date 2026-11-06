@@ -49,8 +49,7 @@
           ],
           "sources": {
                 "ops/verdict-delivery-proof.py": "a199eb96015ea45a56e2b89ff5517eb43618855b3b9b14c7556d6b5ff2ab44c7",
-                "ops/verdict-delivery.py": "1402052022e04945cb58aebb86215434aed8e86c5d1b9c96c5a7a56341e759b3",
-                "ops/review-gate.py": "be86926b7cc6397487575aba80e040b40acc0dcb354108deb7e87b6a628cce0d",
+                "ops/verdict-delivery.py": "ac1eb9e0549bab89f88762b3d7dec5ded4736999006be2892ef8df496e8e35bc",
                 "lib/loadpy.py": "868281532b1b418afbd18c535653adbf21fa580f54da01da158548e539ed40fd"
           }
     },

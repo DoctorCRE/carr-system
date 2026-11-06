@@ -78,7 +78,7 @@
     ]
   },
   "tools/prove-recorded-comps-readable-deal-labels.py": {
-    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "sha256": "a142fc0a375a9f0d701a981514e3cf31b7dc84ab6dcfa4be87387601b3df8914",
     "commands": [
       "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
       "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"
@@ -112,6 +112,13 @@
     "sha256": "d27da0ae34a094d9a21b9504b51b2880a1019f4d3f1a03a3c047df036df94ba7",
     "commands": [
       "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
+    ]
+  },
+  "tools/prove-client-anniversary-read.py": {
+    "sha256": "7774379a09a41ad88f7e816e4486fd48b7c4db274f13be01f0fdc69ba0ba698d",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e PARSER with JSON stdin through parseClientAnniversaryResponse",
+      "git merge-base --is-ancestor merged unit SHA deployed release SHA"
     ]
   }
 }
