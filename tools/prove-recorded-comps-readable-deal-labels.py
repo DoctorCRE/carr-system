@@ -272,7 +272,6 @@ def execute(args, receipt):
     receipt['predicate'] = 'natural-comps-and-release-producer' if blocks else 'natural.post-deployment-table'
     if not blocks:
         receipt['reason'] = 'no qualifying post-deployment table'
-    print(json.dumps(receipt, sort_keys=True))
     return 0 if blocks else 78
 
 
@@ -290,10 +289,14 @@ def main():
     def timeout(_signum, _frame):
         raise Unavailable('total deadline exceeded')
     signal.signal(signal.SIGALRM, timeout)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
     receipt = {'natural_read': 'unavailable', 'synthetic': 'unavailable', 'predicate': 'release.identity'}
     try:
-        return execute(args, receipt)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
+            code = execute(args, receipt)
+        finally:
+            with defer_deadline():
+                signal.setitimer(signal.ITIMER_REAL, 0)
     except ProofFailed as error:
         receipt['predicate'] = str(error)
         receipt['contradiction'] = 'predicate failed'
@@ -301,18 +304,15 @@ def main():
             receipt['natural_read'] = 'failed'
         elif str(error).startswith('synthetic.'):
             receipt['synthetic'] = 'failed'
-        print(json.dumps(receipt, sort_keys=True))
-        return 1
+        code = 1
     except (KeyError, TypeError, ValueError, IndexError, AttributeError) as error:
         receipt['contradiction'] = type(error).__name__
-        print(json.dumps(receipt, sort_keys=True))
-        return 1
+        code = 1
     except (Unavailable, OSError, subprocess.TimeoutExpired) as error:
         receipt['reason'] = str(error) if isinstance(error, Unavailable) else type(error).__name__
-        print(json.dumps(receipt, sort_keys=True))
-        return 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        code = 78
+    print(json.dumps(receipt, sort_keys=True))
+    return code
 
 
 if __name__ == '__main__':

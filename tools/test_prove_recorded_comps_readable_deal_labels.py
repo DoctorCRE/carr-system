@@ -152,7 +152,7 @@ console.log(JSON.stringify({responses,release}));
                 responses = {verb: {'content': [{'type': 'text', 'text': json.dumps(value)}]} for verb, value in responses.items()}
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
-            if mode in ('timeout', 'wrapper_error'):
+            if mode in ('timeout', 'wrapper_error', 'deadline_disarm'):
                 child = ("from pathlib import Path; import time; "
                          f"Path({str(folder / 'started')!r}).touch(); "
                          "time.sleep(3); "
@@ -163,7 +163,7 @@ console.log(JSON.stringify({responses,release}));
                     + f'started={str(folder / "started")!r}\n'
                     + 'from pathlib import Path\n'
                     + 'while not Path(started).exists(): time.sleep(0.01)\n'
-                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'child.wait()\n'))
+                    + ('sys.exit(3)\n' if mode in ('wrapper_error', 'deadline_disarm') else 'child.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
             if denied_reads:
@@ -207,6 +207,11 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                            'def cleanup(self):\n'
                            ' if "comps-proof-" in self.name: time.sleep(3)\n'
                            ' return real_cleanup(self)\ntempfile.TemporaryDirectory.cleanup=cleanup\n') + harness
+            if mode == 'deadline_disarm':
+                harness = ('import signal,os\nreal_timer=signal.setitimer\n'
+                           'def set_timer(which,seconds,*args):\n'
+                           ' if seconds==0: os.kill(os.getpid(),signal.SIGALRM)\n'
+                           ' return real_timer(which,seconds,*args)\nsignal.setitimer=set_timer\n') + harness
             runner_path = RUNNER
             if mode in ('dependencies', 'clean_runtime'):
                 runtime = folder / 'runtime'
@@ -225,7 +230,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 pid = int((folder / 'pid').read_text())
                 with self.assertRaises(ProcessLookupError):
                     os.kill(pid, 0)
-            if mode in ('timeout', 'wrapper_error'):
+            if mode in ('timeout', 'wrapper_error', 'deadline_disarm'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
                 time.sleep(3.2)
                 self.assertFalse((folder / 'escaped').exists(),
@@ -312,6 +317,11 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             with self.subTest(mode=mode):
                 result = self.invoke(mode, timeout_seconds=2)
                 self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+
+    def test_alarm_during_timer_cancellation_still_exits_unavailable(self):
+        result = self.invoke('deadline_disarm')
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+        self.assertTrue(json.loads(result.stdout)['reason'])
 
     def test_mcp_envelope(self):
         result = self.invoke('envelope')
