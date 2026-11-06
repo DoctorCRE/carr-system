@@ -8,7 +8,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: MCP unit shard ${{ matrix.shard }} of 5
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 85
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +53,8 @@ jobs:
         run: ops/ci-zsh.sh
       - uses: ./.github/actions/ci-apt
         with:
-          packages: --postgres --documents
+          packages: --postgres --unit-shard ${{ matrix.shard }}
+          timeout-seconds: 4500
       - name: Run assigned MCP suites
         env:
           CARR_CI_DATABASE_URL: postgres://carr_ci@127.0.0.1:5432/carr_ci

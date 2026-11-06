@@ -43,17 +43,30 @@ def main(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('--postgres', '--provision-postgres', action='store_true')
     parser.add_argument('--documents', action='store_true')
+    from ci_unit_shards import COUNT
+    parser.add_argument('--unit-shard', type=int, choices=range(1, COUNT + 1))
     args = parser.parse_args(args)
+    if args.unit_shard:
+        from ci_unit_shards import plan
+        args.documents = 'fact-store-postgres.test.mjs' in plan()[args.unit_shard - 1]
     if args.postgres:
         install()
     if args.documents:
-        subprocess.run(['sudo', 'apt-get', '-o', 'Acquire::Retries=0',
-                        'update', '--error-on=any', '-qq'], check=True, timeout=120)
-        subprocess.run(['sudo', 'apt-get', '-o', 'Acquire::Retries=0',
-                        'install', '-y', '--no-install-recommends',
-                        'libreoffice-calc', 'poppler-utils'], check=True, timeout=120)
-        subprocess.run(['pdftotext', '-v'], check=True, timeout=10)
-        subprocess.run(['libreoffice', '--version'], check=True, timeout=10)
+        try:
+            for arguments, limit in ((['update', '--error-on=any', '-qq'], 120),
+                                     (['install', '-y', '--no-install-recommends',
+                                       'libreoffice-calc', 'poppler-utils'], 3600)):
+                subprocess.run(['timeout', '--kill-after=5s', f'{limit}s',
+                                'sudo', 'apt-get', '-o', 'Acquire::Retries=2',
+                                '-o', 'Acquire::http::Timeout=15',
+                                '-o', 'Acquire::https::Timeout=15', *arguments],
+                               check=True, timeout=limit + 10)
+            subprocess.run(['pdftotext', '-v'], check=True, timeout=10)
+            subprocess.run(['libreoffice', '--version'], check=True, timeout=10)
+        except (subprocess.SubprocessError, OSError) as error:
+            print(f'::error::Document setup failed within bounded signed apt acquisition: {error}',
+                  file=sys.stderr, flush=True)
+            return 1
     return 0
 
 

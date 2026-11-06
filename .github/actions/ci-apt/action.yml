@@ -1,6 +1,9 @@
 name: CI system dependencies
 description: Acquire signed packages and verify required tools.
 inputs:
+  timeout-seconds:
+    description: Total setup deadline including native apt retries
+    default: '300'
   packages:
     description: PostgreSQL and document dependency switches
     required: true
@@ -8,4 +11,4 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: timeout --kill-after=5s 300s python3 ops/ci-apt.py ${{ inputs.packages }}
+      run: timeout --kill-after=5s ${{ inputs.timeout-seconds }}s python3 ops/ci-apt.py ${{ inputs.packages }}
