@@ -826,13 +826,16 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
     });
     const lateLaunch = join(dir, "late-launch.py");
     await writeFile(lateLaunch, `import importlib.util, sys, time
+from pathlib import Path
 spec = importlib.util.spec_from_file_location('proof', ${JSON.stringify(join(root, "tools/prove-identity-domain-recorded-addresses.py"))})
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 launch = proof.subprocess.Popen
 def delayed(command, **kwargs):
  child = launch(command, **kwargs)
- if command[0] == ${JSON.stringify(wrapper)}: time.sleep(0.7)
+ if Path(command[0]).resolve() == Path(${JSON.stringify(wrapper)}).resolve():
+  time.sleep(0.7)
+  Path(__file__).with_name('late.marker').write_text('acquired')
  return child
 proof.subprocess.Popen = delayed
 sys.exit(proof.main())
@@ -840,12 +843,14 @@ sys.exit(proof.main())
     for (const mode of ["descendant", "late-descendant", "late-launch"]) {
       await t.test(`deadline cleans up owned ${mode} process tree`, async () => {
         await writeFile(join(dir, "mode"), mode === "late-launch" ? "descendant" : mode);
+        await rm(join(dir, "child.pid"), { force: true });
         let pid;
         try {
           const started = performance.now();
           const timed = await run([...flags.slice(0, -1), "0.5"], mode === "late-launch" ? lateLaunch : undefined);
           assert.equal(timed.code, 78, timed.stdout + timed.stderr);
           assert.ok(performance.now() - started < 2000, "proof exceeded bounded acquisition cleanup");
+          if (mode === "late-launch") assert.equal(await readFile(join(dir, "late.marker"), "utf8"), "acquired");
           pid = Number(await readFile(join(dir, "child.pid"), "utf8"));
           let alive = true;
           for (let attempt = 0; attempt < 100; attempt++) {
