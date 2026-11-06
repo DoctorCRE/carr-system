@@ -6,26 +6,45 @@ type RelationshipFields = { deal_evidence?: DealEvidence[]; loan_programs?: stri
 // Evidence and overrides are external JSON, validated field by field below.
 type EvidenceInput = Record<string, any>;
 import { exactDealAssociations } from "./relationship-network.ts";
-// Trust uses verified deal history; missing coverage never becomes zero.
-export function computedTrust(stats: Partial<RelationshipStats> | null | undefined, now: string) {
-  if (!stats?.coverage_verified_at || !Number.isInteger(stats.deals_worked) || !Number.isInteger(stats.won) || !Number.isInteger(stats.lost)) return 'Unrated';
+type EvidenceEvaluation = {
+  kind: 'unverified';
+  projection: { computed_tier: 'Unrated'; deals_worked: null; deals_referred: null; won: null; lost: null; win_rate: null };
+} | {
+  kind: 'verified'; coverage: bigint; observed: bigint;
+  projection: { computed_tier: 'Proven' | 'Established' | 'Trial'; deals_worked: number; deals_referred: number | undefined; won: number; lost: number; win_rate: number | null };
+};
+function exactEvidenceInstant(value: unknown): bigint | null {
+  const canonical = canonicalEvidenceTimestamp(value);
+  if (canonical === null || typeof value !== 'string') return null;
+  const fraction = /\.(\d{1,6})/.exec(value)?.[1] || '';
+  return BigInt(Date.parse(canonical)) * 1000n + BigInt(fraction.padEnd(6, '0').slice(3));
+}
+function evaluateEvidence(stats: Partial<RelationshipStats> | null | undefined, now: string): EvidenceEvaluation {
+  const coverage = exactEvidenceInstant(stats?.coverage_verified_at);
+  const observed = exactEvidenceInstant(now);
+  const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  if (!stats || coverage === null || observed === null || coverage > observed
+      || !count(stats.deals_worked) || !count(stats.won) || !count(stats.lost)
+      || (stats.deals_referred !== undefined && !count(stats.deals_referred))
+      || stats.won > stats.deals_worked - stats.lost) {
+    return { kind: 'unverified', projection: { computed_tier: 'Unrated', deals_worked: null,
+      deals_referred: null, won: null, lost: null, win_rate: null } };
+  }
   const years = stats.first_worked_at ? (Date.parse(now) - Date.parse(stats.first_worked_at)) / (365.25 * 86400000) : 0;
   const recency = stats.last_contacted_at ? (Date.parse(now) - Date.parse(stats.last_contacted_at)) / 86400000 : Infinity;
-  // Number.isInteger above establishes these optional numeric fields.
-  const resolved = stats.won! + stats.lost!;
-  // Keep the existing null comparison coercion when no outcomes are resolved.
-  const rate = resolved ? stats.won! / resolved : null;
-  if (years >= 2 && stats.deals_worked! >= 8 && rate! >= .7 && recency >= 0 && recency <= 180) return 'Proven';
-  if (years >= 1 && stats.deals_worked! >= 3 && rate! >= .5 && recency >= 0 && recency <= 365) return 'Established';
-  return 'Trial';
+  const resolved = stats.won + stats.lost;
+  const rate = resolved ? stats.won / resolved : null;
+  const tier = years >= 2 && stats.deals_worked >= 8 && rate !== null && rate >= .7 && recency >= 0 && recency <= 180 ? 'Proven'
+    : years >= 1 && stats.deals_worked >= 3 && rate !== null && rate >= .5 && recency >= 0 && recency <= 365 ? 'Established' : 'Trial';
+  return { kind: 'verified', coverage, observed, projection: { computed_tier: tier,
+    deals_worked: stats.deals_worked, deals_referred: stats.deals_referred,
+    won: stats.won, lost: stats.lost, win_rate: rate } };
+}
+export function computedTrust(stats: Partial<RelationshipStats> | null | undefined, now: string) {
+  return evaluateEvidence(stats, now).projection.computed_tier;
 }
 export function enrichRelationship(payload: Partial<RelationshipStats> | null | undefined, now: string) {
-  const stats = payload || {};
-  // Keep legacy undefined-to-NaN arithmetic for incomplete unverified payloads.
-  const verified = Boolean(stats.coverage_verified_at);
-  return { ...stats, deals_referred: verified ? stats.deals_referred : null, deals_worked: verified ? stats.deals_worked : null,
-    win_rate: verified && stats.won! + stats.lost! > 0 ? stats.won! / (stats.won! + stats.lost!) : null,
-    computed_tier: computedTrust(stats, now), formula_version: 'vendor-trust.v1' };
+  return { ...payload, ...evaluateEvidence(payload, now).projection, formula_version: 'vendor-trust.v1' };
 }
 export function requireRelationshipPartner(actor: Actor, code = 'AUTHORIZATION_REFUSED') {
   if (actor?.human !== true || !(['joe', 'dell'] as readonly unknown[]).includes(actor?.slug)) throw Object.assign(new Error(code), { code });
@@ -54,7 +73,7 @@ export function dealEvidenceEntries(value: unknown) {
 // explicit timezone. Validate the calendar before Date.parse can normalize it.
 function canonicalEvidenceTimestamp(value: unknown) {
   if (typeof value !== 'string') return null;
-  const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2}))?$/.exec(value);
+  const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-]\d{2}:\d{2}))?$/.exec(value);
   if (!parts) return null;
   const [, y, m, d, h = '00', minute = '00', second = '00', zone = 'Z'] = parts;
   const year = Number(y), month = Number(m), day = Number(d);

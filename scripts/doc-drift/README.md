@@ -20,8 +20,10 @@ TOML file is checked against that file. Verbs resolve from tools.js and its
 local imports. Main-branch GitHub blob links to this repository resolve locally.
 
 Each claim carries its file, line, kind, target and source dependencies.
-Missing claims include rename evidence from Git and `git log --follow` when
-available; similarity suggestions are explicitly unverified. External and
+Missing claims use current-inventory name similarity for explicitly unverified
+suggestions. Required suggestion generation never reads Git history or unrelated
+refs, and full scans work in depth-one checkouts. Rename continuity is not
+inferred. PR selection with a base still requires that base commit. External and
 machine-local references, parameterized examples, generated outputs, negated
 existence statements and planned references are listed as unchecked. The
 checker cannot prove arbitrary prose behavior, dynamic shell dispatch or
