@@ -5,14 +5,13 @@ on:
   pull_request_target:
     types: [synchronize, labeled, unlabeled, reopened, ready_for_review]
   workflow_run:
-    workflows: [CI, Review gate]
+    workflows: [CI]
     types: [completed]
-  status:
+  pull_request_review:
+    types: [submitted, dismissed]
 permissions:
   contents: read
   pull-requests: read
-  checks: read
-  statuses: read
 concurrency:
   group: verdict-delivery-${{ github.event.issue.number || github.event.pull_request.number || github.event.workflow_run.head_sha || github.event.sha }}
   cancel-in-progress: false

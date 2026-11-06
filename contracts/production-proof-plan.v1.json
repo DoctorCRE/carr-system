@@ -49,7 +49,7 @@
           ],
           "sources": {
                 "ops/verdict-delivery-proof.py": "a199eb96015ea45a56e2b89ff5517eb43618855b3b9b14c7556d6b5ff2ab44c7",
-                "ops/verdict-delivery.py": "46eade54d0b4f5c565cc07e3b884df23b4c079f0fc7066d8eeb3e7c9252aac6a",
+                "ops/verdict-delivery.py": "5cc814f38f2a28e80c896560c706af74e0d49c33189381a452a6a302c2875f17",
                 "ops/review-gate.py": "be86926b7cc6397487575aba80e040b40acc0dcb354108deb7e87b6a628cce0d",
                 "lib/loadpy.py": "868281532b1b418afbd18c535653adbf21fa580f54da01da158548e539ed40fd"
           }

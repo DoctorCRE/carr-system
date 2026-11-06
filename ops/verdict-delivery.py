@@ -76,44 +76,6 @@ def ready(pr):
             and pr['head']['repo']['full_name'] == REPO)
 
 
-def green(sha, read):
-    rules = collection(read('rules/branches/main'))
-    required = [check for rule in rules if rule['type'] == 'required_status_checks'
-                for check in rule['parameters']['required_status_checks']]
-    if not required:
-        raise ValueError('No required checks configured; refuse unprotected arming')
-    checks = collection(read(f'commits/{sha}/check-runs?per_page=100'), 'check_runs')
-    statuses = collection(read(f'commits/{sha}/status?per_page=100'), 'statuses')
-    if len(required) > 100:
-        raise ValueError('Required-check budget exceeded')
-    apps = {}
-    for requirement in required:
-        context, provider = requirement['context'], requirement.get('integration_id')
-        matches = [c for c in checks if c['name'] == context and c['head_sha'] == sha
-                   and (provider is None or c['app']['id'] == provider)]
-        # REST check-runs returns latest attempts; ids order repeated check names.
-        latest = max(matches, key=lambda c: c['id']) if matches else None
-        check_ok = bool(latest and latest['status'] == 'completed' and latest['conclusion'] == 'success')
-        matching_statuses = [s for s in statuses if s['context'] == context]
-        if provider is not None:
-            bound = []
-            for status in matching_statuses:
-                creator = status.get('creator') or {}
-                login = creator.get('login', '')
-                if creator.get('type') == 'Bot' and re.fullmatch(r'[a-zA-Z0-9-]+\[bot\]', login):
-                    if login not in apps:
-                        apps[login] = read('apps/' + login[:-5])
-                    app = apps[login]
-                    if app['id'] == provider:
-                        bound.append(status)
-            matching_statuses = bound
-        latest_status = max(matching_statuses, key=lambda s: s['id']) if matching_statuses else None
-        status_ok = bool(latest_status and latest_status['state'] == 'success')
-        if not (latest or latest_status) or (latest and not check_ok) or (latest_status and not status_ok):
-            return False
-    return True
-
-
 def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
             arm_enabled=False, dry_run=False):
     if type(number) is not int or number < 1 or app_login != APP:
@@ -166,10 +128,8 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
     failure = gate.review_failure(pr, reviews, app_login)
     if failure:
         return state('refused', failure)
-    if not green(sha, read):
-        return state('approved-current-head', 'Required checks have not all succeeded')
     if not arm_enabled:
-        return state('checks-green', 'Arming disabled pending App permission and configuration')
+        return state('approved-current-head', 'Arming disabled pending App permission and configuration')
     current = read(f'pulls/{number}')
     if current['head']['sha'] != sha:
         return state('head-moved', 'Head moved before arming')
@@ -178,8 +138,6 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
     # Reviews can change without a push. Re-read immediately before the write.
     if gate.review_failure(current, collection(read(f'pulls/{number}/reviews?per_page=100')), app_login):
         return state('refused', 'Approval changed before arming')
-    if not green(sha, read):
-        return state('approved-current-head', 'Required checks changed before arming')
     if current.get('auto_merge'):
         return state('armed', 'Native auto-merge already enabled')
     queue = read(f'queue/{number}')
@@ -188,7 +146,7 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
     if queue['isInMergeQueue']:
         return state('armed', 'PR is already in the native merge queue')
     if dry_run:
-        return state('would-arm', 'Current-head App approval and required checks green')
+        return state('would-arm', 'Current-head App approval; GitHub enforces required checks')
     write({'kind': 'arm', 'number': number, 'sha': sha})
     return state('armed', 'Native merge queue requested with matching head')
 

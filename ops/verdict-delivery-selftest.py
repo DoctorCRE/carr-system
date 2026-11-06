@@ -18,13 +18,7 @@ class Delivery(unittest.TestCase):
         self.review = {'id': 5, 'state': 'APPROVED', 'commit_id': SHA, 'body': BODY,
                        'submitted_at': '2026-11-05T12:00:00Z',
                        'user': {'login': m.APP, 'type': 'Bot'}}
-        self.data = {'queue/12': {'headRefOid': SHA, 'isInMergeQueue': False}, 'pulls/12': self.pr, 'pulls/12/reviews?per_page=100': [self.review],
-                     'rules/branches/main': [{'type': 'required_status_checks', 'parameters': {
-                         'required_status_checks': [{'context': 'strict', 'integration_id': 15368}]}}],
-                     f'commits/{SHA}/check-runs?per_page=100': {'total_count': 1, 'check_runs': [
-                         {'id': 1, 'name': 'strict', 'head_sha': SHA, 'status': 'completed',
-                          'conclusion': 'success', 'app': {'id': 15368}}]},
-                     f'commits/{SHA}/status?per_page=100': {'total_count': 0, 'statuses': []}}
+        self.data = {'queue/12': {'headRefOid': SHA, 'isInMergeQueue': False}, 'pulls/12': self.pr, 'pulls/12/reviews?per_page=100': [self.review]}
         self.writes = []
 
     def read(self, path):
@@ -51,13 +45,14 @@ class Delivery(unittest.TestCase):
         self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'armed')
         self.assertEqual(self.writes, [{'kind': 'arm', 'number': 12, 'sha': SHA}])
 
-    def test_approved_current_checks_pending(self):
-        self.data[f'commits/{SHA}/check-runs?per_page=100']['check_runs'][0]['conclusion'] = None
-        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'approved-current-head')
-        self.assertFalse(self.writes)
+    def test_native_merge_owns_pending_checks(self):
+        # No check or ruleset response is available to this adapter.
+        # GitHub owns pending, failing and successful required-check decisions.
+        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'armed')
+        self.assertEqual(self.writes, [{'kind': 'arm', 'number': 12, 'sha': SHA}])
 
     def test_checks_green_permission_held(self):
-        self.assertEqual(self.run_delivery()['state'], 'checks-green')
+        self.assertEqual(self.run_delivery()['state'], 'approved-current-head')
         self.assertFalse(self.writes)
 
     def test_head_moved(self):
@@ -155,15 +150,6 @@ class Delivery(unittest.TestCase):
         self.data['pulls/12/reviews?per_page=100'].append(change)
         self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'refused')
 
-    def test_required_check_provider_and_completeness(self):
-        checks = self.data[f'commits/{SHA}/check-runs?per_page=100']
-        for field, value in [('total_count', 2), ('total_count', 100)]:
-            checks[field] = value
-            with self.assertRaises(ValueError): self.run_delivery(arm_enabled=True)
-        checks['total_count'] = 1
-        checks['check_runs'][0]['app']['id'] = 999
-        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'approved-current-head')
-        self.assertFalse(self.writes)
 
     def test_parser_refuses_malformed_and_duplicate_headers(self):
         for body in ['', BODY.replace(SHA, 'abc'), BODY + '\nReviewed-SHA: ' + SHA,
@@ -193,22 +179,6 @@ class Delivery(unittest.TestCase):
             m.deliver(12, self.read, fail, app_login=m.APP, arm_enabled=True)
         self.assertEqual(len(self.writes), 1)
 
-    def test_status_provider_binding_and_red_collision(self):
-        checks = self.data[f'commits/{SHA}/check-runs?per_page=100']
-        statuses = self.data[f'commits/{SHA}/status?per_page=100']
-        statuses.update(total_count=1, statuses=[{'id': 7, 'context': 'strict', 'state': 'success',
-                       'creator': {'type': 'Bot', 'login': 'github-actions[bot]'}}])
-        self.data['apps/github-actions'] = {'id': 15368}
-        checks.update(total_count=0, check_runs=[])
-        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'armed')
-        self.data['apps/github-actions']['id'] = 999
-        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'approved-current-head')
-        self.data['apps/github-actions']['id'] = 15368
-        statuses['statuses'][0]['state'] = 'failure'
-        checks.update(total_count=1, check_runs=[{'id': 1, 'name': 'strict', 'head_sha': SHA,
-                      'status': 'completed', 'conclusion': 'success', 'app': {'id': 15368}}])
-        self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'approved-current-head')
-
     def test_approval_revoked_before_arm(self):
         calls = 0
         def read(path):
@@ -228,10 +198,6 @@ class Delivery(unittest.TestCase):
         self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'armed')
         self.assertFalse(self.writes)
 
-    def test_unprotected_branch_refuses(self):
-        self.data['rules/branches/main'] = []
-        with self.assertRaises(ValueError): self.run_delivery(arm_enabled=True)
-        self.assertFalse(self.writes)
 
     def test_new_approval_after_changes_posts_again(self):
         self.review['body'] += '\nVerdict-Intake: 1'
@@ -242,19 +208,6 @@ class Delivery(unittest.TestCase):
         self.assertEqual(self.run_delivery(verdict=BODY, intake_id=3)['state'], 'submitted')
         self.assertEqual(len(self.writes), 1)
 
-    def test_checks_turn_red_before_arm(self):
-        calls = 0
-        def read(path):
-            nonlocal calls
-            value = self.read(path)
-            if '/check-runs?' in path:
-                calls += 1
-                if calls > 1:
-                    value['check_runs'][0]['conclusion'] = 'failure'
-            return value
-        self.assertEqual(m.deliver(12, read, self.writes.append, app_login=m.APP,
-                                  arm_enabled=True)['state'], 'approved-current-head')
-        self.assertFalse(self.writes)
 
     def test_github_request_budget_refuses_before_network(self):
         from unittest.mock import patch
