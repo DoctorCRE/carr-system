@@ -92,7 +92,8 @@ elif verb=='preview-email-next-step':
             sys.exit(0)
         print('local-verb identity -> synthetic\\nTOOL ERROR '+json.dumps(data['refusal']),file=sys.stderr)
         sys.exit(1)
-    value={**data['active'],'text':args['text'],'next_date':args['next_date']}
+    value=data['active']
+    assert value['text']==args['text'] and value['next_date']==args['next_date']
 else: raise AssertionError('write or unknown verb')
 print(json.dumps(value))
 ''')
