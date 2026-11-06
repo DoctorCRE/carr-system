@@ -1,13 +1,16 @@
 {
   "tools/prove-calendar-snapshot-strict-instants.py": {
-    "sha256": "edaecef058793a6e895a81c7fcb74bc38c7356a815fcf67ed59f000c5c5998ff",
+    "sha256": "c73f3c539ce420105400d294d1f33bf69cc5240e5e8a8b5e5c9d8d1443cfb424",
     "commands": [
       "repository run.sh call calendar-meeting-prep",
       "declared fixture wrapper call calendar-meeting-prep",
       "fixture sys.executable -c prints JSON argv",
       "git rev-parse HEAD",
       "git merge-base --is-ancestor"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   },
   "tools/prove-deal-checklist-transaction-recovery.py": {
     "sha256": "21275c25234ab2b3576baa723e2f128b46c2c7bd0f5a7876eb1f465d088dc503",
@@ -39,10 +42,13 @@
     ]
   },
   "tools/prove-lease-comparison-tiny-rate-stability.py": {
-    "sha256": "11df744ae9d12e2ddec0fbb75a502ee1a3687dacf06d6a7e219f86bbaddfac4b",
+    "sha256": "5a38c9968e8e7aad48c19c7aa985d08ea667cbf711f6e961bae9390bbeecc89d",
     "commands": [
       "declared --call-wrapper call compare-lease-terms"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   },
   "tools/prove-mail-policy-multiple-recorded-addresses.py": {
     "sha256": "f6e0c1165c23bccc67d6e8668e0733a0d5c0d822d0a88e23c09b614a2f33edc2",

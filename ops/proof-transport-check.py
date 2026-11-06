@@ -11,7 +11,7 @@ through lib/release_reader.py or the declared call wrapper; dynamic imports and
 string execution in runners are refused. Pure computation is outside scope.
 
 Process declarations pin the entire runner, including indirect argv construction
-and embedded scripts. Audit every command before updating a pin. The selected
+and embedded scripts. Audit every command and hash-bound helper before updating a pin. The selected
 call wrapper and explicit fixture executables are trusted caller inputs.
 """
 import argparse
@@ -72,6 +72,13 @@ def violations(source, path=None):
     declaration = PROCESSES.get(path, {})
     process_allowed = (bool(declaration.get('commands')) and
                        hashlib.sha256(source.encode()).hexdigest() == declaration.get('sha256'))
+    helpers = set()
+    if process_allowed:
+        for name, digest in declaration.get('helpers', {}).items():
+            module = name.split('.')[0]
+            helper = ROOT / 'tools' / f'{module}.py'
+            if helper.is_file() and hashlib.sha256(helper.read_bytes()).hexdigest() == digest:
+                helpers.add(name)
     bindings = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -86,7 +93,8 @@ def violations(source, path=None):
                 if (getattr(node, 'level', 0) or alias.name == '*' or
                         (isinstance(node, ast.ImportFrom) and alias.name in
                          {'os', 'posix', 'nt', 'sys', 'subprocess', 'socket', 'urllib', 'modules'}) or
-                        (kind is not None and (kind != 'program' or not process_allowed))):
+                        (kind is not None and not (kind == 'unknown helper' and name in helpers)
+                         and (kind != 'program' or not process_allowed))):
                     failures.append((node.lineno, f'undeclared network/process import {name}; use lib.release_reader or declare audited commands'))
         if isinstance(node, ast.Name) and node.id in {'__import__', 'eval', 'exec', 'compile', 'getattr', 'globals', 'locals', 'vars'}:
             failures.append((node.lineno, 'dynamic capability lookup is not admitted'))

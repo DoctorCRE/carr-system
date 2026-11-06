@@ -1,5 +1,6 @@
 """Exercise proof transport admission and outgoing release request behavior."""
 import importlib.util
+import hashlib
 from http.server import ThreadingHTTPServer
 import threading
 from pathlib import Path
@@ -159,6 +160,33 @@ class ProofTransportTest(unittest.TestCase):
                 self.assertTrue(guard.violations(source.replace("'call'", "'fetch'"), name)
                                 if "'call'" in source else
                                 guard.violations(source + '\nother_command = "curl"', name))
+
+    def test_pure_parser_admission_binds_runner_symbol_and_helper_source(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        for name in ['calendar-snapshot-strict-instants', 'lease-comparison-tiny-rate-stability']:
+            path = f'tools/prove-{name}.py'
+            source = (ROOT / path).read_text()
+            with self.subTest(runner=name):
+                self.assertEqual(guard.violations(source, path), [])
+                self.assertTrue(guard.violations(source, 'tools/prove-unregistered.py'))
+                for addition in ['\nimport socket', '\nimport urllib.request',
+                                 '\nfrom proof_release import other_symbol']:
+                    changed = source + addition
+                    declaration = dict(guard.PROCESSES[path],
+                                       sha256=hashlib.sha256(changed.encode()).hexdigest())
+                    with patch.dict(guard.PROCESSES, {path: declaration}):
+                        self.assertTrue(guard.violations(changed, path))
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    (root / 'tools').mkdir()
+                    helper = root / 'tools/proof_release.py'
+                    original = (ROOT / 'tools/proof_release.py').read_text()
+                    with patch.object(guard, 'ROOT', root):
+                        self.assertTrue(guard.violations(source, path))
+                        helper.write_text(original)
+                        self.assertEqual(guard.violations(source, path), [])
+                        helper.write_text(original + '\nimport socket\n')
+                        self.assertTrue(guard.violations(source, path))
 
     def test_shared_reader_caps_success_and_errors_without_following_redirects(self):
         from lib.release_reader import read, USER_AGENT
