@@ -132,6 +132,38 @@ class Delivery(unittest.TestCase):
                                   arm_enabled=True)['state'], 'held')
         self.assertFalse(self.writes)
 
+    def test_hold_added_during_queue_lookup_refuses_arm(self):
+        def read(path):
+            value = self.read(path)
+            if path == 'queue/12':
+                self.pr['labels'] = [{'name': 'merge-hold'}]
+            return value
+        result = m.deliver(12, read, self.writes.append, app_login=m.APP, arm_enabled=True)
+        self.assertEqual(result['state'], 'held')
+        self.assertFalse(self.writes)
+
+    def test_approval_dismissed_during_queue_lookup_refuses_arm(self):
+        def read(path):
+            value = self.read(path)
+            if path == 'queue/12':
+                self.review['state'] = 'DISMISSED'
+            return value
+        result = m.deliver(12, read, self.writes.append, app_login=m.APP, arm_enabled=True)
+        self.assertEqual(result['state'], 'refused')
+        self.assertFalse(self.writes)
+
+    def test_approval_replaced_during_queue_lookup_refuses_arm(self):
+        def read(path):
+            value = self.read(path)
+            if path == 'queue/12':
+                self.data['pulls/12/reviews?per_page=100'].append(dict(
+                    self.review, id=6, state='CHANGES_REQUESTED',
+                    submitted_at='2026-11-05T13:00:00Z'))
+            return value
+        result = m.deliver(12, read, self.writes.append, app_login=m.APP, arm_enabled=True)
+        self.assertEqual(result['state'], 'refused')
+        self.assertFalse(self.writes)
+
     def test_duplicate_intake_no_review_write(self):
         self.review['body'] += '\nVerdict-Intake: 1'
         self.assertEqual(self.run_delivery(verdict=BODY, intake_id=1)['state'], 'refused')

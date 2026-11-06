@@ -130,6 +130,9 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
         return state('refused', failure)
     if not arm_enabled:
         return state('approved-current-head', 'Arming disabled pending App permission and configuration')
+    queue = read(f'queue/{number}')
+    if queue['headRefOid'] != sha:
+        return state('head-moved', 'Head moved before queue readback')
     current = read(f'pulls/{number}')
     if current['head']['sha'] != sha:
         return state('head-moved', 'Head moved before arming')
@@ -140,9 +143,6 @@ def deliver(number, read, write, *, app_login, verdict=None, intake_id=None,
         return state('refused', 'Approval changed before arming')
     if current.get('auto_merge'):
         return state('armed', 'Native auto-merge already enabled')
-    queue = read(f'queue/{number}')
-    if queue['headRefOid'] != sha:
-        return state('head-moved', 'Head moved before queue readback')
     if queue['isInMergeQueue']:
         return state('armed', 'PR is already in the native merge queue')
     if dry_run:
