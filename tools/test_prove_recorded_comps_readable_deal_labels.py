@@ -2,7 +2,12 @@
 import contextlib
 import http.client
 import http.server
+import hashlib
+import base64
+import io
+import tarfile
 import json
+import os
 from pathlib import Path
 import subprocess
 import shutil
@@ -27,6 +32,32 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 class ProofTest(unittest.TestCase):
     def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False):
         requests = []
+        archive = io.BytesIO()
+        package = ROOT / 'mcp-server/node_modules/@cfworker/json-schema'
+        with tarfile.open(fileobj=archive, mode='w:gz') as bundle:
+            bundle.add(package, arcname='package')
+        dependency = archive.getvalue()
+        if mode in ('archive_path', 'archive_link', 'archive_size'):
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode='w:gz') as bundle:
+                entry = tarfile.TarInfo('package/../../escaped' if mode == 'archive_path' else 'package/file')
+                if mode == 'archive_link':
+                    entry.type = tarfile.SYMTYPE
+                    entry.linkname = '/tmp/outside'
+                if mode == 'archive_size':
+                    entry.size = 1048577
+                bundle.addfile(entry, io.BytesIO(b'x' * entry.size))
+            dependency = archive.getvalue()
+        if mode == 'archive_invalid':
+            dependency = b'not a tarball'
+
+        lock = json.loads((ROOT / 'mcp-server/package-lock.json').read_text())
+        lock['packages']['node_modules/@cfworker/json-schema']['integrity'] = (
+            'sha512-' + base64.b64encode(hashlib.sha512(dependency).digest()).decode())
+        if mode == 'transitive':
+            lock['packages']['node_modules/@cfworker/json-schema']['dependencies'] = {'unexpected': '1.0.0'}
+        if mode == 'dependency_url':
+            lock['packages']['node_modules/@cfworker/json-schema']['resolved'] = 'https://untrusted.invalid/archive.tgz'
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
                 if (self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
@@ -42,7 +73,12 @@ class ProofTest(unittest.TestCase):
                 if mode == 'http_error':
                     self.send_error(503)
                     return
-                if self.path == '/release':
+                if self.path == '/@cfworker/json-schema/-/json-schema-4.1.1.tgz':
+                    if mode == 'dependencies':
+                        self.send_error(503)
+                        return
+                    body = dependency if mode != 'integrity' else b'corrupted'
+                elif self.path == '/release':
                     value = json.loads(json.dumps(fixture['release']))
                     if mode == 'identity':
                         value['git_sha']['value'] = 'main'
@@ -56,7 +92,8 @@ class ProofTest(unittest.TestCase):
                     if name not in {'src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'}:
                         self.send_error(404)
                         return
-                    body = (ROOT / 'mcp-server' / name).read_bytes()
+                    body = (json.dumps(lock).encode() if name == 'package-lock.json'
+                            else (ROOT / 'mcp-server' / name).read_bytes())
                     if mode == 'producer' and name == 'src/answer-blocks.js':
                         body = body.replace(b'value: row.deal_name', b'value: row.deal_id')
                 if mode == 'oversized':
@@ -141,6 +178,8 @@ console.log(JSON.stringify({responses,release}));
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
 def opened(self,url,*args,**kwargs):
+ if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://registry.npmjs.org/'):
+  url=urllib.request.Request(origin+url.full_url.removeprefix('https://registry.npmjs.org'),headers=dict(url.header_items()),method=url.get_method())
  if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://raw.githubusercontent.com/'):
   url=urllib.request.Request(origin+url.full_url.removeprefix('https://raw.githubusercontent.com'),headers=dict(url.header_items()),method=url.get_method())
  return original(self,url,*args,**kwargs)
@@ -148,23 +187,37 @@ urllib.request.OpenerDirector.open=opened
 sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds',sys.argv[4]]
 runpy.run_path(sys.argv[0],run_name='__main__')
 '''
+            if mode in ('stalled_evaluation', 'late_launch'):
+                child = ('from pathlib import Path; import os,time; '
+                         f'Path({str(folder / "pid")!r}).write_text(str(os.getpid())); time.sleep(8)')
+                harness = ('import subprocess,time\nreal_popen=subprocess.Popen\n'
+                           'def launch(command,*args,**kwargs):\n'
+                           f' if command[0]=="node": command=[sys.executable,"-c",{child!r}]\n'
+                           ' process=real_popen(command,*args,**kwargs)\n'
+                           + (' if command[0]==sys.executable: time.sleep(3)\n' if mode == 'late_launch' else '')
+                           + ' return process\nsubprocess.Popen=launch\n') + harness
             runner_path = RUNNER
-            if mode == 'dependencies':
+            if mode in ('dependencies', 'clean_runtime'):
                 runtime = folder / 'runtime'
                 for name in ('tools/prove-recorded-comps-readable-deal-labels.py', 'lib/release_reader.py', 'lib/release-reader-marker.json', 'mcp-server/package-lock.json'):
                     target = runtime / name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(ROOT / name, target)
+                (runtime / 'mcp-server/package-lock.json').write_text(json.dumps(lock))
                 runner_path = runtime / RUNNER.relative_to(ROOT)
             result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
+            if mode in ('stalled_evaluation', 'late_launch'):
+                pid = int((folder / 'pid').read_text())
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(pid, 0)
             if mode in ('timeout', 'wrapper_error'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
                 time.sleep(3.2)
                 self.assertFalse((folder / 'escaped').exists(),
                                  'wrapper descendant performed work after proof exit')
-            self.assertLessEqual(len(requests), 4, requests)
+            self.assertLessEqual(len(requests), 5, requests)
             if mode == 'pass':
-                self.assertEqual(len(requests), 4, requests)
+                self.assertEqual(len(requests), 5, requests)
             return result
 
     def test_pass(self):
@@ -211,10 +264,33 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['predicate'], 'natural.canonical-response')
 
+    def test_clean_runtime_obtains_release_locked_dependency(self):
+        result = self.invoke('clean_runtime')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['synthetic'], 'passed')
+
+    def test_wrong_dependency_integrity_is_unavailable(self):
+        result = self.invoke('integrity')
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
     def test_missing_runtime_dependencies_are_unavailable(self):
         result = self.invoke('dependencies')
         self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
+    def test_dependency_archive_refusals(self):
+        for mode in ('archive_path', 'archive_link', 'archive_size', 'archive_invalid', 'transitive', 'dependency_url'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
+    def test_producer_deadline_cleans_stalled_and_late_processes(self):
+        for mode in ('stalled_evaluation', 'late_launch'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode, timeout_seconds=2)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
 
     def test_mcp_envelope(self):
         result = self.invoke('envelope')
