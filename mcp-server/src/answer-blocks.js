@@ -44,19 +44,22 @@ export async function recordedCompsTable(c, dealIds, ToolError) {
     `with requested as (select distinct unnest($1::uuid[]) as id),
      missing as (select id from requested except select id from public.deal),
      comps as (
-       select id, deal_id, side, rate_norm_sf_yr
-       from public.v_deal_room_negotiation
-       where deal_id = any($1::uuid[]) and rate_norm_sf_yr is not null
-       order by proposed_on desc, id limit 200
+       select n.id, n.deal_id, d.name as deal_name, n.proposed_on, n.side, n.rate_norm_sf_yr
+       from public.v_deal_room_negotiation n
+       join public.deal d on d.id = n.deal_id
+       where n.deal_id = any($1::uuid[]) and n.rate_norm_sf_yr is not null
+       order by n.proposed_on desc, n.id limit 200
      )
      select exists(select 1 from missing) as missing,
        coalesce((select jsonb_agg(to_jsonb(comps)) from comps), '[]'::jsonb) as comps`, [dealIds]);
   if (result.missing) throw new ToolError({ error: 'answer_blocks_invalid' });
   return { type: 'table.v1', id: 'comps', columns: [
     { key: 'deal', label: 'Deal', type: 'text' },
+    { key: 'proposed_on', label: 'Proposed on', type: 'date' },
     { key: 'side', label: 'Side', type: 'text' },
     { key: 'rent', label: 'Proposed rent ($/SF/year)', type: 'number' },
-  ], rows: result.comps.map(row => ({ deal: { value: row.deal_id }, side: { value: row.side },
+  ], rows: result.comps.map(row => ({ deal: { value: row.deal_name, source: { record_id: row.deal_id } },
+    proposed_on: { value: row.proposed_on, source: { record_id: row.id } }, side: { value: row.side },
     rent: { value: Number(row.rate_norm_sf_yr), source: { record_id: row.id } },
   })) };
 }

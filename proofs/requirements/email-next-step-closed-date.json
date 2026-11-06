@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "email-next-step-closed-date",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "natural-closed-date-preview-refusal",
+      "predicate": "After merge and deploy verify Worker identity with the registered release smoke observer. Separately run python3 tools/prove-email-next-step-closed-date.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. Require a natural closed_on-only noninvoiced deal with literal captured email evidence to refuse preview-email-next-step with email_next_step_evidence_not_found, plus an eligible active preview and unchanged release identity. Release smoke alone does not prove the behavior.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Dedicated CLI exits 0 with closed_date_preview_refused, active_preview_proposed and release_identity_stable. Exit 1 means contradiction. Exit 78 or absent cohorts remains landed-unproven. No confirm or production mutation.",
+      "input_class": "Natural authenticated deal-room-board, get-deal-room and preview-email-next-step reads only, ten records, twenty-four requests, no retries.",
+      "deadline_seconds": 30
+    },
+    {
+      "id": "installed-observer-source-and-execution",
+      "predicate": "After ordinary Studio installation independently verify the installed tools/prove-email-next-step-closed-date.py and lib/record_call.py source digests against the merged revision. Retain its actual redacted successful natural-cohort execution receipt at the same Worker release. Separately observe a normal outlook-intake canonical run with studio-canonical-run.v1 for service outlook-intake, key outlook.intake, environment production, count run.mail_ids minimum 1 and maximum age 3600 seconds at the exact installed runtime SHA. The registered runner only supplies ancillary installation evidence and does not execute or attest the dedicated CLI.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Both installed source identity and dedicated CLI receipt pass alongside the canonical Studio receipt. Missing installation or natural evidence remains landed-unproven.",
+      "input_class": "Read-only installed source digests, dedicated observer receipt and normal canonical intake receipt. No launches, writes or sends.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 24,
+    "max_records": 10,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

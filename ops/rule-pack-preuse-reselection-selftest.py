@@ -542,11 +542,15 @@ with patch.object(hook, 'session_catalog', return_value=source), patch.object(ho
                 if out is not None:
                     self.assertEqual(json.loads(out['hookSpecificOutput']['additionalContext'])['rules'], [self.RULE])
                 return out
+            def repeat(payload):
+                out = hook.process(payload, runner=runner, cache=False)
+                self.assertEqual(json.loads(out['hookSpecificOutput']['additionalContext'])['schema'],
+                                 'rule-pack-reference/v1')
             self.assertIsNotNone(deliver(event))
-            self.assertIsNone(deliver(event))
+            repeat(event)
             self.assertIsNotNone(deliver(dict(event, agent_id=None, prompt='Parent task')))
             self.assertIsNotNone(deliver(dict(event, agent_id='sibling', prompt='Sibling task')))
-            self.assertIsNone(deliver(event))
+            repeat(event)
             source['corpus_digest'] = 'b' * 64
             self.assertIsNotNone(deliver(event))
             epoch.return_value = 'epoch-2'
@@ -601,6 +605,50 @@ class CardDeliveryTests(HookTestCase):
         for key in ('rules', 'overflow', 'cards'):
             self.assertEqual(visible.get(key), row.get(key))
         return row
+
+    def test_repeated_preuse_references_prior_pack_and_context_resets(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(tmp, 'routes')}), \
+                patch.object(hook.rule_routes, '_context_epoch', return_value='one') as epoch:
+            rows = [self.UNCOVERED, self.covered('24e10ee8')]
+            first = self.receipt(self.invoke(rows, dedupe=True))
+            self.assertEqual([c['id'] for c in first['cards']], ['A01'])
+            repeated = self.invoke(rows, dedupe=True)['hookSpecificOutput']['additionalContext']
+            self.assertIn('Rule pack already delivered', repeated)
+            self.assertEqual(len(repeated.splitlines()), 1)
+            self.assertLess(len(repeated), 200)
+            self.assertIsNone(self.invoke([], dedupe=True))
+            epoch.return_value = 'two'
+            self.assertEqual(self.receipt(self.invoke(rows, dedupe=True))['cards'], first['cards'])
+            self.assertEqual(self.receipt(self.invoke(rows, payload={'agent_id': 'child'},
+                                                    dedupe=True))['cards'], first['cards'])
+
+    def test_reference_never_replaces_new_rules_or_incomplete_selection(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(tmp, 'routes')}):
+            self.invoke([self.UNCOVERED], dedupe=True)
+            fresh = dict(self.UNCOVERED, id='33333333', statement='A newly applicable rule.')
+            row = self.receipt(self.invoke([self.UNCOVERED, fresh], dedupe=True))
+            self.assertEqual([r['id'] for r in row['rules']], ['33333333'])
+            broken = dict(self.UNCOVERED, id='44444444', scope={})
+            result = self.invoke([self.UNCOVERED, broken], dedupe=True)
+            self.assertNotIn('rule-pack-reference', json.dumps(result))
+
+    def test_selector_recovery_cannot_reference_an_undelivered_card(self):
+        select = hook.select_cards
+        calls = 0
+        def transient(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError('temporary selector failure')
+            return select(*args, **kwargs)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(tmp, 'routes')}), \
+                patch.object(hook, 'select_cards', side_effect=transient):
+            self.assertIsNone(self.invoke([self.covered('24e10ee8')], dedupe=True))
+            self.assertEqual([c['id'] for c in self.receipt(self.invoke(
+                [self.covered('24e10ee8')], dedupe=True))['cards']], ['A01'])
 
     def test_tool_card_replaces_its_source_rule(self):
         row = self.receipt(self.invoke([self.UNCOVERED, self.covered('24e10ee8')]))

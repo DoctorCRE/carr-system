@@ -1,13 +1,16 @@
 {
   "tools/prove-calendar-snapshot-strict-instants.py": {
-    "sha256": "edaecef058793a6e895a81c7fcb74bc38c7356a815fcf67ed59f000c5c5998ff",
+    "sha256": "c73f3c539ce420105400d294d1f33bf69cc5240e5e8a8b5e5c9d8d1443cfb424",
     "commands": [
       "repository run.sh call calendar-meeting-prep",
       "declared fixture wrapper call calendar-meeting-prep",
       "fixture sys.executable -c prints JSON argv",
       "git rev-parse HEAD",
       "git merge-base --is-ancestor"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   },
   "tools/prove-deal-checklist-transaction-recovery.py": {
     "sha256": "21275c25234ab2b3576baa723e2f128b46c2c7bd0f5a7876eb1f465d088dc503",
@@ -39,10 +42,13 @@
     ]
   },
   "tools/prove-lease-comparison-tiny-rate-stability.py": {
-    "sha256": "11df744ae9d12e2ddec0fbb75a502ee1a3687dacf06d6a7e219f86bbaddfac4b",
+    "sha256": "5a38c9968e8e7aad48c19c7aa985d08ea667cbf711f6e961bae9390bbeecc89d",
     "commands": [
       "declared --call-wrapper call compare-lease-terms"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   },
   "tools/prove-mail-policy-multiple-recorded-addresses.py": {
     "sha256": "f6e0c1165c23bccc67d6e8668e0733a0d5c0d822d0a88e23c09b614a2f33edc2",
@@ -71,10 +77,30 @@
       "declared fixture Python --stub"
     ]
   },
+  "tools/prove-recorded-comps-readable-deal-labels.py": {
+    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "commands": [
+      "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
+      "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"
+    ]
+  },
   "tools/prove-vendor-scheduling-zero-duration.py": {
     "sha256": "270e15167affb568f88e8b39a9aa2228d263c61254bbaed87fde25b3cdc2ac90",
     "commands": [
       "declared --call-wrapper call read-vendor-meetings/morning-brief"
+    ]
+  },
+  "tools/prove-meeting-prep-savepoint-lifetime.py": {
+    "sha256": "8b8a651f5da52a2a1b54160a89d8bebd6adf79dc23b4cb49497cd59db4f41568",
+    "commands": [
+      "declared --call-wrapper call calendar-meeting-prep {}",
+      "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
+    ]
+  },
+  "tools/prove-email-next-step-closed-date.py": {
+    "sha256": "d27da0ae34a094d9a21b9504b51b2880a1019f4d3f1a03a3c047df036df94ba7",
+    "commands": [
+      "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
     ]
   }
 }
