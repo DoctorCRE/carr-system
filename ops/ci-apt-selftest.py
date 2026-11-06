@@ -65,6 +65,29 @@ class SystemDependencies(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 self.invoke(directory, False, run)
 
+    def test_missing_or_old_rust_refuses_image_before_path_publication(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('image_apt', ROOT / 'ops/ci-apt.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for fault in ('missing-rustc', 'missing-cargo', 'old-rustc', 'old-cargo', 'timeout'):
+            def run(command, **kwargs):
+                self.assertEqual(kwargs['timeout'], 5)
+                tool = command[0]
+                if fault == 'timeout':
+                    raise subprocess.TimeoutExpired(command, 5)
+                if fault == 'missing-' + tool:
+                    raise FileNotFoundError(tool)
+                return subprocess.CompletedProcess(command, 0, f'{tool} 1.{84 if fault == "old-" + tool else 90}.0 (hash date)')
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'path'
+                with patch.dict(os.environ, CARR_CI_POSTGRES_IMAGE='both', GITHUB_PATH=str(output)), \
+                     patch.object(module.os, 'geteuid', return_value=1001), \
+                     patch.object(module.subprocess, 'run', side_effect=run):
+                    with self.assertRaises((RuntimeError, OSError, subprocess.TimeoutExpired)):
+                        module.qualify_image(postgres=False)
+                    self.assertFalse(output.exists())
+
     def test_image_document_and_postgres_checks_never_invoke_apt(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location('image_apt', ROOT / 'ops/ci-apt.py')
@@ -75,6 +98,8 @@ class SystemDependencies(unittest.TestCase):
                 output = Path(temporary) / 'path'
                 def run(command, **kwargs):
                     self.assertEqual(command[-1], '--version')
+                    if command[0] in ('rustc', 'cargo'):
+                        return subprocess.CompletedProcess(command, 0, f'{command[0]} 1.90.0 (hash date)')
                     major = 17 if '/17/' in command[0] else 18
                     return subprocess.CompletedProcess(command, 0, f'tool (PostgreSQL) {major}.1')
                 with patch.dict(os.environ, CARR_CI_POSTGRES_IMAGE='both', GITHUB_PATH=str(output)), \

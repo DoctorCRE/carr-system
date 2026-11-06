@@ -38,6 +38,8 @@ class Provisioning(unittest.TestCase):
                         raise FileNotFoundError(command[0])
                     if fault == 'timeout':
                         raise subprocess.TimeoutExpired(command, 5)
+                    if command[0] in ('rustc', 'cargo'):
+                        return subprocess.CompletedProcess(command, 0, f'{command[0]} 1.90.0 (hash date)')
                     version = 17 if '/17/' in command[0] else 18
                     return subprocess.CompletedProcess(command, 0,
                         f'tool (PostgreSQL) {16 if fault == "version" else version}.6')
@@ -48,9 +50,9 @@ class Provisioning(unittest.TestCase):
                     if fault == 'none':
                         self.assertEqual(pg.main(['--provision-postgres']), 0)
                         self.assertEqual(output.read_text(), '/usr/lib/postgresql/17/bin\n')
-                        self.assertEqual(runner.call_count, 14)
+                        self.assertEqual(runner.call_count, 16)
                         self.assertEqual({Path(call.args[0][0]).name for call in runner.call_args_list},
-                            {'initdb', 'pg_ctl', 'postgres', 'psql', 'createdb', 'pg_dump', 'pg_restore'})
+                            {'initdb', 'pg_ctl', 'postgres', 'psql', 'createdb', 'pg_dump', 'pg_restore', 'rustc', 'cargo'})
                     else:
                         with self.assertRaises((RuntimeError, FileNotFoundError, subprocess.TimeoutExpired)):
                             pg.main(['--provision-postgres'])

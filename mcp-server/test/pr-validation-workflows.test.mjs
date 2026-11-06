@@ -123,24 +123,31 @@ test("PR gates retain two parallel partitions and secret scanning runs independe
   assert.ok(ci.jobs.checks.needs.includes("gates") && ci.jobs.checks.needs.includes("secret"));
 });
 
-test("only unit fixtures provision the shared PostgreSQL service", () => {
-  const ci = read("ci.yml"), job = ci.jobs.classes;
-  const run = job.steps.find(step => step.name === "Run this group's check classes");
-  const evaluate = (value, classes) => runInNewContext(value.slice(3, -2), {
-    matrix: { classes }, contains: (value, needle) => value.includes(needle),
-  });
-  for (const group of job.strategy.matrix.classes) {
-    const image = evaluate(job.services.postgres.image, group);
-    const dsn = evaluate(run.env.CARR_CI_DATABASE_URL, group);
-    if (group.split(" ").includes("unit")) {
-      assert.equal(image, read("main-canary.yml").jobs.classes.services.postgres.image);
-      assert.match(image, /@sha256:[0-9a-f]{64}$/);
-      assert.equal(new URL(dsn).hostname, "127.0.0.1");
-      assert.equal(new URL(dsn).username, "carr_ci");
-      assert.equal(new URL(dsn).password, job.services.postgres.env.POSTGRES_PASSWORD);
-    } else {
-      assert.equal(image, "");
-      assert.equal(dsn, "");
+test("unit fixtures use the job container's disposable PostgreSQL service endpoint", () => {
+  const evaluate = (value, classes) => typeof value === 'string' && value.startsWith('${{')
+    ? runInNewContext(value.slice(3, -2), {
+      matrix: { classes }, contains: (value, needle) => value.includes(needle),
+    }) : value;
+  for (const file of ['ci.yml', 'main-canary.yml', 'unit-shards.yml']) {
+    const job = read(file).jobs[file === 'unit-shards.yml' ? 'unit' : 'classes'];
+    const run = job.steps.find(step => ["Run this group's check classes", 'Run assigned MCP suites'].includes(step.name));
+    for (const group of job.strategy.matrix.classes || ['unit']) {
+      const dsn = evaluate(run.env.CARR_CI_DATABASE_URL, group);
+      if (group.split(' ').includes('unit')) {
+        assert.match(evaluate(job.container.image, group), /@sha256:[0-9a-f]{64}$/);
+        assert.match(evaluate(job.services.postgres.image, group), /@sha256:[0-9a-f]{64}$/);
+        const endpoint = new URL(dsn);
+        assert.equal(endpoint.hostname, 'postgres');
+        assert.equal(endpoint.port, '5432');
+        assert.equal(endpoint.pathname, '/carr_ci');
+        assert.equal(endpoint.username, job.services.postgres.env.POSTGRES_USER);
+        assert.equal(endpoint.password, '');
+        assert.equal(endpoint.search + endpoint.hash, '');
+        assert.equal(run.env.PGPASSWORD, job.services.postgres.env.POSTGRES_PASSWORD);
+        assert.equal(job.env.CARR_CI_POSTGRES_IMAGE.includes('both'), true);
+      } else {
+        assert.equal(dsn, '');
+      }
     }
   }
 });

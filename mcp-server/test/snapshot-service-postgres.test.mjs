@@ -12,15 +12,28 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+
+async function snapshotService(prefix) {
+  if (!process.env.CARR_CI_DATABASE_URL) {
+    const local = await postgresDatabase(prefix);
+    return { ...local, dsn: `postgresql://fixture@127.0.0.1:${local.client.connectionParameters.port}/postgres`, local: true };
+  }
+  const release = await acquirePostgresFixtureGroup();
+  const dsn = process.env.CARR_CI_DATABASE_URL;
+  const client = new pg.Client({ connectionString: dsn });
+  try { await client.connect(); }
+  catch (error) { try { await client.end(); } finally { await release(); } throw error; }
+  return { client, dsn, close: async () => { try { await client.end(); } finally { await release(); } } };
+}
 
 test('CI-service snapshots clone named databases on the provided service and clean up role state', async () => {
-  const service = await postgresDatabase('snap-ci-');
+  const service = await snapshotService('snap-ci-');
   const savedUrl = process.env.CARR_CI_DATABASE_URL;
   const savedKey = process.env.CARR_TEST_PG_SNAPSHOT_KEY;
   const savedSnapshot = process.env.CARR_TEST_PG_SNAPSHOT;
   let template, first, second, client;
-  const base = `postgresql://fixture@127.0.0.1:${service.client.connectionParameters.port}/postgres`;
+  const base = service.dsn;
   try {
     process.env.CARR_CI_DATABASE_URL = base;
     delete process.env.CARR_TEST_PG_SNAPSHOT;
@@ -104,14 +117,16 @@ test('all direct snapshot callers use distinct databases on their actual CI-serv
     }
   }
   assert.ok(suites.length > 0, 'snapshot callers must participate in the connection proof');
-  const service = await postgresDatabase('callers-ci-');
+  const service = await snapshotService('callers-ci-');
   const directory = await mkdtemp(path.join(tmpdir(), 'snapshot-callers-'));
   const savedUrl = process.env.CARR_CI_DATABASE_URL;
   let baseline, current, before;
   try {
-    await service.client.query('create database carr_ci');
+    if (service.local) await service.client.query('create database carr_ci');
     before = await clusterState(service.client);
-    process.env.CARR_CI_DATABASE_URL = `postgresql://fixture@127.0.0.1:${service.client.connectionParameters.port}/carr_ci`;
+    const endpoint = new URL(service.dsn);
+    endpoint.pathname = '/carr_ci';
+    process.env.CARR_CI_DATABASE_URL = endpoint.href;
     baseline = await acquireDisposablePostgres({ prefix: 'mcp-snapshot-', template: true, baseline: true });
     current = await acquireDisposablePostgres({ prefix: 'mcp-snapshot-', template: true, sourceTemplate: baseline });
     const env = { ...process.env, CARR_TEST_PG_SNAPSHOT: current.snapshot, CARR_TEST_PG_SNAPSHOT_KEY: current.key,

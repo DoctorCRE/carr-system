@@ -75,6 +75,11 @@ def qualify_image(postgres=True, documents=False):
                     raise RuntimeError(f'missing pgvector artifact: {artifact}')
     if documents and (not shutil.which('pdftotext') or not shutil.which('libreoffice')):
         raise RuntimeError('CI image is missing document tools')
+    for tool in ('rustc', 'cargo'):
+        result = subprocess.run([tool, '--version'], check=True, capture_output=True, text=True, timeout=5)
+        version = re.match(rf'{tool} (\d+)\.(\d+)\.', result.stdout)
+        if not version or tuple(map(int, version.groups())) < (1, 85):
+            raise RuntimeError(f'CI image requires {tool} >= 1.85: {result.stdout}')
     if postgres:
         with open(os.environ['GITHUB_PATH'], 'a') as output:
             output.write('/usr/lib/postgresql/17/bin\n')
