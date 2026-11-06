@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> Refused: invalid feed, any preferences or stored suppression
+    [*] --> Quiet: valid feed, valid quiet preferences, either stored suppression
+    [*] --> Historical: valid feed, valid nonquiet preferences, stored suppression
+    [*] --> Ordinary: valid feed, valid nonquiet preferences, no stored suppression
+    [*] --> Historical: valid feed, unavailable preferences, stored suppression
+    [*] --> Ordinary: valid feed, unavailable preferences, no stored suppression
+    Refused --> [*]
+    Quiet --> [*]
+    Historical --> [*]
+    Ordinary --> [*]

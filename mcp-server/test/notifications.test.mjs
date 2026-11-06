@@ -431,7 +431,7 @@ test("AC-PREF-WRITE: exactly one of start/end is refused by name before any writ
 
 const feedFacts = (delivery = []) => ({
   ok: true, unread_count: 1,
-  notifications: [{ id: "n1", severity: "failure", reason: "r", subject_type: "deal",
+  notifications: [{ id: "11111111-1111-4111-8111-111111111111", severity: "failure", reason: "r", subject_type: "deal",
     subject_ref: "d1", deep_link: "/deals/d1", created_at: "2026-09-18T00:00:00Z",
     read_at: null, delivery }],
 });
@@ -449,11 +449,11 @@ test("AC-PREF-FEED: notification-feed's inputSchema is byte-identical to its v32
 
 test("AC-PREF-FEED: quiet_now marks every row, a cleared window marks none, and a mint-time suppressed device row stays marked after the window ends",
   () => {
-    const quiet = notificationFeedProjection(feedFacts(), { ok: true, quiet_now: true }, ToolError);
+    const quiet = notificationFeedProjection(feedFacts(), preferenceFacts(true), ToolError);
     assert.equal(quiet.quiet_now, true);
     assert.equal(quiet.notifications[0].quiet_suppressed, true);
 
-    const cleared = notificationFeedProjection(feedFacts(), { ok: true, quiet_now: false }, ToolError);
+    const cleared = notificationFeedProjection(feedFacts(), preferenceFacts(false), ToolError);
     assert.equal(cleared.quiet_now, false);
     assert.equal(cleared.notifications[0].quiet_suppressed, false,
       "quiet hours cleared marks none");
@@ -462,7 +462,7 @@ test("AC-PREF-FEED: quiet_now marks every row, a cleared window marks none, and 
     // was suppressed at mint time stays marked once the window ends.
     const historical = notificationFeedProjection(
       feedFacts([{ channel: "device", state: "suppressed_quiet_hours" }]),
-      { ok: true, quiet_now: false }, ToolError);
+      preferenceFacts(false), ToolError);
     assert.equal(historical.quiet_now, false);
     assert.equal(historical.notifications[0].quiet_suppressed, true);
 
@@ -562,3 +562,53 @@ test("AC-PREF-FEED: two zones, one instant, one stored window, opposite answers"
     assert.equal((await read(day)).quiet_now, false);
     await client.query("delete from ops.notification_preference where actor=$1", [joe.id]);
   });
+
+function preferenceFacts(quiet_now = false) {
+  return { ok: true, exists: false, device_opt_in: false, quiet_hours_start: null,
+    quiet_hours_end: null, timezone: "UTC", version: 1, quiet_now };
+}
+
+test("feed coverage is all-or-nothing for absent fields, invalid counts, rows and deliveries", () => {
+  const valid = feedFacts();
+  const broken = [null, false, 1, "feed", [], {}, { ok: true },
+    ...[undefined, null, -1, 1.5, "1", NaN, Infinity].map(unread_count => ({ ...valid, unread_count })),
+    ...[undefined, null, {}, [null], [1], [false], ["row"]].map(notifications => ({ ...valid, notifications }))];
+  for (const key of Object.keys(valid.notifications[0])) {
+    const row = { ...valid.notifications[0] };
+    delete row[key];
+    broken.push({ ...valid, notifications: [row] });
+  }
+  for (const delivery of [null, {}, [null], [1], [{}], [{ channel: "device" }],
+    [{ channel: "email", state: "pending" }], [{ channel: "device", state: "unknown" }]]) {
+    broken.push({ ...valid, notifications: [{ ...valid.notifications[0], delivery }] });
+  }
+  for (const facts of broken) {
+    assert.throws(() => notificationFeedProjection(facts, preferenceFacts(), ToolError),
+      error => error.error === "notification_feed_unavailable");
+  }
+  assert.throws(() => notificationFeedProjection({ ...valid,
+    notifications: [...valid.notifications, null] }, preferenceFacts(), ToolError),
+    /notification_feed_unavailable/);
+});
+
+test("explicit zero and paginated populated feeds remain valid", () => {
+  assert.deepEqual(notificationFeedProjection({ ok: true, unread_count: 0, notifications: [] }, null, ToolError),
+    { ok: true, unread_count: 0, notifications: [], quiet_now: false });
+  for (const unread_count of [0, 1, 100]) {
+    assert.equal(notificationFeedProjection({ ...feedFacts(), unread_count }, null, ToolError).unread_count, unread_count);
+  }
+});
+
+test("feed preference and historical suppression truth table", () => {
+  for (const prefs of [preferenceFacts(true), preferenceFacts(false), null, {},
+    { ok: false, quiet_now: true }, { ok: true, quiet_now: true }]) {
+    for (const historical of [false, true]) {
+      const facts = feedFacts(historical ? [{ channel: "device", state: "suppressed_quiet_hours" }] : []);
+      const result = notificationFeedProjection(facts, prefs, ToolError);
+      const current = prefs?.exists === false && prefs.quiet_now;
+      assert.equal(result.quiet_now, !!current);
+      assert.equal(result.notifications[0].quiet_suppressed, !!current || historical);
+      assert.throws(() => notificationFeedProjection({ ok: true }, prefs, ToolError), /notification_feed_unavailable/);
+    }
+  }
+});
