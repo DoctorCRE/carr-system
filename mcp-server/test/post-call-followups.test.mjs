@@ -1,5 +1,6 @@
 // Tests read-only pending call follow-up snapshots.
 import test from 'node:test';
+import { writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { allowedIn, connectionRouteForTool } from '../src/mcp.js';
 import { TOOLS, executeRegisteredTool, assertRegisteredToolInput } from '../src/tools.js';
@@ -75,6 +76,57 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       const result = await command('resolve-post-call-candidate', { candidate_id: id, accept: true, idempotency_key: randomUUID() });
       assert.equal(result.ref, action);
       assert.equal((await c.query(`select due_on::text from ${source} where id=$1`, [action])).rows[0].due_on, before.date_effect.resulting_due_on);
+    });
+    for (const source of ['next_action', 'capture_post_call_action']) {
+      for (const defaulted of [true, false]) await caseTest(`${source} edge whitespace reuses identity and preserves bullets and date ${defaulted}`, async () => {
+        const edge = '\t\n\r\v\f \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+        const id = await proposal(`${edge}Review\t synthetic   survey${edge}`, '2027-02-02', defaulted);
+        const action = await seed(source, id, `${edge}REVIEW   SYNTHETIC\nSURVEY${edge}`);
+        await c.query(`update ${source} set item_bullets='["Keep concrete recipient", "Keep survey date"]'::jsonb where id=$1`, [action]);
+        const observation = await command('read-call-outcomes');
+        if (process.env.POST_CALL_EDGE_FIXTURE_OUTPUT && source === 'next_action' && defaulted) {
+          const call = observation.calls.find(call => call.session_id === session);
+          writeFileSync(process.env.POST_CALL_EDGE_FIXTURE_OUTPUT, JSON.stringify({ ...observation,
+            calls: [{ ...call, applied: [], open_cards: call.open_cards.filter(card => card.candidate_id === id) }] }));
+        }
+        const before = observation.calls.find(call => call.session_id === session).open_cards
+          .find(card => card.candidate_id === id).existing_action_comparison;
+        assert.equal(before.status, 'exact_match');
+        assert.equal(before.exact_match.id, action);
+        assert.equal(before.date_effect.reason, defaulted ? 'defaulted_date' : 'stated_date');
+        const args = { candidate_id: id, accept: true, idempotency_key: randomUUID() };
+        const result = await command('resolve-post-call-candidate', args);
+        assert.equal(result.ref, action);
+        assert.equal((await command('resolve-post-call-candidate', args)).ref, action);
+        const stored = (await c.query(`select due_on::text,item_bullets from ${source} where id=$1`, [action])).rows[0];
+        assert.equal(stored.due_on, defaulted ? '2027-01-01' : '2027-02-02');
+        assert.ok(stored.item_bullets.includes('Keep concrete recipient'));
+        assert.ok(stored.item_bullets.includes('Keep survey date'));
+      });
+    }
+    await caseTest('proof context accepts all actor owners and PostgreSQL task dates', async () => {
+      const helper = (await c.query("insert into actor(slug,kind,display_name) values('synthetic-helper','automation','Synthetic helper') returning id")).rows[0].id;
+      const exact = await proposal('Review exact survey');
+      await seed('next_action', exact, '\tReview exact survey\n');
+      const related = await proposal('Review helper survey');
+      for (const [i, due] of ['infinity', '-infinity', '10000-01-01', '0001-01-01 BC'].entries()) {
+        const source = i === 0 ? 'next_action' : 'capture_post_call_action';
+        const task = source === 'next_action'
+          ? (await c.query("insert into next_action(subject_type,subject_id,owner_id,description,status,created_by) values('deal',$1,$2,$3,'open',$4) returning id",
+            [deal, helper, '\tReview helper survey\n', actor.id])).rows[0].id
+          : await seed(source, related, '\tReview helper survey\n', helper);
+        await c.query(`update ${source} set due_on=$1::date where id=$2`, [due, task]);
+      }
+      const observation = await command('read-call-outcomes');
+      const call = observation.calls.find(call => call.session_id === session);
+      const cards = call.open_cards.filter(card => [exact, related].includes(card.candidate_id));
+      assert.equal(cards.find(card => card.candidate_id === exact).existing_action_comparison.status, 'exact_match');
+      const context = cards.find(card => card.candidate_id === related).existing_action_comparison;
+      assert.equal(context.status, 'related_open_tasks');
+      assert.deepEqual(context.related_open_tasks.filter(task => task.owner === 'synthetic-helper')
+        .map(task => task.due_on).sort(), ['infinity', '-infinity', '10000-01-01', '0001-01-01 BC'].sort());
+      if (process.env.POST_CALL_EDGE_CONTRACT_FIXTURE_OUTPUT) writeFileSync(process.env.POST_CALL_EDGE_CONTRACT_FIXTURE_OUTPUT,
+        JSON.stringify({ ...observation, calls: [{ ...call, applied: [], open_cards: cards }] }));
     });
     for (const [label, source, text, owner, status, structured] of [
       ['different owner', 'next_action', 'Review owner survey', dell, 'open', true],

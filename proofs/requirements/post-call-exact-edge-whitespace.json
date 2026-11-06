@@ -1,0 +1,31 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR433-S5-post-call-exact-edge-whitespace",
+  "targets": ["worker", "studio"],
+  "assertions": [
+    {
+      "id": "natural-exact-task-edge-whitespace",
+      "predicate": "Verify the deployed Worker release with the registered release smoke observer. Separately run python3 tools/prove-post-call-exact-edge-whitespace.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30 after merge and deploy. Require at least one natural same-owner open edge-whitespace task cohort in read-call-outcomes with exact identity and preserved date context under an unchanged release identity. Release smoke alone does not prove this behavior.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "The dedicated CLI exits 0, eligible_cohorts is positive, and exact_identity_and_owner and preserved_date_context are true. Exit 78 leaves the unit landed-unproven. Exit 1 names a contradiction. No task acceptance or synthetic production cohort is permitted.",
+      "input_class": "Natural registered read-call-outcomes response. Redacted aggregate receipt only. No writes or sends.",
+      "deadline_seconds": 30
+    },
+    {
+      "id": "installed-proof-source-and-readback",
+      "predicate": "Independently check the installed tools/prove-post-call-exact-edge-whitespace.py digest against the merged source and retain its actual natural-cohort execution receipt. Separately observe an ordinary outlook-intake canonical run at the full installed runtime SHA through studio-canonical-run.v1, service outlook-intake, key outlook.intake, environment production, count run.mail_ids minimum 1, maximum age 3600 seconds. The registered observer gives ancillary installation evidence only and does not execute or attest the dedicated CLI. No runtime refresh or job launch is part of observation.",
+      "runner": "studio-canonical-run.v1",
+      "expected_result": "Installed source binding, canonical observation and the dedicated natural-cohort CLI all pass at the pinned release. Missing installation identity or natural cohort leaves the unit landed-unproven.",
+      "input_class": "Read-only installed source digest, redacted dedicated CLI receipt and canonical batch receipt. No record writes or sends.",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 3,
+    "max_records": 1000,
+    "max_runtime_seconds": 120,
+    "max_artifact_bytes": 1048576
+  }
+}
