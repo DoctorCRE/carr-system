@@ -79,7 +79,7 @@ jobs:
     if: ${{ !cancelled() && !github.event.pull_request.draft && github.event_name == 'pull_request' && needs.select.outputs.fast == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:6ccae3e94d42143c5c52d723dd0e75741a787f8a4e7f10639be17b93ee07f7c7
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2
     defaults:
       run:
         shell: bash
@@ -129,7 +129,7 @@ jobs:
     if: ${{ !cancelled() && !github.event.pull_request.draft && github.event_name == 'pull_request' && needs.select.outputs.gates == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:6ccae3e94d42143c5c52d723dd0e75741a787f8a4e7f10639be17b93ee07f7c7
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2
     defaults:
       run:
         shell: bash
@@ -242,7 +242,7 @@ jobs:
     name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     container:
-      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@sha256:6ccae3e94d42143c5c52d723dd0e75741a787f8a4e7f10639be17b93ee07f7c7' || '' }}
+      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2' || '' }}
     defaults:
       run:
         shell: bash
@@ -433,7 +433,7 @@ jobs:
         part: [reconstruction, equivalence, shadow, gates, acceptance]
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:6ccae3e94d42143c5c52d723dd0e75741a787f8a4e7f10639be17b93ee07f7c7
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2
     defaults:
       run:
         shell: bash
