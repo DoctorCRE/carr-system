@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "carr": {
+      "type": "http",
+      "url": "https://api.doctorcre.com/mcp"
+    }
+  }
+}

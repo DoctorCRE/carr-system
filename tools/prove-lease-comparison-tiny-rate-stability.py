@@ -7,8 +7,11 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
-import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read as read_http
 
 
 class Unavailable(Exception):
@@ -57,7 +60,6 @@ def assert_finite(value, key):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise AssertionError(f"non-finite or missing economic output: {key}")
 
-
 def observe(origin, wrapper, timeout):
     deadline = time.monotonic() + timeout
     release = None
@@ -74,12 +76,10 @@ def observe(origin, wrapper, timeout):
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
-        request = urllib.request.Request(origin.rstrip("/") + "/release", method="GET")
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                return None
-        with urllib.request.build_opener(NoRedirect).open(request, timeout=remaining()) as response:
-            release = json.loads(response.read(65537))
+        response = read_http(origin.rstrip("/") + "/release", timeout=remaining(), max_bytes=65536)
+        if response.status != 200:
+            raise OSError('release_unavailable')
+        release = json.loads(response.body)
         if (not isinstance(release, dict) or not isinstance(release.get("git_sha"), str)
                 or len(release["git_sha"]) != 40):
             raise Unavailable("release identity unavailable")

@@ -95,7 +95,7 @@ class ShellSafety(unittest.TestCase):
         self.verdict("printf '%s' 'cat ~/.ssh/id_ed25519'", 0)
         self.verdict('cat ~/.ssh/config', 0)
 
-    def test_single_shell_hook_and_at_most_one_post_hook(self):
+    def test_distinct_shell_admission_hooks_and_at_most_one_post_hook(self):
         for name in ('hooks', 'codex-hooks'):
             document = json.loads((REPO / f'ops/config/{name}.json').read_text())
             document = document.get('hooks', document)
@@ -103,7 +103,13 @@ class ShellSafety(unittest.TestCase):
                      if re.fullmatch(group.get('matcher', ''), 'Bash')
                      for hook in group['hooks']
                      if 'rule-pack-preuse-reselection.py' not in hook['command']]
-            self.assertEqual(len(shell), 1, name)
+            expected = {'guard-unattended.py'}
+            if name == 'hooks':
+                expected.add('agent-card-gate.py')
+            scripts = [re.findall(r'/hooks/([\w-]+\.py)', hook['command'])[-1]
+                       for hook in shell]
+            self.assertEqual(set(scripts), expected, name)
+            self.assertEqual(len(scripts), len(expected), name)
             self.assertLessEqual(sum(len(group['hooks']) for group in document['PostToolUse']), 1)
 
     def test_native_managed_permissions_and_dry_run(self):

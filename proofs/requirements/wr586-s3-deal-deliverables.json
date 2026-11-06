@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR586.S3.J2-deal-deliverables",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "deliverables-release",
+      "predicate": "Deployed Worker release matches the merged source and registers list-deal-deliverables, start-deal-deliverable, finalize-deal-deliverable and set-deal-deliverable-visibility. Release identity and registry smoke do not prove the file lifecycle. Separately observe an authorized partner uploading a synthetic file to the exact deal, finalizing privately, changing visibility with the expected version, downloading identical bytes and losing download access after session revocation. The read-only observer records these partner actions and release identity without uploading, mutating or sending itself. Mandatory semantic observer: python3 ops/deal-deliverables-proof.py --receipt out/deliverables/partner-receipt.json --sha $(git rev-parse HEAD) --active-cookie-file out/deliverables/active-cookie --revoked-cookie-file out/deliverables/revoked-cookie. Follow workspace/statecharts/wr586-s3-deliverables/production-proof.md. This observer verifies authenticated current listing, identical-byte download and revoked-session refusal against sanitized partner-attested upload/finalize/visibility responses. Offline pass and corrupt evidence CLI cases run in deal-deliverables-postgres.test.mjs.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release smoke and the separate semantic CLI both exit zero. Partner-attested writes and authenticated live reads are required; release smoke alone leaves lifecycle unproven.",
+      "input_class": "read-only Worker release and verb registry, followed by separately observed partner lifecycle evidence",
+      "deadline_seconds": 120
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 10,
+    "max_records": 1000,
+    "max_runtime_seconds": 180,
+    "max_artifact_bytes": 37748736
+  }
+}

@@ -172,7 +172,8 @@ class McpTransport:
                         'params':{'name':verb,'arguments':args}})
         request = urllib.request.Request(self.endpoint, data=body, headers={
             'Authorization':'Bearer '+self.token, 'Content-Type':'application/json',
-            'Accept':'application/json', 'MCP-Protocol-Version':'2025-03-26'})
+            'Accept':'application/json', 'MCP-Protocol-Version':'2025-03-26',
+            'User-Agent':'carr-session-continuity/1'})
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
