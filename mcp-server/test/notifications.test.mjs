@@ -573,10 +573,17 @@ test("feed coverage is all-or-nothing for absent fields, invalid counts, rows an
   const broken = [null, false, 1, "feed", [], {}, { ok: true },
     ...[undefined, null, -1, 1.5, "1", NaN, Infinity].map(unread_count => ({ ...valid, unread_count })),
     ...[undefined, null, {}, [null], [1], [false], ["row"]].map(notifications => ({ ...valid, notifications }))];
+  broken.push({ ...valid, unread_count: 0 });
+  broken.push({ ...valid, notifications: [...valid.notifications, ...valid.notifications] });
   for (const key of Object.keys(valid.notifications[0])) {
     const row = { ...valid.notifications[0] };
     delete row[key];
     broken.push({ ...valid, notifications: [row] });
+    for (const value of [null, 42, [], {}]) {
+      if (!(key === "read_at" && value === null) && !(key === "delivery" && Array.isArray(value))) {
+        broken.push({ ...valid, notifications: [{ ...valid.notifications[0], [key]: value }] });
+      }
+    }
   }
   for (const delivery of [null, {}, [null], [1], [{}], [{ channel: "device" }],
     [{ channel: "email", state: "pending" }], [{ channel: "device", state: "unknown" }]]) {
@@ -594,7 +601,9 @@ test("feed coverage is all-or-nothing for absent fields, invalid counts, rows an
 test("explicit zero and paginated populated feeds remain valid", () => {
   assert.deepEqual(notificationFeedProjection({ ok: true, unread_count: 0, notifications: [] }, null, ToolError),
     { ok: true, unread_count: 0, notifications: [], quiet_now: false });
-  for (const unread_count of [0, 1, 100]) {
+  assert.equal(notificationFeedProjection({ ...feedFacts(), unread_count: 0,
+    notifications: [{ ...feedFacts().notifications[0], read_at: "2026-09-19T00:00:00Z" }] }, null, ToolError).unread_count, 0);
+  for (const unread_count of [1, 100]) {
     assert.equal(notificationFeedProjection({ ...feedFacts(), unread_count }, null, ToolError).unread_count, unread_count);
   }
 });
@@ -610,5 +619,102 @@ test("feed preference and historical suppression truth table", () => {
       assert.equal(result.notifications[0].quiet_suppressed, !!current || historical);
       assert.throws(() => notificationFeedProjection({ ok: true }, prefs, ToolError), /notification_feed_unavailable/);
     }
+  }
+});
+
+test("proof CLI validates release-pinned live contracts, refusals, contradictions, unavailable and deadline cases", async () => {
+  const { mkdtemp, mkdir, writeFile, copyFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { spawn, execFileSync } = await import('node:child_process');
+  const { createServer } = await import('node:http');
+  const root = await mkdtemp(join(tmpdir(), 'notification-proof-contract-'));
+  const repo = fileURLToPath(new URL('../../', import.meta.url));
+  let server;
+  try {
+    await mkdir(join(root, 'tools'), { recursive: true });
+    await mkdir(join(root, 'mcp-server/src'), { recursive: true });
+    const cli = join(root, 'tools/prove-notification-feed-evidence-integrity.py');
+    await copyFile(join(repo, 'tools/prove-notification-feed-evidence-integrity.py'), cli);
+    await copyFile(join(repo, 'mcp-server/src/notifications.ts'), join(root, 'mcp-server/src/notifications.ts'));
+    const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+    git('init', '-q'); git('add', 'tools/prove-notification-feed-evidence-integrity.py', 'mcp-server/src/notifications.ts');
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Synthetic production parser fixture');
+    let sha = git('rev-parse', 'HEAD');
+    let releaseReads = 0;
+    server = createServer((request, response) => {
+      if (request.url !== '/release') { response.writeHead(404).end(); return; }
+      releaseReads++;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ git_sha: { value: sha, reason: null } }));
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const wrapper = join(root, 'wrapper.py');
+    const fixture = join(root, 'responses.json');
+    const calls = join(root, 'calls');
+    await writeFile(wrapper, `#!/usr/bin/env python3
+import json, pathlib, sys, time
+root = pathlib.Path(__file__).parent
+value = json.loads((root / 'responses.json').read_text())
+with (root / 'calls').open('a') as out: out.write(sys.argv[2] + '\\n')
+if value.get('sleep'): time.sleep(2)
+if value.get('exit'): sys.exit(1)
+if value.get('type_error'): print('TypeError: invalid feed', file=sys.stderr); sys.exit(1)
+assert sys.argv[1] == 'call'
+assert json.loads(sys.argv[3]) == ({'limit':20} if sys.argv[2] == 'notification-feed' else {})
+print(json.dumps(value['feed' if sys.argv[2] == 'notification-feed' else 'preferences']))
+`, { mode: 0o700 });
+    const valid = {
+      feed: notificationFeedProjection(feedFacts([{ channel: 'device', state: 'suppressed_quiet_hours' }]), preferenceFacts(), ToolError),
+      preferences: notificationPreferenceProjection(preferenceFacts(), ToolError),
+    };
+    async function run(value, flags = []) {
+      await writeFile(fixture, JSON.stringify(value));
+      await writeFile(calls, ''); releaseReads = 0;
+      const child = spawn('python3', [cli, '--origin', origin, '--call-wrapper', wrapper, '--timeout-seconds', '5', ...flags]);
+      let stdout = '', stderr = '';
+      child.stdout.on('data', chunk => stdout += chunk); child.stderr.on('data', chunk => stderr += chunk);
+      const code = await new Promise(resolve => child.on('close', resolve));
+      const { readFile } = await import('node:fs/promises');
+      assert.ok((await readFile(calls, 'utf8')).trim().split('\n').filter(Boolean).length <= 2);
+      assert.ok(releaseReads <= 2);
+      return { code, stdout, stderr };
+    }
+    for (const value of [valid,
+      { ...valid, feed: notificationFeedProjection({ ok:true, unread_count:0, notifications:[] }, null, ToolError) },
+      { feed: { error:'notification_feed_unavailable' }, preferences: { error:'notification_preferences_unavailable' } }]) {
+      const result = await run(value);
+      assert.equal(result.code, 0, result.stdout + result.stderr);
+      assert.equal(JSON.parse(result.stdout).source_dependencies, 1);
+      assert.ok(JSON.parse(result.stdout).replay_cases >= 50);
+      assert.equal(releaseReads, 2);
+    }
+    for (const value of [{ ...valid, feed: { ok: true } },
+      { ...valid, feed: { ...valid.feed, notifications:[null] } },
+      { ...valid, feed:{...valid.feed, unread_count:-1} },
+      { ...valid, preferences:{ok:true} }]) {
+      const result = await run(value); assert.equal(result.code, 1, result.stdout + result.stderr);
+    }
+    assert.equal((await run({ exit:true })).code, 78);
+    assert.equal((await run({ type_error:true })).code, 1);
+    assert.equal((await run({ ...valid, sleep:true }, ['--timeout-seconds', '0.1'])).code, 78);
+    assert.equal((await run(valid, ['--timeout-seconds', '0'])).code, 2);
+    assert.equal((await run(valid, ['--unknown'])).code, 2);
+    const { readFile } = await import('node:fs/promises');
+    const mutation = (await readFile(join(repo, 'mcp-server/src/notifications.ts'), 'utf8')).replace(
+      'throw new ToolError({ error: "notification_feed_unavailable" });',
+      'return { ok: true, unread_count: 0, quiet_now: false, notifications: [] };');
+    await writeFile(join(root, 'mcp-server/src/notifications.ts'), mutation);
+    git('add', 'mcp-server/src/notifications.ts');
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'Synthetic fabricated-empty-success mutation');
+    sha = git('rev-parse', 'HEAD');
+    assert.equal((await run(valid)).code, 1, 'replay must reject a release with fabricated empty success');
+    sha = '0'.repeat(40);
+    assert.equal((await run(valid)).code, 78);
+  } finally {
+    if (server) await new Promise(resolve => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
   }
 });
