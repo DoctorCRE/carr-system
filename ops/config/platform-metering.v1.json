@@ -81,7 +81,7 @@
     ],
     "selected_workload": {
       "name": "DoctorCRE Tour search and selection-cart regression",
-      "repository": "jbookout/doctorcre-app",
+      "repository": "DoctorCRE/doctorcre-app",
       "source_commit": "6a9f996cd731a9debe1d9df82b9449f864d28f5e",
       "source_tree": "edc2e0ee8b98d9bed4a1ccb211157ae67a8f732c",
       "command_argv": [

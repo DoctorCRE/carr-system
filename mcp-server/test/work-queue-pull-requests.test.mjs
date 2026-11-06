@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPullRequestSource, isolatePullRequests, queueView, jobStage, workQueueTools, PULL_REQUEST_TTL_MS, STALE_AFTER_MS } from '../src/work-queue.js';
 
-const REPOS = ['DoctorCRE/carr-system', 'jbookout/doctorcre-app'];
+const REPOS = ['DoctorCRE/carr-system', 'DoctorCRE/doctorcre-app'];
 
 test('merged review attestation uses the shared comment grammar and distinct Cards, not GitHub logins', async () => {
   const change = { pr_url: 'https://github.com/DoctorCRE/carr-system/pull/811', merge_commit_sha: 'a'.repeat(40) };
@@ -99,7 +99,7 @@ test('without a credential nothing is fetched and every repository reports unava
 test('Card lines map open, draft, merged and closed PRs to their jobs', async () => {
   const { fetchImpl } = github({
     'DoctorCRE/carr-system': [item(10, 'Card: WR557.S1.J2\n\n## Why', { draft: true }), item(11, 'No card line here'), item(12, 'Mentions Card: WR557.S1.J9 inline only')],
-    'jbookout/doctorcre-app': [item(20, 'Card: WR557.S4.J1\r\nCard: WR557.S4.J2', { state: 'closed', pull_request: { merged_at: '2026-10-27T13:00:00Z' } })],
+    'DoctorCRE/doctorcre-app': [item(20, 'Card: WR557.S4.J1\r\nCard: WR557.S4.J2', { state: 'closed', pull_request: { merged_at: '2026-10-27T13:00:00Z' } })],
   });
   const sources = await createPullRequestSource({ token: 'synthetic', fetchImpl })(REPOS);
   assert.deepEqual(sources.flatMap(source => source.prs.map(pr => [pr.number, pr.state, pr.draft, pr.cards])),
@@ -369,4 +369,86 @@ test('GitHub rate limits leave production status unknown', async () => {
     ? Response.json({ env: { value: 'production' }, git_sha: { value: 'b'.repeat(40) } })
     : new Response('', { status: 429 }) });
   assert.deepEqual(await read([{ repo: 'DoctorCRE/carr-system', number: 1, state: 'merged' }]), [null]);
+});
+
+
+test('repository transfer has one enumeration and exact PR-link aliases', async () => {
+  const { repositories, validChangeUrl, changeUrlPattern } = await import('../src/work-queue.js');
+  assert.equal(repositories.filter(name => name.endsWith('/doctorcre-app')).length, 1);
+  assert.ok(repositories.includes('DoctorCRE/doctorcre-app'));
+  for (const repository of ['DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app']) {
+    const url = `https://github.com/${repository}/pull/123`;
+    assert.ok(validChangeUrl(url));
+    assert.match(url, new RegExp(changeUrlPattern));
+  }
+  for (const repository of ['DoctorCRE/unrelated', 'someone/doctorcre-app']) {
+    const url = `https://github.com/${repository}/pull/123`;
+    assert.equal(validChangeUrl(url), false);
+    assert.doesNotMatch(url, new RegExp(changeUrlPattern));
+  }
+});
+
+
+test('pre-transfer search uses only the explicit alias, cached with the canonical identity', async () => {
+  const { createPullRequestSource } = await import('../src/work-queue.js');
+  for (const status of [404, 422]) {
+    const calls = [];
+    const read = createPullRequestSource({ token: 'synthetic', fetchImpl: async url => {
+      const query = new URL(url).searchParams.get('q');
+      calls.push(query);
+      return query.startsWith('repo:DoctorCRE/doctorcre-app ')
+        ? { ok: false, status }
+        : { ok: true, status: 200, json: async () => ({ items: [], total_count: 0 }) };
+    }});
+    const result = await read(['DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app']);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].state, 'ok');
+    assert.equal(result[0].repo, 'DoctorCRE/doctorcre-app');
+    await read(['jbookout/doctorcre-app']);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[1].startsWith('repo:jbookout/doctorcre-app '));
+  }
+  for (const [repo, status] of [['DoctorCRE/unrelated', 422], ['DoctorCRE/doctorcre-app', 403]]) {
+    let calls = 0;
+    const read = createPullRequestSource({ token: 'synthetic', fetchImpl: async () => { calls++; return { ok: false, status }; }});
+    assert.equal((await read([repo]))[0].state, 'unavailable');
+    assert.equal(calls, 1);
+  }
+});
+
+
+test('transfer search succeeds canonically and refuses failed aliases or non-fallback statuses', async () => {
+  for (const statuses of [[200], [404, 500], [422, 403], [403], [429], [500]]) {
+    const calls = [];
+    const read = createPullRequestSource({ token: 'synthetic', fetchImpl: async url => {
+      calls.push(new URL(url).searchParams.get('q'));
+      const status = statuses[calls.length - 1];
+      return Response.json(status === 200 ? { items: [], total_count: 0 } : { message: 'Unavailable' }, { status });
+    }});
+    const result = await read(['DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app']);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].state, statuses[0] === 200 ? 'ok' : 'unavailable');
+    assert.equal(calls.length, statuses.length);
+    assert.ok(calls[0].startsWith('repo:DoctorCRE/doctorcre-app '));
+    if (calls.length === 2) assert.ok(calls[1].startsWith('repo:jbookout/doctorcre-app '));
+    await read(['jbookout/doctorcre-app']);
+    assert.equal(calls.length, statuses.length);
+  }
+});
+
+test('review attestations retain exact heads across app URL aliases', async () => {
+  const sha = 'b'.repeat(40);
+  for (const [changeRepo, reviewRepo, accepted] of [
+    ['jbookout/doctorcre-app', 'DoctorCRE/doctorcre-app', true],
+    ['DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app', true],
+    ['DoctorCRE/doctorcre-app', 'DoctorCRE/carr-system', false],
+    ['DoctorCRE/doctorcre-app', 'someone/doctorcre-app', false],
+  ]) {
+    const change = { pr_url: `https://github.com/${changeRepo}/pull/811`, merge_commit_sha: 'a'.repeat(40) };
+    const source = createPullRequestSource({ token: 'synthetic', fetchImpl: async url => Response.json(
+      /\/pulls\/811$/.test(url) ? { merged: true, merge_commit_sha: change.merge_commit_sha, head: { sha }, body: 'Card: WR628.S1.J1' }
+        : url.includes('/comments?') ? [{ body: `VERDICT: APPROVE\nReviewed-SHA: ${sha}\nReviewer: WR628.S1.J26`,
+          html_url: `https://github.com/${reviewRepo}/pull/811#issuecomment-1` }] : []) });
+    assert.equal(Boolean(await source.reviewedChange(change, 'WR628.S1')), accepted);
+  }
 });

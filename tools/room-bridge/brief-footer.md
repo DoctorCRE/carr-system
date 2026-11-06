@@ -1,6 +1,6 @@
 Start with /pstack:poteto-mode. Read the installed poteto-mode SKILL.md in full as a poteto-agent worker, never the coordinator. On Codex and Grok read ~/.agents/skills/pstack/skills/poteto-mode/SKILL.md and its docs/harness/codex-grok.md adapter. On Claude use pstack:poteto-agent and read the upstream Claude adapter. Read ~/.claude/rules/pstack-models.md and ~/.claude/rules/pstack-routing.md on every provider.
 
-Use pstack's GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY, TIMEBOX, FORBIDDEN, REPORT, STANDING brief. Paste /Users/booko/.claude/orchestrate/doctorcre-delivery/preferences.md verbatim into every remote dispatch and every resume; local workers may reference that path. The task's explicit scope and safeguards govern. Workers never merge, rebase, force-push or retarget PRs. Only the coordinator arms merges after independent current-head review and green CI.
+Use pstack's GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY, TIMEBOX, FORBIDDEN, REPORT, STANDING brief. Paste /Users/booko/.claude/orchestrate/doctorcre-delivery/preferences.md verbatim into every remote dispatch and every resume; local workers may reference that path. The task's explicit scope and safeguards govern. Workers never merge, rebase, force-push or retarget PRs. Only the coordinator arms merges after independent current-head review and green CI. Approval is GitHub required review by the CARR review App; GitHub dismisses stale approvals and requires approval of the latest push.
 
 Never run env, printenv or ps eww or print environment variables.
 
@@ -25,6 +25,6 @@ Skill map (one owner per process; use only these): test-first = mattpocock-skill
 
 Reviewers in carr-system and doctorcre-app write a verdict file and never post a review or comment. Begin both the verdict file and the final reply with these three lines: `VERDICT: APPROVE` or `VERDICT: CHANGES`, then `Reviewed-SHA: <full head SHA inspected>`, then `Reviewer: <name>`. The PR's Card line and findings with file:line follow. The coordinator submits the file as a native App review with `ops/review-submit.py N approve|request-changes --reviewed-sha <sha> --body-file <verdict file>`, adding `--repository jbookout/doctorcre-app` for the app. The authoring job never reviews its own PR.
 
-Before `git push` and `gh pr create`, run `./run.sh pre-pr --body <PR body file>` and fix every line it prints.
+Before `git push` and `gh pr create`, run `./run.sh pre-pr` and fix every line it prints.
 
 Local verification requires `ops/ci.sh --only "pushfloor secret"` plus relevant selftests. The hosted required `ops/ci.sh --strict` check must pass. Unit skips locally without CARR_CI_DATABASE_URL.

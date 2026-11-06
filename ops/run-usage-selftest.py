@@ -18,8 +18,10 @@ class UsageTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stderr, b"")
                 self.assertIn(b"review-pr <number>", result.stdout)
+                self.assertIn(b"pre-pr|", result.stdout)
+                self.assertNotIn(b"pre-pr [--body", result.stdout)
                 self.assertEqual(hashlib.sha256(result.stdout).hexdigest(),
-                                 "db9988175b5aaf4781dbdf3dd748d3c57d749005891a91a12f944bb6b93e3ed9")
+                                 "c859c3af97ccc3f34346adb554a6a2fbf84f04be67b4f7e167f0a3893edfbf5d")
 
     def test_independent_usage_additions_merge(self):
         source = (REPO / "run.sh").read_text()

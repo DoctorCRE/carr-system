@@ -1,0 +1,14 @@
+stateDiagram-v2
+    [*] --> Requested
+    Requested --> Rejected: Invalid owner input
+    Requested --> All: Omit owner
+    Requested --> Unassigned: Explicit null
+    Requested --> Owned: Exact recorded slug
+    All --> Selected: Existing eligibility
+    Unassigned --> Selected: Existing eligibility and null owner_id
+    Owned --> Selected: Existing eligibility and joined slug equality
+    Selected --> Refused: More than 1000 rows
+    Selected --> Returned: At most 1000 rows in due order
+    Rejected --> [*]
+    Refused --> [*]
+    Returned --> [*]

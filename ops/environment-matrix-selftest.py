@@ -195,7 +195,7 @@ def main() -> int:
           product_domains == [{
               "hostname": "app.doctorcre.com",
               "worker": "doctorcre-app",
-              "repository": "jbookout/doctorcre-app",
+              "repository": "DoctorCRE/doctorcre-app",
           }] and not (product_hosts & served_prod),
           "app.doctorcre.com must be declared for doctorcre-app and absent from carr-mcp routes")
     # An OMITTED `routes` key inherits production's custom domains, which is

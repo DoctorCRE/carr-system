@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.repository_identity import canonical_repository
 from lib.hook_runtime import Verdict, decision, run
 
 MINT = """Start with /pstack:poteto-mode as a poteto-agent worker on every provider.
@@ -183,7 +184,7 @@ def repository_name(value):
         return None
     match = re.fullmatch(r'(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)?'
                          r'([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?', value)
-    return match[1].lower() if match else None
+    return canonical_repository(match[1]) if match else None
 
 
 def launch_repository(cwd=None):

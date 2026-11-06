@@ -1,0 +1,212 @@
+{
+  "provenance": {
+    "transport": "executeRegisteredTool/disposable-postgres",
+    "producer_revision": "113e1d50f0e44216557bf28eeeadf03a4fa862e3",
+    "producer_sha256": "7f8189def7cd27b792cb8064c4e573534318d2bb200defff7d5045e2042c4662",
+    "registry_sha256": "05c190d25598aaf584ce2959bd73629ac4701149545e126c141b2c3915eb129a",
+    "query": {
+      "verb": "quiet-follow-ups",
+      "all": {},
+      "owned": {
+        "owner_slug": "joe"
+      },
+      "unassigned": {
+        "owner_slug": null
+      }
+    }
+  },
+  "owner_slug": "joe",
+  "all": {
+    "schema_version": "quiet-follow-ups.v1",
+    "cadence": {
+      "lead_days": 45,
+      "vendor_days": 90
+    },
+    "proposals": [
+      {
+        "subject_type": "lead",
+        "subject_id": "2e7ea886-f7fb-4eab-b7cd-d4c3b4dc28c2",
+        "party_id": "e281441e-edc6-4f90-b528-906f00aaec99",
+        "ref": null,
+        "name": "Synthetic quiet owner e281441e-edc6-4f90-b528-906f00aaec99",
+        "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 45,
+        "due_on": "2026-06-04T05:00:00.000Z",
+        "owner": "dell",
+        "days_overdue": 155
+      },
+      {
+        "subject_type": "lead",
+        "subject_id": "33db1966-5c8b-404c-9c25-275559c38050",
+        "party_id": "5160740f-2c35-415a-bd60-45e17f94284b",
+        "ref": null,
+        "name": "Synthetic quiet owner 5160740f-2c35-415a-bd60-45e17f94284b",
+        "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 45,
+        "due_on": "2026-06-04T05:00:00.000Z",
+        "owner": "joe",
+        "days_overdue": 155
+      },
+      {
+        "subject_type": "lead",
+        "subject_id": "c10acad1-b23e-45ab-9038-28fa49b97fa0",
+        "party_id": "e6f99784-6b68-480d-8a75-c7a95f51dc1b",
+        "ref": null,
+        "name": "Synthetic quiet owner e6f99784-6b68-480d-8a75-c7a95f51dc1b",
+        "owner_id": null,
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 45,
+        "due_on": "2026-06-04T05:00:00.000Z",
+        "owner": null,
+        "days_overdue": 155
+      },
+      {
+        "subject_type": "vendor",
+        "subject_id": "2f04986b-6552-44b7-8de5-cc598c30680a",
+        "party_id": "3631b56d-17b1-4489-a42a-a9d5a9f0c005",
+        "ref": null,
+        "name": "Synthetic quiet owner 3631b56d-17b1-4489-a42a-a9d5a9f0c005",
+        "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 90,
+        "due_on": "2026-07-19T05:00:00.000Z",
+        "owner": "dell",
+        "days_overdue": 110
+      },
+      {
+        "subject_type": "vendor",
+        "subject_id": "7bef16f2-0f45-4587-a828-eb064383b992",
+        "party_id": "170d440c-e83a-4605-9154-b2aa63460ba6",
+        "ref": null,
+        "name": "Synthetic quiet owner 170d440c-e83a-4605-9154-b2aa63460ba6",
+        "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 90,
+        "due_on": "2026-07-19T05:00:00.000Z",
+        "owner": "joe",
+        "days_overdue": 110
+      },
+      {
+        "subject_type": "vendor",
+        "subject_id": "fe1203f4-4f02-4911-9d15-86a7cf131dbf",
+        "party_id": "5489bb32-9892-4330-b551-a867f2905b46",
+        "ref": null,
+        "name": "Synthetic quiet owner 5489bb32-9892-4330-b551-a867f2905b46",
+        "owner_id": null,
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 90,
+        "due_on": "2026-07-19T05:00:00.000Z",
+        "owner": null,
+        "days_overdue": 110
+      }
+    ],
+    "sent": false,
+    "tasks_created": false
+  },
+  "owned": {
+    "schema_version": "quiet-follow-ups.v1",
+    "cadence": {
+      "lead_days": 45,
+      "vendor_days": 90
+    },
+    "proposals": [
+      {
+        "subject_type": "lead",
+        "subject_id": "33db1966-5c8b-404c-9c25-275559c38050",
+        "party_id": "5160740f-2c35-415a-bd60-45e17f94284b",
+        "ref": null,
+        "name": "Synthetic quiet owner 5160740f-2c35-415a-bd60-45e17f94284b",
+        "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 45,
+        "due_on": "2026-06-04T05:00:00.000Z",
+        "owner": "joe",
+        "days_overdue": 155
+      },
+      {
+        "subject_type": "vendor",
+        "subject_id": "7bef16f2-0f45-4587-a828-eb064383b992",
+        "party_id": "170d440c-e83a-4605-9154-b2aa63460ba6",
+        "ref": null,
+        "name": "Synthetic quiet owner 170d440c-e83a-4605-9154-b2aa63460ba6",
+        "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 90,
+        "due_on": "2026-07-19T05:00:00.000Z",
+        "owner": "joe",
+        "days_overdue": 110
+      }
+    ],
+    "sent": false,
+    "tasks_created": false
+  },
+  "unassigned": {
+    "schema_version": "quiet-follow-ups.v1",
+    "cadence": {
+      "lead_days": 45,
+      "vendor_days": 90
+    },
+    "proposals": [
+      {
+        "subject_type": "lead",
+        "subject_id": "c10acad1-b23e-45ab-9038-28fa49b97fa0",
+        "party_id": "e6f99784-6b68-480d-8a75-c7a95f51dc1b",
+        "ref": null,
+        "name": "Synthetic quiet owner e6f99784-6b68-480d-8a75-c7a95f51dc1b",
+        "owner_id": null,
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 45,
+        "due_on": "2026-06-04T05:00:00.000Z",
+        "owner": null,
+        "days_overdue": 155
+      },
+      {
+        "subject_type": "vendor",
+        "subject_id": "fe1203f4-4f02-4911-9d15-86a7cf131dbf",
+        "party_id": "5489bb32-9892-4330-b551-a867f2905b46",
+        "ref": null,
+        "name": "Synthetic quiet owner 5489bb32-9892-4330-b551-a867f2905b46",
+        "owner_id": null,
+        "anchor_on": "2026-04-20T05:00:00.000Z",
+        "basis": "last_contact",
+        "next_action_date": null,
+        "client_id": null,
+        "interval_days": 90,
+        "due_on": "2026-07-19T05:00:00.000Z",
+        "owner": null,
+        "days_overdue": 110
+      }
+    ],
+    "sent": false,
+    "tasks_created": false
+  }
+}

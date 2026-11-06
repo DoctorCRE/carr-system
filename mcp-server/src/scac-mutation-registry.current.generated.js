@@ -753,7 +753,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "complete-work-request": {
     "ingress_key": "mcp-tool:complete-work-request",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "schema_digest": "3c7699ff842968550f207195665afc21cba139949b4020886c7324cc95c5af03",
+    "schema_digest": "7bfabdb5b1c10be7df0bca3cb539bd8b65a54d078c35c0102a99a6c89744cb39",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -1013,7 +1013,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dispatch-job": {
     "ingress_key": "mcp-tool:dispatch-job",
     "source_locator": "mcp-server/src/work-queue.js",
-    "schema_digest": "0d73978972a3f26946fd87dd8df3831afc4b9b8d50a240335cd3316c656c5235",
+    "schema_digest": "2d22ed470527bbdb227c87cd46b2909347d87917172a8b7e08130040752da189",
     "write": true,
     "human_only": false,
     "human_caller_only": false,
@@ -2207,7 +2207,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "quiet-follow-ups": {
     "ingress_key": "mcp-tool:quiet-follow-ups",
     "source_locator": "mcp-server/src/lead-follow-up.ts",
-    "schema_digest": "037640c2932ce4804d4d9b08127658569bd28b6d5b48c49f35e9e92f538881c7",
+    "schema_digest": "4bb030736a9bfff0959ce5e7e9e81693ab8ba6d5dc161815ebfc1460778b72c8",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2218,6 +2218,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-action-context",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
     "schema_digest": "3755cab1aeb3c05567da19a1dce33140fdbc419f44bc07795fccde037e2e909a",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-activity-deal-attribution": {
+    "ingress_key": "mcp-tool:read-activity-deal-attribution",
+    "source_locator": "mcp-server/src/activity-deal-attribution.ts",
+    "schema_digest": "4f44c68219bcdad2853d6e30cc54f84a91867d2519a6d855892e14d6676b7454",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2258,6 +2268,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-call-outcomes",
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-client-anniversaries": {
+    "ingress_key": "mcp-tool:read-client-anniversaries",
+    "source_locator": "mcp-server/src/client-anniversary-read.ts",
+    "schema_digest": "dbe781d2ecf5d1758b2608e43383d30a0e3ce23bbb1e0ef2bd284f86e458024f",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

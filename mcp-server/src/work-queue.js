@@ -1,4 +1,5 @@
 // Store lean Work Request slice and job facts with stable IDs and priority order.
+import { repositoryNames, acceptedRepositories, canonicalRepository, repositoryAliases, repositoryLookupName } from './repository-identity.js';
 import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
@@ -18,11 +19,11 @@ const slice = { ...positive, default: 1 };
 const jobFacts = ['executor', 'model', 'effort', 'card_title', 'description'];
 const jobStart = ['job', 'runner_job_id'];
 const titleVerbRepairs = new Map([['Update', 'Revise'], ['Rereview', 'Review'], ['Resync', 'Fix']]);
-export const repositories = Object.keys(addressFormat.repositories);
-export const changeUrlPattern = `^https://github\\.com/(${repositories.map(repo => repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/pull/[1-9][0-9]*$`;
+export const repositories = repositoryNames;
+export const changeUrlPattern = `^https://github\\.com/(${acceptedRepositories.map(repo => repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/pull/[1-9][0-9]*$`;
 export const validChangeUrl = url => {
   const match = typeof url === 'string' && /^https:\/\/github[.]com\/([^/]+\/[^/]+)\/pull\/[1-9][0-9]*$/.exec(url);
-  return !!match && repositories.includes(match[1]);
+  return !!match && canonicalRepository(match[1]) !== null;
 };
 export const completionFields = {
   criterion_evidence: { type: 'array', items: { type: 'object', additionalProperties: false,
@@ -80,7 +81,14 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       let total = 0, incomplete = false;
       for (let page = 1; page <= 10; page++) {
         query.set('page', String(page));
-        const response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers });
+        let response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers, signal: AbortSignal.timeout(8000) });
+        if (page === 1 && [404, 422].includes(response.status)) {
+          for (const alias of repositoryAliases(repo)) {
+            query.set('q', `repo:${alias} is:pr in:body "Card: WR"${bound}`);
+            response = await fetchImpl(`https://api.github.com/search/issues?${query}`, { headers, signal: AbortSignal.timeout(8000) });
+            if (![404, 422].includes(response.status)) break;
+          }
+        }
         if (!response.ok) return { repo, state: 'unavailable', reason: `github_http_${response.status}`, prs: [] };
         const body = await response.json();
         total = body.total_count;
@@ -96,7 +104,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       return { repo, state: 'ok', observed_at: new Date(now()).toISOString(), truncated: incomplete || total > items.length, prs };
     } catch { return { repo, state: 'unavailable', reason: 'github_unreachable', prs: [] }; }
   }
-  const read = (repos, since) => Promise.all(repos.map(repo => {
+  const read = (repos, since) => Promise.all([...new Set(repos.map(repo => canonicalRepository(repo) ?? repo))].map(repo => {
     const key = `${repo} ${since?.slice(0, 10) ?? ''}`;
     const hit = memo.get(key);
     if (hit && now() - hit.at < ttlMs) return hit.value;
@@ -127,7 +135,8 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
       const ordered = [...comments, ...reviews.filter(review => !['DISMISSED', 'PENDING'].includes(review.state))]
         .sort((a, b) => (a.submitted_at ?? a.created_at ?? '').localeCompare(b.submitted_at ?? b.created_at ?? ''));
       const approval = independentApproval(author, pr.head.sha, ordered);
-      return approval?.review_url?.startsWith(change.pr_url + '#') ? { ...change, ...approval } : null;
+      const canonicalUrl = url => typeof url === 'string' ? url.replace(/^https:\/\/github[.]com\/([^/]+\/[^/]+)\//, (_, repo) => `https://github.com/${canonicalRepository(repo)}/`) : null;
+      return canonicalUrl(approval?.review_url)?.startsWith(canonicalUrl(change.pr_url) + '#') ? { ...change, ...approval } : null;
     } catch { return null; }
   };
   return read;
@@ -136,7 +145,7 @@ export function createPullRequestSource({ token, fetchImpl = (...a) => fetch(...
 
 const RELEASE_URLS = {
   'DoctorCRE/carr-system': 'https://api.doctorcre.com/release',
-  'jbookout/doctorcre-app': 'https://app.doctorcre.com/app-release',
+  'DoctorCRE/doctorcre-app': 'https://app.doctorcre.com/app-release',
 };
 const SHA = /^[0-9a-f]{40}$/i;
 
@@ -171,10 +180,10 @@ export function createProductionSource({ token, fetchImpl = (...args) => fetch(.
   return async prs => {
     const results = prs.map(() => null);
     if (!token) return results;
-    const repos = Object.keys(RELEASE_URLS).filter(repo => prs.some(pr => pr.repo === repo && pr.state === 'merged'));
+    const repos = Object.keys(RELEASE_URLS).filter(repo => prs.some(pr => canonicalRepository(pr.repo) === repo && pr.state === 'merged'));
     for (const repo of repos) {
       let budget = Math.floor(8 / repos.length);
-      const eligible = prs.map((pr, index) => ({ pr, index })).filter(({ pr }) => pr.repo === repo && pr.state === 'merged'
+      const eligible = prs.map((pr, index) => ({ pr, index })).filter(({ pr }) => canonicalRepository(pr.repo) === repo && pr.state === 'merged'
         && Number.isSafeInteger(pr.number) && pr.number > 0);
       if (!eligible.length) continue;
       const start = (cursors.get(repo) ?? 0) % eligible.length;
@@ -187,7 +196,7 @@ export function createProductionSource({ token, fetchImpl = (...args) => fetch(.
         return SHA.test(sha || '') ? sha : null;
       });
       if (!release) continue;
-      const [owner, name] = repo.split('/');
+      const [owner, name] = repositoryLookupName(repo).split('/');
       const fields = items.map(({ pr }, i) => `p${i}: pullRequest(number: ${pr.number}) { mergeCommit { oid } }`).join(' ');
       const batch = await cached(`prs:${repo}:${items.map(({ pr }) => pr.number).join(',')}`, async () => {
         const data = await json('https://api.github.com/graphql', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' },
@@ -208,7 +217,7 @@ export function createProductionSource({ token, fetchImpl = (...args) => fetch(.
       for (let offset = 0; offset < tasks.length; offset += 4) {
         await Promise.all(tasks.slice(offset, offset + 4).map(async ({ index, key, merge }) => {
           results[index] = await cached(key, async () => {
-            const comparison = await json(`https://api.github.com/repos/${repo}/compare/${merge}...${release}`, { headers });
+            const comparison = await json(`https://api.github.com/repos/${repositoryLookupName(repo)}/compare/${merge}...${release}`, { headers });
             if (comparison.status === 'ahead' || comparison.status === 'identical') return true;
             if (comparison.status === 'behind' || comparison.status === 'diverged') return false;
             return null;
@@ -244,7 +253,7 @@ export function queueView(rows, sources, at) {
   const byCard = new Map();
   for (const pr of sources.flatMap(source => source.prs)) for (const card of pr.cards) {
     const { cards, ...fact } = pr;
-    byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[pr.repo]}#${pr.number}` }]);
+    byCard.set(card, [...(byCard.get(card) ?? []), { ...fact, card_id: `${card}.${addressFormat.repositories[canonicalRepository(pr.repo)]}#${pr.number}` }]);
   }
   // A stall is only claimed when every repository answered in full: an unreadable or truncated (including GitHub's incomplete_results) one may hold the newer push.
   const complete = sources.every(source => source.state === 'ok' && !source.truncated);
@@ -255,7 +264,7 @@ export function queueView(rows, sources, at) {
     const stage = live.length || !finished ? (live.length ? jobStage(live) : row.started_at ? 'running' : 'queued') : finished.stage;
     const since = stage === 'build' ? Math.max(...prs.filter(pr => pr.state === 'open').map(pr => Date.parse(pr.updated_at))) : NaN;
     return { ...row, card_id, created_at: new Date(created_at).toISOString(), stage, stale: complete && at - since >= STALE_AFTER_MS,
-      pr_evidence_complete: complete && (!finished || finished.prs.every(saved => live.some(pr => pr.repo === saved.repo && pr.number === saved.number))), prs };
+      pr_evidence_complete: complete && (!finished || finished.prs.every(saved => live.some(pr => canonicalRepository(pr.repo) === canonicalRepository(saved.repo) && pr.number === saved.number))), prs };
   });
   return { jobs, github: sources.map(({ prs, ...source }) => source) };
 }
@@ -454,7 +463,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
         return { ...result, ...(completion ? { work_request_state: completion.state } : {}) };
       }),
     'dispatch-job': command('dispatch-job', 'Mint a queued job with a caller-supplied job_type from job-workflows.v1.yaml, or record a runner start for an existing job exactly once.',
-      { work_request: { ...text(), pattern: workRequestPattern, description: 'WR-000675; WR675 and WR-675 normalize to WR-000675.' }, slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: repositories }, job_type: { ...text(), enum: jobTypes }, executor: { ...text(), description: 'Executor identifier, open text (for example codex or claude); no closed catalog.' }, model: { ...text(), description: 'Model identifier selected by the executor, open text; no closed catalog.' }, effort: text(), card_title: { ...text(80), description: titleRule }, description: { ...text(500), description: descriptionRule } },
+      { work_request: { ...text(), pattern: workRequestPattern, description: 'WR-000675; WR675 and WR-675 normalize to WR-000675.' }, slice, job: positive, runner_job_id: text(), repository: { ...text(), enum: acceptedRepositories }, job_type: { ...text(), enum: jobTypes }, executor: { ...text(), description: 'Executor identifier, open text (for example codex or claude); no closed catalog.' }, model: { ...text(), description: 'Model identifier selected by the executor, open text; no closed catalog.' }, effort: text(), card_title: { ...text(80), description: titleRule }, description: { ...text(500), description: descriptionRule } },
       [], async (c, actor, args, wr) => {
         const starting = jobStart.some(key => Object.hasOwn(args, key));
         if (starting) {
@@ -463,12 +472,12 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
           if (!row && jobFacts.some(key => args[key] == null)) refuse('job_not_found');
           if (row) {
             if (args.job_type != null && row.job_type != null && row.job_type !== args.job_type) refuse('job_type_mismatch');
-            if (row.repository != null && row.repository !== args.repository) refuse('job_repository_mismatch');
+            if (row.repository != null && canonicalRepository(row.repository) !== canonicalRepository(args.repository)) refuse('job_repository_mismatch');
             if (row.runner_job_id != null) refuse('job_already_started');
             await c.query(`update ops.work_request_job set runner_job_id=$4,started_at=now(),
               executor=coalesce($5,executor),model=coalesce($6,model),effort=coalesce($7,effort),repository=coalesce(repository,$8),job_type=coalesce(job_type,$9)
               where work_request_id=$1 and slice_ordinal=$2 and j_number=$3`, [wr.id, args.slice || 1, args.job, args.runner_job_id,
-              args.executor ?? null, args.model ?? null, args.effort ?? null, args.repository, args.job_type ?? null]);
+              args.executor ?? null, args.model ?? null, args.effort ?? null, canonicalRepository(args.repository), args.job_type ?? null]);
             return { card_id: queueCardId(wr.ref, args.slice || 1, args.job), runner_job_id: args.runner_job_id };
           }
         }
@@ -485,7 +494,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
           (work_request_id,slice_ordinal,j_number,priority,executor,model,effort,card_title,description,repository,runner_job_id,started_at,job_type)
           select $1,$2,coalesce($10,max(j_number)+1,1),$3,$4,$5,$6,$7,$8,$9,$11,case when $11::text is not null then now() end,$12 from ops.work_request_job
           where work_request_id=$1 and slice_ordinal=$2 returning j_number`,
-        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, args.repository ?? null, args.job ?? null, args.runner_job_id ?? null, args.job_type])).rows[0].j_number;
+        [wr.id, ordinal, priority, args.executor, args.model, args.effort, args.card_title, args.description, canonicalRepository(args.repository), args.job ?? null, args.runner_job_id ?? null, args.job_type])).rows[0].j_number;
         return { card_id: queueCardId(wr.ref, ordinal, number), priority,
           ...(starting ? { runner_job_id: args.runner_job_id } : {}) };
       }, { anyOf: [
@@ -537,7 +546,7 @@ export function workQueueTools({ withEnvelope, writeEvent, ToolError, completeWo
       handler: async (c, actor, args) => {
         validate(args, {}, []);
         const rows = await ordered(c, actor);
-        const sources = await (c.pullRequests ?? unavailablePullRequests)(Object.keys(addressFormat.repositories));
+        const sources = await (c.pullRequests ?? unavailablePullRequests)(repositoryNames);
         const view = queueView(rows, sources, Date.now());
         const prs = view.jobs.flatMap(job => job.prs);
         const live = c.production ? await c.production(prs) : prs.map(() => null);

@@ -23,6 +23,27 @@ SPEC.loader.exec_module(board)
 
 
 class ConsumerCompletion(unittest.TestCase):
+    def test_transfer_aliases_preserve_latest_failure(self):
+        task = self.proven_task()
+        proof = {"schema": "carr-consumer-proof.v1", "outcome": "pass",
+                 "repo": "jbookout/doctorcre-app", "source_sha": "a" * 40,
+                 "target": "https://app.doctorcre.com", "workflow": "synthetic flow",
+                 "evidence_ref": "synthetic:transfer", "observed_at": "2026-11-06T10:00:00Z"}
+        failure = dict(proof, repo='DoctorCRE/doctorcre-app', outcome='fail')
+        for observations in ([proof, failure], [failure, proof]):
+            canonical = board.consumer_observations(observations)
+            self.assertEqual(len(canonical), 1)
+            self.assertEqual(next(iter(canonical.values()))['outcome'], 'fail')
+        board.record_consumer_proof(task, failure)
+        board.record_consumer_proof(task, proof)
+        self.assertEqual(task['consumer_proofs'][board.consumer_binding(proof)]['outcome'], 'fail')
+
+    def test_unregistered_repositories_cannot_share_a_proof_identity(self):
+        task = self.proven_task()
+        task.update(repo='DoctorCRE/unrelated', delivery_target='https://app.doctorcre.com')
+        task['consumer_proof']['repo'] = 'someone/doctorcre-app'
+        self.assertFalse(board.consumer_proven(task))
+
     def proven_task(self):
         return {"repo": "jbookout/doctorcre-app", "pr": 42, "status": "done",
                 "stage": "live", "pr_phase": "Merged", "merge_sha": "a" * 40,

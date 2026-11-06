@@ -200,6 +200,8 @@ for (const approved of [true,false]) test(`close command completes through real 
   const root = await mkdtemp(path.join(tmpdir(), 'close-wr-cli-'));
   try {
     await mkdir(path.join(root, 'bin'));
+    await mkdir(path.join(root, 'lib'));
+    await copyFile(new URL('../../lib/repository_identity.py', import.meta.url), path.join(root, 'lib/repository_identity.py'));
     await mkdir(path.join(root, 'mcp-server/src'), { recursive: true });
     await copyFile(new URL('../../bin/close-work-request', import.meta.url), path.join(root, 'bin/close-work-request'));
     await copyFile(new URL('../src/progress-address.v1.json', import.meta.url), path.join(root, 'mcp-server/src/progress-address.v1.json'));

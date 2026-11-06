@@ -18,6 +18,9 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.repository_identity import canonical_repository, repository_for_name
+
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_FILE_BYTES = 8 * 1024 * 1024
 SHA256 = frozenset("0123456789abcdef")
@@ -52,7 +55,7 @@ def load_pin(path: Path) -> dict[str, Any]:
         raise ValueError("DoctorCRE pin fields do not match the v1 contract")
     if pin["schema"] != "carr-doctorcre-artifact-pin.v1":
         raise ValueError("unsupported DoctorCRE pin schema")
-    if pin["repository"] != "jbookout/doctorcre-app":
+    if canonical_repository(pin["repository"]) != repository_for_name("doctorcre-app"):
         raise ValueError("DoctorCRE pin names an unexpected repository")
     if not isinstance(pin["release_tag"], str) or not pin["release_tag"].startswith("app-v"):
         raise ValueError("DoctorCRE release tag is invalid")
