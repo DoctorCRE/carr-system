@@ -2,6 +2,7 @@
 """Observe natural recorded comps and the release-pinned deterministic producer."""
 import argparse
 import base64
+from contextlib import contextmanager, ExitStack
 from datetime import datetime
 import hashlib
 import io
@@ -98,6 +99,15 @@ console.log(JSON.stringify({passed:true}));
 '''
 
 
+@contextmanager
+def defer_deadline():
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+
+
 def execute(args, receipt):
     deadline = time.monotonic() + args.timeout_seconds
     def remaining():
@@ -111,12 +121,9 @@ def execute(args, receipt):
             process = None
             try:
                 # Deliver the deadline only after ownership of a late launch is recorded.
-                mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
-                try:
+                with defer_deadline():
                     process = subprocess.Popen(command, stdout=output, stderr=subprocess.DEVNULL, start_new_session=True,
                                                preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT + 1, LIMIT + 1)))
-                finally:
-                    signal.pthread_sigmask(signal.SIG_SETMASK, mask)
                 code = process.wait(timeout=remaining())
             finally:
                 if process is not None:
@@ -213,7 +220,10 @@ def execute(args, receipt):
         require('natural.canonical-deal-name', room['name'] == row['deal']['value'])
         receipt['natural_read'] = 'passed'
     receipt['predicate'] = 'synthetic.execution'
-    with tempfile.TemporaryDirectory(prefix='comps-proof-') as temp:
+    resources = ExitStack()
+    try:
+        with defer_deadline():
+            temp = resources.enter_context(tempfile.TemporaryDirectory(prefix='comps-proof-'))
         folder = Path(temp)
         receipt['predicate'] = 'synthetic.runtime-dependencies'
         dependency = json.loads(sources['package-lock.json'])['packages']['node_modules/@cfworker/json-schema']
@@ -255,6 +265,9 @@ def execute(args, receipt):
         (folder / 'check.mjs').write_text(SYNTHETIC)
         result = run(['node', str(folder / 'check.mjs'), json.dumps(blocks)], contradiction=True)
         require('synthetic.completion', json.loads(result).get('passed') is True)
+    finally:
+        with defer_deadline():
+            resources.close()
     receipt['synthetic'] = 'passed'
     receipt['predicate'] = 'natural-comps-and-release-producer' if blocks else 'natural.post-deployment-table'
     if not blocks:

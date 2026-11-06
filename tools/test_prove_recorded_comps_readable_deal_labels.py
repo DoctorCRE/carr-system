@@ -196,6 +196,17 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                            ' process=real_popen(command,*args,**kwargs)\n'
                            + (' if command[0]==sys.executable: time.sleep(3)\n' if mode == 'late_launch' else '')
                            + ' return process\nsubprocess.Popen=launch\n') + harness
+            if mode == 'late_directory':
+                harness = ('import tempfile,time\nreal_mkdtemp=tempfile.mkdtemp\n'
+                           'def acquire(*args,**kwargs):\n'
+                           ' folder=real_mkdtemp(*args,**kwargs)\n'
+                           ' if (kwargs.get("prefix") or (args[1] if len(args)>1 else None))=="comps-proof-": time.sleep(3)\n'
+                           ' return folder\ntempfile.mkdtemp=acquire\n') + harness
+            if mode == 'late_cleanup':
+                harness = ('import tempfile,time\nreal_cleanup=tempfile.TemporaryDirectory.cleanup\n'
+                           'def cleanup(self):\n'
+                           ' if "comps-proof-" in self.name: time.sleep(3)\n'
+                           ' return real_cleanup(self)\ntempfile.TemporaryDirectory.cleanup=cleanup\n') + harness
             runner_path = RUNNER
             if mode in ('dependencies', 'clean_runtime'):
                 runtime = folder / 'runtime'
@@ -205,7 +216,11 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                     shutil.copyfile(ROOT / name, target)
                 (runtime / 'mcp-server/package-lock.json').write_text(json.dumps(lock))
                 runner_path = runtime / RUNNER.relative_to(ROOT)
-            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
+            scratch = folder / 'proof-scratch'
+            scratch.mkdir()
+            environment = dict(os.environ, TMPDIR=str(scratch), TMP=str(scratch), TEMP=str(scratch))
+            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35, env=environment)
+            self.assertEqual(list(scratch.iterdir()), [], 'proof left temporary fixtures')
             if mode in ('stalled_evaluation', 'late_launch'):
                 pid = int((folder / 'pid').read_text())
                 with self.assertRaises(ProcessLookupError):
@@ -288,6 +303,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 
     def test_producer_deadline_cleans_stalled_and_late_processes(self):
         for mode in ('stalled_evaluation', 'late_launch'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode, timeout_seconds=2)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+
+    def test_deadline_during_directory_acquisition_cleans_scratch(self):
+        for mode in ('late_directory', 'late_cleanup'):
             with self.subTest(mode=mode):
                 result = self.invoke(mode, timeout_seconds=2)
                 self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
