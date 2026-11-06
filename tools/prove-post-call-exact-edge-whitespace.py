@@ -4,14 +4,18 @@ import argparse
 from datetime import date
 import json
 import os
+from pathlib import Path
 import re
 import selectors
 import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
-import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read
 
 MAX_BYTES = 1048576
 SPACE = '\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'
@@ -21,11 +25,6 @@ WHITESPACE = re.compile('[' + SPACE + ']+')
 class Unavailable(Exception):
     def __init__(self, status):
         self.status = status
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise Unavailable('release_unavailable')
 
 
 def normalized(text):
@@ -117,9 +116,15 @@ def observe(args, receipt):
         return left
 
     def release():
-        with urllib.request.build_opener(NoRedirect()).open(args.origin.rstrip('/') + '/release', timeout=remaining()) as response:
-            raw = response.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES:
+        try:
+            response = read(args.origin.rstrip('/') + '/release', timeout=remaining(), max_bytes=MAX_BYTES)
+        except (TimeoutError, urllib.error.URLError) as error:
+            if isinstance(error, TimeoutError) or isinstance(error.reason, TimeoutError):
+                raise Unavailable('timeout')
+            raise
+        remaining()
+        raw = response.body
+        if response.status != 200 or len(raw) > MAX_BYTES:
             raise Unavailable('release_unavailable')
         value = object_json(raw)
         sha, version = value.get('git_sha'), value.get('worker_version')

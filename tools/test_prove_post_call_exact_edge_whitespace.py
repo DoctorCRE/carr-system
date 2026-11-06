@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +40,7 @@ class ProofCLI(unittest.TestCase):
         cls.folder.cleanup()
 
     @contextmanager
-    def fixture(self, mutate=None, mode='ok', change_release=False, invalid_release=False, root_mutate=None):
+    def fixture(self, mutate=None, mode='ok', change_release=False, invalid_release=False, root_mutate=None, release_mode='ok'):
         value = copy.deepcopy(self.response)
         if mutate:
             mutate(value['calls'][0]['open_cards'][0])
@@ -54,6 +55,16 @@ class ProofCLI(unittest.TestCase):
                 if self.path != '/release':
                     self.send_error(404)
                     return
+                if self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)':
+                    self.send_error(403)
+                    return
+                if release_mode == 'redirect':
+                    self.send_response(302)
+                    self.send_header('Location', '/redirect-target')
+                    self.end_headers()
+                    return
+                if release_mode == 'timeout':
+                    time.sleep(1)
                 self.send_response(200)
                 self.end_headers()
                 reply = copy.deepcopy(release)
@@ -61,7 +72,13 @@ class ProofCLI(unittest.TestCase):
                     reply['worker_version']['id'] = 'different-version'
                 if invalid_release:
                     reply['env']['value'] = 'staging'
-                self.wfile.write(json.dumps(reply).encode())
+                raw = json.dumps(reply).encode()
+                if release_mode == 'oversized':
+                    raw += b' ' * 1048576
+                try:
+                    self.wfile.write(raw)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
             def log_message(self, *args):
                 pass
@@ -96,7 +113,7 @@ assert sys.argv[1:] == ['call', 'read-call-outcomes', '{}']
     def run_cli(self, expected, **kwargs):
         with self.fixture(**kwargs) as (folder, wrapper, origin, requests):
             result = subprocess.run([sys.executable, str(RUNNER), '--origin', origin, '--call-wrapper', str(wrapper),
-                                     '--timeout-seconds', '0.5' if kwargs.get('mode') == 'timeout' else '30'],
+                                     '--timeout-seconds', '0.5' if kwargs.get('mode') == 'timeout' or kwargs.get('release_mode') == 'timeout' else '30'],
                                     capture_output=True, text=True, timeout=5)
             self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
             receipt = json.loads(result.stdout)
@@ -111,6 +128,13 @@ assert sys.argv[1:] == ['call', 'read-call-outcomes', '{}']
             self.assertLessEqual(len(requests), 2)
             self.assertTrue(all(path == '/release' for path in requests))
             return receipt
+
+    def test_release_transport_preserves_refusals(self):
+        for mode in ['redirect', 'oversized', 'timeout']:
+            with self.subTest(mode=mode):
+                receipt = self.run_cli(78, release_mode=mode)
+                self.assertEqual(receipt['status'], 'timeout' if mode == 'timeout' else 'release_unavailable')
+                self.assertEqual(receipt['record_reads'], 0)
 
     def test_registered_exact_cohort_passes(self):
         receipt = self.run_cli(0)
