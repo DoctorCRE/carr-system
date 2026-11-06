@@ -30,7 +30,7 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 
 
 class ProofTest(unittest.TestCase):
-    def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False):
+    def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False, malformed_reader_headers=False, extra_marked_read=False):
         requests = []
         archive = io.BytesIO()
         package = ROOT / 'mcp-server/node_modules/@cfworker/json-schema'
@@ -60,8 +60,8 @@ class ProofTest(unittest.TestCase):
             lock['packages']['node_modules/@cfworker/json-schema']['resolved'] = 'https://untrusted.invalid/archive.tgz'
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
-                if (self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
-                        or self.headers.get('x-doctorcre-release-reader') != '1'):
+                if (self.headers.get_all('User-Agent') != ['doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)']
+                        or self.headers.get_all('x-doctorcre-release-reader') != ['1']):
                     self.send_error(403)
                     return
                 requests.append(self.path)
@@ -166,17 +166,10 @@ console.log(JSON.stringify({responses,release}));
                     + ('sys.exit(3)\n' if mode in ('wrapper_error', 'deadline_disarm') else 'os.kill(os.getppid(), signal.SIGALRM)\nchild.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
-            if denied_reads:
-                for path in ('/', '/favicon.ico'):
-                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
-                    with contextlib.closing(connection):
-                        connection.request('GET', path)
-                        response = connection.getresponse()
-                        self.assertEqual(response.status, 403)
-                        response.read()
             harness = '''import runpy,sys,urllib.request
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
+extra_marked_read=sys.argv[5]=='True'
 def opened(self,url,*args,**kwargs):
  if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://registry.npmjs.org/'):
   url=urllib.request.Request(origin+url.full_url.removeprefix('https://registry.npmjs.org'),headers=dict(url.header_items()),method=url.get_method())
@@ -185,7 +178,13 @@ def opened(self,url,*args,**kwargs):
  return original(self,url,*args,**kwargs)
 urllib.request.OpenerDirector.open=opened
 sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds',sys.argv[4]]
-runpy.run_path(sys.argv[0],run_name='__main__')
+try:
+ runpy.run_path(sys.argv[0],run_name='__main__')
+finally:
+ if extra_marked_read:
+  from lib.release_reader import read
+  response=read(origin+'/release',timeout=5)
+  assert response.status==200
 '''
             if mode in ('stalled_evaluation', 'late_launch'):
                 child = ('from pathlib import Path; import os,time; '
@@ -224,8 +223,35 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             scratch = folder / 'proof-scratch'
             scratch.mkdir()
             environment = dict(os.environ, TMPDIR=str(scratch), TMP=str(scratch), TEMP=str(scratch))
-            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35, env=environment)
+            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds), str(extra_marked_read)], capture_output=True, text=True, timeout=35, env=environment)
             self.assertEqual(list(scratch.iterdir()), [], 'proof left temporary fixtures')
+            if denied_reads:
+                for path in ('/', '/favicon.ico'):
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                    with contextlib.closing(connection):
+                        connection.request('GET', path)
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 403)
+                        response.read()
+            if malformed_reader_headers:
+                agent = 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
+                for headers in (
+                    [('User-Agent', agent), ('x-doctorcre-release-reader', 'wrong')],
+                    [('User-Agent', 'browser'), ('x-doctorcre-release-reader', '1')],
+                    [('User-Agent', agent), ('x-doctorcre-release-reader', '1'),
+                     ('x-doctorcre-release-reader', '1')],
+                    [('User-Agent', agent), ('User-Agent', 'browser'),
+                     ('x-doctorcre-release-reader', '1')],
+                ):
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                    with contextlib.closing(connection):
+                        connection.putrequest('GET', f'/DoctorCRE/carr-system/{SHA}/mcp-server/package-lock.json')
+                        for name, value in headers:
+                            connection.putheader(name, value)
+                        connection.endheaders()
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 403)
+                        response.read()
             if mode in ('stalled_evaluation', 'late_launch'):
                 pid = int((folder / 'pid').read_text())
                 with self.assertRaises(ProcessLookupError):
@@ -241,6 +267,11 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                         break
                     self.assertLess(time.monotonic(), until, 'owned wrapper descendant survived cleanup')
                     threading.Event().wait(0.01)
+            if extra_marked_read:
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            allowed_paths = {'/release', '/@cfworker/json-schema/-/json-schema-4.1.1.tgz', *(f'/DoctorCRE/carr-system/{SHA}/mcp-server/{name}'
+                                         for name in ('src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'))}
+            self.assertTrue(set(requests) <= allowed_paths, requests)
             self.assertLessEqual(len(requests), 5, requests)
             if mode == 'pass':
                 self.assertEqual(len(requests), 5, requests)
@@ -257,6 +288,14 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 result = self.invoke(mode, denied_reads=True)
                 self.assertEqual(result.returncode, 0 if mode == 'pass' else 78,
                                  result.stdout + result.stderr)
+
+    def test_malformed_reader_headers_are_rejected_before_accounting(self):
+        result = self.invoke(malformed_reader_headers=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_sixth_marked_read_exceeds_proof_budget(self):
+        with self.assertRaisesRegex(AssertionError, '6 not less than or equal to 5'):
+            self.invoke(extra_marked_read=True)
 
     def test_http_refusals(self):
         for mode in ('redirect', 'http_error', 'oversized'):
