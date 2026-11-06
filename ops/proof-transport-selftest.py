@@ -55,14 +55,66 @@ class ProofTransportTest(unittest.TestCase):
                 (root / 'tools/prove-new.py').write_text(source)
                 self.assertTrue(guard.check(root), source)
 
+    def test_program_execution_classes_require_audited_commands(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        cases = [
+            'import posix; posix.system("curl https://example.test")',
+            'from posix import system as launch; launch("curl https://example.test")',
+            'import webbrowser; webbrowser.GenericBrowser("/usr/bin/curl").open("https://example.test")',
+            'from webbrowser import GenericBrowser as Browser',
+            'import pty; pty.spawn(["curl", "https://example.test"])',
+            'import multiprocessing as mp; mp.set_executable("/usr/bin/curl")',
+            'import ctypes; ctypes.CDLL("libcurl.so")',
+            'import cffi; cffi.FFI().dlopen("libcurl.so")',
+        ]
+        for module in ['os', 'posix', 'nt']:
+            for member in ['system', 'execv', 'execve', 'execlp', 'spawnv',
+                           'spawnve', 'popen', 'posix_spawn', 'posix_spawnp']:
+                cases.append(f'import {module} as process; process.{member}("curl")')
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertTrue(guard.violations(source))
+                import hashlib
+                path = 'tools/prove-synthetic.py'
+                with patch.dict(guard.PROCESSES, {path: {
+                    'sha256': hashlib.sha256(source.encode()).hexdigest(),
+                    'commands': ['audited synthetic command'],
+                }}):
+                    self.assertEqual(guard.violations(source, path), [])
+                    self.assertTrue(guard.violations(source + '\n# changed', path))
+
+    def test_socket_url_and_dynamic_classes_cannot_be_process_declared(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        import hashlib
+        cases = [f'import {name}' for name in [
+            'socket', 'ssl', 'http.client', 'urllib.request', 'urllib3',
+            'requests', 'httpx', 'aiohttp', 'ftplib', 'smtplib',
+            'telnetlib', 'xmlrpc.client', 'importlib',
+        ]]
+        cases += [
+            'import asyncio; asyncio.open_connection("example.test", 443)',
+            'import asyncio; asyncio.get_event_loop().create_connection(None, "example.test", 443)',
+            'from asyncio import open_connection as connect',
+            '__import__("socket")', 'exec("import socket")', 'eval("1 + 1")',
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                path = 'tools/prove-synthetic.py'
+                with patch.dict(guard.PROCESSES, {path: {
+                    'sha256': hashlib.sha256(source.encode()).hexdigest(),
+                    'commands': ['git rev-parse HEAD'],
+                }}):
+                    self.assertTrue(guard.violations(source, path))
+
     def test_guard_accepts_shared_reader_and_pure_imports(self):
         guard = load(ROOT / 'ops/proof-transport-check.py')
         self.assertEqual(guard.violations(
             'import urllib.parse\nfrom lib.release_reader import read\n'
             'from datetime import datetime, timezone\nimport json\n'
-            'import hashlib, re, signal\n'
+            'import hashlib, re, signal, os, posix, asyncio\n'
             'from lib import release_reader\n'
             'hashlib.sha256(b"fixture"); re.split(",", "a,b")\n'
+            'os.stat("."); posix.stat("."); asyncio.sleep(0)\n'
             'signal.pthread_sigmask(signal.SIG_BLOCK, set())'), [])
 
     def test_cli_rejects_bypass_and_accepts_shared_reader(self):
@@ -72,6 +124,8 @@ class ProofTransportTest(unittest.TestCase):
             proof = root / 'tools/prove-new.py'
             for source, status in [
                 ('import subprocess; subprocess.run(["/usr/bin/curl", "https://example.test"])', 1),
+                ('import posix; posix.system("curl https://example.test")', 1),
+                ('import webbrowser; webbrowser.GenericBrowser("curl").open("https://example.test")', 1),
                 ('from lib.release_reader import read; read("https://example.test")', 0),
             ]:
                 proof.write_text(source)

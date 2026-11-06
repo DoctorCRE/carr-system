@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Admit proof network access only through the shared reader and audited commands.
+"""Catch accidental proof transport bypasses by our own builders.
+
+Coordinator decision: the threat model is ACCIDENTAL bypass, not a determined
+adversary. The real failure was five proof runners using Python's default urllib
+transport. Static checks cannot be complete against deliberate evasion and this
+check makes no such claim. Classify capabilities rather than individual clients:
+program execution requires audited non-network commands; socket/URL opening goes
+through lib/release_reader.py or the declared call wrapper; dynamic imports and
+string execution in runners are refused. Pure computation is outside scope.
 
 Process declarations pin the entire runner, including indirect argv construction
 and embedded scripts. Audit every command before updating a pin. The selected
-call wrapper and explicit fixture executables are trusted caller inputs. This
-source check is not a sandbox for hostile Python or substituted executables.
+call wrapper and explicit fixture executables are trusted caller inputs.
 """
 import argparse
 import ast
@@ -14,26 +21,45 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-# Pure standard-library computation is outside transport admission.
-
 NETWORK_MODULES = {
-    'socket', '_socket', 'ssl', '_ssl', 'http', 'urllib', 'urllib3',
-    'requests', 'httpx', 'aiohttp', 'ftplib', 'smtplib', 'imaplib',
-    'poplib', 'nntplib', 'telnetlib', 'xmlrpc', 'asyncio', 'socketserver',
+    'socket', '_socket', 'ssl', '_ssl', 'http.client', 'urllib.request',
+    'urllib3', 'requests', 'httpx', 'aiohttp',
+    'ftplib', 'smtplib', 'imaplib', 'poplib', 'nntplib', 'telnetlib',
+    'xmlrpc.client', 'xmlrpc.server', 'socketserver', 'http.server',
 }
-INDIRECT_MODULES = {'importlib', 'ctypes', '_ctypes', 'builtins', 'runpy',
-                    'multiprocessing', '_posixsubprocess', 'pty'}
+PROGRAM_MODULES = {
+    'subprocess', '_posixsubprocess', 'pty', 'webbrowser', 'multiprocessing',
+    'ctypes', '_ctypes', 'cffi',
+}
+DYNAMIC_MODULES = {'importlib', 'builtins', 'runpy'}
+OS_MODULES = {'os', 'posix', 'nt'}
 OS_PROCESS = {'system', 'popen', 'startfile', 'fork', 'forkpty', 'posix_spawn', 'posix_spawnp'}
+ASYNC_NETWORK = {'open_connection', 'open_unix_connection', 'create_connection',
+                 'create_unix_connection', 'create_datagram_endpoint',
+                 'start_server', 'start_unix_server', 'create_server',
+                 'create_unix_server', 'connect_accepted_socket', 'sock_connect'}
 
 
-def restricted(name):
-    root = name.split('.')[0]
-    if name == 'urllib.parse' or name.startswith('urllib.parse.'):
-        return False
+def belongs(name, modules):
+    return any(name == module or name.startswith(module + '.') for module in modules)
+
+
+def capability(name):
+    parts = name.split('.')
+    if belongs(name, DYNAMIC_MODULES):
+        return 'dynamic'
+    if belongs(name, NETWORK_MODULES) or (
+            parts[0] == 'asyncio' and any(part in ASYNC_NETWORK for part in parts[1:])):
+        return 'network'
+    if belongs(name, PROGRAM_MODULES) or (
+            parts[0] in OS_MODULES and len(parts) > 1 and
+            (parts[1] in OS_PROCESS or parts[1].startswith(('exec', 'spawn')) or parts[1] == '*')):
+        return 'program'
     if name in {'lib', 'lib.release_reader', 'lib.release_reader.read'}:
-        return False
-    return (root in NETWORK_MODULES or root in INDIRECT_MODULES or
-            root not in sys.stdlib_module_names)
+        return None
+    if parts[0] not in sys.stdlib_module_names:
+        return 'unknown helper'
+    return None
 
 
 PROCESSES = json.loads((ROOT / 'ops/config/proof-process-allowlist.json').read_text())
@@ -55,13 +81,11 @@ def violations(source, path=None):
                     bindings[alias.asname or root] = name if alias.asname else root
                 else:
                     bindings[alias.asname or alias.name] = name
-                if (getattr(node, 'level', 0) or
+                kind = capability(name)
+                if (getattr(node, 'level', 0) or alias.name == '*' or
                         (isinstance(node, ast.ImportFrom) and alias.name in
-                         {'os', 'sys', 'subprocess', 'socket', 'urllib', 'modules'}) or
-                        (root == 'subprocess' and not process_allowed) or
-                        (name.startswith('os.') and not process_allowed and
-                         (name[3:] in OS_PROCESS or name[3:].startswith(('exec', 'spawn')))) or
-                        (root != 'subprocess' and restricted(name))):
+                         {'os', 'posix', 'nt', 'sys', 'subprocess', 'socket', 'urllib', 'modules'}) or
+                        (kind is not None and (kind != 'program' or not process_allowed))):
                     failures.append((node.lineno, f'undeclared network/process import {name}; use lib.release_reader or declare audited commands'))
         if isinstance(node, ast.Name) and node.id in {'__import__', 'eval', 'exec', 'compile', 'getattr', 'globals', 'locals', 'vars'}:
             failures.append((node.lineno, 'dynamic capability lookup is not admitted'))
@@ -80,12 +104,13 @@ def violations(source, path=None):
         parts = name.split('.')
         if isinstance(node, ast.Attribute) and node.attr.startswith('__') and node.attr not in {'__class__', '__name__'}:
             failures.append((node.lineno, 'reflective capability lookup is not admitted'))
-        if ((name.startswith('os.') and (parts[1] in OS_PROCESS or parts[1].startswith(('exec', 'spawn')))
-             and not process_allowed) or
+        kind = capability(name) if '.' in name else None
+        if ((kind in {'network', 'dynamic'} or (kind == 'program' and not process_allowed)) or
                 name.startswith('sys.modules') or
-                (name.startswith('urllib.') and not name.startswith('urllib.parse')) or
                 (name.startswith('lib.release_reader.') and parts[2] != 'read') or
-                (isinstance(node, ast.Attribute) and node.attr in {'os', 'sys', 'subprocess', 'socket', 'urllib'})):
+                (isinstance(node, ast.Attribute) and node.attr in
+                 {'os', 'posix', 'nt', 'sys', 'subprocess', 'socket', 'urllib'}) or
+                (isinstance(node, ast.Attribute) and node.attr in ASYNC_NETWORK)):
             failures.append((node.lineno, f'undeclared network/process capability {name}'))
     return failures
 
