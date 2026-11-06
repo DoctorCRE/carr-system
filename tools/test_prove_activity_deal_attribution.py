@@ -54,6 +54,41 @@ class AttributionProofTests(unittest.TestCase):
 
 
 class ActorTransportTests(unittest.TestCase):
+    def test_empty_activity_cli_refuses(self):
+        self.assert_null_activity_refuses('empty', 'unknown', 'unknown')
+
+    def test_unavailable_activity_cli_refuses(self):
+        self.assert_null_activity_refuses('unavailable', 'unavailable', 'unavailable')
+
+    def assert_null_activity_refuses(self, state, attribution, coverage):
+        from contextlib import redirect_stdout
+        from types import SimpleNamespace
+        import io
+        import sys
+        import tempfile
+        response = dict(schema='activity-deal-attribution.v1', state=state,
+                        attribution=attribution, coverage=coverage, activity=None,
+                        direct=None, candidates=[], credited_activity_count=0)
+        subprocess.run(['node', '--experimental-strip-types', '--input-type=module', '-e', proof.PARSER],
+                       input=json.dumps([response]), text=True, cwd=ROOT, capture_output=True, check=True)
+        bundle = json.loads(FIXTURE.read_text())
+        queue = dict(schema_version='email-router-queue.v2', emails=[
+            dict(activity_id=bundle['canonical'][0]['activity_id'], deal=None)])
+        release = SimpleNamespace(status=200, body=json.dumps({
+            'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode())
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = Path(directory) / 'actor'
+            wrapper.write_text('#!' + sys.executable + '\nimport json,sys\n'
+                               + 'queue=' + repr(queue) + '\nresponse=' + repr(response) + '\n'
+                               + "print(json.dumps(queue if sys.argv[2]=='email-router-queue' else response))\n")
+            wrapper.chmod(0o700)
+            with patch.object(proof, 'read', return_value=release), redirect_stdout(io.StringIO()) as output:
+                result = proof.main(['--production', '--natural', '--merge-sha', 'a' * 40,
+                                     '--call-wrapper', str(wrapper)])
+            self.assertEqual(result, 78)
+            self.assertEqual(json.loads(output.getvalue()), {
+                'schema': 'activity-deal-attribution-proof.v1', 'state': 'insufficient_evidence'})
+
     def test_deployed_actor_wrapper_uses_contract_parser_and_canonical_timeline(self):
         from types import SimpleNamespace
         import tempfile

@@ -104,7 +104,7 @@
     ]
   },
   "tools/prove-activity-deal-attribution.py": {
-    "sha256": "75655699da057f23aa46f9108aefa23d9cd3041cefecfc8ff3a278dfc5c51b9b",
+    "sha256": "9f95711a5d7860169a9cf607b9fde21a1be75f3b4f07e0c538cfd0f5f363489e",
     "commands": [
       "node --experimental-strip-types --input-type=module -e with fixed parser program and stdin JSON",
       "declared --call-wrapper call email-router-queue/get-deal-room/read-activity-deal-attribution; cleanup signals only to each owned wrapper process group"

@@ -103,7 +103,8 @@ def production(args):
         if str(UUID(activity_id)) != activity_id:
             raise ValueError('activity_id_invalid')
         response = call('read-activity-deal-attribution', {'activity_id': activity_id})
-        if response.get('activity', {}).get('id') != activity_id:
+        activity = response.get('activity')
+        if not isinstance(activity, dict) or activity.get('id') != activity_id:
             raise ValueError('activity_identity_mismatch')
         deal_id = email.get('deal')
         if response.get('state') == 'needs_input' and deal_id is not None:
