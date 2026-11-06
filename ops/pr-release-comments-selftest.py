@@ -10,6 +10,7 @@ import tempfile
 import os
 
 spec = importlib.util.spec_from_file_location('comments', Path(__file__).with_name('pr-release-comments.py'))
+assert spec is not None and spec.loader is not None
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
