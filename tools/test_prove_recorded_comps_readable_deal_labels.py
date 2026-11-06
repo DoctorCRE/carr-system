@@ -29,8 +29,8 @@ class ProofTest(unittest.TestCase):
         requests = []
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
-                if (self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
-                        or self.headers.get('x-doctorcre-release-reader') != '1'):
+                if (self.headers.get_all('User-Agent') != ['doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)']
+                        or self.headers.get_all('x-doctorcre-release-reader') != ['1']):
                     self.send_error(403)
                     return
                 requests.append(self.path)
@@ -188,6 +188,8 @@ finally:
                 time.sleep(3.2)
                 self.assertFalse((folder / 'escaped').exists(),
                                  'wrapper descendant performed work after proof exit')
+            if extra_marked_read:
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             allowed_paths = {'/release', *(f'/DoctorCRE/carr-system/{SHA}/mcp-server/{name}'
                                          for name in ('src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'))}
             self.assertTrue(set(requests) <= allowed_paths, requests)
