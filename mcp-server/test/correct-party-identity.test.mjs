@@ -665,3 +665,61 @@ test("regional ISP and other consumer mail domains never count as corroboration"
     e => e.payload.error === "identity_evidence_required", domain);
   }
 });
+
+for (const email of [
+  "first@other.test; person@clinic.test",
+  "first@other.test, person@clinic.test",
+  '"Morgan, Alex" <first@other.test>; Alex <Person@CLINIC.test>',
+  "person@clinic.test; PERSON@CLINIC.test",
+  "前田@other.test; 医師@clinic.test",
+  "first@other.test; 医師@医院.test",
+]) {
+  test(`recorded secondary domain corroborates name and firm in ${email}`, async () => {
+    const domain = email.includes("医院") ? "医院.test" : "clinic.test";
+    for (const fields of [{ name: "Alex Morgan" }, { org: "Harbor Point Legal" }]) {
+      const fake = new Fake(basePlan({ email }));
+      const evidence = { ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: domain };
+      const out = await call(fake, { fields, evidence });
+      assert.deepEqual(out.updated, Object.keys(fields));
+      assert.deepEqual(JSON.parse(fake.events()[0][1][7]).evidence, evidence);
+    }
+  });
+}
+
+for (const email of [
+  "clinic.test", "Contact clinic.test for details", "person@notclinic.test", "person@clinic.test.invalid",
+  '"clinic.test" <person@other.test>', '"person@clinic.test" <person@other.test>',
+  '"Morgan, person@clinic.test" <person@other.test>', "person@other.test; clinic.test",
+]) {
+  test(`domain without recorded address refuses in ${email}`, async () => {
+    const fake = new Fake(basePlan({ email }));
+    await assert.rejects(call(fake, { fields: { name: "Alex Morgan" }, evidence: {
+      ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: "clinic.test" } }),
+    e => e.payload.error === "identity_evidence_required");
+    assertNoCorrection(fake);
+  });
+}
+
+for (const domain of ["gmail.com", "carr.us", "mail.carr.us"]) {
+  test(`secondary ${domain} remains refused`, async () => {
+    const fake = new Fake(basePlan({ email: `first@clinic.test; person@${domain}` }));
+    await assert.rejects(call(fake, { fields: { org: "Harbor Point Legal" }, evidence: {
+      ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: domain } }),
+    e => e.payload.error === "identity_evidence_required");
+    assertNoCorrection(fake);
+  });
+}
+
+test("secondary domain exact replay returns receipt without correction; changed action refuses", async () => {
+  const fake = new Fake(basePlan({ email: "first@other.test; person@clinic.test" }));
+  const args = { fields: { name: "Alex Morgan" }, evidence: {
+    ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: "clinic.test" } };
+  const out = await call(fake, args);
+  const receipt = fake.writes("insert into tool_call")[0][1];
+  fake.plan["select request_hash, response from tool_call"] = [{ request_hash: receipt[3], response: out }];
+  fake.calls = [];
+  assert.deepEqual(await call(fake, args), { replayed: true, ...out });
+  assertNoCorrection(fake);
+  await assert.rejects(call(fake, { ...args, fields: { name: "Another Name" } }), e => e.payload.error === "key_reuse");
+  assertNoCorrection(fake);
+});
