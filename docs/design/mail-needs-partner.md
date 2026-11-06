@@ -14,10 +14,14 @@ Only stored next_date is a decision date. Missing dates are unknown. PostgreSQL 
 
 Action references name the existing proposal confirmation command and exact proposal ID and version. They require the existing preview before confirmation; this read never authorizes a mutation. Coverage includes recorded inbound proposals only, not unrecorded inbox mail. Queued and sent are never equated.
 
-## Remaining proof constraints
+## Production proof transport
 
-This draft does not claim production proof readiness. The fixed adapter uses the existing app-origin session. api.doctorcre.com is not an accepted browser origin, and sessionFor enforces origin binding. A separate authenticated contract decision is needed before the specified API-host natural proof can work. No new origin or write grant is added here.
+The natural proof reuses the existing local-actor call wrapper used by prove-prospect-research-future-evidence.py and prove-mail-policy-multiple-recorded-addresses.py. run.sh call reaches the deployed Worker /mcp door; the server derives mailbox authority from its existing local token. No actor argument, new credential store, cookie transfer or origin grant is introduced. The independent app's shared scripts/app-release-reader.mjs supplies read-only HTTP and release headers, not partner authentication. lib/carr_session_scope.py classifies transcript ownership and does not authenticate production reads.
 
-The Python proof invokes the production TypeScript response parser. ops/proof-transport-check.py requires this exact subprocess and source hash in ops/config/proof-process-allowlist.json. That file is outside this job's writable scope. Lint correctly refuses the undeclared subprocess. Do not bypass it or claim green CI. Production mode returns insufficient_evidence until a contemporaneous canonical authenticated read transport is implemented. The CLI never accepts a hand-written canonical production receipt.
+The primary wrapper defaults to this checkout's run.sh. The proof worker supplies an existing second-partner authenticated wrapper using --other-call-wrapper. Both wrappers must implement the existing call verb JSON convention. Same-mailbox credentials fail closed. Release HTTP uses lib/release_reader.py. The fixed browser GET remains an adapter tested against the same registered read contract; the proof observes the deployed registered verb through the permitted existing actor transport.
+
+Read the top natural pending item, read the second partner mailbox, then contemporaneously page list-email-proposals using the primary wrapper. Canonical reads include non-deal items and are capped at twenty pages of fifty proposals. Missing witnesses, incomplete second-mailbox coverage, stale versions, resolved proposals, source failures, absent second-partner transport or absent merge identity return insufficient_evidence. There are at most twenty-two wrapper reads, a sixty-second wrapper deadline and a ten-second per-call timeout. Every acquired wrapper process group is killed on success, failure or timeout. The parser subprocess is bounded to fifteen seconds and has no child acquisition.
+
+The allowlist pins the complete proof source and audits the fixed Node parser, selected existing read wrappers and owned-process-group cleanup. Its checker is unchanged. Production remains unverified in this builder job.
 
 The response supplies an existing confirmation-command reference requiring review. It does not invent a browser deep link or claim the command arguments alone are sufficient to confirm.

@@ -1,3 +1,4 @@
+// Rank recorded pending decisions for the authenticated partner mailbox.
 import { partnerAuthoritySlugForActor } from './partner-authority.js';
 import { ToolError } from './tool-error.ts';
 

@@ -2,6 +2,9 @@
 """Check recorded pending mail evidence without mutating or sending."""
 import argparse
 import json
+import os
+import signal
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -48,20 +51,68 @@ def observe(bundle):
 
 
 def production(args):
-    def read(path, cookie=None):
-        headers = {'Cookie': cookie.read_text().strip()} if cookie else {}
-        reply = release_reader.read('https://api.doctorcre.com' + path, headers=headers, timeout=10, max_bytes=MAX_BYTES)
-        if reply.status != 200 or len(reply.body) > MAX_BYTES:
-            raise ValueError('authenticated_read_unavailable')
-        return json.loads(reply.body)
-    release = read('/release')
+    reply = release_reader.read('https://api.doctorcre.com/release', timeout=10, max_bytes=MAX_BYTES)
+    if reply.status != 200 or len(reply.body) > MAX_BYTES:
+        raise ValueError('release_unavailable')
+    release = json.loads(reply.body)
     if not args.merged_sha or release.get('git_sha', {}).get('value') != args.merged_sha:
         raise ValueError('merge_identity_unproved')
-    if not args.primary_cookie_file or not args.other_cookie_file:
-        raise ValueError('origin_bound_partner_sessions_required')
-    primary = parsed(read('/api/v1/intelligence/mail-needs-partner?limit=1', args.primary_cookie_file))
-    other = parsed(read('/api/v1/intelligence/mail-needs-partner?limit=50', args.other_cookie_file))
-    raise ValueError('canonical_authenticated_read_transport_unavailable')
+    if not args.other_call_wrapper:
+        raise ValueError('second_partner_call_wrapper_required')
+
+    deadline = time.monotonic() + 60
+
+    def call(wrapper, verb, payload):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('read_deadline_exhausted')
+        with subprocess.Popen([str(wrapper.resolve()), 'call', verb, json.dumps(payload)],
+                              cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              start_new_session=True) as process:
+            try:
+                output, _ = process.communicate(timeout=min(10, remaining))
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        if process.returncode or len(output) > MAX_BYTES:
+            raise ValueError('authenticated_read_unavailable')
+        value = json.loads(output)
+        if not isinstance(value, dict) or value.get('error') or value.get('ok') is False:
+            raise ValueError('authenticated_read_unavailable')
+        return value
+
+    primary = parsed(call(args.primary_call_wrapper, 'read-mail-needs-partner', {'limit': 1}))
+    other = parsed(call(args.other_call_wrapper, 'read-mail-needs-partner', {'limit': 50}))
+    if not primary['items']:
+        raise ValueError('no_natural_evidence')
+    proposal_id = primary['items'][0]['proposal_id']
+    cursor = None
+    canonical = None
+    for _ in range(20):
+        payload = {'status': 'pending', 'include_non_deal': True, 'limit': 50}
+        if cursor:
+            payload['cursor'] = cursor
+        page = call(args.primary_call_wrapper, 'list-email-proposals', payload)
+        if (page.get('schema_version') != 'email-proposals.v1' or page.get('send') is not False
+                or not isinstance(page.get('proposals'), list) or len(page['proposals']) > 50
+                or type(page.get('more')) is not bool):
+            raise ValueError('canonical_contract_invalid')
+        if any(row.get('id') == proposal_id for row in page['proposals']):
+            canonical = page
+            break
+        if not page['more']:
+            break
+        next_cursor = page.get('next_cursor')
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
+            raise ValueError('canonical_cursor_invalid')
+        cursor = next_cursor
+    if canonical is None:
+        raise ValueError('canonical_pending_not_observed_within_read_cap')
+    receipt = observe(dict(primary=primary, other=other, canonical=canonical))
+    receipt['release_sha'] = args.merged_sha
+    return receipt
 
 
 def main(argv=None):
@@ -71,8 +122,8 @@ def main(argv=None):
     parser.add_argument('--production', action='store_true')
     parser.add_argument('--natural', action='store_true')
     parser.add_argument('--merged-sha')
-    parser.add_argument('--primary-cookie-file', type=Path)
-    parser.add_argument('--other-cookie-file', type=Path)
+    parser.add_argument('--primary-call-wrapper', type=Path, default=ROOT / 'run.sh')
+    parser.add_argument('--other-call-wrapper', type=Path, help='Existing authenticated wrapper on the second partner machine; no actor override.')
     args = parser.parse_args(argv)
     try:
         if args.fixture and not args.production:

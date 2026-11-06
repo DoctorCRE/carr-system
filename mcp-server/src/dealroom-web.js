@@ -1,3 +1,4 @@
+// Serve authenticated Deal Room browser requests.
 import { mailNeedsPartnerOwner, parseMailNeedsPartnerQuery, parseMailNeedsPartnerResponse } from "./mail-needs-partner.ts";
 const MAIL_NEEDS_PARTNER_PATH = "/api/v1/intelligence/mail-needs-partner";
 // Browser entrypoint for the configured production app host (with a narrow
