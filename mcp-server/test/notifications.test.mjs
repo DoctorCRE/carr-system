@@ -628,11 +628,14 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
   const { join } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { spawn, execFileSync } = await import('node:child_process');
-  const { createServer } = await import('node:http');
+  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
   const root = await mkdtemp(join(tmpdir(), 'notification-proof-contract-'));
   const repo = fileURLToPath(new URL('../../', import.meta.url));
   let server;
   try {
+    await mkdir(join(root, 'lib'), { recursive: true });
+    await copyFile(join(repo, 'lib/release_reader.py'), join(root, 'lib/release_reader.py'));
+    await copyFile(join(repo, 'lib/release-reader-marker.json'), join(root, 'lib/release-reader-marker.json'));
     await mkdir(join(root, 'tools'), { recursive: true });
     await mkdir(join(root, 'mcp-server/src'), { recursive: true });
     const cli = join(root, 'tools/prove-notification-feed-evidence-integrity.py');
@@ -645,6 +648,7 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
     let releaseReads = 0;
     server = createServer((request, response) => {
       if (request.url !== '/release') { response.writeHead(404).end(); return; }
+      assert.equal(request.headers['user-agent'], 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)');
       releaseReads++;
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ git_sha: { value: sha, reason: null } }));
@@ -716,5 +720,30 @@ print(json.dumps(value['feed' if sys.argv[2] == 'notification-feed' else 'prefer
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('proof release fixture refuses unmarked reads and admits the Python reader', async () => {
+  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { fileURLToPath } = await import('node:url');
+  const server = createServer((_req, res) => res.end('fixture-release'));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/release`;
+    for (const suffix of ['', '?probe=1']) {
+      const response = await fetch(url + suffix);
+      assert.equal(response.status, 403);
+      assert.equal(await response.text(), 'proof_release_reader_required');
+    }
+    const result = await promisify(execFile)(process.env.CARR_CI_PYTHON || 'python3',
+      ['-c', 'from lib.release_reader import read; import sys; r = read(sys.argv[1]); assert r.status == 200; print(r.body.decode())', url],
+      { cwd: fileURLToPath(new URL('../../', import.meta.url)), timeout: 5000 });
+    assert.equal(result.stdout.trim(), 'fixture-release');
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
   }
 });

@@ -3,6 +3,7 @@
 import argparse
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 import os
 import re
 import signal
@@ -11,18 +12,15 @@ import subprocess
 import sys
 import time
 import urllib.parse
-import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read as read_http
 
 MAX_BYTES = 1048576
 
 
 class Insufficient(Exception):
     pass
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise Insufficient()
 
 
 def instant(value):
@@ -32,7 +30,6 @@ def instant(value):
     if parsed.tzinfo is None:
         raise Insufficient()
     return parsed.timestamp()
-
 
 def observe(args, receipt):
     deadline = time.monotonic() + args.timeout_seconds
@@ -52,9 +49,10 @@ def observe(args, receipt):
         return value
 
     def release():
-        opener = urllib.request.build_opener(NoRedirect())
-        with opener.open(args.origin.rstrip('/') + '/release', timeout=remaining()) as response:
-            value = decode(response.read(MAX_BYTES + 1))
+        response = read_http(args.origin.rstrip('/') + '/release', timeout=remaining(), max_bytes=MAX_BYTES)
+        if response.status != 200:
+            raise OSError('release_unavailable')
+        value = decode(response.body)
         sha = value.get('git_sha', {}).get('value')
         if not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{40}', sha):
             raise Insufficient()

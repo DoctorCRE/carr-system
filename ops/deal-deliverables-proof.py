@@ -12,8 +12,9 @@ import json
 import re
 import signal
 from pathlib import Path
-import urllib.request
-import urllib.error
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read as read_http
 
 MAX_BYTES = 36 * 1024 * 1024
 
@@ -73,28 +74,19 @@ def main():
             check(all(re.fullmatch('[a-f0-9-]{36}', row[k]) for k in ('deal_id', 'id')), 'invalid file path')
             root = '/api/v1/deal-deliverables/' + row['deal_id']
             paths = {'release':'/release', 'list':root, 'download':root+'/'+row['id']+'/download', 'revoked':root+'/'+row['id']+'/download'}
-            class NoRedirect(urllib.request.HTTPRedirectHandler):
-                def redirect_request(self, *unused):
-                    return None
-            opener = urllib.request.build_opener(NoRedirect())
             def read(key):
                 origin = 'https://api.doctorcre.com' if key == 'release' else 'https://app.doctorcre.com'
                 headers = {}
                 if key != 'release':
                     cookie = (args.revoked_cookie_file if key == 'revoked' else args.active_cookie_file).read_text().strip()
                     headers['Cookie'] = cookie
-                request = urllib.request.Request(origin + paths[key], headers=headers)
-                try:
-                    response = opener.open(request, timeout=10)
-                except urllib.error.HTTPError as error:
-                    response = error
-                with response:
-                    data = response.read(MAX_BYTES + 1)
-                    check(len(data) <= MAX_BYTES, 'GET exceeds byte limit')
-                    if key == 'revoked':
-                        return {'status':response.status}
-                    check(response.status == 200, 'GET refused')
-                    return {'base64':base64.b64encode(data).decode()} if key == 'download' else json.loads(data)
+                response = read_http(origin + paths[key], headers=headers, timeout=10, max_bytes=MAX_BYTES)
+                data = response.body
+                check(len(data) <= MAX_BYTES, 'GET exceeds byte limit')
+                if key == 'revoked':
+                    return {'status': response.status}
+                check(response.status == 200, 'GET refused')
+                return {'base64':base64.b64encode(data).decode()} if key == 'download' else json.loads(data)
         print(json.dumps(observe(receipt, args.sha, read)))
         return 0
     except (ValueError, KeyError, TypeError, OSError) as error:

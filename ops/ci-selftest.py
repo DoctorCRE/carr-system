@@ -47,7 +47,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
+            "ops/ci.sh", "ops/ci.py", "ops/proof-transport-check.py", "ops/ci_scope.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py", "ops/gitleaks.py", ".gitleaks.toml",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
@@ -55,7 +55,7 @@ def ci_fixture():
             "ops/migration-open-pr-gate.py", "ops/migration-order-gate.py",
             "tools/migration_claims.py", "tools/migration_number_contract.py",
             "tools/migration_source.py", "tools/migration_baseline.py",
-            "ops/config/public-source-identities.v1.json",
+            "ops/config/public-source-identities.v1.json", "ops/config/proof-process-allowlist.json",
             "bin/type-check.sh", "bin/with-timeout.py", "mypy.ini",
         ):
             target = root / rel
