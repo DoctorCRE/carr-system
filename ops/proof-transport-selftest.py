@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,20 +21,73 @@ def load(path):
 
 
 class ProofTransportTest(unittest.TestCase):
-    def test_guard_rejects_direct_transports_and_aliases(self):
+    def test_guard_rejects_unapproved_capabilities(self):
         guard = load(ROOT / 'ops/proof-transport-check.py')
-        for source in ['import urllib.request as net', 'from urllib import request',
-                       'from urllib.request import urlopen as read', 'import requests',
-                       'import httpx as net', 'from http.client import HTTPSConnection',
-                       'import aiohttp', 'import socket',
-                       'import subprocess; subprocess.run(["curl", "https://example.test"])']:
-            with self.subTest(source=source):
-                with tempfile.TemporaryDirectory() as directory:
-                    root = Path(directory)
-                    (root / 'tools').mkdir()
-                    (root / 'tools/prove-new.py').write_text(source)
-                    self.assertTrue(guard.check(root))
-        self.assertEqual(guard.violations('import urllib.parse\nfrom lib.release_reader import read'), [])
+        cases = [
+            'import urllib.request as net',
+            'from urllib import request as r',
+            'from urllib.request import urlopen as read',
+            'import http.client as h; h.HTTPSConnection("example.test")',
+            'import requests as r; r.get("https://example.test")',
+            'import httpx as net', 'import aiohttp', 'import socket',
+            'import ftplib', 'import arbitrary_network_helper',
+            'import subprocess; subprocess.run(["curl", "https://example.test"])',
+            'import subprocess; subprocess.run(["/usr/bin/curl", "--silent", "--fail", "https://example.test"], check=True)',
+            'import subprocess; subprocess.run("/usr/bin/curl https://example.test", shell=True)',
+            'import subprocess; subprocess.run(["sh", "-c", "exec curl https://example.test"])',
+            'import subprocess; subprocess.run(["python3", "-c", "import socket"])',
+            'from subprocess import run as launch; launch(["wget", "https://example.test"])',
+            'import os; os.system("curl https://example.test")',
+            'from os import system as launch',
+            '__import__("socket")', 'exec("import socket")',
+            'import importlib; importlib.import_module("socket")',
+            'import pathlib; pathlib.os.system("curl https://example.test")',
+            'import sys; sys.modules["socket"].socket()',
+            'import lib.release_reader as reader; reader.urllib.request.urlopen("https://example.test")',
+        ]
+        for source in cases:
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'tools').mkdir()
+                (root / 'tools/prove-new.py').write_text(source)
+                self.assertTrue(guard.check(root), source)
+
+    def test_guard_accepts_shared_reader_and_pure_imports(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        self.assertEqual(guard.violations(
+            'import urllib.parse\nfrom lib.release_reader import read\n'
+            'from datetime import datetime, timezone\nimport json'), [])
+
+    def test_cli_rejects_bypass_and_accepts_shared_reader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'tools').mkdir()
+            proof = root / 'tools/prove-new.py'
+            for source, status in [
+                ('import subprocess; subprocess.run(["/usr/bin/curl", "https://example.test"])', 1),
+                ('from lib.release_reader import read; read("https://example.test")', 0),
+            ]:
+                proof.write_text(source)
+                result = subprocess.run([sys.executable, str(ROOT / 'ops/proof-transport-check.py'),
+                                         '--root', directory], capture_output=True, text=True)
+                self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+
+    def test_process_declarations_are_bound_to_entire_runner(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        self.assertEqual(guard.check(ROOT), [])
+        for name in guard.PROCESSES:
+            source = (ROOT / name).read_text()
+            with self.subTest(runner=name):
+                self.assertEqual(guard.violations(source, name), [])
+                for addition in [
+                    '\nsubprocess.run(["/usr/bin/curl", "https://example.test"])',
+                    '\nsubprocess.run(["sh", "-c", "exec curl https://example.test"])',
+                    '\nimport socket',
+                ]:
+                    self.assertTrue(guard.violations(source + addition, name))
+                self.assertTrue(guard.violations(source.replace("'call'", "'fetch'"), name)
+                                if "'call'" in source else
+                                guard.violations(source + '\nother_command = "curl"', name))
 
     def test_shared_reader_caps_success_and_errors_without_following_redirects(self):
         from lib.release_reader import read, USER_AGENT
