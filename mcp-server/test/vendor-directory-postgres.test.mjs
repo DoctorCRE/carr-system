@@ -12,8 +12,8 @@ import { parseBusinessQuery, readBusinessList, readBusinessRecord } from '../src
 function disposableClient(dsn) {
   const url = assertDisposableDatabase(dsn);
   const db = new pg.Client({connectionString:dsn});
-  assert.equal(db.connectionParameters.host, url.hostname);
-  assert.equal(db.connectionParameters.port, Number(url.port));
+  assert.equal(db.connectionParameters.host, url.searchParams.get('host') || url.hostname);
+  assert.equal(db.connectionParameters.port, Number(url.port || 5432));
   return db;
 }
 

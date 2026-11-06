@@ -5,7 +5,12 @@ export function assertDisposableDatabase(dsn, { env = process.env, service = fal
   const refuse = () => assert.fail('REFUSED: disposable PostgreSQL endpoint required');
   let url;
   try { url = new URL(dsn); } catch { refuse(); }
-  if (!['postgres:', 'postgresql:'].includes(url.protocol) || !url.port || url.search || url.hash) refuse();
+  if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.hash) refuse();
+  const socket = url.hostname === 'localhost' && url.username === 'carr_ci' && !url.password
+    && !url.port && url.pathname === '/carr_ci'
+    && /^\?host=%2Ftmp%2Fpg-[a-z0-9_]{8}$/.test(url.search);
+  if (socket) return url;
+  if (!url.port || url.search) refuse();
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   const hosted = env.GITHUB_ACTIONS === 'true' && env.CARR_CI_POSTGRES_IMAGE === 'both'
     && url.hostname === 'postgres' && url.port === '5432' && url.username === 'carr_ci' && !url.password

@@ -14,7 +14,7 @@ const SNAPSHOT_DSN = await snapshotDatabase('relationship-network-postgres-');
 function disposableClient(){
   const dsn=SNAPSHOT_DSN;
   const url=assertDisposableDatabase(dsn),db=new pg.Client({connectionString:dsn});
-  assert.ok(db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'effective endpoint must match the disposable URL');
+  assert.ok(db.connectionParameters.host===(url.searchParams.get('host') || url.hostname)&&db.connectionParameters.port===Number(url.port || 5432),'effective endpoint must match the disposable URL');
   return db;
 }
 // Synthetic fixtures. `prefix` pins a UUID's sort position or forces hex letters.
@@ -264,7 +264,7 @@ test('W14 PostgreSQL: per-deal attribution, every role row, and one association 
 test('W14 PostgreSQL: exact referrals, deduplication, broker attribution, holds and reader grants', async t => {
   const dsn=SNAPSHOT_DSN;
   const url=assertDisposableDatabase(dsn),db=new pg.Client({connectionString:dsn});
-  assert.ok(db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'effective endpoint must match the disposable URL');
+  assert.ok(db.connectionParameters.host===(url.searchParams.get('host') || url.hostname)&&db.connectionParameters.port===Number(url.port || 5432),'effective endpoint must match the disposable URL');
   await db.connect();await db.query('begin');
   try {
     const actor={...(await db.query("select id,slug from public.actor where slug='joe'")).rows[0],human:true};

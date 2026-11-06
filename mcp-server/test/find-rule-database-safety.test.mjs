@@ -136,3 +136,14 @@ test('disposable URL policy bounds hosted clones and admin service separately', 
     assert.throws(() => assertDisposableDatabase(dsn + '?host=remote', { env }));
   }
 });
+
+
+test('disposable URL policy preserves the supervisor local socket contract only', () => {
+  const dsn = 'postgresql://carr_ci@localhost/carr_ci?host=%2Ftmp%2Fpg-abcdefgh';
+  assertDisposableDatabase(dsn, { env: {} });
+  for (const unsafe of [dsn.replace('pg-abcdefgh', 'other'), dsn + '&port=5433',
+    dsn.replace('localhost', 'remote'), dsn.replace('carr_ci@', 'other@'),
+    dsn + '&host=remote', dsn.replace('pg-abcdefgh', 'pg-abcdefgh%2F..%2Fremote')]) {
+    assert.throws(() => assertDisposableDatabase(unsafe, { env: {} }));
+  }
+});
