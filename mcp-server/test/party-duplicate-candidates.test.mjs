@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { createServer } from 'node:http';
+import { createServer } from './helpers/proof-release-fixture.mjs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { TOOLS } from '../src/tools.js';

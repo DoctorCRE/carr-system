@@ -1,6 +1,7 @@
 """Exercise the proof CLI with registered-handler responses from disposable Postgres."""
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
+from proof_release_fixture import ReleaseFixtureHandler
 import copy
 import json
 import os
@@ -52,8 +53,8 @@ class ProofCLI(unittest.TestCase):
         requests = []
         release = self.release
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append(self.path)
                 if self.path != '/release':
                     self.send_error(404)

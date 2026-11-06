@@ -1,6 +1,6 @@
 """Exercise proof transport admission and outgoing release request behavior."""
 import importlib.util
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 import threading
 from pathlib import Path
 import sys
@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from tools.proof_release_fixture import ReleaseFixtureHandler
 
 
 def load(path):
@@ -62,6 +63,8 @@ class ProofTransportTest(unittest.TestCase):
             'from posix import system as launch; launch("curl https://example.test")',
             'import webbrowser; webbrowser.GenericBrowser("/usr/bin/curl").open("https://example.test")',
             'from webbrowser import GenericBrowser as Browser',
+            'import asyncio; asyncio.create_subprocess_exec("curl")',
+            'from asyncio import create_subprocess_shell as launch; launch("curl")',
             'import pty; pty.spawn(["curl", "https://example.test"])',
             'import multiprocessing as mp; mp.set_executable("/usr/bin/curl")',
             'import ctypes; ctypes.CDLL("libcurl.so")',
@@ -161,8 +164,8 @@ class ProofTransportTest(unittest.TestCase):
         from lib.release_reader import read, USER_AGENT
         requests = []
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append((self.path, self.headers))
                 status = {'/redirect': 302, '/refused': 403}.get(self.path, 200)
                 self.send_response(status)
@@ -187,6 +190,62 @@ class ProofTransportTest(unittest.TestCase):
             for _, headers in requests:
                 self.assertEqual(headers['User-Agent'], USER_AGENT)
                 self.assertEqual(headers['Cookie'], 'synthetic')
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
+    def test_fixture_runtime_refuses_bypasses_and_admits_reader(self):
+        from lib.release_reader import read
+        import urllib.error
+        import urllib.request
+
+        seen = []
+
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
+                seen.append(self.headers)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'fixture-release')
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            url = f'http://127.0.0.1:{server.server_port}/release'
+            for suffix in ['', '?probe=1']:
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(url + suffix, timeout=2)
+                with caught.exception as error:
+                    self.assertEqual(error.code, 403)
+                    self.assertIn(b'proof_release_reader_required', error.read())
+            direct = subprocess.run([sys.executable, '-c',
+                'import urllib.request,sys; urllib.request.urlopen(sys.argv[1]).read()', url],
+                capture_output=True, timeout=5)
+            self.assertNotEqual(direct.returncode, 0)
+            self.assertIn(b'403', direct.stderr)
+            for function, args in [
+                ('create_subprocess_exec', repr('/usr/bin/curl') + ', ' + repr('--silent') + ', ' + repr('--fail') + ', ' + repr(url)),
+                ('create_subprocess_shell', repr('/usr/bin/curl --silent --fail ' + url)),
+            ]:
+                source = ('import asyncio\nasync def main():\n    child = await asyncio.' + function + '(' + args + ')\n    assert await child.wait() == 0\nasyncio.run(main())\n')
+                with tempfile.TemporaryDirectory() as directory:
+                    runner = Path(directory) / 'prove-new.py'
+                    runner.write_text(source)
+                    result = subprocess.run([sys.executable, str(runner)], capture_output=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0, function)
+                self.assertNotIn(b'fixture-release', result.stdout)
+            headers = {'uSeR-aGeNt': 'caller-proof/1', 'Cookie': 'synthetic',
+                       'X-DoctorCRE-Release-Reader': 'wrong', 'x-doctorcre-release-reader': 'also-wrong'}
+            original = headers.copy()
+            self.assertEqual(read(url, headers=headers).body, b'fixture-release')
+            self.assertEqual(headers, original)
+            self.assertEqual(seen[0]['User-Agent'], 'caller-proof/1')
+            self.assertEqual(seen[0]['Cookie'], 'synthetic')
         finally:
             server.shutdown()
             thread.join()

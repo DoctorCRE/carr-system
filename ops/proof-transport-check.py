@@ -3,8 +3,9 @@
 
 Coordinator decision: the threat model is ACCIDENTAL bypass, not a determined
 adversary. The real failure was five proof runners using Python's default urllib
-transport. Static checks cannot be complete against deliberate evasion and this
-check makes no such claim. Classify capabilities rather than individual clients:
+transport. The runtime release-fixture gate is the enforcement; this static
+check is advisory under the accidental-bypass threat model. Static checks cannot
+be complete against deliberate evasion and this check makes no such claim. Classify capabilities rather than individual clients:
 program execution requires audited non-network commands; socket/URL opening goes
 through lib/release_reader.py or the declared call wrapper; dynamic imports and
 string execution in runners are refused. Pure computation is outside scope.
@@ -29,7 +30,7 @@ NETWORK_MODULES = {
 }
 PROGRAM_MODULES = {
     'subprocess', '_posixsubprocess', 'pty', 'webbrowser', 'multiprocessing',
-    'ctypes', '_ctypes', 'cffi',
+    'ctypes', '_ctypes', 'cffi', 'asyncio.create_subprocess_exec', 'asyncio.create_subprocess_shell',
 }
 DYNAMIC_MODULES = {'importlib', 'builtins', 'runpy'}
 OS_MODULES = {'os', 'posix', 'nt'}

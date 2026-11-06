@@ -49,7 +49,8 @@
       ],
       "sources": {
         "ops/email-touch-cohort-proof.py": "2918cea6a98b702fb9300c8fa632471e42cf5e45d221319c665bbde464707ca3",
-        "lib/release_reader.py": "c5e7de19a178026ff51926541ca29a2297942e548720b1630ae6b9674859ea0b",
+        "lib/release_reader.py": "96d016ca767847e6569669259cd15fe369c07e53a972d43578e40cc55fcde6b2",
+        "lib/release-reader-marker.json": "29028978ca9edb73d49b2c947f33ebe60252dbc2de19ecff31aeb63f9ebff1ee",
         "lib/local_principal.py": "71119895af1a2295bc41fb542859136f3efd2adb06847f9e40022b156f0993be"
       }
     },
