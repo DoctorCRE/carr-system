@@ -103,6 +103,16 @@
       "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
     ]
   },
+  "tools/prove-activity-deal-attribution.py": {
+    "sha256": "9f95711a5d7860169a9cf607b9fde21a1be75f3b4f07e0c538cfd0f5f363489e",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e with fixed parser program and stdin JSON",
+      "declared --call-wrapper call email-router-queue/get-deal-room/read-activity-deal-attribution; cleanup signals only to each owned wrapper process group"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
   "tools/prove-client-anniversary-read.py": {
     "sha256": "7774379a09a41ad88f7e816e4486fd48b7c4db274f13be01f0fdc69ba0ba698d",
     "commands": [
