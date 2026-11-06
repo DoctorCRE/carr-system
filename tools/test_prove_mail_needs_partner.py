@@ -16,6 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'tools/prove-mail-needs-partner.py'
 spec = importlib.util.spec_from_file_location('proof', SCRIPT)
+assert spec is not None and spec.loader is not None
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
 
