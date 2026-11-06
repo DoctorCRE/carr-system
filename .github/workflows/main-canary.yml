@@ -67,7 +67,7 @@ jobs:
     name: ${{ matrix.gate_shard == 2 && matrix.job_names[format('{0}_shard_2', matrix.classes)].name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     container:
-      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@PENDING_PUBLISHED_DIGEST' || '' }}
+      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@sha256:6ccae3e94d42143c5c52d723dd0e75741a787f8a4e7f10639be17b93ee07f7c7' || '' }}
     defaults:
       run:
         shell: bash

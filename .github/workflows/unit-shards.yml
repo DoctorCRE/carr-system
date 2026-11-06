@@ -9,7 +9,7 @@ jobs:
     name: MCP unit shard ${{ matrix.shard }} of 5
     runs-on: ubuntu-24.04
     container:
-      image: ghcr.io/jbookout/software-factory/ci-postgres@PENDING_PUBLISHED_DIGEST
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:6ccae3e94d42143c5c52d723dd0e75741a787f8a4e7f10639be17b93ee07f7c7
     defaults:
       run:
         shell: bash

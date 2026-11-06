@@ -88,7 +88,6 @@ class Controls(unittest.TestCase):
             for name in names:
                 job = jobs[name]
                 image = job['container']['image']
-                # Drafts deliberately fail this admission until publication supplies the digest.
                 self.assertRegex(image, r'ghcr.io/jbookout/software-factory/ci-postgres@sha256:[0-9a-f]{64}')
                 images.add(re.search(r'ghcr.io/[^\s\']+', image).group())
                 self.assertEqual(job['env']['CARR_CI_POSTGRES_IMAGE'], POSTGRES_PROFILE)
