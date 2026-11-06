@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 RUNNER = Path(__file__).with_name('prove-vendor-scheduling-zero-duration.py')
 SPEC = importlib.util.spec_from_file_location('vendor_proof', RUNNER)
+assert SPEC is not None and SPEC.loader is not None
 PROOF = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROOF)
 SHA = 'a' * 40
