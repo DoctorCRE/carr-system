@@ -11,7 +11,7 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'tools/prove-mail-needs-partner.py'
@@ -22,6 +22,22 @@ spec.loader.exec_module(proof)
 
 
 class MailProofTests(unittest.TestCase):
+    def test_landed_requirement_binds_worker_observer(self):
+        sys.path.insert(0, str(ROOT / 'ops'))
+        from delivery_plan import bind_requirements
+        policy = json.loads((ROOT / 'contracts/production-proof-plan.v1.json').read_text())
+        path = 'proofs/requirements/mail-needs-partner.json'
+        sha = 'a' * 40
+        source = SimpleNamespace(
+            git=Mock(return_value=b''),
+            ref=lambda revision, name: dict(path=name, commit=revision, sha256='b' * 64))
+        requirements, covered = bind_requirements(
+            [path], policy, source, sha, lambda name: (ROOT / name).read_bytes())
+        self.assertEqual(covered, {'worker'})
+        self.assertEqual(requirements[0]['requirement_id'], 'mail-needs-partner')
+        self.assertEqual([item['runner'] for item in requirements[0]['observers']],
+                         ['worker-release-smoke.v1'])
+
     def setUp(self):
         self.bundle = json.loads((ROOT / 'tools/fixtures/mail-needs-partner.json').read_text())
 

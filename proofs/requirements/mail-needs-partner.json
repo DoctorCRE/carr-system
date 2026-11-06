@@ -1,10 +1,25 @@
 {
-  "unit": "mail-needs-partner",
-  "card": "WR648.S1.J4",
-  "contract": "mail-needs-partner.v1",
-  "fixture_command": "python3 tools/prove-mail-needs-partner.py --fixture tools/fixtures/mail-needs-partner.json",
-  "production_command": "python3 tools/prove-mail-needs-partner.py --production --natural --merged-sha <deployed-merge-sha> --other-call-wrapper <existing-second-partner-wrapper>",
-  "production_status": "requires_deployed_merge_identity_and_existing_distinct_partner_call_wrappers",
-  "claims": ["pending_recorded_proposal", "explicit_priority_reason", "existing_review_command_reference", "other_partner_exclusion"],
-  "not_claimed": ["delivered", "replied", "production_proven"]
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "mail-needs-partner",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "natural-pending-mail-and-distinct-mailbox",
+      "predicate": "After merge and deploy verify Worker release identity with worker-release-smoke.v1, restricted to --lane worker --phase post --only release-identity at the deployed merge SHA. Separately require python3 tools/prove-mail-needs-partner.py --production --natural --merged-sha <deployed-merge-sha> --other-call-wrapper <existing-second-partner-wrapper>. The dedicated CLI must parse mail-needs-partner.v1 from a natural pending proposal, retain its real ID, source reference, explicit priority reason and exact existing review command, corroborate pending status, version and source activity in list-email-proposals, and exclude that ID from a complete distinct-partner mailbox. The second mailbox must have no further page. Release smoke supplies ancillary release evidence only and cannot attest this mail observation.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Require both registered release evidence and the dedicated CLI exit 0 with mail-needs-partner-proof.v1 state observed, count 1, pending=true, isolated=true, review_reference=true and the deployed merged release SHA. Missing natural records, a missing or same partner wrapper, incomplete second-mailbox coverage, failed auth, unavailable source, contract mismatch or wrong release returns insufficient_evidence and exit 78; remain landed-unproven. Never infer delivered or replied from pending or queued.",
+      "input_class": "Registered observer reads Worker and app release identities only; safety budgets below apply to that observation. Separately authorized CLI uses existing authenticated local-actor wrappers with no caller-selected mailbox: one primary row, up to 50 distinct-mailbox rows, and at most twenty canonical pages of 50 rows. It makes at most 23 reads including release, uses ten-second call deadlines and a sixty-second wrapper budget, and retains only counts, IDs and sanitized predicates. No seeded production data or credential arguments.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 2,
+    "max_records": 2,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
 }
