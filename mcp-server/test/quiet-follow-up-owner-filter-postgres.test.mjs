@@ -62,6 +62,7 @@ test('owner modes preserve exact ordered subsets and registered response recordi
       provenance: { transport: 'executeRegisteredTool/disposable-postgres',
         producer_revision: execFileSync('git', ['rev-parse','HEAD'], { encoding: 'utf8' }).trim(),
         producer_sha256: createHash('sha256').update(source).digest('hex'),
+        registry_sha256: createHash('sha256').update(readFileSync(new URL('../src/scac-mutation-registry.current.generated.js', import.meta.url))).digest('hex'),
         query: { verb: 'quiet-follow-ups', all: {}, owned: { owner_slug: actor.slug }, unassigned: { owner_slug: null } } },
       owner_slug: actor.slug, all, owned, unassigned,
     }, null, 2) + '\n');
@@ -70,7 +71,9 @@ test('owner modes preserve exact ordered subsets and registered response recordi
 
 test('invalid owner input refuses before database work', async () => {
   for (const owner_slug of ['', '   ', '\n\t', 'x'.repeat(101), 2, [], {}]) {
-    await assert.rejects(() => read({ owner_slug }));
+    const client = { query() { assert.fail('invalid owner reached database'); } };
+    await assert.rejects(() => executeRegisteredTool(client, actor, 'quiet-follow-ups', { owner_slug }),
+      e => e.payload?.error === 'invalid_owner_slug');
   }
   assert.deepEqual(TOOLS['quiet-follow-ups'].inputSchema.properties.owner_slug.type, ['string','null']);
 });
@@ -94,8 +97,37 @@ test('owner filtering preserves eligibility and next action override without wri
     values('lead',$1,$2,current_date+30,'Synthetic future open task',$2,$2)`, [row.id,actor.id]);
   assert.equal(await has(), false);
   const vendor = await subject('vendor', actor.id);
-  await c.query("update vendor set disposition='inactive' where id=$1", [vendor.id]);
+  await c.query("update vendor set disposition=(select slug from vendor_disposition where slug<>'active' order by slug limit 1) where id=$1", [vendor.id]);
   assert.ok(!(await read({ owner_slug: actor.slug })).proposals.some(p => p.subject_id === vendor.id));
+});
+
+test('missing actor joins retain assigned rows only in all-owner mode', async () => {
+  await c.query('create temp view actor as select id,slug from public.actor where false');
+  await c.query('begin read only');
+  try {
+    const all = await executeRegisteredTool(c, actor, 'quiet-follow-ups', {});
+    assert.ok(all.proposals.some(p => p.owner_id !== null && p.owner === null));
+    const owned = await executeRegisteredTool(c, actor, 'quiet-follow-ups', { owner_slug: actor.slug });
+    assert.deepEqual(owned.proposals, []);
+    const unassigned = await executeRegisteredTool(c, actor, 'quiet-follow-ups', { owner_slug: null });
+    assert.deepEqual(unassigned.proposals, all.proposals.filter(p => p.owner_id === null));
+  } finally {
+    await c.query('rollback');
+    await c.query('drop view pg_temp.actor');
+  }
+});
+
+test('recorded responses replay through production proof response contract', () => {
+  const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/quiet-follow-up-owner-filter.json', import.meta.url)));
+  for (const [file, key] of [['lead-follow-up.ts', 'producer_sha256'],
+    ['scac-mutation-registry.current.generated.js', 'registry_sha256']]) {
+    assert.equal(recording.provenance[key], createHash('sha256').update(
+      readFileSync(new URL('../src/' + file, import.meta.url))).digest('hex'));
+  }
+  const python = process.env.CARR_CI_PYTHON || 'python3';
+  const output = execFileSync(python, ['tools/prove-quiet-follow-up-owner-filter.py', '--fixture',
+    'tools/fixtures/quiet-follow-up-owner-filter.json'], { encoding: 'utf8', timeout: 10000, cwd: new URL('../..', import.meta.url) });
+  assert.equal(JSON.parse(output).status, 'passed');
 });
 
 test('owner predicate precedes selected subset overflow and retains missing joins', async () => {
@@ -107,12 +139,4 @@ test('owner predicate precedes selected subset overflow and retains missing join
   await assert.rejects(() => read({ owner_slug: other.slug }), e => e.payload.error === 'quiet_follow_up_limit_exceeded');
   assert.ok((await read({ owner_slug: actor.slug })).proposals.length > 0);
   assert.ok((await read({ owner_slug: null })).proposals.every(p => p.owner_id === null));
-  await c.query('begin');
-  try {
-    await c.query('create temp view actor as select id,slug from public.actor where false');
-    const all = await executeRegisteredTool(c, actor, 'quiet-follow-ups', { owner_slug: actor.slug });
-    assert.deepEqual(all.proposals, []);
-    const unassigned = await executeRegisteredTool(c, actor, 'quiet-follow-ups', { owner_slug: null });
-    assert.ok(unassigned.proposals.every(p => p.owner_id === null));
-  } finally { await c.query('rollback'); }
 });
