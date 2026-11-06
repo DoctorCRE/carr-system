@@ -38,14 +38,15 @@ UNVERIFIED = {'computed_tier': 'Unrated', 'coverage_verified_at': None,
 
 
 @lru_cache(maxsize=8)
-def endpoint_responses(pages, width):
+def endpoint_responses(pages, width, clock="2026-01-02T00:00:00Z", coverage="2020-01-01T00:00:00Z"):
     source = r"""
 import {readBusinessList, parseBusinessQuery} from './mcp-server/src/workspace-business-read.js';
 import {buildRelease} from './mcp-server/src/release.js';
-const rated = {coverage_verified_at:'2020-01-01T00:00:00Z', deals_worked:8,
+const [pageArg, widthArg, clock, coverage] = process.argv.slice(1);
+const rated = {coverage_verified_at:coverage, deals_worked:8,
   deals_referred:1, won:7, lost:1, first_worked_at:'2020-01-01T00:00:00Z',
   last_contacted_at:'2026-01-01T00:00:00Z'};
-const [pages, width] = process.argv.slice(1).map(Number);
+const pages=Number(pageArg), width=Number(widthArg);
 const responses = [];
 for (let page=1; page<=Math.min(pages,5); page++) {
   const rows = Array.from({length:width}, (_,i)=>({id:`synthetic-${i}`,
@@ -55,21 +56,23 @@ for (let page=1; page<=Math.min(pages,5); page++) {
     : [{}]})};
   responses.push(await readBusinessList({client, actor:{slug:'joe'},
     query:parseBusinessQuery('vendors',new URLSearchParams({contract:'vendor-directory.v1',scope:'team',page:String(page)}),'joe'),
-    correlationId:'synthetic-proof-contract', now:()=>new Date('2026-01-02T00:00:00Z')}));
+    correlationId:'synthetic-proof-contract', now:()=>new Date(clock)}));
 }
 const release = await buildRelease({env:{CARR_ENV:'production',GIT_SHA:'b'.repeat(40)},
   sql:async()=>[],verbCount:1,now:()=>new Date('2026-01-02T00:00:00Z')});
 console.log(JSON.stringify({responses,release}));
 """
-    result = subprocess.run(['node', '--input-type=module', '-e', source, str(pages), str(width)],
+    result = subprocess.run(['node', '--input-type=module', '-e', source, str(pages), str(width), clock, coverage],
                             cwd=ROOT, capture_output=True, text=True, timeout=30, check=True)
     return json.loads(result.stdout)
 
 
 @contextmanager
-def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=True, require_identity=False, observation="2026-01-02T00:00:00.000Z", coverage=None):
+def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=True, require_identity=False, observation="2026-01-02T00:00:00.000Z", coverage=None, producer_coverage=None):
     requests = []
-    generated = endpoint_responses(pages, 2 if rows is None else len(rows))
+    generated = endpoint_responses(pages, 2 if rows is None else len(rows),
+        observation if observation and observation != 'not-a-date' else '2026-01-02T00:00:00Z',
+        producer_coverage or '2020-01-01T00:00:00Z')
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -249,7 +252,8 @@ class ProofCLI(unittest.TestCase):
                 ('2026-01-02T00:00:00.000Z', '2026-01-01T23:00:00.000000-01:00', 0),
                 (None, None, 78), ('not-a-date', None, 78)]:
             with self.subTest(observed=observed, coverage=coverage), fixture(
-                    observation=observed, coverage=coverage) as (base, _):
+                    observation=observed, coverage=coverage if expected == 1 else None,
+                    producer_coverage=coverage if expected == 0 else None) as (base, _):
                 self.assertEqual(self.run_cli(base)[0], expected)
 
     def test_deadline_before_and_after_read(self):
