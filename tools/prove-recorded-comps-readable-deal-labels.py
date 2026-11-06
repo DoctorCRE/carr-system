@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Observe natural recorded comps and the release-pinned deterministic producer."""
 import argparse
+import base64
+from contextlib import contextmanager, ExitStack
 from datetime import datetime
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -11,6 +14,7 @@ import resource
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from urllib.parse import urlparse
@@ -95,6 +99,15 @@ console.log(JSON.stringify({passed:true}));
 '''
 
 
+@contextmanager
+def defer_deadline():
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+
+
 def execute(args, receipt):
     deadline = time.monotonic() + args.timeout_seconds
     def remaining():
@@ -105,16 +118,20 @@ def execute(args, receipt):
 
     def run(command, contradiction=False):
         with tempfile.TemporaryFile() as output:
-            process = subprocess.Popen(command, stdout=output, stderr=subprocess.DEVNULL, start_new_session=True,
-                                       preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT + 1, LIMIT + 1)))
+            process = None
             try:
+                # Deliver the deadline only after ownership of a late launch is recorded.
+                with defer_deadline():
+                    process = subprocess.Popen(command, stdout=output, stderr=subprocess.DEVNULL, start_new_session=True,
+                                               preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT + 1, LIMIT + 1)))
                 code = process.wait(timeout=remaining())
             finally:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
+                if process is not None:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
             output.seek(0)
             data = output.read(LIMIT + 1)
         if len(data) > LIMIT:
@@ -178,11 +195,6 @@ def execute(args, receipt):
         data = get(f'https://raw.githubusercontent.com/DoctorCRE/carr-system/{sha}/mcp-server/{path}')
         sources[path] = data
         receipt['sources'][path] = hashlib.sha256(data).hexdigest()
-    local_lock = json.loads((ROOT / 'mcp-server/package-lock.json').read_text())
-    released_lock = json.loads(sources['package-lock.json'])
-    key = 'node_modules/@cfworker/json-schema'
-    if local_lock['packages'][key] != released_lock['packages'][key]:
-        raise Unavailable('validator dependency differs from release')
     receipt['predicate'] = 'natural.conversation-response'
     blocks = []
     conversations = call('list-doc-conversations', {'limit': 10})['conversations']
@@ -208,18 +220,58 @@ def execute(args, receipt):
         require('natural.canonical-deal-name', room['name'] == row['deal']['value'])
         receipt['natural_read'] = 'passed'
     receipt['predicate'] = 'synthetic.execution'
-    with tempfile.TemporaryDirectory(prefix='.comps-proof-', dir=ROOT / 'mcp-server') as temp:
+    resources = ExitStack()
+    try:
+        with defer_deadline():
+            temp = resources.enter_context(tempfile.TemporaryDirectory(prefix='comps-proof-'))
         folder = Path(temp)
+        receipt['predicate'] = 'synthetic.runtime-dependencies'
+        dependency = json.loads(sources['package-lock.json'])['packages']['node_modules/@cfworker/json-schema']
+        if dependency.get('dependencies'):
+            raise Unavailable('validator transitive dependencies require audit')
+        url = dependency.get('resolved', '')
+        if not re.fullmatch(r'https://registry\.npmjs\.org/@cfworker/json-schema/-/json-schema-[0-9.]+\.tgz', url):
+            raise Unavailable('validator archive URL outside proof contract')
+        archive = get(url)
+        integrity = 'sha512-' + base64.b64encode(hashlib.sha512(archive).digest()).decode()
+        if integrity != dependency.get('integrity'):
+            raise Unavailable('validator archive integrity differs from release')
+        package = folder / 'node_modules/@cfworker/json-schema'
+        try:
+            with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as bundle:
+                total = 0
+                for member in bundle:
+                    remaining()
+                    path = Path(member.name)
+                    if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'package':
+                        raise Unavailable('validator archive path outside package')
+                    target = package.joinpath(*path.parts[1:])
+                    if member.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                    elif member.isfile():
+                        total += member.size
+                        if total > LIMIT:
+                            raise Unavailable('validator archive exceeds expanded budget')
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with bundle.extractfile(member) as source:
+                            target.write_bytes(source.read())
+                    else:
+                        raise Unavailable('validator archive contains unsupported entry')
+        except tarfile.TarError:
+            raise Unavailable('validator archive invalid') from None
+        receipt['predicate'] = 'synthetic.execution'
         (folder / 'answer-blocks.mjs').write_bytes(sources['src/answer-blocks.js'])
         (folder / 'answer-blocks.v1.schema.json').write_bytes(sources['src/answer-blocks.v1.schema.json'])
         (folder / 'check.mjs').write_text(SYNTHETIC)
         result = run(['node', str(folder / 'check.mjs'), json.dumps(blocks)], contradiction=True)
         require('synthetic.completion', json.loads(result).get('passed') is True)
+    finally:
+        with defer_deadline():
+            resources.close()
     receipt['synthetic'] = 'passed'
     receipt['predicate'] = 'natural-comps-and-release-producer' if blocks else 'natural.post-deployment-table'
     if not blocks:
         receipt['reason'] = 'no qualifying post-deployment table'
-    print(json.dumps(receipt, sort_keys=True))
     return 0 if blocks else 78
 
 
@@ -237,10 +289,14 @@ def main():
     def timeout(_signum, _frame):
         raise Unavailable('total deadline exceeded')
     signal.signal(signal.SIGALRM, timeout)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
     receipt = {'natural_read': 'unavailable', 'synthetic': 'unavailable', 'predicate': 'release.identity'}
     try:
-        return execute(args, receipt)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
+            code = execute(args, receipt)
+        finally:
+            with defer_deadline():
+                signal.setitimer(signal.ITIMER_REAL, 0)
     except ProofFailed as error:
         receipt['predicate'] = str(error)
         receipt['contradiction'] = 'predicate failed'
@@ -248,18 +304,15 @@ def main():
             receipt['natural_read'] = 'failed'
         elif str(error).startswith('synthetic.'):
             receipt['synthetic'] = 'failed'
-        print(json.dumps(receipt, sort_keys=True))
-        return 1
+        code = 1
     except (KeyError, TypeError, ValueError, IndexError, AttributeError) as error:
         receipt['contradiction'] = type(error).__name__
-        print(json.dumps(receipt, sort_keys=True))
-        return 1
+        code = 1
     except (Unavailable, OSError, subprocess.TimeoutExpired) as error:
         receipt['reason'] = str(error) if isinstance(error, Unavailable) else type(error).__name__
-        print(json.dumps(receipt, sort_keys=True))
-        return 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        code = 78
+    print(json.dumps(receipt, sort_keys=True))
+    return code
 
 
 if __name__ == '__main__':
