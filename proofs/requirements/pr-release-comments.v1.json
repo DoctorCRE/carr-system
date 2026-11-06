@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "pr-release-comments.v1",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "merge-and-shipment-markers",
+      "predicate": "Exactly one bot-owned merge marker on a waiting PR and shipment marker on a merged PR",
+      "runner": "pr-release-comments.v1",
+      "expected_result": "Both markers observed exactly once",
+      "input_class": "Real GitHub waiting PR, merged dependency and shipped PR merge SHA",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 20,
+    "max_records": 1000,
+    "max_runtime_seconds": 60,
+    "max_artifact_bytes": 1048576
+  }
+}

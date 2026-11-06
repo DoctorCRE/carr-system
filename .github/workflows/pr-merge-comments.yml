@@ -1,0 +1,27 @@
+name: Notify waiting PRs
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: pr-merge-comments-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  notify:
+    permissions:
+      contents: read
+      pull-requests: write
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Comment on waiting PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/pr-release-comments.py merge

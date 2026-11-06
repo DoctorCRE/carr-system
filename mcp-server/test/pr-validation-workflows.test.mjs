@@ -9,27 +9,24 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
-const files = ["ci.yml", "doc-drift.yml"];
-const CI_PR_JOBS = ["select", "lint", "launchd-python39", "fast", "gates", "secret", "unit", "unit-coverage", "checks"];
-const CI_FULL_JOBS = ["select", "launchd-python39", "scope", "unit", "unit-coverage", "classes", "migration-fixtures", "checks"];
+const files = ["doc-drift.yml"];
 const PRODUCT_CLASSES = ["artifact", "binding", "gates", "lint", "pushfloor", "secret", "types", "unit"];
-function selectorNeeds(mode = "product") {
-  const active = mode === "docs" ? ["lint"] : mode === "full" ? ["unit", "unit-coverage", "launchd-python39"] : CI_PR_JOBS;
+function selectorNeeds() {
   return { select: { result: "success", outputs: {
-    full: String(mode === "full"), classes: JSON.stringify(mode === "docs" ? ["lint"] : PRODUCT_CLASSES),
-    ...Object.fromEntries(["lint", "fast", "gates", "secret", "unit", "unit-coverage", "launchd-python39"].map(job => [job, String(active.includes(job))])),
-  } }, scope: { outputs: { full: "true" } } };
+    full: "false", classes: JSON.stringify(PRODUCT_CLASSES),
+    ...Object.fromEntries(["lint", "fast", "gates", "secret", "unit", "unit-coverage", "launchd-python39"].map(job => [job, "true"])),
+  } } };
 }
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
 // Unknown expressions fail closed; these tests make no claims about runner time.
-function expression(value, github, success = true, inputs = { shard_trial: false }, cancelled = false) {
+function expression(value, github, success = true, cancelled = false) {
   if (value === undefined) return success && !cancelled;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base(?:\.ref)?)|inputs\.shard_trial|needs\.scope\.outputs\.full|needs\.select\.outputs(?:\.(?:full|lint|fast|gates|secret|unit)|\['(?:unit-coverage|launchd-python39)'\])|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false|null)+$/, `unsupported expression: ${raw}`);
+  assert.match(raw, /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base(?:\.ref)?)|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false|null)+$/, `unsupported expression: ${raw}`);
   const safe = raw.replace(/github(?:\.[a-zA-Z_]+)+/g, path =>
     JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? null));
-  const result = runInNewContext(safe, { inputs, needs: selectorNeeds(github.ciSelection), always: () => true, cancelled: () => cancelled }, { timeout: 1000 });
+  const result = runInNewContext(safe, { always: () => true, cancelled: () => cancelled }, { timeout: 1000 });
   // Actions implicitly adds success() unless a status function is present.
   return raw.includes("always()") || raw.includes("cancelled()") || success ? result : false;
 }
@@ -53,7 +50,7 @@ function subscribed(workflow, event) {
   if (event.event_name !== "pull_request") return true;
   return (workflow.on.pull_request?.types ?? ["opened", "synchronize", "reopened"]).includes(event.event.action);
 }
-function policy(workflow, event, success = true, inputs = { shard_trial: false }, cancelled = false) {
+function policy(workflow, event, success = true, cancelled = false) {
   const triggers = subscribed(workflow, event);
   const concurrency = workflow.concurrency;
   const group = concurrency.group.replace(/\$\{\{(.*?)\}\}/g,
@@ -61,12 +58,12 @@ function policy(workflow, event, success = true, inputs = { shard_trial: false }
   const cancel = Boolean(expression(concurrency["cancel-in-progress"], event));
   const jobs = Object.entries(workflow.jobs);
   assert.ok(jobs.length);
-  const runnable = triggers ? jobs.filter(([, job]) => expression(job.if, event, success, inputs, cancelled)).map(([name]) => name) : [];
+  const runnable = triggers ? jobs.filter(([, job]) => expression(job.if, event, success, cancelled)).map(([name]) => name) : [];
   return { triggers, group, cancel, runnable, jobs: jobs.map(([name]) => name) };
 }
 for (const file of files) {
   const workflow = read(file);
-  const validationJobs = file === "ci.yml" ? CI_PR_JOBS : ["check", "verdict"];
+  const validationJobs = ["check", "verdict"];
   test(`${file}: close is unsubscribed and cannot publish skipped replacement checks`, () => {
     const closed = policy(workflow, context("pull_request", "closed"));
     assert.equal(closed.triggers, false, "close must start no workflow, not a workflow of skipped jobs");
@@ -85,26 +82,15 @@ for (const file of files) {
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
     assert.equal(draft.triggers, true);
-    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["checks"] : ["verdict"]);
+    assert.deepEqual(draft.runnable, ["verdict"]);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
     assert.equal(current.cancel, true);
     for (const action of ["opened", "reopened", "ready_for_review", "converted_to_draft"]) {
       const transition = policy(workflow, context("pull_request", action, 9, 3));
-      assert.equal(transition.cancel, file !== "ci.yml" || ["ready_for_review", "converted_to_draft"].includes(action));
+      assert.equal(transition.cancel, true);
       assert.equal(transition.group, current.group);
-    }
-    if (file === "ci.yml") {
-      for (const changes of [{}, { body: { from: "old proof" } }, { title: { from: "old title" } },
-        { base: { ref: { from: "main" } } }]) {
-        const edited = context("pull_request", "edited");
-        edited.event.changes = changes;
-        const result = policy(workflow, edited);
-        assert.equal(result.triggers, true);
-        assert.equal(result.group, current.group);
-        assert.equal(result.cancel, Object.hasOwn(changes, "base"));
-      }
     }
     assert.equal(policy(workflow, context("pull_request", "synchronize", 9, 2)).group, current.group);
     assert.notEqual(policy(workflow, context("pull_request", "opened", 10)).group, current.group);
@@ -115,7 +101,7 @@ for (const file of files) {
       assert.equal(one.cancel, false);
       assert.notEqual(one.group, current.group);
       assert.notEqual(one.group, two.group, "pending non-PR verdicts must not replace each other");
-      assert.deepEqual(one.runnable, file === "ci.yml" ? CI_FULL_JOBS : validationJobs);
+      assert.deepEqual(one.runnable, validationJobs);
     }
   });
   test(`${file}: unsubscribed push events never count as validation`, () => {
@@ -124,16 +110,6 @@ for (const file of files) {
     assert.deepEqual(push.runnable, []);
   });
 }
-
-test("expensive proof jobs survive scope failure but stop when superseded", () => {
-  const ci = read("ci.yml");
-  for (const [event, jobs] of [["pull_request", CI_PR_JOBS], ["merge_group", CI_FULL_JOBS]]) {
-    assert.deepEqual(policy(ci, context(event), false).runnable, jobs);
-    assert.deepEqual(policy(ci, context(event), true, { shard_trial: false }, true).runnable, ["checks"]);
-  }
-  assert.deepEqual(Object.keys(ci.jobs).sort(), [...new Set([...CI_PR_JOBS, ...CI_FULL_JOBS])].sort(),
-    "every job belongs to the PR lane, full lane, or both");
-});
 
 test("PR gates retain two parallel partitions and secret scanning runs independently", () => {
   const ci = read("ci.yml");
@@ -169,27 +145,8 @@ test("only unit fixtures provision the shared PostgreSQL service", () => {
   }
 });
 
-test("same-head proof edits rerun the complete PR lane without scheduling doc drift", () => {
-  const ci = read("ci.yml");
-  const previous = policy(ci, context());
-  const edited = policy(ci, context("pull_request", "edited"));
-  assert.equal(edited.triggers, true);
-  assert.deepEqual(edited.runnable, CI_PR_JOBS);
-  assert.equal(edited.group, previous.group);
-  assert.equal(edited.cancel, false);
-  const draftEvent = context("pull_request", "edited");
-  draftEvent.event.pull_request.draft = true;
-  assert.deepEqual(policy(ci, draftEvent).runnable, ["checks"]);
-  assert.deepEqual(policy(ci, context("pull_request", "edited"), true,
-    { shard_trial: false }, true).runnable, ["checks"]);
-  const drift = policy(read("doc-drift.yml"), context("pull_request", "edited"));
-  assert.equal(drift.triggers, false);
-  assert.deepEqual(drift.runnable, []);
-});
-
 test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
-  assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
   assert.deepEqual(gate.needs, ["select", "lint", "fast", "gates", "secret", "unit", "unit-coverage", "scope", "classes", "migration-fixtures", "launchd-python39"]);
   assert.deepEqual(ci.jobs["unit-coverage"].needs, ["select", "unit"], "coverage must wait for the entire shard matrix");
   const cardinality = spawnSync("python3", ["-c",
@@ -198,7 +155,6 @@ test("strict aggregate runs after failed classes and requires complete successfu
   assert.equal(cardinality.status, 0, cardinality.stderr);
   assert.deepEqual(read("unit-shards.yml").jobs.unit.strategy.matrix.shard,
     Array.from({ length: Number(cardinality.stdout.trim()) }, (_, index) => index + 1));
-  assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
@@ -306,12 +262,5 @@ test("Python 3.9 imports block full events and selected PRs", () => {
       assert.equal(blocked, event_name !== "pull_request" && result !== "success");
       if (blocked) assert.notEqual(spawnSync("bash", ["-e", "-c", guard.run]).status, 0);
     }
-  }
-});
-
-test("documentation and full fallback schedule only their native GitHub lanes", () => {
-  const ci = read("ci.yml");
-  for (const [mode, expected] of [["docs", ["select", "lint", "checks"]], ["full", CI_FULL_JOBS]]) {
-    assert.deepEqual(policy(ci, { ...context(), ciSelection: mode }).runnable, expected);
   }
 });

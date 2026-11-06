@@ -45,7 +45,6 @@ export async function addCalendarMeetingPrep(c, section, sponsor) {
       last_touch::text, market from v_open_deal_room_board
       where id = any($1::uuid[]) and lower(owner)=$2
       order by id limit 1000 /* calendar_meeting_prep */`, [ids, sponsor]);
-    if (c.inTransaction) await c.query("release savepoint calendar_meeting_prep");
     const byId = new Map(rows.map(row => [row.id, row]));
     let missing = false;
     for (const item of section.items) for (const deal of item.possible_deals) {
@@ -59,11 +58,13 @@ export async function addCalendarMeetingPrep(c, section, sponsor) {
       section.state = "partial";
       section.notes.push("Preparation is unavailable for some possible deals. Check the deal record.");
     }
+    if (c.inTransaction) await c.query("release savepoint calendar_meeting_prep");
   } catch {
     if (c.inTransaction) {
       await c.query("rollback to savepoint calendar_meeting_prep");
       await c.query("release savepoint calendar_meeting_prep");
     }
+    for (const item of section.items) for (const deal of item.possible_deals) deal.prep = { state: "unavailable" };
     section.state = "partial";
     section.sources.meeting_prep = { state: "unavailable" };
     section.notes.push("Meeting deal preparation could not be checked.");
