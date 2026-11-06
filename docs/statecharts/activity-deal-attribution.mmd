@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> validating: Ask about an exact activity
+    validating --> invalid: Malformed or extra arguments
+    validating --> unauthorized: Caller lacks partner authority
+    validating --> reading: Partner supplies a valid UUID
+    reading --> ready: Activity has a live direct deal
+    reading --> needs_input: Source links require review or are missing
+    reading --> empty: Activity is unknown or inaccessible
+    reading --> unavailable: Source fails or exceeds the cap
+    %% never Credit an activity to a candidate inferred from names or contact membership.
+    %% never Show a retired or inaccessible subject.
