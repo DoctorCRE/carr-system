@@ -1,3 +1,4 @@
+// Read exact activity attribution with bounded, authorized canonical evidence.
 import type { Schema } from '@cfworker/json-schema';
 import { Validator } from '@cfworker/json-schema';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';

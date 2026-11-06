@@ -1,8 +1,10 @@
+"""Verify attribution proof contracts and refusal before production transport access."""
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'tools/prove-activity-deal-attribution.py'
@@ -44,3 +46,17 @@ class AttributionProofTests(unittest.TestCase):
         r = subprocess.run(['python3', str(RUNNER), '--production', '--natural'], capture_output=True)
         self.assertEqual(r.returncode, 78)
         self.assertNotIn(b'cookie', r.stdout)
+
+    def test_missing_shared_contracts_refuse_before_credentials_or_calls(self):
+        with patch.object(proof.Path, 'stat', side_effect=AssertionError('credential access')), \
+                patch.object(proof, 'read', side_effect=AssertionError('HTTP read')), \
+                patch.object(proof.subprocess, 'run', side_effect=AssertionError('process call')):
+            self.assertEqual(proof.main(['--production', '--natural',
+                                         '--session-headers-file', '/nonexistent/private',
+                                         '--merge-sha', 'a' * 40]), 78)
+        result = subprocess.run(['python3', str(RUNNER), '--production', '--natural'],
+                                capture_output=True, text=True)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt['state'], 'insufficient_evidence')
+        self.assertEqual(receipt['missing_contracts'], [
+            'release_reader_read_only_mcp_post', 'api_host_authenticated_proof_route'])

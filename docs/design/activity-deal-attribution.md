@@ -17,3 +17,7 @@ Throughput checkpoint. Schema and source checks block implementation. Contract, 
 ## Evidence coverage
 
 A complete response covers only direct and one-hop source-activity associations. It makes no claim about all relationships. Missing source pointers produce unknown coverage. Unknown, inaccessible, or retired activities share an empty response. Database failure and overflow produce unavailable coverage. Candidates preserve activity and deal versions. Every activity ID is returned once per candidate deal, even when several source paths reach it.
+
+## Production proof transport
+
+Production proof currently refuses with `insufficient_evidence` before reading credentials or making calls. Its receipt names the missing shared read-only MCP POST transport and API-host authenticated proof route. The coordinator owns those shared contracts in a separate unit. The retained production composition cannot run until that integration replaces the explicit missing-contract guard. Fixture mode still exercises the runtime response parser and canonical evidence checks. The process declaration pins the full runner, including its fixed Node parser, bounded canonical-read wrapper forms, and validated git ancestry check. No other process declaration or checker behavior changes.

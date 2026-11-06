@@ -90,5 +90,13 @@
       "declared --call-wrapper call calendar-meeting-prep {}",
       "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
     ]
+  },
+  "tools/prove-activity-deal-attribution.py": {
+    "sha256": "1fe10221ce31e7d7f63f8e017244f82f83f8094f34c4049b5708457035fc2d55",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e with fixed parser program and stdin JSON",
+      "declared --call-wrapper call email-router-queue/get-deal-room",
+      "git merge-base --is-ancestor with validated full SHAs"
+    ]
   }
 }

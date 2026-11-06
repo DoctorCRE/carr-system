@@ -12,6 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.release_reader import read
 
+MISSING_PRODUCTION_CONTRACTS = (
+    "release_reader_read_only_mcp_post", "api_host_authenticated_proof_route",
+)
+
 PARSER = """
 import {parseActivityDealAttribution} from './mcp-server/src/activity-deal-attribution.ts';
 let data='';for await(const part of process.stdin)data+=part;
@@ -50,6 +54,8 @@ def validate(cohort):
 
 
 def production(args):
+    if MISSING_PRODUCTION_CONTRACTS:
+        raise ValueError("shared_production_transport_contracts_required")
     # Session transport is supplied as a private headers file, never a CLI token.
     if not args.session_headers_file or not args.merge_sha:
         raise ValueError('private_session_and_merge_identity_required')
@@ -146,7 +152,10 @@ def main(argv=None):
         print(json.dumps({'schema': 'activity-deal-attribution-proof.v1', 'state': 'passed', **result}))
         return 0
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
-        print(json.dumps({'schema': 'activity-deal-attribution-proof.v1', 'state': 'insufficient_evidence'}))
+        receipt = {'schema': 'activity-deal-attribution-proof.v1', 'state': 'insufficient_evidence'}
+        if args.production and MISSING_PRODUCTION_CONTRACTS:
+            receipt['missing_contracts'] = list(MISSING_PRODUCTION_CONTRACTS)
+        print(json.dumps(receipt))
         return 78
 
 
