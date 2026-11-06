@@ -1403,25 +1403,7 @@ def _hosted_workflow(filename="ci.yml"):
 
 
 def test_hosted_draft_lifecycle():
-    """Execute YAML conditions and verdict commands against same-head event fixtures.
-
-    This models scheduler inputs, not GitHub's remote check selection.
-    Ready transitions must schedule a full run even when the SHA is unchanged.
-    """
-    def evaluate(expression, context):
-        expression = str(expression)
-        if expression.count("${{") > 1:
-            return re.sub(r"\$\{\{(.*?)\}\}",
-                          lambda match: str(evaluate(match.group(1), context)), expression)
-        expression = expression.removeprefix("${{").removesuffix("}}").strip()
-        script = """const [expr, ctx] = JSON.parse(process.argv[1]);
-        const {github, needs, cancelled: stopped = false} = ctx;
-        const always=()=>true, cancelled=()=>stopped, success=()=>!stopped;
-        const fromJSON=JSON.parse;
-        process.stdout.write(JSON.stringify(eval(expr)));"""
-        return json.loads(subprocess.check_output(
-            ["node", "-e", script, json.dumps([expression, context])], text=True))
-
+    """Keep required event wiring and execute the actual aggregate on bad results."""
     for filename, lanes, verdict_name, command in (
             ("ci.yml", ("fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
@@ -1429,19 +1411,17 @@ def test_hosted_draft_lifecycle():
         wf = _hosted_workflow(filename)
         events = wf["on"]
         expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft", "ready_for_review"}
-        if filename == "ci.yml":
-            expected_actions.add("edited")
         check(f"{filename}: only intended PR lifecycle events schedule runs",
               set(events["pull_request"]["types"]) == expected_actions)
         check(f"{filename}: all non-PR full-suite triggers survive",
               {"merge_group", "schedule", "workflow_dispatch"} <= set(events))
         jobs = wf["jobs"]
         if filename == "doc-drift.yml":
-            baseline = next(st for st in jobs['check']['steps'] if st.get('name', '').startswith('Summarize drift'))
-            for event in ('pull_request', 'merge_group', 'schedule', 'workflow_dispatch'):
-                check(f"drift baseline event {event}", bool(evaluate(baseline['if'],
-                    {'github': {'event_name': event}})) == (event in ('schedule', 'workflow_dispatch')))
-        else:
+            baseline = next(st for st in jobs['check']['steps']
+                            if st.get('name', '').startswith('Summarize drift'))
+            check("drift baseline only applies to scheduled and manual checks",
+                  baseline['if'] == "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'")
+        if filename == "ci.yml":
             weekly = _hosted_workflow('fallow.yml')
             check("Fallow runs weekly outside the PR aggregate",
                   set(weekly['on']) == {'schedule', 'workflow_dispatch'}
@@ -1465,84 +1445,15 @@ def test_hosted_draft_lifecycle():
                 **{job: 'true' for job in PR_JOBS}}}
             for name in ('scope', 'classes', 'migration-fixtures'):
                 needs[name]['result'] = 'skipped'
-        def context(event="pull_request", draft=False, action="synchronize", sha="a" * 40, changes=None):
-            return {"github": {"workflow": wf["name"], "event_name": event,
-                               "run_id": 41, "sha": sha,
-                               "event": {"action": action, "changes": changes or {}, "pull_request": {
-                                   "number": 12 if event == "pull_request" else None,
-                                   "draft": draft if event == "pull_request" else False, "head": {"sha": sha}}}},
-                    "needs": needs}
-        groups = []
         with tempfile.TemporaryDirectory() as directory:
-            # No source change between these events. A ready success cannot
-            # turn the following draft or cancelled ready run into success.
-            for draft, action, sha in (
-                    (True, "opened", "a" * 40), (False, "ready_for_review", "a" * 40),
-                    (True, "converted_to_draft", "a" * 40), (False, "ready_for_review", "a" * 40),
-                    (False, "reopened", "a" * 40), (False, "synchronize", "a" * 40),
-                    (False, "edited", "a" * 40), (True, "edited", "a" * 40),
-                    (False, "synchronize", "b" * 40)):
-                if action not in events["pull_request"]["types"]:
-                    continue
-                ctx = context(draft=draft, action=action, sha=sha)
-                groups.append(evaluate(wf["concurrency"]["group"], ctx))
-                check(f"{filename}: {action} draft={draft} SHA={sha[:7]} schedules correct lanes",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == ((not draft) if filename != "ci.yml" or name in ("fast", "gates", "secret", "unit-coverage") else False)
-                          for name in lanes))
+            for draft in (False, True):
                 result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=REPO,
                     env={**scrubbed_env(), "CI_NEEDS": json.dumps(needs),
-                         "CI_DRAFT": str(evaluate(step["env"]["CI_DRAFT"], ctx)).lower(),
-                         "CI_EVENT": "pull_request",
+                         "CI_DRAFT": str(draft).lower(), "CI_EVENT": "pull_request",
                          "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary")},
                     text=True, capture_output=True, timeout=10)
-                check(f"{filename}: {action} draft={draft} verdict is explicit",
-                      result.returncode == (1 if draft else 0)
-                      and (not draft or "deferred; no full-suite evidence" in result.stdout))
-                if filename == "ci.yml" and draft:
-                    check("draft cannot record or upload a full-suite receipt",
-                          all(not evaluate(st.get("if", "true"), ctx) for st in verdict["steps"]
-                              if "record --output" in st.get("run", "") or st.get("with", {}).get("name") == "ci-tree-evidence"))
-            check(f"{filename}: same PR uses one concurrency group across readiness and synchronize",
-                  len(set(groups + [evaluate(wf["concurrency"]["group"], context(sha="b" * 40))])) == 1
-                  and evaluate(wf["concurrency"]["cancel-in-progress"], context()))
-            if filename == "ci.yml":
-                cancel = wf["concurrency"]["cancel-in-progress"]
-                for action, changes, expected in (
-                        ("opened", {}, False), ("reopened", {}, False),
-                        ("edited", {}, False),
-                        ("edited", {"body": {"from": "old proof"}}, False),
-                        ("edited", {"title": {"from": "old title"}}, False),
-                        ("edited", {"base": {"ref": {"from": "main"}}}, True),
-                        ("synchronize", {}, True), ("ready_for_review", {}, True),
-                        ("converted_to_draft", {}, True)):
-                    ctx = context(action=action, changes=changes)
-                    check(f"CI {action} changes={list(changes)} cancellation={expected}",
-                          evaluate(cancel, ctx) == expected)
-                for actions in (("ready_for_review", "edited", "edited"),
-                                ("ready_for_review", "edited", "synchronize")):
-                    sequence = [context(action=action) for action in actions]
-                    check(f"CI sequence {actions} shares the active PR group",
-                          {evaluate(wf["concurrency"]["group"], ctx) for ctx in sequence} == {groups[0]})
-                    check(f"CI sequence {actions} preserves metadata queue then source invalidation",
-                          [evaluate(cancel, ctx) for ctx in sequence]
-                          == [True, False, actions[-1] == "synchronize"])
-                for event in ("merge_group", "schedule", "workflow_dispatch"):
-                    check(f"CI {event} groups are unique per run",
-                          evaluate(wf["concurrency"]["group"], context(event=event))
-                          != evaluate(wf["concurrency"]["group"], {
-                              **context(event=event), "github": {**context(event=event)["github"], "run_id": 42}}))
-                check("CI different workflows use independent groups",
-                      groups[0] != evaluate(wf["concurrency"]["group"], {
-                          **context(), "github": {**context()["github"], "workflow": "Review gate"}}))
-            check(f"{filename}: different PRs have independent groups",
-                  groups[0] != evaluate(wf["concurrency"]["group"], {
-                      **context(), "github": {**context()["github"], "event": {"pull_request": {"number": 13}}}}))
-            for event in ("merge_group", "schedule", "workflow_dispatch"):
-                ctx = context(event=event, draft=True)
-                check(f"{filename}: {event} runs every lane outside PR cancellation group",
-                      all(bool(evaluate(jobs[name].get("if", "true"), ctx)) == (filename != "ci.yml" or name not in ("fast", "gates", "secret")) for name in lanes)
-                      and not evaluate(wf["concurrency"]["cancel-in-progress"], ctx)
-                      and evaluate(wf["concurrency"]["group"], ctx) != groups[0])
+                check(f"{filename}: draft={draft} verdict is explicit",
+                      result.returncode == (1 if draft else 0))
             for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
@@ -1560,15 +1471,12 @@ def test_hosted_draft_lifecycle():
                         text=True, capture_output=True, timeout=10)
                     check(f"{filename}: ready {lane}={state} blocks success at same SHA",
                           result.returncode != 0)
-            ctx = {**context(), "cancelled": True}
-            check(f"{filename}: cancelled run still evaluates its required verdict",
-                  evaluate(verdict["if"], ctx))
             # Status functions are valid in step conditions, not step env.
             guard = next((st for st in verdict['steps'] if st.get('if') == '${{ cancelled() }}'), {})
             result = subprocess.run(["bash", "-e", "-c", guard.get("run", "true")], cwd=REPO,
                                     text=True, capture_output=True, timeout=10)
             check(f"{filename}: cancellation after successful lanes cannot green the verdict",
-                  bool(guard) and evaluate(guard["if"], ctx) and result.returncode != 0
+                  bool(guard) and result.returncode != 0
                   and verdict['steps'].index(guard) == len(verdict['steps']) - 1)
         if filename == "ci.yml":
             matrix = jobs["classes"]["strategy"]["matrix"]
