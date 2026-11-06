@@ -19,6 +19,7 @@ from unittest.mock import patch
 from git_env import fixture_env
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
 
 
 class AgentCardGate(unittest.TestCase):
@@ -42,11 +43,11 @@ class AgentCardGate(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for directory in ('hooks', 'lib', 'tools', 'ops'):
-            (self.root / directory).mkdir()
+        for directory in ('hooks', 'lib', 'tools', 'ops', 'mcp-server/src'):
+            (self.root / directory).mkdir(parents=True)
         for relative in ('hooks/agent-card-gate.py', 'hooks/cmd_text.py', 'hooks/guard-unattended.py',
                          'hooks/gate_paths.py', 'hooks/refused_content.py', 'lib/hook_runtime.py',
-                         'ops/git_env.py'):
+                         'ops/git_env.py', 'lib/repository_identity.py', 'mcp-server/src/progress-address.v1.json'):
             shutil.copyfile(REPO / relative, self.root / relative)
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True, env=fixture_env())
         subprocess.run(['git', 'remote', 'add', 'origin',
@@ -365,6 +366,20 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertLess(time.monotonic() - started, 9)
 
+    def test_app_transfer_remote_and_card_pairs(self):
+        self.register_fixture()
+        original = self.lookup.read_text()
+        for card_repo, remote_repo in (('DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app'),
+                                       ('jbookout/doctorcre-app', 'DoctorCRE/doctorcre-app')):
+            self.lookup.write_text(original.replace('DoctorCRE/carr-system', card_repo))
+            for remote, expected in ((remote_repo, 0), ('DoctorCRE/unrelated', 2),
+                                     ('unrelated/doctorcre-app', 2), ('DoctorCRE/carr-system', 2)):
+                subprocess.run(['git', 'remote', 'set-url', 'origin',
+                                f'https://github.com/{remote}.git'], cwd=self.root,
+                               check=True, env=fixture_env())
+                result = self.run_hook(prompt='Card: WR557.S6.J1')
+                self.assertEqual(result.returncode, expected, result.stderr)
+
     def test_repository_binding_and_git_isolation(self):
         self.register_fixture()
         other = self.root / 'other'
@@ -425,7 +440,7 @@ class AgentCardGate(unittest.TestCase):
     def test_dispatch_wrapper_forwards_without_seed(self):
         wrapper = self.root / 'tools/call-verb.py'
         shutil.copyfile(REPO / 'tools/call-verb.py', wrapper)
-        (self.root / 'mcp-server').mkdir()
+        (self.root / 'mcp-server').mkdir(exist_ok=True)
         fake = self.root / 'mcp-server/local-verb.mjs'
         fake.write_text('import sys,json\nprint(json.dumps([sys.argv[1:],sys.stdin.read()]))\nraise SystemExit(7)\n')
         code = (f'import runpy,sys; m=runpy.run_path({str(wrapper)!r}); '
@@ -436,6 +451,18 @@ class AgentCardGate(unittest.TestCase):
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(json.loads(result.stdout), [['dispatch-job', '-', 'extra'], '{"synthetic":true}'])
         self.assertFalse((self.home / '.cache').exists())
+
+
+
+
+class RepositoryTransferTests(unittest.TestCase):
+    def test_exact_repository_identity(self):
+        from lib.repository_identity import canonical_repository, repository_names
+        for name in ('jbookout/doctorcre-app', 'DoctorCRE/doctorcre-app'):
+            self.assertEqual(canonical_repository(name), 'DoctorCRE/doctorcre-app')
+        self.assertIsNone(canonical_repository('DoctorCRE/unrelated'))
+        self.assertEqual(repository_names().count('DoctorCRE/doctorcre-app'), 1)
+        self.assertNotIn('jbookout/doctorcre-app', repository_names())
 
 
 if __name__ == '__main__':

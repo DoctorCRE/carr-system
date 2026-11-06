@@ -8,7 +8,7 @@ import { MEMORY_ATTACH_LINE } from "../src/doctrine.js";
 import { authenticatedIdentity } from "../src/identity.js";
 import { Pool } from "@neondatabase/serverless";
 
-const READS = ["catch-me-up", "today-triage", "find", "find-and-catch-up",
+const READS = ["read-client-anniversaries", "catch-me-up", "today-triage", "find", "find-and-catch-up",
   "deal-board", "get-deal-room", "vendor-assignment-context", "who-do-we-know", "counterparty-history",
   "lead-board", "schedule-board", "search-tour-properties", "read-doctrine",
   "search-doctrine", "recall-memory", "read-vendor-meetings"];

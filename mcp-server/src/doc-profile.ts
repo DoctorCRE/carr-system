@@ -1,6 +1,7 @@
 // Doc's complete, reviewed brokerage surface. Unlike general profiles, reads
 // must be named too: a new record-layer verb never expands this endpoint.
 export const DOC_TOOL_NAMES = Object.freeze([
+  "read-client-anniversaries",
   "whats-new",
   "catch-me-up", "today-triage", "find", "find-and-catch-up", "deal-board",
   "get-deal-room", "ping-deal-checklist", "vendor-assignment-context", "who-do-we-know", "counterparty-history", "lead-board",
@@ -25,6 +26,7 @@ export const DOC_INSTRUCTIONS =
   "keep that key on retries and preserve any base_version required by the tool. " +
   "Ask the partner about version_conflict or needs_confirm; never retry them automatically. " +
   "Use ping-deal-checklist to queue due checklist reminders for the recorded partner owner; queued never means delivered. " +
+  "For upcoming client closing anniversaries, call read-client-anniversaries. Cite its canonical closing evidence and report skipped-invalid or unavailable coverage. Never infer dates or send greetings. " +
   "Only the listed tools are available. This endpoint cannot send messages or delete records.";
 
 // These verbs query the private record store; none browses or contacts outside

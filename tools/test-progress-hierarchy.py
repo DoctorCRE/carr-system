@@ -9,6 +9,39 @@ from lib import progress_hierarchy as h
 
 
 class HierarchyTests(unittest.TestCase):
+    def test_transfer_identity_at_progress_boundaries(self):
+        from lib.repository_identity import canonical_repository
+        import importlib.util
+        root = Path(__file__).resolve().parents[1]
+        def load(name, relative):
+            spec = importlib.util.spec_from_file_location(name, root / relative)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+        board = load('transfer_board', 'tools/progress_board.py')
+        orchestrator = load('transfer_orchestrator', 'tools/progress_orchestrator.py')
+        for repo in ('DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app'):
+            self.assertEqual(h.card_address('WR-000014', 1, 1, repo, 123), 'WR14.S1.J1.app#123')
+            self.assertEqual(board.canonical_repo(repo), 'DoctorCRE/doctorcre-app')
+            self.assertEqual(board.lane_config(repo)[0], 'app')
+            self.assertEqual(len(orchestrator.links({'repo': repo, 'pr': 123})), 1)
+        for repo in ('DoctorCRE/unrelated', 'someone/doctorcre-app'):
+            self.assertIsNone(canonical_repository(repo))
+            self.assertIsNone(board.lane_config(repo))
+            self.assertEqual(orchestrator.links({'repo': repo, 'pr': 123}), [])
+            with self.assertRaises(KeyError):
+                h.card_address('WR-000014', 1, 1, repo, 123)
+
+    def test_local_job_identity_roots(self):
+        from lib.local_jobs import repository_roots
+        for repo in ('DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app'):
+            roots = repository_roots({'repositories': [repo], 'repository_roots': {repo: '/tmp/synthetic-app'}})
+            self.assertEqual(list(roots), ['DoctorCRE/doctorcre-app'])
+        for repo in ('DoctorCRE/unrelated', 'someone/doctorcre-app'):
+            with self.assertRaises(ValueError):
+                repository_roots({'repositories': [repo], 'repository_roots': {repo: '/tmp/synthetic-app'}})
+
     def board(self):
         return {'project': 'test', 'work_requests': {'WR-000014': {
             'title': 'Merge queue', 'description': 'Keep reviewed changes moving safely.',

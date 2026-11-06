@@ -142,7 +142,7 @@ test('a runner adopts an unbound repository and records its start once without m
 
 test('a runner can only claim a job bound to its repository', async () => {
   const work_request = await request('WR-000019');
-  const repository = 'jbookout/doctorcre-app';
+  const repository = 'DoctorCRE/doctorcre-app';
   await command('dispatch-job', job(work_request, { repository }));
   const start = { work_request, job: 1, repository, runner_job_id: 'bound-runner', idempotency_key: randomUUID() };
   await assert.rejects(command('dispatch-job', { ...start, repository: 'DoctorCRE/carr-system' }),
@@ -705,4 +705,26 @@ test('registration refuses malformed IDs and hides other tenants and private req
     await c.query('set local role carr_reader');
     assert.deepEqual(await executeRegisteredTool(c, actor, 'job-card-registration', { card_id }), { ok: true, card_id, registered: false });
   } finally { await c.query('rollback'); }
+});
+
+for (const [stored, incoming] of [['jbookout/doctorcre-app', 'DoctorCRE/doctorcre-app'],
+                                 ['DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app']]) {
+  test(`repository transfer start ${stored} to ${incoming}`, async () => {
+    const work_request = await request(stored.startsWith('jbookout') ? 'WR-000881' : 'WR-000882');
+    await command('dispatch-job', job(work_request, { repository: stored }));
+    // Existing rows retain their recorded name across the forward migration.
+    await c.query('update ops.work_request_job set repository=$1 where work_request_id=(select id from ops.work_request where ref=$2)', [stored, work_request]);
+    await assert.rejects(command('dispatch-job', { work_request, job: 1, repository: 'DoctorCRE/carr-system', runner_job_id: 'transfer', idempotency_key: randomUUID() }), /job_repository_mismatch/);
+    await assert.rejects(command('dispatch-job', { work_request, job: 1, repository: 'DoctorCRE/unrelated', runner_job_id: 'transfer', idempotency_key: randomUUID() }));
+    await command('dispatch-job', { work_request, job: 1, repository: incoming, runner_job_id: 'transfer', idempotency_key: randomUUID() });
+  });
+}
+
+test('repository CHECK upgrade is idempotent and matches registry identities', async () => {
+  const migration = readFileSync(new URL('../../migrations/1160_app_repository_identity.sql', import.meta.url), 'utf8');
+  await c.query(migration);
+  await c.query(migration);
+  const { acceptedRepositories } = await import('../src/repository-identity.js');
+  const definition = (await c.query("select pg_get_constraintdef(oid) as definition from pg_constraint where conrelid='ops.work_request_job'::regclass and conname='work_request_job_repository_check'")).rows[0].definition;
+  assert.deepEqual([...definition.matchAll(/'([^']+)'::text/g)].map(match => match[1]).sort(), [...acceptedRepositories].sort());
 });
