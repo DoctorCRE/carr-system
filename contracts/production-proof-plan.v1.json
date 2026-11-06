@@ -49,7 +49,7 @@
       ],
       "sources": {
         "tools/prove-quiet-follow-up-owner-filter.py": "732f913eb28c92cc9e9596258d72dd3b216f47540cb1e8bfa3fbe6bfbc544b30",
-        "lib/release_reader.py": "96d016ca767847e6569669259cd15fe369c07e53a972d43578e40cc55fcde6b2",
+        "lib/release_reader.py": "b274a27c21165f01e1ca8218861c363da6d839e99b5b0aae6b5721f3b94fbd1a",
         "lib/release-reader-marker.json": "29028978ca9edb73d49b2c947f33ebe60252dbc2de19ecff31aeb63f9ebff1ee"
       }
     },
