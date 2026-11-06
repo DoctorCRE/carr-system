@@ -54,6 +54,16 @@
                 "lib/loadpy.py": "868281532b1b418afbd18c535653adbf21fa580f54da01da158548e539ed40fd"
           }
     },
+    "pr-release-comments.v1": {
+      "path": "ops/pr-release-comments-proof.py",
+      "targets": [
+        "worker"
+      ],
+      "sources": {
+        "ops/pr-release-comments-proof.py": "60475ab205860a30c339456b62c5c2707fa03367faeedecbf9dd7ef1af2693cc",
+        "ops/pr-release-comments.py": "ae419643681f4e436a46f664c0539f02c39197151d08f784d80f29c27f6f71a7"
+      }
+    },
     "email-touch-cohort-reconcile.v1": {
       "path": "ops/email-touch-cohort-proof.py",
       "targets": [
@@ -95,6 +105,7 @@
         "lib/credential_file.py": "68c27169405b12a9a41b94d3de6aa94b66eec324b8971e12c0ebc9228456919b"
       }
     },
+    "studio-triage-containment.v1": {"path": "ops/studio-triage-containment-observe.py", "targets": ["studio"], "sources": {"ops/studio-triage-containment-observe.py": "b4059b092d18ec2b0a6f0c1c9181a42b45de216b3bbff957d26a9e700df33f48"}},
     "studio-run-receipt.v1": {"path": "ops/studio-proof-observe.py", "revision": "f699e1859dc87e4122501bbaba35a312607452a7", "targets": ["studio"]}
   },
   "x-required-targets": {"worker": ["mcp-server/**", "migrations/**"], "studio": ["lib/outlook*.py", "bin/install-outlook-*", "bin/refresh-outlook-runtime", "ops/launchd/com.carr.outlook-*.plist"]},

@@ -71,10 +71,24 @@
       "declared fixture Python --stub"
     ]
   },
+  "tools/prove-recorded-comps-readable-deal-labels.py": {
+    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "commands": [
+      "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
+      "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"
+    ]
+  },
   "tools/prove-vendor-scheduling-zero-duration.py": {
     "sha256": "270e15167affb568f88e8b39a9aa2228d263c61254bbaed87fde25b3cdc2ac90",
     "commands": [
       "declared --call-wrapper call read-vendor-meetings/morning-brief"
+    ]
+  },
+  "tools/prove-meeting-prep-savepoint-lifetime.py": {
+    "sha256": "8b8a651f5da52a2a1b54160a89d8bebd6adf79dc23b4cb49497cd59db4f41568",
+    "commands": [
+      "declared --call-wrapper call calendar-meeting-prep {}",
+      "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
     ]
   }
 }
