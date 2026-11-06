@@ -87,7 +87,7 @@ def observe(origin, wrapper, seconds):
             if len(addresses) > 50 or any(not re.fullmatch(r'[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}', a) for a in addresses):
                 raise Unavailable('stored_addresses_outside_recipient_contract')
             raw = snapshot.get('values', {}).get('email')
-            if not isinstance(raw, str) or any(a not in raw.lower() for a in addresses):
+            if not isinstance(raw, str) or not set(addresses).issubset(re.split(r'[\s,;<>]+', raw.lower())):
                 raise Unavailable('snapshot_address_evidence_unavailable')
             record = call('prospect-research', {'subject': ref})
             if (record.get('schema_version') != 'prospect-research.v1' or record.get('id') != party_id

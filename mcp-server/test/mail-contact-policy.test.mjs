@@ -158,6 +158,21 @@ finally:
   }
 });
 
+test('contact discovery returns complete policy addresses without inventing suffixes', async () => {
+  for (const punctuation of [...`!"#$%&'()*+./:=?[\\]^_\`{|}~-`, '😀']) {
+    const address = `a${punctuation}b@example.test`;
+    const email = `Name <${address.toUpperCase()}>; Second@Example.Test; ${address}`;
+    const result = await TOOLS['email-match-contacts'].handler({query: async () => ({rows: [
+      {ref: 'P-0001', name: 'Synthetic', email},
+    ]})}, {}, {});
+    assert.deepEqual(result.contacts.map(c => c.address), [address, 'second@example.test'], address);
+    const policy = await TOOLS['mail-contact-policy'].handler({query: async () => ({rows: [{email}]})}, {},
+      {emails: [address, 'b@example.test', 'second@example.test']});
+    assert.equal(policy.recipients.find(c => c.email === address).blocked, true);
+    assert.equal(policy.recipients.find(c => c.email === 'b@example.test').blocked, false);
+  }
+});
+
 test('proof CLI consumes registered read replies and refuses contradictions and unavailable evidence', async () => {
   const { mkdtemp, readFile, writeFile, chmod, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
@@ -172,7 +187,7 @@ test('proof CLI consumes registered read replies and refuses contradictions and 
   const directory = await mkdtemp(path.join(tmpdir(), 'mail-policy-proof-'));
   const wrapper = path.join(directory, 'wrapper');
   const party = {id: 'aaaaaaaa-0000-4000-8000-000000000001', ref: 'P-0001',
-    name: 'Synthetic', email: 'First@Example.Test; Second@Example.Test', contact_state: 'do_not_contact'};
+    name: 'Synthetic', email: 'a!b@Example.Test; Second@Example.Test', contact_state: 'do_not_contact'};
   const rows = [{ref: party.ref, name: party.name, email: party.email, party_id: party.id,
     party_version: 1, party_name: party.name, phone: null, cell: null, title: null,
     org_id: null, company_id: null, company_version: null, company_name: null}];
@@ -207,13 +222,18 @@ print(json.dumps(data[verb]))
 `);
     await chmod(wrapper, 0o700);
     for (const [mode, code] of [['pass', 0], ['contradiction', 1], ['unavailable', 78],
-      ['timeout', 78], ['row-limit', 78], ['release-drift', 78], ['single-address', 78], ['wrong-party', 78]]) {
+      ['timeout', 78], ['row-limit', 78], ['release-drift', 78], ['single-address', 78], ['wrong-party', 78], ['discovery-suffix', 78]]) {
       releaseReads = 0;
       drift = mode === 'release-drift';
       const replies = structuredClone(fixtures);
       if (mode === 'contradiction') replies['mail-contact-policy'] = unblocked;
       if (mode === 'unavailable') replies['prospect-research'].contact_state = 'active';
       if (mode === 'wrong-party') replies['prospect-research'].id = 'bbbbbbbb-0000-4000-8000-000000000001';
+      if (mode === 'discovery-suffix') {
+        replies['email-match-contacts'].contacts[0].address = 'b@example.test';
+        replies['mail-contact-policy'] = await invoke('mail-contact-policy',
+          {emails: ['b@example.test', 'second@example.test']}, [{email: party.email}]);
+      }
       if (mode === 'timeout') replies.timeout = true;
       if (mode === 'row-limit') replies['email-match-contacts'].contacts = Array(1001).fill(contacts.contacts[0]);
       if (mode === 'single-address') replies['email-match-contacts'].contacts = [contacts.contacts[0]];
@@ -229,6 +249,10 @@ print(json.dumps(data[verb]))
       });
       assert.equal(result.status, code, `${mode}: ${result.stderr} ${result.stdout}`);
       const receipt = JSON.parse(result.stdout);
+      if (mode === 'discovery-suffix') {
+        assert.equal(receipt.reason, 'snapshot_address_evidence_unavailable');
+        assert.equal(receipt.wrapper_calls, 1);
+      }
       assert.ok(receipt.wrapper_calls <= 20);
       assert.ok(receipt.examined_rows <= 1000);
       assert.doesNotMatch(result.stdout, /example\.test|Synthetic|P-0001/i);

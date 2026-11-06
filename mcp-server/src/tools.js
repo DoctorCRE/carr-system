@@ -8,8 +8,8 @@ import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
-const recordedEmailAddresses = email => [...new Set((email?.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
-  .map(address => address.toLowerCase()))];
+const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
+  .filter(address => mailRecipientAddress.test(address)).map(address => address.toLowerCase()))];
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
@@ -4136,8 +4136,7 @@ export const TOOLS = {
           select 1 from lead l where l.party_id = p.id
             and (l.suppressed or l.stage = 'do_not_contact')
         )`)).rows;
-      const blocked = new Set(restricted.flatMap(row => (row.email?.split(/[\s,;<>]+/u) ?? [])
-        .filter(address => mailRecipientAddress.test(address)).map(address => address.toLowerCase())));
+      const blocked = new Set(restricted.flatMap(row => recordedEmailAddresses(row.email)));
       const recipients = emails.map(email => ({ email, blocked: blocked.has(email) }));
       return { recipients };
     },
