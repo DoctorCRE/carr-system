@@ -6,6 +6,42 @@ import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
+import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.js';
+
+const registrySource = readFileSync(new URL('../src/scac-mutation-registry.current.generated.js', import.meta.url), 'utf8');
+function registryPin(registry = SCAC_MUTATION_OPERATIONS) {
+  return createHash('sha256').update(JSON.stringify(registry['quiet-follow-ups'])).digest('hex');
+}
+function recordingRegistryMatches(registry) {
+  const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/quiet-follow-up-owner-filter.json', import.meta.url)));
+  assert.equal(recording.provenance.registry_entry_sha256, registryPin(registry));
+}
+async function registryCopy(source) {
+  const module = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  return module.SCAC_MUTATION_OPERATIONS;
+}
+
+test('recording accepts an unrelated registry entry', async () => {
+  const copy = registrySource.replace('Object.freeze({', 'Object.freeze({"synthetic-unrelated-verb": {"write": false},');
+  assert.notEqual(copy, registrySource);
+  recordingRegistryMatches(await registryCopy(copy));
+  recordingRegistryMatches({ ...SCAC_MUTATION_OPERATIONS,
+    'accept-outcome-feedback': { ...SCAC_MUTATION_OPERATIONS['accept-outcome-feedback'], write: false } });
+});
+
+test('recording rejects a quiet-follow-ups contract change', async () => {
+  const entry = SCAC_MUTATION_OPERATIONS['quiet-follow-ups'];
+  for (const key of Object.keys(entry)) {
+    const registry = { ...SCAC_MUTATION_OPERATIONS,
+      'quiet-follow-ups': { ...entry, [key]: key === 'delegates_to' ? ['synthetic-verb'] : !entry[key] } };
+    assert.throws(() => recordingRegistryMatches(registry), { code: 'ERR_ASSERTION' });
+  }
+  const copy = registrySource.replace('"ingress_key": "mcp-tool:quiet-follow-ups"',
+    '"ingress_key": "mcp-tool:quiet-follow-ups-changed"');
+  assert.notEqual(copy, registrySource);
+  const changed = await registryCopy(copy);
+  assert.throws(() => recordingRegistryMatches(changed), { code: 'ERR_ASSERTION' });
+});
 
 let fixture, c, actor, other;
 before(async () => {
@@ -62,7 +98,7 @@ test('owner modes preserve exact ordered subsets and registered response recordi
       provenance: { transport: 'executeRegisteredTool/disposable-postgres',
         producer_revision: execFileSync('git', ['rev-parse','HEAD'], { encoding: 'utf8' }).trim(),
         producer_sha256: createHash('sha256').update(source).digest('hex'),
-        registry_sha256: createHash('sha256').update(readFileSync(new URL('../src/scac-mutation-registry.current.generated.js', import.meta.url))).digest('hex'),
+        registry_entry_sha256: registryPin(),
         query: { verb: 'quiet-follow-ups', all: {}, owned: { owner_slug: actor.slug }, unassigned: { owner_slug: null } } },
       owner_slug: actor.slug, all, owned, unassigned,
     }, null, 2) + '\n');
@@ -119,11 +155,9 @@ test('missing actor joins retain assigned rows only in all-owner mode', async ()
 
 test('recorded responses replay through production proof response contract', () => {
   const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/quiet-follow-up-owner-filter.json', import.meta.url)));
-  for (const [file, key] of [['lead-follow-up.ts', 'producer_sha256'],
-    ['scac-mutation-registry.current.generated.js', 'registry_sha256']]) {
-    assert.equal(recording.provenance[key], createHash('sha256').update(
-      readFileSync(new URL('../src/' + file, import.meta.url))).digest('hex'));
-  }
+  assert.equal(recording.provenance.producer_sha256, createHash('sha256').update(
+    readFileSync(new URL('../src/lead-follow-up.ts', import.meta.url))).digest('hex'));
+  recordingRegistryMatches(SCAC_MUTATION_OPERATIONS);
   const python = process.env.CARR_CI_PYTHON || 'python3';
   const output = execFileSync(python, ['tools/prove-quiet-follow-up-owner-filter.py', '--fixture',
     'tools/fixtures/quiet-follow-up-owner-filter.json'], { encoding: 'utf8', timeout: 10000, cwd: new URL('../..', import.meta.url) });
