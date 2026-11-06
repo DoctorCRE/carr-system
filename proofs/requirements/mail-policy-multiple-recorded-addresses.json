@@ -1,0 +1,14 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "mail-policy-multiple-recorded-addresses",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "natural-multi-address-restriction",
+    "predicate": "Run python3 tools/prove-mail-policy-multiple-recorded-addresses.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30 after deployment. Read release before and after, require unchanged git_sha, resolve a natural multi-address party snapshot through email-match-contacts and prospect-research and require blocked=true for every sampled address under its recorded do_not_contact restriction.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "Exit 0 with status pass, witnesses >= 1 and addresses >= 2. Exit 1 means an observed restriction contradiction. Exit 78 means unavailable release, natural witness, supported restriction evidence, authentication or exhausted bounds. Release smoke alone never proves the assertion.",
+    "input_class": "Read-only authenticated wrapper, natural multi-address contact with exact snapshot and prospect-research contact_state. No seeding, writes or sends. Counts and release hash only.",
+    "deadline_seconds": 30
+  }],
+  "safety": {"read_only": true, "no_sends": true, "max_requests": 22, "max_records": 1000, "max_runtime_seconds": 30, "max_artifact_bytes": 65536}
+}
