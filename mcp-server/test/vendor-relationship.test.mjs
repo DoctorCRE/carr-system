@@ -1,5 +1,6 @@
 // Tests vendor relationship trust, evidence, overrides, and merging.
 import test from 'node:test';
+import {readFileSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import { computedTrust, enrichRelationship, trustedOverride, dealEvidenceEntries, mergeRelationshipFields } from '../src/vendor-relationship.ts';
 import { parseBusinessQuery, readBusinessList } from '../src/workspace-business-read.js';
@@ -108,5 +109,19 @@ test('valid history preserves tier thresholds, absent first contact, and bounded
  assert.equal(computedTrust({...proven,coverage_verified_at:'2026-09-01T12:00:00.123456+00:00'},now),'Proven');
  for (const [days, expected] of [[180,'Proven'],[181,'Established'],[365,'Established'],[366,'Trial']]) {
   assert.equal(computedTrust({...proven,last_contacted_at:new Date(Date.parse(now)-days*86400000).toISOString()},now),expected);
+ }
+});
+
+
+test('coverage orders exact microseconds across offsets, midnight and epoch', () => {
+ const cases = JSON.parse(readFileSync(new URL('./fixtures/vendor-trust-instants.json',import.meta.url),'utf8'));
+ for (const [observed,coverage,valid] of cases) {
+  const input={...proven,coverage_verified_at:coverage,last_contacted_at:observed};
+  const result=enrichRelationship(input,observed);
+  assert.equal(computedTrust(input,observed)!=='Unrated',valid,JSON.stringify([observed,coverage]));
+  assert.equal(result.computed_tier!=='Unrated',valid);
+  for (const key of ['deals_worked','deals_referred','won','lost','win_rate'])
+   assert.equal(result[key],valid ? (key==='win_rate'?7/8:input[key]) : null,key);
+  assert.doesNotThrow(()=>JSON.stringify(result));
  }
 });

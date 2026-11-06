@@ -2,6 +2,9 @@
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import copy
+import importlib.util
+from types import SimpleNamespace
+from unittest.mock import patch
 import http.cookiejar
 from functools import lru_cache
 import json
@@ -64,7 +67,7 @@ console.log(JSON.stringify({responses,release}));
 
 
 @contextmanager
-def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=True, require_identity=False):
+def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=True, require_identity=False, observation="2026-01-02T00:00:00.000Z", coverage=None):
     requests = []
     generated = endpoint_responses(pages, 2 if rows is None else len(rows))
 
@@ -95,6 +98,12 @@ def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=Tru
                     return
                 page = int(self.path.rsplit('=', 1)[1])
                 value = copy.deepcopy(generated['responses'][page - 1])
+                if observation is None:
+                    value.pop('source', None)
+                else:
+                    value['source']['observed_at'] = observation
+                if coverage is not None:
+                    value['rows'][0]['relationship']['coverage_verified_at'] = coverage
                 # Inject contradictions only after the real producer has built its response.
                 if rows is not None:
                     for row, stats in zip(value['rows'], rows):
@@ -218,10 +227,78 @@ class ProofCLI(unittest.TestCase):
             self.assertEqual(len(requests), 0)
             self.assertEqual(self.run_cli(base, domain='other.invalid')[0], 78)
 
+    def test_shared_exact_instant_corpus(self):
+        spec = importlib.util.spec_from_file_location('vendor_proof', RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        cases = json.loads((ROOT / 'mcp-server/test/fixtures/vendor-trust-instants.json').read_text())
+        for observed, coverage, valid in cases:
+            with self.subTest(observed=observed, coverage=coverage):
+                stats = {**RATED, 'coverage_verified_at': coverage}
+                if valid:
+                    self.assertEqual(runner.check_relationship(stats, runner.timestamp(observed)), 'rated')
+                else:
+                    with self.assertRaises(runner.Contradiction):
+                        runner.check_relationship(stats, runner.timestamp(observed))
+
+    def test_page_observation_clock(self):
+        for observed, coverage, expected in [
+                ('2099-01-02T00:00:00.000Z', '2099-01-02T00:00:00.000000Z', 0),
+                ('2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000001Z', 1),
+                ('2026-01-02T00:00:00.000Z', '2026-01-02T01:00:00.000001+01:00', 1),
+                ('2026-01-02T00:00:00.000Z', '2026-01-01T23:00:00.000000-01:00', 0),
+                (None, None, 78), ('not-a-date', None, 78)]:
+            with self.subTest(observed=observed, coverage=coverage), fixture(
+                    observation=observed, coverage=coverage) as (base, _):
+                self.assertEqual(self.run_cli(base)[0], expected)
+
+    def test_deadline_before_and_after_read(self):
+        spec = importlib.util.spec_from_file_location('vendor_proof', RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        args = SimpleNamespace(origin='http://127.0.0.1', carr_origin='http://127.0.0.1',
+                               storage_state=None, timeout_seconds=30)
+        for ticks, calls in [([0, 30], 0), ([0, 0, 30], 1)]:
+            with self.subTest(ticks=ticks), patch.object(runner, 'cookie_jar'), patch.object(
+                    runner.time, 'monotonic', side_effect=ticks), patch.object(runner, 'read') as reader:
+                with self.assertRaisesRegex(runner.Unavailable, 'deadline_exceeded'):
+                    runner.observe(args)
+                self.assertEqual(reader.call_count, calls)
+
     def test_total_timeout(self):
-        with fixture(delay=2) as (base, requests):
-            self.assertEqual(self.run_cli(base, timeout=1)[0], 78)
-            self.assertEqual(len(requests), 3)
+        source = r"""
+import importlib.util, signal, sys
+spec=importlib.util.spec_from_file_location('proof',sys.argv[1])
+proof=importlib.util.module_from_spec(spec);spec.loader.exec_module(proof)
+real_timer=signal.setitimer
+previous=signal.getsignal(signal.SIGALRM)
+def timer(which,seconds):
+    if seconds:
+        print('READY',flush=True)
+        return real_timer(which,.05)
+    return real_timer(which,0)
+def stalled(_):
+    signal.pause()
+proof.signal.setitimer=timer
+proof.observe=stalled
+sys.argv=['proof','--origin','http://127.0.0.1','--carr-origin','http://127.0.0.1',
+          '--storage-state','unused','--timeout-seconds','30']
+result=proof.main()
+assert signal.getsignal(signal.SIGALRM)==previous
+sys.exit(result)
+"""
+        process = subprocess.Popen([sys.executable, '-c', source, str(RUNNER)],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            stdout, stderr = process.communicate(timeout=10)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        self.assertEqual(process.returncode, 78, stdout + stderr)
+        self.assertTrue(stdout.startswith('READY\n'), stdout)
+        self.assertEqual(json.loads(stdout.splitlines()[-1])['status'], 'unavailable')
+        self.assertEqual(stderr, '')
 
     def test_bounded_pagination(self):
         with fixture([RATED, UNVERIFIED], pages=20) as (base, requests):

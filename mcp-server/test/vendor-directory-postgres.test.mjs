@@ -117,7 +117,7 @@ test('W5 PostgreSQL: sourced stats, partner override, audit, replay, CAS and rea
       const coverage=(await db.query('select deal_history_verified_at from public.vendor where id=$1',[vendor])).rows[0].deal_history_verified_at;
       assert.equal(coverage.toISOString(),observedAt.toISOString());
       try {
-        await db.query('update public.vendor set deal_history_verified_at=$2 where id=$1',[vendor,new Date(observedAt.valueOf()+1000)]);
+        await db.query('update public.vendor set deal_history_verified_at=$2 where id=$1',[vendor,'2026-10-01T00:00:00.000001Z']);
         const relationship=(await read()).record.relationship;
         assert.equal(relationship.computed_tier,'Unrated');
         for(const key of ['deals_worked','deals_referred','won','lost','win_rate']) assert.equal(relationship[key],null,key);

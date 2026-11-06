@@ -111,6 +111,8 @@ def observe(args):
             raise Unavailable('deadline_exceeded')
         response = read(base + path, timeout=remaining, max_bytes=MAX_BYTES,
                         cookie_jar=jar if authenticated else None)
+        if time.monotonic() >= deadline:
+            raise Unavailable('deadline_exceeded')
         if response.status != 200:
             raise Unavailable('http_status_invalid')
         data = response.body
@@ -131,13 +133,16 @@ def observe(args):
     if not all(isinstance(sha, str) and re.fullmatch('[0-9a-f]{40}', sha) for sha in [app_release, worker_release]):
         raise Unavailable('release_identity_missing')
     totals = {'rated': 0, 'unverified': 0, 'rows': 0, 'pages': 0}
-    now = datetime.now(timezone.utc)
     for page in range(1, 6):
         payload = get(app, '/api/v1/business/vendors?contract=vendor-directory.v1&scope=team&page=' + str(page), authenticated=True)
         rows = payload.get('rows')
         if (not isinstance(rows, list) or len(rows) > 25 or payload.get('page') != page
                 or payload.get('page_size') != 25 or not count(payload.get('page_count')) or payload['page_count'] < page):
             raise Unavailable('pagination_invalid')
+        source = payload.get('source')
+        now = timestamp(source.get('observed_at')) if isinstance(source, dict) else None
+        if now is None:
+            raise Unavailable('observation_missing')
         totals['pages'] += 1
         for row in rows[:100 - totals['rows']]:
             if not isinstance(row, dict):
@@ -165,10 +170,17 @@ def main():
     def timeout(*_):
         raise Unavailable('deadline_exceeded')
 
-    signal.signal(signal.SIGALRM, timeout)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
+    previous = signal.getsignal(signal.SIGALRM)
     try:
-        result = observe(args)
+        try:
+            signal.signal(signal.SIGALRM, timeout)
+            signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
+            result = observe(args)
+        finally:
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
         print(json.dumps({'status': 'observed', **result}))
         return 0
     except Contradiction as error:
@@ -177,8 +189,6 @@ def main():
     except (Unavailable, OSError, ValueError, KeyError, TypeError, AttributeError):
         print(json.dumps({'status': 'unavailable', 'reason': 'evidence_or_authorization_unavailable'}))
         return 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 if __name__ == '__main__':
