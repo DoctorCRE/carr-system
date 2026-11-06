@@ -98,11 +98,14 @@
     ]
   },
   "tools/prove-mail-needs-partner.py": {
-    "sha256": "3b42e338f7f115a6139b58ea5ae584057a457027c3d615c5f7e0c0c4d485c91e",
+    "sha256": "3a4e7e3321c4e2fb43bd23d4060536b2177735a45b98188f14fa685a4a28fc28",
     "commands": [
       "node --experimental-strip-types --input-type=module -e PARSER with fixed registered mail response parser and JSON stdin (no network)",
       "declared primary/other --call-wrapper call read-mail-needs-partner; primary wrapper call list-email-proposals with bounded pending pages; existing authenticated local actor transport",
       "killpg only the process group acquired for each wrapper (cleanup on success, error and timeout)"
-    ]
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   }
 }

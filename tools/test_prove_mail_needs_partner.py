@@ -89,7 +89,7 @@ class ProductionTransportTests(unittest.TestCase):
                     value = copy.deepcopy(value)
                     value['proposals'][0]['status'] = 'confirmed'
             return FakeProcess(0, json.dumps(value).encode())
-        reply = SimpleNamespace(status=200, body=json.dumps({'git_sha': {'value': 'a' * 40}}).encode())
+        reply = SimpleNamespace(status=200, body=json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode())
         with patch.object(proof, 'parsed', side_effect=lambda value: value), patch.object(proof.release_reader, 'read', return_value=reply) as read, patch.object(proof.subprocess, 'Popen', side_effect=invoke), patch.object(proof.os, 'killpg'):
             result = proof.production(self.args)
         read.assert_called_once_with('https://api.doctorcre.com/release', timeout=10, max_bytes=proof.MAX_BYTES)
@@ -109,7 +109,7 @@ class ProductionTransportTests(unittest.TestCase):
             self.assertLessEqual(len(self.calls), 22)
 
     def test_wrapper_timeout_disposes_owned_process_group(self):
-        reply = SimpleNamespace(status=200, body=json.dumps({'git_sha': {'value': 'a' * 40}}).encode())
+        reply = SimpleNamespace(status=200, body=json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode())
         process = FakeProcess(0, b'')
         with patch.object(proof.release_reader, 'read', return_value=reply), patch.object(proof.subprocess, 'Popen', return_value=process), patch.object(process, 'communicate', side_effect=subprocess.TimeoutExpired('synthetic-wrapper', 10)), patch.object(proof.os, 'killpg') as kill:
             with self.assertRaises(subprocess.TimeoutExpired):
@@ -120,14 +120,14 @@ class ProductionTransportTests(unittest.TestCase):
         for missing in ['merged_sha', 'other_call_wrapper']:
             args = copy.copy(self.args)
             setattr(args, missing, None)
-            reply = SimpleNamespace(status=200, body=json.dumps({'git_sha': {'value': 'a' * 40}}).encode())
+            reply = SimpleNamespace(status=200, body=json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode())
             with self.subTest(missing=missing), patch.object(proof.release_reader, 'read', return_value=reply), patch.object(proof.subprocess, 'Popen') as launch:
                 with self.assertRaises(ValueError):
                     proof.production(args)
                 launch.assert_not_called()
 
     def test_real_wrappers_use_real_parser_and_timeout_reaps_process(self):
-        reply = SimpleNamespace(status=200, body=json.dumps({'git_sha': {'value': 'a' * 40}}).encode())
+        reply = SimpleNamespace(status=200, body=json.dumps({'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'a' * 40}}).encode())
         with tempfile.TemporaryDirectory(prefix='wr648-proof-') as directory:
             folder = Path(directory)
             fixture = folder / 'bundle.json'

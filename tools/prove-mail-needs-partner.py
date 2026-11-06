@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import release_reader
+from proof_release import release_revision
 
 MAX_BYTES = 1048576
 PARSER = """import {parseMailNeedsPartnerResponse} from './mcp-server/src/mail-needs-partner.ts';
@@ -55,7 +56,7 @@ def production(args):
     if reply.status != 200 or len(reply.body) > MAX_BYTES:
         raise ValueError('release_unavailable')
     release = json.loads(reply.body)
-    if not args.merged_sha or release.get('git_sha', {}).get('value') != args.merged_sha:
+    if not args.merged_sha or release_revision(release) != args.merged_sha:
         raise ValueError('merge_identity_unproved')
     if not args.other_call_wrapper:
         raise ValueError('second_partner_call_wrapper_required')
