@@ -112,18 +112,32 @@ class Controls(unittest.TestCase):
         wf = workflow()
         self.assertEqual(wf['on']['merge_group']['types'], ['checks_requested'])
         self.assertEqual(wf['on']['pull_request']['types'],
-                         ['opened', 'synchronize', 'reopened',
+                         ['opened', 'edited', 'synchronize', 'reopened',
                           'converted_to_draft', 'ready_for_review'])
+        metadata = "github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null"
         self.assertEqual(wf['concurrency'], {
-            'group': '${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}',
-            'cancel-in-progress': "${{ github.event_name == 'pull_request' }}"})
+            'group': "${{ github.workflow }}-${{ github.event_name }}-${{ (" + metadata + ") && format('metadata-{0}', github.run_id) || github.event.pull_request.number || github.ref }}",
+            'cancel-in-progress': "${{ github.event_name == 'pull_request' && !(" + metadata + ") }}"})
+        candidate = "!(" + metadata + ")"
+        self.assertEqual(wf['jobs']['select']['if'],
+                         "${{ !cancelled() && !github.event.pull_request.draft && " + candidate + " }}")
+        self.assertEqual(wf['jobs']['checks']['if'], "${{ always() && " + candidate + " }}")
+        self.assertEqual(wf['jobs']['checks']['name'],
+                         "${{ (" + metadata + ") && 'CI metadata (no validation)' || 'ops/ci.sh --strict' }}")
+        for name, job in wf['jobs'].items():
+            if name in ('select', 'checks'):
+                continue
+            with self.subTest(job=name):
+                self.assertIn('select', job['needs'])
+                self.assertIn('needs.select.outputs', job['if'])
+                self.assertIn('!cancelled()', job['if'])
         self.assertIn('edited', workflow('review-gate.yml')['on']['pull_request_target']['types'])
         for name in ('classes', 'migration-fixtures'):
             self.assertFalse(wf['jobs'][name]['strategy']['fail-fast'])
 
     def test_required_context_reports_even_after_a_failed_class(self):
         wf = workflow()
-        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
+        self.assertIn("|| 'ops/ci.sh --strict'", wf['jobs']['checks']['name'])
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
         self.assertEqual(set(wf['jobs']['checks']['needs']), {'select', 'lint', 'unit', 'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'})

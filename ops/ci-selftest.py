@@ -1411,6 +1411,8 @@ def test_hosted_draft_lifecycle():
         wf = _hosted_workflow(filename)
         events = wf["on"]
         expected_actions = {"opened", "synchronize", "reopened", "converted_to_draft", "ready_for_review"}
+        if filename == "ci.yml":
+            expected_actions.add("edited")
         check(f"{filename}: only intended PR lifecycle events schedule runs",
               set(events["pull_request"]["types"]) == expected_actions)
         check(f"{filename}: all non-PR full-suite triggers survive",
@@ -1430,7 +1432,9 @@ def test_hosted_draft_lifecycle():
         verdict = jobs.get(verdict_name, {})
         expected_needs = set(lanes) | ({"select", "lint", "unit", "launchd-python39"} if filename == "ci.yml" else set())
         check(f"{filename}: verdict always evaluates and waits for every lane",
-              verdict.get("if") == "${{ always() }}" and set(verdict.get("needs", [])) == expected_needs)
+              (verdict.get("if") == "${{ always() }}" if filename != "ci.yml" else
+               verdict.get("if") == "${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}")
+              and set(verdict.get("needs", [])) == expected_needs)
         if not verdict:
             continue
         step = next(st for st in verdict["steps"] if st.get("run") == f"python3 ops/ci-evidence.py {command}")
