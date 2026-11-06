@@ -93,6 +93,7 @@
         "lib/credential_file.py": "68c27169405b12a9a41b94d3de6aa94b66eec324b8971e12c0ebc9228456919b"
       }
     },
+    "studio-triage-containment.v1": {"path": "ops/studio-triage-containment-observe.py", "targets": ["studio"], "sources": {"ops/studio-triage-containment-observe.py": "b4059b092d18ec2b0a6f0c1c9181a42b45de216b3bbff957d26a9e700df33f48"}},
     "studio-run-receipt.v1": {"path": "ops/studio-proof-observe.py", "revision": "f699e1859dc87e4122501bbaba35a312607452a7", "targets": ["studio"]}
   },
   "x-required-targets": {"worker": ["mcp-server/**", "migrations/**"], "studio": ["lib/outlook*.py", "bin/install-outlook-*", "bin/refresh-outlook-runtime", "ops/launchd/com.carr.outlook-*.plist"]},
