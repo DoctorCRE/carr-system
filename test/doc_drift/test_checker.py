@@ -18,6 +18,17 @@ except ModuleNotFoundError:
 
 
 class CheckerTest(unittest.TestCase):
+    def test_exact_transferred_repository_exemption(self):
+        import runpy
+        module = runpy.run_path(str(CHECKER))
+        # Path classification uses the registry for the transferred owner only.
+        canonical = module['canonical_repository']
+        for repo in ('DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app'):
+            self.assertEqual(canonical(repo), 'DoctorCRE/doctorcre-app')
+            self.assertEqual(module['Tree'](self.root).path(repo, 'AGENTS.md')[1], 'cross-repository name')
+        self.assertIsNone(canonical('DoctorCRE/unrelated'))
+        self.assertNotEqual(module['Tree'](self.root).path('DoctorCRE/unrelated', 'AGENTS.md')[1], 'cross-repository name')
+
     def setUp(self):
         self.env = fixture_env()
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="doc-drift-fixture-")))

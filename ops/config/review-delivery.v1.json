@@ -34,7 +34,7 @@
     "live_url": "https://api.doctorcre.com"
   },
   "app": {
-    "github_repo": "jbookout/doctorcre-app",
+    "github_repo": "DoctorCRE/doctorcre-app",
     "non_release_globs": [
       "**/*.md",
       "test/**",

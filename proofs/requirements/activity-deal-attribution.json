@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "activity-deal-attribution",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "natural-direct-and-unresolved",
+      "predicate": "After merge and deployment, the separately authorized proof worker runs python3 tools/prove-activity-deal-attribution.py --production --natural with --merge-sha set to the exact deployed merge SHA. Read /release through lib/release_reader.py and use the existing server-derived actor wrapper (default run.sh call) for read-activity-deal-attribution, email-router-queue and get-deal-room. The verb and fixed GET adapter share the same runtime contract. Resolve at most 25 natural activity IDs from the existing authenticated email-router-queue read and cross-check a direct activity against get-deal-room timeline evidence. Require one direct attribution and one naturally unresolved or ambiguous activity. Never seed records. Missing witnesses, source failure, absent authorization, release identity mismatch or contradictory evidence exits 78. Fixture pass and release identity alone never establish live proof.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Both natural witnesses pass the production response parser and canonical identity comparison at a release containing the merged SHA.",
+      "input_class": "Natural captured activities and canonical authenticated read evidence. No writes or sends.",
+      "deadline_seconds": 360
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 32,
+    "max_records": 25,
+    "max_runtime_seconds": 360,
+    "max_artifact_bytes": 1048576
+  }
+}

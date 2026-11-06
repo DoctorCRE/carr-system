@@ -59,6 +59,8 @@ if args[:2] != ["api", "graphql"]:
     sys.exit(2)
 fields = dict(arg.split("=", 1) for arg in args[2:] if "=" in arg)
 repo = f"{fields['owner']}/{fields['name']}"
+if repo == "jbookout/doctorcre-app":
+    repo = "DoctorCRE/doctorcre-app"
 if repo in fixture.get("fail", []):
     sys.exit(1)
 now = datetime.now(timezone.utc)
@@ -777,15 +779,15 @@ class PullRequestStatus(BoardCase):
         self.run_board("init", "demo", "--title", "Demo")
         self.update_legacy_task("demo", "carr", "--title", "CARR fix", "--status", "running", "--executor", "Codex", "--pr", "85")
         self.update_legacy_task("demo", "app", "--title", "App fix", "--status", "running", "--executor", "Codex",
-                       "--pr", "85", "--repo", "jbookout/doctorcre-app")
+                       "--pr", "85", "--repo", "DoctorCRE/doctorcre-app")
         state = self.read_state("demo")
         self.assertEqual(state["tasks"]["carr"]["repo"], "DoctorCRE/carr-system")
-        self.assertEqual(state["tasks"]["app"]["repo"], "jbookout/doctorcre-app")
+        self.assertEqual(state["tasks"]["app"]["repo"], "DoctorCRE/doctorcre-app")
         del state["tasks"]["carr"]["repo"]  # JSON written before --repo existed
         self.write_state("demo", state)
         carr = {**self.VALID, "number": 85, "state": "MERGED", "mergeCommit": {"oid": SHA_M}}
         app = {**self.VALID, "number": 85, "comments": []}
-        self.fake_gh({"open": {"jbookout/doctorcre-app": [app]},
+        self.fake_gh({"open": {"DoctorCRE/doctorcre-app": [app]},
                       "merged": {"DoctorCRE/carr-system": [carr]}})
         self.run_board("render", "demo")
         state = self.read_state("demo")
@@ -802,9 +804,9 @@ class PullRequestStatus(BoardCase):
         self.assertEqual((old["status"], old["stage"], old["pr_phase"], old["pr_head"]),
                          ("review", "merged", "Merged", SHA_A))
         self.set_fixture({})
-        self.update_legacy_task("demo", "a", "--repo", "jbookout/doctorcre-app")
+        self.update_legacy_task("demo", "a", "--repo", "DoctorCRE/doctorcre-app")
         moved = self.read_state("demo")["tasks"]["a"]
-        self.assertEqual((moved["repo"], moved["pr"]), ("jbookout/doctorcre-app", 42))
+        self.assertEqual((moved["repo"], moved["pr"]), ("DoctorCRE/doctorcre-app", 42))
         self.assertEqual((moved["status"], moved["stage"]), ("running", "build"))
         for field in ("pr_phase", "pr_checks", "pr_head", "evidence", "completed_at", "merge_sha"):
             self.assertNotIn(field, moved)
@@ -901,7 +903,7 @@ class PullRequestStatus(BoardCase):
             with patch.object(BOARD, "probe_json", lambda url: probes.get(url)):
                 BOARD.RELEASE_CACHE.clear()
                 carr = BOARD.latest_release("DoctorCRE/carr-system")
-                app = BOARD.latest_release("jbookout/doctorcre-app")
+                app = BOARD.latest_release("DoctorCRE/doctorcre-app")
                 wait = BOARD.release_wait_reason("DoctorCRE/carr-system")
         BOARD.RELEASE_CACHE.clear()
         self.assertEqual((carr["sha"], carr["lane"], carr["source"]), ("6" * 40, "worker", "live probe"))
@@ -1114,7 +1116,7 @@ class AllRepositoriesBoard(BoardCase):
 
     def fixture_all(self):
         carr = "DoctorCRE/carr-system"
-        app = "jbookout/doctorcre-app"
+        app = "DoctorCRE/doctorcre-app"
         return {
             "open": {
                 carr: [
@@ -1145,7 +1147,7 @@ class AllRepositoriesBoard(BoardCase):
         self.assertEqual(state["kind"], "all-repos")
         self.assertEqual(state["project"], "all-repos")
         repos = [row["repo"] for row in state["repos"]]
-        self.assertEqual(repos, ["DoctorCRE/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory"])
+        self.assertEqual(repos, ["DoctorCRE/carr-system", "DoctorCRE/doctorcre-app", "jbookout/software-factory"])
         tasks = state["tasks"]
         expect = {
             "carr-system-1": ("build", "running", "Draft", False),
@@ -1169,7 +1171,7 @@ class AllRepositoriesBoard(BoardCase):
                     reason, action = BOARD.blocked_detail(task)
                     self.assertTrue(reason and action)
         app = tasks["doctorcre-app-1"]
-        self.assertEqual((app["repo"], app["pr"], app["title"]), ("jbookout/doctorcre-app", 1, "App one"))
+        self.assertEqual((app["repo"], app["pr"], app["title"]), ("DoctorCRE/doctorcre-app", 1, "App one"))
         self.assertEqual(app["summary"], "Fixes the phone layout.")
         self.assertEqual(app["author"], "jbookout")
         self.assertEqual(app["executor"], "Claude cloud")
@@ -1182,7 +1184,7 @@ class AllRepositoriesBoard(BoardCase):
         self.assertIn("consumer proof", tasks["carr-system-7"]["release_wait"])
         counts = {row["repo"]: (row["open"], row["merged"]) for row in state["repos"]}
         self.assertEqual(counts["DoctorCRE/carr-system"], (6, 2))
-        self.assertEqual(counts["jbookout/doctorcre-app"], (1, 0))
+        self.assertEqual(counts["DoctorCRE/doctorcre-app"], (1, 0))
         snapshot = BOARD.board_snapshot(state)
         self.assertEqual(snapshot["kind"], "all-repos")
         self.assertEqual(snapshot["repos"], state["repos"])
@@ -1191,7 +1193,7 @@ class AllRepositoriesBoard(BoardCase):
     def test_same_pr_number_in_two_repositories_never_collides(self):
         fixture = self.fixture_all()
         fixture["open"] = {"DoctorCRE/carr-system": [self.pr(93, title="CARR 93")],
-                           "jbookout/doctorcre-app": [self.pr(93, title="App 93")]}
+                           "DoctorCRE/doctorcre-app": [self.pr(93, title="App 93")]}
         fixture["merged"] = {}
         self.fake_gh(fixture)
         self.run_board("render", "all-repos")
@@ -1199,21 +1201,21 @@ class AllRepositoriesBoard(BoardCase):
         self.assertEqual(tasks["carr-system-93"]["title"], "CARR 93")
         self.assertEqual(tasks["doctorcre-app-93"]["title"], "App 93")
         self.assertEqual({(t["repo"], t["pr"]) for t in tasks.values()},
-                         {("DoctorCRE/carr-system", 93), ("jbookout/doctorcre-app", 93)})
-        self.assertEqual(BOARD.card_key("jbookout/doctorcre-app", 93), "doctorcre-app-93")
-        self.assertNotEqual(BOARD.card_key("jbookout/doctorcre-app", 93), BOARD.card_key("DoctorCRE/carr-system", 93))
+                         {("DoctorCRE/carr-system", 93), ("DoctorCRE/doctorcre-app", 93)})
+        self.assertEqual(BOARD.card_key("DoctorCRE/doctorcre-app", 93), "doctorcre-app-93")
+        self.assertNotEqual(BOARD.card_key("DoctorCRE/doctorcre-app", 93), BOARD.card_key("DoctorCRE/carr-system", 93))
 
     def test_one_repository_failing_keeps_its_previous_cards(self):
         fixture = self.fixture_all()
         self.fake_gh(fixture)
         self.run_board("render", "all-repos")
         before = {k: v for k, v in self.read_state("all-repos")["tasks"].items() if k.startswith("doctorcre-app-")}
-        self.set_fixture({**fixture, "fail": ["jbookout/doctorcre-app"], "open": {"DoctorCRE/carr-system": []}})
+        self.set_fixture({**fixture, "fail": ["DoctorCRE/doctorcre-app"], "open": {"DoctorCRE/carr-system": []}})
         self.run_board("render", "all-repos")
         state = self.read_state("all-repos")
         after = {k: v for k, v in state["tasks"].items() if k.startswith("doctorcre-app-")}
         self.assertEqual(after, before)
-        row = next(r for r in state["repos"] if r["repo"] == "jbookout/doctorcre-app")
+        row = next(r for r in state["repos"] if r["repo"] == "DoctorCRE/doctorcre-app")
         self.assertIn("error", row)
         self.assertNotIn("carr-system-1", state["tasks"])
 
@@ -2018,7 +2020,7 @@ class ReviewRound1420(BoardCase):
         with patch.dict(os.environ), \
              patch.object(BOARD, "probe_json", lambda url: {"environment": "production", "source_commit": 5}):
             os.environ.pop("PROGRESS_BOARD_SKIP_PROBE", None)
-            self.assertIsNone(BOARD.latest_release("jbookout/doctorcre-app"))
+            self.assertIsNone(BOARD.latest_release("DoctorCRE/doctorcre-app"))
         BOARD.RELEASE_CACHE.clear()
         BOARD.RELEASE_ERRORS.clear()
 
@@ -2253,7 +2255,7 @@ class DeliveryTargetRelease(BoardCase):
         for repo, identity in (
             ("DoctorCRE/carr-system", {"ok": True, "env": {"value": "production"},
                                       "git_sha": {"value": released}}),
-            ("jbookout/doctorcre-app", {"service": "doctorcre-app", "environment": "production",
+            ("DoctorCRE/doctorcre-app", {"service": "doctorcre-app", "environment": "production",
                                        "source_commit": released}),
         ):
             with self.subTest(repo=repo):

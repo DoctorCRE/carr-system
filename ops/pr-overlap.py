@@ -4,6 +4,9 @@ import argparse
 import json
 import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.repository_identity import repository_names, repository_lookup_name
 
 
 def fetch_pages(endpoint):
@@ -24,15 +27,15 @@ def overlaps(a, b):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('repo', choices=['DoctorCRE/carr-system', 'jbookout/doctorcre-app'])
+    parser.add_argument('repo', choices=repository_names(aliases=True))
     parser.add_argument('paths', nargs='+')
     args = parser.parse_args()
     matches = []
     incomplete = False
     try:
-        prs = fetch_pages(f'repos/{args.repo}/pulls')
+        prs = fetch_pages(f'repos/{repository_lookup_name(args.repo)}/pulls')
         for pr in prs:
-            files = fetch_pages(f"repos/{args.repo}/pulls/{pr['number']}/files")
+            files = fetch_pages(f"repos/{repository_lookup_name(args.repo)}/pulls/{pr['number']}/files")
             paths = [name for f in files for name in (f['filename'], f.get('previous_filename'))
                      if name and any(overlaps(name, p) for p in args.paths)]
             if paths:

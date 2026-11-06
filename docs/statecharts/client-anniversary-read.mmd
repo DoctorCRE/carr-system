@@ -1,0 +1,9 @@
+stateDiagram-v2
+  [*] --> Validating: Request anniversaries
+  Validating --> Unauthorized: No verified partner
+  Validating --> needs_input: Invalid query
+  Validating --> Reading: Valid partner and query
+  Reading --> ready: Eligible rows
+  Reading --> empty: No eligible rows
+  Reading --> unavailable: Source fails or exceeds cap
+  ready --> Validating: Request next page
