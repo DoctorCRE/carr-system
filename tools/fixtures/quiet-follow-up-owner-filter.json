@@ -3,7 +3,7 @@
     "transport": "executeRegisteredTool/disposable-postgres",
     "producer_revision": "113e1d50f0e44216557bf28eeeadf03a4fa862e3",
     "producer_sha256": "7f8189def7cd27b792cb8064c4e573534318d2bb200defff7d5045e2042c4662",
-    "registry_sha256": "05c190d25598aaf584ce2959bd73629ac4701149545e126c141b2c3915eb129a",
+    "registry_entry_sha256": "0b22e503a76360dbba4a25d132c768e5c7cf7c915f54a50ffa62026e0f4ddde7",
     "query": {
       "verb": "quiet-follow-ups",
       "all": {},
