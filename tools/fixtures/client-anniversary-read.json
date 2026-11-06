@@ -1,0 +1,45 @@
+{
+  "response": {
+    "schema_version": "client-anniversary-read.v1",
+    "state": "ready",
+    "as_of": "2026-11-06",
+    "timezone": "America/Chicago",
+    "query": {
+      "horizon_days": 30,
+      "limit": 20,
+      "offset": 0
+    },
+    "rows": [
+      {
+        "client_id": "aa000000-0000-4000-8000-000000000001",
+        "client_name": "Synthetic client",
+        "deal_id": "aa000000-0000-4000-8000-000000000002",
+        "deal_name": "Synthetic deal",
+        "closed_on": "2020-11-06",
+        "phase": "closed",
+        "outcome": "won",
+        "deal_version": 3,
+        "client_version": 2,
+        "party_version": 1,
+        "anniversary_on": "2026-11-06",
+        "days_until": 0,
+        "years": 6,
+        "evidence_ref": "deal:aa000000-0000-4000-8000-000000000002@3#closed_on"
+      }
+    ],
+    "coverage": {
+      "scanned": 1,
+      "skipped_invalid": 0,
+      "complete": true
+    },
+    "next_offset": null
+  },
+  "reference": {
+    "id": "aa000000-0000-4000-8000-000000000002",
+    "client_id": "aa000000-0000-4000-8000-000000000001",
+    "closed_on": "2020-11-06",
+    "phase": "closed",
+    "outcome": "won",
+    "base_version": 3
+  }
+}

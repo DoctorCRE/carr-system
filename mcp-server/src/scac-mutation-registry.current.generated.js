@@ -2264,6 +2264,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-client-anniversaries": {
+    "ingress_key": "mcp-tool:read-client-anniversaries",
+    "source_locator": "mcp-server/src/client-anniversary-read.ts",
+    "schema_digest": "dbe781d2ecf5d1758b2608e43383d30a0e3ce23bbb1e0ef2bd284f86e458024f",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-client-portal": {
     "ingress_key": "mcp-tool:read-client-portal",
     "source_locator": "mcp-server/src/client-portal.ts",

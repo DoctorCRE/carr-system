@@ -6,6 +6,7 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
+import { CLIENT_ANNIVERSARY_PATH, anniversaryQueryFromUrl, parseAnniversaryQuery, parseClientAnniversaryResponse } from "./client-anniversary-read.ts";
 import { publicError } from "./public-errors.ts";
 import {
   exchangeGoogleCode,
@@ -908,6 +909,21 @@ async function jevDealReadingResponse(request, env, session, dependencies) {
   }
 }
 
+async function clientAnniversaryResponse(request, env, session, dependencies) {
+  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+  const args = anniversaryQueryFromUrl(new URL(request.url));
+  if (!parseAnniversaryQuery(args)) return json({ error: "invalid_query", state: "needs_input" }, 400);
+  const refusal = await verbRequestBudgetRefusal(env, session.actor, session.key);
+  if (refusal) return refusal;
+  try {
+    const invoke = dependencies.clientAnniversaryCaller || callTool;
+    const result = parseClientAnniversaryResponse(await invoke(env, session.actor, "read-client-anniversaries", args));
+    return json(result, result.state === "unavailable" ? 503 : 200);
+  } catch {
+    return json({ error: "DEPENDENCY_UNAVAILABLE", state: "unavailable" }, 503);
+  }
+}
+
 async function appFactResponse(request, env, session, dependencies) {
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const guarded = await guardSystemWorkPost(request, env, session, { readBody: true, maxBytes: 16384 });
@@ -1091,7 +1107,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       // The business read is the ONLY addition to that surface, and it is
       // admitted by an exact path parser rather than a prefix.
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
-          url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
+          url.pathname !== CLIENT_ANNIVERSARY_PATH && url.pathname !== JEV_DEAL_READING_PATH && !APP_FACT_ROUTES.has(url.pathname) &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           url.pathname !== PHONE_CALL_PREFIX && !url.pathname.startsWith(PHONE_CALL_PREFIX + '/') &&
           !url.pathname.startsWith(DELIVERABLE_PREFIX + '/') &&
@@ -1121,7 +1137,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       const session = await sessionFor(request, env, dependencies);
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
-        if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+        if (url.pathname === CLIENT_ANNIVERSARY_PATH || url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || url.pathname.startsWith(DELIVERABLE_PREFIX) || APP_FACT_ROUTES.has(url.pathname) ||
             url.pathname === PHONE_CALL_PREFIX || url.pathname.startsWith(PHONE_CALL_PREFIX + '/') ||
             isBusinessApiPath(url.pathname)) {
@@ -1192,7 +1208,9 @@ async function handleRequest(request, env, ctx, dependencies) {
         response = await dependencies.mcpHandler(request, env, ctx, session.actor, session.key);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
-      else if (APP_FACT_ROUTES.has(url.pathname)) {
+      else if (url.pathname === CLIENT_ANNIVERSARY_PATH) {
+        response = await clientAnniversaryResponse(request, env, session, dependencies);
+      } else if (APP_FACT_ROUTES.has(url.pathname)) {
         response = await appFactResponse(request, env, session, dependencies);
       } else if (url.pathname === JEV_DEAL_READING_PATH) {
         response = await jevDealReadingResponse(request, env, session, dependencies);
