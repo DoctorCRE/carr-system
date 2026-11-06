@@ -417,6 +417,25 @@ test('pre-transfer search uses only the explicit alias, cached with the canonica
 });
 
 
+test('transfer search succeeds canonically and refuses failed aliases or non-fallback statuses', async () => {
+  for (const statuses of [[200], [404, 500], [422, 403], [403], [429], [500]]) {
+    const calls = [];
+    const read = createPullRequestSource({ token: 'synthetic', fetchImpl: async url => {
+      calls.push(new URL(url).searchParams.get('q'));
+      const status = statuses[calls.length - 1];
+      return Response.json(status === 200 ? { items: [], total_count: 0 } : { message: 'Unavailable' }, { status });
+    }});
+    const result = await read(['DoctorCRE/doctorcre-app', 'jbookout/doctorcre-app']);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].state, statuses[0] === 200 ? 'ok' : 'unavailable');
+    assert.equal(calls.length, statuses.length);
+    assert.ok(calls[0].startsWith('repo:DoctorCRE/doctorcre-app '));
+    if (calls.length === 2) assert.ok(calls[1].startsWith('repo:jbookout/doctorcre-app '));
+    await read(['jbookout/doctorcre-app']);
+    assert.equal(calls.length, statuses.length);
+  }
+});
+
 test('review attestations retain exact heads across app URL aliases', async () => {
   const sha = 'b'.repeat(40);
   for (const [changeRepo, reviewRepo, accepted] of [

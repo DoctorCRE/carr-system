@@ -2,7 +2,8 @@
 import json
 from pathlib import Path
 import unittest
-from progress_orchestrator import project
+from unittest.mock import patch
+from progress_orchestrator import links, project
 
 
 class OrchestratorTests(unittest.TestCase):
@@ -49,11 +50,30 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(len(result['cards']), 2)
         self.assertEqual(set(result['sources']), {'github', 'portfolio'})
 
+    def test_app_pr_links_use_redirect_locator_for_both_repository_names(self):
+        for repo in ('jbookout/doctorcre-app', 'DoctorCRE/doctorcre-app'):
+            with self.subTest(repo=repo):
+                self.assertEqual(links({'repo': repo, 'pr': 721}),
+                                 ['https://github.com/jbookout/doctorcre-app/pull/721'])
+        self.assertEqual(links({'prs': [
+            {'repo': 'jbookout/doctorcre-app', 'number': 721},
+            {'repo': 'DoctorCRE/doctorcre-app', 'number': 721}]}),
+            ['https://github.com/jbookout/doctorcre-app/pull/721'])
+        self.assertEqual(links({'repo': 'someone/doctorcre-app', 'pr': 721}), [])
+
+    def test_app_pr_links_use_canonical_locator_after_alias_retirement(self):
+        from lib.repository_identity import REGISTRY
+        with patch.dict(REGISTRY, repository_identities={}):
+            for repo in ('jbookout/doctorcre-app', 'DoctorCRE/doctorcre-app'):
+                with self.subTest(repo=repo):
+                    self.assertEqual(links({'repo': repo, 'pr': 721}),
+                                     ['https://github.com/DoctorCRE/doctorcre-app/pull/721'])
+
     def test_duplicate_pull_requests_share_one_card(self):
         task = {'title': 'Deal room search', 'stage': 'review', 'repo': 'jbookout/doctorcre-app', 'pr': 12}
-        result = project({'tasks': {'local': task}}, portfolio={'tasks': {'github': task}})
+        result = project({'tasks': {'local': task}}, portfolio={'tasks': {'github': {**task, 'repo': 'DoctorCRE/doctorcre-app'}}})
         self.assertEqual(len(result['cards']), 1)
-        self.assertEqual(result['cards'][0]['prs'], ['https://github.com/DoctorCRE/doctorcre-app/pull/12'])
+        self.assertEqual(result['cards'][0]['prs'], ['https://github.com/jbookout/doctorcre-app/pull/12'])
 
 
 

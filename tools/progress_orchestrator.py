@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.repository_identity import canonical_repository, repository_names
+from lib.repository_identity import canonical_repository, repository_lookup_name, repository_names
 
 SCHEMA = 'doctorcre-orchestrator/v1'
 STATES = ('waiting', 'working', 'review', 'fixing', 'merging', 'merged', 'live', 'blocked')
@@ -25,7 +25,7 @@ def links(card):
     result = []
     for ref in refs:
         if isinstance(ref, dict) and REPO.fullmatch(str(ref.get('repo', ''))) and isinstance(ref.get('number'), int) and ref['number'] > 0:
-            href = f"https://github.com/{canonical_repository(ref['repo'])}/pull/{ref['number']}"
+            href = f"https://github.com/{repository_lookup_name(ref['repo'])}/pull/{ref['number']}"
             if href not in result:
                 result.append(href)
     return result
