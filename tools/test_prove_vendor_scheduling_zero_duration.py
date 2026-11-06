@@ -1,7 +1,8 @@
 """Exercise the proof CLI with a synthetic wrapper and local release origin."""
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
+from proof_release_fixture import ReleaseFixtureHandler
 import json
 import shutil
 from pathlib import Path
@@ -31,8 +32,8 @@ class ProofCLI(unittest.TestCase):
             change(vendor, agenda, at)
         requests = []
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append(self.path)
                 self.send_response(200)
                 self.end_headers()

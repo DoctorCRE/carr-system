@@ -1,6 +1,6 @@
 """Replay registered disposable-PostgreSQL responses through the actual proof CLI."""
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -12,6 +12,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'tools/prove-email-next-step-closed-date.py'
+sys.path.insert(0, str(ROOT / 'tools'))
+from proof_release_fixture import ReleaseFixtureHandler
 
 
 class ProofCLI(unittest.TestCase):
@@ -37,8 +39,8 @@ class ProofCLI(unittest.TestCase):
         requests = []
         release_payload = self.data['release']
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append(self.path)
                 self.send_response(200)
                 self.end_headers()

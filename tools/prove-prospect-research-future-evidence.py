@@ -11,6 +11,8 @@ import time
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 MAX_BYTES = 1048576
 
 
@@ -68,9 +70,9 @@ class Proof:
         if self.args.fixture:
             release = json.loads(self.fixture('release'))
         else:
-            release = json.loads(self.process(['curl', '--fail', '--silent', '--show-error',
-                '--max-time', str(self.remaining()), '--max-filesize', str(MAX_BYTES),
-                'https://api.doctorcre.com/release']))
+            response = read_http('https://api.doctorcre.com/release', timeout=self.remaining(), max_bytes=MAX_BYTES)
+            require(response.status == 200 and len(response.body) <= MAX_BYTES, 'release_unavailable')
+            release = json.loads(response.body)
         self.remaining()
         require(isinstance(release, dict) and release.get('ok') is True
                 and release.get('env', {}).get('value') == 'production', 'release_contract')

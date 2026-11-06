@@ -3263,7 +3263,7 @@ test('email next-step proof fixtures use registered response contracts', async (
   const selected = activeRoom.activities.find(a => ['email_in','email_out'].includes(a.kind) && a.detail?.trim().length >= 10);
   const active = await command('preview-email-next-step', { ...nextStepArgs(selected.id),
     deal: activeDeal, evidence_quote: selected.detail.slice(0,2000),
-    text: 'Review captured email evidence', next_date: new Date().toLocaleDateString('en-CA') });
+    text: 'Review captured email evidence', next_date: (await c.query('select current_date::text as day')).rows[0].day });
   const activeBoard = await command('deal-room-board', { workspace: 'all' });
   await c.query("update deal set closed_on='2026-01-01' where id=$1", [deal]);
   try {

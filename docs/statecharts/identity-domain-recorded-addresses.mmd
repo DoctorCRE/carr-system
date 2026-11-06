@@ -1,0 +1,15 @@
+stateDiagram-v2
+    [*] --> EvidenceAdmission: Submit correction
+    EvidenceAdmission --> Refused: Missing confirmation or source
+    EvidenceAdmission --> ReplayCheck: Confirmed sourced evidence
+    ReplayCheck --> Receipt: Exact replay
+    ReplayCheck --> Refused: Key reused for different action
+    ReplayCheck --> VersionAndStoredEvidence: New action
+    VersionAndStoredEvidence --> Refused: Stale version or unrelated identifier or city
+    VersionAndStoredEvidence --> Correction: Current version and independent stored identifier
+    Correction --> Refused: Shared organization safety check fails
+    Correction --> Receipt: Record correction and evidence
+    Receipt --> [*]: Return result
+    Refused --> [*]: Return refusal without correction
+    %% never Refused corrections change identity or emit correction events.
+    %% never Exact replay repeats the correction.

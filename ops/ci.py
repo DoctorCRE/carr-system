@@ -221,6 +221,10 @@ class Controller:
         print(f'ci-retained-logs: {self.logdir}', file=sys.stderr)
 
     def check_lint(self):
+        if self.run_quiet('proof-transport', [sys.executable, str(ROOT / 'ops/proof-transport-check.py')]):
+            self.fail_tail('proof-transport')
+            self.verdict('bad', 'proof HTTP transport bypasses shared reader')
+            return
         base, head = 'HEAD', None
         if self.options.changed_from or os.environ.get('GITHUB_EVENT_NAME') == 'pull_request':
             from ci_scope import diff_revisions

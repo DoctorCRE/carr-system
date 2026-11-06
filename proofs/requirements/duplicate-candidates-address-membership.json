@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "duplicate-candidates-address-membership",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "recorded-address-witness",
+      "predicate": "Require release ancestry, then run python3 tools/prove-duplicate-candidates-address-membership.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30 from the merged checkout. A natural same-kind pair with a shared full recorded address and a multi-address field appears exactly once with same_email. Missing or ambiguous witness exits 78 and is unproven. The registered release smoke proves release identity only; the separate address runner is required.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release contains the merge and the bounded natural-witness runner exits zero with three assertions and unchanged git_sha.",
+      "input_class": "Authenticated read-only email-match-contacts, exact prospect-research identities and UUID-ordered candidate pages.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 22,
+    "max_records": 1000,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

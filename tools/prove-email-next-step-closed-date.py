@@ -10,10 +10,10 @@ import subprocess
 import sys
 import time
 import urllib.parse
-import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.record_call import call_verb, _run_process
+from lib.release_reader import read as release_read
 
 
 class Unavailable(Exception):
@@ -22,11 +22,6 @@ class Unavailable(Exception):
 
 class Contradiction(Exception):
     pass
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args):
-        raise Unavailable('redirect_refused')
 
 
 def observe(origin, wrapper, seconds):
@@ -48,8 +43,10 @@ def observe(origin, wrapper, seconds):
 
     def release():
         request()
-        with urllib.request.build_opener(NoRedirect()).open(origin.rstrip('/') + '/release', timeout=remaining()) as response:
-            value = json.loads(response.read(1048577))
+        response = release_read(origin.rstrip('/') + '/release', timeout=remaining(), max_bytes=1048576)
+        if response.status != 200 or len(response.body) > 1048576:
+            raise Unavailable('release_identity_unavailable')
+        value = json.loads(response.body)
         remaining()
         sha = value.get('git_sha', {}).get('value')
         if (value.get('ok') is not True or value.get('env', {}).get('value') != 'production'

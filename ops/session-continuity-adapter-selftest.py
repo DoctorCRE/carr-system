@@ -55,6 +55,7 @@ class Pins(unittest.TestCase):
                     bridge.McpTransport('https://api.doctorcre.com/mcp', 'synthetic')('read-session-checkpoint-v1', {})
             self.assertEqual(len(requests), 1, 'credential forwarded to redirect host')
             self.assertEqual(requests[0].get_header('Authorization'), 'Bearer synthetic')
+            self.assertEqual(requests[0].get_header('User-agent'), 'carr-session-continuity/1')
 
     def test_socket_and_slow_drip_deadlines(self):
         clock = [0]
