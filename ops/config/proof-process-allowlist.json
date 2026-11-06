@@ -58,6 +58,12 @@
       "node --experimental-strip-types --input-type=module -e REPLAY with registered projection source"
     ]
   },
+  "tools/prove-post-call-exact-edge-whitespace.py": {
+    "sha256": "2b3b90de0700eba9fd3e88b63aa0c4b6598e09409990587e5cbba6d408c9d545",
+    "commands": [
+      "declared --call-wrapper call read-call-outcomes"
+    ]
+  },
   "tools/prove-prospect-research-future-evidence.py": {
     "sha256": "6019d8566cd0deec0d84556780f6739b06dd0f130d9d29e26c196b635017dd73",
     "commands": [

@@ -25,12 +25,13 @@ _OPENER = urllib.request.build_opener(NoRedirect)
 
 def read(url: str, opener=_OPENER.open, timeout: float = 15, *,
          headers: dict[str, str] | None = None, max_bytes: int | None = None) -> Reply:
+    """Read up to max_bytes plus one overflow byte when a cap is supplied."""
     request = urllib.request.Request(url, method="GET", headers={**(headers or {}), "User-Agent": USER_AGENT})
     try:
         with opener(request, timeout=timeout) as response:
-            return Reply(response.status, dict(response.headers.items()),
-                         response.read() if max_bytes is None else response.read(max_bytes + 1))
+            body = response.read() if max_bytes is None else response.read(max_bytes + 1)
+            return Reply(response.status, dict(response.headers.items()), body)
     except urllib.error.HTTPError as error:
         with error:
-            return Reply(error.code, dict(error.headers.items()),
-                         error.read() if max_bytes is None else error.read(max_bytes + 1))
+            body = error.read() if max_bytes is None else error.read(max_bytes + 1)
+            return Reply(error.code, dict(error.headers.items()), body)
