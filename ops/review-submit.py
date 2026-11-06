@@ -59,10 +59,11 @@ def installation_token(repository=CONFIG['repository']):
         raise ValueError('GitHub App authentication failed') from None
 
 
-def submit(number, decision, body, reviewed_sha, repository=CONFIG['repository']):
+def submit(number, decision, body, reviewed_sha, repository=CONFIG['repository'], *, token=None):
     if [line for line in body.splitlines() if line.startswith('Reviewed-SHA:')] != [f'Reviewed-SHA: {reviewed_sha}']:
         raise ValueError(f"review body needs exactly one line 'Reviewed-SHA: {reviewed_sha}'")
-    token = installation_token(repository)
+    owns_token = token is None
+    token = token or installation_token(repository)
     try:
         path = f"/repos/{repository}/pulls/{number}"
         if request(path, token)['head']['sha'] != reviewed_sha:
@@ -72,7 +73,8 @@ def submit(number, decision, body, reviewed_sha, repository=CONFIG['repository']
             'body': body, 'commit_id': reviewed_sha})
         return review['id']
     finally:
-        request('/installation/token', token, method='DELETE')
+        if owns_token:
+            request('/installation/token', token, method='DELETE')
 
 
 def main():

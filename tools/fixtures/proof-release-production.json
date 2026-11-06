@@ -1,0 +1,6 @@
+{
+  "ok": true,
+  "ts": "2026-11-05T12:11:30.414Z",
+  "env": {"value": "production", "reason": null},
+  "git_sha": {"value": "d10f593f426a290382fec1b65934a7a02694e033", "reason": null}
+}
