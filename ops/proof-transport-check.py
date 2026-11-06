@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admit only declared imports and audited proof process commands.
+"""Admit proof network access only through the shared reader and audited commands.
 
 Process declarations pin the entire runner, including indirect argv construction
 and embedded scripts. Audit every command before updating a pin. The selected
@@ -11,20 +11,31 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-# Exact modules and public members, never a list of known network clients.
-IMPORTS = {
-    'argparse': {'ArgumentParser'}, 'datetime': {'datetime', 'timezone'},
-    'json': {'loads', 'dumps'}, 'math': {'isfinite'},
-    'os': {'read', 'killpg'}, 'pathlib': {'Path'}, 're': {'compile', 'fullmatch', 'I'},
-    'selectors': {'DefaultSelector', 'EVENT_READ'},
-    'signal': {'SIGALRM', 'SIGKILL', 'ITIMER_REAL', 'signal', 'setitimer'},
-    'sys': {'path', 'argv', 'executable', 'stderr', 'stdout', 'exit'},
-    'tempfile': {'TemporaryFile', 'TemporaryDirectory'},
-    'time': {'monotonic', 'sleep'}, 'urllib.parse': {'urlsplit', 'urlparse', 'quote', 'urlencode'},
-    'uuid': {'UUID', 'uuid4'}, 'lib.release_reader': {'read'},
+# Pure standard-library computation is outside transport admission.
+
+NETWORK_MODULES = {
+    'socket', '_socket', 'ssl', '_ssl', 'http', 'urllib', 'urllib3',
+    'requests', 'httpx', 'aiohttp', 'ftplib', 'smtplib', 'imaplib',
+    'poplib', 'nntplib', 'telnetlib', 'xmlrpc', 'asyncio', 'socketserver',
 }
+INDIRECT_MODULES = {'importlib', 'ctypes', '_ctypes', 'builtins', 'runpy',
+                    'multiprocessing', '_posixsubprocess', 'pty'}
+OS_PROCESS = {'system', 'popen', 'startfile', 'fork', 'forkpty', 'posix_spawn', 'posix_spawnp'}
+
+
+def restricted(name):
+    root = name.split('.')[0]
+    if name == 'urllib.parse' or name.startswith('urllib.parse.'):
+        return False
+    if name in {'lib', 'lib.release_reader', 'lib.release_reader.read'}:
+        return False
+    return (root in NETWORK_MODULES or root in INDIRECT_MODULES or
+            root not in sys.stdlib_module_names)
+
+
 PROCESSES = json.loads((ROOT / 'ops/config/proof-process-allowlist.json').read_text())
 
 
@@ -34,29 +45,48 @@ def violations(source, path=None):
     declaration = PROCESSES.get(path, {})
     process_allowed = (bool(declaration.get('commands')) and
                        hashlib.sha256(source.encode()).hexdigest() == declaration.get('sha256'))
-    modules = {}
+    bindings = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
-                module = alias.name if isinstance(node, ast.Import) else node.module or ''
-                allowed = (module in IMPORTS and not getattr(node, 'level', 0) and
-                           (isinstance(node, ast.Import) or alias.name in IMPORTS[module]))
-                if module == 'subprocess' and process_allowed:
-                    allowed = True
-                if not allowed:
-                    failures.append((node.lineno, f'undeclared import {module}.{alias.name}; use lib.release_reader or declare audited commands'))
+                name = alias.name if isinstance(node, ast.Import) else '.'.join(filter(None, [node.module, alias.name]))
+                root = name.split('.')[0]
                 if isinstance(node, ast.Import):
-                    modules[alias.asname or alias.name.split('.')[0]] = module if alias.asname else alias.name.split('.')[0]
+                    bindings[alias.asname or root] = name if alias.asname else root
+                else:
+                    bindings[alias.asname or alias.name] = name
+                if (getattr(node, 'level', 0) or
+                        (isinstance(node, ast.ImportFrom) and alias.name in
+                         {'os', 'sys', 'subprocess', 'socket', 'urllib', 'modules'}) or
+                        (root == 'subprocess' and not process_allowed) or
+                        (name.startswith('os.') and not process_allowed and
+                         (name[3:] in OS_PROCESS or name[3:].startswith(('exec', 'spawn')))) or
+                        (root != 'subprocess' and restricted(name))):
+                    failures.append((node.lineno, f'undeclared network/process import {name}; use lib.release_reader or declare audited commands'))
         if isinstance(node, ast.Name) and node.id in {'__import__', 'eval', 'exec', 'compile', 'getattr', 'globals', 'locals', 'vars'}:
             failures.append((node.lineno, 'dynamic capability lookup is not admitted'))
+
+    def qualified(node):
+        if isinstance(node, ast.Name):
+            return bindings.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            return qualified(node.value) + '.' + node.attr
+        return ''
+
     for node in ast.walk(tree):
+        if not isinstance(node, (ast.Attribute, ast.Name)):
+            continue
+        name = qualified(node)
+        parts = name.split('.')
         if isinstance(node, ast.Attribute) and node.attr.startswith('__') and node.attr not in {'__class__', '__name__'}:
             failures.append((node.lineno, 'reflective capability lookup is not admitted'))
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            module = modules.get(node.value.id)
-            allowed = IMPORTS.get(module, {'parse'} if module == 'urllib' else {'release_reader'} if module == 'lib' else None)
-            if allowed is not None and node.attr not in allowed:
-                failures.append((node.lineno, f'undeclared {module} capability {node.attr}'))
+        if ((name.startswith('os.') and (parts[1] in OS_PROCESS or parts[1].startswith(('exec', 'spawn')))
+             and not process_allowed) or
+                name.startswith('sys.modules') or
+                (name.startswith('urllib.') and not name.startswith('urllib.parse')) or
+                (name.startswith('lib.release_reader.') and parts[2] != 'read') or
+                (isinstance(node, ast.Attribute) and node.attr in {'os', 'sys', 'subprocess', 'socket', 'urllib'})):
+            failures.append((node.lineno, f'undeclared network/process capability {name}'))
     return failures
 
 

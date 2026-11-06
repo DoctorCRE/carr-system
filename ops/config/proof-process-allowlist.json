@@ -24,6 +24,14 @@
       "declared --call-wrapper call email-match-contacts/prospect-research/party-duplicate-candidates"
     ]
   },
+  "tools/prove-identity-domain-recorded-addresses.py": {
+    "sha256": "15ce1802214c4ac85dadb97c2e3b136f8e74e097c0a633b854315394090a1cd8",
+    "commands": [
+      "declared --call-wrapper call prospect-research/catch-me-up",
+      "git log -1 --format=%H -- mcp-server/src/party-identity.js",
+      "git merge-base --is-ancestor"
+    ]
+  },
   "tools/prove-lead-contact-address-membership.py": {
     "sha256": "6e1b81b5ea76c5f5b1052d7b86c97e9b04a21c82fe392c03e469e2f3db1aa6f7",
     "commands": [
@@ -34,6 +42,12 @@
     "sha256": "11df744ae9d12e2ddec0fbb75a502ee1a3687dacf06d6a7e219f86bbaddfac4b",
     "commands": [
       "declared --call-wrapper call compare-lease-terms"
+    ]
+  },
+  "tools/prove-mail-policy-multiple-recorded-addresses.py": {
+    "sha256": "f6e0c1165c23bccc67d6e8668e0733a0d5c0d822d0a88e23c09b614a2f33edc2",
+    "commands": [
+      "declared --call-wrapper call email-match-contacts/prospect-research/mail-contact-policy"
     ]
   },
   "tools/prove-notification-feed-evidence-integrity.py": {

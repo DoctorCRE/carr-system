@@ -39,6 +39,9 @@ class ProofTransportTest(unittest.TestCase):
             'from subprocess import run as launch; launch(["wget", "https://example.test"])',
             'import os; os.system("curl https://example.test")',
             'from os import system as launch',
+            'from os import execv as launch',
+            'from pathlib import os as process; process.system("curl https://example.test")',
+            'import urllib.parse; urllib.request.urlopen("https://example.test")',
             '__import__("socket")', 'exec("import socket")',
             'import importlib; importlib.import_module("socket")',
             'import pathlib; pathlib.os.system("curl https://example.test")',
@@ -56,7 +59,11 @@ class ProofTransportTest(unittest.TestCase):
         guard = load(ROOT / 'ops/proof-transport-check.py')
         self.assertEqual(guard.violations(
             'import urllib.parse\nfrom lib.release_reader import read\n'
-            'from datetime import datetime, timezone\nimport json'), [])
+            'from datetime import datetime, timezone\nimport json\n'
+            'import hashlib, re, signal\n'
+            'from lib import release_reader\n'
+            'hashlib.sha256(b"fixture"); re.split(",", "a,b")\n'
+            'signal.pthread_sigmask(signal.SIG_BLOCK, set())'), [])
 
     def test_cli_rejects_bypass_and_accepts_shared_reader(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -71,6 +78,13 @@ class ProofTransportTest(unittest.TestCase):
                 result = subprocess.run([sys.executable, str(ROOT / 'ops/proof-transport-check.py'),
                                          '--root', directory], capture_output=True, text=True)
                 self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+
+    def test_merged_main_proof_sources_are_admitted(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        self.assertEqual(guard.check(ROOT), [])
+        for name in ['identity-domain-recorded-addresses', 'mail-policy-multiple-recorded-addresses']:
+            path = f'tools/prove-{name}.py'
+            self.assertEqual(guard.violations((ROOT / path).read_text(), path), [])
 
     def test_process_declarations_are_bound_to_entire_runner(self):
         guard = load(ROOT / 'ops/proof-transport-check.py')
