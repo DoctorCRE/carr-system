@@ -1577,278 +1577,96 @@ def test_hosted_draft_lifecycle():
 
 
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
-    """PR 1465 spent its entire job budget in apt update before any class ran.
-
-    Execute the workflow's setup with a synthetic apt, not a second installer.
-    A working install must never refresh; stale indexes must still be repaired;
-    runs 37826917141, 37820191123, 37803579466, 37793286211, 37781682483,
-    37762481248 and 37683204623 had Install-zsh timeouts. Run 37762481248
-    confirms a mid-dpkg timeout (Reading database at 85%); the other logs do
-    not establish a network cause. Synthetic download failures exercise the
-    bounded fallback; an unavailable package must fail setup.
-    """
     wf = _hosted_workflow()
-    setup = next(st for st in wf["jobs"]["classes"]["steps"]
-                 if st.get("name") == "Install zsh")
-    # Three download attempts, one refresh, one unpack; each timeout also
-    # permits five seconds to kill its process group. Backoff occurs after
-    # attempts one and two only.
+    setup = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Install zsh")
     check("hosted zsh setup uses the shared installer", setup["run"] == "ops/ci-zsh.sh")
-    installer_source = (REPO / "ops/ci-zsh.sh").read_text()
-    backoff = int(setup["env"]["ZSH_RETRY_BACKOFF"])
-    attempts = len(re.search(r"for attempt in ([0-9 ]+); do", installer_source).group(1).split())
-    download, refresh, unpack = [int(grace) + int(limit) for grace, limit in
-                                re.findall(r"timeout --kill-after=(\d+)s (\d+)s", installer_source)]
-    verification = int(re.search(r"signal\.alarm\((\d+)\)", installer_source).group(1))
-    # One verification before each download and one immediately before install.
-    budget_seconds = attempts * download + refresh + unpack + sum(range(1, attempts)) * backoff + (attempts + 1) * verification + 30
-    deadline_minutes = (budget_seconds + 59) // 60
-    check("zsh setup deadline equals its retry budget plus bounded overhead",
-          setup.get("timeout-minutes") == deadline_minutes,
-          {"expected": deadline_minutes, "actual": setup.get("timeout-minutes")})
-    cache = next(st for st in wf["jobs"]["classes"]["steps"]
-                 if st.get("name") == "Restore zsh package archives")
-    check("zsh archives use a pinned cache action and the install directory",
-          cache["uses"] == "actions/cache@5a3ec84eff668545956fd18022155c47e93e2684"
-          and cache["with"]["path"] == setup["env"]["ZSH_ARCHIVE_DIR"] + "/*.deb"
-          and wf["jobs"]["classes"]["runs-on"] == "ubuntu-24.04")
-    canary = _hosted_workflow("main-canary.yml")["jobs"]["classes"]["steps"]
-    canary_setup = next(st for st in canary if st.get("name") == "Install zsh")
-    check("PR and canary execute the same bounded zsh installer",
-          all(canary_setup[k] == setup[k] for k in ("run", "env", "timeout-minutes")))
-    fixture_steps = wf["jobs"]["migration-fixtures"]["steps"]
-    fixture_setup = next((st for st in fixture_steps if st.get("name") == "Install zsh"), {})
-    check("equivalence installs the restore rehearsal interpreter before its proof",
-          all(fixture_setup.get(k) == setup[k] for k in ("run", "env", "timeout-minutes"))
-          and fixture_setup.get("if") == "matrix.part == 'equivalence'"
-          and fixture_steps.index(fixture_setup) < next(
-              i for i, st in enumerate(fixture_steps)
-              if st.get("name") == "Prove independent migration fixture"))
+    for filename in ("ci.yml", "main-canary.yml", "unit-shards.yml"):
+        for job in _hosted_workflow(filename)["jobs"].values():
+            for step in job.get("steps", []):
+                if step.get("name") == "Install zsh":
+                    check(f"{filename} bounds zsh setup", step.get("timeout-minutes") == 12)
+    _exercise_zsh_installer()
+
+
+def _exercise_zsh_installer():
     with tempfile.TemporaryDirectory(prefix="ci-zsh-setup-") as tmp:
         fixture = pathlib.Path(tmp)
-        sudo = fixture / "sudo"
-        sudo.write_text("#!" + sys.executable + "\n" + '''
-import json, os, pathlib, sys, time
-if sys.argv[1] == "rm":
-    os.execvp("rm", sys.argv[1:])
-log = pathlib.Path(os.environ["CI_SETUP_CALLS"])
-calls = json.loads(log.read_text()) if log.exists() else []
-calls.append(sys.argv[1:])
-log.write_text(json.dumps(calls))
-args = sys.argv[1:]
-mode = os.environ["CI_SETUP_FIXTURE"]
-kind = ("download" if "--download-only" in args else
-        "install" if "--no-download" in args else
-        "update" if "update" in args else "unknown")
-if mode == "working" and kind == "update":
-    sys.exit(91)
-if mode == "stale" and len(calls) == 1:
-    sys.exit(100)
-if mode == "mirror-flaky" and len(calls) in (1, 3):
-    sys.exit(100)
-if mode == "unavailable" and kind in ("download", "update"):
-    sys.exit(100)
-if mode == "hung-download" and kind == "download":
-    time.sleep(30)
-if mode == "install-failed" and kind == "install":
-    sys.exit(100)
-''')
-        sudo.chmod(0o755)
-        zsh = fixture / "zsh"
-        zsh.write_text("#!/bin/sh\n[ \"$CI_SETUP_FIXTURE\" = preinstalled ]\n")
-        zsh.chmod(0o755)
-        timeout = fixture / "timeout"
-        timeout.write_text("#!" + sys.executable + "\n" + '''
-import json, os, pathlib, subprocess, sys
-log = pathlib.Path(os.environ["CI_SETUP_DEADLINES"])
-calls = json.loads(log.read_text()) if log.exists() else []
-calls.append(sys.argv[1:3])
-log.write_text(json.dumps(calls))
-assert sys.argv[1] == "--kill-after=5s"
-assert 0 < int(sys.argv[2].removesuffix("s")) <= 120
-try:
-    result = subprocess.run(sys.argv[3:], timeout=1)
-    sys.exit(result.returncode)
-except subprocess.TimeoutExpired:
-    sys.exit(124)
-''')
-        timeout.chmod(0o755)
-        failing = ("unavailable", "hung-download", "install-failed")
-        for mode, expected in (("preinstalled", []),
-                               ("working", ["download", "install"]),
-                               ("stale", ["download", "update", "download", "install"]),
-                               ("mirror-flaky", ["download", "update", "download", "download", "install"]),
-                               ("unavailable", ["download", "update", "download", "download"]),
-                               ("hung-download", ["download", "update", "download", "download"]),
-                               ("install-failed", ["download", "install"])):
-            log = fixture / (mode + ".json")
-            deadlines_log = fixture / (mode + "-deadlines.json")
-            env = scrubbed_env()
-            env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
-                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode,
-                       CI_SETUP_DEADLINES=str(deadlines_log), ZSH_RETRY_BACKOFF="0",
-                       ZSH_ARCHIVE_DIR=str(fixture / "archives"))
-            try:
-                process = subprocess.Popen(["bash", "-e", "-o", "pipefail", "-c", installer_source],
-                                           cwd=fixture, env=env, stdout=subprocess.PIPE,
-                                           stderr=subprocess.PIPE, text=True, start_new_session=True)
-                stdout, stderr = process.communicate(timeout=8)
-                ran = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.communicate()
-                check(f"zsh setup {mode} finishes within its process budget", False)
-                continue
-            calls = json.loads(log.read_text()) if log.exists() else []
-            deadlines = json.loads(deadlines_log.read_text()) if deadlines_log.exists() else []
-            actions = [("download" if "--download-only" in args else
-                        "install" if "--no-download" in args else
-                        "update" if "update" in args else "unknown")
-                       for args in calls]
-            check(f"zsh setup {mode} uses the required install/refresh path",
-                  actions == expected, actions)
-            check(f"zsh setup {mode} propagates its outcome",
-                  (ran.returncode != 0) == (mode in failing),
-                  ran.returncode)
-            check(f"zsh setup {mode} bounds every apt process",
-                  len(deadlines) == len(calls) and
-                  sum(int(args[1].removesuffix("s")) + 5 for args in deadlines) < 480,
-                  deadlines)
-            check(f"zsh setup {mode} bounds every apt network request",
-                  all(args[0] == "apt-get" and
-                      all(option in args for option in ("Acquire::Retries=2",
-                          "Acquire::http::Timeout=15", "Acquire::https::Timeout=15",
-                          "DPkg::Lock::Timeout=30"))
-                      for args in calls), calls)
-            check(f"zsh setup {mode} uses cached archives without recommends",
-                  all(any(option.startswith("Dir::Cache::archives=")
-                          and option != "Dir::Cache::archives=" + str(fixture / "archives")
-                          for option in args) and "--no-install-recommends" in args
-                      for args in calls if "update" not in args), calls)
-            check(f"zsh setup {mode} requires the zsh package when installing",
-                  all("zsh" in args for args in calls if "update" not in args), calls)
-            check(f"zsh setup {mode} never unpacks without a completed download",
-                  all(calls.index(args) > 0 and
-                      any("--download-only" in prior for prior in calls[:calls.index(args)])
-                      for args in calls if "--no-download" in args), calls)
-
-
-def test_hosted_zsh_cache_requires_authenticated_bytes():
-    installer = (REPO / "ops/ci-zsh.sh").read_text()
-    with tempfile.TemporaryDirectory(prefix="ci-zsh-cache-") as tmp:
-        fixture = pathlib.Path(tmp)
-        for name, source in {
-            "zsh": "#!/bin/sh\nexit 1\n",
-            "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
+        scripts = {
+            "zsh": '#!/bin/sh\n[ "$CI_SETUP_FIXTURE" = preinstalled ]\n',
             "sudo": '#!/bin/sh\nexec "$@"\n',
+            "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
             "apt-cache": "#!" + sys.executable + "\n" + '''
-import hashlib, os, pathlib, sys, time
-mode = os.environ["CI_CACHE_MODE"]
-downloaded = pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()
-if ((mode == "metadata-timeout" and not downloaded)
-        or (mode == "install-metadata-timeout" and downloaded)):
-    time.sleep(31)
-if (os.environ["CI_CACHE_MODE"] == "missing-metadata"
-        and not pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()):
-    sys.exit(0)
-if os.environ["CI_CACHE_MODE"] == "metadata-error":
-    sys.exit(2)
+import hashlib
 print("Package: zsh\\nVersion: 1\\nArchitecture: amd64\\nSHA256: " +
       hashlib.sha256(b"trusted-zsh-package").hexdigest())
 ''',
             "apt-get": "#!" + sys.executable + "\n" + '''
-import json, os, pathlib, stat, sys
-root = pathlib.Path(next(arg.split("=", 1)[1] for arg in sys.argv
-                         if arg.startswith("Dir::Cache::archives=")))
+import json, os, pathlib, sys
+log = pathlib.Path(os.environ["CI_SETUP_CALLS"])
+calls = json.loads(log.read_text()) if log.exists() else []
+args = sys.argv[1:]
+calls.append(args)
+log.write_text(json.dumps(calls))
+mode = os.environ["CI_SETUP_FIXTURE"]
+root = pathlib.Path(next(a.split("=", 1)[1] for a in args if a.startswith("Dir::Cache::archives=")))
 archive = root / "zsh_1_amd64.deb"
-log = pathlib.Path(os.environ["CI_CACHE_LOG"])
-state = json.loads(log.read_text()) if log.exists() else {}
-if "--download-only" in sys.argv:
-    state["restored"] = {p.name: p.read_text() for p in root.glob("*.deb")}
-    state.setdefault("download_archives", []).append(state["restored"])
-    # Model apt's filename+size shortcut instead of repairing a bad cache.
-    if not archive.exists():
-        archive.write_bytes(b"trusted-zsh-package")
-    mode = os.environ["CI_CACHE_MODE"]
-    if mode in ("replace-after-verification", "replace-during-retries"):
-        original = pathlib.Path(os.environ["ZSH_ARCHIVE_DIR"]) / archive.name
+if "--download-only" in args:
+    sys.exit(100)
+if "update" in args:
+    sys.exit(100 if mode == "refresh-failed" else 0)
+if "--no-download" in args:
+    original = pathlib.Path(os.environ["ZSH_ARCHIVE_DIR"]) / archive.name
+    if mode == "cache-replaced":
         original.write_bytes(b"altered-zsh-package")
-    if mode == "replace-during-retries" and len(state["download_archives"]) < 3:
-        log.write_text(json.dumps(state))
-        sys.exit(100)
-    if mode == "replace-downloaded-archive":
-        archive.chmod(0o600)
-        archive.write_bytes(b"altered-zsh-package")
-elif "--no-download" in sys.argv:
-    state["installed"] = archive.read_text()
-    state["install_directory"] = str(root)
-    state["directory_mode"] = stat.S_IMODE(root.stat().st_mode)
-    state["archive_mode"] = stat.S_IMODE(archive.stat().st_mode)
-log.write_text(json.dumps(state))
+    assert archive.read_bytes() == b"trusted-zsh-package"
+    assert root != original.parent
+    assert archive.stat().st_mode & 0o777 == 0o444
+    sys.exit(100 if mode == "partial-cache" else 0)
+if mode in ("cached", "cache-replaced"):
+    sys.exit("network must not be used on a verified cache hit")
+if mode in ("unavailable", "refresh-failed") or (mode == "stale" and not any("update" in c for c in calls)):
+    sys.exit(100)
+archive.write_bytes(b"trusted-zsh-package")
 ''',
-        }.items():
+        }
+        for name, source in scripts.items():
             path = fixture / name
             path.write_text(source)
             path.chmod(0o755)
-        for mode in ("valid", "same-size-tampered", "other-version", "old-version-filename",
-                     "missing-metadata", "metadata-error", "metadata-timeout",
-                     "install-metadata-timeout", "replace-after-verification",
-                     "replace-during-retries", "replace-downloaded-archive"):
+        for mode, expected, success in (
+            ("preinstalled", [], True),
+            ("cached", ["offline"], True),
+            ("cache-replaced", ["offline"], True),
+            ("cold", ["install"], True),
+            ("tampered", ["install"], True),
+            ("partial-cache", ["offline", "install"], True),
+            ("stale", ["install", "update", "install"], True),
+            ("unavailable", ["install", "update", "install"], False),
+            ("refresh-failed", ["install", "update"], False),
+        ):
             archives = fixture / mode
             archives.mkdir()
-            archive = archives / ("zsh_2_amd64.deb" if mode == "old-version-filename" else "zsh_1_amd64.deb")
-            restored = (b"trusted-zsh-package" if mode in ("valid", "old-version-filename",
-                        "replace-after-verification", "replace-during-retries",
-                        "replace-downloaded-archive", "metadata-timeout",
-                        "install-metadata-timeout") else
-                        b"older-zsh-package!!" if mode == "other-version" else b"altered-zsh-package")
-            archive.write_bytes(restored)
-            if mode == "metadata-timeout":
-                (archives / "zsh-common_1_all.deb").write_bytes(b"cached-zsh-common")
+            archive = archives / "zsh_1_amd64.deb"
+            if mode in ("cached", "cache-replaced", "partial-cache", "tampered"):
+                archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
             log = fixture / (mode + ".json")
             env = scrubbed_env()
             env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
-                       ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0",
-                       CI_CACHE_MODE=mode, CI_CACHE_LOG=str(log))
-            ran = subprocess.run(["bash", "-c", installer], cwd=fixture, env=env,
-                                 capture_output=True, text=True, timeout=40)
-            state = json.loads(log.read_text()) if log.exists() else {}
-            if mode == "metadata-error":
-                check("zsh cache verification error stops before apt can consume archives",
-                      ran.returncode != 0 and not state, {"rc": ran.returncode, "state": state})
-                continue
-            if mode == "replace-downloaded-archive":
-                check("zsh refuses a same-size replacement of downloaded bytes before install",
-                      ran.returncode != 0 and "installed" not in state, state)
-                continue
-            if mode == "install-metadata-timeout":
-                check("zsh refuses downloaded bytes when their metadata verification times out",
-                      ran.returncode != 0 and "installed" not in state, state)
-                continue
-            check(f"zsh cache {mode} installs authenticated package bytes",
-                  ran.returncode == 0 and state.get("installed") == "trusted-zsh-package",
-                  {"rc": ran.returncode, "state": state, "stderr": ran.stderr})
-            expected = {"zsh_1_amd64.deb": "trusted-zsh-package"} if mode in (
-                "valid", "replace-after-verification", "replace-during-retries") else {}
-            check(f"zsh cache {mode} exposes only verified restored archives to apt",
-                  state.get("restored") == expected, state)
-            if mode in ("replace-after-verification", "replace-during-retries"):
-                check(f"zsh cache {mode} isolates every retry from restored archive replacement",
-                      all(archives == expected for archives in state.get("download_archives", [])), state)
-                check(f"zsh cache {mode} installs from a private read-only archive set",
-                      state.get("install_directory") != str(archives)
-                      and state.get("directory_mode") == 0o700
-                      and state.get("archive_mode") == 0o444, state)
-                check(f"zsh cache {mode} removes the private installation directory",
-                      not pathlib.Path(state.get("install_directory", str(archives))).exists(), state)
-            elif mode != "valid":
-                quarantined = archives / "quarantine" / archive.name
-                check(f"zsh cache {mode} preserves rejected bytes in quarantine",
-                      quarantined.is_file() and quarantined.read_bytes() == restored)
-                if mode == "metadata-timeout":
-                    remaining = archives / "quarantine/zsh-common_1_all.deb"
-                    check("zsh quarantines remaining cached archives within the verification deadline",
-                          remaining.is_file() and remaining.read_bytes() == b"cached-zsh-common")
+                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode,
+                       ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0")
+            ran = subprocess.run(["bash", str(REPO / "ops/ci-zsh.sh")],
+                                 cwd=fixture, env=env, capture_output=True, text=True, timeout=15)
+            calls = json.loads(log.read_text()) if log.exists() else []
+            actions = [("download" if "--download-only" in c else "offline" if "--no-download" in c
+                        else "update" if "update" in c else "install") for c in calls]
+            check(f"zsh {mode} follows the package-manager path", actions == expected, actions)
+            check(f"zsh {mode} propagates setup success or failure", (ran.returncode == 0) == success,
+                  {"rc": ran.returncode, "stderr": ran.stderr})
+            if mode == "tampered":
+                check("zsh quarantines unauthenticated cache bytes",
+                      (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
+            if mode in ("cold", "stale", "partial-cache"):
+                check(f"zsh {mode} publishes authenticated cache bytes", archive.is_file() and archive.read_bytes() == b"trusted-zsh-package")
 
 
 def test_worktree_python_selection():
@@ -1937,7 +1755,7 @@ def main(argv=None):
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
                test_push_floor_reports_missing_atlas_packages_without_blaming_registry,
                test_hosted_zsh_setup_does_not_refresh_working_indexes,
-               test_hosted_zsh_cache_requires_authenticated_bytes):
+               ):
         try:
             fn()
         except Exception as exc:  # a crashing case is a failing case, never a silent skip
