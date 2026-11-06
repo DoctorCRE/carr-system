@@ -76,5 +76,12 @@
     "commands": [
       "declared --call-wrapper call read-vendor-meetings/morning-brief"
     ]
+  },
+  "tools/prove-meeting-prep-savepoint-lifetime.py": {
+    "sha256": "8b8a651f5da52a2a1b54160a89d8bebd6adf79dc23b4cb49497cd59db4f41568",
+    "commands": [
+      "declared --call-wrapper call calendar-meeting-prep {}",
+      "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
+    ]
   }
 }

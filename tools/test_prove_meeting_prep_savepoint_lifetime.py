@@ -1,6 +1,7 @@
 """Run the proof CLI against synthetic executable and HTTP ports only."""
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
+from proof_release_fixture import ReleaseFixtureHandler
 import json
 from pathlib import Path
 import subprocess
@@ -10,6 +11,9 @@ from threading import Thread
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import MARKER, USER_AGENT
+
 RUNNER = ROOT / 'tools/prove-meeting-prep-savepoint-lifetime.py'
 SHA = 'a' * 40
 SOURCE_PATH = '/DoctorCRE/carr-system/' + SHA + '/mcp-server/src/calendar-meeting-prep.js'
@@ -22,8 +26,13 @@ NATURAL = {'state': 'ready', 'sources': {'outlook_calendar': {'state': 'current'
 def server(routes):
     requests = []
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
+    class Handler(ReleaseFixtureHandler):
+        def release_GET(self):
+            if (self.headers.get_all(MARKER['header']) != [MARKER['value']]
+                    or self.headers.get('User-Agent') != USER_AGENT):
+                self.send_response(403)
+                self.end_headers()
+                return
             requests.append(self.path)
             status, data = routes.get(self.path, (404, b''))
             self.send_response(status)
@@ -127,6 +136,11 @@ class ProofCliTests(unittest.TestCase):
         result, requests, _ = self.invoke(status=302)
         self.assertEqual(result.returncode, 78)
         self.assertEqual(requests, ['/release'])
+
+    def test_source_redirect_is_unavailable_without_following(self):
+        result, requests, _ = self.invoke(source_status=302)
+        self.assertEqual(result.returncode, 78)
+        self.assertEqual(requests, ['/release', SOURCE_PATH])
 
     def test_source_size_bound(self):
         result, requests, _ = self.invoke(source='x' * 1048577)

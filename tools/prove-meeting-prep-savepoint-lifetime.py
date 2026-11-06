@@ -12,7 +12,9 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read
 
 LIMIT = 1048576
 MODULE = 'mcp-server/src/calendar-meeting-prep.js'
@@ -24,11 +26,6 @@ class Unavailable(Exception):
 
 class Contradiction(Exception):
     pass
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise Unavailable('redirect refused')
 
 
 SYNTHETIC = r'''
@@ -95,12 +92,12 @@ def run(command, deadline):
 
 
 def get(url, deadline):
-    opener = build_opener(NoRedirect(), ProxyHandler({}))
-    with opener.open(url, timeout=remaining(deadline)) as response:
-        data = response.read(LIMIT + 1)
-        if len(data) > LIMIT:
-            raise Unavailable('HTTP response exceeds limit')
-        return data
+    response = read(url, timeout=remaining(deadline), max_bytes=LIMIT)
+    if response.status != 200:
+        raise Unavailable('HTTP response unavailable')
+    if len(response.body) > LIMIT:
+        raise Unavailable('HTTP response exceeds limit')
+    return response.body
 
 
 def natural_shape(value):
