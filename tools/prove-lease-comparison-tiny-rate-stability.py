@@ -12,6 +12,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.release_reader import read as read_http
+from proof_release import release_revision
 
 
 class Unavailable(Exception):
@@ -80,9 +81,7 @@ def observe(origin, wrapper, timeout):
         if response.status != 200:
             raise OSError('release_unavailable')
         release = json.loads(response.body)
-        if (not isinstance(release, dict) or not isinstance(release.get("git_sha"), str)
-                or len(release["git_sha"]) != 40):
-            raise Unavailable("release identity unavailable")
+        release_revision(release)
         results = []
         for rate in (1e-20, 0, 0.06):
             process = subprocess.Popen(
