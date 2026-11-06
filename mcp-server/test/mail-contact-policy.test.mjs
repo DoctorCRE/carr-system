@@ -75,12 +75,37 @@ test('existing party and lead instructions block exact email matches in PostgreS
         await db.query('insert into lead values($1,$2,$3)', [id, suppressed, stage]);
       }
     }
+    const punctuationCases = [];
+    for (const punctuation of [...`!"#$%&'()*+./:=?[\\]^_\`{|}~-`, '😀']) {
+      for (const [contactState, suppressed, stage] of [
+        ['do_not_contact', false, 'new'],
+        ['active', true, 'new'],
+        ['active', false, 'do_not_contact'],
+      ]) {
+        for (const multiple of [false, true]) {
+          const id = 100 + punctuationCases.length;
+          const address = `a${punctuation}b${id}@example.test`;
+          const suffix = `b${id}@example.test`;
+          const second = `second${id}@example.test`;
+          await db.query('insert into party values($1,$2,$3,null,null)',
+            [id, multiple ? `Name <${address}>; ${second}` : address, contactState]);
+          await db.query('insert into lead values($1,$2,$3)', [id, suppressed, stage]);
+          punctuationCases.push({address, suffix, second, multiple});
+        }
+      }
+    }
     // The deployed reader has these column grants (0500 and 0839), not table ownership.
     await db.query(`create role carr_reader;
       grant select(id,email,contact_state) on party to carr_reader;
       grant select(party_id,suppressed,stage) on lead to carr_reader;
       set role carr_reader;`);
     const read = emails => TOOLS['mail-contact-policy'].handler(db, {}, {emails});
+    for (const {address, suffix, second, multiple} of punctuationCases) {
+      assert.deepEqual(await read([address, suffix, second]), {recipients: [
+        {email: address, blocked: true}, {email: suffix, blocked: false},
+        {email: second, blocked: multiple},
+      ].sort((a, b) => a.email < b.email ? -1 : a.email > b.email ? 1 : 0)}, `complete punctuation address ${address}`);
+    }
     assert.deepEqual(await read(['unknown@example.test', 'allowed@example.test', 'blocked@example.test',
       'suppressed@example.test', 'stage@example.test']), {recipients: [
       {email: 'allowed@example.test', blocked: false},

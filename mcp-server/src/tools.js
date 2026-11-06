@@ -7,6 +7,7 @@ import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.match(/[\p{L}\p{M}\p{N}_.+'-]+@[\p{L}\p{M}\p{N}_-]+(?:\.[\p{L}\p{M}\p{N}_-]+)+/gu) ?? [])
   .map(address => address.toLowerCase()))];
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
@@ -4126,7 +4127,7 @@ export const TOOLS = {
     }, required: ["emails"] },
     handler: async (c, _actor, args) => {
       if (!Array.isArray(args.emails) || !args.emails.length || args.emails.length > 50 ||
-          args.emails.some(email => typeof email !== "string" || !/^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/.test(email.trim())))
+          args.emails.some(email => typeof email !== "string" || !mailRecipientAddress.test(email.trim())))
         throw new ToolError({ error: "invalid_mail_recipients" });
       const emails = [...new Set(args.emails.map(email => email.trim().toLowerCase()))].sort();
       const restricted = (await c.query(`
@@ -4135,7 +4136,8 @@ export const TOOLS = {
           select 1 from lead l where l.party_id = p.id
             and (l.suppressed or l.stage = 'do_not_contact')
         )`)).rows;
-      const blocked = new Set(restricted.flatMap(row => recordedEmailAddresses(row.email)));
+      const blocked = new Set(restricted.flatMap(row => (row.email?.split(/[\s,;<>]+/u) ?? [])
+        .filter(address => mailRecipientAddress.test(address)).map(address => address.toLowerCase())));
       const recipients = emails.map(email => ({ email, blocked: blocked.has(email) }));
       return { recipients };
     },
