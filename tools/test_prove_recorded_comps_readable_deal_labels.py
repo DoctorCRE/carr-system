@@ -2,12 +2,15 @@
 import contextlib
 import http.server
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
 from proof_release_fixture import ReleaseFixtureHandler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,11 +30,11 @@ class ProofTest(unittest.TestCase):
         requests = []
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
-                requests.append(self.path)
                 if (self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
                         or self.headers.get('x-doctorcre-release-reader') != '1'):
                     self.send_error(403)
                     return
+                requests.append({'method': self.command, 'path': self.path, 'case': mode})
                 if mode == 'redirect':
                     self.send_response(302)
                     self.send_header('Location', '/forbidden')
@@ -110,19 +113,25 @@ console.log(JSON.stringify({responses,release}));
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
             if mode in ('timeout', 'wrapper_error'):
-                child = ("from pathlib import Path; import time; "
-                         f"Path({str(folder / 'started')!r}).touch(); "
-                         "time.sleep(3); "
-                         f"Path({str(folder / 'escaped')!r}).touch()")
+                child = ("from pathlib import Path; import os, signal; "
+                         f"ready=Path({str(folder / 'started')!r}); "
+                         "pending=ready.with_suffix('.tmp'); pending.write_text(str(os.getpid())); "
+                         "pending.replace(ready); signal.pause()")
                 wrapper.write_text(
-                    '#!/usr/bin/env python3\nimport subprocess,sys,time\n'
+                    '#!/usr/bin/env python3\nimport os,signal,subprocess,sys,time\n'
                     + f'child=subprocess.Popen([sys.executable,"-c",{child!r}])\n'
                     + f'started={str(folder / "started")!r}\n'
                     + 'from pathlib import Path\n'
                     + 'while not Path(started).exists(): time.sleep(0.01)\n'
-                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'child.wait()\n'))
+                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'os.kill(os.getppid(), signal.SIGALRM)\nchild.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
+            if mode == 'foreign_requests':
+                for path in ('/', '/favicon.ico'):
+                    with self.assertRaises(urllib.error.HTTPError) as refused:
+                        urllib.request.urlopen(origin + path)
+                    self.assertEqual(refused.exception.code, 403)
+                    refused.exception.close()
             harness = '''import runpy,sys,urllib.request
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
@@ -137,16 +146,26 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             result = subprocess.run(['python3', '-c', harness, str(RUNNER), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
             if mode in ('timeout', 'wrapper_error'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
-                time.sleep(3.2)
-                self.assertFalse((folder / 'escaped').exists(),
-                                 'wrapper descendant performed work after proof exit')
-            self.assertLessEqual(len(requests), 4)
+                pid = int((folder / 'started').read_text())
+                until = time.monotonic() + 30
+                while True:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    self.assertLess(time.monotonic(), until, 'owned wrapper descendant survived cleanup')
+                    threading.Event().wait(0.01)
+            self.assertLessEqual(len(requests), 4, requests)
             return result
 
     def test_pass(self):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['natural_read'], 'passed')
+
+    def test_rejected_foreign_requests_do_not_consume_proof_budget(self):
+        result = self.invoke('foreign_requests')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_http_refusals(self):
         for mode in ('redirect', 'http_error', 'oversized'):
@@ -167,7 +186,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
     def test_timeout_terminates_wrapper_descendants(self):
-        result = self.invoke('timeout', timeout_seconds=2)
+        result = self.invoke('timeout')
         self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
 
     def test_wrapper_error_terminates_descendants(self):
