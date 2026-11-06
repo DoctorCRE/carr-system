@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> validating
+  validating --> needs_input: malformed arguments or cursor
+  validating --> unauthorized: unknown partner
+  validating --> reading: verified partner and valid query
+  reading --> ready: pending decisions found
+  reading --> empty: no eligible proposals
+  reading --> unavailable: source failure
