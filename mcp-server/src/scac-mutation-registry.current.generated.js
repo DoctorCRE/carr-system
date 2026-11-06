@@ -2224,6 +2224,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-activity-deal-attribution": {
+    "ingress_key": "mcp-tool:read-activity-deal-attribution",
+    "source_locator": "mcp-server/src/activity-deal-attribution.ts",
+    "schema_digest": "4f44c68219bcdad2853d6e30cc54f84a91867d2519a6d855892e14d6676b7454",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-actor-roster-v1": {
     "ingress_key": "mcp-tool:read-actor-roster-v1",
     "source_locator": "mcp-server/src/people-directory.ts",
