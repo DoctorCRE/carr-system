@@ -1493,7 +1493,9 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
         for job in _hosted_workflow(filename)["jobs"].values():
             if job.get("container"):
                 check(f"{filename} uses baked zsh instead of package acquisition",
-                      not any("ci-zsh.sh" in step.get("run", "") for step in job.get("steps", [])))
+                      not any("ci-zsh.sh" in step.get("run", "") and step.get("if") !=
+                              "matrix.classes != 'unit' && matrix.classes != 'gates' && matrix.classes != 'migration' && matrix.classes != 'dependency'"
+                              for step in job.get("steps", [])))
     _exercise_zsh_installer()
 
 

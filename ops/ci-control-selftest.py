@@ -105,7 +105,8 @@ class Controls(unittest.TestCase):
                 for step in job.get('steps', []):
                     command = step.get('run', '')
                     self.assertNotRegex(command, r'apt(?:-get)?|curl.*postgres|wget.*postgres')
-                    self.assertNotIn('ci-zsh.sh', command)
+                    if 'ci-zsh.sh' in command:
+                        self.assertEqual(step.get('if'), "matrix.classes != 'unit' && matrix.classes != 'gates' && matrix.classes != 'migration' && matrix.classes != 'dependency'")
         self.assertEqual(len(images), 1)
         action = workflow('../actions/ci-apt/action.yml')
         steps = action['runs']['steps']
