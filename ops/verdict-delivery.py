@@ -241,6 +241,9 @@ def main():
                 number, body, comment_id = intake(event, os.environ.get('CARR_VERDICT_TRANSPORT_LOGIN', ''))
                 receipts.append(deliver(number, github_read, github_write, app_login=APP,
                                         verdict=body, intake_id=comment_id))
+                if receipts[-1]['state'] == 'submitted' and parse_verdict(body).decision == 'approve':
+                    receipts.append(deliver(number, github_read, github_write, app_login=APP,
+                        arm_enabled=os.environ.get('CARR_VERDICT_ARM_ENABLED') == 'true'))
             else:
                 for number in candidates(event):
                     receipts.append(deliver(number, github_read, github_write, app_login=APP,

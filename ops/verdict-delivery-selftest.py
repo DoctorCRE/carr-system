@@ -27,6 +27,37 @@ class Delivery(unittest.TestCase):
     def run_delivery(self, **kw):
         return m.deliver(12, self.read, self.writes.append, app_login=m.APP, **kw)
 
+    def test_approval_event_submits_then_evaluates_native_arm(self):
+        import contextlib
+        import io
+        import json
+        import tempfile
+        from unittest.mock import patch
+        for decision in ('APPROVE', 'CHANGES'):
+            with self.subTest(decision=decision), tempfile.TemporaryDirectory() as directory:
+                self.data['pulls/12/reviews?per_page=100'] = []
+                self.writes.clear()
+                event = {'action': 'created', 'issue': {'number': 12, 'pull_request': {}},
+                         'comment': {'id': 1, 'body': BODY.replace('APPROVE', decision),
+                                     'user': {'login': 'transport'}},
+                         'sender': {'login': 'transport'}}
+                path = Path(directory) / 'event.json'
+                path.write_text(json.dumps(event))
+                def write(action):
+                    self.writes.append(action)
+                    if action['kind'] == 'submit':
+                        self.data['pulls/12/reviews?per_page=100'].append(dict(
+                            self.review, body=action['body'],
+                            state='APPROVED' if action['decision'] == 'approve' else 'CHANGES_REQUESTED'))
+                with patch.dict(m.os.environ, {'GITHUB_EVENT_PATH': str(path),
+                        'GITHUB_REPOSITORY': m.REPO, 'CARR_VERDICT_TRANSPORT_LOGIN': 'transport',
+                        'CARR_VERDICT_ARM_ENABLED': 'true'}, clear=True), patch.object(
+                        m.sys, 'argv', ['verdict-delivery.py', 'event']), patch.object(
+                        m, 'github_read', self.read), patch.object(m, 'github_write', write), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(m.main(), 0)
+                self.assertEqual([a['kind'] for a in self.writes],
+                                 ['submit', 'arm'] if decision == 'APPROVE' else ['submit'])
+
     def test_received_submitted(self):
         self.data['pulls/12/reviews?per_page=100'] = []
         result = self.run_delivery(verdict=BODY, intake_id=1)
