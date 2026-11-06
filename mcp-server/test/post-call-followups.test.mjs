@@ -76,6 +76,26 @@ test('call outcomes preview current action matches and acceptance rechecks them'
       assert.equal(result.ref, action);
       assert.equal((await c.query(`select due_on::text from ${source} where id=$1`, [action])).rows[0].due_on, before.date_effect.resulting_due_on);
     });
+    for (const source of ['next_action', 'capture_post_call_action']) {
+      for (const defaulted of [true, false]) await caseTest(`${source} edge whitespace reuses identity and preserves bullets and date ${defaulted}`, async () => {
+        const edge = '\t\n\r\v\f \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+        const id = await proposal(`${edge}Review\t synthetic   survey${edge}`, '2027-02-02', defaulted);
+        const action = await seed(source, id, `${edge}REVIEW   SYNTHETIC\nSURVEY${edge}`);
+        await c.query(`update ${source} set item_bullets='["Keep concrete recipient", "Keep survey date"]'::jsonb where id=$1`, [action]);
+        const before = await preview(id);
+        assert.equal(before.status, 'exact_match');
+        assert.equal(before.exact_match.id, action);
+        assert.equal(before.date_effect.reason, defaulted ? 'defaulted_date' : 'stated_date');
+        const args = { candidate_id: id, accept: true, idempotency_key: randomUUID() };
+        const result = await command('resolve-post-call-candidate', args);
+        assert.equal(result.ref, action);
+        assert.equal((await command('resolve-post-call-candidate', args)).ref, action);
+        const stored = (await c.query(`select due_on::text,item_bullets from ${source} where id=$1`, [action])).rows[0];
+        assert.equal(stored.due_on, defaulted ? '2027-01-01' : '2027-02-02');
+        assert.ok(stored.item_bullets.includes('Keep concrete recipient'));
+        assert.ok(stored.item_bullets.includes('Keep survey date'));
+      });
+    }
     for (const [label, source, text, owner, status, structured] of [
       ['different owner', 'next_action', 'Review owner survey', dell, 'open', true],
       ['completed', 'capture_post_call_action', 'Review completed survey', actor.id, 'done', true],
