@@ -2207,7 +2207,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "quiet-follow-ups": {
     "ingress_key": "mcp-tool:quiet-follow-ups",
     "source_locator": "mcp-server/src/lead-follow-up.ts",
-    "schema_digest": "037640c2932ce4804d4d9b08127658569bd28b6d5b48c49f35e9e92f538881c7",
+    "schema_digest": "4bb030736a9bfff0959ce5e7e9e81693ab8ba6d5dc161815ebfc1460778b72c8",
     "write": false,
     "human_only": false,
     "human_caller_only": false,
@@ -2218,6 +2218,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:read-action-context",
     "source_locator": "mcp-server/src/rule-context-runtime.v5.js",
     "schema_digest": "3755cab1aeb3c05567da19a1dce33140fdbc419f44bc07795fccde037e2e909a",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-activity-deal-attribution": {
+    "ingress_key": "mcp-tool:read-activity-deal-attribution",
+    "source_locator": "mcp-server/src/activity-deal-attribution.ts",
+    "schema_digest": "4f44c68219bcdad2853d6e30cc54f84a91867d2519a6d855892e14d6676b7454",
     "write": false,
     "human_only": false,
     "human_caller_only": false,

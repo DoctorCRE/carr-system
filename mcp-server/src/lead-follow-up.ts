@@ -81,12 +81,16 @@ export function leadFollowUpTools() {
   return {
     'quiet-follow-ups': {
       write: false, writerConnection: true,
-      description: 'Read-only follow-up proposals for quiet leads and active vendors. Suggested inactivity intervals default to 45 and 90 days and may be supplied explicitly. Uses the latest recorded contact date or creation date when never contacted. A lead next_action_date overrides the interval. Preserves every open task including future and held tasks; excludes suppressed/terminal leads, restricted parties, merged/deleted records, and leads linked to cold/paused clients. Includes source dates and owner. Never creates a task, changes a cadence rule, drafts or sends email. Existing cadence engine continues scheduled task succession.',
+      description: 'Read-only follow-up proposals for quiet leads and active vendors. Suggested inactivity intervals default to 45 and 90 days and may be supplied explicitly. Uses the latest recorded contact date or creation date when never contacted. A lead next_action_date overrides the interval. Preserves every open task including future and held tasks; excludes suppressed/terminal leads, restricted parties, merged/deleted records, and leads linked to cold/paused clients. Includes source dates and owner. Omit owner_slug for all owners, supply null for unassigned owner_id, or an exact recorded actor slug. Never creates a task, changes a cadence rule, drafts or sends email. Existing cadence engine continues scheduled task succession.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         lead_days: { type: 'integer', minimum: 1, maximum: 365, default: 45 },
         vendor_days: { type: 'integer', minimum: 1, maximum: 365, default: 90 },
+        owner_slug: { type: ['string', 'null'], minLength: 1, maxLength: 100, pattern: '\\S' },
       } },
-      handler: async (c: Db, _actor: unknown, args: { lead_days?: number; vendor_days?: number }) => {
+      handler: async (c: Db, _actor: unknown, args: { lead_days?: number; vendor_days?: number; owner_slug?: string | null }) => {
+        if (args.owner_slug !== undefined && args.owner_slug !== null &&
+          (typeof args.owner_slug !== 'string' || !args.owner_slug.trim() || args.owner_slug.length > 100))
+          throw new ToolError({ error: 'invalid_owner_slug' });
         const cadence = { lead_days: args.lead_days ?? 45, vendor_days: args.vendor_days ?? 90 };
         const proposals = (await c.query(`with subjects as (
           select 'lead'::text subject_type,l.id subject_id,l.party_id,l.registry_ref ref,p.name,l.owner_id,
@@ -113,7 +117,9 @@ export function leadFollowUpTools() {
               or (n.subject_type='client' and n.subject_id=s.client_id))))
           select d.*,a.slug owner,current_date-due_on days_overdue from due d
             left join actor a on a.id=d.owner_id where due_on<=current_date
-          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES,'active'])).rows;
+            and ($5::boolean or ($6::text is null and d.owner_id is null) or a.slug=$6::text)
+          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES,'active',
+            args.owner_slug === undefined,args.owner_slug ?? null])).rows;
         if (proposals.length > 1000) throw new ToolError({ error: 'quiet_follow_up_limit_exceeded' });
         return { schema_version: 'quiet-follow-ups.v1', cadence, proposals, sent: false, tasks_created: false };
       },

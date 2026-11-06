@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
 
 RUNNER = Path(__file__).with_name('prove-calendar-snapshot-strict-instants.py')
@@ -97,7 +97,6 @@ class ProofCLI(unittest.TestCase):
             ('import json; print(' + repr(json.dumps(PROOF.FIXTURE['calendar'])) + ')', True),
             ('sys.exit(1)', False),
             ('print("not JSON")', False),
-            ('import time; time.sleep(2)', False),
             ('print("x" * 1048577)', False),
         ]
         for program, passes in programs:
@@ -106,8 +105,37 @@ class ProofCLI(unittest.TestCase):
                 wrapper.write_text('#!' + sys.executable + '\nimport sys\n'
                                    'assert sys.argv[1:] == ["call", "calendar-meeting-prep", "{}"]\n' + program + '\n')
                 wrapper.chmod(0o700)
-                result = self.run_cli('--fixture', '--fixture-wrapper', str(wrapper), '--timeout-seconds', '0.3')
+                result = self.run_cli('--fixture', '--fixture-wrapper', str(wrapper), '--timeout-seconds', '30')
                 self.assertEqual(result.returncode == 0, passes, result.stderr)
+
+    def test_timeout_kills_and_reaps_at_wait_boundary(self):
+        process = MagicMock()
+        process.pid = 123456789
+        process.wait.side_effect = [subprocess.TimeoutExpired('synthetic', 0.3), 0]
+        with patch.object(PROOF, 'time', SimpleNamespace(monotonic=lambda: 100)), \
+                patch.object(PROOF.subprocess, 'Popen', return_value=process), \
+                patch.object(PROOF.os, 'killpg') as kill:
+            with self.assertRaisesRegex(ValueError, 'total deadline exceeded'):
+                PROOF.command(['/synthetic'], 100.3)
+            self.assertAlmostEqual(process.wait.call_args_list[0].kwargs['timeout'], 0.3)
+            kill.assert_called_once_with(process.pid, PROOF.signal.SIGKILL)
+            self.assertEqual(process.wait.call_count, 2)
+
+    def test_expired_deadline_refuses_process_start(self):
+        with patch.object(PROOF, 'time', SimpleNamespace(monotonic=lambda: 100)), \
+                patch.object(PROOF.subprocess, 'Popen') as start:
+            with self.assertRaisesRegex(ValueError, 'total deadline exceeded'):
+                PROOF.command(['/synthetic'], 100)
+            start.assert_not_called()
+
+    def test_completion_after_deadline_is_refused(self):
+        process = MagicMock()
+        process.wait.return_value = 0
+        with patch.object(PROOF.time, 'monotonic', side_effect=[100, 101]), \
+                patch.object(PROOF.subprocess, 'Popen', return_value=process):
+            with self.assertRaisesRegex(ValueError, 'total deadline exceeded'):
+                PROOF.command(['/synthetic'], 100.3)
+            self.assertAlmostEqual(process.wait.call_args.kwargs['timeout'], 0.3)
 
     def test_cli_refuses_invalid_budgets_and_live_fixture_options(self):
         for budget in ('0', '-1', '31', 'nan'):

@@ -3,6 +3,7 @@ import contextlib
 import http.client
 import http.server
 import json
+import os
 from pathlib import Path
 import subprocess
 import shutil
@@ -116,17 +117,17 @@ console.log(JSON.stringify({responses,release}));
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
             if mode in ('timeout', 'wrapper_error'):
-                child = ("from pathlib import Path; import time; "
-                         f"Path({str(folder / 'started')!r}).touch(); "
-                         "time.sleep(3); "
-                         f"Path({str(folder / 'escaped')!r}).touch()")
+                child = ("from pathlib import Path; import os, signal; "
+                         f"ready=Path({str(folder / 'started')!r}); "
+                         "pending=ready.with_suffix('.tmp'); pending.write_text(str(os.getpid())); "
+                         "pending.replace(ready); signal.pause()")
                 wrapper.write_text(
-                    '#!/usr/bin/env python3\nimport subprocess,sys,time\n'
+                    '#!/usr/bin/env python3\nimport os,signal,subprocess,sys,time\n'
                     + f'child=subprocess.Popen([sys.executable,"-c",{child!r}])\n'
                     + f'started={str(folder / "started")!r}\n'
                     + 'from pathlib import Path\n'
                     + 'while not Path(started).exists(): time.sleep(0.01)\n'
-                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'child.wait()\n'))
+                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'os.kill(os.getppid(), signal.SIGALRM)\nchild.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
             if denied_reads:
@@ -159,9 +160,15 @@ runpy.run_path(sys.argv[0],run_name='__main__')
             result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
             if mode in ('timeout', 'wrapper_error'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
-                time.sleep(3.2)
-                self.assertFalse((folder / 'escaped').exists(),
-                                 'wrapper descendant performed work after proof exit')
+                pid = int((folder / 'started').read_text())
+                until = time.monotonic() + 30
+                while True:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    self.assertLess(time.monotonic(), until, 'owned wrapper descendant survived cleanup')
+                    threading.Event().wait(0.01)
             self.assertLessEqual(len(requests), 4, requests)
             if mode == 'pass':
                 self.assertEqual(len(requests), 4, requests)
@@ -173,9 +180,9 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         self.assertEqual(json.loads(result.stdout)['natural_read'], 'passed')
 
     def test_denied_reads_do_not_consume_proof_budget(self):
-        for mode, timeout in (('pass', 30), ('timeout', 2)):
+        for mode in ('pass', 'timeout'):
             with self.subTest(mode=mode):
-                result = self.invoke(mode, timeout_seconds=timeout, denied_reads=True)
+                result = self.invoke(mode, denied_reads=True)
                 self.assertEqual(result.returncode, 0 if mode == 'pass' else 78,
                                  result.stdout + result.stderr)
 
@@ -245,7 +252,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 self.assertEqual(str(failure.exception), predicate)
 
     def test_timeout_terminates_wrapper_descendants(self):
-        result = self.invoke('timeout', timeout_seconds=2)
+        result = self.invoke('timeout')
         self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
 
     def test_wrapper_error_terminates_descendants(self):
