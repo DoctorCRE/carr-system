@@ -25,7 +25,7 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 
 
 class ProofTest(unittest.TestCase):
-    def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False):
+    def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False, malformed_reader_headers=False, extra_marked_read=False):
         requests = []
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
@@ -129,24 +129,23 @@ console.log(JSON.stringify({responses,release}));
                     + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'child.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
-            if denied_reads:
-                for path in ('/', '/favicon.ico'):
-                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
-                    with contextlib.closing(connection):
-                        connection.request('GET', path)
-                        response = connection.getresponse()
-                        self.assertEqual(response.status, 403)
-                        response.read()
             harness = '''import runpy,sys,urllib.request
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
+extra_marked_read=sys.argv[5]=='True'
 def opened(self,url,*args,**kwargs):
  if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://raw.githubusercontent.com/'):
   url=urllib.request.Request(origin+url.full_url.removeprefix('https://raw.githubusercontent.com'),headers=dict(url.header_items()),method=url.get_method())
  return original(self,url,*args,**kwargs)
 urllib.request.OpenerDirector.open=opened
 sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds',sys.argv[4]]
-runpy.run_path(sys.argv[0],run_name='__main__')
+try:
+ runpy.run_path(sys.argv[0],run_name='__main__')
+finally:
+ if extra_marked_read:
+  from lib.release_reader import read
+  response=read(origin+'/release',timeout=5)
+  assert response.status==200
 '''
             runner_path = RUNNER
             if mode == 'dependencies':
@@ -156,12 +155,42 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(ROOT / name, target)
                 runner_path = runtime / RUNNER.relative_to(ROOT)
-            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
+            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds), str(extra_marked_read)], capture_output=True, text=True, timeout=35)
+            if denied_reads:
+                for path in ('/', '/favicon.ico'):
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                    with contextlib.closing(connection):
+                        connection.request('GET', path)
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 403)
+                        response.read()
+            if malformed_reader_headers:
+                agent = 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
+                for headers in (
+                    [('User-Agent', agent), ('x-doctorcre-release-reader', 'wrong')],
+                    [('User-Agent', 'browser'), ('x-doctorcre-release-reader', '1')],
+                    [('User-Agent', agent), ('x-doctorcre-release-reader', '1'),
+                     ('x-doctorcre-release-reader', '1')],
+                    [('User-Agent', agent), ('User-Agent', 'browser'),
+                     ('x-doctorcre-release-reader', '1')],
+                ):
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                    with contextlib.closing(connection):
+                        connection.putrequest('GET', f'/DoctorCRE/carr-system/{SHA}/mcp-server/package-lock.json')
+                        for name, value in headers:
+                            connection.putheader(name, value)
+                        connection.endheaders()
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 403)
+                        response.read()
             if mode in ('timeout', 'wrapper_error'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
                 time.sleep(3.2)
                 self.assertFalse((folder / 'escaped').exists(),
                                  'wrapper descendant performed work after proof exit')
+            allowed_paths = {'/release', *(f'/DoctorCRE/carr-system/{SHA}/mcp-server/{name}'
+                                         for name in ('src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'))}
+            self.assertTrue(set(requests) <= allowed_paths, requests)
             self.assertLessEqual(len(requests), 4, requests)
             if mode == 'pass':
                 self.assertEqual(len(requests), 4, requests)
@@ -178,6 +207,14 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 result = self.invoke(mode, timeout_seconds=timeout, denied_reads=True)
                 self.assertEqual(result.returncode, 0 if mode == 'pass' else 78,
                                  result.stdout + result.stderr)
+
+    def test_malformed_reader_headers_are_rejected_before_accounting(self):
+        result = self.invoke(malformed_reader_headers=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_fifth_marked_read_exceeds_proof_budget(self):
+        with self.assertRaisesRegex(AssertionError, '5 not less than or equal to 4'):
+            self.invoke(extra_marked_read=True)
 
     def test_http_refusals(self):
         for mode in ('redirect', 'http_error', 'oversized'):
