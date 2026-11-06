@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import pg from 'pg';
+import { randomUUID } from 'node:crypto';
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
+import { executeRegisteredTool } from '../src/tools.js';
+const dsn=await snapshotDatabase('activity-deal-attribution-');
+test('Postgres exact attribution, ambiguity, deduplication, live subjects and read-only execution',async t=>{
+ const c=new pg.Client({connectionString:dsn});await c.connect();t.after(()=>c.end());
+ const actor={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
+ const dell={...(await c.query("select id,slug from actor where slug='dell'")).rows[0],human:true};
+ const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic attribution',$1,$1) returning id",[actor.id])).rows[0].id;
+ const client=(await c.query("insert into client(party_id,created_by,updated_by) values($1,$2,$2) returning id",[party,actor.id])).rows[0].id;
+ const deals=[];
+ for(let i=0;i<2;i++)deals.push((await c.query("insert into deal(client_id,name,deal_type,phase,created_by,updated_by) values($1,$2,'purchase','research',$3,$3) returning id",[client,'Synthetic deal '+i,actor.id])).rows[0].id);
+ const add=async(deal=null,context=null,source=null)=>(await c.query("insert into activity(kind,summary,occurred_at,actor_id,client_id,deal_id,email_context,email_source) values('email_in','Synthetic activity',now(),$1,$2,$3,$4,$5) returning id",[actor.id,deal?null:client,deal,context,source])).rows[0].id;
+ const read=async(id,who=actor)=>{
+ await c.query('begin read only');
+ try{await c.query('set local role carr_reader');const r=await executeRegisteredTool(c,who,'read-activity-deal-attribution',{activity_id:id});await c.query('rollback');return r;}catch(e){await c.query('rollback');throw e;}
+ };
+ const direct=await add(deals[0]);
+ assert.equal((await read(direct)).direct.deal_id,deals[0]);assert.equal((await read(direct,dell)).state,'ready');
+ const root=await add();
+ assert.equal((await read(root)).attribution,'unresolved','client membership cannot infer a deal');
+ const linked=await add(deals[0],{source_activity_id:root,source_version:'mail-v1'});
+ let r=await read(root);assert.equal(r.attribution,'source_linked');assert.deepEqual(r.candidates[0].evidence.map(e=>e.activity_id),[linked]);
+ const second=await add(deals[1],{source_activity_id:root});
+ r=await read(root);assert.equal(r.attribution,'ambiguous');assert.equal(r.credited_activity_count,0);assert.equal(r.candidates.length,2);
+ const child=await add(null,{source_activity_id:root});
+ r=await read(child);assert.equal(r.candidates.length,2);assert.equal(new Set(r.candidates.flatMap(x=>x.evidence.map(e=>e.activity_id))).size,2);
+ const missing=await add(null,{source_activity_id:randomUUID()});assert.equal((await read(missing)).coverage,'unknown');
+ const privateActivity=await add(deals[0],null,{mailbox_owner:'joe',sender_email:'synthetic@example.com'});
+ assert.equal((await read(privateActivity,dell)).state,'empty');
+ await c.query("update activity set email_context=jsonb_set(coalesce(email_context,'{}'),'{lifecycle}','{\"state\":\"deleted\"}') where id=$1",[second]);
+ assert.equal((await read(root)).candidates.length,1);
+ await c.query("insert into activity(kind,summary,occurred_at,actor_id,deal_id,email_context) select 'email_in','Synthetic overflow',now(),$1,$2,jsonb_build_object('source_activity_id',$3::text) from generate_series(1,101)",[actor.id,deals[0],root]);
+ assert.equal((await read(root)).state,'unavailable');
+ await c.query('update party set deleted_at=now() where id=$1',[party]);
+ assert.equal((await read(direct)).state,'empty');assert.equal((await read(root)).state,'empty');
+ assert.equal((await read(randomUUID())).state,'empty');
+});

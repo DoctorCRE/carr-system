@@ -10,7 +10,8 @@ import subjectWatchesFamily from "./tool-families/subject-watches.js";
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
   .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
-const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
+import activityDealAttributionFamily from "./tool-families/activity-deal-attribution.js";
+const toolFamilies = [activityDealAttributionFamily, censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
 import { homeInboxTools, HOME_INBOX_WRITES } from "./home-inbox.js";
