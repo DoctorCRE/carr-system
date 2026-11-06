@@ -14,6 +14,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read
+
 MAX_BYTES = 1048576
 SAFE_INTEGER = 9007199254740991
 
@@ -115,8 +118,10 @@ def observe(args):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise Unavailable('deadline_exceeded')
-        with opener.open(base + path, timeout=remaining) as response:
-            data = response.read(MAX_BYTES + 1)
+        response = read(base + path, opener=opener.open, timeout=remaining, max_bytes=MAX_BYTES)
+        if response.status != 200:
+            raise Unavailable('http_status_invalid')
+        data = response.body
         if len(data) > MAX_BYTES:
             raise Unavailable('response_too_large')
         value = json.loads(data)

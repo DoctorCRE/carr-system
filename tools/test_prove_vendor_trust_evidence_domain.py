@@ -1,6 +1,8 @@
 """Exercise the exact proof CLI with synthetic sessions and HTTP origins."""
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import copy
+from functools import lru_cache
 import json
 from pathlib import Path
 import subprocess
@@ -9,6 +11,20 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.request
+
+ROOT = Path(__file__).resolve().parents[1]
+MARKER = json.loads((ROOT / 'lib/release-reader-marker.json').read_text())
+# Recorded synthetic /app-release response from the real app handler at
+# jbookout/doctorcre-app 03cf3a04664f842c3ff5d01b2424cc6ba21a3dba.
+APP_RELEASE = {'service': 'doctorcre-app',
+ 'environment': 'production',
+ 'source_commit': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+ 'provider_version_id': None,
+ 'provider_version_tag': None,
+ 'provider_version_created_at': None,
+ 'carr_contract': {'schema': 'doctorcre-carr-interface.v1', 'version': '1.56.0'},
+ 'route_contract': {'schema': 'doctorcre-app-routes.v1', 'version': '1.21.0'}}
 
 RUNNER = Path(__file__).with_name('prove-vendor-trust-evidence-domain.py')
 RATED = {'computed_tier': 'Proven', 'coverage_verified_at': '2020-01-01T00:00:00Z',
@@ -17,10 +33,39 @@ UNVERIFIED = {'computed_tier': 'Unrated', 'coverage_verified_at': None,
               'deals_worked': None, 'deals_referred': None, 'won': None, 'lost': None, 'win_rate': None}
 
 
+@lru_cache(maxsize=8)
+def endpoint_responses(pages, width):
+    source = r"""
+import {readBusinessList, parseBusinessQuery} from './mcp-server/src/workspace-business-read.js';
+import {buildRelease} from './mcp-server/src/release.js';
+const rated = {coverage_verified_at:'2020-01-01T00:00:00Z', deals_worked:8,
+  deals_referred:1, won:7, lost:1, first_worked_at:'2020-01-01T00:00:00Z',
+  last_contacted_at:'2026-01-01T00:00:00Z'};
+const [pages, width] = process.argv.slice(1).map(Number);
+const responses = [];
+for (let page=1; page<=Math.min(pages,5); page++) {
+  const rows = Array.from({length:width}, (_,i)=>({id:`synthetic-${i}`,
+    name:'PRIVATE_VENDOR', relationship:i===width-1 ? {} : rated}));
+  const client = {query: async text => ({rows:text.startsWith('with filtered')
+    ? [{total_count:pages===1 ? width : pages*25, viewer_owner_resolved:true, rows}]
+    : [{}]})};
+  responses.push(await readBusinessList({client, actor:{slug:'joe'},
+    query:parseBusinessQuery('vendors',new URLSearchParams({contract:'vendor-directory.v1',scope:'team',page:String(page)}),'joe'),
+    correlationId:'synthetic-proof-contract', now:()=>new Date('2026-01-02T00:00:00Z')}));
+}
+const release = await buildRelease({env:{CARR_ENV:'production',GIT_SHA:'b'.repeat(40)},
+  sql:async()=>[],verbCount:1,now:()=>new Date('2026-01-02T00:00:00Z')});
+console.log(JSON.stringify({responses,release}));
+"""
+    result = subprocess.run(['node', '--input-type=module', '-e', source, str(pages), str(width)],
+                            cwd=ROOT, capture_output=True, text=True, timeout=30, check=True)
+    return json.loads(result.stdout)
+
+
 @contextmanager
-def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=True):
+def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=True, require_identity=False):
     requests = []
-    rows = [RATED, UNVERIFIED] if rows is None else rows
+    generated = endpoint_responses(pages, 2 if rows is None else len(rows))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -28,10 +73,17 @@ def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=Tru
 
         def do_GET(self):
             requests.append((self.path, self.headers.get('Cookie')))
+            if require_identity and (self.headers.get('User-Agent') !=
+                    'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)' or
+                    self.headers.get(MARKER['header']) != MARKER['value']):
+                self.send_error(403)
+                return
             if self.path == '/app-release':
-                value = {'service': 'doctorcre-app', 'environment': 'production', 'source_commit': 'a'*40 if release else None}
+                value = copy.deepcopy(APP_RELEASE)
+                if not release:
+                    value['source_commit'] = None
             elif self.path == '/release':
-                value = {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': 'b'*40}}
+                value = generated['release']
             else:
                 if delay:
                     time.sleep(delay)
@@ -41,8 +93,11 @@ def fixture(rows=None, pages=1, status=200, delay=0, redirect=False, release=Tru
                     self.end_headers()
                     return
                 page = int(self.path.rsplit('=', 1)[1])
-                value = {'page': page, 'page_size': 25, 'page_count': pages,
-                         'rows': [{'name': 'PRIVATE_VENDOR', 'relationship': row} for row in rows]}
+                value = copy.deepcopy(generated['responses'][page - 1])
+                # Inject contradictions only after the real producer has built its response.
+                if rows is not None:
+                    for row, stats in zip(value['rows'], rows):
+                        row['relationship'] = stats
                 if self.headers.get('Cookie') != 'session=SYNTHETIC_SECRET':
                     self.send_response(401)
                     self.end_headers()
@@ -89,6 +144,24 @@ class ProofCLI(unittest.TestCase):
         self.assertEqual(result['carr_release'], 'b'*40)
         self.assertEqual([cookie for _, cookie in requests[:2]], [None, None])
         self.assertIn('contract=vendor-directory.v1&scope=team&page=1', requests[2][0])
+
+    def test_shared_transport_identity_on_every_read(self):
+        with fixture(require_identity=True) as (base, requests):
+            self.assertEqual(self.run_cli(base)[0], 0)
+        self.assertEqual(len(requests), 3)
+
+    def test_fixture_endpoint_contract(self):
+        with fixture() as (base, _):
+            request = urllib.request.Request(base + '/api/v1/business/vendors?contract=vendor-directory.v1&scope=team&page=1',
+                                             headers={'Cookie': 'session=SYNTHETIC_SECRET'})
+            with urllib.request.urlopen(request) as response:
+                value = json.load(response)
+        self.assertEqual(value['dataset'], 'vendors')
+        self.assertEqual(value['query']['contract'], 'vendor-directory.v1')
+        self.assertEqual(value['total'], len(value['rows']))
+        self.assertEqual(value['source']['observed_at'], '2026-01-02T00:00:00.000Z')
+        self.assertIn('facets', value)
+        self.assertIn('partial', value)
 
     def test_contradictions(self):
         for update in [{'coverage_verified_at': 'not-a-date'}, {'coverage_verified_at': '2099-01-01T00:00:00Z'},
