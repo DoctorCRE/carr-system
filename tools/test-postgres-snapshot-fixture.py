@@ -45,6 +45,17 @@ class SnapshotIsolation(unittest.TestCase):
                     self.assertNotIn('PGSERVICE', restore)
                     self.assertNotIn('PGSERVICEFILE', restore)
 
+    def test_snapshot_migrations_cannot_inherit_transport_overrides(self):
+        from lib.postgres_snapshot_fixture import migrate_snapshot
+        with patch.dict(os.environ, PGHOSTADDR='203.0.113.1', PGSERVICE='production',
+                        PGSERVICEFILE='/untrusted', PGPASSWORD='postgres'), \
+             patch('lib.postgres_snapshot_fixture.subprocess.run', return_value=Mock(returncode=0)) as run:
+            migrate_snapshot(ROOT / 'db/schema.sql', 'postgres://carr_ci@postgres:5432/owned')
+            env = run.call_args.kwargs['env']
+            self.assertEqual(env['DATABASE_URL'], 'postgres://carr_ci@postgres:5432/owned')
+            self.assertEqual(env['PGPASSWORD'], 'postgres')
+            self.assertFalse({'PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE'} & env.keys())
+
     def test_restore_failure_drops_owned_database_and_restores_roles(self):
         import lib.postgres_service_fixture as module
         admin = Mock()

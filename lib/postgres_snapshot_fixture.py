@@ -21,7 +21,8 @@ def snapshot_key(schema, baseline=False):
 def migrate_snapshot(schema, dsn):
     root = Path(schema).parent.parent
     result = subprocess.run([sys.executable, str(root / 'tools/migrate.py'), '--apply', '--yes'],
-        cwd=root, env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=180)
+        cwd=root, env={**{key: value for key, value in os.environ.items()
+                         if not key.startswith('PG') or key == 'PGPASSWORD'}, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=180)
     if result.returncode:
         raise RuntimeError('snapshot migrations failed: ' + (result.stdout + result.stderr)[-4000:])
 
