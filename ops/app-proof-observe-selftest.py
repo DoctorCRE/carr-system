@@ -260,6 +260,35 @@ class AppObserverTest(unittest.TestCase):
             self.assertEqual((self.repo / '.git/config').read_bytes(), config)
             self.assertEqual(self.git('show-ref'), refs)
 
+    def test_legacy_git_config_cannot_reenable_replacement_history(self):
+        unrelated = self.unrelated_commit()
+        self.git('config', 'core.useReplaceRefs', 'true')
+        self.git('replace', self.served, unrelated)
+        run = subprocess.run
+
+        def legacy_git(command, *args, **kwargs):
+            # Git 2.39 reads core.useReplaceRefs after --no-replace-objects.
+            # Replay that precedence on newer host Git, using real object walks.
+            if command[0] == 'git' and '--no-replace-objects' in command:
+                command = ['git', '-c', 'core.useReplaceRefs=true',
+                           *(arg for arg in command[1:] if arg != '--no-replace-objects')]
+            return run(command, *args, **kwargs)
+
+        config = (self.repo / '.git/config').read_bytes()
+        refs = self.git('show-ref')
+        with patch.object(self.observer.subprocess, 'run', side_effect=legacy_git):
+            self.assertEqual(self.observe()['status'], 'passed')
+            self.git('replace', '-d', self.served)
+            self.git('replace', unrelated, self.served)
+            self.identity = json.dumps({'service': 'doctorcre-app', 'environment': 'production',
+                                        'source_commit': unrelated}).encode()
+            with self.assertRaisesRegex(ValueError, 'not a proven ancestor'):
+                self.observe()
+            self.git('replace', '-d', unrelated)
+            self.git('replace', self.served, unrelated)
+        self.assertEqual((self.repo / '.git/config').read_bytes(), config)
+        self.assertEqual(self.git('show-ref'), refs)
+
     def test_network_identity_and_marker_fail_closed(self):
         def offline(*args):
             raise OSError('network unavailable')
