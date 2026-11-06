@@ -1,0 +1,21 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR617-S30-notification-feed-evidence-integrity",
+  "targets": ["worker"],
+  "assertions": [{
+    "id": "live-feed-and-release-pinned-replay",
+    "predicate": "After merge and deployment, verify Worker release identity using the registered release smoke runner. Separately execute python3 tools/prove-notification-feed-evidence-integrity.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. Require unchanged release git_sha, ancestry containing this source change, a valid explicit authenticated notification feed or notification_feed_unavailable refusal, and the separate synthetic truth-table replay through the production projection loaded from that exact release revision. A normal live feed proves deployed read operation only. The replay proves malformed-definer resilience separately without production database access or writes. The release smoke runner alone cannot prove this regression.",
+    "runner": "worker-release-smoke.v1",
+    "expected_result": "The dedicated observer exits 0 with both evidence classes passing, two release reads, two wrapper calls, one source dependency and at least 50 replay cases. Exit 1 is a contradiction. Exit 78 is inaccessible evidence and leaves the unit landed-unproven. No builder production calls.",
+    "input_class": "Natural authenticated notification-feed limit=20 and read-notification-preferences responses, public release identity and release-pinned source. Separate synthetic in-memory projection replay. Counts-only receipt. No sends or writes.",
+    "deadline_seconds": 30
+  }],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 4,
+    "max_records": 20,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}
