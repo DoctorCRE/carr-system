@@ -78,8 +78,22 @@ jobs:
     needs: select
     if: ${{ !cancelled() && !github.event.pull_request.draft && github.event_name == 'pull_request' && needs.select.outputs.fast == 'true' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/jbookout/software-factory/ci-postgres@PENDING_PUBLISHED_DIGEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARR_CI_POSTGRES_IMAGE: both
+      CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+      CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
     timeout-minutes: 20
     steps:
+      - name: Prepare writable image Python environment
+        run: |
+          test "$(id -u)" = 1001
+          python -m venv "$RUNNER_TEMP/ci-venv"
+          echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -88,27 +102,11 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
       - uses: ./.github/actions/ci-downloads
 
       - run: python -m pip install -r requirements.lock
       - run: npm --prefix mcp-server ci --no-audit
       - run: npm --prefix practice-plugin ci --no-audit
-      - name: Identify the runner image for the zsh archive
-        id: zsh-image
-        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-      - name: Restore zsh package archives
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/zsh-debs/*.deb
-          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh', 'ops/ci_zsh.py') }}
-      - name: Install zsh
-        timeout-minutes: 12
-        env:
-          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
-        run: ops/ci-zsh.sh
       - uses: ./.github/actions/ci-apt
         with:
           packages: --postgres --documents
@@ -130,8 +128,22 @@ jobs:
         shard: [1, 2]
     if: ${{ !cancelled() && !github.event.pull_request.draft && github.event_name == 'pull_request' && needs.select.outputs.gates == 'true' }}
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/jbookout/software-factory/ci-postgres@PENDING_PUBLISHED_DIGEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARR_CI_POSTGRES_IMAGE: both
+      CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+      CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
     timeout-minutes: 20
     steps:
+      - name: Prepare writable image Python environment
+        run: |
+          test "$(id -u)" = 1001
+          python -m venv "$RUNNER_TEMP/ci-venv"
+          echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -140,27 +152,11 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
       - uses: ./.github/actions/ci-downloads
 
       - run: python -m pip install -r requirements.lock
       - run: npm --prefix mcp-server ci --no-audit
       - run: npm --prefix practice-plugin ci --no-audit
-      - name: Identify the runner image for the zsh archive
-        id: zsh-image
-        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-      - name: Restore zsh package archives
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/zsh-debs/*.deb
-          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh', 'ops/ci_zsh.py') }}
-      - name: Install zsh
-        timeout-minutes: 12
-        env:
-          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
-        run: ops/ci-zsh.sh
       - uses: ./.github/actions/ci-apt
         with:
           packages: --postgres --documents
@@ -245,6 +241,15 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.select.outputs.full == 'true') }}
     name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
+    container:
+      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@PENDING_PUBLISHED_DIGEST' || '' }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARR_CI_POSTGRES_IMAGE: both
+      CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+      CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
     strategy:
       fail-fast: false
       matrix:
@@ -291,6 +296,12 @@ jobs:
 
 
     steps:
+      - name: Prepare writable image Python environment
+        if: matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration'
+        run: |
+          test "$(id -u)" = 1001
+          python -m venv "$RUNNER_TEMP/ci-venv"
+          echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Migration identity and historical snapshot proofs read pinned commits.
@@ -309,7 +320,7 @@ jobs:
           package-manager-cache: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: matrix.classes != 'migration' || steps.scope.outputs.full != 'false'
+        if: matrix.classes != 'unit' && matrix.classes != 'gates' && matrix.classes != 'migration' && (matrix.classes != 'migration' || steps.scope.outputs.full != 'false')
         with:
           python-version-file: .python-version
       - uses: ./.github/actions/ci-downloads
@@ -335,32 +346,7 @@ jobs:
           npm --prefix mcp-server ci --no-audit
           npm --prefix practice-plugin ci --no-audit
 
-      - name: Identify the runner image for the zsh archive
-        if: matrix.classes != 'dependency' && (matrix.classes != 'migration' || steps.scope.outputs.full != 'false')
-        id: zsh-image
-        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-      - name: Restore zsh package archives
-        if: matrix.classes != 'dependency' && (matrix.classes != 'migration' || steps.scope.outputs.full != 'false')
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/zsh-debs/*.deb
-          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh', 'ops/ci_zsh.py') }}
-      - name: Install zsh
-        if: matrix.classes != 'dependency' && (matrix.classes != 'migration' || steps.scope.outputs.full != 'false')
-        # bin/run-scheduled.sh has a #!/bin/zsh shebang and its test
-        # invokes it by that interpreter. Use the runner's installed shell
-        # when available; otherwise try its indexes before refreshing them.
-        # Verified cache hits install offline; cold runners use ordinary apt.
-        timeout-minutes: 12
-        env:
-          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
-        run: ops/ci-zsh.sh
-
-      - name: Install PDF text extraction dependency
-        if: matrix.classes == 'gates'
-        run: sudo apt-get update && sudo apt-get install -y poppler-utils
-
-      - name: Install PostgreSQL 17
+      - name: Verify PostgreSQL image capabilities
         if: contains(matrix.classes, 'unit') || contains(matrix.classes, 'gates') || (matrix.classes == 'migration' && steps.scope.outputs.full != 'false')
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
@@ -380,7 +366,8 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
-          CARR_CI_DATABASE_URL: ${{ contains(matrix.classes, 'unit') && 'postgres://carr_ci:postgres@127.0.0.1:5432/carr_ci' || '' }} # ci-secret-scan: allow - disposable loopback fixture
+          CARR_CI_DATABASE_URL: ${{ contains(matrix.classes, 'unit') && 'postgres://carr_ci@postgres:5432/carr_ci' || '' }} # ci-secret-scan: allow - disposable service fixture
+          PGPASSWORD: postgres
           GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
@@ -424,8 +411,22 @@ jobs:
       matrix:
         part: [reconstruction, equivalence, shadow, gates, acceptance]
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/jbookout/software-factory/ci-postgres@PENDING_PUBLISHED_DIGEST
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARR_CI_POSTGRES_IMAGE: both
+      CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+      CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
     timeout-minutes: 30
     steps:
+      - name: Prepare writable image Python environment
+        run: |
+          test "$(id -u)" = 1001
+          python -m venv "$RUNNER_TEMP/ci-venv"
+          echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -434,35 +435,15 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version-file: .python-version
       - uses: ./.github/actions/ci-downloads
 
       - name: Install proof dependencies
         run: |
           python -m pip install -r requirements.lock
           npm --prefix mcp-server ci --no-audit
-      - name: Install PostgreSQL 17
+      - name: Verify PostgreSQL image capabilities
         timeout-minutes: 5
         run: bash ops/ci-postgres.sh
-
-      - name: Identify the runner image for the zsh archive
-        if: matrix.part == 'equivalence'
-        id: zsh-image
-        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-      - name: Restore zsh package archives
-        if: matrix.part == 'equivalence'
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/zsh-debs/*.deb
-          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh', 'ops/ci_zsh.py') }}
-      - name: Install zsh
-        if: matrix.part == 'equivalence'
-        timeout-minutes: 12
-        env:
-          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
-        run: ops/ci-zsh.sh
 
       - name: Prove independent migration fixture
         if: matrix.part != 'acceptance' && matrix.part != 'gates'

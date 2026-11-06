@@ -10,6 +10,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 COUNT = 5
+POSTGRES_PROFILE = "both"
 WATCHDOG_MS = 600000
 BUDGET_MS = WATCHDOG_MS * 4 // 5
 
@@ -103,13 +104,17 @@ def verify(receipts, root=ROOT):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=Path, default=ROOT)
-    parser.add_argument('action', choices=('plan', 'verify', 'timings'))
+    parser.add_argument('action', choices=('plan', 'capabilities', 'verify', 'timings'))
     parser.add_argument('receipts', nargs='*', type=Path)
     parser.add_argument('--source-run', type=int)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     try:
-        if args.action == 'plan':
+        if args.action == 'capabilities':
+            print(json.dumps([{'shard': index, 'postgres_profile': POSTGRES_PROFILE,
+                               'majors': [17, 18]}
+                              for index, _ in enumerate(plan(args.root), 1)]))
+        elif args.action == 'plan':
             print(json.dumps(plan(args.root)))
         elif args.action == 'timings':
             if not (args.source_run and args.output):

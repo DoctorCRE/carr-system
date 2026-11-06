@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SystemDependencies(unittest.TestCase):
     def invoke(self, directory, installed, run):
-        with patch.dict(os.environ, CARR_CI_APT_ARCHIVES=str(directory / 'archives'),
+        with patch.dict(os.environ, CARR_CI_POSTGRES_IMAGE='', CARR_CI_APT_ARCHIVES=str(directory / 'archives'),
                         GITHUB_PATH=str(directory / 'path')), \
              patch('sys.argv', ['ci-apt.py', '--postgres', '--documents']), \
              patch('pathlib.Path.is_file', return_value=installed), \
@@ -64,6 +64,31 @@ class SystemDependencies(unittest.TestCase):
             run.side_effect = subprocess.CalledProcessError(1, 'apt-get')
             with self.assertRaises(subprocess.CalledProcessError):
                 self.invoke(directory, False, run)
+
+    def test_image_document_and_postgres_checks_never_invoke_apt(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('image_apt', ROOT / 'ops/ci-apt.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for documents_present in (True, False):
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / 'path'
+                def run(command, **kwargs):
+                    self.assertEqual(command[-1], '--version')
+                    major = 17 if '/17/' in command[0] else 18
+                    return subprocess.CompletedProcess(command, 0, f'tool (PostgreSQL) {major}.1')
+                with patch.dict(os.environ, CARR_CI_POSTGRES_IMAGE='both', GITHUB_PATH=str(output)), \
+                     patch.object(module.os, 'geteuid', return_value=1001), \
+                     patch.object(module.Path, 'is_file', return_value=True), \
+                     patch.object(module.shutil, 'which', return_value='/usr/bin/tool' if documents_present else None), \
+                     patch.object(module.subprocess, 'run', side_effect=run):
+                    if documents_present:
+                        self.assertEqual(module.main(['--postgres', '--documents']), 0)
+                        self.assertTrue(output.exists())
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'document tools'):
+                            module.main(['--postgres', '--documents'])
+                        self.assertFalse(output.exists())
 
 
 if __name__ == '__main__':

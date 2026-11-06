@@ -52,7 +52,8 @@ class Controls(unittest.TestCase):
                     self.assertTrue(all('cache' not in step['with'] for step in setups))
                     restore = next(step for step in steps if step.get('uses') == './.github/actions/ci-downloads')
                     self.assertGreater(steps.index(restore), steps.index(setups[-1]))
-                    self.assertEqual(restore.get('if'), setups[-1].get('if'))
+                    if not job.get('container'):
+                        self.assertEqual(restore.get('if'), setups[-1].get('if'))
         install = next(step for step in wf['jobs']['classes']['steps']
                        if step.get('name') == 'Install Node dependencies')
         commands = install['run'].splitlines()
@@ -74,39 +75,50 @@ class Controls(unittest.TestCase):
         for step in job['steps']:
             self.assertNotIn('needs.scope', json.dumps(step))
 
-    def test_postgres_install_is_bounded_and_retries_once(self):
-        installs = [step for filename in ('ci.yml', 'main-canary.yml')
-                    for job in workflow(filename)['jobs'].values() for step in job.get('steps', [])
-                    if step.get('name') == 'Install PostgreSQL 17']
-        for step in installs:
-            self.assertEqual(step.get('timeout-minutes'), 5)
-            self.assertEqual(step['run'], 'bash ops/ci-postgres.sh')
+    def test_hosted_database_lanes_require_image_without_acquisition(self):
+        import re
+        from ci_unit_shards import POSTGRES_PROFILE, COUNT
+        self.assertEqual(POSTGRES_PROFILE, 'both')
+        self.assertEqual(COUNT, 5)
+        lanes = {'ci.yml': ('fast', 'gates', 'classes', 'migration-fixtures'),
+                 'main-canary.yml': ('classes',), 'unit-shards.yml': ('unit',)}
+        images = set()
+        for filename, names in lanes.items():
+            jobs = workflow(filename)['jobs']
+            for name in names:
+                job = jobs[name]
+                image = job['container']['image']
+                # Drafts deliberately fail this admission until publication supplies the digest.
+                self.assertRegex(image, r'ghcr.io/jbookout/software-factory/ci-postgres@sha256:[0-9a-f]{64}')
+                images.add(re.search(r'ghcr.io/[^\s\']+', image).group())
+                self.assertEqual(job['env']['CARR_CI_POSTGRES_IMAGE'], POSTGRES_PROFILE)
+                self.assertEqual(job['defaults']['run']['shell'], 'bash')
+                if name == 'classes':
+                    for selected in ('unit', 'gates', 'migration'):
+                        self.assertIn("matrix.classes == '" + selected + "'", image)
+                checks = [step for step in job['steps'] if 'ci-apt' in step.get('uses', '')
+                          or 'ci-postgres.sh' in step.get('run', '')]
+                self.assertTrue(checks)
+                for step in checks:
+                    if 'run' in step:
+                        self.assertEqual(step['timeout-minutes'], 5)
+            for job in jobs.values():
+                for step in job.get('steps', []):
+                    command = step.get('run', '')
+                    self.assertNotRegex(command, r'apt(?:-get)?|curl.*postgres|wget.*postgres')
+                    self.assertNotIn('ci-zsh.sh', command)
+        self.assertEqual(len(images), 1)
+        action = workflow('../actions/ci-apt/action.yml')
+        steps = action['runs']['steps']
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]['env']['CARR_CI_POSTGRES_IMAGE'], 'both')
+        self.assertNotRegex(json.dumps(steps), r'apt-get|actions/cache|--postgres-attempt')
+        shards = workflow('unit-shards.yml')['jobs']['unit']
+        run = next(step for step in shards['steps'] if step.get('name') == 'Run assigned MCP suites')
+        self.assertIn('@postgres:5432/', run['env']['CARR_CI_DATABASE_URL'])
         canary = workflow('main-canary.yml')['jobs']['classes']['steps']
-        install = next(step for step in canary if step.get('name') == 'Install PostgreSQL 17')
-        configure = next(step for step in canary
-                         if 'create_main_cluster = false' in step.get('run', ''))
-        self.assertLess(canary.index(configure), canary.index(install))
-        self.assertEqual(configure.get('if'), "contains(matrix.classes, 'migration')")
-        self.assertFalse(any('apt-get install' in step.get('run', '') for step in canary))
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            timeout = root / 'timeout'
-            timeout.write_text('#!' + sys.executable + "\n"
-                "import os,pathlib,sys\n"
-                "p=pathlib.Path(os.environ['ATTEMPTS'])\n"
-                "n=int(p.read_text())+1 if p.exists() else 1\n"
-                "p.write_text(str(n))\n"
-                "assert sys.argv[1:3] == ['--kill-after=5s','110s'] and sys.argv[-1] == '--postgres-attempt' and sys.argv[-2].endswith('/ci-apt.py')\n"
-                "sys.exit({'timeout':124,'failure':1,'missing':127}.get(os.environ['INSTALL_RESULT'], 1 if n==1 else 0))\n")
-            timeout.chmod(0o755)
-            for mode, expected in [('retry-success', 0), ('timeout', 1), ('failure', 1), ('missing', 1)]:
-                attempts = root / (mode + '-attempts')
-                result = subprocess.run(['bash', 'ops/ci-postgres.sh'], cwd=ROOT,
-                    env={**os.environ, 'PATH': directory + os.pathsep + os.environ['PATH'],
-                         'ATTEMPTS': str(attempts), 'INSTALL_RESULT': mode},
-                    capture_output=True, text=True, timeout=20)
-                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                self.assertEqual(attempts.read_text(), '2')
+        run = next(step for step in canary if step.get('name') == "Run this group's check classes")
+        self.assertIn('python ops/local-pg-ci.py --class migration', run['run'])
 
     def test_native_candidate_event_contract(self):
         wf = workflow()

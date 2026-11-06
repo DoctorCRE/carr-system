@@ -1489,14 +1489,11 @@ def test_hosted_draft_lifecycle():
 
 
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
-    wf = _hosted_workflow()
-    setup = next(st for st in wf["jobs"]["classes"]["steps"] if st.get("name") == "Install zsh")
-    check("hosted zsh setup uses the shared installer", setup["run"] == "ops/ci-zsh.sh")
     for filename in ("ci.yml", "main-canary.yml", "unit-shards.yml"):
         for job in _hosted_workflow(filename)["jobs"].values():
-            for step in job.get("steps", []):
-                if step.get("name") == "Install zsh":
-                    check(f"{filename} bounds zsh setup", step.get("timeout-minutes") == 12)
+            if job.get("container"):
+                check(f"{filename} uses baked zsh instead of package acquisition",
+                      not any("ci-zsh.sh" in step.get("run", "") for step in job.get("steps", [])))
     _exercise_zsh_installer()
 
 
