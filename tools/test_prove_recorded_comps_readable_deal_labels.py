@@ -293,7 +293,7 @@ finally:
         result = self.invoke(malformed_reader_headers=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_fifth_marked_read_exceeds_proof_budget(self):
+    def test_sixth_marked_read_exceeds_proof_budget(self):
         with self.assertRaisesRegex(AssertionError, '6 not less than or equal to 5'):
             self.invoke(extra_marked_read=True)
 
