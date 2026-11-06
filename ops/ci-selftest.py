@@ -1594,9 +1594,18 @@ def _exercise_zsh_installer():
         scripts = {
             "zsh": '#!/bin/sh\n[ "$CI_SETUP_FIXTURE" = preinstalled ]\n',
             "sudo": '#!/bin/sh\nexec "$@"\n',
-            "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
+            "timeout": "#!" + sys.executable + "\n" + '''
+import os, sys
+assert sys.argv[1] == "--kill-after=5s"
+assert 0 < int(sys.argv[2].removesuffix("s")) <= 180
+os.execvp(sys.argv[3], sys.argv[3:])
+''',
             "apt-cache": "#!" + sys.executable + "\n" + '''
-import hashlib
+import hashlib, os, signal, sys
+if os.environ["CI_SETUP_FIXTURE"] == "metadata-deadline":
+    os.kill(os.getppid(), signal.SIGALRM)
+if os.environ["CI_SETUP_FIXTURE"] in ("metadata-error", "publish-error"):
+    sys.exit(2)
 print("Package: zsh\\nVersion: 1\\nArchitecture: amd64\\nSHA256: " +
       hashlib.sha256(b"trusted-zsh-package").hexdigest())
 ''',
@@ -1621,12 +1630,17 @@ if "--no-download" in args:
     assert archive.read_bytes() == b"trusted-zsh-package"
     assert root != original.parent
     assert archive.stat().st_mode & 0o777 == 0o444
-    sys.exit(100 if mode == "partial-cache" else 0)
+    sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
+if mode == "timed-out":
+    sys.exit(124)
+if mode == "native-error":
+    sys.exit(42)
 if mode in ("cached", "cache-replaced"):
     sys.exit("network must not be used on a verified cache hit")
 if mode in ("unavailable", "refresh-failed") or (mode == "stale" and not any("update" in c for c in calls)):
     sys.exit(100)
-archive.write_bytes(b"trusted-zsh-package")
+if not archive.exists():
+    archive.write_bytes(b"trusted-zsh-package")
 ''',
         }
         for name, source in scripts.items():
@@ -1636,6 +1650,7 @@ archive.write_bytes(b"trusted-zsh-package")
         for mode, expected, success in (
             ("preinstalled", [], True),
             ("cached", ["offline"], True),
+            ("cached-timed-out", ["offline"], False),
             ("cache-replaced", ["offline"], True),
             ("cold", ["install"], True),
             ("tampered", ["install"], True),
@@ -1643,25 +1658,42 @@ archive.write_bytes(b"trusted-zsh-package")
             ("stale", ["install", "update", "install"], True),
             ("unavailable", ["install", "update", "install"], False),
             ("refresh-failed", ["install", "update"], False),
+            ("metadata-error", [], False),
+            ("metadata-deadline", [], False),
+            ("timed-out", ["install"], False),
+            ("native-error", ["install"], False),
+            ("publish-error", ["install"], False),
+            ("old-version", ["install"], True),
+            ("symlink", ["install"], True),
         ):
             archives = fixture / mode
             archives.mkdir()
             archive = archives / "zsh_1_amd64.deb"
-            if mode in ("cached", "cache-replaced", "partial-cache", "tampered"):
+            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline"):
                 archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
+            if mode == "old-version":
+                archive.rename(archives / "zsh_2_amd64.deb")
+            if mode == "symlink":
+                target = fixture / "external.deb"
+                target.write_bytes(b"trusted-zsh-package")
+                archive.symlink_to(target)
             log = fixture / (mode + ".json")
             env = scrubbed_env()
             env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
-                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode,
+                       CI_SETUP_CALLS=str(log), CI_SETUP_FIXTURE=mode, TMPDIR=str(fixture),
                        ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0")
             ran = subprocess.run(["bash", str(REPO / "ops/ci-zsh.sh")],
                                  cwd=fixture, env=env, capture_output=True, text=True, timeout=15)
+            check(f"zsh {mode} cleans up after setup", not any(fixture.glob("carr-zsh.*")))
             calls = json.loads(log.read_text()) if log.exists() else []
             actions = [("download" if "--download-only" in c else "offline" if "--no-download" in c
                         else "update" if "update" in c else "install") for c in calls]
             check(f"zsh {mode} follows the package-manager path", actions == expected, actions)
             check(f"zsh {mode} propagates setup success or failure", (ran.returncode == 0) == success,
                   {"rc": ran.returncode, "stderr": ran.stderr})
+            for call in calls:
+                private = pathlib.Path(next(a.split("=", 1)[1] for a in call if a.startswith("Dir::Cache::archives=")))
+                check(f"zsh {mode} removes private archives", not private.exists())
             if mode == "tampered":
                 check("zsh quarantines unauthenticated cache bytes",
                       (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
