@@ -1,15 +1,19 @@
 {
   "schema": "carr-production-proof-plan.v1",
   "requirement_id": "WR622-S1-J345-proof-release-reads",
-  "targets": ["worker"],
-  "assertions": [{
-    "id": "released-proof-runners-reach-record-reads",
-    "predicate": "After deploy, run worker-release-smoke.v1 for release identity. Separately run python3 tools/prove-deal-checklist-transaction-recovery.py --live --timeout-seconds 30 --max-records 3 and python3 tools/prove-calendar-snapshot-strict-instants.py --live --timeout-seconds 30 from the merged checkout. Both must exit zero after proving the release contains that checkout and validating their actual behavior reads.",
-    "runner": "worker-release-smoke.v1",
-    "expected_result": "Both semantic runners exit zero with actual deal, record, calendar and meeting counts. Release smoke attests identity only. Fixture results do not attest production behavior.",
-    "input_class": "Public production release and read-only authenticated deal and calendar reads through the existing local actor wrapper. No induced failures or writes.",
-    "deadline_seconds": 60
-  }],
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "released-proof-runners-accept-production-identity",
+      "predicate": "After deploy, run worker-release-smoke.v1 for release identity. Separately run python3 tools/prove-calendar-snapshot-strict-instants.py --live --timeout-seconds 30 from the merged checkout and python3 tools/prove-lease-comparison-tiny-rate-stability.py --origin https://api.doctorcre.com --call-wrapper ./run.sh --timeout-seconds 30. Both must exit zero after accepting the nested production release identity and validating their actual behavior reads. Calendar also requires source ancestry containing the merged checkout.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Calendar exits zero with actual calendar counts and lease exits zero with finite economic outputs and tiny-rate convergence. Release smoke attests identity only. Fixture results do not attest production behavior.",
+      "input_class": "Public production release and read-only calendar and synthetic lease calculation calls through the existing local actor wrapper. No induced failures or writes.",
+      "deadline_seconds": 60
+    }
+  ],
   "safety": {
     "read_only": true,
     "no_sends": true,

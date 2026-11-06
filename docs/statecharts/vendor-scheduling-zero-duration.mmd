@@ -1,0 +1,39 @@
+stateDiagram-v2
+    [*] --> Authenticating: Read vendor meetings
+    Authenticating --> Reading: Partner or verified local wrapper reads its partner calendar
+    Authenticating --> Refused: Caller has no mailbox authority or selects a sponsor
+    Refused: Refuse before database reads
+    Refused --> [*]
+    Reading --> SourceUnavailable: Calendar read fails or source is missing
+    Reading --> InvalidDurationUnavailable: A displayed meeting has no duration
+    Reading --> SourceUnavailable: Coverage is stale, future, malformed, or truncated
+    Reading --> CoveredReady: Fresh coverage has gaps of at least thirty minutes
+    Reading --> CoveredEmpty: Fresh coverage has no qualifying gaps
+    Reading --> WarningPartial: Known warnings and qualifying gaps
+    SourceUnavailable: Scheduling unavailable, no candidate gaps
+    InvalidDurationUnavailable: Scheduling unavailable, agenda stays visible
+    CoveredReady: Show candidate gaps, confirm in Outlook
+    CoveredEmpty: No candidate gaps
+    WarningPartial: Show candidate gaps with uncertainty
+    SourceUnavailable --> [*]
+    InvalidDurationUnavailable --> [*]
+    CoveredReady --> [*]
+    CoveredEmpty --> [*]
+    WarningPartial --> [*]
+    %% never Offer candidate gaps when a displayed meeting has zero duration.
+    %% never Rewrite a missing or delayed source as an empty calendar.
+    %% The awaited database read settles before projection. No owned background work or teardown.
+
+    [*] --> ProofReading: Observe release and authenticated calendar
+    ProofReading --> ProofInsufficient: Read fails, deadline expires, or response exceeds one MiB
+    ProofReading --> ProofInsufficient: Natural evidence is absent or release changes
+    ProofReading --> ProofPassed: Natural zero-duration row has no candidate gaps
+    ProofReading --> ProofContradiction: Natural zero-duration row still has candidate gaps
+    ProofInsufficient: Insufficient observation, exit 78
+    ProofPassed: Both assertions pass, exit 0
+    ProofContradiction: Contradiction, exit 1
+    ProofInsufficient --> [*]: Kill owned wrapper group and reap leader
+    ProofPassed --> [*]: Kill owned wrapper group and reap leader
+    ProofContradiction --> [*]: Kill owned wrapper group and reap leader
+    %% never Drain wrapper stdout beyond one MiB plus one overflow byte.
+    %% never Let caller input choose a calendar owner or turn an agent into a human.

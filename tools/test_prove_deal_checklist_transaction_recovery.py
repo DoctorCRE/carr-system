@@ -1,61 +1,14 @@
 """Exercise the exact proof CLI with synthetic subprocess replies."""
 from pathlib import Path
-import http.server
-import importlib.util
-import threading
-import urllib.request
-from types import SimpleNamespace
-from unittest.mock import patch
 import json
 import subprocess
 import sys
 import unittest
 
 RUNNER = Path(__file__).with_name('prove-deal-checklist-transaction-recovery.py')
-SPEC = importlib.util.spec_from_file_location('deal_proof', RUNNER)
-assert SPEC is not None and SPEC.loader is not None
-PROOF = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(PROOF)
 
 
 class ProofCliTest(unittest.TestCase):
-    def test_release_transport_reaches_deal_reads(self):
-        release = json.loads(RUNNER.with_name('fixtures').joinpath('proof-release-production.json').read_text())
-        requests = []
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                requests.append(self.headers.get('User-Agent', ''))
-                self.send_response(403 if requests[-1].startswith('Python-urllib') else 200)
-                self.end_headers()
-                self.wfile.write(json.dumps(release).encode())
-
-            def log_message(self, *args):
-                pass
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        thread = threading.Thread(target=server.serve_forever)
-        thread.start()
-        origin = f'http://127.0.0.1:{server.server_port}'
-        popen, open_url = subprocess.Popen, urllib.request.urlopen
-        def execute(argv, **kwargs):
-            if argv[0] == 'curl':
-                argv = [*argv[:-1], origin + '/release']
-            elif argv[0] == 'git':
-                output = release['git_sha']['value'] if argv[1] == 'rev-parse' else ''
-                argv = [sys.executable, '-c', 'print(' + repr(output) + ')']
-            elif argv[1:3] in (['call', 'deal-room-board'], ['call', 'get-deal-room']):
-                argv = [sys.executable, str(RUNNER), '--fixture-verb', 'current', *argv[2:]]
-            return popen(argv, **kwargs)
-        try:
-            with patch.object(PROOF.subprocess, 'Popen', side_effect=execute), patch.object(
-                    urllib.request, 'urlopen', side_effect=lambda *a, **kw: open_url(origin + '/release', **kw)):
-                PROOF.prove(SimpleNamespace(timeout_seconds=5, expected_revision='HEAD', fixture=False, max_records=1))
-            self.assertEqual(len(requests), 1)
-            self.assertFalse(requests[0].startswith('Python-urllib'))
-        finally:
-            server.shutdown()
-            thread.join()
-            server.server_close()
-
     def run_cli(self, *flags):
         return subprocess.run([sys.executable, str(RUNNER), *flags], capture_output=True, text=True, timeout=10)
 

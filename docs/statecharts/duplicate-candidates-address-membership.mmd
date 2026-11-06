@@ -1,0 +1,11 @@
+stateDiagram-v2
+    [*] --> Requested
+    Requested --> Refused: Invalid limit or cursor
+    Requested --> Page: Read current live snapshot
+    Page --> Requested: Continue with next UUID pair
+    Page --> Finished: No further pairs
+    Page --> Requested: Refresh after edit or retirement
+    Requested --> Unavailable: Read fails
+    Unavailable --> [*]
+    Refused --> [*]
+    Finished --> [*]

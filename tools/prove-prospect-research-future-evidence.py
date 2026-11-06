@@ -8,10 +8,11 @@ import re
 import subprocess
 import sys
 import time
-from proof_release import read_release, release_revision
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 MAX_BYTES = 1048576
 
 
@@ -69,9 +70,14 @@ class Proof:
         if self.args.fixture:
             release = json.loads(self.fixture('release'))
         else:
-            release = read_release(self.process, self.remaining)
+            response = read_http('https://api.doctorcre.com/release', timeout=self.remaining(), max_bytes=MAX_BYTES)
+            require(response.status == 200 and len(response.body) <= MAX_BYTES, 'release_unavailable')
+            release = json.loads(response.body)
         self.remaining()
-        sha = release_revision(release)
+        require(isinstance(release, dict) and release.get('ok') is True
+                and release.get('env', {}).get('value') == 'production', 'release_contract')
+        sha = release.get('git_sha', {}).get('value')
+        require(isinstance(sha, str) and re.fullmatch('[0-9a-f]{40}', sha), 'release_revision')
         merge = self.args.merge_sha or self.process(['git', 'rev-parse', 'HEAD']).strip()
         require(re.fullmatch('[0-9a-f]{40}', merge), 'merge_revision')
         self.process(['git', 'merge-base', '--is-ancestor', merge, sha])

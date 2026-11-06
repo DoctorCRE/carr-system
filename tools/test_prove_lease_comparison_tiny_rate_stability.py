@@ -1,6 +1,7 @@
 """Test the declared CLI with synthetic HTTP and executable wrapper fixtures."""
 import contextlib
 import http.server
+from proof_release_fixture import ReleaseFixtureHandler
 import importlib.util
 import json
 from pathlib import Path
@@ -42,13 +43,13 @@ class ProofTest(unittest.TestCase):
     @contextlib.contextmanager
     def fixture(self, release=None, status=200):
         requests = []
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append(self.path)
                 self.send_response(status)
                 self.end_headers()
                 self.wfile.write(json.dumps(release if release is not None else
-                                            dict(ok=True, env=dict(value='production'), git_sha=dict(value='a' * 40))).encode())
+                                            json.loads(RUNNER.with_name('fixtures').joinpath('proof-release-production.json').read_text())).encode())
 
             def log_message(self, *args):
                 pass
@@ -109,7 +110,8 @@ print(json.dumps(payload[str(data['financing']['annual_interest_rate'])]))
                     self.assertEqual(call[side], dict(label=f'{years} Year Lease', term_years=years,
                         base_rent_per_sf=[20]*5, operating_expenses_per_sf=5, free_rent_months=0,
                         free_opex_months=0, buildout_cost_per_sf=100, landlord_ti_per_sf=0))
-            self.assertEqual(json.loads(result.stdout)['release']['git_sha']['value'], 'a'*40)
+            self.assertEqual(json.loads(result.stdout)['release']['git_sha']['value'],
+                             'd10f593f426a290382fec1b65934a7a02694e033')
 
     def test_contradictions(self):
         for mode in ('null', 'infinity', 'wrong', 'ordinary'):
@@ -127,7 +129,10 @@ print(json.dumps(payload[str(data['financing']['annual_interest_rate'])]))
                 self.assertEqual(len(calls), 1)
 
     def test_release_failure_prevents_calls(self):
-        for release, status in [({}, 200), ({'git_sha':'short'}, 200), ({}, 503), ({}, 302)]:
+        for release, status in [({}, 200), ({'git_sha':'short'}, 200),
+                                ({'git_sha': 'a' * 40}, 200),
+                                ({'ok': True, 'env': {'value': 'staging'}, 'git_sha': {'value': 'a' * 40}}, 200),
+                                ({}, 503), ({}, 302)]:
             with self.subTest(status=status), self.fixture(release, status) as (directory, origin, requests):
                 result, calls = self.run_cli(directory, origin)
                 self.assertEqual(result.returncode, 78, result.stdout)
@@ -147,8 +152,6 @@ time.sleep(60)
             processes = []
 
             def start_ready_wrapper(*args, **kwargs):
-                if args[0][0] == 'curl':
-                    return popen(*args, **kwargs)
                 process = popen(*args, **kwargs)
                 processes.append(process)
                 self.addCleanup(process.stdout.close)
@@ -159,7 +162,7 @@ time.sleep(60)
                 self.assertEqual(process.stdout.readline(), 'ready\n')
                 return process
 
-            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 0, 0, 0, 29.99]))
+            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=[0, 0, 29.99]))
             with mock.patch.object(proof, 'time', clock), \
                     mock.patch.object(proof.signal, 'setitimer'), \
                     mock.patch.object(proof.subprocess, 'Popen', side_effect=start_ready_wrapper):

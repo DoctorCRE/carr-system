@@ -9,13 +9,15 @@ import json
 import os
 import signal
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
-from proof_release import read_release, release_revision
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 STATES = {'current', 'unavailable', 'source_changed', 'deal_type_unknown'}
 SCENARIOS = ('current', 'unavailable', 'source_changed', 'auth', 'empty', 'invalid', 'aborted', 'wrong-id', 'wrong-release', 'dishonest', 'bad-checklist', 'timeout')
 DEAL_ID = '11111111-1111-4111-8111-111111111111'
@@ -89,8 +91,14 @@ def prove(args):
         if args.scenario == 'wrong-release':
             release['git_sha']['value'] = 'invalid'
     else:
-        release = read_release(process, remaining)
-    revision = release_revision(release)
+        response = read_http('https://api.doctorcre.com/release', timeout=remaining(), max_bytes=1048576)
+        require(response.status == 200, 'release_unavailable')
+        release = json.loads(response.body)
+        remaining()
+    require(isinstance(release, dict) and release.get('ok') is True and
+            release.get('env', {}).get('value') == 'production', 'release_invalid')
+    revision = release.get('git_sha', {}).get('value', '')
+    require(isinstance(revision, str) and re.fullmatch('[0-9a-f]{40}', revision), 'release_invalid')
     process(['git', 'merge-base', '--is-ancestor', expected, revision])
     board = call('deal-room-board', {'workspace': 'all'})
     require(board.get('schema_version') == 'local-deals-board.v2' and isinstance(board.get('deals'), list), 'board_invalid')

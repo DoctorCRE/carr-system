@@ -5,13 +5,13 @@ export async function findExactPostCallAction(c, candidate, ownerId) {
     `select id,item_bullets,source,description,owner_id,status,due_on::text as due_on from (
            select id,item_bullets,description,owner_id,status,due_on,'next_action' as source,created_at as ordered_at from next_action
              where subject_type='deal' and subject_id=$1 and status='open' and owner_id=$3
-               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
+               and lower(btrim(regexp_replace(description, $4, ' ', 'g')))=$2
            union all
            select id,item_bullets,description,owner_id,status,due_on,'capture_post_call_action' as source,accepted_at as ordered_at from capture_post_call_action
              where deal_id=$1 and status='open' and owner_id=$3 and item_title is not null
-               and lower(regexp_replace(btrim(description), '\\s+', ' ', 'g'))=$2
+               and lower(btrim(regexp_replace(description, $4, ' ', 'g')))=$2
          ) actions order by ordered_at,id limit 1 /* capture:followup-existing */`,
-        [candidate.deal_id, stepKey, ownerId])).rows[0] || null;
+        [candidate.deal_id, stepKey, ownerId, '[\u0009-\u000d \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+'])).rows[0] || null;
 }
 
 const actionSnapshot = (row, owner = row.owner) => ({

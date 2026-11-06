@@ -7,8 +7,12 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
-from proof_release import read_release
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read as read_http
+from proof_release import release_revision
 
 
 class Unavailable(Exception):
@@ -57,7 +61,6 @@ def assert_finite(value, key):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise AssertionError(f"non-finite or missing economic output: {key}")
 
-
 def observe(origin, wrapper, timeout):
     deadline = time.monotonic() + timeout
     release = None
@@ -74,8 +77,11 @@ def observe(origin, wrapper, timeout):
     signal.signal(signal.SIGALRM, expired)
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
-        release = read_release(lambda argv: subprocess.check_output(
-            argv, timeout=remaining(), stderr=subprocess.DEVNULL).decode(), remaining, origin)
+        response = read_http(origin.rstrip("/") + "/release", timeout=remaining(), max_bytes=65536)
+        if response.status != 200:
+            raise OSError('release_unavailable')
+        release = json.loads(response.body)
+        release_revision(release)
         results = []
         for rate in (1e-20, 0, 0.06):
             process = subprocess.Popen(
@@ -104,7 +110,7 @@ def observe(origin, wrapper, timeout):
                                    "zero and ordinary controls match"])
     except AssertionError as error:
         return 1, dict(status="contradiction", release=release, reason=str(error))
-    except (Unavailable, OSError, ValueError, subprocess.SubprocessError) as error:
+    except (Unavailable, OSError, ValueError, subprocess.TimeoutExpired) as error:
         return 78, dict(status="unavailable", release=release, reason=type(error).__name__)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
