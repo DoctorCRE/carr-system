@@ -348,9 +348,26 @@ CORE index. Apply the native K cards in AGENTS.md. Before acting, read the linke
 Approval is GitHub required review by the CARR review App
 (`doctorcre-carr-review[bot]`), separate from required source CI. GitHub dismisses
 stale approvals after pushes and requires approval of the latest push. The
-coordinator submits the independent reviewer's verdict as a native App review.
+coordinator submits the independent reviewer's verdict as a native App review
+through `ops/review-submit.py` (also reached by `./run.sh review-pr` and
+`bin/review-pr`). That helper remains supported. Do not import the retired
+`ops/review-gate.py` or invoke its deleted workflow from delivery automation.
 
 The retired custom approval policy in generated rule `7bb0a3ed` is superseded by
 Joe's removal instruction (`27810f4f`). Its size exemptions and Actions-variable
 checks no longer apply. Card admission and PR-title skip-CI checks are not CI
 requirements; do not recreate them. Historical rule snapshots remain provenance.
+
+Claude Code CARR configuration is project-scoped. `.mcp.json` keeps the server
+name `carr`; `.claude/settings.json` pre-approves it and owns CARR hooks. Hooks
+resolve through `CLAUDE_PROJECT_DIR` in each checkout, including T3 worktrees.
+User settings retain personal MCP servers and preferences. After merge, use
+`python3 ops/scope-agent-config.py` to preview removal of legacy user copies.
+
+Codex CARR hooks load from the common checkout's `.codex/hooks.json`, including
+linked worktrees. The installer targets this layer; integrity checks it against
+this checkout's contract. Commands use `git rev-parse --show-toplevel` from the
+session cwd. Review and trust project hooks in Codex `/hooks`; changed hooks
+need trust again. User-wide hooks are additive. After merge,
+`python3 ops/scope-agent-config.py` previews CARR hook removal from both clients'
+user files. `--apply` saves private backups and preserves unrelated registrations.

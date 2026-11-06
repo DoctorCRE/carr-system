@@ -6,9 +6,12 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import sys
 import time
 import urllib.parse
-import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read as read_http
 
 
 class Unavailable(Exception):
@@ -17,11 +20,6 @@ class Unavailable(Exception):
 
 class Contradiction(Exception):
     pass
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args):
-        raise Unavailable('release_redirect')
 
 
 def observe(origin, wrapper, seconds):
@@ -38,9 +36,10 @@ def observe(origin, wrapper, seconds):
         return value
 
     def release():
-        opener = urllib.request.build_opener(NoRedirect())
-        with opener.open(origin.rstrip('/') + '/release', timeout=remaining()) as response:
-            payload = json.loads(response.read(1048577))
+        response = read_http(origin.rstrip('/') + '/release', timeout=remaining(), max_bytes=1048576)
+        if response.status != 200:
+            raise OSError('release_unavailable')
+        payload = json.loads(response.body)
         value = payload.get('git_sha', {}).get('value')
         if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{40}', value):
             raise Unavailable('release_identity_unavailable')

@@ -17,22 +17,25 @@ def workflow(filename="ci.yml"):
         str(ROOT / '.github/workflows' / filename)], cwd=ROOT / 'mcp-server', text=True))
 
 
-def expression(value, github, cancelled=False, matrix=None):
+def expression(value, github, cancelled=False, matrix=None, selected=None):
     # Evaluate the workflow's actual expression with GitHub's missing-property
     # semantics; no reimplementation of the intended event predicate.
     if not isinstance(value, str):
         return value
     source = '''const get=(o,p)=>p.split('.').reduce((v,k)=>v&&v[k],o)||'';
     const github=JSON.parse(process.argv[1]);const always=()=>true;const cancelled=()=>JSON.parse(process.argv[3]);const fromJSON=JSON.parse;
-    const needs={scope:{outputs:{full:'true'}}};
+    const needs={scope:{outputs:{full:'true'}},select:{outputs:JSON.parse(process.argv[5])}};
     const matrix=JSON.parse(process.argv[4]);
     const format=(template,...args)=>template.replace(/\\{(\\d+)\\}/g,(_,i)=>args[Number(i)]);
     const e=process.argv[2].replace(/github(?:\\.[a-zA-Z_]+)+/g,p=>JSON.stringify(get({github},p)));
     console.log(JSON.stringify(eval(e)));'''
     import re
+    from ci_scope import PR_JOBS
+    selected = selected if selected is not None else {'full': 'false', **{job: 'true' for job in PR_JOBS}}
     def evaluate(match):
         return json.loads(subprocess.check_output(['node', '-e', source,
-            json.dumps(github), match.group(1), json.dumps(cancelled), json.dumps(matrix or {})], text=True))
+            json.dumps(github), match.group(1), json.dumps(cancelled), json.dumps(matrix or {}),
+            json.dumps(selected)], text=True))
     if value.startswith('${{') and value.endswith('}}') and value.count('${{') == 1:
         return evaluate(re.fullmatch(r'\$\{\{(.*?)\}\}', value))
     return re.sub(r'\$\{\{(.*?)\}\}', lambda m: str(evaluate(m)), value)
@@ -185,11 +188,21 @@ class Controls(unittest.TestCase):
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
-        self.assertEqual(set(wf['jobs']['checks']['needs']), {'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'})
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'select', 'lint', 'unit', 'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
         self.assertEqual(verdict['env']['CI_NEEDS'], '${{ toJSON(needs) }}')
         self.assertNotIn('GH_TOKEN', verdict['env'])
+
+    def test_documentation_and_full_fallback_schedule_their_selected_jobs(self):
+        jobs = workflow()['jobs']
+        event = {'event_name': 'pull_request', 'event': {'pull_request': {'draft': False}}}
+        for full in (False, True):
+            selected = {'full': str(full).lower(), 'lint': str(not full).lower(), 'fast': 'false'}
+            self.assertEqual(bool(expression(jobs['lint']['if'], event, selected=selected)), not full)
+            self.assertEqual(bool(expression(jobs['classes']['if'], event, selected=selected)), full)
+            self.assertFalse(expression(jobs['fast']['if'], event, selected=selected))
+            self.assertTrue(expression(jobs['checks']['if'], event, selected=selected))
 
 if __name__=='__main__': unittest.main()

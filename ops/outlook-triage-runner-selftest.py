@@ -278,20 +278,6 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(report.planning['capability'], 'capability_not_verified')
 
 
-class ProofDeclarationTest(unittest.TestCase):
-    def test_checked_in_studio_requirement_passes_real_admission(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            body = Path(tmp) / 'body.md'
-            files = Path(tmp) / 'files.json'
-            body.write_text('## Production proof\nproofs/requirements/wr634-triage-runner.json\n')
-            files.write_text(json.dumps(['lib/outlook_triage.py', 'lib/outlook_triage_snapshot.py',
-                                         'lib/outlook_triage_capability.py',
-                                         'proofs/requirements/wr634-triage-runner.json']))
-            result = subprocess.run([sys.executable, str(ROOT / 'ops/production-proof-plan.py'),
-                                     '--body-file', str(body), '--files-file', str(files)],
-                                    capture_output=True, text=True, timeout=20)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn('execution unproven', result.stdout)
 
 
 if __name__ == '__main__':

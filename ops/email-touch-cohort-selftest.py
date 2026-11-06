@@ -42,16 +42,16 @@ class BoundaryTest(unittest.TestCase):
         ):
             with self.subTest(payload_type=type(payload).__name__):
                 response = MagicMock()
-                response.__enter__.return_value.read.return_value = json.dumps(payload).encode()
-                with patch.object(module, 'urlopen', return_value=response) as transport:
+                response.status = 200
+                response.body = json.dumps(payload).encode()
+                with patch.object(module, 'read_http', return_value=response) as transport:
                     if isinstance(payload, dict) and payload.get('env', {}).get('value') == 'production':
                         self.assertEqual(module.live_release(), 'a'*40)
                     else:
                         with self.assertRaisesRegex(module.Refused, 'release_unavailable'):
                             module.live_release()
-                    transport.assert_called_once_with('https://api.doctorcre.com/release', timeout=5)
-                    response.__enter__.return_value.read.assert_called_once_with(65537)
-        with patch.object(module, 'urlopen', side_effect=TimeoutError) as transport:
+                    transport.assert_called_once_with('https://api.doctorcre.com/release', timeout=5, max_bytes=65536)
+        with patch.object(module, 'read_http', side_effect=TimeoutError) as transport:
             with self.assertRaisesRegex(module.Refused, 'release_unavailable'):
                 module.live_release()
             self.assertEqual(transport.call_count, 1)

@@ -295,7 +295,7 @@ def case_secondary_converges(tmp):
         "launchd job reloaded through launchctl":
             "load" in open(os.path.join(tmp, "launchctl.log")).read(),
         "Claude settings rendered":
-            os.path.isfile(os.path.join(home, ".claude", "settings.json")),
+            os.path.isfile(os.path.join(repo, ".claude", "settings.json")),
         "managed policies stay inside the fixture HOME":
             all(Path(home, name).is_file() for name in
                 ("managed-claude.json",)),
@@ -309,7 +309,7 @@ def case_secondary_converges(tmp):
 def case_failed_install_names_stale_hooks(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell",
                                       behind=False)
-    settings = Path(home, ".claude/settings.json")
+    settings = Path(repo, ".claude/settings.json")
     settings.parent.mkdir(parents=True, exist_ok=True)
     missing = [Path(repo, "hooks/write-effect-check.py"),
                Path(repo, "hooks/deleted-safety-check.py")]
@@ -348,7 +348,7 @@ def case_failed_install_without_stale_hooks(tmp):
 def case_success_removes_stale_hooks(tmp):
     repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell",
                                       behind=False)
-    settings = Path(home, ".claude/settings.json")
+    settings = Path(repo, ".claude/settings.json")
     settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{
         "command": f"python3 {repo}/hooks/write-effect-check.py"

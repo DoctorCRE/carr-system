@@ -57,7 +57,8 @@
         "fill-engine/**",
         "generators/**",
         "templates/**",
-        "video/**"
+        "video/**",
+        ".mcp.json"
       ],
       "targets": [
         "studio"
