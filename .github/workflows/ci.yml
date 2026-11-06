@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       options: --init
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b5e93fd6ef588fab8877480869f9ae59878e578f699dc94d8174623ce23bd7ba
     defaults:
       run:
         shell: bash
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       options: --init
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b5e93fd6ef588fab8877480869f9ae59878e578f699dc94d8174623ce23bd7ba
     defaults:
       run:
         shell: bash
@@ -245,7 +245,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       options: --init
-      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2' || '' }}
+      image: ${{ (matrix.classes == 'unit' || matrix.classes == 'gates' || matrix.classes == 'migration') && 'ghcr.io/jbookout/software-factory/ci-postgres@sha256:b5e93fd6ef588fab8877480869f9ae59878e578f699dc94d8174623ce23bd7ba' || '' }}
     defaults:
       run:
         shell: bash
@@ -437,7 +437,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       options: --init
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b73069772460b2a83dc1da3fceeee3799d72545d62d2b67f6a5338b2a892f0c2
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b5e93fd6ef588fab8877480869f9ae59878e578f699dc94d8174623ce23bd7ba
     defaults:
       run:
         shell: bash
