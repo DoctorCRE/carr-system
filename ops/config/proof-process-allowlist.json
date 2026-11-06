@@ -96,5 +96,11 @@
       "declared --call-wrapper call calendar-meeting-prep {}",
       "node --experimental-vm-modules --input-type=module -e SYNTHETIC with full-release-SHA calendar-meeting-prep source and inert imports"
     ]
+  },
+  "tools/prove-email-next-step-closed-date.py": {
+    "sha256": "d27da0ae34a094d9a21b9504b51b2880a1019f4d3f1a03a3c047df036df94ba7",
+    "commands": [
+      "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
+    ]
   }
 }

@@ -52,7 +52,7 @@ def capability(name):
     if belongs(name, NETWORK_MODULES) or (
             parts[0] == 'asyncio' and any(part in ASYNC_NETWORK for part in parts[1:])):
         return 'network'
-    if belongs(name, PROGRAM_MODULES) or (
+    if belongs(name, PROGRAM_MODULES | {'lib.record_call'}) or (
             parts[0] in OS_MODULES and len(parts) > 1 and
             (parts[1] in OS_PROCESS or parts[1].startswith(('exec', 'spawn')) or parts[1] == '*')):
         return 'program'
