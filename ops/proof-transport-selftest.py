@@ -87,6 +87,19 @@ class ProofTransportTest(unittest.TestCase):
                     self.assertEqual(guard.violations(source, path), [])
                     self.assertTrue(guard.violations(source + '\n# changed', path))
 
+    def test_record_call_requires_pinned_process_declaration(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        import hashlib
+        source = 'from lib.record_call import call_verb, _run_process'
+        path = 'tools/prove-synthetic.py'
+        self.assertTrue(guard.violations(source, path))
+        with patch.dict(guard.PROCESSES, {path: {
+            'sha256': hashlib.sha256(source.encode()).hexdigest(),
+            'commands': ['declared wrapper call read-only verbs'],
+        }}):
+            self.assertEqual(guard.violations(source, path), [])
+            self.assertTrue(guard.violations(source + '\n# changed', path))
+
     def test_socket_url_and_dynamic_classes_cannot_be_process_declared(self):
         guard = load(ROOT / 'ops/proof-transport-check.py')
         import hashlib
