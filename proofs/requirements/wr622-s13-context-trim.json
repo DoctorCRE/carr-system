@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "WR622-S13-J3-context-trim",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "released-source-and-installed-hooks",
+      "predicate": "Read the normal Worker release identity and verify its source contains the merged context-trim change. Release identity alone does not prove local hook installation. Separately execute the installed bootstrap capture and repeated PreToolUse scenario, retaining the saved file hash and compact reference before claiming live behavior.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Release identity contains the merged source. Installed hook behavior remains unproven until a large capture preserves all bytes and a complete repeated PreToolUse emits its reference while fresh rules still arrive.",
+      "input_class": "normal read-only release identity plus synthetic installed-hook inputs; no business records or sends",
+      "deadline_seconds": 60
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1,
+    "max_runtime_seconds": 60,
+    "max_artifact_bytes": 1048576
+  }
+}
