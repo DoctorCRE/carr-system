@@ -797,6 +797,7 @@ test("PostgreSQL deliverable lifecycle and guarded byte transport", async (t) =>
               "-c",
               `
 import importlib.util, io, json, base64, sys
+from functools import partial
 spec = importlib.util.spec_from_file_location('proof', sys.argv[4])
 proof = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(proof)
@@ -808,6 +809,7 @@ seen = []
 class Opener:
     def open(self, request, timeout):
         seen.append(request.full_url)
+        assert request.get_header('User-agent') == 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
         if len(seen) == 1:
             assert request.full_url == 'https://api.doctorcre.com/release'
             assert request.get_header('Cookie') is None
@@ -820,9 +822,10 @@ class Opener:
             key = 'revoked' if request.get_header('Cookie') == 'synthetic-revoked' else 'download'
         data = base64.b64decode(fixture[key]['base64']) if key == 'download' else json.dumps(fixture[key]).encode()
         response = io.BytesIO(data)
+        response.headers = {}
         response.status = fixture[key]['status'] if key == 'revoked' else 200
         return response
-proof.urllib.request.build_opener = lambda *args: Opener()
+proof.read_http = partial(proof.read_http, opener=Opener().open)
 directory = sys.argv[3]
 sys.argv = ['proof', '--receipt',sys.argv[1], '--sha','1'*40,'--active-cookie-file',directory+'/active-cookie','--revoked-cookie-file',directory+'/revoked-cookie']
 assert proof.main() == 0
