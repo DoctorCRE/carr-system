@@ -1,5 +1,6 @@
 """Exercise the recorded comps proof CLI with synthetic records and release sources."""
 import contextlib
+import http.client
 import http.server
 import json
 from pathlib import Path
@@ -24,15 +25,15 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 
 
 class ProofTest(unittest.TestCase):
-    def invoke(self, mode='pass', timeout_seconds=30):
+    def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False):
         requests = []
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
-                requests.append(self.path)
                 if (self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
                         or self.headers.get('x-doctorcre-release-reader') != '1'):
                     self.send_error(403)
                     return
+                requests.append(self.path)
                 if mode == 'redirect':
                     self.send_response(302)
                     self.send_header('Location', '/forbidden')
@@ -128,6 +129,14 @@ console.log(JSON.stringify({responses,release}));
                     + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'child.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
+            if denied_reads:
+                for path in ('/', '/favicon.ico'):
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                    with contextlib.closing(connection):
+                        connection.request('GET', path)
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 403)
+                        response.read()
             harness = '''import runpy,sys,urllib.request
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
@@ -154,12 +163,21 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                 self.assertFalse((folder / 'escaped').exists(),
                                  'wrapper descendant performed work after proof exit')
             self.assertLessEqual(len(requests), 4, requests)
+            if mode == 'pass':
+                self.assertEqual(len(requests), 4, requests)
             return result
 
     def test_pass(self):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['natural_read'], 'passed')
+
+    def test_denied_reads_do_not_consume_proof_budget(self):
+        for mode, timeout in (('pass', 30), ('timeout', 2)):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode, timeout_seconds=timeout, denied_reads=True)
+                self.assertEqual(result.returncode, 0 if mode == 'pass' else 78,
+                                 result.stdout + result.stderr)
 
     def test_http_refusals(self):
         for mode in ('redirect', 'http_error', 'oversized'):
