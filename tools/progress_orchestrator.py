@@ -1,11 +1,15 @@
 """Display-only engineering facts for the authenticated orchestrator board."""
 from datetime import datetime, timezone
 import re
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.repository_identity import canonical_repository, repository_names
 
 SCHEMA = 'doctorcre-orchestrator/v1'
 STATES = ('waiting', 'working', 'review', 'fixing', 'merging', 'merged', 'live', 'blocked')
 PRIVATE = re.compile(r'@|(?:/Users/|/home/|/private/|/tmp/)|(?:token|password|secret|authorization)\s*[:=]|[a-f0-9]{32,}', re.I)
-REPO = re.compile(r'^(DoctorCRE/carr-system|jbookout/(doctorcre-app|software-factory))$')
+REPO = re.compile(r'^(?:' + '|'.join(re.escape(repo) for repo in repository_names(aliases=True)) + ')$', re.I)
 
 
 def text(value, fallback='Not recorded', limit=220):
@@ -21,7 +25,7 @@ def links(card):
     result = []
     for ref in refs:
         if isinstance(ref, dict) and REPO.fullmatch(str(ref.get('repo', ''))) and isinstance(ref.get('number'), int) and ref['number'] > 0:
-            href = f"https://github.com/{ref['repo']}/pull/{ref['number']}"
+            href = f"https://github.com/{canonical_repository(ref['repo'])}/pull/{ref['number']}"
             if href not in result:
                 result.append(href)
     return result
@@ -63,8 +67,8 @@ def project(state, *, portfolio=None, observed_at=None):
             'changed_at': task.get('updated_at'), 'prs': refs,
             'delivery_evidence': text(task.get('evidence'), '', 440) if state_of(task) == 'live' else '',
             'origin': 'board', 'terminal': False,
-            'area': {'DoctorCRE/carr-system': 'Shared backend', 'jbookout/doctorcre-app': 'DoctorCRE app',
-                     'jbookout/software-factory': 'Development tools'}.get(task.get('repo'), 'Shared portfolio')})
+            'area': {'DoctorCRE/carr-system': 'Shared backend', 'DoctorCRE/doctorcre-app': 'DoctorCRE app',
+                     'jbookout/software-factory': 'Development tools'}.get(canonical_repository(task.get('repo')), 'Shared portfolio')})
     history = sorted((c for c in cards if c['state'] == 'live' or c['terminal']), key=lambda c: c['changed_at'] or '', reverse=True)
     active = [c for c in cards if c['state'] != 'live' and not c['terminal']]
     return {'schema': SCHEMA, 'observed_at': at, 'cards': active, 'history': history[:20],

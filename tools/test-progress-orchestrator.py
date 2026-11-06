@@ -53,7 +53,7 @@ class OrchestratorTests(unittest.TestCase):
         task = {'title': 'Deal room search', 'stage': 'review', 'repo': 'jbookout/doctorcre-app', 'pr': 12}
         result = project({'tasks': {'local': task}}, portfolio={'tasks': {'github': task}})
         self.assertEqual(len(result['cards']), 1)
-        self.assertEqual(result['cards'][0]['prs'], ['https://github.com/jbookout/doctorcre-app/pull/12'])
+        self.assertEqual(result['cards'][0]['prs'], ['https://github.com/DoctorCRE/doctorcre-app/pull/12'])
 
 
 
