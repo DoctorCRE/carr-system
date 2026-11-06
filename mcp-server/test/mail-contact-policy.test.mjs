@@ -14,7 +14,7 @@ test('suppression read returns only exact normalized recipient decisions', async
 });
 
 test('invalid address sets refuse before reading records', async () => {
-  for (const emails of [[], ['bad'], ['a@example.test,b@example.test'], Array(51).fill('a@example.test'), ['Name <a@example.test>'], ['a@b.éé'], [null], ['a@example.test;b@example.test']]) {
+  for (const emails of [[], ['bad'], ['a@example.test,b@example.test'], Array(51).fill('a@example.test'), ['Name <a@example.test>'], ['a@b.éé'], ['用户@公司.中国'], [null], ['a@example.test;b@example.test']]) {
     await assert.rejects(TOOLS['mail-contact-policy'].handler({query: () => assert.fail('query')}, {}, {emails}),
       error => error.payload?.error === 'invalid_mail_recipients' || error.error === 'invalid_mail_recipients'
         || String(error).includes('invalid_mail_recipients'));
@@ -173,6 +173,34 @@ test('contact discovery returns complete policy addresses without inventing suff
   }
 });
 
+test('stored Unicode discovery preserves role inbox classification through Outlook Matcher', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const result = await TOOLS['email-match-contacts'].handler({query: async () => ({rows: [
+    {ref: 'L-0206', name: 'Synthetic', email: 'info@example.test; 用户@公司.中国; élodie@médical.éé'},
+  ]})}, {}, {});
+  assert.deepEqual(result.contacts.map(({address, exact}) => ({address, exact})), [
+    {address: 'info@example.test', exact: false},
+    {address: '用户@公司.中国', exact: true},
+    {address: 'élodie@médical.éé', exact: true},
+  ]);
+  const pair = await TOOLS['email-match-contacts'].handler({query: async () => ({rows: [
+    {ref: 'L-0206', name: 'Synthetic', email: 'info@example.test; 用户@公司.中国'},
+  ]})}, {}, {});
+  assert.deepEqual(pair.contacts.map(({address, exact}) => ({address, exact})), [
+    {address: 'info@example.test', exact: false}, {address: '用户@公司.中国', exact: true},
+  ]);
+  execFileSync('python3', ['-c', `
+import json, sys
+from lib.outlook_intake import Contact, Matcher
+contacts = json.load(sys.stdin)
+m = Matcher([Contact(c['address'], c['ref'], c['name'], c['exact']) for c in contacts], 'internal.test')
+assert 'info@example.test' in m.shared
+assert 'info@example.test' not in m.by_email
+assert m.by_email['用户@公司.中国'] == {'L-0206'}
+assert m.by_email['élodie@médical.éé'] == {'L-0206'}
+`], {input: JSON.stringify(result.contacts), cwd: new URL('../..', import.meta.url), encoding: 'utf8'});
+});
+
 test('proof CLI consumes registered read replies and refuses contradictions and unavailable evidence', async () => {
   const { mkdtemp, readFile, writeFile, chmod, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
@@ -200,19 +228,32 @@ test('proof CLI consumes registered read replies and refuses contradictions and 
   const emails = contacts.contacts.map(c => c.address).sort();
   const blocked = await invoke('mail-contact-policy', {emails}, [{email: party.email}]);
   const unblocked = await invoke('mail-contact-policy', {emails}, []);
+  const unicodeContacts = await invoke('email-match-contacts', {}, rows.map(row => ({...row, email: 'info@example.test; 用户@公司.中国'})));
   const fixtures = {'email-match-contacts': contacts, 'prospect-research': research, 'mail-contact-policy': blocked};
-  let releaseReads = 0, drift = false;
+  let releaseReads = 0, mode;
   const server = createServer((request, response) => {
     assert.equal(request.url, '/release');
     releaseReads++;
+    if (request.headers['user-agent'] !== 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)') {
+      response.writeHead(403).end();
+      return;
+    }
+    if (mode === 'release-redirect') {
+      response.writeHead(302, {location: '/unexpected'}).end();
+      return;
+    }
+    if (mode === 'release-size') { response.end('x'.repeat(1048577)); return; }
+    if (mode === 'release-identity') { response.end('{}'); return; }
+    if (mode === 'release-timeout') { return; }
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({git_sha: {value: (drift && releaseReads > 1 ? 'b' : 'a').repeat(40)}}));
+    response.end(JSON.stringify({git_sha: {value: (mode === 'release-drift' && releaseReads > 1 ? 'b' : 'a').repeat(40)}}));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
     await writeFile(wrapper, `#!/usr/bin/env python3
-import json, pathlib, sys, time
+import json, os, pathlib, sys, time
+pathlib.Path(__file__).with_name("pid").write_text(str(os.getpid()))
 assert sys.argv[1] == 'call'
 data = json.loads(pathlib.Path(__file__).with_name('replies.json').read_text())
 verb, args = sys.argv[2], json.loads(sys.argv[3])
@@ -221,11 +262,13 @@ if data.get('timeout'): time.sleep(2)
 print(json.dumps(data[verb]))
 `);
     await chmod(wrapper, 0o700);
-    for (const [mode, code] of [['pass', 0], ['contradiction', 1], ['unavailable', 78],
-      ['timeout', 78], ['row-limit', 78], ['release-drift', 78], ['single-address', 78], ['wrong-party', 78], ['discovery-suffix', 78]]) {
+    for (const [scenario, code] of [['pass', 0], ['contradiction', 1], ['unavailable', 78],
+      ['timeout', 78], ['row-limit', 78], ['release-drift', 78], ['single-address', 78], ['wrong-party', 78], ['discovery-suffix', 78],
+      ['release-redirect', 78], ['release-size', 78], ['release-identity', 78], ['release-timeout', 78], ['unicode-evidence', 78]]) {
       releaseReads = 0;
-      drift = mode === 'release-drift';
+      mode = scenario;
       const replies = structuredClone(fixtures);
+      if (mode === 'unicode-evidence') replies['email-match-contacts'] = unicodeContacts;
       if (mode === 'contradiction') replies['mail-contact-policy'] = unblocked;
       if (mode === 'unavailable') replies['prospect-research'].contact_state = 'active';
       if (mode === 'wrong-party') replies['prospect-research'].id = 'bbbbbbbb-0000-4000-8000-000000000001';
@@ -240,7 +283,7 @@ print(json.dumps(data[verb]))
       await writeFile(path.join(directory, 'replies.json'), JSON.stringify(replies));
       const result = await new Promise((resolve, reject) => {
         const child = spawn('python3', ['tools/prove-mail-policy-multiple-recorded-addresses.py',
-          '--origin', origin, '--call-wrapper', wrapper, '--timeout-seconds', mode === 'timeout' ? '0.1' : '30'], {cwd: root});
+          '--origin', origin, '--call-wrapper', wrapper, '--timeout-seconds', ['timeout', 'release-timeout'].includes(mode) ? '0.5' : '30'], {cwd: root});
         let stdout = '', stderr = '';
         child.stdout.on('data', data => stdout += data);
         child.stderr.on('data', data => stderr += data);
@@ -249,6 +292,22 @@ print(json.dumps(data[verb]))
       });
       assert.equal(result.status, code, `${mode}: ${result.stderr} ${result.stdout}`);
       const receipt = JSON.parse(result.stdout);
+      if (mode.startsWith('release-') && !['release-drift', 'release-timeout'].includes(mode)) {
+        assert.equal(receipt.wrapper_calls, 0, mode);
+        assert.equal(receipt.reason, {
+          'release-redirect': 'release_redirect', 'release-size': 'release_size_limit',
+          'release-identity': 'release_identity_unavailable',
+        }[mode]);
+      }
+      if (mode === 'unicode-evidence') {
+        assert.equal(receipt.wrapper_calls, 1);
+        assert.equal(receipt.reason, 'stored_addresses_outside_recipient_contract');
+      }
+      if (mode === 'release-timeout') assert.ok(['deadline_exhausted', 'source_unavailable'].includes(receipt.reason));
+      if (mode === 'timeout') {
+        const pid = Number(await readFile(path.join(directory, 'pid'), 'utf8'));
+        assert.throws(() => process.kill(pid, 0), {code: 'ESRCH'}, 'owned stalled wrapper was reaped');
+      }
       if (mode === 'discovery-suffix') {
         assert.equal(receipt.reason, 'snapshot_address_evidence_unavailable');
         assert.equal(receipt.wrapper_calls, 1);
@@ -263,6 +322,7 @@ print(json.dumps(data[verb]))
       }
     }
   } finally {
+    server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     await rm(directory, {recursive: true, force: true});
   }

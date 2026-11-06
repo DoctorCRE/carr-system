@@ -9,7 +9,7 @@ import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
-  .filter(address => mailRecipientAddress.test(address)).map(address => address.toLowerCase()))];
+  .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
 const toolFamilies = [censusInventoryFamily, practiceOriginationFamily, scheduleBoardFamily, vendorMeetingsFamily, subjectWatchesFamily];
 import { homeWaitingTools } from "./home-waiting.ts";
 import { peopleDirectoryTools } from "./people-directory.ts";
