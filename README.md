@@ -37,7 +37,7 @@ The Drive cutoff fired 2026-08-19. The generated Drive `.md` files were moved to
 ## Access model (Joe's decision, 2026-07-24)
 
 - Joe: owner, merges everything. Joe is the code-savvy partner; every fix lands through him.
-- Dell's side: authenticated access to the private repo is live. Dell works on a named branch, pushes that branch, and opens a PR; Joe reviews and merges. The installed pre-push hook refuses Dell's direct pushes to `main` and preserves the review gate.
+- Dell's side: authenticated access to the private repo is live. Dell works on a named branch, pushes that branch, and opens a PR; Joe reviews and merges. The installed pre-push hook refuses Dell's direct pushes to `main` and preserves GitHub required review.
 - Platform-enforced branch protection on a private repo still requires the appropriate paid GitHub plan. Until then, the local pre-push hook plus Joe-owned merge is the active control.
 
 ## Boundaries

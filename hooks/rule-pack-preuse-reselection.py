@@ -293,6 +293,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     session = payload['session_id']
     agent = payload.get('agent_id') or payload.get('agentId')
     tool = payload.get('tool_name', '')
+    original = selection
     selection, cards = apply_cards(payload, selection, dedupe=dedupe)
     ids = [r['id'] for r in selection['rules']]
     if dedupe:
@@ -321,6 +322,15 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
         except OSError:
             pass  # Advisory diagnostics must not deny an otherwise valid action.
     if not rules and not cards:
+        if dedupe and event == 'PreToolUse' and selection['complete']:
+            _, matched_cards = apply_cards(payload, original, dedupe=False)
+            fresh_cards = rule_routes.fresh_ids(session, CARD_TOOL,
+                [rule_cards.card_key(c['id']) for c in matched_cards],
+                agent_id=agent, corpus_digest=selection['corpus_digest'])
+            if (selection['rules'] or matched_cards) and not fresh_cards:
+                return context(canonical({'schema': 'rule-pack-reference/v1',
+                    'reference': 'Rule pack already delivered in this context; apply prior rules and cards.',
+                    'corpus': selection['corpus_digest'][:12]}).decode(), event)
         return None
     # Fit the audit receipt first to preserve existing budget refusals.
     base = {'schema': LOOKUP_RECEIPT_SCHEMA,

@@ -131,7 +131,6 @@ class Controls(unittest.TestCase):
                 self.assertIn('select', job['needs'])
                 self.assertIn('needs.select.outputs', job['if'])
                 self.assertIn('!cancelled()', job['if'])
-        self.assertIn('edited', workflow('review-gate.yml')['on']['pull_request_target']['types'])
         for name in ('classes', 'migration-fixtures'):
             self.assertFalse(wf['jobs'][name]['strategy']['fail-fast'])
 

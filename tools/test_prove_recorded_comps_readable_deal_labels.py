@@ -1,16 +1,16 @@
 """Exercise the recorded comps proof CLI with synthetic records and release sources."""
 import contextlib
+import http.client
 import http.server
 import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import threading
 import time
 import unittest
-import urllib.error
-import urllib.request
 from proof_release_fixture import ReleaseFixtureHandler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +26,7 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 
 
 class ProofTest(unittest.TestCase):
-    def invoke(self, mode='pass', timeout_seconds=30):
+    def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False):
         requests = []
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
@@ -34,7 +34,7 @@ class ProofTest(unittest.TestCase):
                         or self.headers.get('x-doctorcre-release-reader') != '1'):
                     self.send_error(403)
                     return
-                requests.append({'method': self.command, 'path': self.path, 'case': mode})
+                requests.append(self.path)
                 if mode == 'redirect':
                     self.send_response(302)
                     self.send_header('Location', '/forbidden')
@@ -76,9 +76,9 @@ class ProofTest(unittest.TestCase):
             stack.callback(server.shutdown)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             table = json.loads(json.dumps(TABLE))
-            if mode == 'uuid':
+            if mode in ('uuid', 'optimized_uuid'):
                 table['rows'][0]['deal']['value'] = ID
-            turns = [] if mode == 'absent' else [{'at': '2026-10-01T00:00:00Z' if mode == 'old' else '2026-11-02T00:00:00Z', 'answer_blocks': [table]}]
+            turns = [] if mode in ('absent', 'dependencies') else [{'at': '2026-10-01T00:00:00Z' if mode == 'old' else '2026-11-02T00:00:00Z', 'answer_blocks': [table]}]
             fixture_script = r"""
 import {docConversationTools} from './mcp-server/src/doc-conversation.js';
 import {TOOLS} from './mcp-server/src/tools.js';
@@ -110,6 +110,10 @@ console.log(JSON.stringify({responses,release}));
             self.assertEqual(generated.returncode, 0, generated.stderr)
             fixture = json.loads(generated.stdout)
             responses = fixture['responses']
+            if mode == 'shape':
+                del responses['get-deal-room']['name']
+            if mode == 'envelope':
+                responses = {verb: {'content': [{'type': 'text', 'text': json.dumps(value)}]} for verb, value in responses.items()}
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
             if mode in ('timeout', 'wrapper_error'):
@@ -126,12 +130,14 @@ console.log(JSON.stringify({responses,release}));
                     + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'os.kill(os.getppid(), signal.SIGALRM)\nchild.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
-            if mode == 'foreign_requests':
+            if denied_reads:
                 for path in ('/', '/favicon.ico'):
-                    with self.assertRaises(urllib.error.HTTPError) as refused:
-                        urllib.request.urlopen(origin + path)
-                    self.assertEqual(refused.exception.code, 403)
-                    refused.exception.close()
+                    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                    with contextlib.closing(connection):
+                        connection.request('GET', path)
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 403)
+                        response.read()
             harness = '''import runpy,sys,urllib.request
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
@@ -143,7 +149,15 @@ urllib.request.OpenerDirector.open=opened
 sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds',sys.argv[4]]
 runpy.run_path(sys.argv[0],run_name='__main__')
 '''
-            result = subprocess.run(['python3', '-c', harness, str(RUNNER), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
+            runner_path = RUNNER
+            if mode == 'dependencies':
+                runtime = folder / 'runtime'
+                for name in ('tools/prove-recorded-comps-readable-deal-labels.py', 'lib/release_reader.py', 'lib/release-reader-marker.json', 'mcp-server/package-lock.json'):
+                    target = runtime / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(ROOT / name, target)
+                runner_path = runtime / RUNNER.relative_to(ROOT)
+            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds)], capture_output=True, text=True, timeout=35)
             if mode in ('timeout', 'wrapper_error'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
                 pid = int((folder / 'started').read_text())
@@ -156,6 +170,8 @@ runpy.run_path(sys.argv[0],run_name='__main__')
                     self.assertLess(time.monotonic(), until, 'owned wrapper descendant survived cleanup')
                     threading.Event().wait(0.01)
             self.assertLessEqual(len(requests), 4, requests)
+            if mode == 'pass':
+                self.assertEqual(len(requests), 4, requests)
             return result
 
     def test_pass(self):
@@ -163,27 +179,77 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['natural_read'], 'passed')
 
-    def test_rejected_foreign_requests_do_not_consume_proof_budget(self):
-        result = self.invoke('foreign_requests')
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    def test_denied_reads_do_not_consume_proof_budget(self):
+        for mode in ('pass', 'timeout'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode, denied_reads=True)
+                self.assertEqual(result.returncode, 0 if mode == 'pass' else 78,
+                                 result.stdout + result.stderr)
 
     def test_http_refusals(self):
         for mode in ('redirect', 'http_error', 'oversized'):
             with self.subTest(mode=mode):
                 result = self.invoke(mode)
                 self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+                self.assertTrue(json.loads(result.stdout)['predicate'])
 
     def test_natural_unavailable(self):
         for mode in ('absent', 'old', 'identity'):
             with self.subTest(mode=mode):
                 result = self.invoke(mode)
                 self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+                self.assertTrue(json.loads(result.stdout)['predicate'])
 
     def test_contradictions(self):
         for mode in ('uuid', 'name', 'producer'):
             with self.subTest(mode=mode):
                 result = self.invoke(mode)
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                expected = {'uuid': 'natural.deal-readable', 'name': 'natural.canonical-deal-name', 'producer': 'synthetic.deal-name'}[mode]
+                self.assertEqual(json.loads(result.stdout)['predicate'], expected)
+
+    def test_optimized_python_keeps_predicates(self):
+        result = self.invoke('optimized_uuid')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['predicate'], 'natural.deal-readable')
+
+    def test_malformed_response_names_stage(self):
+        result = self.invoke('shape')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['predicate'], 'natural.canonical-response')
+
+    def test_missing_runtime_dependencies_are_unavailable(self):
+        result = self.invoke('dependencies')
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
+    def test_mcp_envelope(self):
+        result = self.invoke('envelope')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_named_table_predicates(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('comps_proof', RUNNER)
+        runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runner)
+        cases = [
+            ('natural.deal-column', lambda t: t['columns'][0].update(label='Wrong')),
+            ('natural.proposed-on-column', lambda t: t['columns'][1].update(type='text')),
+            ('natural.rent-column', lambda t: t['columns'][2].update(label='Wrong')),
+            ('natural.row-budget', lambda t: t.update(rows=[])),
+            ('natural.deal-readable', lambda t: t['rows'][0]['deal'].update(value='')),
+            ('natural.deal-readable', lambda t: t['rows'][0]['deal'].update(value=ID)),
+            ('natural.deal-source', lambda t: t['rows'][0]['deal']['source'].update(record_id='bad')),
+            ('natural.rent-source', lambda t: t['rows'][0]['rent']['source'].update(record_id='bad')),
+            ('natural.proposed-on-value', lambda t: t['rows'][0]['proposed_on'].update(value='bad')),
+        ]
+        for predicate, mutate in cases:
+            with self.subTest(predicate=predicate):
+                table = json.loads(json.dumps(TABLE))
+                mutate(table)
+                with self.assertRaises(runner.ProofFailed) as failure:
+                    runner.check_table(table)
+                self.assertEqual(str(failure.exception), predicate)
 
     def test_timeout_terminates_wrapper_descendants(self):
         result = self.invoke('timeout')

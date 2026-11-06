@@ -19,6 +19,13 @@ class Submit(unittest.TestCase):
             self.assertEqual(request.call_args_list[1].args[2], {'event': 'APPROVE', 'body': 'Reviewed-SHA: abc', 'commit_id': 'abc'})
             self.assertEqual(request.call_args_list[1].args[1], 'secret')
 
+    def test_actions_token_skips_local_key_and_keeps_action_owned_token(self):
+        with patch.object(submit, 'installation_token') as mint, patch.object(submit, 'request', side_effect=[{'head': {'sha': 'abc'}}, {'id': 1}]) as request:
+            self.assertEqual(submit.submit(12, 'approve', 'Reviewed-SHA: abc', 'abc', token='actions-token'), 1)
+            mint.assert_not_called()
+            self.assertEqual(request.call_count, 2)
+            self.assertTrue(all(c.args[1] == 'actions-token' for c in request.call_args_list))
+
     def test_invalid_body_never_authenticates_or_posts(self):
         sha = 'a' * 40
         for body in ('looks good', 'Reviewed-SHA: ' + 'b' * 40,

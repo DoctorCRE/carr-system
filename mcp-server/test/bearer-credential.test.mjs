@@ -176,7 +176,7 @@ test("the capture claim door refuses the bare device secret before any database 
 
 test("the staging e2e-session door refuses a comma-joined duplicate credential", async () => {
   const secret = "synthetic-e2e-session-secret-for-tests-only";
-  const server = createDealroomHandler({ now: () => 1_800_000_000_000, prepareE2eSessionFn: async () => {} });
+  const server = createDealroomHandler({ now: () => 1_800_000_000_000 });
   // The staging hosts e2e-session.test.mjs uses; the door answers 404 anywhere else.
   const appHost = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev";
   const env = { CARR_ENV: "staging", APP_HOST: "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
