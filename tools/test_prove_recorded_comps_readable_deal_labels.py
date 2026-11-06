@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from proof_release_fixture import ReleaseFixtureHandler
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'tools/prove-recorded-comps-readable-deal-labels.py'
@@ -24,11 +25,23 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 class ProofTest(unittest.TestCase):
     def invoke(self, mode='pass', timeout_seconds=30):
         requests = []
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
                 requests.append(self.path)
+                if (self.headers.get('User-Agent') != 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)'
+                        or self.headers.get('x-doctorcre-release-reader') != '1'):
+                    self.send_error(403)
+                    return
+                if mode == 'redirect':
+                    self.send_response(302)
+                    self.send_header('Location', '/forbidden')
+                    self.end_headers()
+                    return
+                if mode == 'http_error':
+                    self.send_error(503)
+                    return
                 if self.path == '/release':
-                    value = {'env': {'value': 'production'}, 'git_sha': {'value': SHA}, 'worker_version': {'timestamp': '2026-11-01T00:00:00Z'}}
+                    value = json.loads(json.dumps(fixture['release']))
                     if mode == 'identity':
                         value['git_sha']['value'] = 'main'
                     body = json.dumps(value).encode()
@@ -44,6 +57,8 @@ class ProofTest(unittest.TestCase):
                     body = (ROOT / 'mcp-server' / name).read_bytes()
                     if mode == 'producer' and name == 'src/answer-blocks.js':
                         body = body.replace(b'value: row.deal_name', b'value: row.deal_id')
+                if mode == 'oversized':
+                    body += b' ' * 1048576
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(body)
@@ -61,7 +76,37 @@ class ProofTest(unittest.TestCase):
             if mode == 'uuid':
                 table['rows'][0]['deal']['value'] = ID
             turns = [] if mode == 'absent' else [{'at': '2026-10-01T00:00:00Z' if mode == 'old' else '2026-11-02T00:00:00Z', 'answer_blocks': [table]}]
-            responses = {'list-doc-conversations': {'conversations': [{'id': ID}]}, 'read-doc-conversation': {'turns': turns}, 'get-deal-room': {'name': 'Different' if mode == 'name' else 'Synthetic Harbor'}}
+            fixture_script = r"""
+import {docConversationTools} from './mcp-server/src/doc-conversation.js';
+import {TOOLS} from './mcp-server/src/tools.js';
+import {buildRelease} from './mcp-server/src/release.js';
+import {validateAnswerBlocks} from './mcp-server/src/answer-blocks.js';
+const input=JSON.parse(process.argv[1]);
+class ToolError extends Error {}
+const docs=docConversationTools({ToolError});
+for(const turn of input.turns) validateAnswerBlocks(turn.answer_blocks,ToolError);
+const client={query:async(sql,args)=>{
+ if(sql.includes('ops.list_doc_conversations')) return {rows:[{listed:{ok:true,conversations:[{id:input.id}]}}]};
+ if(sql.includes('ops.doc_conversation_facts')) return {rows:[{facts:{ok:true,identity:{id:input.id},turns:input.turns}}]};
+ if(sql.includes('v_ref_index')) return {rows:[{subject_type:'deal',subject_id:input.id}]};
+ if(sql.includes('from v_deal_room_board b')) return {rows:[{id:input.id,name:input.name}]};
+ return {rows:[]};
+}};
+const actor={id:input.id};
+const responses={
+ 'list-doc-conversations':await docs['list-doc-conversations'].handler(client,actor,{limit:10}),
+ 'read-doc-conversation':await docs['read-doc-conversation'].handler(client,actor,{conversation_id:input.id,limit:200}),
+ 'get-deal-room':await TOOLS['get-deal-room'].handler(client,actor,{deal:input.id}),
+};
+const release=await buildRelease({env:{CARR_ENV:'production',GIT_SHA:'a'.repeat(40),CF_VERSION_METADATA:{id:'fixture',timestamp:'2026-11-01T00:00:00Z'}},sql:async()=>[],verbCount:1});
+console.log(JSON.stringify({responses,release}));
+"""
+            generated = subprocess.run(['node', '--input-type=module', '-e', fixture_script,
+                                        json.dumps({'id': ID, 'turns': turns, 'name': 'Different' if mode == 'name' else 'Synthetic Harbor'})],
+                                       cwd=ROOT, capture_output=True, text=True, timeout=10)
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            fixture = json.loads(generated.stdout)
+            responses = fixture['responses']
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
             if mode in ('timeout', 'wrapper_error'):
@@ -82,8 +127,8 @@ class ProofTest(unittest.TestCase):
 original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
 def opened(self,url,*args,**kwargs):
- if isinstance(url,str) and url.startswith('https://raw.githubusercontent.com/'):
-  url=origin+url.removeprefix('https://raw.githubusercontent.com')
+ if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://raw.githubusercontent.com/'):
+  url=urllib.request.Request(origin+url.full_url.removeprefix('https://raw.githubusercontent.com'),headers=dict(url.header_items()),method=url.get_method())
  return original(self,url,*args,**kwargs)
 urllib.request.OpenerDirector.open=opened
 sys.argv=[sys.argv[1],'--origin',sys.argv[2],'--call-wrapper',sys.argv[3],'--timeout-seconds',sys.argv[4]]
@@ -102,6 +147,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['natural_read'], 'passed')
+
+    def test_http_refusals(self):
+        for mode in ('redirect', 'http_error', 'oversized'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
 
     def test_natural_unavailable(self):
         for mode in ('absent', 'old', 'identity'):

@@ -14,20 +14,16 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlparse
-from urllib.request import build_opener, HTTPRedirectHandler
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 LIMIT = 1048576
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', re.I)
 
 
 class Unavailable(Exception):
     pass
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise Unavailable('redirect refused')
 
 
 def stamp(value):
@@ -107,8 +103,10 @@ def execute(args, receipt):
         return data
 
     def get(url):
-        with build_opener(NoRedirect).open(url, timeout=remaining()) as response:
-            data = response.read(LIMIT + 1)
+        response = read_http(url, timeout=remaining(), max_bytes=LIMIT)
+        if response.status != 200:
+            raise Unavailable('HTTP status unavailable')
+        data = response.body
         if len(data) > LIMIT:
             raise Unavailable('HTTP response exceeds budget')
         return data
