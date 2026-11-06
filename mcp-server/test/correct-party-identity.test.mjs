@@ -716,7 +716,7 @@ test("secondary domain exact replay returns receipt without correction; changed 
     ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: "clinic.test" } };
   const out = await call(fake, args);
   const receipt = fake.writes("insert into tool_call")[0][1];
-  fake.plan["select request_hash, response from tool_call"] = [{ request_hash: receipt[3], response: out }];
+  fake.plan["select request_hash, response"] = [{ request_hash: receipt[3], response: out }];
   fake.calls = [];
   assert.deepEqual(await call(fake, args), { replayed: true, ...out });
   assertNoCorrection(fake);
