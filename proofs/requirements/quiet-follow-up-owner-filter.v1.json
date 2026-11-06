@@ -1,0 +1,25 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "quiet-follow-up-owner-filter.v1",
+  "targets": [
+    "worker"
+  ],
+  "assertions": [
+    {
+      "id": "exact-owner-subsets",
+      "predicate": "PRODUCTION PROOF: Run `python3 tools/prove-quiet-follow-up-owner-filter.py --origin https://api.doctorcre.com`; identity alone must exit 78. After merge, observe signed-in app-origin /mcp registered quiet-follow-ups reads with owner_slug omitted, with one recorded owner slug, and with null. Record exact ordered subject subsets, unchanged due order, cadence, sent:false and tasks_created:false, and verify CARR /release contains the merge. Supply those recorded reads using --evidence and --merge-sha for the CLI's conservative exact-merge release check. A later descendant release requires independent ancestry evidence. The one authorized identity-only production run exited 78 with identity_only_owner_reads_required; no authenticated production read was made.",
+      "runner": "quiet-follow-up-owner-filter.v1",
+      "expected_result": "Exit 0 only with signed-in recorded owner reads and exact merged release; contradictions exit 1 and missing evidence or identity alone exits 78.",
+      "input_class": "Read-only production release and supplied signed-in app-origin /mcp recorded responses; fixture replay is not production proof.",
+      "deadline_seconds": 30
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 1,
+    "max_records": 1000,
+    "max_runtime_seconds": 30,
+    "max_artifact_bytes": 1048576
+  }
+}

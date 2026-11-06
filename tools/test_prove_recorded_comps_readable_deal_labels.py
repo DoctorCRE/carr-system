@@ -2,6 +2,10 @@
 import contextlib
 import http.client
 import http.server
+import hashlib
+import base64
+import io
+import tarfile
 import json
 import os
 from pathlib import Path
@@ -28,6 +32,32 @@ TABLE = {'type': 'table.v1', 'id': 'comps', 'columns': [
 class ProofTest(unittest.TestCase):
     def invoke(self, mode='pass', timeout_seconds=30, denied_reads=False, malformed_reader_headers=False, extra_marked_read=False):
         requests = []
+        archive = io.BytesIO()
+        package = ROOT / 'mcp-server/node_modules/@cfworker/json-schema'
+        with tarfile.open(fileobj=archive, mode='w:gz') as bundle:
+            bundle.add(package, arcname='package')
+        dependency = archive.getvalue()
+        if mode in ('archive_path', 'archive_link', 'archive_size'):
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode='w:gz') as bundle:
+                entry = tarfile.TarInfo('package/../../escaped' if mode == 'archive_path' else 'package/file')
+                if mode == 'archive_link':
+                    entry.type = tarfile.SYMTYPE
+                    entry.linkname = '/tmp/outside'
+                if mode == 'archive_size':
+                    entry.size = 1048577
+                bundle.addfile(entry, io.BytesIO(b'x' * entry.size))
+            dependency = archive.getvalue()
+        if mode == 'archive_invalid':
+            dependency = b'not a tarball'
+
+        lock = json.loads((ROOT / 'mcp-server/package-lock.json').read_text())
+        lock['packages']['node_modules/@cfworker/json-schema']['integrity'] = (
+            'sha512-' + base64.b64encode(hashlib.sha512(dependency).digest()).decode())
+        if mode == 'transitive':
+            lock['packages']['node_modules/@cfworker/json-schema']['dependencies'] = {'unexpected': '1.0.0'}
+        if mode == 'dependency_url':
+            lock['packages']['node_modules/@cfworker/json-schema']['resolved'] = 'https://untrusted.invalid/archive.tgz'
         class Handler(ReleaseFixtureHandler):
             def release_GET(self):
                 if (self.headers.get_all('User-Agent') != ['doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)']
@@ -43,7 +73,12 @@ class ProofTest(unittest.TestCase):
                 if mode == 'http_error':
                     self.send_error(503)
                     return
-                if self.path == '/release':
+                if self.path == '/@cfworker/json-schema/-/json-schema-4.1.1.tgz':
+                    if mode == 'dependencies':
+                        self.send_error(503)
+                        return
+                    body = dependency if mode != 'integrity' else b'corrupted'
+                elif self.path == '/release':
                     value = json.loads(json.dumps(fixture['release']))
                     if mode == 'identity':
                         value['git_sha']['value'] = 'main'
@@ -57,7 +92,8 @@ class ProofTest(unittest.TestCase):
                     if name not in {'src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'}:
                         self.send_error(404)
                         return
-                    body = (ROOT / 'mcp-server' / name).read_bytes()
+                    body = (json.dumps(lock).encode() if name == 'package-lock.json'
+                            else (ROOT / 'mcp-server' / name).read_bytes())
                     if mode == 'producer' and name == 'src/answer-blocks.js':
                         body = body.replace(b'value: row.deal_name', b'value: row.deal_id')
                 if mode == 'oversized':
@@ -116,7 +152,7 @@ console.log(JSON.stringify({responses,release}));
                 responses = {verb: {'content': [{'type': 'text', 'text': json.dumps(value)}]} for verb, value in responses.items()}
             wrapper = folder / 'call'
             wrapper.write_text('#!/usr/bin/env python3\nimport json,sys\n' + f'responses={responses!r}\n' + "args=json.loads(sys.argv[3])\nif sys.argv[2]=='list-doc-conversations': assert args=={'limit':10}\nif sys.argv[2]=='read-doc-conversation': assert args['limit']==200\nprint(json.dumps(responses[sys.argv[2]]))\n")
-            if mode in ('timeout', 'wrapper_error'):
+            if mode in ('timeout', 'wrapper_error', 'deadline_disarm'):
                 child = ("from pathlib import Path; import os, signal; "
                          f"ready=Path({str(folder / 'started')!r}); "
                          "pending=ready.with_suffix('.tmp'); pending.write_text(str(os.getpid())); "
@@ -127,7 +163,7 @@ console.log(JSON.stringify({responses,release}));
                     + f'started={str(folder / "started")!r}\n'
                     + 'from pathlib import Path\n'
                     + 'while not Path(started).exists(): time.sleep(0.01)\n'
-                    + ('sys.exit(3)\n' if mode == 'wrapper_error' else 'os.kill(os.getppid(), signal.SIGALRM)\nchild.wait()\n'))
+                    + ('sys.exit(3)\n' if mode in ('wrapper_error', 'deadline_disarm') else 'os.kill(os.getppid(), signal.SIGALRM)\nchild.wait()\n'))
             wrapper.chmod(0o700)
             origin = f'http://127.0.0.1:{server.server_port}'
             harness = '''import runpy,sys,urllib.request
@@ -135,6 +171,8 @@ original=urllib.request.OpenerDirector.open
 origin=sys.argv[2]
 extra_marked_read=sys.argv[5]=='True'
 def opened(self,url,*args,**kwargs):
+ if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://registry.npmjs.org/'):
+  url=urllib.request.Request(origin+url.full_url.removeprefix('https://registry.npmjs.org'),headers=dict(url.header_items()),method=url.get_method())
  if isinstance(url,urllib.request.Request) and url.full_url.startswith('https://raw.githubusercontent.com/'):
   url=urllib.request.Request(origin+url.full_url.removeprefix('https://raw.githubusercontent.com'),headers=dict(url.header_items()),method=url.get_method())
  return original(self,url,*args,**kwargs)
@@ -148,15 +186,45 @@ finally:
   response=read(origin+'/release',timeout=5)
   assert response.status==200
 '''
+            if mode in ('stalled_evaluation', 'late_launch'):
+                child = ('from pathlib import Path; import os,time; '
+                         f'Path({str(folder / "pid")!r}).write_text(str(os.getpid())); time.sleep(8)')
+                harness = ('import subprocess,time\nreal_popen=subprocess.Popen\n'
+                           'def launch(command,*args,**kwargs):\n'
+                           f' if command[0]=="node": command=[sys.executable,"-c",{child!r}]\n'
+                           ' process=real_popen(command,*args,**kwargs)\n'
+                           + (' if command[0]==sys.executable: time.sleep(3)\n' if mode == 'late_launch' else '')
+                           + ' return process\nsubprocess.Popen=launch\n') + harness
+            if mode == 'late_directory':
+                harness = ('import tempfile,time\nreal_mkdtemp=tempfile.mkdtemp\n'
+                           'def acquire(*args,**kwargs):\n'
+                           ' folder=real_mkdtemp(*args,**kwargs)\n'
+                           ' if (kwargs.get("prefix") or (args[1] if len(args)>1 else None))=="comps-proof-": time.sleep(3)\n'
+                           ' return folder\ntempfile.mkdtemp=acquire\n') + harness
+            if mode == 'late_cleanup':
+                harness = ('import tempfile,time\nreal_cleanup=tempfile.TemporaryDirectory.cleanup\n'
+                           'def cleanup(self):\n'
+                           ' if "comps-proof-" in self.name: time.sleep(3)\n'
+                           ' return real_cleanup(self)\ntempfile.TemporaryDirectory.cleanup=cleanup\n') + harness
+            if mode == 'deadline_disarm':
+                harness = ('import signal,os\nreal_timer=signal.setitimer\n'
+                           'def set_timer(which,seconds,*args):\n'
+                           ' if seconds==0: os.kill(os.getpid(),signal.SIGALRM)\n'
+                           ' return real_timer(which,seconds,*args)\nsignal.setitimer=set_timer\n') + harness
             runner_path = RUNNER
-            if mode == 'dependencies':
+            if mode in ('dependencies', 'clean_runtime'):
                 runtime = folder / 'runtime'
                 for name in ('tools/prove-recorded-comps-readable-deal-labels.py', 'lib/release_reader.py', 'lib/release-reader-marker.json', 'mcp-server/package-lock.json'):
                     target = runtime / name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(ROOT / name, target)
+                (runtime / 'mcp-server/package-lock.json').write_text(json.dumps(lock))
                 runner_path = runtime / RUNNER.relative_to(ROOT)
-            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds), str(extra_marked_read)], capture_output=True, text=True, timeout=35)
+            scratch = folder / 'proof-scratch'
+            scratch.mkdir()
+            environment = dict(os.environ, TMPDIR=str(scratch), TMP=str(scratch), TEMP=str(scratch))
+            result = subprocess.run(['python3', *(['-O'] if mode == 'optimized_uuid' else []), '-c', harness, str(runner_path), origin, str(wrapper), str(timeout_seconds), str(extra_marked_read)], capture_output=True, text=True, timeout=35, env=environment)
+            self.assertEqual(list(scratch.iterdir()), [], 'proof left temporary fixtures')
             if denied_reads:
                 for path in ('/', '/favicon.ico'):
                     connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
@@ -184,7 +252,11 @@ finally:
                         response = connection.getresponse()
                         self.assertEqual(response.status, 403)
                         response.read()
-            if mode in ('timeout', 'wrapper_error'):
+            if mode in ('stalled_evaluation', 'late_launch'):
+                pid = int((folder / 'pid').read_text())
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(pid, 0)
+            if mode in ('timeout', 'wrapper_error', 'deadline_disarm'):
                 self.assertTrue((folder / 'started').exists(), result.stdout + result.stderr)
                 pid = int((folder / 'started').read_text())
                 until = time.monotonic() + 30
@@ -197,12 +269,12 @@ finally:
                     threading.Event().wait(0.01)
             if extra_marked_read:
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            allowed_paths = {'/release', *(f'/DoctorCRE/carr-system/{SHA}/mcp-server/{name}'
+            allowed_paths = {'/release', '/@cfworker/json-schema/-/json-schema-4.1.1.tgz', *(f'/DoctorCRE/carr-system/{SHA}/mcp-server/{name}'
                                          for name in ('src/answer-blocks.js', 'src/answer-blocks.v1.schema.json', 'package-lock.json'))}
             self.assertTrue(set(requests) <= allowed_paths, requests)
-            self.assertLessEqual(len(requests), 4, requests)
+            self.assertLessEqual(len(requests), 5, requests)
             if mode == 'pass':
-                self.assertEqual(len(requests), 4, requests)
+                self.assertEqual(len(requests), 5, requests)
             return result
 
     def test_pass(self):
@@ -222,7 +294,7 @@ finally:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_fifth_marked_read_exceeds_proof_budget(self):
-        with self.assertRaisesRegex(AssertionError, '5 not less than or equal to 4'):
+        with self.assertRaisesRegex(AssertionError, '6 not less than or equal to 5'):
             self.invoke(extra_marked_read=True)
 
     def test_http_refusals(self):
@@ -257,10 +329,44 @@ finally:
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['predicate'], 'natural.canonical-response')
 
+    def test_clean_runtime_obtains_release_locked_dependency(self):
+        result = self.invoke('clean_runtime')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['synthetic'], 'passed')
+
+    def test_wrong_dependency_integrity_is_unavailable(self):
+        result = self.invoke('integrity')
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
     def test_missing_runtime_dependencies_are_unavailable(self):
         result = self.invoke('dependencies')
         self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
+    def test_dependency_archive_refusals(self):
+        for mode in ('archive_path', 'archive_link', 'archive_size', 'archive_invalid', 'transitive', 'dependency_url'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)['predicate'], 'synthetic.runtime-dependencies')
+
+    def test_producer_deadline_cleans_stalled_and_late_processes(self):
+        for mode in ('stalled_evaluation', 'late_launch'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode, timeout_seconds=2)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+
+    def test_deadline_during_directory_acquisition_cleans_scratch(self):
+        for mode in ('late_directory', 'late_cleanup'):
+            with self.subTest(mode=mode):
+                result = self.invoke(mode, timeout_seconds=2)
+                self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+
+    def test_alarm_during_timer_cancellation_still_exits_unavailable(self):
+        result = self.invoke('deadline_disarm')
+        self.assertEqual(result.returncode, 78, result.stdout + result.stderr)
+        self.assertTrue(json.loads(result.stdout)['reason'])
 
     def test_mcp_envelope(self):
         result = self.invoke('envelope')
