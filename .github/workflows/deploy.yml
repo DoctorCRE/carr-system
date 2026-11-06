@@ -27,6 +27,9 @@ permissions:
 
 jobs:
   deploy:
+    permissions:
+      contents: read
+      actions: read
     if: >-
       (github.event_name == 'workflow_run'
         && github.event.workflow_run.conclusion == 'success'
@@ -37,6 +40,8 @@ jobs:
       || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      sha: ${{ env.SHA }}
     environment: production
     env:
       SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -368,3 +373,27 @@ jobs:
           done
           echo "::error::$RELEASE_URL did not report git_sha $SHA, env staging and $VERBS verbs within two minutes."
           exit 1
+
+  notify:
+    needs: [deploy, staging]
+    if: >-
+      always() && needs.deploy.result == 'success' && (needs.staging.result == 'success' || needs.staging.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: production-pr-comments
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      SHA: ${{ needs.deploy.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Comment on shipped PRs after required deploy jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/pr-release-comments.py deploy

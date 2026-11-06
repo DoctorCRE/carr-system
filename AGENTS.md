@@ -200,7 +200,8 @@ To catch up with main, merge origin/main into the branch. This overrides the
 rebase and force-push steps in the tstack skills (`modernize`, `full-send`,
 `full-stop`); Joe 2026-10-26: "Keep never-rebase/never-force-push."
 
-Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Workers push, report, stop; only the coordinator arms merges after independent current-head approval and green CI. CI results reach the orchestrator as app events.
+Never poll GitHub: no loops, watch or sleep around gh pr checks, gh run or gh api. Workers push, report, stop; only the coordinator arms merges after independent current-head approval and green CI. CI results reach the orchestrator as app events. Merges and verified deploys reach
+the coordinator as idempotent PR comments.
 
 Do not commit on main either. `ops/githooks/pre-commit` refuses it, because a
 commit on main in `~/carr-system` strands there (nine unpushed commits took an
@@ -351,7 +352,7 @@ stale approvals after pushes and requires approval of the latest push. The
 coordinator submits the independent reviewer's verdict as a native App review
 through `ops/review-submit.py` (also reached by `./run.sh review-pr` and
 `bin/review-pr`). That helper remains supported. Do not import the retired
-`ops/review-gate.py` or invoke its deleted workflow from delivery automation.
+approval evaluator or invoke its deleted workflow from delivery automation.
 
 The retired custom approval policy in generated rule `7bb0a3ed` is superseded by
 Joe's removal instruction (`27810f4f`). Its size exemptions and Actions-variable

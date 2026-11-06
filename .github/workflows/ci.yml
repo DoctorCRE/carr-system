@@ -13,8 +13,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action == 'synchronize' || github.event.action == 'ready_for_review' || github.event.action == 'converted_to_draft' || (github.event.action == 'edited' && github.event.changes.base != null)) }}
+  # Metadata cannot evict a pending candidate, even with cancellation disabled.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && format('metadata-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}
 
 permissions:
   contents: read
@@ -22,7 +23,7 @@ permissions:
 
 jobs:
   select:
-    if: ${{ !cancelled() && !github.event.pull_request.draft }}
+    if: ${{ !cancelled() && !github.event.pull_request.draft && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -507,14 +508,15 @@ jobs:
     # success into a red context. Without `always()` a failed group would
     # leave this job skipped, and a required check that never reports blocks
     # the merge silently instead of saying why.
-    name: ops/ci.sh --strict
+    # A skipped metadata run must not publish the required candidate context.
+    name: ${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && 'CI metadata (no validation)' || 'ops/ci.sh --strict' }}
     runs-on: ubuntu-24.04
     needs: [select, lint, fast, gates, secret, unit, unit-coverage, scope, classes, migration-fixtures, launchd-python39]
     permissions:
       contents: read
       statuses: write
       pull-requests: read
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
