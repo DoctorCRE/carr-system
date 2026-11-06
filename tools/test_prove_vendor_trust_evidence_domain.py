@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import copy
+import http.cookiejar
 from functools import lru_cache
 import json
 from pathlib import Path
@@ -149,6 +150,24 @@ class ProofCLI(unittest.TestCase):
         with fixture(require_identity=True) as (base, requests):
             self.assertEqual(self.run_cli(base)[0], 0)
         self.assertEqual(len(requests), 3)
+
+    def test_shared_reader_cookie_session_and_redirect_refusal(self):
+        sys.path.insert(0, str(ROOT))
+        from lib.release_reader import read
+        jar = http.cookiejar.CookieJar()
+        jar.set_cookie(http.cookiejar.Cookie(
+            0, 'session', 'SYNTHETIC_SECRET', None, False, '127.0.0.1', False,
+            False, '/', True, False, None, True, None, None, {}, False))
+        with fixture(require_identity=True) as (base, requests):
+            self.assertEqual(read(base + '/app-release').status, 200)
+            self.assertEqual(read(base + '/api/v1/business/vendors?contract=vendor-directory.v1&scope=team&page=1',
+                                  cookie_jar=jar).status, 200)
+            self.assertEqual(read(base + '/release').status, 200)
+        self.assertEqual([cookie for _, cookie in requests],
+                         [None, 'session=SYNTHETIC_SECRET', None])
+        with fixture(redirect=True) as (base, requests):
+            self.assertEqual(read(base + '/api/v1/business/vendors?contract=vendor-directory.v1&scope=team&page=1', cookie_jar=jar).status, 302)
+        self.assertEqual(len(requests), 1)
 
     def test_fixture_endpoint_contract(self):
         with fixture() as (base, _):

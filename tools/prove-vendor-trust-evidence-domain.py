@@ -10,9 +10,7 @@ import re
 import signal
 import sys
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.release_reader import read
@@ -27,11 +25,6 @@ class Unavailable(Exception):
 
 class Contradiction(Exception):
     pass
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        raise Unavailable('redirect_refused')
 
 
 def origin(value):
@@ -110,15 +103,14 @@ def cookie_jar(path):
 def observe(args):
     app, carr = origin(args.origin), origin(args.carr_origin)
     jar = cookie_jar(args.storage_state)
-    public = urllib.request.build_opener(NoRedirect())
-    authenticated = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPCookieProcessor(jar))
     deadline = time.monotonic() + args.timeout_seconds
 
-    def get(base, path, opener):
+    def get(base, path, *, authenticated=False):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise Unavailable('deadline_exceeded')
-        response = read(base + path, opener=opener.open, timeout=remaining, max_bytes=MAX_BYTES)
+        response = read(base + path, timeout=remaining, max_bytes=MAX_BYTES,
+                        cookie_jar=jar if authenticated else None)
         if response.status != 200:
             raise Unavailable('http_status_invalid')
         data = response.body
@@ -129,9 +121,9 @@ def observe(args):
             raise Unavailable('response_invalid')
         return value
 
-    app_identity = get(app, '/app-release', public)
+    app_identity = get(app, '/app-release')
     app_release = app_identity.get('source_commit')
-    worker = get(carr, '/release', public)
+    worker = get(carr, '/release')
     worker_release = worker.get('git_sha', {}).get('value')
     if (app_identity.get('service') != 'doctorcre-app' or app_identity.get('environment') != 'production'
             or worker.get('ok') is not True or worker.get('env', {}).get('value') != 'production'):
@@ -141,7 +133,7 @@ def observe(args):
     totals = {'rated': 0, 'unverified': 0, 'rows': 0, 'pages': 0}
     now = datetime.now(timezone.utc)
     for page in range(1, 6):
-        payload = get(app, '/api/v1/business/vendors?contract=vendor-directory.v1&scope=team&page=' + str(page), authenticated)
+        payload = get(app, '/api/v1/business/vendors?contract=vendor-directory.v1&scope=team&page=' + str(page), authenticated=True)
         rows = payload.get('rows')
         if (not isinstance(rows, list) or len(rows) > 25 or payload.get('page') != page
                 or payload.get('page_size') != 25 or not count(payload.get('page_count')) or payload['page_count'] < page):
