@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Tests record source authority migrations and verbs on PostgreSQL.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-F01 on REAL PostgreSQL: the migration, the two SQL fixtures, and the
@@ -55,7 +56,6 @@ import { connectionRouteForTool } from "../src/mcp.js";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_F01_DB_REQUIRED === "1";
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = [
   "document-derivative-registration-postgres.sql",
@@ -267,7 +267,7 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
     assert.equal(REQUIRED, false, "the F01 database proof is required but DATABASE_URL is unset");
     return t.skip("the migration class supplies DATABASE_URL");
   }
-  assert.match(DSN, LOOPBACK, "the F01 database proof runs only against a loopback disposable database");
+  assertDisposableDatabase(DSN);
   const pg = (await import("pg")).default;
   const source = new URL(DSN).pathname.replace(/^\//, "");
   const admin = await adminClient(pg);

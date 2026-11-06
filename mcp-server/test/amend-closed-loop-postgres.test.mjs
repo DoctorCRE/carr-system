@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // amend-closed-loop-postgres.test.mjs — amend-closed-loop on REAL PostgreSQL.
 //
@@ -52,11 +53,9 @@ async function loadForUpdateRemovedMutant() {
 test.after(() => { if (mutantWork) rmSync(mutantWork, { recursive: true, force: true }); });
 
 const DSN = await snapshotDatabase('amend-closed-loop-postgres-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 async function database(t) {
-  assert.ok(LOOPBACK.test(DSN),
-    "REFUSED: this proof writes loop rows and runs against a disposable loopback only");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

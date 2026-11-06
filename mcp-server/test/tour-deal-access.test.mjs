@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Verify canonical Tour deal decisions and installed HTTP access boundaries.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +37,7 @@ test('an active non-partner receives no deal decisions', async () => {
 
 const databaseUrl = process.env.CARR_TOUR_DEAL_TEST_DATABASE_URL;
 test('installed HTTP create, detail, cart and cross-deal library enforce canonical deal access', {skip:!databaseUrl}, async () => {
-  assert(['127.0.0.1','localhost'].includes(new URL(databaseUrl).hostname), 'synthetic local PostgreSQL only');
+  assertDisposableDatabase(databaseUrl);
   const {default:pg} = await import('pg');
   const {Client} = pg;
   const {createTourInternalWebHandler} = await import('../src/tour-internal-web.js');

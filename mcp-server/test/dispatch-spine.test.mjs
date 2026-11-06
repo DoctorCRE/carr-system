@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // WR-000119 — the dispatch spine's acceptance proofs, ONE BLOCK PER CRITERION
 // on the WR-000119 card: AC-DS-LINK, AC-DS-ACK, AC-DS-HISTORY, AC-DS-REGISTRY.
 //
@@ -26,7 +27,6 @@ import { TOOLS } from "../src/tools.js";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_DISPATCH_SPINE_DB_REQUIRED === "1";
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 
 class ToolError extends Error {
   constructor(fields) { super(fields.error); Object.assign(this, fields); }
@@ -43,8 +43,7 @@ async function skipUnlessDatabase(t) {
     t.skip("the migration class supplies DATABASE_URL");
     return null;
   }
-  assert.ok(LOOPBACK.test(DSN),
-    "REFUSED: this proof appends wire turns and link rows and runs against a disposable loopback only");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

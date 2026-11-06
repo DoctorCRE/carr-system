@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // End-to-end rehearsal of the Monday pipeline call (WR-000433 AC4).
 //
 // Drives the real Call Mode pipeline on a SYNTHETIC call about SYNTHETIC deals
@@ -66,8 +67,7 @@ before(async () => {
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
   let bin, connection;
   if (ciDsn) {
-    const url = new URL(ciDsn);
-    assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'rehearsal requires disposable loopback PostgreSQL');
+    const url = assertDisposableDatabase(ciDsn, { service: true });
     admin = new pg.Client({ connectionString: ciDsn });
     await admin.connect();
     database = `call_rehearsal_${randomUUID().replaceAll('-', '')}`;

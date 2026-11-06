@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Real registered handler, envelope and event writes on disposable PostgreSQL.
 // Committed race fixtures stay only in the loopback database CI discards.
@@ -13,20 +14,17 @@ const VERB = 'record-commission-receipt';
 const enabled = { timeout: 20000 };
 
 function assertDisposableReceiptDatabase(dsn, env = process.env) {
-  const url = new URL(dsn);
-  const hosted = env.GITHUB_ACTIONS === 'true' && env.CARR_CI_POSTGRES_IMAGE === 'both'
-    && ['postgres:', 'postgresql:'].includes(url.protocol) && url.hostname === 'postgres'
-    && url.port === '5432' && url.username === 'carr_ci' && !url.password && !url.search && !url.hash
-    && /^\/invoice_tracker_transaction_[a-f0-9]{32}$/.test(url.pathname);
-  assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || hosted,
-    'receipt transaction proof refuses an untrusted database');
+  assertDisposableDatabase(dsn, { env });
+  if (new URL(dsn).hostname === 'postgres') {
+    assert.match(new URL(dsn).pathname, /^\/invoice_tracker_transaction_[a-f0-9]{32}$/);
+  }
 }
 
 test('receipt proof accepts only local fixtures or the exact hosted service clone', () => {
   const env = { GITHUB_ACTIONS: 'true', CARR_CI_POSTGRES_IMAGE: 'both' };
   const hosted = 'postgresql://carr_ci@postgres:5432/invoice_tracker_transaction_' + 'a'.repeat(32);
   assert.doesNotThrow(() => assertDisposableReceiptDatabase(hosted, env));
-  assert.doesNotThrow(() => assertDisposableReceiptDatabase('postgresql://carr_ci@localhost/owned', {}));
+  assert.doesNotThrow(() => assertDisposableReceiptDatabase('postgresql://carr_ci@localhost:5432/owned', {}));
   for (const dsn of [hosted.replace('@postgres:', '@remote:'), hosted.replace('/invoice_tracker_transaction_', '/other_'),
     hosted.replace('5432', '5433'), hosted.replace('carr_ci@', 'other@'), hosted.replace('carr_ci@', 'carr_ci:pw@'),
     hosted + '?hostaddr=203.0.113.1', hosted + '#override']) {

@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
@@ -12,10 +13,7 @@ test('link queue executes hydration, filing and cursor paging in PostgreSQL', as
   let fixture, admin, database, c;
   try {
     if (ciDsn) {
-      const url = new URL(ciDsn);
-      assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-      assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname));
-      assert.equal(url.search, '');
+      const url = assertDisposableDatabase(ciDsn, { service: true });
       admin = new pg.Client({ connectionString: ciDsn });
       await admin.connect();
       database = `email_link_${randomUUID().replaceAll('-', '')}`;

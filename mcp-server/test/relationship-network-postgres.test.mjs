@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Tests relationship network concurrency and attribution on PostgreSQL.
 import test from 'node:test';
@@ -10,10 +11,10 @@ import { readBusinessRecord } from '../src/workspace-business-read.js';
 
 const SNAPSHOT_DSN = await snapshotDatabase('relationship-network-postgres-');
 
-function loopback(){
+function disposableClient(){
   const dsn=SNAPSHOT_DSN;
-  const url=new URL(dsn),db=new pg.Client({connectionString:dsn});
-  assert.ok(['postgres:','postgresql:'].includes(url.protocol)&&['localhost','127.0.0.1'].includes(url.hostname)&&url.port&&!url.search&&!url.hash&&db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'loopback database with explicit port required');
+  const url=assertDisposableDatabase(dsn),db=new pg.Client({connectionString:dsn});
+  assert.ok(db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'effective endpoint must match the disposable URL');
   return db;
 }
 // Synthetic fixtures. `prefix` pins a UUID's sort position or forces hex letters.
@@ -32,7 +33,7 @@ const network=async db=>{await db.query('savepoint read');await db.query('set lo
 const referredDeals=(snapshot,party)=>snapshot.edges.filter(e=>e.kind==='referred'&&e.from==='party:'+party&&e.to.startsWith('deal:')).map(e=>e.to).sort();
 
 test('W14 PostgreSQL: coverage and exact attachments serialize in both commit orders', async t => {
-  const setup=loopback();
+  const setup=disposableClient();
   const attachment=new pg.Client({connectionString:SNAPSHOT_DSN}),verification=new pg.Client({connectionString:SNAPSHOT_DSN});
   await setup.connect();await attachment.connect();await verification.connect();
   try {
@@ -107,7 +108,7 @@ test('W14 PostgreSQL: coverage and exact attachments serialize in both commit or
 });
 
 test('W14 PostgreSQL: a vendor role created after an empty lookup waits for the attachment', async t => {
-  const setup=loopback();
+  const setup=disposableClient();
   const attachment=new pg.Client({connectionString:SNAPSHOT_DSN}),creation=new pg.Client({connectionString:SNAPSHOT_DSN});
   await setup.connect();await attachment.connect();await creation.connect();
   let release=()=>{},attached,created;
@@ -147,7 +148,7 @@ test('W14 PostgreSQL: a vendor role created after an empty lookup waits for the 
 });
 
 test('W14 PostgreSQL: a concurrent attachment never credits a deal to the other caller\'s broker', async t => {
-  const setup=loopback();
+  const setup=disposableClient();
   const first=new pg.Client({connectionString:SNAPSHOT_DSN}),second=new pg.Client({connectionString:SNAPSHOT_DSN});
   await setup.connect();await first.connect();await second.connect();
   try {
@@ -185,7 +186,7 @@ test('W14 PostgreSQL: a concurrent attachment never credits a deal to the other 
 });
 
 test('W14 PostgreSQL: per-deal attribution, every role row, and one association rule for both reads', async t => {
-  const db=loopback(t,'CARR_RELATIONSHIP_DB_REQUIRED');if(!db)return;
+  const db=disposableClient(t,'CARR_RELATIONSHIP_DB_REQUIRED');if(!db)return;
   await db.connect();await db.query('begin');
   try {
     const f=await fixtures(db),{actor}=f;
@@ -262,8 +263,8 @@ test('W14 PostgreSQL: per-deal attribution, every role row, and one association 
 
 test('W14 PostgreSQL: exact referrals, deduplication, broker attribution, holds and reader grants', async t => {
   const dsn=SNAPSHOT_DSN;
-  const url=new URL(dsn),db=new pg.Client({connectionString:dsn});
-  assert.ok(['postgres:','postgresql:'].includes(url.protocol)&&['localhost','127.0.0.1'].includes(url.hostname)&&url.port&&!url.search&&!url.hash&&db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'loopback database with explicit port required');
+  const url=assertDisposableDatabase(dsn),db=new pg.Client({connectionString:dsn});
+  assert.ok(db.connectionParameters.host===url.hostname&&db.connectionParameters.port===Number(url.port),'effective endpoint must match the disposable URL');
   await db.connect();await db.query('begin');
   try {
     const actor={...(await db.query("select id,slug from public.actor where slug='joe'")).rows[0],human:true};

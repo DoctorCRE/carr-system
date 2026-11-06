@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Tests vendor directory migrations and PostgreSQL read and write contracts.
 import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
@@ -9,12 +10,10 @@ import { randomUUID } from 'node:crypto';
 import { TOOLS } from '../src/tools.js';
 import { parseBusinessQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 function disposableClient(dsn) {
-  const refuse = () => { throw new Error('REFUSED: disposable database requires loopback with an explicit port and no connection overrides'); };
-  let url, db;
-  try { url = new URL(dsn); db = new pg.Client({connectionString:dsn}); }
-  catch { refuse(); }
-  const hosts = ['127.0.0.1','localhost'];
-  if (!['postgres:','postgresql:'].includes(url.protocol) || !hosts.includes(url.hostname) || !url.port || url.search || url.hash || !hosts.includes(db.connectionParameters.host) || db.connectionParameters.host !== url.hostname || db.connectionParameters.port !== Number(url.port)) refuse();
+  const url = assertDisposableDatabase(dsn);
+  const db = new pg.Client({connectionString:dsn});
+  assert.equal(db.connectionParameters.host, url.hostname);
+  assert.equal(db.connectionParameters.port, Number(url.port));
   return db;
 }
 
