@@ -1,5 +1,5 @@
 {
-  "email_next_step_closed_date_proof_measurement": {"card": "WR441.S18.J1", "suite": "tools/test_prove_email_next_step_closed_date.py", "command": "python3 -m unittest discover -s tools -p test_prove_email_next_step_closed_date.py", "local_samples_ms": [51302, 51848], "basis": "Includes one real registered-tool disposable PostgreSQL fixture capture and eight local CLI scenarios. No new MCP shard."},
+  "email_next_step_closed_date_proof_measurement": {"card": "WR441.S18.J1", "suite": "tools/test_prove_email_next_step_closed_date.py", "command": "python3 -m unittest discover -s tools -p test_prove_email_next_step_closed_date.py", "local_samples_ms": [51302, 51848, 54306], "basis": "Includes one real registered-tool disposable PostgreSQL fixture capture and eight local CLI scenarios. No new MCP shard."},
   "claude_config_scope_suite_measurement": {"card": "WR839.S3.J7", "suite": "ops/claude-config-scope-selftest.py", "class": "gates", "command": [".venv/bin/python", "ops/claude-config-scope-selftest.py"], "local_samples_ms": [475, 647, 601]},
   "field_census_suite_measurement": {"card": "WR587.S4.J6", "suite": "ops/outlook-intake-selftest.py", "class": "unit", "local_samples_ms": [55602], "basis": "Existing intake suite extended with census transitions. Measured full suite duration. No new suite."},
   "source_run": 41339293730,

@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { acceptsConfirmVerb } from './fixtures/email-followups-app-confirm-verb.mjs';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
+import { buildRelease } from '../src/release.js';
 
 let fixture, c, actor, deal, clientRef, connection;
 before(async () => {
@@ -3276,6 +3277,8 @@ test('email next-step proof fixtures use registered response contracts', async (
     assert.equal(active.contract, 'email-next-step.v1');
     assert.equal(closedRoom.schema_version, 'deal-timeline.v1');
     if (process.env.CARR_EMAIL_NEXT_STEP_FIXTURE) writeFileSync(process.env.CARR_EMAIL_NEXT_STEP_FIXTURE,
-      JSON.stringify({ deal, active, activeRoom, activeBoard, closedRoom, closedBoard, refusal }));
+      JSON.stringify({ deal, active, activeRoom, activeBoard, closedRoom, closedBoard, refusal,
+        release: await buildRelease({ env: { CARR_ENV: 'production', GIT_SHA: 'a'.repeat(40) },
+          sql: async () => [], verbCount: 1 }) }));
   } finally { await c.query('update deal set closed_on=null where id=$1', [deal]); }
 });

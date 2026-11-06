@@ -35,14 +35,16 @@ class ProofCLI(unittest.TestCase):
     @contextmanager
     def fixture(self, scenario):
         requests = []
+        release_payload = self.data['release']
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 requests.append(self.path)
                 self.send_response(200)
                 self.end_headers()
-                value = {'ok': True, 'env': {'value': 'production'},
-                         'git_sha': {'value': ('b' if scenario == 'release-change' and len(requests) > 1 else 'a') * 40}}
+                value = json.loads(json.dumps(release_payload))
+                if scenario == 'release-change' and len(requests) > 1:
+                    value['git_sha']['value'] = 'b' * 40
                 if scenario == 'bad-release':
                     value['ok'] = False
                 self.wfile.write(json.dumps(value).encode())
