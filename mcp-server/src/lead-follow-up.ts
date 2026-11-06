@@ -149,13 +149,13 @@ export function leadFollowUpTools() {
       inputSchema: marketFilters,
       handler: async (c: Db, _actor: unknown, args: MarketFilter) => {
         const rows = (await c.query(`with wins as (
-          select d.id,d.client_id,d.deal_type,d.closed_on,d.city,p.state,
+          select d.id,d.name,d.client_id,d.deal_type,d.closed_on,d.city,p.state,
             coalesce(nullif(cl.vertical,''),nullif(d.segment,''),nullif(p.specialty,'')) vertical
           from deal d join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
           where d.phase='closed' and d.outcome='won' and d.closed_on<=current_date
             and cl.merged_into is null and p.merged_into is null and p.deleted_at is null)
           select vertical,deal_type,city,state,count(*)::int won_deals,count(distinct client_id)::int clients,
-            jsonb_agg(jsonb_build_object('deal_id',id,'closed_on',closed_on) order by closed_on,id) evidence
+            jsonb_agg(jsonb_build_object('deal_id',id,'closed_on',closed_on,'deal_name',name) order by closed_on,id) evidence
           from wins where ($1::text is null or vertical=$1) and ($2::text is null or city=$2)
             and ($3::text is null or state=$3)
           group by vertical,deal_type,city,state order by count(*) desc,vertical,deal_type,city,state limit 1001`,
