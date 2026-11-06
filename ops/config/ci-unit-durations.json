@@ -28,6 +28,8 @@
   "portal_session_suite_measurement": {"card": "WR617.S4.J5", "source_sha": "c7b3ed7e8333e67163124f4938bf6bef794b97c5", "hosted_run": 41955790078, "suite": "client-portal-session-postgres.test.mjs", "milliseconds": 16754, "log_sha256": "e3d40adf825edcabde40de1d74ff3fa52dfc28b776e67023c4fbfe17b8940cdb", "basis": "Observed hosted canonical runner duration; replaces unmeasured-suite fallback. Retains hosted setup floor, five shards and watchdog headroom."},
   "calendar_strict_instants_suite_measurement": {"card": "WR636.S2.J3", "source_sha": "8dcbddb181558116caf6e46dbe0293bddf044c5a", "hosted_run": 42006466357, "suite": "calendar-strict-instants.test.mjs", "milliseconds": 288, "log_sha256": "1002f7383ef9d653ad19d8c0d2b7d104587cb3b98bb1c5efa93d33aadfc8a657", "basis": "Observed successful hosted canonical runner duration. suiteBatches places this pure suite in the parallel bulk pool. Retains hosted setup floor, five shards and watchdog headroom."},
   "composer_suite_measurement": {"card": "WR227.S20.J2", "source_sha": "f92cf8f5a20ffc35ffa1285c936e3604426897c7", "hosted_run": 41977490875, "suite": "market-study-composer.test.mjs", "milliseconds": 741, "serial": false, "log_sha256": "70cf0dbf59e2cbc696ac11f768185957c05937b1aa8ee8a6c7cd04e4c4a0b910", "basis": "Observed hosted canonical runner duration; replaces unmeasured-suite fallback. Retains hosted setup floor, five shards and watchdog headroom."},
+  "activity_attribution_suite_measurement": {"card":"WR648.S3.J1","local_samples_ms":{"focused_combined":1765,"postgres":7519},"basis":"Measured process duration including teardown. No speedup claim."},
+  "client_anniversary_read_suite_measurement": {"card": "WR648.S4.J4", "source_sha": "37cb3be257e3cf4fae28721580901ff0a147c3ee", "hosted_run": 42239667958, "measured_ms": {"client-anniversary-read.test.mjs": 352, "client-anniversary-read-route.test.mjs": 1123, "client-anniversary-read-postgres.test.mjs": 1306}, "logs": [{"job": 127966583015, "sha256": "70c1f57ed4424a90caa43b9a8840e751d86f939dc142dd001566585b51af8d8f"}, {"job": 127966583004, "sha256": "cd63037e5e08e7fa61ae68097a2a9672b63cb0aaf6c816f4316215fb19f2d7fb"}], "basis": "Successful hosted canonical runner timings including child teardown. PostgreSQL snapshot setup is counted separately by snapshot_template_ms. Replaces local standalone timings multiplied by 10; retains five shards, cold setup floor and 20 percent watchdog headroom."},
   "suites": {
     "a02-rule-enforcement-postgres.test.mjs": {"milliseconds": 3248, "serial": true},
     "a02-rule-enforcement-reader-mutants.test.mjs": {"milliseconds": 1021, "serial": false},
@@ -35,6 +37,9 @@
     "action-links-postgres.test.mjs": {"milliseconds": 1624, "serial": true},
     "action-links.test.mjs": {"milliseconds": 529, "serial": false},
     "action-risk-guardrails.test.mjs": {"milliseconds": 584, "serial": false},
+    "activity-deal-attribution-postgres.test.mjs": {"milliseconds": 8766, "serial": true},
+    "activity-deal-attribution-route.test.mjs": {"milliseconds": 3439, "serial": false},
+    "activity-deal-attribution.test.mjs": {"milliseconds": 1922, "serial": false},
     "activity-occurred-at-future.test.mjs": {"milliseconds": 943, "serial": false},
     "add-party-name-guard.test.mjs": {"milliseconds": 1585, "serial": false},
     "add-party-org-identity.test.mjs": {"milliseconds": 556, "serial": false},
@@ -77,6 +82,9 @@
     "chrome-launch.test.mjs": {"milliseconds": 39545, "serial": true},
     "chromium-binary.test.mjs": {"milliseconds": 81, "serial": true},
     "clear-the-deck-postgres.test.mjs": {"milliseconds": 2108, "serial": true},
+    "client-anniversary-read-postgres.test.mjs": {"milliseconds": 1306, "serial": true},
+    "client-anniversary-read-route.test.mjs": {"milliseconds": 1123, "serial": false},
+    "client-anniversary-read.test.mjs": {"milliseconds": 352, "serial": false},
     "client-portal-postgres.test.mjs": {"milliseconds": 16539, "serial": true},
     "client-portal-register-postgres.test.mjs": {"milliseconds": 3075, "serial": true},
     "client-portal-session-postgres.test.mjs": {"milliseconds": 16754, "serial": true},
@@ -155,11 +163,11 @@
     "email-delivery-finding-postgres.test.mjs": {"milliseconds": 19100, "serial": true},
     "email-lead-proposal-postgres.test.mjs": {"milliseconds": 1653, "serial": true},
     "email-lifecycle-postgres.test.mjs": {"milliseconds": 27050, "serial": true},
-    "email-touch-application-postgres.test.mjs": {"milliseconds": 52400, "serial": true},
     "email-link-queue-postgres.test.mjs": {"milliseconds": 400, "serial": true},
     "email-link-queue.test.mjs": {"milliseconds": 744, "serial": false},
     "email-loi-spelling.test.mjs": {"milliseconds": 539, "serial": false},
     "email-match-contacts-postgres.test.mjs": {"milliseconds": 3316, "serial": true},
+    "email-touch-application-postgres.test.mjs": {"milliseconds": 52400, "serial": true},
     "engineering-program-controller.v5.test.mjs": {"milliseconds": 393, "serial": false},
     "engineering-runtime-migration.test.mjs": {"milliseconds": 595, "serial": false},
     "engineering-runtime.test.mjs": {"milliseconds": 582, "serial": false},
@@ -359,6 +367,8 @@
     "salesforce-report-capture.test.mjs": {"milliseconds": 149, "serial": false},
     "schedule-board.test.js": {"milliseconds": 133, "serial": false},
     "self-closing-records-sql.test.mjs": {"milliseconds": 1475, "serial": true},
+    "session-checkpoints-auth.test.mjs": {"milliseconds": 805, "serial": false},
+    "session-checkpoints.test.mjs": {"milliseconds": 1256, "serial": true},
     "session-identity.test.mjs": {"milliseconds": 317, "serial": false},
     "shared-oauth-worker.test.mjs": {"milliseconds": 3213, "serial": false},
     "shared-oauth.test.mjs": {"milliseconds": 2517, "serial": true},
@@ -373,7 +383,6 @@
     "snapshot-service-postgres.test.mjs": {"milliseconds": 251409, "serial": true},
     "sponsor-runtime.test.mjs": {"milliseconds": 776, "serial": false},
     "staging-journey-preflight.test.mjs": {"milliseconds": 402, "serial": false},
-    "staging-loop-fixtures.test.mjs": {"milliseconds": 636, "serial": false},
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},
     "standing-context-territory.test.mjs": {"milliseconds": 5044, "serial": true},
     "subject-watches-postgres.test.mjs": {"milliseconds": 25540, "serial": true},
@@ -467,18 +476,6 @@
     "workspace-command-center-web.test.mjs": {"milliseconds": 543, "serial": false},
     "workspace-surface-inventory.test.mjs": {"milliseconds": 446, "serial": false},
     "write-event-call-shape.test.mjs": {"milliseconds": 210, "serial": false},
-    "write-reconciliation.test.mjs": {"milliseconds": 547, "serial": false},
-    "session-checkpoints-auth.test.mjs": {"milliseconds": 805, "serial": false},
-    "session-checkpoints.test.mjs": {"milliseconds": 1256, "serial": true}
-  },
-  "gate_suite_measurements": {
-      "ops/verdict-delivery-selftest.py": {
-          "milliseconds": 121,
-          "serial": false
-      },
-      "ops/verdict-delivery-proof-selftest.py": {
-          "milliseconds": 78,
-          "serial": false
-      }
+    "write-reconciliation.test.mjs": {"milliseconds": 547, "serial": false}
   }
 }

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Exercise bin/ci-why against synthetic recorded gh output, with no network."""
-# Real failure it prevents (2026-10-28 retro): a ci-why that dumps whole logs or cries wolf on the review gate.
 import contextlib
 import importlib.machinery
 import importlib.util
@@ -33,8 +32,6 @@ PYTEST_LOG = '\n'.join(SETUP + [
 LONG_LOG = '\n'.join([T + '##[group]Run make test', T + 'Error: first problem']
                      + [T + f'detail {i}' for i in range(200)]
                      + [T + '##[error]Process completed with exit code 2.'])
-GATE_LOG = '\n'.join([T + '##[group]Run python3 ops/review-gate.py', T + 'approval required',
-                      T + '##[error]Process completed with exit code 1.'])
 
 
 def job(job_id, name, step, conclusion='failure'):
@@ -74,19 +71,17 @@ def run(fake, *argv):
 
 
 class CiWhyTests(unittest.TestCase):
-    def test_review_gate_only_is_called_out_without_fetching_logs(self):
-        fake = Fake([check('evaluate', 'fail', 7, 70), check('review-gate', 'fail', 8, 80), check('unit', 'pass', 9, 90)],
-                    {}, {'70': GATE_LOG})
+    def test_evaluate_job_failures_are_explained(self):
+        fake = Fake([check('evaluate', 'fail', 7, 70)],
+                    {'7': [job(70, 'evaluate', 'Run tests')]}, {'70': PYTEST_LOG})
         text = run(fake, 12)
-        self.assertIn('2 failing, 0 pending, 3 checks', text)
-        self.assertIn('that is the only failure, nothing to fix in code', text)
-        self.assertFalse([c for c in fake.calls if c[0] in ('api', 'run')])
+        self.assertIn('== evaluate (job 70, failure)', text)
+        self.assertIn('FAILED tests/test_widget.py::test_sum', text)
 
     def test_failed_step_window_skips_setup_noise_and_cleanup(self):
-        fake = Fake([check('unit', 'fail', 5, 51), check('evaluate', 'fail', 6, 60), check('lint', 'pending', 5, 52)],
+        fake = Fake([check('unit', 'fail', 5, 51), check('lint', 'pending', 5, 52)],
                     {'5': [job(51, 'unit', 'Run tests'), job(53, 'other', 'x')]}, {'51': PYTEST_LOG})
         text = run(fake, 12)
-        self.assertIn('review gate (evaluate) is waiting for an approval on this head; not a code failure.', text)
         self.assertIn('== unit (job 51, failure)\nfailed step: Run tests', text)
         self.assertIn('FAILED tests/test_widget.py::test_sum - AssertionError', text)
         self.assertIn('##[error]Process completed with exit code 1.', text)

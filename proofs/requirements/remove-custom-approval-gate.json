@@ -1,0 +1,34 @@
+{
+  "schema": "carr-production-proof-plan.v1",
+  "requirement_id": "remove-custom-approval-gate",
+  "targets": [
+    "worker",
+    "studio"
+  ],
+  "assertions": [
+    {
+      "id": "worker-unchanged-release",
+      "predicate": "After merge, the registered release smoke reader proves the deployed Worker release contains this merge and passes its existing read-only smoke checks. Separately read the merged GitHub tree to confirm the approval workflow and gate scripts are absent, with native required review approved.",
+      "runner": "worker-release-smoke.v1",
+      "expected_result": "Deployed Worker smoke passes; GitHub native approval is present and the custom approval workflow is absent. Source deletion is verified independently from runtime smoke.",
+      "input_class": "Read-only deployed Worker release and GitHub PR metadata",
+      "deadline_seconds": 300
+    },
+    {
+      "id": "studio-unchanged-runtime",
+      "predicate": "Read the next normal successful Studio receipt at the installed full runtime SHA with studio-run-receipt.v1. Require counts.run.processed at least zero. This idle predicate checks continued successful operation only; no positive business processing or gate behavior is inferred from it.",
+      "runner": "studio-run-receipt.v1",
+      "expected_result": "Successful receipt matches installed source identity; counts.run.processed is nonnegative. Missing or failed receipt stays unproven.",
+      "input_class": "Read-only natural Studio receipt; no job is started by the observer",
+      "deadline_seconds": 300
+    }
+  ],
+  "safety": {
+    "read_only": true,
+    "no_sends": true,
+    "max_requests": 20,
+    "max_records": 20,
+    "max_runtime_seconds": 300,
+    "max_artifact_bytes": 1048576
+  }
+}

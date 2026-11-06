@@ -78,14 +78,14 @@
     ]
   },
   "tools/prove-recorded-comps-readable-deal-labels.py": {
-    "sha256": "622198c978c8c4a16920ad79bac519a34343bc378d6f56a5a223e21215ff7608",
+    "sha256": "a142fc0a375a9f0d701a981514e3cf31b7dc84ab6dcfa4be87387601b3df8914",
     "commands": [
       "declared --call-wrapper call list-doc-conversations/read-doc-conversation/get-deal-room",
       "node release-pinned check.mjs with fixed SYNTHETIC and validated answer blocks"
     ]
   },
   "tools/prove-vendor-scheduling-zero-duration.py": {
-    "sha256": "270e15167affb568f88e8b39a9aa2228d263c61254bbaed87fde25b3cdc2ac90",
+    "sha256": "b5403589e2032203445bd651fbfb4fc9da40e825dd70cb6187c60d25aca2ce2b",
     "commands": [
       "declared --call-wrapper call read-vendor-meetings/morning-brief"
     ]
@@ -101,6 +101,23 @@
     "sha256": "d27da0ae34a094d9a21b9504b51b2880a1019f4d3f1a03a3c047df036df94ba7",
     "commands": [
       "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
+    ]
+  },
+  "tools/prove-activity-deal-attribution.py": {
+    "sha256": "9f95711a5d7860169a9cf607b9fde21a1be75f3b4f07e0c538cfd0f5f363489e",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e with fixed parser program and stdin JSON",
+      "declared --call-wrapper call email-router-queue/get-deal-room/read-activity-deal-attribution; cleanup signals only to each owned wrapper process group"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
+  },
+  "tools/prove-client-anniversary-read.py": {
+    "sha256": "7774379a09a41ad88f7e816e4486fd48b7c4db274f13be01f0fdc69ba0ba698d",
+    "commands": [
+      "node --experimental-strip-types --input-type=module -e PARSER with JSON stdin through parseClientAnniversaryResponse",
+      "git merge-base --is-ancestor merged unit SHA deployed release SHA"
     ]
   }
 }

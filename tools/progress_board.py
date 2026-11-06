@@ -37,6 +37,9 @@ from typing import NamedTuple, Any, Callable, Iterator
 from urllib.request import Request, urlopen
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.repository_identity import canonical_repository, repository_names, repository_for_name, repository_lookup_name
+
 STATUSES = ("queued", "running", "review", "blocked", "question-for-orchestrator", "done", "failed", "superseded")
 # Failed and superseded cards leave the pipeline: they show only in History,
 # each with its reason.
@@ -47,7 +50,7 @@ CONSUMER_PROOF_FIELDS = frozenset({"schema", "outcome", "repo", "source_sha", "t
 LEGACY_PROOF_CUTOFF = datetime(2026, 10, 19, 9, 33, 8, tzinfo=timezone.utc)
 LEGACY_PR_REF = re.compile(
     r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)"
-    r"|(?:((?:DoctorCRE/carr-system|jbookout/(?:doctorcre-app|software-factory))|carr-system|doctorcre-app|software-factory|App)\s+)?"
+    r"|(?:((?:" + "|".join(re.escape(repo) for repo in repository_names(aliases=True)) + r")|carr-system|doctorcre-app|software-factory|App)\s+)?"
     r"\bPR\s*#?\s*(\d+)", re.IGNORECASE)
 PIPELINE_STAGES = ("queued", "build", "review", "ci", "merged", "live")
 PR_STAGES = PIPELINE_STAGES[1:] + ("measured",)
@@ -94,7 +97,7 @@ SNAPSHOT_TASK_FIELDS = frozenset("""
 BLOCKER_EXCERPT_LIMIT = 192
 
 ALL_REPOS_BOARD = "all-repos"
-CORE_REPOS = ("DoctorCRE/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")
+CORE_REPOS = tuple(repository_names())
 RECENT_MERGED = timedelta(days=14)
 # The repository this tool reads its release config, review rules and verbs
 # from. The launchd wrapper binds it explicitly, so a copy of the tool run from
@@ -124,11 +127,11 @@ PHASE_BLOCKS = {
 
 RELEASE_TARGETS = {
     DEFAULT_PR_REPO: (Path.home() / "carr-system", "https://api.doctorcre.com/release"),
-    "jbookout/doctorcre-app": (Path.home() / "doctorcre-app", "https://app.doctorcre.com/app-release"),
+    "DoctorCRE/doctorcre-app": (Path.home() / "doctorcre-app", "https://app.doctorcre.com/app-release"),
 }
 AUTOMATIC_DELIVERY_TARGETS = {
     DEFAULT_PR_REPO: "worker",
-    "jbookout/doctorcre-app": "app",
+    "DoctorCRE/doctorcre-app": "app",
 }
 
 
@@ -215,7 +218,7 @@ def safe_asker_ref(value: str) -> str:
 def safe_repo(value: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*", value):
         raise SystemExit("repo must be a GitHub owner/repository name")
-    return value
+    return canonical_repository(value) or value
 
 
 def task_repo(task: dict[str, Any]) -> str:
@@ -445,7 +448,8 @@ def valid_consumer_proof(proof: Any) -> bool:
 
 
 def consumer_binding(proof: dict[str, Any]) -> str:
-    return json.dumps([proof.get(key) for key in ("repo", "source_sha", "target", "workflow")],
+    return json.dumps([canonical_repository(proof.get(key)) or proof.get(key) if key == "repo" else proof.get(key)
+                       for key in ("repo", "source_sha", "target", "workflow")],
                       separators=(",", ":"))
 
 
@@ -458,6 +462,7 @@ def selected_consumer_proof(task: dict[str, Any]) -> Any:
     if isinstance(target, str) and target in {"worker", "app"}:
         target = (release_config().get(target) or {}).get("live_url")
     source = task.get("merge_sha") if task.get("pr") is not None else task.get("delivery_source_sha")
+    proofs = consumer_observations(proofs.values())
     return proofs.get(consumer_binding({"repo": repo, "source_sha": source,
                                        "target": target, "workflow": task.get("delivery_workflow")}))
 
@@ -466,10 +471,16 @@ def record_consumer_proof(task: dict[str, Any], proof: Any) -> None:
     if not valid_consumer_proof(proof):
         raise SystemExit("--consumer-proof requires a valid pass/fail receipt with an observation timestamp")
     stored = task.get("consumer_proofs")
-    proofs = dict(stored) if isinstance(stored, dict) else {}
     legacy = task.get("consumer_proof")
-    observations = [proof] if isinstance(stored, dict) or not valid_consumer_proof(legacy) else [legacy, proof]
+    observations = [*stored.values(), proof] if isinstance(stored, dict) else [legacy, proof]
+    task["consumer_proofs"] = consumer_observations(observations)
+
+
+def consumer_observations(observations):
+    proofs = {}
     for observation in observations:
+        if not valid_consumer_proof(observation):
+            continue
         key = consumer_binding(observation)
         previous = proofs.get(key)
         observed = parse_time(observation["observed_at"])
@@ -478,7 +489,7 @@ def record_consumer_proof(task: dict[str, Any], proof: Any) -> None:
                 or observed == last_observed and previous.get("outcome") == "fail"):
             continue
         proofs[key] = observation
-    task["consumer_proofs"] = proofs
+    return proofs
 
 
 def consumer_proven(task: dict[str, Any]) -> bool:
@@ -493,12 +504,13 @@ def consumer_proven(task: dict[str, Any]) -> bool:
     if not isinstance(target, str):
         return False
     if target in {"worker", "app"}:
-        if AUTOMATIC_DELIVERY_TARGETS.get(repo) != target:
+        if AUTOMATIC_DELIVERY_TARGETS.get(canonical_repository(repo)) != target:
             return False
         target = (release_config().get(target) or {}).get("live_url")
     source = task.get("merge_sha") if task.get("pr") is not None else task.get("delivery_source_sha")
     workflow = task.get("delivery_workflow")
-    return (proof.get("outcome") == "pass" and proof.get("repo") == repo
+    return (proof.get("outcome") == "pass" and canonical_repository(repo) is not None
+            and canonical_repository(proof.get("repo")) == canonical_repository(repo)
             and isinstance(source, str) and SHA_RE.fullmatch(source) is not None
             and proof.get("source_sha") == source
             and isinstance(target, str) and "://" in target and proof.get("target") == target
@@ -820,7 +832,7 @@ def author(row: dict[str, Any]) -> dict[str, str]:
 
 def complete_connections(repo: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Read overflow pages before an observation can replace cached facts."""
-    owner, name = repo.split("/", 1)
+    owner, name = (repository_lookup_name(repo) or repo).split("/", 1)
     for row in rows:
         for kind, fields in (("contexts", "__typename ... on CheckRun { name status conclusion } "
                               "... on StatusContext { context state }"),
@@ -936,7 +948,7 @@ class GitHubReadPass:
         # GitHub timestamps have second resolution. Overlap the cursor by one
         # second so a closure during this read cannot fall between two reads.
         started = (now_utc() - timedelta(seconds=1)).isoformat(timespec="seconds")
-        owner, name = repo.split("/", 1)
+        owner, name = (repository_lookup_name(repo) or repo).split("/", 1)
         pages: dict[str, list[dict[str, Any]]] = {"open": [], "closed": []}
         variables: dict[str, str | bool | None] = {"owner": owner, "name": name, "withOpen": True,
                                                     "withClosed": True}
@@ -997,7 +1009,7 @@ class GitHubReadPass:
             else:
                 missing.setdefault(safe_repo(repo), []).append(number)
         for repo, numbers in missing.items():
-            owner, name = repo.split("/", 1)
+            owner, name = (repository_lookup_name(repo) or repo).split("/", 1)
             for start in range(0, len(numbers), PULLS_BATCH):
                 batch = numbers[start:start + PULLS_BATCH]
                 query = ("query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { "
@@ -1155,7 +1167,7 @@ def release_config() -> dict[str, Any]:
 def lane_config(repo: str) -> tuple[str, dict[str, Any]] | None:
     for lane in ("worker", "app"):
         entry = release_config().get(lane)
-        if isinstance(entry, dict) and entry.get("github_repo") == repo:
+        if isinstance(entry, dict) and canonical_repository(entry.get("github_repo")) == canonical_repository(repo):
             return lane, entry
     return None
 
@@ -1288,6 +1300,7 @@ def probe_json(url: str) -> dict[str, Any] | None:
 
 
 def latest_release(repo: str) -> dict[str, Any] | None:
+    repo = canonical_repository(repo) or repo
     if repo in RELEASE_CACHE:
         return RELEASE_CACHE[repo]
     release = None
@@ -1325,7 +1338,7 @@ def release_wait_reason(repo: str) -> str:
 def release_contains(repo: str, release: str, commit: str) -> bool:
     """Whether the release includes the commit, from the repository's local
     clone; a clone that lacks either commit answers no and the card waits."""
-    target = RELEASE_TARGETS.get(repo)
+    target = RELEASE_TARGETS.get(canonical_repository(repo))
     if target is None:
         return False
     try:
@@ -1405,7 +1418,7 @@ def delivered_live(task: dict[str, Any], repo: str, at: str, evidence: str | Non
     if task_stage(task) != "merged":
         return False
     target = task.get("delivery_target")
-    automatic = AUTOMATIC_DELIVERY_TARGETS.get(repo)
+    automatic = AUTOMATIC_DELIVERY_TARGETS.get(canonical_repository(repo))
     if automatic and target == automatic and evidence and consumer_proven(task):
         prior = task_stage(task)
         task.update({"status": "done", "stage": "live", "completed_at": at, "updated_at": at,
@@ -1666,7 +1679,7 @@ def settle_done_without_pr(task: dict[str, Any]) -> bool:
 
 def deployed_release(repo: str) -> tuple[Path, str, str] | None:
     """Read where this repository runs. Pipeline cursors and main are not deployment proof."""
-    target = RELEASE_TARGETS.get(repo)
+    target = RELEASE_TARGETS.get(canonical_repository(repo))
     if target is None:
         return None
     root, url = target
@@ -1771,10 +1784,10 @@ def render(project: str, *, discover: bool = False) -> None:
     # readback for cards whose delivery target a release completes, and the
     # live probe's reason for the rest.
     release_tasks = [*tasks, *[
-        {"repo": key[0], "pr": key[1], "delivery_target": AUTOMATIC_DELIVERY_TARGETS[key[0]]}
+        {"repo": key[0], "pr": key[1], "delivery_target": AUTOMATIC_DELIVERY_TARGETS[canonical_repository(key[0])]}
         for key in discovered if key not in keys]]
     targeted = {pr_key(task) for task in release_tasks if task.get("pr") is not None
-                and task.get("delivery_target") == AUTOMATIC_DELIVERY_TARGETS.get(pr_key(task)[0])}
+                and task.get("delivery_target") == AUTOMATIC_DELIVERY_TARGETS.get(canonical_repository(pr_key(task)[0]))}
     releases: dict[str, tuple[Path, str, str] | None] = {}
     evidence: dict[tuple[str, int], str | None] = {}
     for key, (info, _) in fetched.items():
@@ -1843,7 +1856,7 @@ def legacy_card(task: dict[str, Any]) -> bool:
 
 
 def canonical_repo(repo: str) -> str:
-    return next((core for core in CORE_REPOS if core.lower() == repo.lower()), repo.lower())
+    return canonical_repository(repo) or repo.lower()
 
 
 def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
@@ -1860,10 +1873,10 @@ def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
             if repo.lower() == "app":
                 repo = "doctorcre-app"
             if "/" not in repo:
-                repo = ("DoctorCRE/" if repo == "carr-system" else "jbookout/") + repo
+                repo = repository_for_name(repo)
         refs.add((canonical_repo(repo), int(number)))
     for repo, number in re.findall(r"reports/[\w.-]*-AF-(carr-system|doctorcre-app|software-factory)-(\d+)\.txt\b", text):
-        refs.add((f"{'DoctorCRE' if repo == 'carr-system' else 'jbookout'}/{repo}", int(number)))
+        refs.add((repository_for_name(repo), int(number)))
     return refs
 
 
@@ -1883,6 +1896,7 @@ def legacy_pr_matches_subject(task: dict[str, Any], info: dict[str, Any]) -> boo
 
 def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[dict[str, Any], dict[str, Any]]:
     """Plan the pre-proof migration on a copy; never grants consumer proof."""
+    fetched = {(canonical_repo(repo), number): value for (repo, number), value in fetched.items()}
     result = copy.deepcopy(state)
     counts = {key: 0 for key in ("done", "dropped", "legacy, unverified", "kept")}
     sample_groups: dict[str, list[dict[str, Any]]] = {key: [] for key in counts}
@@ -1927,6 +1941,12 @@ def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[
     return result, {"counts": counts, "samples": samples}
 
 
+def matches_pr_url(url, repo, number):
+    match = re.fullmatch(r'https://github[.]com/([^/]+/[^/]+)/pull/([1-9][0-9]*)', url or '')
+    return bool(match and canonical_repository(match[1]) is not None
+                and canonical_repository(match[1]) == canonical_repository(repo) and int(match[2]) == number)
+
+
 def command_dispose_legacy(args: argparse.Namespace) -> None:
     initial = read_state(args.project)
     keys = {next(iter(refs)) for task in initial.get("tasks", {}).values()
@@ -1937,7 +1957,7 @@ def command_dispose_legacy(args: argparse.Namespace) -> None:
         try:
             info = gh_json(["pr", "view", str(number), "--repo", repo, "--json",
                             "number,title,files,state,mergeCommit,mergedAt,closedAt,url"])
-            if not isinstance(info, dict) or info.get("number") != number or info.get("url") != f"https://github.com/{repo}/pull/{number}":
+            if not isinstance(info, dict) or info.get("number") != number or not matches_pr_url(info.get("url"), repo, number):
                 raise RuntimeError("GitHub returned a mismatched PR identity")
             fetched[repo, number] = info, None
         except RuntimeError as exc:
@@ -2693,7 +2713,7 @@ def add_v1_cards(state: dict[str, Any], discovered: dict) -> bool:
         if task_id in tasks:
             continue
         tasks[task_id] = pr_card(key[0], info, info["state"] == "MERGED")
-        tasks[task_id]["delivery_target"] = AUTOMATIC_DELIVERY_TARGETS[key[0]]
+        tasks[task_id]["delivery_target"] = AUTOMATIC_DELIVERY_TARGETS[canonical_repository(key[0])]
         changed = True
     return changed
 

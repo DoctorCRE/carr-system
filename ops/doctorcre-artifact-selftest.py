@@ -45,7 +45,7 @@ def add_file(bundle: tarfile.TarFile, name: str, content: bytes) -> None:
     bundle.addfile(row, io.BytesIO(content))
 
 
-def bundle(label: str, malicious_path: str | None = None) -> tuple[dict, bytes, bytes]:
+def bundle(label: str, malicious_path: str | None = None, repository: str = "jbookout/doctorcre-app") -> tuple[dict, bytes, bytes]:
     files = {
         "index.html": f"<h1>{label}</h1>\n".encode(),
         "workspace.html": f"<main>{label}</main>\n".encode(),
@@ -57,7 +57,7 @@ def bundle(label: str, malicious_path: str | None = None) -> tuple[dict, bytes, 
     commit = hashlib.sha1(label.encode()).hexdigest()
     manifest = {
         "schema": "doctorcre-static-artifact.v1",
-        "repository": "jbookout/doctorcre-app",
+        "repository": repository,
         "source_commit": commit,
         "entrypoint": "workspace.html",
         "carr_interface": {"path": "contracts/carr-interface.v1.json", **CONTRACTS["carr_interface"]},
@@ -74,12 +74,12 @@ def bundle(label: str, malicious_path: str | None = None) -> tuple[dict, bytes, 
             add_file(archive, malicious_path, b"escape")
     archive_bytes = stream.getvalue()
     tag = f"app-v0.0.0-{label}"
-    base = f"https://github.com/jbookout/doctorcre-app/releases/download/{tag}"
+    base = f"https://github.com/{repository}/releases/download/{tag}"
     pin = {
         "schema": "carr-doctorcre-artifact-pin.v1",
-        "repository": "jbookout/doctorcre-app",
+        "repository": repository,
         "release_tag": tag,
-        "release_url": f"https://github.com/jbookout/doctorcre-app/releases/tag/{tag}",
+        "release_url": f"https://github.com/{repository}/releases/tag/{tag}",
         "source_commit": commit,
         "archive_url": f"{base}/doctorcre-app.tar",
         "archive_bytes": len(archive_bytes),
@@ -146,7 +146,7 @@ def main() -> int:
     print("doctorcre-artifact-selftest: exact pin and reversible activation")
     test_download_failures()
     prior_pin, prior_archive, prior_manifest = bundle("prior")
-    candidate_pin, candidate_archive, candidate_manifest = bundle("candidate")
+    candidate_pin, candidate_archive, candidate_manifest = bundle("candidate", repository="DoctorCRE/doctorcre-app")
 
     manifest, files = ARTIFACT.verify(candidate_pin, candidate_archive, candidate_manifest)
     check("1. exact artifact verifies", manifest["source_commit"] == candidate_pin["source_commit"] and len(files) == 2)
@@ -191,6 +191,20 @@ def main() -> int:
             check("7. cached artifact tampering blocks activation", "differs from its receipt" in str(exc))
         else:
             check("7. cached artifact tampering blocks activation", False)
+
+    with tempfile.TemporaryDirectory() as directory:
+        pin = json.loads((REPO / 'ops/config/doctorcre-artifact.v1.json').read_text())
+        for repo, accepted in [('DoctorCRE/doctorcre-app', True), ('jbookout/doctorcre-app', True),
+                               ('DoctorCRE/carr-system', False), ('DoctorCRE/unrelated', False),
+                               ('someone/doctorcre-app', False)]:
+            candidate = json.loads(json.dumps(pin).replace(pin['repository'], repo))
+            path = Path(directory) / 'pin.json'
+            path.write_text(json.dumps(candidate))
+            try:
+                ARTIFACT.load_pin(path)
+                check('repository identity ' + repo, accepted)
+            except ValueError:
+                check('repository refusal ' + repo, not accepted)
 
     if FAILURES:
         print(f"doctorcre-artifact-selftest: {len(FAILURES)} FAILED")

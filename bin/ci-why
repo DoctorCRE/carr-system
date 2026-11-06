@@ -10,7 +10,6 @@ import sys
 WINDOW = 40
 BEFORE = 10
 CAP = 200
-REVIEW_GATE = {'evaluate', 'review-gate'}
 UNFINISHED = {'failure', 'cancelled', 'timed_out'}
 ANSI = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
 STAMP = re.compile(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?')
@@ -67,13 +66,8 @@ def from_pr(repo, pr):
     failed = [c for c in checks if c['bucket'] in ('fail', 'cancel')]
     pending = sum(c['bucket'] == 'pending' for c in checks)
     out = [f'PR #{pr} head {head[:12]}: {len(failed)} failing, {pending} pending, {len(checks)} checks']
-    gate = [c for c in failed if c['name'] in REVIEW_GATE]
-    real = [c for c in failed if c['name'] not in REVIEW_GATE]
-    if gate:
-        out.append('review gate (' + ', '.join(c['name'] for c in gate) + ') is waiting for an approval on this head; '
-                   + ('that is the only failure, nothing to fix in code.' if not real else 'not a code failure.'))
     runs = {}
-    for check in real:
+    for check in failed:
         match = JOB_LINK.search(check.get('link') or '')
         if match:
             runs.setdefault(match[1], set()).add(int(match[2]))

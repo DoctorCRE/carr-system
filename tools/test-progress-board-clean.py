@@ -231,7 +231,7 @@ class DiscoveryRenderTests(BoardFileCase):
                                      (app, 3): (pr(3, title="W3c: Undo"), None)})["tasks"]
         self.assertEqual(set(tasks), {"pr-15", "app-pr-3"})
         self.assertEqual(tasks["pr-15"]["delivery_target"], board.AUTOMATIC_DELIVERY_TARGETS[REPO])
-        self.assertEqual(tasks["app-pr-3"]["delivery_target"], board.AUTOMATIC_DELIVERY_TARGETS[app])
+        self.assertEqual(tasks["app-pr-3"]["delivery_target"], board.AUTOMATIC_DELIVERY_TARGETS[board.canonical_repo(app)])
         self.assertEqual(tasks["pr-15"]["stage"], "merged")
         self.assertIn("consumer proof", tasks["pr-15"]["release_wait"])
         self.assertEqual(tasks["app-pr-3"]["milestone"], "V1")

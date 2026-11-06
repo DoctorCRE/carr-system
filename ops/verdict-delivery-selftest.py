@@ -104,6 +104,31 @@ class Delivery(unittest.TestCase):
         self.assertEqual(self.run_delivery(arm_enabled=True)['state'], 'refused')
         self.assertFalse(self.writes)
 
+    def test_review_failures_preserve_reason_without_legacy_gate(self):
+        cases = [
+            ({'state': 'CHANGES_REQUESTED'}, 'App requested changes at this head'),
+            ({'state': 'DISMISSED'}, 'Current-head App approval required'),
+            ({'commit_id': 'b' * 40}, 'Current-head App approval required'),
+            ({'body': 'Reviewed-SHA: ' + 'b' * 40}, 'App approval body needs exactly one line'),
+            ({'body': BODY + '\nReviewed-SHA: ' + SHA}, 'App approval body needs exactly one line'),
+            ({'user': {'login': m.APP, 'type': 'User'}}, 'Current-head App approval required'),
+        ]
+        original = copy.deepcopy(self.review)
+        for changes, reason in cases:
+            with self.subTest(changes=changes):
+                self.data['pulls/12/reviews?per_page=100'] = [dict(original, **changes)]
+                result = self.run_delivery(arm_enabled=True)
+                self.assertEqual(result['state'], 'refused')
+                self.assertIn(reason, result['reason'])
+                self.assertFalse(self.writes)
+
+    def test_skip_ci_title_still_refuses_native_arm(self):
+        self.pr['title'] = 'Feature [skip ci]'
+        result = self.run_delivery(arm_enabled=True)
+        self.assertEqual(result['state'], 'refused')
+        self.assertEqual(result['reason'], 'Remove skip-CI markers from the PR title')
+        self.assertFalse(self.writes)
+
     def test_race_before_arm(self):
         calls = 0
         def read(path):

@@ -1,6 +1,8 @@
 """Work Request addresses and the versioned progress-board projection."""
 from __future__ import annotations
 
+from lib.repository_identity import canonical_repository, repository_for_name
+
 import copy
 import hashlib
 import json
@@ -21,7 +23,7 @@ def wr_address(ref):
 
 def card_address(ref, ordinal, job=None, repo=None, pr=None):
     values = {'work_request': wr_address(ref), 'slice': ordinal, 'job': job,
-              'repo': REPOSITORIES[repo] if pr else None, 'pr': pr}
+              'repo': REPOSITORIES[canonical_repository(repo)] if pr else None, 'pr': pr}
     template = 'pr_template' if pr else 'job_template' if job is not None else 'slice_template'
     return ADDRESS_FORMAT[template].format(**values)
 
@@ -334,21 +336,26 @@ def backfill(state, catalog=None, facts=None, summaries=None):
     import uuid
     catalog = catalog or {}
     facts = facts or {}
+    normalized = {}
+    for key, value in facts.items():
+        repo, separator, number = key.rpartition('#')
+        normalized[f"{canonical_repository(repo) or repo}#{number}" if separator else key] = value
+    facts = normalized
     summaries = summaries or {}
     assignments, requests, proposed = {}, {}, {}
     related = related_pr_groups(facts)
     for key, original in {**state.get('legacy_history', {}), **state.get('tasks', {})}.items():
         task = copy.deepcopy(original)
-        fact = facts.get(f"{task.get('repo', 'DoctorCRE/carr-system')}#{task.get('pr')}", {})
+        fact = facts.get(f"{canonical_repository(task.get('repo', 'DoctorCRE/carr-system'))}#{task.get('pr')}", {})
         if not fact:
             target = re.search(r'(carr-system|doctorcre-app|software-factory)-(\d+)$', key)
             if target:
-                fact = facts.get(f"{'DoctorCRE' if target[1] == 'carr-system' else 'jbookout'}/{target[1]}#{target[2]}", {})
+                fact = facts.get(f"{repository_for_name(target[1])}#{target[2]}", {})
         if not fact:
             note = str(task.get('note') or '')
             opened = re.search(r'Opened (carr-system|doctorcre-app|software-factory) PR (\d+)', note)
             if opened:
-                fact = facts.get(f"{'DoctorCRE' if opened[1] == 'carr-system' else 'jbookout'}/{opened[1]}#{opened[2]}", {})
+                fact = facts.get(f"{repository_for_name(opened[1])}#{opened[2]}", {})
         if fact:
             task['title'] = fact.get('title') or task.get('title')
             task['body'] = fact.get('body')
@@ -368,7 +375,7 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         if not series:
             match = re.search(r'\b(V\d+)\s+([A-Z]\d+[A-Za-z]?|\d+[A-Z]|[A-Z])\b', text)
             series = match[1] if match else None
-        pr_key = f"{original.get('repo', 'DoctorCRE/carr-system')}#{original.get('pr')}"
+        pr_key = f"{canonical_repository(original.get('repo', 'DoctorCRE/carr-system'))}#{original.get('pr')}"
         standalone = related.get(pr_key) if original.get('pr') and fact else None
         group = ref or ('series:' + str(series) if series else standalone or 'legacy')
         request = requests.setdefault(group, copy.deepcopy(catalog.get(ref) or state.get('work_requests', {}).get(ref) or {

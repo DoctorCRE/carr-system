@@ -22,7 +22,7 @@ SPEC = importlib.util.spec_from_file_location("board", Path(__file__).with_name(
 assert SPEC is not None and SPEC.loader is not None
 B = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(B)
-REPO, APP = "DoctorCRE/carr-system", "jbookout/doctorcre-app"
+REPO, APP = "DoctorCRE/carr-system", "DoctorCRE/doctorcre-app"
 SHA = "a" * 40
 NOW = datetime(2026, 11, 1, 12, tzinfo=timezone.utc)
 RECENT = (NOW - B.timedelta(days=3)).isoformat(timespec="seconds")
@@ -79,7 +79,7 @@ class FakeGitHub:
         self.calls.append(args)
         assert args[:2] == ["api", "graphql"], args
         fields = dict(arg.split("=", 1) for arg in args[2:] if "=" in arg)
-        repo = f"{fields['owner']}/{fields['name']}"
+        repo = B.canonical_repo(f"{fields['owner']}/{fields['name']}")
         aliases = re.findall(r"pr(\d+): pullRequest", fields["query"])
         if aliases:
             every = {row["number"]: row for row in self.open[repo] + self.closed[repo]}

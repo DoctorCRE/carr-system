@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Metadata cannot evict a pending candidate, even with cancellation disabled.
+  # Edits validate independently so they cannot evict a pending candidate.
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && format('metadata-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}
 
@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   select:
-    if: ${{ !cancelled() && !github.event.pull_request.draft && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}
+    if: ${{ !cancelled() && !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     outputs:
@@ -510,15 +510,14 @@ jobs:
     # success into a red context. Without `always()` a failed group would
     # leave this job skipped, and a required check that never reports blocks
     # the merge silently instead of saying why.
-    # A skipped metadata run must not publish the required candidate context.
-    name: ${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && 'CI metadata (no validation)' || 'ops/ci.sh --strict' }}
+    name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
     needs: [select, lint, fast, gates, secret, unit, unit-coverage, scope, classes, migration-fixtures, launchd-python39]
     permissions:
       contents: read
       statuses: write
       pull-requests: read
-    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) }}
+    if: ${{ always() }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
