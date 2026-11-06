@@ -1491,6 +1491,8 @@ def test_hosted_zsh_setup_does_not_refresh_working_indexes():
     for filename in ("ci.yml", "main-canary.yml", "unit-shards.yml"):
         for job in _hosted_workflow(filename)["jobs"].values():
             if job.get("container"):
+                check(f"{filename} reaps orphaned PostgreSQL processes",
+                      "--init" in job["container"].get("options", ""))
                 check(f"{filename} uses baked zsh instead of package acquisition",
                       not any("ci-zsh.sh" in step.get("run", "") and step.get("if") !=
                               "matrix.classes != 'unit' && matrix.classes != 'gates' && matrix.classes != 'migration' && matrix.classes != 'dependency'"

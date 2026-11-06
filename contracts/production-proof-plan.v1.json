@@ -112,6 +112,7 @@
     "docs/**", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md",
     ".agents/skills/**", "tools/pstack/*.md", "test/**", "mcp-server/test/**", "README.md",
     ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
+    "lib/postgres_service_fixture.py", "lib/postgres_snapshot_fixture.py",
     "ops/ci.sh", "ops/ci-gates.py",
     "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
     "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",

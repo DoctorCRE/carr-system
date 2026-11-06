@@ -88,6 +88,18 @@ class DeliveryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_ci_snapshot_libraries_need_no_runtime_proof(self):
+        for name in ('postgres_service_fixture', 'postgres_snapshot_fixture'):
+            self.write(f'lib/{name}.py', 'synthetic fixture')
+        plan = self.resolve(self.commit())
+        self.assertEqual(plan['targets'], [])
+        self.assertEqual(plan['lanes'], ['control'])
+        self.assertEqual(plan['requirements'], [])
+        self.write('lib/product.py', 'runtime')
+        self.commit()
+        with self.assertRaisesRegex(ValueError, 'requirement|target'):
+            self.resolve()
+
     def test_requested_to_refused(self):
         for sha in ['HEAD', 'f' * 40, self.git('rev-parse', 'HEAD^{tree}')]:
             with self.subTest(sha=sha), self.assertRaises(ValueError):
