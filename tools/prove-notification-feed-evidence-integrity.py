@@ -11,9 +11,10 @@ import sys
 import tempfile
 import time
 import urllib.parse
-import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.release_reader import read as read_http
 SOURCE = 'mcp-server/src/notifications.ts'
 MAX_BYTES = 1048576
 
@@ -94,11 +95,6 @@ class Contradiction(Exception):
     pass
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *_args):
-        raise Unavailable('release_redirect')
-
-
 def observe(origin, wrapper, seconds):
     deadline = time.monotonic() + seconds
 
@@ -146,9 +142,10 @@ def observe(origin, wrapper, seconds):
             return raw
 
     def release():
-        opener = urllib.request.build_opener(NoRedirect())
-        with opener.open(origin.rstrip('/') + '/release', timeout=remaining()) as response:
-            raw = response.read(MAX_BYTES + 1)
+        response = read_http(origin.rstrip('/') + '/release', timeout=remaining(), max_bytes=MAX_BYTES)
+        if response.status != 200:
+            raise OSError('release_unavailable')
+        raw = response.body
         if len(raw) > MAX_BYTES:
             raise Unavailable('release_too_large')
         data = json.loads(raw)

@@ -633,6 +633,8 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
   const repo = fileURLToPath(new URL('../../', import.meta.url));
   let server;
   try {
+    await mkdir(join(root, 'lib'), { recursive: true });
+    await copyFile(join(repo, 'lib/release_reader.py'), join(root, 'lib/release_reader.py'));
     await mkdir(join(root, 'tools'), { recursive: true });
     await mkdir(join(root, 'mcp-server/src'), { recursive: true });
     const cli = join(root, 'tools/prove-notification-feed-evidence-integrity.py');
@@ -645,6 +647,7 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
     let releaseReads = 0;
     server = createServer((request, response) => {
       if (request.url !== '/release') { response.writeHead(404).end(); return; }
+      assert.equal(request.headers['user-agent'], 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)');
       releaseReads++;
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ git_sha: { value: sha, reason: null } }));

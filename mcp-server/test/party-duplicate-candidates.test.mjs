@@ -157,6 +157,7 @@ test('party duplicate candidates through the registered reader verb', async t =>
       let mode, releases;
       const server = createServer((req, res) => {
         assert.equal(req.url, '/release');
+        assert.equal(req.headers['user-agent'], 'doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)');
         releases++;
         res.end(JSON.stringify({ git_sha: { value: (mode === 'release-change' && releases > 1 ? 'b' : 'a').repeat(40) } }));
       });

@@ -23,12 +23,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(NoRedirect)
 
 
-def read(url: str, opener=_OPENER.open, timeout: int = 15) -> Reply:
-    request = urllib.request.Request(url, method="GET", headers={"User-Agent": USER_AGENT})
+def read(url: str, opener=_OPENER.open, timeout: float = 15, *,
+         headers: dict[str, str] | None = None, max_bytes: int | None = None) -> Reply:
+    request = urllib.request.Request(url, method="GET", headers={**(headers or {}), "User-Agent": USER_AGENT})
     try:
         with opener(request, timeout=timeout) as response:
-            return Reply(response.status, dict(response.headers.items()), response.read())
+            return Reply(response.status, dict(response.headers.items()),
+                         response.read() if max_bytes is None else response.read(max_bytes + 1))
     except urllib.error.HTTPError as error:
-        # Redirects are disabled by the caller for the auth probe, but HTTP
-        # errors still carry useful status/headers and should be judged.
-        return Reply(error.code, dict(error.headers.items()), error.read())
+        with error:
+            return Reply(error.code, dict(error.headers.items()),
+                         error.read() if max_bytes is None else error.read(max_bytes + 1))

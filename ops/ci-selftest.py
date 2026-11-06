@@ -47,7 +47,7 @@ def ci_fixture():
     with tempfile.TemporaryDirectory(prefix="carr-ci-fixture-") as directory:
         root = pathlib.Path(directory)
         for rel in (
-            "ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
+            "ops/ci.sh", "ops/ci.py", "ops/proof-transport-check.py", "ops/ci_scope.py", "ops/ci-gates.py", "ops/ci-pushfloor.py", "ops/ci-migration.py", "ops/ci-secret.py",
             "ops/node_test_summary.py", "tools/codemap.py",
             "ops/ci-secret-scan.py", "ops/pii_guard.py", "ops/ci-dep-check.py", "ops/gitleaks.py", ".gitleaks.toml",
             "ops/git_env.py", "ops/no-client-deliverables-gate.py",
@@ -537,7 +537,7 @@ def test_hxprobe_runs_locked_checks_and_propagates_failures():
         (root / "ops/config").mkdir(parents=True)
         (root / "vendor/hxprobe").mkdir(parents=True)
         (root / "bin").mkdir()
-        for rel in ("ops/ci.sh", "ops/ci.py", "ops/ci_scope.py", "ops/node_test_summary.py",
+        for rel in ("ops/ci.sh", "ops/ci.py", "ops/proof-transport-check.py", "ops/ci_scope.py", "ops/node_test_summary.py",
                     "ops/ci-secret-scan.py", "ops/pii_guard.py"):
             shutil.copy2(REPO / rel, root / rel)
         (root / "ops/config/ci-check-scope.json").write_text('{}')

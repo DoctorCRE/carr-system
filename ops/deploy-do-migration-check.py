@@ -34,7 +34,7 @@ def check(config, applied, account, base):
     received = 0
     total = None
     while True:
-        request = urllib.request.Request(f'{base}/accounts/{account}/workers/domains?page={page}&per_page=100', headers={'Authorization': 'Bearer ' + os.environ.get('CLOUDFLARE_API_TOKEN', '')})
+        request = urllib.request.Request(f'{base}/accounts/{account}/workers/domains?page={page}&per_page=100', headers={'User-Agent': 'carr-deploy-migration-check/1', 'Authorization': 'Bearer ' + os.environ.get('CLOUDFLARE_API_TOKEN', '')})
         with urllib.request.urlopen(request, timeout=20) as response:
             data = json.load(response)
         if data.get('success') is not True or not isinstance(data.get('result'), list):
