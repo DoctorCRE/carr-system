@@ -116,6 +116,29 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
                               env={**self.env, 'FAKE_MODE': mode},
                               capture_output=True, text=True, timeout=90)
 
+    def slow_artifact_reader(self, seconds):
+        with (self.fakebin / 'sitecustomize.py').open('a') as stream:
+            stream.write(
+                "import os, pathlib, time\n"
+                "if len(sys.argv) > 1 and sys.argv[1].endswith('acceptance_checks.py'):\n"
+                f"    pathlib.Path({str(self.home / 'reader.pid')!r}).write_text(str(os.getpid()))\n"
+                f"    time.sleep({seconds!r})\n")
+
+    def test_slow_reader_start_uses_remaining_task_deadline(self):
+        self.slow_artifact_reader(1.2)
+        result = self.run_task()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.ledger()[-1]['status'], 'success')
+
+    def test_slow_reader_exceeding_task_deadline_fails_closed(self):
+        self.slow_artifact_reader(60)
+        result = self.run_task(timeout='10')
+        self.assertEqual(result.returncode, 124, result.stdout + result.stderr)
+        self.assertEqual(self.ledger()[-1]['reason'], 'timeout')
+        pid = int((self.home / 'reader.pid').read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
     def pin_weekly_window(self):
         # Two runs seconds apart must share one schedule window; an hourly cron splits them at the top of the hour.
         path = self.repo/'ops/headless-tasks/tasks.json'
