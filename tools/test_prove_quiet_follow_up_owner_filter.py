@@ -4,6 +4,10 @@ import contextlib
 import io
 import importlib.util
 import json
+import http.server
+import signal
+import threading
+import time
 from pathlib import Path
 import subprocess
 import sys
@@ -141,6 +145,63 @@ class OwnerProofTests(unittest.TestCase):
                 code, result = self.run_production(sha)
                 self.assertEqual(code, expected, result)
                 self.assertEqual(result['status'], 'passed' if expected == 0 else 'insufficient-evidence')
+
+    def test_equal_unknown_release_is_insufficient(self):
+        with patch.object(self, 'merge', 'f' * 40):
+            code, result = self.run_production('f' * 40)
+        self.assertEqual(code, 78, result)
+
+    def test_http_deadline_interrupts_progress_and_inactivity(self):
+        for phase in ('body', 'headers', 'inactive'):
+            with self.subTest(phase=phase):
+                stopped = threading.Event()
+                class Handler(http.server.BaseHTTPRequestHandler):
+                    def log_message(self, *args):
+                        pass
+
+                    def do_GET(self):
+                        self.send_response(200)
+                        self.send_header('Content-Length', '100')
+                        try:
+                            if phase == 'headers':
+                                self.flush_headers()
+                            else:
+                                self.end_headers()
+                            for _ in range(30):
+                                if phase == 'body':
+                                    self.wfile.write(b' ')
+                                    self.wfile.flush()
+                                elif phase == 'headers':
+                                    self.wfile.write(b'X-Progress: yes\r\n')
+                                    self.wfile.flush()
+                                if stopped.wait(0.05):
+                                    return
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+
+                server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+                thread = threading.Thread(target=server.serve_forever)
+                thread.start()
+                previous = signal.getsignal(signal.SIGALRM)
+                output = io.StringIO()
+                start = time.monotonic()
+                try:
+                    with patch.object(proof, 'PROOF_BUDGET_SECONDS', 0.3, create=True), \
+                            contextlib.redirect_stdout(output):
+                        code = proof.main(['--origin', f'http://127.0.0.1:{server.server_port}',
+                            '--merge-sha', self.merge, '--evidence', str(
+                                ROOT / 'tools/fixtures/quiet-follow-up-owner-filter.json')])
+                    elapsed = time.monotonic() - start
+                    result = json.loads(output.getvalue())
+                    self.assertEqual((code, result['reason']), (78, 'deadline'))
+                    self.assertLess(elapsed, 0.9)
+                    self.assertEqual(signal.getsignal(signal.SIGALRM), previous)
+                    self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+                finally:
+                    stopped.set()
+                    server.shutdown()
+                    server.server_close()
+                    thread.join()
 
     def test_evidence_must_match_observed_containing_release(self):
         code, result = self.run_production(self.descendant, evidence_sha=self.merge)
