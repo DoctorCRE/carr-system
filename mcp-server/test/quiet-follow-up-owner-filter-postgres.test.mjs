@@ -105,6 +105,28 @@ test('owner modes preserve exact ordered subsets and registered response recordi
   }
 });
 
+test('serialized quiet proposals preserve calendar dates through PostgreSQL decoding', async () => {
+  const subjects = [];
+  for (const kind of ['lead', 'vendor']) {
+    const row = await subject(kind, actor.id);
+    subjects.push(row);
+    await c.query(`update ${kind} set last_touch='2000-02-29',created_at='2000-01-02T00:30:00Z' where id=$1`, [row.id]);
+  }
+  const check = async (anchor, due) => {
+    const payload = await read({ owner_slug: actor.slug });
+    for (const { id } of subjects) {
+      const row = payload.proposals.find(p => p.subject_id === id);
+      assert.equal(row.anchor_on, anchor);
+      assert.equal(row.due_on, due[row.subject_type]);
+    }
+  };
+  await check('2000-02-29', { lead: '2000-04-14', vendor: '2000-05-29' });
+  for (const [i, kind] of ['lead', 'vendor'].entries()) {
+    await c.query(`update ${kind} set last_touch=null where id=$1`, [subjects[i].id]);
+  }
+  await check('2000-01-01', { lead: '2000-02-15', vendor: '2000-03-31' });
+});
+
 test('invalid owner input refuses before database work', async () => {
   for (const owner_slug of ['', '   ', '\n\t', 'x'.repeat(101), 2, [], {}]) {
     const client = { query() { assert.fail('invalid owner reached database'); } };
