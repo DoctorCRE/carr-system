@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
+import { types } from '../src/postgres.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.js';
@@ -46,7 +47,7 @@ test('recording rejects a quiet-follow-ups contract change', async () => {
 let fixture, c, actor, other;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'quiet-owner-', snapshot: true });
-  c = new pg.Client(fixture.connection);
+  c = new pg.Client({ ...fixture.connection, types });
   await c.connect();
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   other = (await c.query("select id,slug from actor where slug='dell'")).rows[0];
@@ -72,6 +73,30 @@ async function subject(kind, owner, days = 200) {
     [id,party,owner,days,actor.id]);
   return { id, party };
 }
+
+test('PostgreSQL date columns remain calendar dates while timestamp types keep their decoding', async () => {
+  const query = `select '2000-02-29'::date leap_day, '2026-03-08'::date spring_day,
+    '2026-11-01'::date fall_day, null::date absent,
+    '2026-03-08 12:34:56.123'::timestamp wall_clock,
+    '2026-03-08 12:34:56.123+00'::timestamptz instant`;
+  for (const zone of ['UTC', 'America/Chicago', 'Asia/Tokyo']) {
+    await c.query("select set_config('TimeZone',$1,false)", [zone]);
+    const result = await c.query(query);
+    const row = result.rows[0];
+    const serialized = JSON.parse(JSON.stringify(row));
+    for (const field of result.fields.filter(field => field.dataTypeID === 1082 && row[field.name] !== null)) {
+      assert.equal(typeof row[field.name], 'string', field.name);
+      assert.match(serialized[field.name], /^\d{4}-\d{2}-\d{2}$/);
+    }
+    assert.deepEqual([serialized.leap_day, serialized.spring_day, serialized.fall_day, serialized.absent],
+      ['2000-02-29', '2026-03-08', '2026-11-01', null]);
+    const original = await new Promise((resolve, reject) => {
+      c.query({ text: query, types: pg.types }, (error, value) => error ? reject(error) : resolve(value));
+    });
+    for (const field of result.fields.filter(field => [1114, 1184].includes(field.dataTypeID)))
+      assert.deepEqual(row[field.name], original.rows[0][field.name], field.name);
+  }
+});
 
 test('owner modes preserve exact ordered subsets and registered response recordings', async () => {
   for (const kind of ['lead','vendor']) for (const owner of [actor.id, other.id, null]) await subject(kind, owner);
