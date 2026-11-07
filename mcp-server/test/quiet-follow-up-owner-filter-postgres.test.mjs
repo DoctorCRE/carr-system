@@ -65,10 +65,10 @@ async function subject(kind, owner, days = 200) {
   const party = randomUUID(), id = randomUUID();
   await c.query(`insert into party(id,kind,name,created_by,updated_by)
     values($1::uuid,'org','Synthetic quiet owner '||$1::uuid::text,$2,$2)`, [party, actor.id]);
-  if (kind === 'lead') await c.query(`insert into lead(id,party_id,stage,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'new',current_date-$4::int,$3,$5,$5)`, [id,party,owner,days,actor.id]);
-  else await c.query(`insert into vendor(id,party_id,category,stage,disposition,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-$4::int,$3,$5,$5)`,
+  if (kind === 'lead') await c.query(`insert into lead(id,party_id,registry_ref,stage,last_touch,owner_id,created_by,updated_by)
+    values($1,$2,'L-'||$1::uuid::text,'new',current_date-$4::int,$3,$5,$5)`, [id,party,owner,days,actor.id]);
+  else await c.query(`insert into vendor(id,party_id,vendor_ref,category,stage,disposition,last_touch,owner_id,created_by,updated_by)
+    values($1,$2,'V-'||$1::uuid::text,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-$4::int,$3,$5,$5)`,
     [id,party,owner,days,actor.id]);
   return { id, party };
 }
