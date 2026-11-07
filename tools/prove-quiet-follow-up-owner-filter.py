@@ -6,9 +6,13 @@ import json
 from pathlib import Path
 import re
 import sys
+import subprocess
+import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 from lib.release_reader import read as release_read
+from proof_release import release_revision
 
 
 class InsufficientEvidence(ValueError):
@@ -86,28 +90,37 @@ def main(argv=None):
             result = verify(json.loads(args.fixture.read_text()))
             result['mode'] = 'fixture-replay'
         else:
+            deadline = time.monotonic() + 20
             reply = release_read(args.origin.rstrip('/') + '/release', timeout=15, max_bytes=1048576)
             if reply.status != 200 or len(reply.body) > 1048576:
                 raise InsufficientEvidence('release_unavailable')
             release = json.loads(reply.body)
-            sha = release.get('git_sha', {}).get('value')
-            if (release.get('ok') is not True or release.get('env', {}).get('value') != 'production'
-                    or not isinstance(sha, str) or not re.fullmatch('[0-9a-f]{40}', sha)):
-                raise InsufficientEvidence('release_contract')
+            sha = release_revision(release)
             if not args.evidence or not args.merge_sha:
                 raise InsufficientEvidence('identity_only_owner_reads_required')
+            if not re.fullmatch('[0-9a-f]{40}', args.merge_sha):
+                raise InsufficientEvidence('merge_revision_contract')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise InsufficientEvidence('deadline')
+            check = subprocess.run(['git', '--no-replace-objects', 'merge-base', '--is-ancestor',
+                args.merge_sha, sha], cwd=ROOT, capture_output=True, timeout=remaining)
+            if check.returncode:
+                raise InsufficientEvidence('release_merge_identity_unproved')
             bundle = json.loads(args.evidence.read_text())
             provenance = bundle.get('provenance', {})
-            if (sha != args.merge_sha or provenance.get('release_sha') != sha
+            if (provenance.get('release_sha') != sha
                     or provenance.get('transport') != 'signed-in-app-origin/mcp'
                     or provenance.get('app_origin') != 'https://app.doctorcre.com'):
                 raise InsufficientEvidence('signed_in_reads_or_merge_identity_unavailable')
             result = verify(bundle)
             result.update(mode='production', release_sha=sha)
+            if time.monotonic() >= deadline:
+                raise InsufficientEvidence('deadline')
         code = 0
     except AssertionError as error:
         code, result = 1, {'status': 'failed', 'reason': str(error)}
-    except (InsufficientEvidence, OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+    except (InsufficientEvidence, OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError) as error:
         code, result = 78, {'status': 'insufficient-evidence', 'reason': str(error)}
     print(json.dumps(result, sort_keys=True))
     return code

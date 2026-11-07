@@ -130,5 +130,14 @@
       "node --experimental-strip-types --input-type=module -e PARSER with JSON stdin through parseClientAnniversaryResponse",
       "git merge-base --is-ancestor merged unit SHA deployed release SHA"
     ]
+  },
+  "tools/prove-quiet-follow-up-owner-filter.py": {
+    "sha256": "4c96a05bb90573f4b3c70961156b679ccbe0726f4d6628996fa4caa32e0ee0a8",
+    "commands": [
+      "git --no-replace-objects merge-base --is-ancestor"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   }
 }

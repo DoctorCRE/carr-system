@@ -12,6 +12,9 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'ops'))
+from git_env import fixture_env
+
 RUNNER = ROOT / 'tools/prove-quiet-follow-up-owner-filter.py'
 spec = importlib.util.spec_from_file_location('quiet_owner_proof', RUNNER)
 assert spec is not None and spec.loader is not None
@@ -28,7 +31,8 @@ class OwnerProofTests(unittest.TestCase):
         def git(*args, input=None):
             return subprocess.run(['git', '-c', 'user.name=Proof test', '-c',
                 'user.email=proof@example.invalid', *args], cwd=cls.git_root,
-                input=input, text=True, capture_output=True, check=True, timeout=5).stdout.strip()
+                input=input, text=True, capture_output=True, check=True, timeout=5,
+                env=fixture_env()).stdout.strip()
         git('init', '-q')
         tree = git('mktree', input='')
         cls.older = git('commit-tree', tree, input='older')
@@ -112,17 +116,18 @@ class OwnerProofTests(unittest.TestCase):
             self.assertEqual(self.run_fixture(value)[0], 78)
 
 
-    def run_production(self, release_sha, value=None):
+    def run_production(self, release_sha, value=None, evidence_sha=None):
         from lib.release_reader import Reply
         value = copy.deepcopy(self.recording if value is None else value)
-        value['provenance'].update(release_sha=release_sha,
+        value['provenance'].update(release_sha=evidence_sha or release_sha,
             transport='signed-in-app-origin/mcp', app_origin='https://app.doctorcre.com')
         release = {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': release_sha}}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'evidence.json'
             path.write_text(json.dumps(value))
             output = io.StringIO()
-            with patch.object(proof, 'ROOT', self.git_root, create=True), patch.object(proof,
+            with patch.object(proof, 'ROOT', self.git_root, create=True), patch.dict(
+                    'os.environ', fixture_env(), clear=True), patch.object(proof,
                     'release_read', return_value=Reply(200, {}, json.dumps(release).encode())), \
                     contextlib.redirect_stdout(output):
                 code = proof.main(['--evidence', str(path), '--merge-sha', self.merge])
@@ -136,6 +141,16 @@ class OwnerProofTests(unittest.TestCase):
                 code, result = self.run_production(sha)
                 self.assertEqual(code, expected, result)
                 self.assertEqual(result['status'], 'passed' if expected == 0 else 'insufficient-evidence')
+
+    def test_evidence_must_match_observed_containing_release(self):
+        code, result = self.run_production(self.descendant, evidence_sha=self.merge)
+        self.assertEqual((code, result['reason']),
+            (78, 'signed_in_reads_or_merge_identity_unavailable'))
+
+    def test_ancestry_timeout_is_insufficient_evidence(self):
+        with patch.object(proof.subprocess, 'run', side_effect=subprocess.TimeoutExpired('git', 1)):
+            code, result = self.run_production(self.descendant)
+        self.assertEqual((code, result['status']), (78, 'insufficient-evidence'))
 
     def test_containing_release_subset_failure_exits_one(self):
         value = copy.deepcopy(self.recording)
