@@ -146,6 +146,15 @@ class OwnerProofTests(unittest.TestCase):
                 self.assertEqual(code, expected, result)
                 self.assertEqual(result['status'], 'passed' if expected == 0 else 'insufficient-evidence')
 
+    def test_http_inactivity_error_is_insufficient(self):
+        previous = signal.getsignal(signal.SIGALRM)
+        with patch.object(proof, 'release_read', side_effect=TimeoutError('timed out')), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            code = proof.main(['--merge-sha', self.merge])
+        self.assertEqual((code, json.loads(output.getvalue())['reason']), (78, 'timed out'))
+        self.assertEqual(signal.getsignal(signal.SIGALRM), previous)
+        self.assertEqual(signal.getitimer(signal.ITIMER_REAL), (0.0, 0.0))
+
     def test_equal_unknown_release_is_insufficient(self):
         with patch.object(self, 'merge', 'f' * 40):
             code, result = self.run_production('f' * 40)

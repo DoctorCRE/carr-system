@@ -132,7 +132,7 @@
     ]
   },
   "tools/prove-quiet-follow-up-owner-filter.py": {
-    "sha256": "4c96a05bb90573f4b3c70961156b679ccbe0726f4d6628996fa4caa32e0ee0a8",
+    "sha256": "e8df045b07ed4bbdb6a94cf0d1571386b5636d9b7e5ae915e5ad6103b7814290",
     "commands": [
       "git --no-replace-objects merge-base --is-ancestor"
     ],

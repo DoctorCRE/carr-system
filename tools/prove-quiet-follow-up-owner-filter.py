@@ -5,6 +5,7 @@ from datetime import date
 import json
 from pathlib import Path
 import re
+import signal
 import sys
 import subprocess
 import time
@@ -13,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.release_reader import read as release_read
 from proof_release import release_revision
+
+PROOF_BUDGET_SECONDS = 20
 
 
 class InsufficientEvidence(ValueError):
@@ -90,8 +93,17 @@ def main(argv=None):
             result = verify(json.loads(args.fixture.read_text()))
             result['mode'] = 'fixture-replay'
         else:
-            deadline = time.monotonic() + 20
-            reply = release_read(args.origin.rstrip('/') + '/release', timeout=15, max_bytes=1048576)
+            deadline = time.monotonic() + PROOF_BUDGET_SECONDS
+            def expired(_signal, _frame):
+                raise InsufficientEvidence('deadline')
+
+            previous = signal.signal(signal.SIGALRM, expired)
+            try:
+                signal.setitimer(signal.ITIMER_REAL, PROOF_BUDGET_SECONDS)
+                reply = release_read(args.origin.rstrip('/') + '/release', timeout=15, max_bytes=1048576)
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, previous)
             if reply.status != 200 or len(reply.body) > 1048576:
                 raise InsufficientEvidence('release_unavailable')
             release = json.loads(reply.body)
