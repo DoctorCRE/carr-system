@@ -1,0 +1,710 @@
+{
+  "provenance": {
+    "transport": "executeRegisteredTool/disposable-postgres",
+    "producer_sha256": "3c9b5020d9f5534d42385da75a6a962bb530bd7a08ede21bb2e278a8a8d27b01",
+    "driver_sha256": "be4b104f47970ace941c42e1eddbdf0839257f233075e38ce4c323e57a4c562f"
+  },
+  "date_columns": {
+    "morning-brief": [
+      "due_on",
+      "est_lease_event"
+    ],
+    "deal-board": [
+      "last_touch"
+    ],
+    "lead-hot": [
+      "est_lease_event",
+      "last_touch",
+      "next_action_date"
+    ],
+    "lead-board": [
+      "est_lease_event",
+      "last_touch",
+      "next_action_date"
+    ],
+    "claim-card": [
+      "est_lease_event"
+    ],
+    "stale-records": [
+      "last_touch"
+    ],
+    "quiet-follow-ups": [
+      "next_action_date"
+    ]
+  },
+  "responses": {
+    "morning-brief": {
+      "state": "unavailable",
+      "sponsor": "joe",
+      "sections": {
+        "needs_joe": {
+          "state": "unavailable",
+          "schema": "needs-joe.v1",
+          "ordered_by": "what it blocks: live work, then capabilities, then pending approvals; oldest first",
+          "count": 0,
+          "items": [],
+          "excluded": {
+            "count": 2,
+            "by_reason": {
+              "system_decidable": 2
+            },
+            "reasons": {
+              "system_decidable": "The verb that decides it carries no human-only or authority-only flag."
+            }
+          },
+          "sources": {
+            "loops": {
+              "state": "ready",
+              "count": 0
+            },
+            "work_requests": {
+              "state": "ready",
+              "count": 0
+            },
+            "board_questions": {
+              "state": "ready",
+              "count": 0
+            },
+            "governance": {
+              "state": "ready",
+              "count": 0
+            },
+            "local": {
+              "state": "unavailable",
+              "count": 0
+            }
+          },
+          "reason": "source_unavailable"
+        },
+        "today": {
+          "state": "empty",
+          "items": [],
+          "total": 0,
+          "has_more": false,
+          "next_cursor": null,
+          "item_kinds": [
+            {
+              "kind": "next_action",
+              "label": "Next actions",
+              "count": 0
+            },
+            {
+              "kind": "post_call_action",
+              "label": "Post-call actions",
+              "count": 0
+            },
+            {
+              "kind": "critical_date",
+              "label": "Critical dates including upcoming deadlines",
+              "count": 0
+            },
+            {
+              "kind": "ingest",
+              "label": "Inbox awaiting triage",
+              "count": 0
+            }
+          ]
+        },
+        "claim_card": {
+          "state": "empty",
+          "items": [],
+          "claimable": 0,
+          "needs_contact_count": 0
+        },
+        "deals": {
+          "state": "empty",
+          "items": [],
+          "accounts": []
+        },
+        "loops": {
+          "state": "empty",
+          "items": []
+        },
+        "renewals": {
+          "state": "empty",
+          "items": [],
+          "t1_candidate_count": 0,
+          "source_observed_at": null,
+          "freshness_state": "empty"
+        },
+        "assurance_cadence": {
+          "state": "empty",
+          "items": []
+        },
+        "costs": {
+          "state": "unavailable",
+          "reason": "source_unavailable",
+          "items": [],
+          "providers": [],
+          "months": [],
+          "alerts": [],
+          "action": "owner orchestrator: run the cost collector, restore missing billing reads, and verify a fresh complete-day snapshot; auto-clear after a valid snapshot younger than 36 hours."
+        }
+      },
+      "coverage": {
+        "schema": "morning-brief-coverage.v1",
+        "count_scope": "returned_rows_only",
+        "required_sections": [
+          {
+            "key": "needs_joe",
+            "path": "/sections/needs_joe",
+            "state": "unavailable",
+            "counts": {
+              "items": null
+            },
+            "incomplete_sources": [
+              {
+                "key": "local",
+                "state": "unavailable"
+              }
+            ]
+          },
+          {
+            "key": "today",
+            "path": "/sections/today",
+            "state": "empty",
+            "counts": {
+              "items": 0
+            },
+            "incomplete_sources": []
+          },
+          {
+            "key": "claim_card",
+            "path": "/sections/claim_card",
+            "state": "empty",
+            "counts": {
+              "items": 0
+            },
+            "incomplete_sources": []
+          },
+          {
+            "key": "deals",
+            "path": "/sections/deals",
+            "state": "empty",
+            "counts": {
+              "items": 0,
+              "accounts": 0
+            },
+            "incomplete_sources": []
+          },
+          {
+            "key": "loops",
+            "path": "/sections/loops",
+            "state": "empty",
+            "counts": {
+              "items": 0
+            },
+            "incomplete_sources": []
+          },
+          {
+            "key": "renewals",
+            "path": "/sections/renewals",
+            "state": "empty",
+            "counts": {
+              "items": 0
+            },
+            "incomplete_sources": []
+          },
+          {
+            "key": "assurance_cadence",
+            "path": "/sections/assurance_cadence",
+            "state": "empty",
+            "counts": {
+              "items": 0
+            },
+            "incomplete_sources": []
+          },
+          {
+            "key": "costs",
+            "path": "/sections/costs",
+            "state": "unavailable",
+            "counts": {
+              "items": null,
+              "providers": null
+            },
+            "incomplete_sources": []
+          }
+        ]
+      }
+    },
+    "deal-board": {
+      "deals": []
+    },
+    "lead-hot": {
+      "leads": [
+        {
+          "id": "f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
+          "registry_ref": "L-f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
+          "name": "Synthetic quiet owner a74743e3-374e-441b-abb1-a6dd05be6903",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": "2000-02-29",
+          "event_confidence": null,
+          "last_touch": "2000-01-01",
+          "next_action_date": "2000-03-01"
+        },
+        {
+          "id": "d4eeb725-7bd1-46c4-ae02-de02896573c4",
+          "registry_ref": "L-d4eeb725-7bd1-46c4-ae02-de02896573c4",
+          "name": "Synthetic quiet owner 9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": null,
+          "event_confidence": null,
+          "last_touch": null,
+          "next_action_date": null
+        },
+        {
+          "id": "bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
+          "registry_ref": "L-bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
+          "name": "Synthetic quiet owner b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": null,
+          "event_confidence": null,
+          "last_touch": null,
+          "next_action_date": null
+        },
+        {
+          "id": "ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
+          "registry_ref": "L-ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
+          "name": "Synthetic quiet owner c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": null,
+          "event_confidence": null,
+          "last_touch": null,
+          "next_action_date": null
+        }
+      ]
+    },
+    "lead-board": {
+      "generated_at": "2026-11-07T17:56:36.496Z",
+      "stages": [
+        {
+          "slug": "new",
+          "label": "New",
+          "sort": 10
+        },
+        {
+          "slug": "qualified",
+          "label": "Qualified",
+          "sort": 20
+        },
+        {
+          "slug": "outreach_active",
+          "label": "Outreach Active",
+          "sort": 30
+        },
+        {
+          "slug": "engaged",
+          "label": "Engaged",
+          "sort": 40
+        },
+        {
+          "slug": "nurture_drip",
+          "label": "Nurture (Drip)",
+          "sort": 50
+        },
+        {
+          "slug": "opportunity",
+          "label": "Opportunity",
+          "sort": 60
+        },
+        {
+          "slug": "active_deal",
+          "label": "Active Deal",
+          "sort": 70
+        },
+        {
+          "slug": "closed_won",
+          "label": "Closed-Won",
+          "sort": 80
+        },
+        {
+          "slug": "closed_lost",
+          "label": "Closed-Lost",
+          "sort": 90
+        },
+        {
+          "slug": "do_not_contact",
+          "label": "Do Not Contact",
+          "sort": 100
+        },
+        {
+          "slug": "archived",
+          "label": "Archived",
+          "sort": 110
+        }
+      ],
+      "leads": [
+        {
+          "id": "d4eeb725-7bd1-46c4-ae02-de02896573c4",
+          "registry_ref": "L-d4eeb725-7bd1-46c4-ae02-de02896573c4",
+          "name": "Synthetic quiet owner 9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "party_id": "9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "stage_label": "New",
+          "stage_sort": 10,
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": null,
+          "event_confidence": null,
+          "last_touch": "2026-04-22",
+          "next_action_date": null,
+          "owner": null,
+          "owner_label": null,
+          "base_version": 1,
+          "created_at": "2026-11-07T17:56:36.394Z",
+          "updated_at": "2026-11-07T17:56:36.394Z",
+          "conversion_eligible": true,
+          "converted": false,
+          "stage_moves": [],
+          "contact_state": "active",
+          "contact_eligible": true,
+          "handling_advice": "Verify identity and discover whether the practice has a real estate decision. Research the handed record before preparing an outreach draft.",
+          "strategy": {
+            "basis": "stage_based_guidance",
+            "hold": null,
+            "objective": "Verify identity and discover whether the practice has a real estate decision.",
+            "discovery": [
+              "What has the practice already tried?",
+              "What constraints and timing are firm?",
+              "Who approves the decision?",
+              "What would make the practice stop?",
+              "What would success look like in 90 days?"
+            ],
+            "decision_window": null,
+            "confidence": "unrecorded",
+            "next_step": "Agree a next step and date; silence is not consent.",
+            "channel": "Use a verified contact route. Keep outreach as a draft for a partner to send.",
+            "risk": "Do not infer personal circumstances, intent, or a confirmed lease expiry from a sourcing signal.",
+            "sent": false
+          }
+        },
+        {
+          "id": "f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
+          "registry_ref": "L-f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
+          "name": "Synthetic quiet owner a74743e3-374e-441b-abb1-a6dd05be6903",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "party_id": "a74743e3-374e-441b-abb1-a6dd05be6903",
+          "stage_label": "New",
+          "stage_sort": 10,
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": "2000-02-29",
+          "event_confidence": null,
+          "last_touch": "2000-01-01",
+          "next_action_date": "2000-03-01",
+          "owner": "joe",
+          "owner_label": "Joe",
+          "base_version": 2,
+          "created_at": "2026-11-07T17:56:36.432Z",
+          "updated_at": "2026-11-07T17:56:36.432Z",
+          "conversion_eligible": true,
+          "converted": false,
+          "stage_moves": [],
+          "contact_state": "active",
+          "contact_eligible": true,
+          "handling_advice": "Verify identity and discover whether the practice has a real estate decision. Research the handed record before preparing an outreach draft.",
+          "strategy": {
+            "basis": "stage_based_guidance",
+            "hold": null,
+            "objective": "Verify identity and discover whether the practice has a real estate decision.",
+            "discovery": [
+              "What has the practice already tried?",
+              "What constraints and timing are firm?",
+              "Who approves the decision?",
+              "What would make the practice stop?",
+              "What would success look like in 90 days?"
+            ],
+            "decision_window": "2000-02-29",
+            "confidence": "unrecorded",
+            "next_step": "Respect the recorded next action date 2000-03-01.",
+            "channel": "Use a verified contact route. Keep outreach as a draft for a partner to send.",
+            "risk": "Do not infer personal circumstances, intent, or a confirmed lease expiry from a sourcing signal.",
+            "sent": false
+          }
+        },
+        {
+          "id": "bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
+          "registry_ref": "L-bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
+          "name": "Synthetic quiet owner b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "party_id": "b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "stage_label": "New",
+          "stage_sort": 10,
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": null,
+          "event_confidence": null,
+          "last_touch": "2026-04-22",
+          "next_action_date": null,
+          "owner": "joe",
+          "owner_label": "Joe",
+          "base_version": 1,
+          "created_at": "2026-11-07T17:56:36.387Z",
+          "updated_at": "2026-11-07T17:56:36.387Z",
+          "conversion_eligible": true,
+          "converted": false,
+          "stage_moves": [],
+          "contact_state": "active",
+          "contact_eligible": true,
+          "handling_advice": "Verify identity and discover whether the practice has a real estate decision. Research the handed record before preparing an outreach draft.",
+          "strategy": {
+            "basis": "stage_based_guidance",
+            "hold": null,
+            "objective": "Verify identity and discover whether the practice has a real estate decision.",
+            "discovery": [
+              "What has the practice already tried?",
+              "What constraints and timing are firm?",
+              "Who approves the decision?",
+              "What would make the practice stop?",
+              "What would success look like in 90 days?"
+            ],
+            "decision_window": null,
+            "confidence": "unrecorded",
+            "next_step": "Agree a next step and date; silence is not consent.",
+            "channel": "Use a verified contact route. Keep outreach as a draft for a partner to send.",
+            "risk": "Do not infer personal circumstances, intent, or a confirmed lease expiry from a sourcing signal.",
+            "sent": false
+          }
+        },
+        {
+          "id": "ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
+          "registry_ref": "L-ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
+          "name": "Synthetic quiet owner c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "specialty": null,
+          "city": null,
+          "county": null,
+          "state": null,
+          "lane": null,
+          "stage": "new",
+          "party_id": "c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "stage_label": "New",
+          "stage_sort": 10,
+          "score": null,
+          "segment": null,
+          "suppressed": false,
+          "est_lease_event": null,
+          "event_confidence": null,
+          "last_touch": "2026-04-22",
+          "next_action_date": null,
+          "owner": "dell",
+          "owner_label": "Dell",
+          "base_version": 1,
+          "created_at": "2026-11-07T17:56:36.391Z",
+          "updated_at": "2026-11-07T17:56:36.391Z",
+          "conversion_eligible": true,
+          "converted": false,
+          "stage_moves": [],
+          "contact_state": "active",
+          "contact_eligible": true,
+          "handling_advice": "Verify identity and discover whether the practice has a real estate decision. Research the handed record before preparing an outreach draft.",
+          "strategy": {
+            "basis": "stage_based_guidance",
+            "hold": null,
+            "objective": "Verify identity and discover whether the practice has a real estate decision.",
+            "discovery": [
+              "What has the practice already tried?",
+              "What constraints and timing are firm?",
+              "Who approves the decision?",
+              "What would make the practice stop?",
+              "What would success look like in 90 days?"
+            ],
+            "decision_window": null,
+            "confidence": "unrecorded",
+            "next_step": "Agree a next step and date; silence is not consent.",
+            "channel": "Use a verified contact route. Keep outreach as a draft for a partner to send.",
+            "risk": "Do not infer personal circumstances, intent, or a confirmed lease expiry from a sourcing signal.",
+            "sent": false
+          }
+        }
+      ],
+      "metrics": {
+        "nurture_count": 0,
+        "conversion_denominator": 4,
+        "converted_count": 0
+      }
+    },
+    "claim-card": {
+      "showing": 0,
+      "claimable": 0,
+      "needs_contact_count": 0,
+      "candidates": [],
+      "hint": "promote-pool or decline-candidate with the row's own pool_id and base_version. Every decline shortens this list permanently, which is the only thing that makes it shorter."
+    },
+    "stale-records": {
+      "stale": []
+    },
+    "quiet-follow-ups": {
+      "schema_version": "quiet-follow-ups.v1",
+      "cadence": {
+        "lead_days": 45,
+        "vendor_days": 90
+      },
+      "proposals": [
+        {
+          "subject_type": "lead",
+          "subject_id": "f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
+          "party_id": "a74743e3-374e-441b-abb1-a6dd05be6903",
+          "ref": "L-f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
+          "name": "Synthetic quiet owner a74743e3-374e-441b-abb1-a6dd05be6903",
+          "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "anchor_on": "2000-01-01",
+          "basis": "last_contact",
+          "next_action_date": "2000-03-01",
+          "client_id": null,
+          "interval_days": 45,
+          "due_on": "2000-03-01",
+          "owner": "joe",
+          "days_overdue": 9747
+        },
+        {
+          "subject_type": "lead",
+          "subject_id": "bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
+          "party_id": "b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "ref": "L-bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
+          "name": "Synthetic quiet owner b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 45,
+          "due_on": "2026-06-06",
+          "owner": "joe",
+          "days_overdue": 154
+        },
+        {
+          "subject_type": "lead",
+          "subject_id": "ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
+          "party_id": "c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "ref": "L-ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
+          "name": "Synthetic quiet owner c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 45,
+          "due_on": "2026-06-06",
+          "owner": "dell",
+          "days_overdue": 154
+        },
+        {
+          "subject_type": "lead",
+          "subject_id": "d4eeb725-7bd1-46c4-ae02-de02896573c4",
+          "party_id": "9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "ref": "L-d4eeb725-7bd1-46c4-ae02-de02896573c4",
+          "name": "Synthetic quiet owner 9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "owner_id": null,
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 45,
+          "due_on": "2026-06-06",
+          "owner": null,
+          "days_overdue": 154
+        },
+        {
+          "subject_type": "vendor",
+          "subject_id": "07c60d3c-afeb-4137-84f8-88bed7c611a1",
+          "party_id": "c128afd5-e29a-4027-a18f-c325423b3c94",
+          "ref": "V-07c60d3c-afeb-4137-84f8-88bed7c611a1",
+          "name": "Synthetic quiet owner c128afd5-e29a-4027-a18f-c325423b3c94",
+          "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 90,
+          "due_on": "2026-07-21",
+          "owner": "dell",
+          "days_overdue": 109
+        },
+        {
+          "subject_type": "vendor",
+          "subject_id": "a7924c01-0829-454c-a810-5e27cdd176c7",
+          "party_id": "459a4b12-0e88-4989-92bf-2165f500aa22",
+          "ref": "V-a7924c01-0829-454c-a810-5e27cdd176c7",
+          "name": "Synthetic quiet owner 459a4b12-0e88-4989-92bf-2165f500aa22",
+          "owner_id": null,
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 90,
+          "due_on": "2026-07-21",
+          "owner": null,
+          "days_overdue": 109
+        },
+        {
+          "subject_type": "vendor",
+          "subject_id": "fd9772de-dcdd-4405-831a-7cbfa34458b4",
+          "party_id": "142f605f-de51-4615-b2c1-932ffa9e6887",
+          "ref": "V-fd9772de-dcdd-4405-831a-7cbfa34458b4",
+          "name": "Synthetic quiet owner 142f605f-de51-4615-b2c1-932ffa9e6887",
+          "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 90,
+          "due_on": "2026-07-21",
+          "owner": "joe",
+          "days_overdue": 109
+        }
+      ],
+      "sent": false,
+      "tasks_created": false
+    }
+  }
+}

@@ -24,7 +24,7 @@ import { redeemProgram6BrowserChallenge } from "./program6-browser-challenge.js"
 import { program6ActionsEnabled } from "./program6-feature-flag.ts";
 import { workspaceCommandCenterEnabled } from "./workspace-feature-flag.ts";
 import { COMMAND_CENTER_PATH } from "./workspace-command-center.js";
-import { neon } from "@neondatabase/serverless";
+import { neon } from "./postgres.js";
 import { readWorkInventoryCensus, WORK_INVENTORY_PATH } from "./work-inventory-census.v5.js";
 import { ATLAS_GRAPH_PATH, readAtlasInventoryGraph } from "./atlas-inventory-graph.v5.js";
 import {

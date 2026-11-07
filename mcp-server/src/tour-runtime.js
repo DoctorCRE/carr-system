@@ -1,7 +1,7 @@
 // Production adapters for the authenticated internal Tour leaf and the public
 // reports leaf. Identity remains owned by Deal Room; writes remain owned by the
 // registered tool envelope; public reads accept digests only.
-import { Pool } from "@neondatabase/serverless";
+import { Pool } from "./postgres.js";
 import { installTourDealAccess } from './tour-deal-access.js';
 import { callTool } from "./mcp.js";
 import { ToolError } from "./tool-error.ts";

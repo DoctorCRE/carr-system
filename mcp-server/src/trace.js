@@ -76,7 +76,7 @@
 // specifically (a well-handled, well-messaged refusal with its own hint — not
 // an unhandled anything).
 
-import { neon } from "@neondatabase/serverless";
+import { neon } from "./postgres.js";
 import { logLine } from "./correlation.js";
 
 const SERVICE_KEY = "carr-mcp";

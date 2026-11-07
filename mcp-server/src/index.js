@@ -83,7 +83,7 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 // at its own call site below, since a 401 is invisible to a >=500 check.
 
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
-import { neon, Pool } from "@neondatabase/serverless";
+import { neon, Pool } from "./postgres.js";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
 export { PhoneAudioHandoff } from './phone-audio-handoff.js';
