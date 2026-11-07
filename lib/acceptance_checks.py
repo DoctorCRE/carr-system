@@ -112,8 +112,11 @@ def _observe_bounded(request, deadline):
     A stalled filesystem operation cannot hold the verifier: subprocess.run
     kills and reaps the disposable process at the deadline. No signal handlers
     or lingering I/O threads are installed in the caller.
+    Interpreter startup and I/O share the caller's total deadline. Callers
+    without a deadline retain the standalone read bound.
     """
-    remaining = READ_TIMEOUT if deadline is None else min(READ_TIMEOUT, deadline - time.monotonic())
+    deadline = time.monotonic() + READ_TIMEOUT if deadline is None else deadline
+    remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise ValueError('artifact read deadline expired')
     try:
@@ -121,6 +124,8 @@ def _observe_bounded(request, deadline):
                                 capture_output=True, timeout=remaining)
     except subprocess.TimeoutExpired as exc:
         raise ValueError('artifact read deadline expired') from exc
+    if time.monotonic() >= deadline:
+        raise ValueError('artifact read deadline expired')
     if result.returncode:
         raise ValueError('artifact reader failed')
     return json.loads(result.stdout)
@@ -189,7 +194,7 @@ verifier reads each artifact itself. When receipts is a list, a worker named
 its artifacts, and each criterion also needs exactly one matching receipt whose
 digest equals the bytes read; with None the caller is the observer.
 """
-    deadline = min(deadline, time.monotonic() + READ_TIMEOUT) if deadline is not None else time.monotonic() + READ_TIMEOUT
+    deadline = time.monotonic() + READ_TIMEOUT if deadline is None else deadline
     if not isinstance(criteria, list) or not criteria:
         return {'status':'needs_review','criteria':[], 'reason':'explicit acceptance criteria required'}
     # Every filesystem touch happens in one bounded pass before any predicate.
