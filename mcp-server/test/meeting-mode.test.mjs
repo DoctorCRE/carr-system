@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Tests meeting mode contracts, privacy safeguards, and persistence.
 import { readMigration } from "./migration-source.testhelper.mjs";
 // V5-UX-B11 — non-recording shared Meeting Mode acceptance proofs.
@@ -31,7 +32,6 @@ import { TOOLS } from "../src/tools.js";
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_MEETING_MODE_DB_REQUIRED === "1";
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const TENANT = "carr-internal";
 const MIGRATION = readMigration(new URL("../../migrations/0556_meeting_mode_store.sql", import.meta.url));
 const SOURCE = fs.readFileSync(new URL("../src/meeting-mode.js", import.meta.url), "utf8");
@@ -261,7 +261,7 @@ async function database(t) {
     t.skip("the migration class supplies DATABASE_URL");
     return null;
   }
-  assert.ok(LOOPBACK.test(DSN), "REFUSED: this proof writes meeting rows and runs against a disposable loopback only");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

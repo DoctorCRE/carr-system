@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // salesforce-reconciliation-rw02-postgres.test.mjs — the V5-RW02 evidence
 // store's replay and write-time refusal paths on REAL PostgreSQL.
@@ -31,7 +32,6 @@ import {
 import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const DSN = await snapshotDatabase('salesforce-reconciliation-rw02-postgres-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const JOE = { slug: "joe", display: "Joe", human: true, via: "mcp", client_id: "rw02-postgres-test" };
 const D = n => `sha256:${String(n).padStart(2, "0").repeat(32)}`;
 
@@ -103,7 +103,7 @@ const readbackEvaluator = evidence => ({
 });
 
 test("V5-RW02 evidence store replay and write-time refusals on real PostgreSQL", async t => {
-  assert.match(DSN, LOOPBACK, "the V5-RW02 database proof runs only against a loopback disposable database");
+  assertDisposableDatabase(DSN);
   const pg = (await import("pg")).default;
   const source = new URL(DSN).pathname.replace(/^\//, "");
   const admin = await clientFor(pg, "postgres");

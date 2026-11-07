@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Test rule lookup and replacement safeguards, including PostgreSQL behavior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,7 +7,7 @@ import { TOOLS, executeRegisteredTool, ToolError } from '../src/tools.js';
 
 const dsn=process.env.CARR_RULE_TEST_DATABASE_URL;
 // Refuse unsafe configuration before any database test can construct a client.
-if (dsn) assert.match(dsn,/^postgres(?:ql)?:\/\/[^@/]*@(?:127\.0\.0\.1|localhost):/);
+if (dsn) assertDisposableDatabase(dsn);
 
 const oldId = 'aabbccdd-0000-4000-8000-000000000001';
 const newId = 'aabbccdd-0000-4000-8000-000000000002';

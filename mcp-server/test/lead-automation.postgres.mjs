@@ -1,10 +1,11 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Synthetic fixtures only. Run against the disposable migration database.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { leadAutomationTools, nextMorning } from '../src/lead-automation.js';
 const url = process.env.CARR_CI_DATABASE_URL || process.env.DATABASE_URL;
-if (!url || !['localhost','127.0.0.1'].includes(new URL(url).hostname)) throw new Error('disposable_loopback_database_required');
+assertDisposableDatabase(url);
 const c = new pg.Client({connectionString:url});
 await c.connect();
 let checks=0;

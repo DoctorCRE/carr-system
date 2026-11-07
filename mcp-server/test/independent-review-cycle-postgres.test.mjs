@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // V5-A03 against real disposable PostgreSQL. The unit suite proves the JS
 // boundary; this proves the append-only relations and transition locks.
@@ -16,12 +17,11 @@ const V5_REVIEW_DIMENSIONS = [
 ];
 
 const DSN = await snapshotDatabase('independent-review-cycle-postgres-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const digest = () => `sha256:${randomBytes(32).toString("hex")}`;
 const session = label => `session:${label}-${randomUUID()}`;
 
 async function database(t) {
-  assert.ok(LOOPBACK.test(DSN), "REFUSED: V5-A03 database proof only writes to disposable loopback PostgreSQL");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

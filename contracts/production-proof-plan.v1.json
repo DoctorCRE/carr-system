@@ -88,7 +88,7 @@
     },
     "app-release-live-walk.v1": {
       "path": "ops/app-proof-observe.py",
-      "revision": "55d0bd0cb7cc18f651eb4f2569aa111749032369",
+      "sources": {"ops/app-proof-observe.py": "a5673ab8783aa158a77684dab47cb39ac84a83c80eeeeda8e1b25e9669dbe97f"},
       "targets": ["app"]
     },
     "worker-email-link-marker.v1": {
@@ -123,6 +123,7 @@
     "docs/**", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "CHANGELOG.md",
     ".agents/skills/**", "tools/pstack/*.md", "test/**", "mcp-server/test/**", "README.md",
     ".github/**", "ops/*-selftest.py", "tools/test-*.py", "tools/test_*.py",
+    "lib/postgres_service_fixture.py", "lib/postgres_snapshot_fixture.py",
     "ops/ci.sh", "ops/ci-gates.py",
     "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
     "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",

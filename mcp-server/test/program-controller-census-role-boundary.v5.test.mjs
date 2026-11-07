@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // WR-000110 — F02-LEASE-ROW and T-WRITER-DENIED, on a real connection role.
 //
 // WHY THIS CANNOT BE A MOCK. Two of this Work Request's properties are
@@ -32,7 +33,6 @@ import { readLiveLeaseCensus, readSliceAdmissionRequest }
   from "../src/program-controller-census.v5.js";
 
 const DSN = await snapshotDatabase('census-role-boundary-');
-const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const WRITER_FUNCTION = "ops.record_program_controller_fact(text,uuid,jsonb)";
 
 const AUTHORITY_LOGIN = "carr_authority_joe";
@@ -95,8 +95,7 @@ const censusClient = client => ({
 });
 
 async function database() {
-  assert.ok(LOOPBACK.test(DSN),
-    "REFUSED: this proof mints login roles and runs against a disposable loopback only");
+  assertDisposableDatabase(DSN);
   return (await import("pg")).default ?? (await import("pg"));
 }
 

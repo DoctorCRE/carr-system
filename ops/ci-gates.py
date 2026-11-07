@@ -69,6 +69,9 @@ class Gates:
         self.timed_out = False
         scope = Path('ops/config/ci-check-scope.json')
         self.scope = json.loads(scope.read_text()) if scope.is_file() else {}
+        durations = Path('ops/config/ci-unit-durations.json')
+        self.suite_budgets = (json.loads(durations.read_text()).get('gate_suites', {})
+                              if durations.is_file() else {})
         self.portable = (os.environ.get('CARR_CI_PORTABLE_ONLY') == '1'
                          or os.environ.get('GITHUB_ACTIONS', '').lower() == 'true')
 
@@ -152,6 +155,10 @@ class Gates:
     def execute(self, name, *command):
         return self.record(self.run(name, command))
 
+    def suite_timeout(self, path):
+        return self.suite_budgets.get(path, {}).get(
+            "timeout_seconds", self.args.timeout * self.args.jobs)
+
     def check(self):
         os.environ['CARR_HOOK_FIXTURE'] = '1'
         try:
@@ -175,7 +182,7 @@ class Gates:
                           LOGDIR=str(self.logdir), PY=self.args.python, pooled_timeout=str(timeout))
         with ThreadPoolExecutor(max_workers=self.args.jobs) as pool:
             results = list(pool.map(lambda path: self.run('gate-' + Path(path).name,
-                [self.args.python, self.args.timeout_helper, str(timeout), self.args.python, path],
+                [self.args.python, self.args.timeout_helper, str(self.suite_timeout(path)), self.args.python, path],
                 isolated=True), eligible))
         for result in results:
             rc = self.record(result)
@@ -186,7 +193,8 @@ class Gates:
             elif rc == 124:
                 self.failures.append('TIMEOUT:' + base)
                 self.timed_out = True
-                print(f'        \033[31mTIMEOUT\033[0m  {base} — exceeded {timeout}s (pool-scaled); '
+                budget = self.suite_timeout(next(path for path in eligible if Path(path).name == base))
+                print(f'        \033[31mTIMEOUT\033[0m  {base} — exceeded {budget}s; '
                       'reporting all completed Python gate results', file=sys.stderr)
                 self.tail(name)
             elif rc == 78:

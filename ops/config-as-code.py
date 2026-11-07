@@ -1173,8 +1173,10 @@ def launchd_path_refusal(body):
             # either reports no repository or discovers an enclosing one, so
             # its answer only counts when it names the nearest metadata.
             nearest = _nearest_git_metadata(directory)
+            # Match the metadata walk above even across container bind mounts.
             top = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],
-                                 capture_output=True, text=True, env=_git_env(), timeout=15)
+                                 capture_output=True, text=True,
+                                 env=dict(_git_env(), GIT_DISCOVERY_ACROSS_FILESYSTEM="1"), timeout=15)
             if top.returncode:
                 if nearest is None and top.returncode == 128 and top.stderr.strip() == "fatal: not a git repository (or any of the parent directories): .git":
                     continue

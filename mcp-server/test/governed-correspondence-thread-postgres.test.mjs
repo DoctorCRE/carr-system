@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // WR-000530 — read-correspondence-thread is bound to the server-derived sponsor
 // on the existing read-connection boundary.
 //
@@ -23,7 +24,6 @@ import { connectionRouteForTool, setWriterActorContext } from "../src/mcp.js";
 const VERB = "read-correspondence-thread";
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_CORRESPONDENCE_DB_REQUIRED === "1";
-const LOOPBACK = /^postgres(?:ql)?:\/\/[^@/]*@(?:127\.0\.0\.1|localhost)[:/]/;
 
 const MAILBOX = {
   joe: "sha256:577047ee6425cc34f2e7a23bb904395c2bfa7b1aba3eae2e23f525812197e3f3",
@@ -55,7 +55,7 @@ async function database(t) {
     t.skip("the migration class supplies DATABASE_URL");
     return null;
   }
-  assert.match(DSN, LOOPBACK, "REFUSED: this proof writes fixture receipts on a disposable loopback only");
+  assertDisposableDatabase(DSN);
   const pg = (await import("pg")).default;
   const client = new pg.Client({ connectionString: DSN });
   await client.connect();

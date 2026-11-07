@@ -1,21 +1,13 @@
-name: Cached CI system dependencies
-description: Reuse runner packages and main-seeded apt archives.
+name: CI image capabilities
+description: Verify preinstalled tools without package acquisition.
 inputs:
   packages:
-    description: PostgreSQL and document dependency switches
+    description: PostgreSQL and document capability switches
     required: true
 runs:
   using: composite
   steps:
-    - id: image
-      shell: bash
-      run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
-      with:
-        path: ${{ runner.temp }}/apt-debs/*.deb
-        key: apt-ubuntu24-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ inputs.packages }}-${{ hashFiles('ops/ci-postgres.sh', 'ops/ci-apt.py') }}
-        restore-keys: apt-ubuntu24-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ inputs.packages }}-
     - shell: bash
       env:
-        CARR_CI_APT_ARCHIVES: ${{ runner.temp }}/apt-debs
+        CARR_CI_POSTGRES_IMAGE: both
       run: python3 ops/ci-apt.py ${{ inputs.packages }}

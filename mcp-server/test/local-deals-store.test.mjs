@@ -1,3 +1,4 @@
+import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
 // Test Local Deals PostgreSQL operations, evidence and regressions.
 import { readMigration } from './migration-source.testhelper.mjs';
 import { restoreEventIdentity, applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
@@ -40,9 +41,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
   try {
     let connection;
     if (ciDsn) {
-      const url = new URL(ciDsn);
-      assert.ok(['postgres:', 'postgresql:'].includes(url.protocol));
-      assert.ok(['127.0.0.1', 'localhost'].includes(url.hostname), 'fixture requires disposable loopback PostgreSQL');
+      const url = assertDisposableDatabase(ciDsn, { service: true });
       admin = new pg.Client({ connectionString: ciDsn });
       await admin.connect();
       const name = `local_deals_${randomUUID().replaceAll('-', '')}`;

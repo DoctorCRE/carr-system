@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reuse runner packages and package archives before contacting apt mirrors."""
+"""Validate CI image tools; retain acquisition for pinned external consumers."""
 import argparse
 import os
 from pathlib import Path
@@ -58,7 +58,43 @@ def provision(args):
     return 1
 
 
+def qualify_image(postgres=True, documents=False):
+    if os.geteuid() == 0:
+        raise RuntimeError('CI image checks must run as an unprivileged user')
+    if postgres:
+        for version in (17, 18):
+            for binary in ('initdb', 'pg_ctl', 'postgres', 'psql', 'createdb', 'pg_dump', 'pg_restore'):
+                command = [f'/usr/lib/postgresql/{version}/bin/{binary}', '--version']
+                result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=5)
+                if not re.search(rf'\(PostgreSQL\) {version}(?:\.|\b)', result.stdout):
+                    raise RuntimeError(f'wrong PostgreSQL version: {command[0]}: {result.stdout}')
+                print(result.stdout.strip(), flush=True)
+            for artifact in (f'/usr/share/postgresql/{version}/extension/vector.control',
+                             f'/usr/lib/postgresql/{version}/lib/vector.so'):
+                if not Path(artifact).is_file():
+                    raise RuntimeError(f'missing pgvector artifact: {artifact}')
+    if documents and (not shutil.which('pdftotext') or not shutil.which('libreoffice')):
+        raise RuntimeError('CI image is missing document tools')
+    for tool in ('rustc', 'cargo'):
+        result = subprocess.run([tool, '--version'], check=True, capture_output=True, text=True, timeout=5)
+        version = re.match(rf'{tool} (\d+)\.(\d+)\.', result.stdout)
+        if not version or tuple(map(int, version.groups())) < (1, 85):
+            raise RuntimeError(f'CI image requires {tool} >= 1.85: {result.stdout}')
+    if postgres:
+        with open(os.environ['GITHUB_PATH'], 'a') as output:
+            output.write('/usr/lib/postgresql/17/bin\n')
+    return 0
+
+
 def main(args):
+    if os.environ.get('CARR_CI_POSTGRES_IMAGE') == 'both':
+        if args == ['--provision-postgres']:
+            return qualify_image()
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--postgres', action='store_true')
+        parser.add_argument('--documents', action='store_true')
+        selected = parser.parse_args(args)
+        return qualify_image(selected.postgres, selected.documents)
     if args in (['--provision-postgres'], ['--postgres-attempt']):
         return provision([] if args == ['--provision-postgres'] else args)
     parser = argparse.ArgumentParser()

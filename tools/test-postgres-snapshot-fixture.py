@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 import unittest
+from unittest.mock import Mock, patch
 import tempfile
 import json
 import os
@@ -12,9 +13,100 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir, postgres_fixture_group
 from lib.postgres_snapshot_fixture import start_snapshot, snapshot_key
+from lib.postgres_service_fixture import service_database
 
 
 class SnapshotIsolation(unittest.TestCase):
+    def test_service_transport_uses_one_validated_endpoint(self):
+        import lib.postgres_service_fixture as module
+        for host, hosted in [('127.0.0.1', False), ('localhost', False), ('postgres', True)]:
+            admin = Mock()
+            admin.info.port, admin.info.user = 5432, 'carr_ci'
+            admin.__enter__ = Mock(return_value=admin)
+            admin.__exit__ = Mock(return_value=False)
+            with patch.dict(os.environ, GITHUB_ACTIONS='true' if hosted else '',
+                            CARR_CI_POSTGRES_IMAGE='both', PGHOSTADDR='203.0.113.1',
+                            PGSERVICE='', PGSERVICEFILE='', PGPASSWORD='postgres'), \
+                 patch('socket.getaddrinfo', return_value=[(2, 1, 6, '', ('172.18.0.2', 5432))]), \
+                 patch.object(module.psycopg, 'connect', return_value=admin) as connect, \
+                 patch.object(module, 'role_state', return_value=({}, set())), \
+                 patch.object(module, 'restore_roles'), \
+                 patch.object(module.subprocess, 'run', return_value=Mock(returncode=0)) as run:
+                with service_database(f'postgres://carr_ci@{host}:5432/carr_ci', 'probe-', schema='seed.sql') as metadata:
+                    self.assertIn(f'@{host}:5432/probe_', metadata['dsn'])
+                    self.assertIsNone(module.urlsplit(metadata['dsn']).password)
+                    restore = run.call_args.kwargs['env']
+                    address = '172.18.0.2' if hosted else '127.0.0.1'
+                    self.assertEqual(connect.call_args.kwargs['hostaddr'], address)
+                    self.assertEqual(restore['PGHOSTADDR'], address)
+                    self.assertEqual(restore['PGHOST'], host)
+                    self.assertEqual(restore['PGDATABASE'], metadata['dsn'].rsplit('/', 1)[1])
+                    self.assertEqual(restore['PGPASSWORD'], 'postgres')
+                    self.assertNotIn('PGSERVICE', restore)
+                    self.assertNotIn('PGSERVICEFILE', restore)
+
+    def test_snapshot_migrations_cannot_inherit_transport_overrides(self):
+        from lib.postgres_snapshot_fixture import migrate_snapshot
+        with patch.dict(os.environ, PGHOSTADDR='203.0.113.1', PGSERVICE='production',
+                        PGSERVICEFILE='/untrusted', PGPASSWORD='postgres'), \
+             patch('lib.postgres_snapshot_fixture.subprocess.run', return_value=Mock(returncode=0)) as run:
+            migrate_snapshot(ROOT / 'db/schema.sql', 'postgres://carr_ci@postgres:5432/owned')
+            env = run.call_args.kwargs['env']
+            self.assertEqual(env['DATABASE_URL'], 'postgres://carr_ci@postgres:5432/owned')
+            self.assertEqual(env['PGPASSWORD'], 'postgres')
+            self.assertFalse({'PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE'} & env.keys())
+
+    def test_restore_failure_drops_owned_database_and_restores_roles(self):
+        import lib.postgres_service_fixture as module
+        admin = Mock()
+        admin.info.port, admin.info.user = 5432, 'carr_ci'
+        admin.__enter__ = Mock(return_value=admin)
+        admin.__exit__ = Mock(return_value=False)
+        before = ({}, set())
+        with patch.dict(os.environ, PGSERVICE='', PGSERVICEFILE=''), \
+             patch.object(module.psycopg, 'connect', return_value=admin), \
+             patch.object(module, 'role_state', return_value=before), \
+             patch.object(module, 'restore_roles') as restore, \
+             patch.object(module.subprocess, 'run', return_value=Mock(returncode=1, stderr='restore refused')):
+            with self.assertRaisesRegex(RuntimeError, 'restore refused'):
+                with service_database('postgres://carr_ci@127.0.0.1:5432/carr_ci', 'probe-', schema='seed.sql'):
+                    self.fail('failed restore yielded a database')
+            statements = [call.args[0].as_string() if hasattr(call.args[0], 'as_string') else call.args[0]
+                          for call in admin.execute.call_args_list]
+            self.assertTrue(any(statement.startswith('drop database "probe_') and statement.endswith('with (force)')
+                                for statement in statements))
+            restore.assert_called_once_with(admin, before)
+
+    def test_ambient_libpq_service_refused_before_connect(self):
+        import lib.postgres_service_fixture as module
+        for key in ('PGSERVICE', 'PGSERVICEFILE'):
+            with patch.dict(os.environ, {key: 'untrusted'}), patch.object(module.psycopg, 'connect') as connect:
+                with self.assertRaisesRegex(ValueError, 'ambient libpq'):
+                    with service_database('postgres://carr_ci@127.0.0.1:5432/carr_ci', 'probe-'):
+                        self.fail('ambient service accepted')
+                connect.assert_not_called()
+
+    def test_service_endpoint_refuses_unsafe_urls_before_network(self):
+        import lib.postgres_service_fixture as module
+        for hosted in (False, True):
+            urls = ['postgres://carr_ci@remote:5432/carr_ci',
+                    'postgres://carr_ci@postgres:5432/carr_ci?hostaddr=127.0.0.1',
+                    'postgres://carr_ci@postgres:5432/carr_ci#override',
+                    'http://carr_ci@postgres:5432/carr_ci',
+                    'postgres://other@postgres:5432/carr_ci',
+                    'postgres://carr_ci:pw@postgres:5432/carr_ci',
+                    'postgres://carr_ci@postgres:5433/carr_ci',
+                    'postgres://carr_ci@postgres:5432/production']
+            if not hosted:
+                urls.append('postgres://carr_ci@postgres:5432/carr_ci')
+            with patch.dict(os.environ, GITHUB_ACTIONS='true' if hosted else '', CARR_CI_POSTGRES_IMAGE='both'), \
+                 patch.object(module.psycopg, 'connect') as connect:
+                for url in urls:
+                    with self.subTest(url=url, hosted=hosted), self.assertRaises(ValueError):
+                        with service_database(url, 'probe-'):
+                            self.fail('unsafe URL accepted')
+                connect.assert_not_called()
+
     def test_key_covers_schema_and_migration_contents_and_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
