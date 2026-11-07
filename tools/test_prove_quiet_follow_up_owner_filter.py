@@ -1,5 +1,7 @@
 """Replay actual registered responses through the proof's production parser."""
 import copy
+import contextlib
+import io
 import importlib.util
 import json
 from pathlib import Path
@@ -20,6 +22,19 @@ spec.loader.exec_module(proof)
 class OwnerProofTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.repository = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.repository.cleanup)
+        cls.git_root = Path(cls.repository.name)
+        def git(*args, input=None):
+            return subprocess.run(['git', '-c', 'user.name=Proof test', '-c',
+                'user.email=proof@example.invalid', *args], cwd=cls.git_root,
+                input=input, text=True, capture_output=True, check=True, timeout=5).stdout.strip()
+        git('init', '-q')
+        tree = git('mktree', input='')
+        cls.older = git('commit-tree', tree, input='older')
+        cls.merge = git('commit-tree', tree, '-p', cls.older, input='merge')
+        cls.descendant = git('commit-tree', tree, '-p', cls.merge, input='descendant')
+        cls.unrelated = git('commit-tree', tree, input='unrelated')
         cls.recording = json.loads((ROOT / 'tools/fixtures/quiet-follow-up-owner-filter.json').read_text())
 
     def run_fixture(self, value):
@@ -95,6 +110,38 @@ class OwnerProofTests(unittest.TestCase):
             if mode == 'cohorts': value['all']['proposals'] = []
             if mode == 'provenance': value['provenance']['query']['owned'] = {}
             self.assertEqual(self.run_fixture(value)[0], 78)
+
+
+    def run_production(self, release_sha, value=None):
+        from lib.release_reader import Reply
+        value = copy.deepcopy(self.recording if value is None else value)
+        value['provenance'].update(release_sha=release_sha,
+            transport='signed-in-app-origin/mcp', app_origin='https://app.doctorcre.com')
+        release = {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': release_sha}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'evidence.json'
+            path.write_text(json.dumps(value))
+            output = io.StringIO()
+            with patch.object(proof, 'ROOT', self.git_root, create=True), patch.object(proof,
+                    'release_read', return_value=Reply(200, {}, json.dumps(release).encode())), \
+                    contextlib.redirect_stdout(output):
+                code = proof.main(['--evidence', str(path), '--merge-sha', self.merge])
+            return code, json.loads(output.getvalue())
+
+    def test_release_containment_matrix(self):
+        for case, sha, expected in [('equal', self.merge, 0),
+                ('descendant', self.descendant, 0), ('older', self.older, 78),
+                ('unrelated', self.unrelated, 78), ('unknown', 'f' * 40, 78)]:
+            with self.subTest(case=case):
+                code, result = self.run_production(sha)
+                self.assertEqual(code, expected, result)
+                self.assertEqual(result['status'], 'passed' if expected == 0 else 'insufficient-evidence')
+
+    def test_containing_release_subset_failure_exits_one(self):
+        value = copy.deepcopy(self.recording)
+        value['owned']['proposals'] = []
+        code, result = self.run_production(self.descendant, value)
+        self.assertEqual((code, result['reason']), (1, 'owned_subset_changed'))
 
     def test_identity_only_is_insufficient(self):
         from lib.release_reader import Reply
