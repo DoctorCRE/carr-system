@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       options: --init
-      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:b5e93fd6ef588fab8877480869f9ae59878e578f699dc94d8174623ce23bd7ba
+      image: ghcr.io/jbookout/software-factory/ci-postgres@sha256:2efca181e7962b7fed6a1184f88de14117d6c626f64f5cdb7afcb4bdccc461fa
     defaults:
       run:
         shell: bash
