@@ -65,10 +65,10 @@ async function subject(kind, owner, days = 200) {
   const party = randomUUID(), id = randomUUID();
   await c.query(`insert into party(id,kind,name,created_by,updated_by)
     values($1::uuid,'org','Synthetic quiet owner '||$1::uuid::text,$2,$2)`, [party, actor.id]);
-  if (kind === 'lead') await c.query(`insert into lead(id,party_id,stage,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'new',current_date-$4::int,$3,$5,$5)`, [id,party,owner,days,actor.id]);
-  else await c.query(`insert into vendor(id,party_id,category,stage,disposition,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-$4::int,$3,$5,$5)`,
+  if (kind === 'lead') await c.query(`insert into lead(id,party_id,registry_ref,stage,last_touch,owner_id,created_by,updated_by)
+    values($1,$2,'L-'||$1::uuid::text,'new',current_date-$4::int,$3,$5,$5)`, [id,party,owner,days,actor.id]);
+  else await c.query(`insert into vendor(id,party_id,vendor_ref,category,stage,disposition,last_touch,owner_id,created_by,updated_by)
+    values($1,$2,'V-'||$1::uuid::text,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-$4::int,$3,$5,$5)`,
     [id,party,owner,days,actor.id]);
   return { id, party };
 }
@@ -103,6 +103,45 @@ test('owner modes preserve exact ordered subsets and registered response recordi
       owner_slug: actor.slug, all, owned, unassigned,
     }, null, 2) + '\n');
   }
+});
+
+test('serialized quiet proposals preserve calendar dates through PostgreSQL decoding', async () => {
+  const subjects = [];
+  for (const kind of ['lead', 'vendor']) {
+    const row = await subject(kind, actor.id);
+    subjects.push(row);
+    await c.query(`update ${kind} set last_touch='2000-02-29',created_at='2000-01-02T00:30:00Z' where id=$1`, [row.id]);
+  }
+  const check = async (anchor, due) => {
+    const payload = await read({ owner_slug: actor.slug });
+    for (const { id } of subjects) {
+      const row = payload.proposals.find(p => p.subject_id === id);
+      assert.equal(row.anchor_on, anchor);
+      assert.equal(row.due_on, due[row.subject_type]);
+    }
+  };
+  for (const zone of ['UTC', 'America/Chicago', 'Asia/Tokyo']) {
+    await c.query("select set_config('TimeZone',$1,false)", [zone]);
+    await c.query('set datestyle to SQL, DMY');
+    try {
+      for (const [i, kind] of ['lead', 'vendor'].entries()) {
+        await c.query(`update ${kind} set last_touch='2000-02-29' where id=$1`, [subjects[i].id]);
+      }
+      await check('2000-02-29', { lead: '2000-04-14', vendor: '2000-05-29' });
+      for (const [i, kind] of ['lead', 'vendor'].entries()) {
+        await c.query(`update ${kind} set last_touch=null where id=$1`, [subjects[i].id]);
+      }
+      await check('2000-01-01', { lead: '2000-02-15', vendor: '2000-03-31' });
+    } finally { await c.query('set datestyle to ISO, MDY'); }
+  }
+  for (const [i, kind] of ['lead', 'vendor'].entries()) {
+    await c.query(`insert into activity(occurred_at,actor_id,kind,summary,${kind}_id)
+      values('2000-07-02T00:30:00Z',$1,'meeting','Synthetic near-midnight contact',$2)`, [actor.id,subjects[i].id]);
+  }
+  await check('2000-07-01', { lead: '2000-08-15', vendor: '2000-09-29' });
+  await c.query("update lead set next_action_date='2000-07-04' where id=$1", [subjects[0].id]);
+  await check('2000-07-01', { lead: '2000-07-04', vendor: '2000-09-29' });
+  await c.query("set time zone 'America/Chicago'");
 });
 
 test('invalid owner input refuses before database work', async () => {
