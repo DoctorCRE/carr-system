@@ -44,7 +44,7 @@
     "mail-needs-partner-route.test.mjs": {"milliseconds": 335, "serial": false},
     "mail-needs-partner-postgres.test.mjs": {"milliseconds": 1185, "serial": true},
 
-    "quiet-follow-up-owner-filter-postgres.test.mjs": {"milliseconds": 20731, "serial": true},
+    "quiet-follow-up-owner-filter-postgres.test.mjs": {"milliseconds": 25651, "serial": true},
     "client-anniversary-read.test.mjs": {"milliseconds": 352, "serial": false},
     "client-anniversary-read-route.test.mjs": {"milliseconds": 1123, "serial": false},
     "client-anniversary-read-postgres.test.mjs": {"milliseconds": 1306, "serial": true},

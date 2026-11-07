@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
+import { types, neon, neonConfig } from '../src/postgres.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.js';
@@ -46,7 +47,7 @@ test('recording rejects a quiet-follow-ups contract change', async () => {
 let fixture, c, actor, other;
 before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'quiet-owner-', snapshot: true });
-  c = new pg.Client(fixture.connection);
+  c = new pg.Client({ ...fixture.connection, types });
   await c.connect();
   actor = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   other = (await c.query("select id,slug from actor where slug='dell'")).rows[0];
@@ -72,6 +73,47 @@ async function subject(kind, owner, days = 200) {
     [id,party,owner,days,actor.id]);
   return { id, party };
 }
+
+test('PostgreSQL date columns remain calendar dates while timestamp types keep their decoding', async () => {
+  const query = `select '2000-02-29'::date leap_day, '2026-03-08'::date spring_day,
+    '2026-11-01'::date fall_day, null::date absent,
+    '2026-03-08 12:34:56.123'::timestamp wall_clock,
+    '2026-03-08 12:34:56.123+00'::timestamptz instant`;
+  for (const zone of ['UTC', 'America/Chicago', 'Asia/Tokyo']) {
+    await c.query("select set_config('TimeZone',$1,false)", [zone]);
+    const result = await c.query(query);
+    const row = result.rows[0];
+    const serialized = JSON.parse(JSON.stringify(row));
+    for (const field of result.fields.filter(field => field.dataTypeID === 1082 && row[field.name] !== null)) {
+      assert.equal(typeof row[field.name], 'string', field.name);
+      assert.match(serialized[field.name], /^\d{4}-\d{2}-\d{2}$/);
+    }
+    assert.deepEqual([serialized.leap_day, serialized.spring_day, serialized.fall_day, serialized.absent],
+      ['2000-02-29', '2026-03-08', '2026-11-01', null]);
+    const original = await new Promise((resolve, reject) => {
+      c.query({ text: query, types: pg.types }, (error, value) => error ? reject(error) : resolve(value));
+    });
+    for (const field of result.fields.filter(field => [1114, 1184].includes(field.dataTypeID)))
+      assert.deepEqual(row[field.name], original.rows[0][field.name], field.name);
+  }
+});
+
+test('HTTP query decoding preserves PostgreSQL dates and both timestamp types', async () => {
+  const text = "select '2000-02-29'::date calendar_day, '2026-03-08 12:34:56.123'::timestamp wall_clock, '2026-03-08 12:34:56.123+00'::timestamptz instant";
+  const wire = await c.query({ text, rowMode: 'array', types: { getTypeParser: () => value => value } });
+  const original = neonConfig.fetchFunction;
+  neonConfig.fetchFunction = async () => new Response(JSON.stringify({
+    fields: wire.fields, rows: wire.rows, rowCount: wire.rowCount, command: wire.command,
+  }), { status: 200 });
+  try {
+    const rows = await neon('postgresql://fixture@localhost/fixture').query(text);
+    assert.equal(rows[0].calendar_day, '2000-02-29');
+    assert.ok(rows[0].wall_clock instanceof Date);
+    assert.ok(rows[0].instant instanceof Date);
+    for (const field of wire.fields.filter(field => [1114,1184].includes(field.dataTypeID)))
+      assert.deepEqual(rows[0][field.name], pg.types.getTypeParser(field.dataTypeID)(wire.rows[0][wire.fields.indexOf(field)]));
+  } finally { neonConfig.fetchFunction = original; }
+});
 
 test('owner modes preserve exact ordered subsets and registered response recordings', async () => {
   for (const kind of ['lead','vendor']) for (const owner of [actor.id, other.id, null]) await subject(kind, owner);
@@ -102,6 +144,59 @@ test('owner modes preserve exact ordered subsets and registered response recordi
         query: { verb: 'quiet-follow-ups', all: {}, owned: { owner_slug: actor.slug }, unassigned: { owner_slug: null } } },
       owner_slug: actor.slug, all, owned, unassigned,
     }, null, 2) + '\n');
+  }
+});
+
+test('registered date-bearing verbs serialize real PostgreSQL responses', async () => {
+  await c.query('begin');
+  try {
+    const lead = await subject('lead', actor.id);
+    await c.query("update lead set est_lease_event='2000-02-29',next_action_date='2000-03-01',last_touch='2000-01-01' where id=$1", [lead.id]);
+    await c.query("insert into activity(occurred_at,actor_id,kind,summary,lead_id) values('2000-01-01T18:00:00Z',$1,'meeting','Synthetic date serialization',$2)", [actor.id,lead.id]);
+    const responses = {}, date_columns = {};
+    for (const verb of ['morning-brief', 'deal-board', 'lead-hot', 'lead-board', 'claim-card', 'stale-records', 'quiet-follow-ups']) {
+      const dates = new Map();
+      const db = { query: async (...args) => {
+        const result = await c.query(...args);
+        for (const field of result.fields || []) if (field.dataTypeID === 1082) {
+          dates.set(field.name, null);
+          for (const row of result.rows) if (row[field.name] !== null) {
+            assert.match(row[field.name], /^\d{4}-\d{2}-\d{2}$/, `${verb}.${field.name}`);
+            dates.set(field.name, row[field.name]);
+          }
+        }
+        return result;
+      } };
+      responses[verb] = JSON.parse(JSON.stringify(await executeRegisteredTool(db, actor, verb, {})));
+      date_columns[verb] = [...dates.keys()].sort();
+      if (['lead-hot','lead-board'].includes(verb)) {
+        const row = responses[verb].leads.find(row => row.id === lead.id);
+        assert.equal(row.est_lease_event, '2000-02-29');
+        assert.equal(row.next_action_date, '2000-03-01');
+        assert.equal(row.last_touch, '2000-01-01');
+      }
+    }
+    if (process.env.PG_DATE_FIXTURE_OUTPUT) writeFileSync(process.env.PG_DATE_FIXTURE_OUTPUT,
+      JSON.stringify({ provenance: { transport: 'executeRegisteredTool/disposable-postgres',
+        producer_sha256: createHash('sha256').update(readFileSync(new URL('../src/tools.js', import.meta.url))).digest('hex'),
+        driver_sha256: createHash('sha256').update(readFileSync(new URL('../src/postgres.js', import.meta.url))).digest('hex') }, date_columns, responses }, null, 2) + '\n');
+  } finally { await c.query('rollback'); }
+});
+
+test('date verb recording is bound to the real producer and calendar contract', () => {
+  const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/postgres-date-verbs.json', import.meta.url)));
+  assert.equal(recording.provenance.transport, 'executeRegisteredTool/disposable-postgres');
+  assert.equal(recording.provenance.producer_sha256, createHash('sha256').update(
+    readFileSync(new URL('../src/tools.js', import.meta.url))).digest('hex'));
+  assert.equal(recording.provenance.driver_sha256, createHash('sha256').update(
+    readFileSync(new URL('../src/postgres.js', import.meta.url))).digest('hex'));
+  assert.deepEqual(Object.keys(recording.responses).sort(),
+    ['morning-brief','deal-board','lead-hot','lead-board','claim-card','stale-records','quiet-follow-ups'].sort());
+  for (const verb of ['lead-hot','lead-board']) {
+    const lead = recording.responses[verb].leads.find(row => row.est_lease_event === '2000-02-29');
+    assert.ok(lead, verb);
+    assert.equal(lead.next_action_date, '2000-03-01');
+    assert.equal(lead.last_touch, '2000-01-01');
   }
 });
 

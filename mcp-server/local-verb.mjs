@@ -109,7 +109,7 @@ import {
 // normal STORE front door down with it.
 async function loadBreakGlassRuntime() {
   const [{ Pool, neonConfig }, { default: ws }, tools] = await Promise.all([
-    import("@neondatabase/serverless"),
+    import("./src/postgres.js"),
     import("ws"),
     import("./src/tools.js"),
   ]);
