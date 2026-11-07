@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read release identity and replay recorded registered quiet-follow-ups reads."""
 import argparse
-from datetime import date, datetime
+from datetime import date
 import json
 from pathlib import Path
 import re
@@ -30,15 +30,19 @@ def response(value):
         raise InsufficientEvidence('proposals_contract')
     for row in rows:
         if (not isinstance(row, dict) or row.get('subject_type') not in {'lead', 'vendor'}
-                or not {'subject_id', 'owner_id', 'owner', 'due_on'} <= row.keys()
+                or not {'subject_id', 'owner_id', 'owner', 'anchor_on', 'due_on'} <= row.keys()
                 or not re.fullmatch(r'[0-9a-f-]{36}', str(row['subject_id']))
                 or row['owner_id'] is not None and not re.fullmatch(r'[0-9a-f-]{36}', str(row['owner_id']))
                 or row['owner'] is not None and not isinstance(row['owner'], str)):
             raise InsufficientEvidence('proposal_contract')
-        if len(row['due_on']) == 10:
-            date.fromisoformat(row['due_on'])
-        else:
-            datetime.fromisoformat(row['due_on'].replace('Z', '+00:00'))
+        for field in ('anchor_on', 'due_on'):
+            day = row[field]
+            if not isinstance(day, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', day):
+                raise InsufficientEvidence('proposal_calendar_date_contract')
+            try:
+                date.fromisoformat(day)
+            except ValueError as error:
+                raise InsufficientEvidence('proposal_calendar_date_contract') from error
     return value
 
 

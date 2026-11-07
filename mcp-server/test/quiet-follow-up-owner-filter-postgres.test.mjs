@@ -120,11 +120,28 @@ test('serialized quiet proposals preserve calendar dates through PostgreSQL deco
       assert.equal(row.due_on, due[row.subject_type]);
     }
   };
-  await check('2000-02-29', { lead: '2000-04-14', vendor: '2000-05-29' });
-  for (const [i, kind] of ['lead', 'vendor'].entries()) {
-    await c.query(`update ${kind} set last_touch=null where id=$1`, [subjects[i].id]);
+  for (const zone of ['UTC', 'America/Chicago', 'Asia/Tokyo']) {
+    await c.query("select set_config('TimeZone',$1,false)", [zone]);
+    await c.query('set datestyle to SQL, DMY');
+    try {
+      for (const [i, kind] of ['lead', 'vendor'].entries()) {
+        await c.query(`update ${kind} set last_touch='2000-02-29' where id=$1`, [subjects[i].id]);
+      }
+      await check('2000-02-29', { lead: '2000-04-14', vendor: '2000-05-29' });
+      for (const [i, kind] of ['lead', 'vendor'].entries()) {
+        await c.query(`update ${kind} set last_touch=null where id=$1`, [subjects[i].id]);
+      }
+      await check('2000-01-01', { lead: '2000-02-15', vendor: '2000-03-31' });
+    } finally { await c.query('set datestyle to ISO, MDY'); }
   }
-  await check('2000-01-01', { lead: '2000-02-15', vendor: '2000-03-31' });
+  for (const [i, kind] of ['lead', 'vendor'].entries()) {
+    await c.query(`insert into activity(occurred_at,actor_id,kind,summary,${kind}_id)
+      values('2000-07-02T00:30:00Z',$1,'meeting','Synthetic near-midnight contact',$2)`, [actor.id,subjects[i].id]);
+  }
+  await check('2000-07-01', { lead: '2000-08-15', vendor: '2000-09-29' });
+  await c.query("update lead set next_action_date='2000-07-04' where id=$1", [subjects[0].id]);
+  await check('2000-07-01', { lead: '2000-07-04', vendor: '2000-09-29' });
+  await c.query("set time zone 'America/Chicago'");
 });
 
 test('invalid owner input refuses before database work', async () => {

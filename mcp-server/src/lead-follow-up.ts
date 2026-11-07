@@ -81,7 +81,7 @@ export function leadFollowUpTools() {
   return {
     'quiet-follow-ups': {
       write: false, writerConnection: true,
-      description: 'Read-only follow-up proposals for quiet leads and active vendors. Suggested inactivity intervals default to 45 and 90 days and may be supplied explicitly. Uses the latest recorded contact date or creation date when never contacted. A lead next_action_date overrides the interval. Preserves every open task including future and held tasks; excludes suppressed/terminal leads, restricted parties, merged/deleted records, and leads linked to cold/paused clients. Includes source dates and owner. Omit owner_slug for all owners, supply null for unassigned owner_id, or an exact recorded actor slug. Never creates a task, changes a cadence rule, drafts or sends email. Existing cadence engine continues scheduled task succession.',
+      description: 'Read-only follow-up proposals for quiet leads and active vendors. Suggested inactivity intervals default to 45 and 90 days and may be supplied explicitly. Uses the latest recorded contact date or creation date when never contacted. A lead next_action_date overrides the interval. Preserves every open task including future and held tasks; excludes suppressed/terminal leads, restricted parties, merged/deleted records, and leads linked to cold/paused clients. Includes source dates and owner. anchor_on and due_on are calendar-date strings (YYYY-MM-DD), never timestamps. Stored dates retain their calendar day; timestamp anchors and the current day use America/Chicago. Output contract: mcp-server/contracts/quiet-follow-ups.v1.json. Omit owner_slug for all owners, supply null for unassigned owner_id, or an exact recorded actor slug. Never creates a task, changes a cadence rule, drafts or sends email. Existing cadence engine continues scheduled task succession.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
         lead_days: { type: 'integer', minimum: 1, maximum: 365, default: 45 },
         vendor_days: { type: 'integer', minimum: 1, maximum: 365, default: 90 },
@@ -94,8 +94,8 @@ export function leadFollowUpTools() {
         const cadence = { lead_days: args.lead_days ?? 45, vendor_days: args.vendor_days ?? 90 };
         const proposals = (await c.query(`with subjects as (
           select 'lead'::text subject_type,l.id subject_id,l.party_id,l.registry_ref ref,p.name,l.owner_id,
-            coalesce(greatest(l.last_touch,t.last_touch::date),l.created_at::date) anchor_on,
-            case when greatest(l.last_touch,t.last_touch::date) is null then 'created_at' else 'last_contact' end basis,
+            coalesce(greatest(l.last_touch,t.last_touch),carr_business_date(l.created_at)) anchor_on,
+            case when greatest(l.last_touch,t.last_touch) is null then 'created_at' else 'last_contact' end basis,
             l.next_action_date,cl.id client_id,$1::int interval_days
           from lead l join party p on p.id=l.party_id left join client cl on cl.id=l.client_id
             left join v_last_touch t on t.subject_type='lead' and t.subject_id=l.id
@@ -104,8 +104,8 @@ export function leadFollowUpTools() {
             and (l.client_id is null or (cl.merged_into is null and coalesce(cl.status,'') not in ('cold','paused')))
           union all
           select 'vendor',v.id,v.party_id,v.vendor_ref,p.name,v.owner_id,
-            coalesce(greatest(v.last_touch,t.last_touch::date),v.created_at::date),
-            case when greatest(v.last_touch,t.last_touch::date) is null then 'created_at' else 'last_contact' end,
+            coalesce(greatest(v.last_touch,t.last_touch),carr_business_date(v.created_at)),
+            case when greatest(v.last_touch,t.last_touch) is null then 'created_at' else 'last_contact' end,
             null::date,null::uuid,$2::int
           from vendor v join party p on p.id=v.party_id
             left join v_last_touch t on t.subject_type='vendor' and t.subject_id=v.id
@@ -115,10 +115,13 @@ export function leadFollowUpTools() {
           from subjects s where not exists(select 1 from next_action n where n.status='open'
             and ((n.subject_type=s.subject_type and n.subject_id=s.subject_id)
               or (n.subject_type='client' and n.subject_id=s.client_id))))
-          select d.*,a.slug owner,current_date-due_on days_overdue from due d
-            left join actor a on a.id=d.owner_id where due_on<=current_date
+          select d.subject_type,d.subject_id,d.party_id,d.ref,d.name,d.owner_id,
+            to_char(d.anchor_on,'YYYY-MM-DD') anchor_on,d.basis,d.next_action_date,d.client_id,d.interval_days,
+            to_char(d.due_on,'YYYY-MM-DD') due_on,a.slug owner,
+            carr_business_date()-d.due_on days_overdue from due d
+            left join actor a on a.id=d.owner_id where due_on<=carr_business_date()
             and ($5::boolean or ($6::text is null and d.owner_id is null) or a.slug=$6::text)
-          order by due_on,subject_type,subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES,'active',
+          order by d.due_on,d.subject_type,d.subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES,'active',
             args.owner_slug === undefined,args.owner_slug ?? null])).rows;
         if (proposals.length > 1000) throw new ToolError({ error: 'quiet_follow_up_limit_exceeded' });
         return { schema_version: 'quiet-follow-ups.v1', cadence, proposals, sent: false, tasks_created: false };

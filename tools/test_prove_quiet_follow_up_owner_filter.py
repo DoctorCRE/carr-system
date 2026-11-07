@@ -35,6 +35,14 @@ class OwnerProofTests(unittest.TestCase):
             proof.response(self.recording[key])
         self.assertEqual(self.run_fixture(self.recording)[0], 0)
 
+    def test_date_contract_refuses_timestamps_and_invalid_days(self):
+        for field in ('anchor_on', 'due_on'):
+            for day in ('2000-02-29T06:00:00.000Z', '2000-02-30', '2000-2-9', None):
+                with self.subTest(field=field, day=day):
+                    value = copy.deepcopy(self.recording)
+                    value['all']['proposals'][0][field] = day
+                    self.assertEqual(self.run_fixture(value)[0], 78)
+
     def test_empty_unassigned_subset_passes_with_owned_evidence(self):
         for owned_only in (False, True):
             with self.subTest(owned_only=owned_only):

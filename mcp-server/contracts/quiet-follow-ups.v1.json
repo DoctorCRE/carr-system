@@ -1,0 +1,23 @@
+{
+  "schema": "quiet-follow-ups.v1",
+  "version": "1.0.0",
+  "transport": "authenticated MCP quiet-follow-ups",
+  "calendar_timezone": "America/Chicago",
+  "proposals": {
+    "anchor_on": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "meaning": "Latest recorded contact calendar date, or creation calendar date when never contacted. Stored date columns retain their day. Timestamp sources are converted to America/Chicago before taking the date. Never a timestamp."
+    },
+    "due_on": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "meaning": "Recorded lead next_action_date when present, otherwise anchor_on plus the subject cadence in calendar days. Never a timestamp."
+    },
+    "days_overdue": "Integer difference between the current America/Chicago calendar date and due_on. Only due rows are returned, ordered by due_on, subject_type, subject_id."
+  },
+  "owner_filter": "Omit owner_slug for all owners, null for unassigned owner_id, or an exact recorded actor slug. Filtering precedes the 1000-row overflow check.",
+  "effects": "Read only. sent and tasks_created are always false."
+}
