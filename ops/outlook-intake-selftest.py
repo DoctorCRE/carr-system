@@ -5659,6 +5659,30 @@ class LoadObjectFieldsTest(unittest.TestCase):
     def load(self, account=None):
         return intake._load(self.db, account)
 
+    def test_private_typed_causes_reach_the_aggregate_without_changing_capture(self):
+        from lib import outlook_field_census as census
+        with sqlite3.connect(self.db) as con:
+            con.executescript("""
+                UPDATE messages SET subject=NULL, sender=NULL, recipients=NULL WHERE id=1;
+                UPDATE message_objects SET subject=NULL, sender=NULL, recipients_status='none' WHERE local_key=71;
+                CREATE TABLE message_field_evidence(local_key INTEGER, field TEXT, cause TEXT);
+                INSERT INTO message_field_evidence VALUES(71,'subject','source_absent');
+                INSERT INTO message_field_evidence VALUES(71,'sender','decode_unsupported');
+                INSERT INTO message_field_evidence VALUES(71,'recipients','unclassified');
+                INSERT INTO message_field_evidence VALUES(71,'body','source_absent');
+            """)
+        meta, rows, _ = self.load(7)
+        self.assertIsNone(rows[0]['subject'])
+        bound = census.binding(self.db, Path(self.tmp.name) / 'Files',
+                               'synthetic', '2026-11-07T00:00:00+00:00', self.db)
+        bundle = census.build(meta, rows, bound)
+        census.validate(bundle)
+        self.assertEqual(bundle['census']['fields']['subject']['causes']['source_absent'], 1)
+        self.assertEqual(bundle['census']['fields']['sender']['causes']['decode_unsupported'], 1)
+        self.assertEqual(bundle['census']['fields']['recipients']['causes']['unclassified'], 1)
+        self.assertNotIn('local_key', json.dumps(bundle))
+        self.assertEqual(meta['subject_decoded'], 0)
+
     def test_delivery_report_reply_identity_is_projected_from_decoder_object(self):
         with sqlite3.connect(self.db) as con:
             con.execute('ALTER TABLE message_objects ADD COLUMN in_reply_to TEXT')
