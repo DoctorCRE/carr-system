@@ -396,6 +396,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn typed_field_causes_distinguish_absence_empty_decode_and_conflict() {
+        let mut index = Index::default();
+        for (key, fields) in [
+            (70, vec![]),
+            (71, vec![(SUBJECT, utf16(""))]),
+            (72, vec![(SUBJECT, vec![0xff])]),
+            (73, vec![(SUBJECT, utf16("One"))]),
+            (73, vec![(SUBJECT, utf16("Two"))]),
+            (74, vec![(SUBJECT, utf16("Present"))]),
+        ] {
+            index.observe(0, &envelope(0x060f, &message(key, 10, &fields)));
+        }
+        let messages = index.messages();
+        for (key, cause) in [(70, "source_absent"), (71, "legitimately_empty"),
+                             (72, "decode_unsupported"), (73, "conflict_or_overflow"),
+                             (74, "unclassified")] {
+            assert_eq!(messages[&key].subject_cause, cause);
+        }
+        assert_eq!(messages[&70].sender_cause, "source_absent");
+        assert_eq!(messages[&70].subject, None);
+        assert_eq!(messages[&71].subject.as_deref(), Some(""));
+        assert_eq!(messages[&72].subject, None);
+        assert_eq!(messages[&73].subject, None);
+    }
+
+    #[test]
     fn each_field_comes_from_the_newest_revision_that_sets_it() {
         let draft = message(70, 10, &[(SUBJECT, utf16("Draft")), (SENDER, utf16("a@example.test"))]);
         let sent = message(70, 20, &[(SUBJECT, utf16("Final"))]);
