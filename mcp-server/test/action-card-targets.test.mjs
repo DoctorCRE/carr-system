@@ -3,9 +3,22 @@ import assert from 'node:assert/strict';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { registeredOperation } from '../src/mutation-registry.js';
 import { buildActionCardRef } from '../src/action-card-targets.ts';
+import { readFile } from 'node:fs/promises';
 test('exact-card v2 is registered separately from v1', () => {
   assert.equal(typeof TOOLS['resolve-action-link-v2']?.handler, 'function');
   assert.equal(typeof TOOLS['resolve-action-link'].handler, 'function');
+});
+
+test('an original push reference shows resolved after canonical review completes', async () => {
+  const [recorded] = JSON.parse(await readFile(new URL('../contracts/fixtures/action-card-targets.v2.json',import.meta.url),'utf8'));
+  const version = 'b'.repeat(32);
+  const c = {query:async()=>({rows:[{target:{state:'resolved',source_version:version,
+    detail:{...recorded.card.detail,reviewed:true}}}]})};
+  const actor = {id:'20000000-0000-4000-8000-000000000001',slug:'joe',human:true};
+  const result = await executeRegisteredTool(c,actor,'resolve-action-link-v2',{ref:recorded.ref});
+  assert.equal(result.card.state,'resolved');
+  assert.equal(result.card.source_version,version);
+  assert.deepEqual(result.card.actions,[]);
 });
 
 test('new kinds retain the bounded address format and refuse on the v1 resolver', async () => {

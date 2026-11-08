@@ -9,7 +9,7 @@ ReadForeign == /\ target = "Requested" /\ target' = "Foreign" /\ detail' = FALSE
 ReadMissing == /\ target \in {"Requested", "Resolved"} /\ target' = "Missing" /\ detail' = FALSE /\ actions' = FALSE
 ReadChanged == /\ target = "Resolved" /\ target' = "Stale" /\ detail' = TRUE /\ actions' = FALSE
 ReadRetired == /\ target = "Resolved" /\ target' = "Retired" /\ detail' = FALSE /\ actions' = FALSE
-ReadReviewed == /\ target = "Resolved" /\ target' = "Resolved" /\ detail' = TRUE /\ actions' = FALSE
+ReadReviewed == /\ target \in {"Resolved", "Stale"} /\ target' = "Resolved" /\ detail' = TRUE /\ actions' = FALSE
 ReadZeroDecisions == /\ target = "Requested" /\ target' = "Resolved" /\ detail' = TRUE /\ actions' = FALSE
 Next == ReadCurrent \/ ReadForeign \/ ReadMissing \/ ReadChanged \/ ReadRetired \/ ReadReviewed \/ ReadZeroDecisions
 Spec == Init /\ [][Next]_vars

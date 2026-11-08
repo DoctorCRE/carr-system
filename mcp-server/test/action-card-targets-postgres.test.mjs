@@ -71,10 +71,10 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
       const feedback = await call(who, 'feedback_event', event, String(i + 1));
       assert.equal(feedback.card.state,'resolved');
       assert.equal(feedback.card.detail.event_id,event);
-      const staleFeedback = await call(who,'feedback_event',event,'999');
-      assert.equal(staleFeedback.card.state,'stale');
-      assert.equal(staleFeedback.card.source_version,String(i+1));
-      assert.deepEqual(staleFeedback.card.actions,[]);
+      const resolvedFeedback = await call(who,'feedback_event',event,'999');
+      assert.equal(resolvedFeedback.card.state,'resolved');
+      assert.equal(resolvedFeedback.card.source_version,String(i+1));
+      assert.deepEqual(resolvedFeedback.card.actions,[]);
       fixtures.push(first, feedback);
     });
     await t.test(`${who.slug} foreign and missing refuse identically before detail`, async () => {
@@ -93,7 +93,7 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
     });
     await t.test(`${who.slug} reviewed source resolves with no operations`, async () => {
       await c.query('update capture_session set outcome_reviewed_at=now(),outcome_reviewed_by=actor_id where id=$1', [session]);
-      const result = await call(who, 'post_call_review', session, await version(who, 'post_call_review', session));
+      const result = await call(who, 'post_call_review', session, sv);
       assert.equal(result.card.state, 'resolved');
       assert.deepEqual(result.card.actions, []);
     });

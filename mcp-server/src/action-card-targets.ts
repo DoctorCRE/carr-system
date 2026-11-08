@@ -74,7 +74,7 @@ export function actionCardTargetTools({ ToolError, readTool }: Dependencies) {
           const row = (await c.query<{target: Source | null}>('select ops.resolve_action_card($1::uuid,$2::text,$3::uuid) as target',
             [actor.id, target.kind, target.id])).rows[0]?.target;
           if (!row) return refuse();
-          const state = row.state === 'retired' ? 'retired' : row.source_version !== target.version ? 'stale' : row.state;
+          const state = row.state === 'pending_review' && row.source_version !== target.version ? 'stale' : row.state;
           return parseActionCardResponse({ schema_version: 'action-link-resolve.v2', ref: args.ref, card: {
             kind: target.kind, id: target.id, source_version: row.source_version, state,
             detail: state === 'retired' ? null : row.detail,
