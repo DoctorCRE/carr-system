@@ -1,0 +1,63 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
+import { parse } from "@babel/parser";
+import { migrationIssues, object, projectPaths, projects } from "./migration.ts";
+
+const pkg = resolve(import.meta.dirname, "..");
+const files = projects(pkg);
+const issues = migrationIssues(pkg, files);
+const graph = object(resolve(pkg, "knip.json"));
+assert.deepEqual(
+  graph.project,
+  files.map((file) => relative(pkg, file)),
+  "Knip must cover every admitted file",
+);
+
+function syntaxIssues(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const child of value) syntaxIssues(child);
+  } else if (typeof value === "object" && value !== null) {
+    if ("type" in value) {
+      if (value.type === "TSAnyKeyword") issues.push("Explicit any is forbidden");
+      if (value.type === "TSNonNullExpression") issues.push("Non-null assertions are forbidden");
+      if (
+        (value.type === "CommentLine" || value.type === "CommentBlock") &&
+        "value" in value &&
+        typeof value.value === "string" &&
+        /@ts-(?:ignore|expect-error|nocheck)|biome-ignore/.test(value.value)
+      ) {
+        issues.push("Suppression directives are forbidden");
+      }
+    }
+    for (const child of Object.values(value)) syntaxIssues(child);
+  }
+}
+
+for (const file of files) {
+  syntaxIssues(parse(readFileSync(file, "utf8"), { sourceType: "module", plugins: ["typescript", "jsx"] }));
+}
+if (issues.length) {
+  process.stderr.write(`${issues.join("\n")}\n`);
+  process.exit(1);
+}
+
+function run(tool: string, args: string[]): void {
+  const result = spawnSync(resolve(pkg, "node_modules/.bin", tool), args, {
+    cwd: pkg,
+    stdio: "inherit",
+    timeout: 120_000,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(1);
+}
+
+for (const path of projectPaths) {
+  const config = object(resolve(pkg, path));
+  if (Array.isArray(config.files) && config.files.length > 0) run("tsc", ["-p", path]);
+  else process.stdout.write(`${path}: no admitted files yet; legacy Worker contracts remain in typecheck\n`);
+}
+run("biome", ["check", "--error-on-warnings", ...files.map((file) => relative(pkg, file))]);
+// Legacy dependencies remain owned by their package checks until their modules join this graph.
+run("knip", ["--include", "files,exports,types,duplicates"]);

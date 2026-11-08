@@ -268,6 +268,10 @@ class Controller:
             self.verdict('bad', 'required Node package checks failed or did not execute')
 
     def check_types(self):
+        if self.run_quiet('staged-types', ['npm', '--prefix', 'mcp-server', 'run', 'check:staged']):
+            self.show('staged-types', tail=25, error=True)
+            self.verdict('bad', 'staged strict TypeScript gate failed')
+            return
         if self.run_quiet('worker-types', ['npm', '--prefix', 'mcp-server', 'run', 'typecheck']):
             self.show('worker-types', tail=25, error=True)
             self.verdict('bad', 'Worker verb contract types failed')
@@ -277,7 +281,7 @@ class Controller:
             return
         rc = self.run_quiet('types', ['./bin/type-check.sh'])
         if rc == 0:
-            self.verdict('ok', 'Worker verb contracts and Python types pass')
+            self.verdict('ok', 'Staged strict TypeScript, Worker verb contracts and Python types pass')
         elif rc == 78:
             version = 'unknown'
             for python in (str(ROOT / '.venv/bin/python'), 'python3'):

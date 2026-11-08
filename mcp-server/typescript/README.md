@@ -1,0 +1,32 @@
+# Staged strict TypeScript gate
+
+Run `npm --prefix mcp-server run check` for the existing Worker contract checks,
+strict gate, typed gate tests and bounded legacy test runner. CI's existing
+`types` class runs `check:staged`, the Worker contract checks and Python types.
+CI's `unit` class owns the legacy runner, so it does not run twice in CI.
+
+`tsconfig.base.json` owns the standard flags. Node-run files join the explicit
+list in `tsconfig.node.json`. Worker files join `tsconfig.worker.json`, which
+retains strict flags and removes Node globals. Its list starts empty because
+P02 converts no product modules. The existing `tsconfig.json` still checks all
+current Worker contracts and generated Cloudflare declarations. Worker
+conversions must include the generated declarations in their strict project.
+
+`migration.json` lists existing JavaScript and hashes unchanged legacy
+TypeScript across the entire repository. A changed or new TypeScript file must
+join a strict project. A new JavaScript file fails, including outside packages.
+There are no tool-required exceptions at this revision. Add exceptions only by
+exact path with the tool requirement documented in the PR. Remove migration
+entries as their files are converted. Delete the temporary migration gate when
+these lists empty.
+
+Add every strict file to Knip's explicit project list. List real executable or
+test roots as entries; libraries must remain reachable through their consumers.
+Knip checks files, exports, types and duplicates in this admitted graph.
+Dependency analysis remains with the existing package checks while legacy
+modules own those dependencies. Biome and prohibited-syntax checks run over
+every admitted file, with warnings treated as errors.
+
+The typed tests copy the real gate and configuration into a disposable Git
+repository and run the installed compiler, Biome and Knip against clean code
+and negative seeds. They need only the checked-out files and installed packages.
