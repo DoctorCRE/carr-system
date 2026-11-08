@@ -61,4 +61,3 @@ begin
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
     'select '||quote_literal(contract::text)||'::jsonb');
 end $grant_contract$;
-
