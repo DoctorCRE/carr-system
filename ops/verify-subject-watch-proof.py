@@ -1,109 +1,121 @@
 #!/usr/bin/env python3
-"""Capture bounded read-only watch counts and verify destination, replay and unwatch deltas."""
+"""Verify scheduled WATCH delivery on a containing release without production writes."""
 import argparse
-import hashlib
+from datetime import datetime
 import json
 from pathlib import Path
+import re
+import subprocess
+import sys
+import time
 from uuid import UUID
-
 import psycopg
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.release_reader import read
 
 
-def capture(database, watched, unwatched, actor):
-    if watched == unwatched:
-        raise ValueError('control must be a different deal')
-    with psycopg.connect(database, options='-c default_transaction_read_only=on -c statement_timeout=5000') as db:
+class InsufficientEvidence(Exception):
+    """The controlled delivery evidence is unavailable."""
+
+
+def containing(expected, observed, remaining):
+    if not re.fullmatch(r'[0-9a-f]{40}', observed or ''):
+        return False
+    if expected == observed:
+        return True
+    result = subprocess.run(['git', 'merge-base', '--is-ancestor', expected, observed],
+                            capture_output=True, timeout=max(.1, remaining))
+    return result.returncode == 0
+
+
+def capture(database, watch, remaining):
+    with psycopg.connect(database, connect_timeout=max(1, int(remaining)),
+                         options='-c default_transaction_read_only=on -c statement_timeout=3000') as db:
         with db.transaction():
             db.execute('set transaction isolation level repeatable read')
-            rows = db.execute("""
-                select d.id, exists(select 1 from ops.subject_watch sw
-                  where sw.subject_type='deal' and sw.subject_id=d.id and sw.actor_id=a.id),
-                  (select count(*) from ops.notification n where n.subject_type='deal'
-                    and n.subject_ref=d.id::text and n.recipient_actor=a.id
-                    and n.event_source='event' and n.dedupe_key like 'subject-watch:%%'),
-                  (select count(*) from ops.subject_watch_event_receipt r
-                    join public.event e on e.id=r.event_id
-                    where e.subject_type='deal' and e.subject_id=d.id
-                    and e.organization_tenant_id='carr-internal'),
-                  (select count(*) from ops.notification n where n.subject_type='deal'
-                    and n.subject_ref=d.id::text and n.recipient_actor=a.id
-                    and n.event_source='event' and n.dedupe_key like 'subject-watch:%%'
-                    and n.deep_link='/deals?deal=' || d.id::text)
-                from public.deal d join public.client c on c.id=d.client_id and c.merged_into is null
-                join public.party p on p.id=c.party_id and p.deleted_at is null and p.merged_into is null
-                cross join public.actor a
-                where d.id in (%s,%s) and a.slug=%s
-                """, (watched, unwatched, actor)).fetchall()
-    by_id = {str(row[0]): row[1:] for row in rows}
-    if len(by_id) != 2 or by_id[str(unwatched)][0]:
-        raise ValueError('requires two live deals and an unwatched control')
-    return {'selection': hashlib.sha256(f'{watched}/{unwatched}/{actor}'.encode()).hexdigest(),
-            'subscribed': by_id[str(watched)][0],
-            'watched': list(by_id[str(watched)][1:]), 'unwatched': list(by_id[str(unwatched)][1:])}
+            row = db.execute("""
+              select jsonb_build_object(
+                'schema_version','subject-watch-scheduled-proof.v1','watch_id',w.id,
+                'clock_receipts',(select count(*) from ops.subject_watch_change c where c.watch_generation_id=w.id
+                  and c.category='lease_threshold_crossed' and c.disposition='emitted'),
+                'notifications',(select count(*) from ops.notification n
+                  join public.event e on e.id=n.event_ref and e.verb='subject-watch-scheduled-sweep'
+                  where n.recipient_actor=w.actor_id and n.dedupe_key like 'subject-watch:'||w.id||':%'),
+                'first_delivery_at',(select min(e.occurred_at) from ops.subject_watch_change c
+                  join ops.notification n on n.id=c.notification_id join public.event e on e.id=n.event_ref
+                  where c.watch_generation_id=w.id and c.category='lease_threshold_crossed'),
+                'last_success_at',d.last_success_at,
+                'scheduled_at',(select scheduled_at from ops.subject_watch_sweep where singleton),
+                'business_mutations',(select count(*) from public.event e where e.recorded_at>=w.subscribed_at
+                  and ((e.subject_type=w.subject_type and e.subject_id=w.subject_id)
+                    or (e.subject_type='deal' and e.subject_id=l.deal_id))),
+                'explicit_expiration',l.expiration_on,
+                'pending',(select count(*) from ops.subject_watch_change c
+                  where c.watch_generation_id=w.id and c.disposition='pending'))
+              from ops.subject_watch_v2_subscription w join public.lease l on w.subject_type='lease' and l.id=w.subject_id
+              join ops.subject_watch_delivery d on d.watch_id=w.id
+              where w.id=%s and w.state='watching'
+              """, (watch,)).fetchone()
+    if not row:
+        raise InsufficientEvidence('No active seeded lease watch was observed.')
+    return row[0]
 
 
-def verify(before, after, replay, removed, suppressed):
-    samples = (before, after, replay, removed, suppressed)
-    for sample in samples:
-        if set(sample) != {'selection', 'subscribed', 'watched', 'unwatched'}:
-            raise ValueError('invalid snapshot')
-        if not isinstance(sample['selection'], str) or type(sample['subscribed']) is not bool:
-            raise ValueError('invalid selection or subscription')
-        for key in ('watched', 'unwatched'):
-            if not isinstance(sample[key], list) or len(sample[key]) != 3 or any(
-                    type(n) is not int or n < 0 for n in sample[key]):
-                raise ValueError('invalid counts')
-    if len({sample['selection'] for sample in samples}) != 1:
-        raise ValueError('different selections')
-    if [sample['subscribed'] for sample in samples] != [True, True, True, False, False]:
-        raise ValueError('invalid subscription sequence')
-    delta = lambda a, b, key: [y-x for x,y in zip(a[key],b[key])]
-    counts = {'watched': delta(before,after,'watched')[0],
-              'unwatched': delta(before,after,'unwatched')[0],
-              'replay': delta(after,replay,'watched')[0],
-              'suppressed': delta(removed,suppressed,'watched')[0]}
-    if (delta(before,after,'watched') != [1,1,1] or
-            delta(before,after,'unwatched') != [0,1,0] or replay != after or
-            any(delta(replay,removed,key) != [0,0,0] for key in ('watched','unwatched')) or
-            delta(removed,suppressed,'watched') != [0,1,0] or
-            delta(removed,suppressed,'unwatched') != [0,0,0]):
-        raise ValueError('watch proof failed ' + json.dumps(counts, sort_keys=True))
-    return counts
+def verify(sample):
+    if sample.get('schema_version') != 'subject-watch-scheduled-proof.v1':
+        raise InsufficientEvidence('The scheduled proof contract is unavailable.')
+    if not all(sample.get(k) for k in ('first_delivery_at','last_success_at','scheduled_at')):
+        raise InsufficientEvidence('A scheduled delivery and later duplicate sweep are required.')
+    stamp = lambda key: datetime.fromisoformat(sample[key].replace('Z', '+00:00'))
+    if stamp('last_success_at') <= stamp('first_delivery_at') or stamp('scheduled_at') < stamp('last_success_at'):
+        raise InsufficientEvidence('No later successful duplicate sweep was observed.')
+    expected = {'clock_receipts': 1, 'notifications': 1, 'business_mutations': 0, 'pending': 0}
+    for key, value in expected.items():
+        if type(sample.get(key)) is not int or sample[key] != value:
+            raise AssertionError(f'{key} expected {value}, observed {sample.get(key)}')
+    if not sample.get('explicit_expiration'):
+        raise AssertionError('The lease requires an explicit selected expiration.')
+    return expected
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    sub = parser.add_subparsers(dest='command', required=True)
-    take = sub.add_parser('capture')
-    take.add_argument('--database', default='', help='libpq connection string; defaults to configured service')
-    take.add_argument('--watched', type=UUID, required=True)
-    take.add_argument('--unwatched', type=UUID, required=True)
-    take.add_argument('--actor', choices=('joe','dell'), required=True)
-    take.add_argument('--output', type=Path, required=True)
-    check = sub.add_parser('verify')
-    for name in ('before','after','replay','removed','suppressed'):
-        check.add_argument('--'+name, type=Path, required=True)
+    parser.add_argument('--expected-merge', required=True)
+    parser.add_argument('--watch-id', type=UUID, required=True)
+    parser.add_argument('--database', default='')
+    parser.add_argument('--release-url', default='https://api.doctorcre.com/release')
+    parser.add_argument('--fixture', type=Path)
+    parser.add_argument('--deadline-seconds', type=float, default=15)
     args = parser.parse_args()
+    deadline = time.monotonic() + min(30, max(1, args.deadline_seconds))
     try:
-        if args.command == 'capture':
-            sample = capture(args.database,args.watched,args.unwatched,args.actor)
-            args.output.write_text(json.dumps(sample)+'\n')
-            print('watch counts captured')
+        if not re.fullmatch(r'[0-9a-f]{40}', args.expected_merge):
+            raise InsufficientEvidence('The expected merge requires a full commit SHA.')
+        fixture = json.loads(args.fixture.read_text()) if args.fixture else None
+        if fixture:
+            release = fixture['release']
         else:
-            samples=[]
-            for path in (args.before,args.after,args.replay,args.removed,args.suppressed):
-                if path.stat().st_size > 4096:
-                    raise ValueError('snapshot exceeds 4 KiB')
-                samples.append(json.loads(path.read_text()))
-            print(json.dumps(verify(*samples),sort_keys=True))
-    except ValueError as error:
-        print(str(error))
+            response = read(args.release_url, timeout=deadline-time.monotonic(), max_bytes=65536)
+            if response.status != 200:
+                raise InsufficientEvidence(f'Release HTTP {response.status}')
+            release = json.loads(response.body)
+        if not containing(args.expected_merge, release.get('git_sha'), deadline-time.monotonic()):
+            raise InsufficientEvidence('The release does not prove containment of the expected merge.')
+        sample = fixture['sample'] if fixture else capture(args.database,args.watch_id,deadline-time.monotonic())
+        if sample.get('watch_id') != str(args.watch_id):
+            raise AssertionError('The proof selected a different watch generation.')
+        result = verify(sample)
+        if time.monotonic() > deadline:
+            raise InsufficientEvidence('The total proof deadline expired.')
+        print(json.dumps({'status':'pass','counts':result}))
+        return 0
+    except AssertionError as error:
+        print(json.dumps({'status':'assertion_failure','reason':str(error)}))
         return 1
-    except (OSError, psycopg.Error):
-        print('watch proof refused')
-        return 1
-    return 0
+    except (InsufficientEvidence,OSError,ValueError,KeyError,TypeError,psycopg.Error,subprocess.TimeoutExpired) as error:
+        print(json.dumps({'status':'insufficient_evidence','reason':str(error)}))
+        return 78
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    sys.exit(main())

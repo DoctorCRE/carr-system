@@ -84,6 +84,7 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "./postgres.js";
+import { scheduledSubjectWatches } from "./subject-watch-scheduler.js";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
 export { PhoneAudioHandoff } from './phone-audio-handoff.js';
@@ -747,5 +748,6 @@ async function routeRequest(request, env, ctx) {
 // ordering is load-bearing) so every route's >=500 responses and uncaught
 // throws are covered the same single-wrap way.
 export default {
+  scheduled: scheduledSubjectWatches,
   fetch: wrapWithCorrelation(withFailureRecording(routeRequest)),
 };

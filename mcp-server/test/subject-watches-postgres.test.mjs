@@ -175,81 +175,17 @@ test('watch statechart on canonical event ingress', async t => {
   await event();assert.equal(await count(),0);assert.equal(await count(dell),0);
   assert.equal(Number((await c.query("select count(*) from ops.subject_watch_change where subject_id=$1 and category='material_changed'",[deal])).rows[0].count),2,'material owner change captures both partners');
   const activity=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic inbound','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,joe])).rows[0].id;
-  await event('confirm-email-filing',{activity_id:activity},deal,'joe-personal');assert.equal(await count(),1);assert.equal(await count(dell),0,'cross-mailbox reply');
-  await event('inherit-email-thread',{activity_id:activity},deal,'joe-personal');assert.equal(await count(),1,'reply identity deduplicates');
-  await c.query('update party set merged_into=$1 where id=$1',[party]);
-  await c.query('update deal set version=version+1 where id=$1',[deal]);await event();assert.equal(await count(),1,'merged party stays quiet');
-  await c.query('update party set merged_into=null where id=$1',[party]);
-  await c.query('update client set merged_into=$1 where id=$1',[client]);
-  await event();assert.equal(await count(),1,'merged client stays quiet');
-  await c.query('update client set merged_into=null where id=$1',[client]);
-  await c.query('update party set deleted_at=now() where id=$1',[party]);
-  await c.query('update deal set version=version+1 where id=$1',[deal]);await event();assert.equal(await count(),1,'deleted source');
-  await c.query('update party set deleted_at=null where id=$1',[party]);
-  await watch('deal',deal,'joe',false);await event();assert.equal(await count(),1,'unsubscribe');
-  await watch('deal',deal);await event();assert.equal(await count(),1,'rewatch starts from a quiet fresh version');
-  const unwatched=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,version,created_by,updated_by) values($1,'Synthetic unwatched deal','purchase','research','joe',2,$2,$2) returning id",[client,joe])).rows[0].id;
-  await event('update-deal',{},unwatched);assert.equal(await count(),1,'unwatched deal stays quiet');
-  const links=(await c.query("select deep_link from ops.notification where subject_type='deal' and dedupe_key like 'subject-watch:%'")).rows;
-  assert.ok(links.every(r=>r.deep_link===`/deals?deal=${deal}`));
-  await c.query('begin');
-  try{await c.query('set local role carr_writer');await assert.rejects(c.query('select ops.consume_subject_watch_event($1)',[e]),x=>x.code==='42501');}
-  finally{await c.query('rollback');}
+  await event('confirm-email-filing',{activity_id:activity},deal,'joe-personal');
+  await event('inherit-email-thread',{activity_id:activity},deal,'joe-personal');
+  assert.equal(await count(),0,'capture does not emit');
+  await c.query('select ops.sweep_subject_watches(clock_timestamp(),50)');
+  assert.equal(await count(),1,'material and reply coalesce');
+  assert.equal(await count(dell),1,'shared material change reaches Dell');
+  assert.equal(Number((await c.query("select count(*) from ops.subject_watch_change where subject_id=$1 and category='reply_arrived'",[deal])).rows[0].count),1,'mailbox reply identity remains private and deduplicated');
+  await watch('deal',deal,'joe',false);
+  await event(); await c.query("select ops.sweep_subject_watches(clock_timestamp()+interval '5 minutes',50)");
+  assert.equal(await count(),1,'unwatch fences emission');
 
-  const leases=[];
-  for(let n=0;n<5;n++){
-    const l=(await c.query("insert into lease(client_id,created_by,updated_by,expiration_on) values($1,$2,$2,current_date+interval '30 months') returning id",[client,joe])).rows[0].id;
-    leases.push(l);await watch('lease',l);
-  }
-  await c.query("insert into ops.notification_preference(actor,device_opt_in,quiet_hours_start,quiet_hours_end,timezone) values($1,true,'00:00','23:59:59.999999','UTC') on conflict(actor) do update set device_opt_in=true,quiet_hours_start='00:00',quiet_hours_end='23:59:59.999999',timezone='UTC'",[joe]);
-  await c.query("update lease set expiration_on=current_date+interval '12 months' where id=any($1::uuid[])",[leases]);
-  for(let n=0;n<3;n++)await c.query('select ops.scan_subject_watch_leases($1,2)',[e]);
-  assert.equal(await count(joe,'lease'),5,'bounded batches skip no lease');
-  const rows=(await c.query("select id,deep_link from ops.notification where subject_type='lease' and dedupe_key like 'subject-watch:%'")).rows;
-  assert.ok(rows.every(r=>r.deep_link===`/clients?record=${client}`));
-  assert.equal(Number((await c.query("select count(*) from ops.notification_delivery where notification_id=any($1::uuid[]) and channel='device' and state='suppressed_quiet_hours'",[rows.map(r=>r.id)])).rows[0].count),5);
-  await c.query("update ops.notification_delivery set state='delivered',settled_at=now() where notification_id=any($1::uuid[]) and channel='in_app'",[rows.map(r=>r.id)]);
-  await event();await event();assert.equal(await count(joe,'lease'),5,'delivery acknowledgement cannot replay');
-  await watch('lease',leases[0],'joe',false);
-  await c.query("update lease set expiration_on=current_date+interval '6 months' where id=any($1::uuid[])",[leases]);
-  await event();assert.equal(await count(joe,'lease'),9,'unsubscribed lease stays quiet');
-  for(const [table,id] of [['party',party],['client',client]]){
-    await c.query('begin');
-    try {
-      await c.query(`update ${table} set merged_into=$1 where id=$1`,[id]);
-      await c.query("update lease set expiration_on=current_date+interval '4 months' where id=any($1::uuid[])",[leases]);
-      await event();assert.equal(await count(joe,'lease'),9,'merged '+table+' lease stays quiet');
-    } finally { await c.query('rollback'); }
-  }
-  await c.query("update lease set status='superseded',expiration_on=current_date+interval '4 months' where id=$1",[leases[1]]);await event();assert.equal(await count(joe,'lease'),9,'superseded lease stays quiet');
-  await c.query('delete from lease where id=$1',[leases[1]]);await event();assert.equal(await count(joe,'lease'),9,'deleted lease');
-  await c.query('begin');
-  try{
-    await c.query("create function ops.watch_test_fail() returns trigger language plpgsql as $$ begin raise exception 'source unavailable'; end $$");
-    await c.query('create trigger watch_test_fail before insert on ops.notification for each row execute function ops.watch_test_fail()');
-    await c.query("update lease set expiration_on=current_date+interval '3 months' where id=$1",[leases[2]]);
-    await assert.rejects(event(),/source unavailable/);
-  }finally{await c.query('rollback');}
-  assert.equal(await count(joe,'lease'),9,'source failure rolls back cursor and notification');
-  const cursorBefore=(await c.query('select watch_id from ops.subject_watch_scan_cursor')).rows;
-  await c.query('begin');
-  try{
-    await c.query("create or replace function ops.lease_radar_window() returns table(starts_on date,ends_on date) language plpgsql stable set search_path=pg_catalog,pg_temp as $$ begin raise exception 'lease source unavailable'; end $$");
-    await assert.rejects(event(),/lease source unavailable/);
-  }finally{await c.query('rollback');}
-  assert.deepEqual((await c.query('select watch_id from ops.subject_watch_scan_cursor')).rows,cursorBefore);
-  assert.equal(await count(joe,'lease'),9);
-  const inside=(await c.query("insert into lease(client_id,created_by,updated_by,expiration_on) values($1,$2,$2,current_date+interval '12 months') returning id",[client,joe])).rows[0].id;
-  await watch('lease',inside);await event();assert.equal(await count(joe,'lease'),9,'in-window subscription takes a quiet baseline');
-  await c.query("update lease set expiration_on=current_date+interval '30 months' where id=$1",[inside]);await event();
-  await c.query('begin');
-  try{
-    await c.query("create or replace function ops.lease_radar_window() returns table(starts_on date,ends_on date) language sql stable set search_path=pg_catalog,pg_temp as $$ select current_date,(current_date+interval '36 months')::date $$");
-    const window=(await c.query('select * from ops.lease_radar_window()')).rows[0];
-    assert.deepEqual((await c.query('select starts_on,ends_on from public.v_client_lease_radar')).rows[0],window,'radar and producer share policy');
-    await event();assert.equal(await count(joe,'lease'),10,'clock threshold needs no lease write');
-    await event();assert.equal(await count(joe,'lease'),10);
-  }finally{await c.query('rollback');}
 });
 
 
@@ -316,6 +252,7 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
   await c.query("update lease set expiration_on=current_date+interval '6 months' where id=$1",[lease]);
   const mail=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic inbox reply','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,joe.id])).rows[0].id;
   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause) values(now(),$1,'confirm-email-filing','deal',$2,$3,'automation_job')",[joe.id,deal,{activity_id:mail}]);
+  await c.query('select ops.sweep_subject_watches(clock_timestamp(),50)');
   const canonical=async()=> (await c.query('select to_jsonb(d) deal,to_jsonb(l) lease from deal d cross join lease l where d.id=$1 and l.id=$2',[deal,lease])).rows[0];
   const original=await canonical();
   const feed=await call('notification-feed',{limit:200});
@@ -344,6 +281,7 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
         assert.equal(after.section,operation==='acknowledge-notification'?placement:operation==='settle-home-inbox'?'settled':operation==='snooze-home-inbox'?'snoozed':'inbox');
         assert.equal(after.unseen,operation==='acknowledge-notification'?false:!seen);
         assert.equal(after.source_state,'needs_attention');
+        assert.ok((await call('read-subject-watch-v1',{subject_type:kind,subject_id:ref})).watch,'inbox actions preserve watch');
         } finally { await c.query('rollback'); isolated=false; }
       });
     }

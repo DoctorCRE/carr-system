@@ -28,6 +28,8 @@ test('policy requires explicit lease thresholds and defaults self changes in the
     assert.equal(validator.validate(policy).valid,false);
   assert.equal(validator.validate({change_kinds:['reply_arrived']}).valid,true);
   assert.equal(validSubjectWatchPolicy({change_kinds:['lease_threshold_crossed']}),false);
+  assert.equal(validSubjectWatchPolicy({change_kinds:['lease_threshold_crossed'],lease_threshold_months:[12]}),true);
+  assert.equal(validSubjectWatchPolicy({change_kinds:['lease_threshold_crossed'],lease_threshold_months:[121]}),false);
 });
 
 test('v2 schemas exclude actor overrides and require generation for lifecycle mutations',()=>{
