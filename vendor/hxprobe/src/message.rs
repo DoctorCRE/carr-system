@@ -91,6 +91,8 @@ struct Revision {
     in_reply_to: Option<String>,
     message_id: Option<String>,
     subject: Option<String>,
+    subject_set: bool,
+    sender_set: bool,
     preview: Option<String>,
     sender: Option<String>,
     sender_name: Option<String>,
@@ -114,6 +116,8 @@ pub struct Message {
     pub message_id: Option<String>,
     /// `Some("")` when the store holds an empty subject.
     pub subject: Option<String>,
+    pub subject_cause: &'static str,
+    pub sender_cause: &'static str,
     pub preview: Option<String>,
     pub sender: Option<String>,
     pub sender_name: Option<String>,
@@ -132,6 +136,7 @@ pub struct Message {
 pub struct Index {
     /// Every key named by a message identity header, accepted or not.
     observed: BTreeSet<u64>,
+    rejected_revisions: BTreeSet<u64>,
     revisions: BTreeMap<u64, Vec<Revision>>,
     recipients: BTreeMap<u64, BTreeMap<u64, BTreeSet<RecipientKey>>>,
     bodies: BTreeMap<u64, BTreeSet<Body>>,
@@ -176,6 +181,8 @@ fn revision(block: usize, data: &[u8]) -> Option<(u64, Revision)> {
         in_reply_to: string(IN_REPLY_TO).map(|s| s.trim_matches(['<', '>']).to_string()),
         message_id: string(MESSAGE_ID).map(|s| s.trim_matches(['<', '>']).to_string()),
         subject: string(SUBJECT),
+        subject_set: slots[&SUBJECT].is_some(),
+        sender_set: slots[&SENDER].is_some(),
         preview: string(PREVIEW),
         sender: string(SENDER),
         sender_name: string(SENDER_NAME),
@@ -220,6 +227,23 @@ fn newest<T: Clone + Ord>(revs: &[Revision], get: impl Fn(&Revision) -> Option<T
     best.and_then(|(_, values)| (values.len() == 1).then(|| values.into_iter().next().unwrap()))
 }
 
+// Evidence follows the same newest-set revision authority, including unreadable set slots.
+fn text_cause(revs: &[Revision], get: impl Fn(&Revision) -> (bool, Option<String>)) -> &'static str {
+    let set: Vec<_> = revs.iter().filter_map(|r| {
+        let (set, value) = get(r);
+        set.then_some((r.modified, value))
+    }).collect();
+    let Some(latest) = set.iter().map(|(time, _)| *time).max() else { return "source_absent" };
+    let values: BTreeSet<_> = set.into_iter().filter(|(time, _)| *time == latest)
+        .map(|(_, value)| value).collect();
+    if values.len() != 1 { return "conflict_or_overflow"; }
+    match values.into_iter().next().unwrap() {
+        None => "decode_unsupported",
+        Some(value) if value.trim().is_empty() => "legitimately_empty",
+        Some(_) => "unclassified",
+    }
+}
+
 /// The current value: every revision tied at the newest time must hold the same set value.
 /// Unlike `newest`, an unset or invalid current value is not filled from an older revision.
 fn current<T: Clone + Ord>(revs: &[Revision], get: impl Fn(&Revision) -> Option<T>) -> Option<T> {
@@ -242,6 +266,8 @@ impl Index {
             }
             if let Some((key, r)) = revision(block, object) {
                 self.revisions.entry(key).or_default().push(r);
+            } else if let Some((key, _)) = super::object::reference(object, MESSAGE.1, MESSAGE_KIND) {
+                self.rejected_revisions.insert(key);
             }
         }
         for (_, object) in envelopes(data, RECIPIENT) {
@@ -326,6 +352,10 @@ impl Index {
                     in_reply_to: newest(revs, |r| r.in_reply_to.clone()),
                     message_id: newest(revs, |r| r.message_id.clone()),
                     subject: newest(revs, |r| r.subject.clone()),
+                    subject_cause: if self.rejected_revisions.contains(&key) { "unclassified" }
+                        else { text_cause(revs, |r| (r.subject_set, r.subject.clone())) },
+                    sender_cause: if self.rejected_revisions.contains(&key) { "unclassified" }
+                        else { text_cause(revs, |r| (r.sender_set, r.sender.clone())) },
                     preview: newest(revs, |r| r.preview.clone()),
                     sender: newest(revs, |r| r.sender.clone()),
                     sender_name: newest(revs, |r| r.sender_name.clone()),
@@ -393,6 +423,44 @@ pub(crate) mod tests {
         v.extend([0, 0]);
         v.extend(object);
         v
+    }
+
+    #[test]
+    fn typed_field_causes_distinguish_absence_empty_decode_and_conflict() {
+        let mut index = Index::default();
+        for (key, fields) in [
+            (70, vec![]),
+            (71, vec![(SUBJECT, utf16(""))]),
+            (72, vec![(SUBJECT, vec![0xff])]),
+            (73, vec![(SUBJECT, utf16("One"))]),
+            (73, vec![(SUBJECT, utf16("Two"))]),
+            (74, vec![(SUBJECT, utf16("Present"))]),
+        ] {
+            index.observe(0, &envelope(0x060f, &message(key, 10, &fields)));
+        }
+        let messages = index.messages();
+        for (key, cause) in [(70, "source_absent"), (71, "legitimately_empty"),
+                             (72, "decode_unsupported"), (73, "conflict_or_overflow"),
+                             (74, "unclassified")] {
+            assert_eq!(messages[&key].subject_cause, cause);
+        }
+        assert_eq!(messages[&70].sender_cause, "source_absent");
+        assert_eq!(messages[&70].subject, None);
+        assert_eq!(messages[&71].subject.as_deref(), Some(""));
+        assert_eq!(messages[&72].subject, None);
+        assert_eq!(messages[&73].subject, None);
+    }
+
+    #[test]
+    fn rejected_revision_cannot_prove_an_absent_or_empty_field() {
+        let mut bad = message(70, 20, &[(SUBJECT, utf16("Unreachable"))]);
+        put(&mut bad, SUBJECT, &u32::MAX.to_le_bytes());
+        let mut index = Index::default();
+        index.observe(0, &[envelope(0x060f, &message(70, 10, &[])), envelope(0x060f, &bad)].concat());
+        let messages = index.messages();
+        assert_eq!(messages[&70].subject, None);
+        assert_eq!(messages[&70].subject_cause, "unclassified");
+        assert_eq!(messages[&70].sender_cause, "unclassified");
     }
 
     #[test]

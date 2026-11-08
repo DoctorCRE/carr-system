@@ -190,3 +190,33 @@ fn seeded_and_mutated_inputs_do_not_panic() {
 fn sustained_inputs_do_not_panic() {
     run_cases(0x440_fedc_ba98_7654, 262_144);
 }
+
+#[test]
+fn db_command_exports_private_causes_with_original_identity() {
+    let path = std::env::temp_dir().join(format!("hxprobe-causes-{}-{}", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir(&path).unwrap();
+    let store = path.join("synthetic.hxd");
+    let db = path.join("decoded.db");
+    let mut bytes = vec![0u8; 64];
+    bytes[..8].copy_from_slice(b"Nostromo");
+    bytes[8] = b'i';
+    bytes[56..64].copy_from_slice(&4096u64.to_le_bytes());
+    bytes.extend(literal_block(&synthetic_record()));
+    std::fs::write(&store, bytes).unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_hxprobe"))
+        .arg("db").arg(&store).arg(&db).output().unwrap();
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let con = rusqlite::Connection::open(&db).unwrap();
+    let causes: Vec<(String, String)> = con.prepare(
+        "SELECT field,cause FROM message_field_evidence WHERE local_key=70 ORDER BY field")
+        .unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+        .map(Result::unwrap).collect();
+    assert_eq!(causes, vec![("body".into(), "source_absent".into()),
+        ("recipients".into(), "source_absent".into()),
+        ("sender".into(), "unclassified".into()), ("subject".into(), "source_absent".into())]);
+    assert_eq!(con.query_row("SELECT subject FROM message_objects WHERE local_key=70", [],
+        |r| r.get::<_, Option<String>>(0)).unwrap(), None);
+    drop(con);
+    std::fs::remove_dir_all(path).unwrap();
+}

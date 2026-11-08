@@ -481,6 +481,10 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
     reply_field = 'o.in_reply_to' if 'in_reply_to' in object_columns else 'NULL AS in_reply_to'
     ownership_fields = ', '.join(f'o.{name}' if name in object_columns else f'NULL AS {name}'
                                  for name in ('account_id', 'folder_id'))
+    evidence: dict[int, dict[str, str]] = {}
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='message_field_evidence'").fetchone():
+        for key, field, cause in con.execute('SELECT local_key, field, cause FROM message_field_evidence'):
+            evidence.setdefault(key, {})[field] = cause
     found = {}
     for row in con.execute(
             'WITH k AS (SELECT message_id, MIN(local_key) AS local_key FROM message_keys '
@@ -491,7 +495,8 @@ def _message_object_fields(con: sqlite3.Connection) -> dict[int, dict]:
         fields = {name: row[name] for name in ('subject', 'conversation_id', 'sender', 'in_reply_to')
                   if row[name] is not None and str(row[name]).strip()}
         fields.update(account_id=row['account_id'], folder_id=row['folder_id'],
-                      census_recipients_status=row['recipients_status'])
+                      census_recipients_status=row['recipients_status'],
+                      field_causes=evidence.get(row['local_key'], {}))
         lists = recipients.get(row['local_key'])
         # No observed recipient objects does not prove an empty recipient list.
         if row['recipients_status'] == 'listed' and lists:

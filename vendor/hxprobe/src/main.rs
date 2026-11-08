@@ -286,6 +286,12 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              -- 'conflict' (cached revisions of a recipient disagree; none exported).
              recipients_status  TEXT NOT NULL
          );
+         CREATE TABLE message_field_evidence (
+             local_key INTEGER NOT NULL,
+             field TEXT NOT NULL,
+             cause TEXT NOT NULL,
+             PRIMARY KEY(local_key, field)
+         );
          CREATE TABLE recipients (
              local_key INTEGER NOT NULL REFERENCES message_objects(local_key),
              kind      TEXT,              -- 'to', 'cc', or NULL for an unmapped kind_code
@@ -398,6 +404,15 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                                            m.account.and_then(|v| i64::try_from(v).ok()),
                                            m.folder.and_then(|v| i64::try_from(v).ok())])
                 .expect("insert message object");
+            for (field, cause) in [
+                ("subject", m.subject_cause), ("sender", m.sender_cause),
+                ("recipients", if m.recipients.is_none() { "conflict_or_overflow" }
+                    else if m.recipient_objects == 0 { "source_absent" } else { "unclassified" }),
+                ("body", if m.body_objects == 0 { "source_absent" } else { "unclassified" }),
+            ] {
+                tx.execute("INSERT INTO message_field_evidence VALUES (?1,?2,?3)",
+                    rusqlite::params![*key as i64, field, cause]).expect("insert field evidence");
+            }
             let mut positions: BTreeMap<u32, i64> = BTreeMap::new();
             for r in m.recipients.iter().flatten() {
                 let position = positions.entry(r.kind).or_default();
