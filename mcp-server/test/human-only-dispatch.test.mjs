@@ -215,7 +215,8 @@ test('push browser guards and registry authority metadata agree', async () => {
     for (const [, actor] of SPONSORED_PARTNER_ACTORS) {
       const error = await executeRegisteredTool(forbiddenClient, actor, name, {}).catch(e => e);
       assert.equal(error.payload.error, 'human_only_verb_requires_verified_partner', name);
-      await assert.rejects(TOOLS[name].handler(forbiddenClient, actor, {}),
+      await assert.rejects(TOOLS[name].handler(forbiddenClient,
+        {...actor, slug: 'joe', web_push_session: 'a'.repeat(64)}, {}),
         e => e.payload.error === 'push_session_required', name);
     }
     await assert.rejects(TOOLS[name].handler(forbiddenClient, joe, {}),
