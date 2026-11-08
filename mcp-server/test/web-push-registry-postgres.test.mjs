@@ -28,7 +28,7 @@ test('registry lifecycle, isolation, replay and logout on disposable PostgreSQL'
   const invoke = async (name, args, actor=partner, client=c) => {
     await client.query('begin');
     try {
-      await client.query("select set_config('carr.actor_id',$1,true)", [actor.id]);
+      await client.query("select set_config('carr.acting_actor_slug',$1,true),set_config('carr.verified_human_actor_slug',$1,true)", [actor.slug]);
       const result = await tools[name].handler(client, actor, args);
       assert.equal(responseContract.validate(result).valid,true);
       await client.query('commit');
@@ -39,7 +39,11 @@ test('registry lifecycle, isolation, replay and logout on disposable PostgreSQL'
   try {
     await c.query("create schema ops; create table public.actor(id uuid primary key,slug text,active boolean,kind text)");
     await c.query("insert into actor values ($1,'joe',true,'human'),($2,'dell',true,'human')",[partner.id,other.id]);
-    await c.query("create function ops.portfolio_writer_actor_id() returns uuid language sql stable as $$select current_setting('carr.actor_id',true)::uuid$$; create function ops.scac_current_grant_contract() returns jsonb language sql as $$select '{\"secdef_execute\":[]}'::jsonb$$");
+    const schema = await readFile(new URL('../../db/schema.sql',import.meta.url),'utf8');
+    const identityFunction = schema.match(/CREATE FUNCTION ops\.portfolio_writer_actor_id\(\)[\s\S]*?\n\$\$;/);
+    assert.ok(identityFunction);
+    await c.query(identityFunction[0]);
+    await c.query("create function ops.scac_current_grant_contract() returns jsonb language sql as $$select '{\"secdef_execute\":[]}'::jsonb$$");
     for (const role of ['carr_reader','carr_writer','carr_authority','carr_jobs','dot_reader']) await c.query(`create role ${role}`);
     await c.query(await readFile(new URL('../../migrations/1161_web_push_registry.sql',import.meta.url),'utf8'));
     assert.equal((await c.query("select has_table_privilege('carr_writer','ops.web_push_subscription','SELECT') as allowed")).rows[0].allowed,false);
