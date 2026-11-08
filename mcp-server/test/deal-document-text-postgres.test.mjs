@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Validator } from '@cfworker/json-schema';
+import { publicError } from '../src/public-errors.ts';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 
@@ -55,6 +56,23 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic'),($2,'codex','automation','Synthetic')", [partner.id, robot.id]);
     await c.query("insert into v_ref_index values('deal',$1)", [deal]);
     await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,'documents/synthetic.pdf','Synthetic.pdf','application/pdf',$3,10,$4)", [doc, deal, hash, partner.id]);
+    await t.test('slug-only reader actors resolve on the stateless production path', async () => {
+      const { id: _robotId, ...readerRobot } = robot;
+      const { id: _partnerId, ...readerPartner } = partner;
+      const sources = await invoke('list-deal-document-text-sources', { limit: 1 }, readerRobot);
+      assert.equal(sources.documents[0].document_ref, doc);
+      const value = await invoke('read-deal-document-text', bound, readerPartner);
+      assert.deepEqual(validate.validate(value).errors, []);
+      assert.equal(value.reason, 'not_produced');
+    });
+    await t.test('nonexistent attachment exposes a typed public refusal', async () => {
+      try {
+        await invoke('read-deal-document-text', { ...bound, attachment_id: '00000000-0000-0000-0000-000000000000' });
+        assert.fail('nonexistent attachment must refuse');
+      } catch (error) {
+        assert.equal(publicError(error).error, 'document_not_found');
+      }
+    });
     await t.test('absent returns unavailable', async () => fixture('not-produced', await read()));
     await t.test('absent to produced and immutable replay', async () => {
       const first = await record();
