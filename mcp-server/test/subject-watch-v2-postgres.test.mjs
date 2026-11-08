@@ -239,7 +239,18 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   await t.test('pending receipt proof CLI passes, fails assertions and refuses insufficient releases',async()=>{
     const dir=mkdtempSync(join(tmpdir(),'watch-proof-'));
     const python=process.env.CARR_CI_PYTHON || 'python3';
-    const cli=args=>spawnSync(python,['ops/verify-subject-watch-proof.py',...args],{encoding:'utf8'});
+    const gitEnv={...process.env};
+    for(const key of ['GIT_SHALLOW_FILE','GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE']) delete gitEnv[key];
+    const git=args=>{
+      const result=spawnSync('git',['-C',dir,...args],{encoding:'utf8',env:gitEnv});
+      assert.equal(result.status,0,result.stderr);return result.stdout.trim();
+    };
+    git(['init','--quiet']);
+    const tree=git(['mktree']);
+    const commit=parents=>git(['-c','user.name=Synthetic','-c','user.email=synthetic@example.test','commit-tree',tree,...parents,'-m',randomUUID()]);
+    const parent=commit([]),revision=commit(['-p',parent]),unrelated=commit([]);
+    const cli=args=>spawnSync(python,['ops/verify-subject-watch-proof.py',...args],{
+      encoding:'utf8',env:{...gitEnv,GIT_DIR:join(dir,'.git'),GIT_WORK_TREE:dir}});
     const capture=name=>{
       const file=join(dir,name+'.json');
       const result=cli(['capture','--database',dsn,'--watched',deal,'--subscription',j.id,'--actor','joe','--output',file]);
@@ -256,8 +267,6 @@ test('meaningful canonical changes commit once with source writes and isolate ma
       assert.equal((await call('update-deal',meaningful)).replayed,true);
       assert.equal((await call('update-deal',immaterial)).replayed,true);
       const replay=capture('replay');
-      const revision=spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout.trim();
-      const parent=spawnSync('git',['rev-parse','HEAD^'],{encoding:'utf8'}).stdout.trim();
       const release=join(dir,'release.json');
       const setRelease=sha=>writeFileSync(release,JSON.stringify({ok:true,env:{value:'production'},git_sha:{value:sha}}));
       const args=['verify','--before',before,'--after',after,'--immaterial',quiet,'--replay',replay,'--merge-sha',parent,'--release-fixture',release];
@@ -270,7 +279,6 @@ test('meaningful canonical changes commit once with source writes and isolate ma
       for(const unknown of ['0'.repeat(40),null]) {
         setRelease(unknown);result=cli(args);assert.equal(result.status,78,result.stdout+result.stderr);
       }
-      const unrelated=spawnSync('git',['commit-tree','HEAD^{tree}'],{input:'Synthetic unrelated release\n',encoding:'utf8'}).stdout.trim();
       setRelease(unrelated);result=cli(args);assert.equal(result.status,78,result.stdout+result.stderr);
     } finally {rmSync(dir,{recursive:true,force:true});}
   });
@@ -292,6 +300,12 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   assert.equal((await changes()).changes.length,beforePartnerDue+1,'exact action replay stays quiet');
   await call('set-next-action',{...partnerDue,idempotency_key:randomUUID()});
   assert.equal((await changes()).changes.length,beforePartnerDue+1,'equivalent per-owner action replacement stays quiet');
+  const beforeSwap=(await changes()).changes.length;
+  await call('set-next-action',{ref:deal,description:'Dell swapped date',due_on:'2027-01-01',owner:'dell',idempotency_key:randomUUID()},dell);
+  receipts=(await changes()).changes;
+  assert.equal(receipts.length,beforeSwap+1,'date swap second operation adds exactly one receipt');
+  const combined=receipts.find(x=>x.changes.some(v=>v.field==='next_date' && v.after==='2027-01-01') && x.changes.some(v=>v.field==='next_actions'));
+  assert.ok(combined,'one action operation carries both next_actions and next_date');
   const peer=new pg.Client({connectionString:dsn});await peer.connect();
   try {
     const beforeConcurrent=(await changes()).changes.length;
@@ -311,6 +325,13 @@ test('meaningful canonical changes commit once with source writes and isolate ma
     await update({closed_on:'2027-06-01'});
     assert.equal((await changes()).changes.length,countPaused+1,'new meaningful transition after resume');
   } finally {await peer.end();}
+  await call('set-next-action',{ref:deal,description:'Overdue Joe action',due_on:'2020-01-01',owner:'joe',idempotency_key:randomUUID()});
+  const beforeMulti=(await changes()).changes.length;
+  await update({closed_on:'2027-08-02',outcome:'won'});
+  receipts=(await changes()).changes;
+  assert.equal(receipts.length,beforeMulti+1,'multi-field update and overdue action supersession are one operation');
+  assert.ok(receipts.some(x=>['closed_on','outcome','next_actions'].every(field=>x.changes.some(v=>v.field===field))),
+    'one update receipt carries scalar edits and the action supersession');
   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[mail]);
   assert.equal((await changes()).changes.filter(x=>x.category==='reply_arrived').length,0,'retired mailbox evidence is hidden at read time');
   await c.query("update activity set email_context=null where id=$1",[mail]);
