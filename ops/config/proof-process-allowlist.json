@@ -140,6 +140,14 @@
       "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
     }
   },
+  "tools/prove-action-card-targets.py": {
+    "sha256": "b3fafee5731987358909b492422af14a5a99704880b1556f3e12e78e36c1473d",
+    "commands": [
+      "node --input-type=module -e fixed PARSER with JSON stdin through parseActionCardResponse",
+      "git --no-replace-objects merge-base --is-ancestor expected merge observed release",
+      "explicit authorized read-only call-wrapper resolve-action-link-v2 with exact ref JSON"
+    ]
+  },
   "tools/prove-deal-document-text.py": {
     "sha256": "0972d218efd698be56a5a20f1f109214055837374bcb0cd700fd02e472a031e8",
     "commands": [
