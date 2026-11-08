@@ -5,6 +5,7 @@ import pg from 'pg';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
@@ -249,7 +250,7 @@ test('meaningful canonical changes commit once with source writes and isolate ma
     const tree=git(['mktree']);
     const commit=parents=>git(['-c','user.name=Synthetic','-c','user.email=synthetic@example.test','commit-tree',tree,...parents,'-m',randomUUID()]);
     const parent=commit([]),revision=commit(['-p',parent]),unrelated=commit([]);
-    const cli=args=>spawnSync(python,['ops/verify-subject-watch-proof.py',...args],{
+    const cli=args=>spawnSync(python,[fileURLToPath(new URL('../../ops/verify-subject-watch-proof.py',import.meta.url)),...args],{
       encoding:'utf8',env:{...gitEnv,GIT_DIR:join(dir,'.git'),GIT_WORK_TREE:dir}});
     const capture=name=>{
       const file=join(dir,name+'.json');
