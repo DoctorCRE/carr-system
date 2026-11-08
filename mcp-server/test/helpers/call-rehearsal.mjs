@@ -109,8 +109,8 @@ export async function openCallSession({ root, started, captureUrl, deviceToken, 
     CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'),
     CARR_POST_CALL_PYTHON: PYTHON, HOME: root, ...extra };
   if (distiller !== 'live') {
-    env.CARR_POST_CALL_DISTILLER_COMMAND = distiller === 'failing' ? `${PYTHON} -c "raise SystemExit(3)"`
-      : `${PYTHON} ${path.join(FIXTURES, 'rehearsal_distiller.py')}`;
+    env.CARR_POST_CALL_DISTILLER_COMMAND = extra.CARR_POST_CALL_DISTILLER_COMMAND || (distiller === 'failing' ? `${PYTHON} -c "raise SystemExit(3)"`
+      : `${PYTHON} ${path.join(FIXTURES, 'rehearsal_distiller.py')}`);
     env.CARR_POST_CALL_JEV_FIXTURE = path.join(FIXTURES, 'rehearsal_jev.py');
   }
   const logs = () => ['capture-bridge.log', 'call-mode.log'].map(f => existsSync(path.join(root, f))
@@ -150,10 +150,10 @@ with patch.object(bridge, 'datetime', Clock), patch.object(bridge, 'time', Simpl
   for (let i = 0; i < 100; i++) {
     try { await fetch(`${url}/api/state`); break; } catch { await new Promise(r => setTimeout(r, 100)); }
   }
-  async function request(route, body) {
+  async function request(route, body, signal) {
     const response = await fetch(`${url}${route}`, body === undefined
-      ? { headers: { origin: 'https://app.doctorcre.com', 'x-carr-call-mode': 'deal-room-v1' } }
-      : { method: 'POST', body: JSON.stringify(body), headers: { origin: 'https://app.doctorcre.com',
+      ? { signal, headers: { origin: 'https://app.doctorcre.com', 'x-carr-call-mode': 'deal-room-v1' } }
+      : { signal, method: 'POST', body: JSON.stringify(body), headers: { origin: 'https://app.doctorcre.com',
         'x-carr-call-mode': 'deal-room-v1', 'content-type': 'application/json' } });
     const payload = await response.json();
     if (response.status !== 200) throw new Error(`${route} -> ${response.status} ${JSON.stringify(payload)}`);
@@ -168,14 +168,23 @@ with patch.object(bridge, 'datetime', Clock), patch.object(bridge, 'time', Simpl
         segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
     },
     /** Poll the companion until `done(review)` holds. */
-    async waitFor(done, { attempts = 240 } = {}) {
+    async waitFor(done, { attempts = 240, timeoutMs = attempts * 500, onReview = () => {} } = {}) {
+      const deadline = performance.now() + timeoutMs;
       let review;
-      for (let i = 0; i < attempts; i++) {
-        review = await request(`/api/post-call?session=${encodeURIComponent(name)}`);
+      while (performance.now() < deadline) {
+        const signal = AbortSignal.timeout(Math.max(1, Math.ceil(deadline - performance.now())));
+        try {
+          review = await request(`/api/post-call?session=${encodeURIComponent(name)}`, undefined, signal);
+        } catch (error) {
+          if (!signal.aborted) throw error;
+          break;
+        }
+        await onReview(review);
+        if (performance.now() >= deadline) break;
         if (done(review)) return review;
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, Math.min(500, Math.max(0, deadline - performance.now()))));
       }
-      throw new Error(`post-call never settled: ${JSON.stringify(review?.status)}\n${logs()}`);
+      throw new Error(`post-call ${name} did not settle within ${timeoutMs}ms; last status: ${JSON.stringify(review?.status)}\n${logs()}`);
     },
     stop() { companion.kill(); },
   };

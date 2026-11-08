@@ -785,7 +785,7 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
     const replies = { "prospect-research": research, "catch-me-up": history };
     const wrapper = join(dir, "wrapper");
     const python = execFileSync("which", ["python3"], { encoding: "utf8" }).trim();
-    const script = `#!${python}\nimport json, sys, time, subprocess\nfrom pathlib import Path\nmode = Path(__file__).with_name('mode').read_text()\nif mode in ('descendant', 'late-descendant'):\n p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n Path(__file__).with_name('child.pid').write_text(str(p.pid))\n if mode == 'late-descendant': print('{}', flush=True)\n time.sleep(60)\nif mode == 'timeout': time.sleep(2)\nif mode == 'unavailable': sys.exit(1)\nassert sys.argv[1] == 'call'\nargs = json.loads(sys.argv[3])\nassert args.get('subject', args.get('ref')) == 'P-0301'\nprint(json.dumps(json.loads(Path(__file__).with_name('replies.json').read_text())[sys.argv[2]]))\n`;
+    const script = `#!${python}\nimport json, sys, time, subprocess\nfrom pathlib import Path\nmode = Path(__file__).with_name('mode').read_text()\nif mode in ('descendant', 'late-descendant', 'late-launch'):\n p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n Path(__file__).with_name('child.pid').write_text(str(p.pid))\n print('ready', flush=True)\n if mode == 'late-descendant': print('{}', flush=True)\n time.sleep(60)\nif mode == 'timeout': time.sleep(2)\nif mode == 'unavailable': sys.exit(1)\nassert sys.argv[1] == 'call'\nargs = json.loads(sys.argv[3])\nassert args.get('subject', args.get('ref')) == 'P-0301'\nprint(json.dumps(json.loads(Path(__file__).with_name('replies.json').read_text())[sys.argv[2]]))\n`;
     await writeFile(wrapper, script, { mode: 0o700 });
     const receipt = join(dir, "receipt.json");
     await writeFile(receipt, JSON.stringify({ schema: "identity-domain-recorded-addresses-receipt.v1",
@@ -824,32 +824,15 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
       assert.ok(agents.length > 0);
       assert.ok(agents.every(agent => agent === "doctorcre-production-smoke/1 (+ops/doctorcre-production-smoke.py)"), JSON.stringify(agents));
     });
-    const lateLaunch = join(dir, "late-launch.py");
-    await writeFile(lateLaunch, `import importlib.util, sys, time
-from pathlib import Path
-spec = importlib.util.spec_from_file_location('proof', ${JSON.stringify(join(root, "tools/prove-identity-domain-recorded-addresses.py"))})
-proof = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(proof)
-launch = proof.subprocess.Popen
-def delayed(command, **kwargs):
- child = launch(command, **kwargs)
- if Path(command[0]).resolve() == Path(${JSON.stringify(wrapper)}).resolve():
-  time.sleep(0.7)
-  Path(__file__).with_name('late.marker').write_text('acquired')
- return child
-proof.subprocess.Popen = delayed
-sys.exit(proof.main())
-`);
     for (const mode of ["descendant", "late-descendant", "late-launch"]) {
       await t.test(`deadline cleans up owned ${mode} process tree`, async () => {
-        await writeFile(join(dir, "mode"), mode === "late-launch" ? "descendant" : mode);
+        await writeFile(join(dir, "mode"), mode);
         await rm(join(dir, "child.pid"), { force: true });
         let pid;
         try {
-          const started = performance.now();
-          const timed = await run([...flags.slice(0, -1), "0.5"], mode === "late-launch" ? lateLaunch : undefined);
+          const timed = await run([...flags.slice(0, -1), "30"], join(root, "mcp-server/test/helpers/identity-deadline-fixture.py"));
           assert.equal(timed.code, 78, timed.stdout + timed.stderr);
-          assert.ok(performance.now() - started < 2000, "proof exceeded bounded acquisition cleanup");
+          assert.equal(JSON.parse(timed.stdout).reason, "total_deadline");
           if (mode === "late-launch") assert.equal(await readFile(join(dir, "late.marker"), "utf8"), "acquired");
           pid = Number(await readFile(join(dir, "child.pid"), "utf8"));
           let alive = true;
@@ -874,5 +857,55 @@ sys.exit(proof.main())
   } finally {
     await new Promise(resolveClose => server.close(resolveClose));
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("descendant proof assertions use synchronization instead of elapsed wall time", async () => {
+  const { parse } = await import("@babel/parser");
+  const { readFile, readdir } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  function violations(source) {
+    const tree = parse(source, { sourceType: "module" });
+    const nodes = [];
+    function visit(node) {
+      if (!node || typeof node !== "object") return;
+      if (node.type) nodes.push(node);
+      for (const [key, value] of Object.entries(node)) {
+        if (["loc", "start", "end"].includes(key)) continue;
+        if (Array.isArray(value)) value.forEach(visit);
+        else visit(value);
+      }
+    }
+    visit(tree);
+    const tainted = new Set();
+    const clock = node => /^(?:performance\.now|Date\.now|process\.hrtime)(?:\(|\.)/.test(source.slice(node.start, node.end));
+    function usesClock(node) {
+      if (!node || typeof node !== "object") return false;
+      if (clock(node) || (node.type === "Identifier" && tainted.has(node.name))) return true;
+      return Object.entries(node).some(([key, value]) => !["loc", "start", "end"].includes(key)
+        && (Array.isArray(value) ? value.some(usesClock) : usesClock(value)));
+    }
+    let changed;
+    do {
+      changed = false;
+      for (const node of nodes) {
+        const target = node.type === "VariableDeclarator" ? node.id : node.type === "AssignmentExpression" ? node.left : null;
+        const value = node.type === "VariableDeclarator" ? node.init : node.right;
+        if (target?.type === "Identifier" && !tainted.has(target.name) && usesClock(value)) {
+          tainted.add(target.name); changed = true;
+        }
+      }
+    } while (changed);
+    return nodes.filter(node => node.type === "CallExpression"
+      && /^assert(?:\.|\()/.test(source.slice(node.callee.start, node.callee.end) + "(")
+      && node.arguments.some(usesClock)).map(node => node.loc.start.line);
+  }
+  const samples = JSON.parse(await readFile(join(import.meta.dirname, "helpers/identity-deadline-clock-cases.json"), "utf8"));
+  for (const sample of samples) assert.deepEqual(violations(sample.source), sample.lines);
+  for (const name of await readdir(import.meta.dirname)) {
+    if (!name.endsWith(".test.mjs")) continue;
+    const source = await readFile(join(import.meta.dirname, name), "utf8");
+    if (!/proof/i.test(source) || !/descendant/i.test(source)) continue;
+    assert.deepEqual(violations(source), [], `${name} asserts elapsed wall time in a descendant proof`);
   }
 });
