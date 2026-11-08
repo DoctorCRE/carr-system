@@ -1,3 +1,4 @@
+// Persist private installation subscriptions with authenticated ownership and logout fencing.
 import type { Actor, Db } from './verb-contract.ts';
 import type { ToolError as ErrorClass } from './tool-error.ts';
 
