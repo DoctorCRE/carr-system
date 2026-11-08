@@ -574,6 +574,22 @@ test('quiet lease clocks and pending delivery', async t => {
   assert.equal((await c.query('select state from ops.subject_watch_v2_subscription where id=$1',[target])).rows[0].state,'paused');
   await c.query('update party set deleted_at=null where id=$1',[party]);
  });
+ await t.test('reply delivery validates every evidence reference without a positional assumption',async()=>{
+  await c.query('begin');
+  try {
+   const dell=(await c.query("select id from actor where slug='dell'")).rows[0].id;
+   const target=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,'{}','{\"change_kinds\":[\"reply_arrived\"]}','watching') returning id",[dell,deal])).rows[0].id;
+   const activity=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic multi-evidence reply','{\"mailbox_owner\":\"dell\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,dell])).rows[0].id;
+   const source=(await c.query('select source_event_id from ops.subject_watch_change where watch_generation_id=$1 limit 1',[watch])).rows[0].source_event_id;
+   const seed=async(key)=>(await c.query("insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,source_event_id,source_revision,policy_version,category,changes,evidence_refs,occurred_at,eligible_at) values($1,$2,'deal',$3,$4,$5,1,1,'reply_arrived','[]',$6,now(),now()) returning id",[target,dell,deal,key,source,JSON.stringify([{event_id:source,activity_id:null},{event_id:source,activity_id:activity}])])).rows[0].id;
+   const first=await seed('fixture:multi-evidence');await sweep('2032-01-01T12:00:00Z');
+   assert.equal((await c.query('select disposition from ops.subject_watch_change where id=$1',[first])).rows[0].disposition,'emitted');
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[activity]);
+   const revoked=await seed('fixture:revoked-evidence');await sweep('2032-01-01T12:05:00Z');
+   assert.equal((await c.query('select disposition from ops.subject_watch_change where id=$1',[revoked])).rows[0].disposition,'suppressed');
+   assert.equal(Number((await c.query('select count(distinct notification_id) n from ops.subject_watch_change where watch_generation_id=$1',[target])).rows[0].n),1);
+  } finally {await c.query('rollback');}
+ });
  await t.test('1x and 10x synthetic pending loads retain every receipt',async()=>{
   for(const size of [50,500]) {
    await c.query('begin');

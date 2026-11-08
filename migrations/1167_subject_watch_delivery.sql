@@ -141,9 +141,12 @@ begin
        where c.watch_generation_id=w.id and c.disposition='pending' and (
          c.category='lease_threshold_crossed' and (not pol->'change_kinds' ? 'lease_threshold_crossed'
            or not keys ? substring(c.semantic_key from 7))
-         or c.category='reply_arrived' and (not pol->'change_kinds' ? 'reply_arrived' or not exists(
-           select 1 from public.activity a where a.id=(c.evidence_refs->0->>'activity_id')::uuid
-             and a.email_source->>'mailbox_owner'=slug_value and coalesce(a.email_context#>>'{lifecycle,state}','live')='live'))
+         or c.category='reply_arrived' and (not pol->'change_kinds' ? 'reply_arrived'
+           or not exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value) where refs.value->>'activity_id' is not null)
+           or exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value)
+             where refs.value->>'activity_id' is not null and not exists(
+               select 1 from public.activity a where a.id=(refs.value->>'activity_id')::uuid
+                 and a.email_source->>'mailbox_owner'=slug_value and coalesce(a.email_context#>>'{lifecycle,state}','live')='live')))
          or coalesce((pol->>'include_self_changes')::boolean,true)=false and c.category<>'lease_threshold_crossed' and exists(
            select 1 from public.event e where e.id=c.source_event_id and (e.actor_id=w.actor_id or e.sponsoring_human_slug=slug_value)));
        begin
