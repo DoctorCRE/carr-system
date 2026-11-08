@@ -5,7 +5,6 @@ config:
     useMaxWidth: false
 ---
 stateDiagram-v2
-  %% labels in full
   classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
   classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
   classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
@@ -16,24 +15,18 @@ stateDiagram-v2
     state "Works" as legendWorks
   }
   class legendWorks works
-  state "Read | Inbox |<br/>NeedsAttention" as s0
-  state "Read | Settled |<br/>NeedsAttention" as s1
-  state "Read | Snoozed |<br/>NeedsAttention" as s2
-  state "Unread | Inbox |<br/>NeedsAttention" as s3
-  state "Unread | Settled |<br/>NeedsAttention" as s4
-  state "Unread | Snoozed |<br/>NeedsAttention" as s5
+  state "Read alert | Inbox card |<br/>Work still open" as s0
+  state "Read alert | Settled card<br/>| Work still open" as s1
+  state "Read alert | Snoozed card<br/>| Work still open" as s2
+  state "Unread alert | Inbox card<br/>| Work still open" as s3
+  state "Unread alert | Settled<br/>card | Work still open" as s4
+  state "Unread alert | Snoozed<br/>card | Work still open" as s5
   [*] --> s3
-  s3 --> s0 : Acknowledge
-  s3 --> s4 : Settle
-  s3 --> s5 : Snooze
-  s0 --> s1 : Settle
-  s0 --> s2 : Snooze
-  s4 --> s1 : Acknowledge
-  s4 --> s3 : Unsettle
-  s5 --> s2 : Acknowledge
-  s5 --> s3 : Unsettle
-  s1 --> s0 : Unsettle
-  s2 --> s0 : Unsettle
+  s3 --> s0 : Read the alert
+  s3 --> s4 : Settle the card
+  s3 --> s5 : Snooze the card
+  s0 --> s1 : Settle the card
+  s0 --> s2 : Snooze the card
   class s0 works
   class s1 works
   class s2 works
