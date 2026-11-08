@@ -11,6 +11,36 @@ import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 
 const dsn = await snapshotDatabase('subject-watches-');
+test('watch Home projection preserves email lifecycle visibility', async t => {
+  const c=new pg.Client({connectionString:dsn}); await c.connect(); t.after(()=>c.end());
+  const joe={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
+  const read=async version=>{
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    return executeRegisteredTool(c,joe,`read-home-inbox-v${version}`,{});
+  };
+  for(const state of ['deleted','recalled','superseded']) await t.test(state,async()=>{
+    await c.query('begin');
+    try {
+      const mail=(await c.query("insert into activity(kind,occurred_at,actor_id,summary,email_source) values('email_in',now(),$1,'Synthetic lifecycle source','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[joe.id])).rows[0].id;
+      const notice=(await c.query(`insert into ops.notification(subject_type,subject_ref,event_ref,event_source,recipient_actor,reason,severity,deep_link,dedupe_key)
+        values('email',$1,$2,'event',$3,'Synthetic lifecycle notice','action_required','/',$4) returning id`,[mail,randomUUID(),joe.id,randomUUID()])).rows[0].id;
+      const draft=(await c.query(`insert into email_proposal(kind,activity_id,owner,draft_subject,draft_body,status,evidence_quote,confidence,created_by)
+        values('reply_draft',$1,'joe','Synthetic lifecycle draft','Synthetic body','pending','Synthetic quote',1,$2) returning id`,[mail,joe.id])).rows[0].id;
+      for(const version of [2,3,4,5]) {
+        const items=(await read(version)).items;
+        assert.ok(items.some(i=>i.source_id===draft),`v${version} includes live draft`);
+        assert.ok(items.some(i=>i.merged_source_ids.includes(notice)),`v${version} includes live email notification`);
+      }
+      await c.query("update activity set email_context=jsonb_build_object('lifecycle',jsonb_build_object('state',$2::text)) where id=$1",[mail,state]);
+      for(const version of [2,3,4,5]) {
+        const items=(await read(version)).items;
+        assert.ok(!items.some(i=>i.source_id===draft),`v${version} excludes ${state} draft`);
+        assert.ok(!items.some(i=>i.merged_source_ids.includes(notice)),`v${version} excludes ${state} email notification`);
+      }
+    } finally { await c.query('rollback'); }
+  });
+});
+
 test('registered watch transitions preserve isolation and initial baseline', async t => {
   const c = new pg.Client({ connectionString: dsn });
   await c.connect(); t.after(() => c.end());
