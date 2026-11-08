@@ -1,3 +1,4 @@
+// Resolve exact partner-owned cards without scanning Home or changing source records.
 import { parseActionLinkRef, buildActionLink } from './action-links.js';
 import { authorizationClassForActor } from './identity.js';
 import { Validator, type Schema } from '@cfworker/json-schema';
