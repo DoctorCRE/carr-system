@@ -56,11 +56,14 @@ test('v2 registered lifecycle, policy, replay, generations and isolation', async
   const replacement={change_kinds:['listing_status_changed'],include_self_changes:false};
   const changed=await mutate('replace-subject-watch-policy-v2',paused.watch,{policy:replacement});
   assert.deepEqual(changed.watch.policy,replacement,'Replace paused policy');
+  assert.equal(changed.watch.state,'paused');
   const resumed=await mutate('resume-subject-watch-v2',changed.watch);
   assert.equal(resumed.watch.state,'watching','Resume');
   assert.deepEqual(resumed.watch.baseline,first.watch.baseline);
   const replaced=await mutate('replace-subject-watch-policy-v2',resumed.watch,{policy});
   assert.equal(replaced.watch.lifecycle_version,5,'Replace policy');
+  assert.equal(replaced.watch.state,'watching');
+  assert.deepEqual(replaced.watch.policy,{include_self_changes:true,...policy});
   await assert.rejects(mutate('unwatch-subject-v2',first.watch),e=>e.payload?.error==='watch_stale_version');
   const key=randomUUID();
   const removeArgs={...target,...expected(replaced.watch),idempotency_key:key};
@@ -85,22 +88,51 @@ test('v2 registered lifecycle, policy, replay, generations and isolation', async
     ['Remove rewatched','unwatch-subject-v2',{}],
     ['Final rewatch','watch-subject-v2',{policy}],
   ]) await t.test(transition,async()=>{
+    const previous=current;
     const response=await command(verb,{...(verb==='watch-subject-v2'?{}:expected(current)),...args});
     current=response.watch;parseSubjectWatchV2(response);
+    const state=verb==='pause-subject-watch-v2'?'paused':verb==='unwatch-subject-v2'?'removed':verb==='replace-subject-watch-policy-v2'?previous.state:'watching';
+    assert.equal(current.state,state,transition);
+    if(verb==='watch-subject-v2') {
+      assert.notEqual(current.id,previous.id);
+      assert.equal(current.lifecycle_version,1);
+      assert.equal(current.baseline.version,2);
+      assert.deepEqual(current.policy,{include_self_changes:true,...args.policy});
+    } else {
+      assert.equal(current.id,previous.id);
+      assert.equal(current.lifecycle_version,previous.lifecycle_version+1);
+      assert.deepEqual(current.baseline,previous.baseline);
+      assert.deepEqual(current.policy,verb==='replace-subject-watch-policy-v2'?{include_self_changes:true,...args.policy}:previous.policy);
+    }
   });
   rewatched.watch=current;
-  await mutate('unwatch-subject-v2',rewatched.watch);
   const other=new pg.Client({connectionString:dsn});await other.connect();
+  let settled;
   try {
-    const results=await Promise.allSettled([
-      call('unwatch-subject-v2',{...removeArgs,idempotency_key:randomUUID()},joe,other),
-      command('watch-subject-v2',{policy}),
-    ]);
-    assert.equal(results[0].status,'rejected');
-    assert.equal(results[0].reason.payload.error,'watch_stale_version');
-    assert.notEqual(results[1].value.watch.id,rewatched.watch.id);
-    rewatched.watch=results[1].value.watch;
-  } finally {await other.end();}
+    const pid=(await other.query('select pg_backend_pid() as pid')).rows[0].pid;
+    await c.query('begin');
+    await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true),set_config('carr.organization_tenant_id','carr-internal',true)");
+    await c.query('set local role carr_writer');
+    const old={...target,...expected(rewatched.watch),idempotency_key:randomUUID()};
+    await executeRegisteredTool(c,joe,'unwatch-subject-v2',old);
+    settled=call('unwatch-subject-v2',{...old,idempotency_key:randomUUID()},joe,other).then(value=>({value}),error=>({error}));
+    const fresh=await executeRegisteredTool(c,joe,'watch-subject-v2',{...target,policy,idempotency_key:randomUUID()});
+    let blocked=false;
+    const deadline=Date.now()+5000;
+    while(Date.now()<deadline && !blocked) {
+      blocked=(await c.query("select exists(select 1 from pg_locks where pid=$1 and locktype='advisory' and not granted) as blocked",[pid])).rows[0].blocked;
+      if(!blocked)await new Promise(resolve=>setTimeout(resolve,10));
+    }
+    assert.equal(blocked,true,'stale removal waits behind replacement transaction');
+    await c.query('commit');
+    assert.equal((await settled).error?.payload?.error,'watch_stale_version');
+    assert.notEqual(fresh.watch.id,rewatched.watch.id);
+    rewatched.watch=fresh.watch;
+  } finally {
+    await c.query('rollback');
+    await settled;
+    await other.end();
+  }
   assert.equal((await call('unwatch-subject-v2',removeArgs)).watch.id,first.watch.id,'Replay cannot remove rewatch');
   assert.equal((await read()).watch.id,rewatched.watch.id);
   await assert.rejects(call('pause-subject-watch-v2',{...target,...expected(rewatched.watch),actor_id:dell.id,idempotency_key:randomUUID()}));
