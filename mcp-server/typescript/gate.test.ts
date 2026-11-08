@@ -115,12 +115,62 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     assert.notEqual(changed.status, 0);
     assert.match(changed.stdout + changed.stderr, /strict project/);
     rmSync(legacyFile);
-    const config: unknown = JSON.parse(readFileSync(join(pkg, "tsconfig.worker.json"), "utf8"));
-    assert.ok(typeof config === "object" && config !== null && "compilerOptions" in config);
-    assert.ok(typeof config.compilerOptions === "object" && config.compilerOptions !== null);
-    Object.assign(config.compilerOptions, { strict: false });
-    writeFileSync(join(pkg, "tsconfig.worker.json"), JSON.stringify(config));
-    assert.notEqual(run().status, 0, "strict flags cannot be loosened");
+    const failures: string[] = [];
+    for (const path of ["tsconfig.base.json", "tsconfig.node.json", "tsconfig.worker.json"]) {
+      const configPath = join(pkg, path);
+      const original = readFileSync(configPath, "utf8");
+      const overrides: [string, boolean][] = [
+        ["strict", false],
+        ["noImplicitAny", false],
+        ["strictNullChecks", false],
+        ["strictFunctionTypes", false],
+        ["strictBindCallApply", false],
+        ["strictPropertyInitialization", false],
+        ["noImplicitThis", false],
+        ["alwaysStrict", false],
+        ["useUnknownInCatchVariables", false],
+        ["strictBuiltinIteratorReturn", false],
+        ["noUncheckedIndexedAccess", false],
+        ["noUnusedLocals", false],
+        ["noUnusedParameters", false],
+        ["exactOptionalPropertyTypes", false],
+        ["erasableSyntaxOnly", false],
+        ["verbatimModuleSyntax", false],
+        ["noCheck", true],
+        ["skipLibCheck", true],
+        ["skipDefaultLibCheck", true],
+        ["allowUnreachableCode", true],
+        ["allowUnusedLabels", true],
+      ];
+      for (const [flag, value] of overrides) {
+        const config = object(configPath);
+        config.compilerOptions ??= {};
+        assert.ok(typeof config.compilerOptions === "object" && config.compilerOptions !== null);
+        config.compilerOptions = { ...config.compilerOptions, [flag]: value };
+        writeFileSync(configPath, JSON.stringify(config));
+        const result = run();
+        writeFileSync(configPath, original);
+        if (result.status === 0) failures.push(`${path} accepted ${flag}=${value}`);
+        else assert.match(result.stdout + result.stderr, new RegExp(flag), `${path} ${flag}`);
+      }
+      if (path === "tsconfig.base.json") continue;
+      const intermediate = join(pkg, "tsconfig.intermediate.json");
+      const config = object(configPath);
+      config.extends = "./tsconfig.intermediate.json";
+      writeFileSync(configPath, JSON.stringify(config));
+      writeFileSync(intermediate, JSON.stringify({ extends: "./tsconfig.base.json" }));
+      const inheritedClean = run();
+      if (inheritedClean.status !== 0) failures.push(`${path} refused clean intermediate extends`);
+      writeFileSync(
+        intermediate,
+        JSON.stringify({ extends: "./tsconfig.base.json", compilerOptions: { noImplicitAny: false } }),
+      );
+      const inheritedOverride = run();
+      if (inheritedOverride.status === 0) failures.push(`${path} accepted inherited noImplicitAny=false`);
+      writeFileSync(configPath, original);
+      rmSync(intermediate);
+    }
+    assert.deepEqual(failures, [], failures.join("\n"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
