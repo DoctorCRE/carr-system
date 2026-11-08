@@ -478,6 +478,7 @@ async function sessionFor(request, env, dependencies) {
     const seconds = Math.max(1, Math.min(SESSION_IDLE_TTL, Math.floor((session.expiresAt - now) / 1000)));
     await env.OAUTH_KV.put(key, JSON.stringify(session), { expirationTtl: seconds });
   }
+  Object.defineProperty(actor, "web_push_session", { value: await sha256(key), configurable: true });
   return { actor, key, session, csrfToken: session.csrfToken, reauthAt: Number(session.reauthAt) || null, refreshCookie };
 }
 
@@ -1086,6 +1087,7 @@ export function createDealroomHandler(overrides = {}) {
     // The business read ships with its own production adapter so the Clients
     // and Vendors views work wherever this handler is mounted; a test replaces
     // the whole reader rather than reaching past it to a database.
+    invalidatePushSession: (env, actor) => callTool(env, actor, "invalidate-web-push-session-v1", {}, "full"),
     businessReader: createWorkspaceBusinessReader(),
     now: () => Date.now(),
     ...overrides,
@@ -1153,6 +1155,8 @@ async function handleRequest(request, env, ctx, dependencies) {
             !equalStrings(request.headers.get("x-carr-csrf"), signOutSession.csrfToken)) {
           return json({ error: "forbidden", reason: "csrf_mismatch" }, 403);
         }
+        try { await dependencies.invalidatePushSession(env, signOutSession.actor); }
+        catch { return json({ error: "push_revocation_unavailable" }, 503); }
         return attachRefresh(await signOut(request, env, origin), signOutSession.refreshCookie);
       }
 
