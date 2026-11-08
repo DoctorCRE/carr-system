@@ -19,14 +19,6 @@ const watch = {
   type: 'object', additionalProperties: false,
   required: ['id','actor_id','subject_type','subject_id','state','policy','lifecycle_version','baseline','subscribed_at'],
   properties: {
-    health: { type: ['object','null'], additionalProperties: false,
-      required: ['last_success_at','pending_count','oldest_pending_at','status'],
-      properties: {
-        last_success_at: { type: ['string','null'], format: 'date-time' },
-        oldest_pending_at: { type: ['string','null'], format: 'date-time' },
-        pending_count: { type: 'integer', minimum: 0, maximum: 1001 },
-        status: { enum: ['healthy','delayed','needs_repair'] },
-      } },
     id: uuid, actor_id: uuid, subject_id: uuid,
     subject_type: { enum: ['deal','lease','listing'] },
     state: { enum: ['watching','paused','removed'] },
@@ -43,6 +35,14 @@ export const subjectWatchV2ResponseSchema = {
   type: 'object', required: ['ok','schema_version'],
   properties: {
     ok: { const: true }, schema_version: { const: 'subject-watch.v2' },
+    health: { type: ['object','null'], additionalProperties: false,
+      required: ['last_success_at','pending_count','oldest_pending_at','status'],
+      properties: {
+        last_success_at: { type: ['string','null'], format: 'date-time' },
+        oldest_pending_at: { type: ['string','null'], format: 'date-time' },
+        pending_count: { type: 'integer', minimum: 0, maximum: 1001 },
+        status: { enum: ['healthy','delayed','needs_repair'] },
+      } },
     watch: { anyOf: [watch,{type:'null'}] },
     watches: { type: 'array', maxItems: 100, items: watch },
     rows_changed: { type: 'integer', minimum: 0, maximum: 1 },

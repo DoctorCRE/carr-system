@@ -93,7 +93,8 @@ begin
  if p_now is null or p_limit is null or p_limit not between 1 and 50 then raise exception 'watch_batch_limit'; end if;
  insert into public.event(occurred_at,actor_id,verb,subject_type,subject_id,cause,new_value)
  select p_now,id,'subject-watch-scheduled-sweep','system',gen_random_uuid(),'automation_job','{}'
- from public.actor where slug='joe' returning id into event_id;
+ from public.actor where slug='system' and active returning id into event_id;
+ if event_id is null then raise exception 'watch_scheduler_actor_unavailable'; end if;
  for w in
    select s.* from (
      select id,actor_id,subject_type,subject_id,1 policy_version,'watching' state,
@@ -282,7 +283,7 @@ begin
   end if;
   select * into w from ops.subject_watch_v2_subscription where actor_id=a and subject_type=k and subject_id=sid;
   if p_command='read' then
-    return jsonb_build_object('ok',true,'schema_version','subject-watch.v2','watch',case when w.state<>'removed' then to_jsonb(w)||jsonb_build_object('health',ops.subject_watch_health(w.id)) end);
+    return jsonb_build_object('ok',true,'schema_version','subject-watch.v2','watch',case when w.state<>'removed' then to_jsonb(w) end,'health',ops.subject_watch_health(w.id));
   end if;
   if p_command in ('watch','replace-policy') then
     pol:=p_args->'policy';
@@ -343,5 +344,94 @@ begin
       where actor_id=a and subject_type=k and subject_id=sid returning * into w;
     changed:=1;
   end if;
-  return jsonb_build_object('ok',true,'schema_version','subject-watch.v2','watch',to_jsonb(w)||jsonb_build_object('health',ops.subject_watch_health(w.id)),'rows_changed',changed);
+  return jsonb_build_object('ok',true,'schema_version','subject-watch.v2','watch',to_jsonb(w),'health',ops.subject_watch_health(w.id),'rows_changed',changed);
+end $$;
+
+CREATE OR REPLACE FUNCTION ops.mint_notification(p_event_source text, p_event_ref uuid, p_subject_type text, p_subject_ref text, p_reason text, p_severity text, p_deep_link text, p_dedupe_key text, p_recipient_slug text, p_bypass_quiet_hours boolean DEFAULT false, p_hold_for_morning boolean DEFAULT false) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    AS $$
+declare v_recipient uuid; v_id uuid; v_prior uuid; v_quiet boolean; v_source_exists boolean;
+        v_release timestamptz; v_held boolean := false;
+begin
+  if not (pg_has_role(current_user, 'carr_writer', 'member')
+       or pg_has_role(current_user, 'carr_authority', 'member')) then
+    raise exception using errcode = '42501',
+      message = 'minting a notification requires the writer or authority capability';
+  end if;
+  if p_bypass_quiet_hours and p_hold_for_morning then
+    raise exception 'a notification cannot both bypass quiet hours and be held for morning'
+      using errcode = '22023';
+  end if;
+
+  select (case p_event_source
+            when 'event' then exists (select 1 from public.event where id = p_event_ref)
+            when 'signal_event' then exists (select 1 from public.signal_event where id = p_event_ref)
+            else false end)
+    into v_source_exists;
+  if not v_source_exists then
+    raise exception 'notification_requires_an_existing_event'
+      using errcode = '23503',
+      detail = format('no %s row named %s', p_event_source, p_event_ref);
+  end if;
+
+  select id into v_recipient from public.actor
+   where slug = p_recipient_slug and kind = 'human' and active = true;
+  if v_recipient is null then
+    return jsonb_build_object('ok', true, 'minted', false,
+      'reason_id', 'no_sponsoring_partner');
+  end if;
+
+  insert into ops.notification(subject_type, subject_ref, event_ref, event_source,
+    recipient_actor, reason, severity, deep_link, dedupe_key, correlation_id)
+  values (p_subject_type, p_subject_ref, p_event_ref, p_event_source,
+    v_recipient, p_reason, p_severity, p_deep_link, p_dedupe_key,
+    nullif(current_setting('carr.correlation_id', true), ''))
+  on conflict (recipient_actor, dedupe_key) do nothing
+  returning id into v_id;
+
+  if v_id is null then
+    select id into v_prior from ops.notification
+     where recipient_actor = v_recipient and dedupe_key = p_dedupe_key;
+    return jsonb_build_object('ok', true, 'minted', false, 'deduplicated', true,
+      'notification_id', v_prior, 'recipient_actor', v_recipient);
+  end if;
+
+  -- V5-A05 morning hold: computed once, applied to every channel alike, so
+  -- the in-app row and the device row agree on when the hold ends.
+  if p_hold_for_morning then
+    v_release := ops.notification_morning_release_at(v_recipient);
+    v_held := v_release > now();
+  end if;
+
+  if v_held then
+    insert into ops.notification_delivery(notification_id, channel, state, settled_at, held_until)
+    values (v_id, 'in_app', 'held_until_morning', null, v_release);
+  else
+    insert into ops.notification_delivery(notification_id, channel, state)
+    values (v_id, 'in_app', 'pending');
+  end if;
+
+  if p_dedupe_key not like 'subject-watch:%' and exists (select 1 from ops.notification_preference where actor = v_recipient and device_opt_in) then
+    if v_held then
+      insert into ops.notification_delivery(notification_id, channel, state, settled_at, held_until)
+      values (v_id, 'device', 'held_until_morning', null, v_release);
+    else
+      -- p_bypass_quiet_hours, true only for V5-A05's server-verified urgent
+      -- (security_incident/data_loss/outward_harm) alerts, short-circuits the
+      -- SAME quiet-hours computation rather than replacing it with a second
+      -- one. record-signal never sets either new argument, so its calls are
+      -- byte-identical to 0521's behaviour.
+      v_quiet := (not p_bypass_quiet_hours) and ops.notification_quiet_now(v_recipient);
+      insert into ops.notification_delivery(notification_id, channel, state, settled_at)
+      values (v_id, 'device',
+              case when v_quiet then 'suppressed_quiet_hours' else 'pending' end,
+              case when v_quiet then now() else null end);
+    end if;
+  end if;
+
+  return jsonb_build_object('ok', true, 'minted', true, 'notification_id', v_id,
+    'recipient_actor', v_recipient, 'severity', p_severity, 'dedupe_key', p_dedupe_key,
+    'bypassed_quiet_hours', p_bypass_quiet_hours,
+    'held_for_morning', v_held, 'held_until', case when v_held then v_release end);
 end $$;
