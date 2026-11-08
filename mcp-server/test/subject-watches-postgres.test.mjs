@@ -157,10 +157,18 @@ test('watch statechart on canonical event ingress', async t => {
   try {
     const original=readFileSync(new URL('../../migrations/1156_subject_watch_events.sql',import.meta.url),'utf8');
     const consumer=original.slice(original.indexOf('create function ops.consume_subject_watch_event'),original.indexOf('create function ops.subject_watch_on_event'));
+    const schema=readFileSync(new URL('../../db/schema.sql',import.meta.url),'utf8');
+    const minterStart=schema.indexOf('CREATE FUNCTION ops.mint_notification(');
+    const originalMinter=schema.slice(minterStart,schema.indexOf('end $$;',minterStart)+8);
+    await c.query(originalMinter.replace('CREATE FUNCTION','CREATE OR REPLACE FUNCTION'));
     await c.query(consumer.replace('create function','create or replace function'));
     await event();assert.equal(await count(),1,'original consumer reproduced a version-only notification');
   } finally {await c.query('rollback');}
   const e=await event();assert.equal(await count(),0);
+  const legacy=(await c.query("select ops.mint_notification('event',$1,'deal',$2,'Legacy direct Watch','action_required','/deals?deal='||$2,'subject-watch:legacy-direct','joe',false,false) result",[e,deal])).rows[0].result;
+  assert.equal(legacy.minted,false,'legacy direct delivery cannot bypass scheduled receipt emission');
+  assert.equal(legacy.reason_id,'watch_scheduled_delivery_required');
+
   await c.query('insert into ops.notification_read(notification_id,recipient_actor) select id,$1 from ops.notification where recipient_actor=$1 and dedupe_key like \'subject-watch:%\' on conflict do nothing',[joe]);
   await event();assert.equal(await count(),0,'duplicate source version');
   for(const link of ['https://example.test','//example.test','/deals?deal=bad','/clients?record=bad','/deals?deal='+deal+'&redirect=evil']){

@@ -196,11 +196,14 @@ revoke all on function ops.subject_watch_clock_keys(text,uuid,jsonb,timestamptz)
  from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 grant execute on function ops.sweep_subject_watches(timestamptz,integer) to carr_writer;
 
-create or replace function ops.consume_subject_watch_event(p_event uuid) returns void
-language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+-- Capture ingress belongs to slice 3; keep its current transaction boundary.
+-- Retire only the legacy event-driven clock now owned by the scheduled sweep.
+create or replace function ops.scan_subject_watch_leases(p_event uuid,p_limit integer default 50)
+returns integer language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 begin
- insert into ops.subject_watch_event_receipt(event_id) values(p_event) on conflict do nothing;
- if found then perform ops.capture_subject_watch_changes(p_event); end if;
+ if p_limit is null or p_limit<1 or p_limit>50 then raise exception 'watch_batch_limit'; end if;
+ if not exists(select 1 from public.event where id=p_event) then raise exception 'watch_event_required'; end if;
+ return 0;
 end $$;
 create or replace function ops.set_subject_watch(p_kind text,p_id uuid,p_watching boolean) returns jsonb
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
@@ -373,6 +376,15 @@ begin
     raise exception 'notification_requires_an_existing_event'
       using errcode = '23503',
       detail = format('no %s row named %s', p_event_source, p_event_ref);
+  end if;
+
+  -- Legacy source consumers may still call the minter while capture evolves.
+  -- Only the scheduled receipt consumer owns WATCH emission.
+  if p_dedupe_key like 'subject-watch:%' and not (
+    p_event_source='event' and exists(select 1 from public.event
+      where id=p_event_ref and verb='subject-watch-scheduled-sweep')) then
+    return jsonb_build_object('ok',true,'minted',false,
+      'reason_id','watch_scheduled_delivery_required');
   end if;
 
   select id into v_recipient from public.actor
