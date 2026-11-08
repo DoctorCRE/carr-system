@@ -78,7 +78,7 @@ for(const failure of [null,'connect','begin','select','commit']) {
   class Pool {
    async connect(){calls.push('connect');if(failure==='connect')throw Error('offline');return this;}
    async query(input){const sql=typeof input==='string'?input:input.text;calls.push(sql);if(sql.startsWith(failure??'!'))throw Error('injected');
-    if(sql.startsWith('select')){batches++;return {rows:[{result:{scanned:50,emitted:0}}]};}}
+    if(sql.startsWith('select')){assert.ok(input.query_timeout>1500 && input.query_timeout<=2000,'client deadline leaves time after the 1500ms SQL cancellation to receive its bounded failure result');batches++;return {rows:[{result:{scanned:50,emitted:0}}]};}}
    release(destroy){assert.equal(destroy,true);calls.push('release');} async end(){calls.push('end');}
   }
   const action=sweepSubjectWatches({scheduledTime:Date.UTC(2027,1,1)},{DATABASE_URL_WRITER:'synthetic'},Pool);

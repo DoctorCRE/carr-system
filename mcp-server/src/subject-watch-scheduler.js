@@ -11,7 +11,7 @@ export async function sweepSubjectWatches(controller, env, PoolClass = Pool) {
     const query = (text, values) => {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error('watch_sweep_deadline');
-      return client.query({ text, values, query_timeout: Math.min(1500, remaining) });
+      return client.query({ text, values, query_timeout: Math.min(2000, remaining) });
     };
     for (let batch = 0; batch < 4 && Date.now() < deadline - 2000; batch++) {
       await query('begin');
