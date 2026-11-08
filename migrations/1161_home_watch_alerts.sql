@@ -36,11 +36,15 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
     select p.* from public.email_proposal p
       join public.activity e on e.id=p.activity_id
       join public.actor a on a.id=p_actor and a.slug=p.owner
-      where p.kind='reply_draft' and e.email_source->>'mailbox_owner'=a.slug
+      where coalesce(e.email_context#>>'{lifecycle,state}','live')='live'
+        and p.kind='reply_draft' and e.email_source->>'mailbox_owner'=a.slug
         and p.status<>'dismissed' and (p.status<>'sent' or p.result_recorded_at>=now()-interval '7 days')
       order by (p.status<>'sent') desc,coalesce(p.result_recorded_at,p.submitted_at,p.created_at) desc,p.id limit 1001
   ), notifications as materialized (
     select n.* from ops.notification n where recipient_actor=p_actor
+      and not exists (select 1 from public.activity mail
+        where n.subject_type='email' and mail.id::text=n.subject_ref
+          and coalesce(mail.email_context#>>'{lifecycle,state}','live')<>'live')
       and ops.notification_visible(n.id)
       order by created_at desc,id desc limit 10001
   ), groups as (
