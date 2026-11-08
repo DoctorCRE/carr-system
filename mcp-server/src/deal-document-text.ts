@@ -7,13 +7,19 @@ const uuid = { type: 'string', format: 'uuid' };
 const hash = { type: 'string', pattern: '^[0-9a-f]{64}$' };
 const object = <T extends Record<string, unknown>>(properties: T, required = Object.keys(properties)) =>
   ({ type: 'object', additionalProperties: false, properties, required });
-function authenticated(actor: Actor) {
-  if (!actor?.id) throw new ToolError({ error: 'unauthenticated' });
+async function authenticated(c: Db, actor: Actor) {
+  if (actor?.id) return actor.id;
+  if (actor?.slug) {
+    const result = await c.query<{ id: string }>('select id from public.actor where slug=$1', [actor.slug]);
+    if (result.rows[0]) return result.rows[0].id;
+  }
+  throw new ToolError({ error: 'unauthenticated' });
 }
-function jobOnly(actor: Actor) {
-  authenticated(actor);
+async function jobOnly(c: Db, actor: Actor) {
+  const id = await authenticated(c, actor);
   if (['verified_partner', 'probe_agent', 'review_agent'].includes(authorizationClassForActor(actor)))
     throw new ToolError({ error: 'not_in_profile' });
+  return id;
 }
 type TextRow = { original_hash: string; content_hash: string | null; text_hash: string;
   status: 'produced' | 'no_text' | 'unavailable'; pages: string[] };
@@ -27,9 +33,9 @@ export function dealDocumentTextTools() {
         text_format_version: { const: 'page-text.v1' }, status: { enum: ['produced', 'no_text', 'unavailable'] },
         pages: { type: 'array', maxItems: 1000, items: { type: 'string', maxLength: 500000 } } }),
       handler: async (c: Db, actor: Actor, args: VerbInputs['record-deal-document-text']) => {
-        jobOnly(actor);
+        const id = await jobOnly(c, actor);
         const result = (await c.query<{ r: { ok: boolean; error?: string } }>(
-          'select ops.record_deal_document_text($1,$2::jsonb) r', [actor.id, JSON.stringify(args)])).rows[0].r;
+          'select ops.record_deal_document_text($1,$2::jsonb) r', [id, JSON.stringify(args)])).rows[0].r;
         if (!result.ok) throw new ToolError({ error: result.error ?? 'retention_failed' });
         return result;
       },
@@ -39,9 +45,9 @@ export function dealDocumentTextTools() {
       description: 'Automation-only bounded keyset scan of undeleted deal originals for deterministic text backfill. Includes retained flag for current hash/format. No model call or writes.',
       inputSchema: object({ after: { anyOf: [uuid, { type: 'null' }] }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['limit']),
       handler: async (c: Db, actor: Actor, args: VerbInputs['list-deal-document-text-sources']) => {
-        jobOnly(actor);
+        const id = await jobOnly(c, actor);
         const result = (await c.query<{ r: { ok: boolean; error?: string; documents?: unknown[] } }>(
-          'select ops.list_deal_document_text_sources($1,$2,$3) r', [actor.id, args.after ?? null, args.limit])).rows[0].r;
+          'select ops.list_deal_document_text_sources($1,$2,$3) r', [id, args.after ?? null, args.limit])).rows[0].r;
         if (!result.ok) throw new ToolError({ error: result.error ?? 'source_scan_failed' });
         return result;
       },
@@ -54,7 +60,7 @@ export function dealDocumentTextTools() {
         offset: { type: 'integer', minimum: 0, maximum: 500000 },
         max_characters: { type: 'integer', minimum: 1, maximum: 16000 } }, ['deal_id', 'attachment_id']),
       handler: async (c: Db, actor: Actor, args: VerbInputs['read-deal-document-text']) => {
-        authenticated(actor);
+        await authenticated(c, actor);
         const doc = (await c.query<TextRow>(`select d.content_hash original_hash,
           t.content_hash,t.text_hash,t.status,t.pages from public.v_deal_documents d
           left join ops.deal_document_text t on t.document_ref=d.id and t.entity_ref=d.deal_id

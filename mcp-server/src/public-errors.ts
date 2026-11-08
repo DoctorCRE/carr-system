@@ -15,6 +15,12 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["unauthenticated", "The authenticated actor could not be resolved."],
+  ["document_not_found", "The attachment is unavailable in this visible deal."],
+  ["source_changed", "The original attachment changed. Restart the document reader from page one."],
+  ["content_hash_required", "Supply the original content hash when continuing a document read."],
+  ["invalid_position", "Use a page, line and offset from the document reader's continuation."],
+  ["derivative_conflict", "Retained text already exists with different content for this original."],
   ["research_evidence_required", "Research is required before creating this person or assigning a business role. Supply the documented research_evidence."],
   ["research_source_invalid", "Each research source needs an HTTPS URL and a valid non-future observed_at timestamp."],
   ["research_evidence_incomplete", "Link every required research field to source indexes and supply discrepancies, including an empty array when none exist."],

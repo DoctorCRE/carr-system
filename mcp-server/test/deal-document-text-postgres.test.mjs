@@ -35,7 +35,11 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     return value;
   };
   const record = (args = {}) => invoke('record-deal-document-text', { ...retained, ...args }, robot);
-  const refuses = (promise, error) => assert.rejects(promise, e => e.payload?.error === error);
+  const refuses = (promise, error) => assert.rejects(promise, e => {
+    if (['unauthenticated', 'document_not_found', 'source_changed', 'content_hash_required', 'invalid_position', 'derivative_conflict'].includes(error))
+      assert.equal(publicError(e).error, error);
+    return e.payload?.error === error;
+  });
   const fixture = (name, value) => {
     const target = new URL(`${name}.json`, fixtureRoot);
     if (process.argv.includes('--record-fixtures')) writeFileSync(target, JSON.stringify(value, null, 2) + '\n');
@@ -49,6 +53,7 @@ test('retained text lifecycle and authenticated registered contract', async t =>
       await c.query(`alter table ${name} add primary key(id)`);
     }
     await c.query('create schema ops; create role carr_reader; create role carr_writer; grant usage on schema ops to carr_reader,carr_writer');
+    await c.query('grant select(id,slug) on public.actor to carr_reader');
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query('create table v_ref_index(subject_type text,subject_id uuid)');
     await c.query(readFileSync(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
@@ -56,11 +61,13 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic'),($2,'codex','automation','Synthetic')", [partner.id, robot.id]);
     await c.query("insert into v_ref_index values('deal',$1)", [deal]);
     await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,'documents/synthetic.pdf','Synthetic.pdf','application/pdf',$3,10,$4)", [doc, deal, hash, partner.id]);
-    await t.test('slug-only reader actors resolve on the stateless production path', async () => {
+    await t.test('slug-only automation resolves on the stateless production path', async () => {
       const { id: _robotId, ...readerRobot } = robot;
-      const { id: _partnerId, ...readerPartner } = partner;
       const sources = await invoke('list-deal-document-text-sources', { limit: 1 }, readerRobot);
       assert.equal(sources.documents[0].document_ref, doc);
+    });
+    await t.test('slug-only partner resolves on the stateless production path', async () => {
+      const { id: _partnerId, ...readerPartner } = partner;
       const value = await invoke('read-deal-document-text', bound, readerPartner);
       assert.deepEqual(validate.validate(value).errors, []);
       assert.equal(value.reason, 'not_produced');
@@ -126,6 +133,7 @@ test('retained text lifecycle and authenticated registered contract', async t =>
       await refuses(read(), 'document_not_found');
       await c.query("insert into v_ref_index values('deal',$1)", [deal]);
       await refuses(TOOLS['read-deal-document-text'].handler(c, null, bound), 'unauthenticated');
+      await refuses(TOOLS['read-deal-document-text'].handler(c, { ...partner, id: undefined, slug: 'unknown' }, bound), 'unauthenticated');
       await refuses(invoke('record-deal-document-text', retained), 'not_in_profile');
       await refuses(invoke('list-deal-document-text-sources', { limit: 100 }), 'not_in_profile');
     });
