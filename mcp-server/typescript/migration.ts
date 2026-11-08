@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -72,6 +72,38 @@ export function projects(pkg: string): string[] {
   });
 }
 
+function baselineScope(root: string): { javaScript: Set<string>; typeScript: Set<string> } | null {
+  const branch = process.env.GITHUB_BASE_REF || "main";
+  const base = `refs/remotes/origin/${branch}`;
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 30_000, stdio: "pipe" });
+  try {
+    const present = spawnSync("git", ["rev-parse", "--verify", `${base}^{commit}`], {
+      cwd: root,
+      timeout: 30_000,
+      stdio: "pipe",
+    });
+    if (present.status !== 0) git(["fetch", "--depth=1", "origin", `refs/heads/${branch}:${base}`]);
+    const path = "mcp-server/typescript/migration.json";
+    if (!git(["ls-tree", "--name-only", base, "--", path]).trim()) {
+      process.stdout.write(`Legacy baseline ${base} has no migration list; allowing initial gate introduction\n`);
+      return null;
+    }
+    const parsed: unknown = JSON.parse(git(["show", `${base}:${path}`]));
+    assert.ok(typeof parsed === "object" && parsed !== null && !Array.isArray(parsed));
+    const scope = Object.fromEntries(Object.entries(parsed));
+    const javaScript = new Set(strings(scope.legacyJavaScript));
+    assert.ok(
+      typeof scope.legacyTypeScript === "object" &&
+        scope.legacyTypeScript !== null &&
+        !Array.isArray(scope.legacyTypeScript),
+    );
+    return { javaScript, typeScript: new Set(Object.keys(scope.legacyTypeScript)) };
+  } catch (cause) {
+    throw new Error(`Cannot read legacy migration baseline from ${base}; refusing staged check`, { cause });
+  }
+}
+
 export function migrationIssues(pkg: string, gated: string[]): string[] {
   const root = resolve(pkg, "..");
   const scope = object(resolve(pkg, "typescript/migration.json"));
@@ -87,6 +119,15 @@ export function migrationIssues(pkg: string, gated: string[]): string[] {
       .filter((path) => path && existsSync(resolve(root, path))),
   );
   const issues: string[] = [];
+  const baseline = baselineScope(root);
+  if (baseline) {
+    for (const path of strings(scope.legacyJavaScript)) {
+      if (!baseline.javaScript.has(path)) issues.push(`Legacy JavaScript list may only shrink: ${path}`);
+    }
+    for (const path of legacy.keys()) {
+      if (!baseline.typeScript.has(path)) issues.push(`Legacy TypeScript list may only shrink: ${path}`);
+    }
+  }
   for (const path of paths) {
     if (/\.(?:js|mjs|cjs|jsx)$/.test(path) && !allowed.has(path)) issues.push(`New first-party JavaScript: ${path}`);
     if (/\.[cm]?tsx?$/.test(path) && !gated.includes(resolve(root, path))) {

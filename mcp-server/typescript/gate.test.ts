@@ -8,7 +8,9 @@ import test from "node:test";
 import { object } from "./migration.ts";
 
 const source = resolve(import.meta.dirname, "..");
-const fixtureEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
+const fixtureEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && name !== "GITHUB_BASE_REF"),
+);
 
 test("staged gate accepts clean code and refuses each negative seed", () => {
   const root = mkdtempSync(join(tmpdir(), "carr-typescript-"));
@@ -84,6 +86,34 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     const shrunk = run();
     assert.equal(shrunk.status, 0, shrunk.stdout + shrunk.stderr);
     assert.deepEqual(baselineFailures, [], baselineFailures.join("\n"));
+    const baselineHead = git("rev-parse", "HEAD").toString().trim();
+    git("update-ref", "-d", "refs/remotes/origin/main");
+    const unavailable = run();
+    assert.notEqual(unavailable.status, 0);
+    assert.match(unavailable.stdout + unavailable.stderr, /Cannot read legacy migration baseline/);
+    git("branch", "-M", "main");
+    git("remote", "add", "origin", root);
+    const fetched = run();
+    assert.equal(fetched.status, 0, fetched.stdout + fetched.stderr);
+    assert.equal(git("rev-parse", "refs/remotes/origin/main").toString().trim(), baselineHead);
+    const emptyTree = execFileSync("git", ["mktree"], { cwd: root, env: fixtureEnv, input: "" }).toString().trim();
+    const initial = git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "commit-tree",
+      emptyTree,
+      "-m",
+      "before gate",
+    )
+      .toString()
+      .trim();
+    git("update-ref", "refs/remotes/origin/main", initial);
+    const bootstrap = run();
+    assert.equal(bootstrap.status, 0, bootstrap.stdout + bootstrap.stderr);
+    assert.match(bootstrap.stdout, /allowing initial gate introduction/);
+    git("update-ref", "refs/remotes/origin/main", baselineHead);
     const clean = run();
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
     const cases: [string, string, RegExp][] = [
