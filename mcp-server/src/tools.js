@@ -11078,7 +11078,7 @@ const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealFiel
   invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
-registerTools(actionLinkTools({ ToolError }), "action-links");
+registerTools(actionLinkTools({ ToolError, readTool: executeRegisteredTool }), "action-links");
 registerTools(actionCardTargetTools({ ToolError, readTool: executeRegisteredTool }), "mcp-server/src/action-card-targets.ts");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than

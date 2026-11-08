@@ -1,0 +1,36 @@
+{
+  "schema_version": "action-link-resolve.v2",
+  "ref": "al1_cmQ6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMGQxOmpvZTox",
+  "card": {
+    "kind": "reply_draft",
+    "id": "20000000-0000-4000-8000-0000000000d1",
+    "state": "pending_approval",
+    "source_version": 1,
+    "subject": "Synthetic subject",
+    "body": "Synthetic body",
+    "to": [
+      "sender@example.test"
+    ],
+    "cc": [
+      "dell@example.test"
+    ],
+    "actions": [
+      {
+        "action": "approve",
+        "verb": "submit-email-draft",
+        "args": {
+          "proposal_id": "20000000-0000-4000-8000-0000000000d1",
+          "base_version": 1,
+          "subject": "Synthetic subject",
+          "body": "Synthetic body",
+          "to": [
+            "sender@example.test"
+          ],
+          "cc": [
+            "dell@example.test"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -12,6 +12,7 @@
   "field_census_suite_measurement": {"card": "WR587.S4.J6", "suite": "ops/outlook-intake-selftest.py", "class": "unit", "local_samples_ms": [55602], "basis": "Existing intake suite extended with census transitions. Measured full suite duration. No new suite."},
   "historical_win_labels_suite_measurement": {"card": "WR647.S16.J1", "command": "CARR_CI_PYTHON=/Users/booko/carr-system/.venv/bin/python node --test mcp-server/test/historical-win-readable-labels-postgres.test.mjs", "local_samples_ms": [2868], "cold_standalone_samples_ms": [65095, 58943], "budget_multiplier": 10, "basis": "Canonical runner with shared snapshot template, registered handler, exclusions and 1001-group refusal. Ten times measured suite duration; template setup is counted separately. Cold standalone samples include snapshot setup. No throughput claim."},
   "action_card_target_suite_measurement": {"card":"WR617.S1.J95","commands":["node --test mcp-server/test/action-card-targets.test.mjs","node --test --test-name-pattern exact-card-lifecycle mcp-server/test/action-card-targets-postgres.test.mjs"],"pure_ms":407,"postgres_lifecycle_ms":58277,"basis":"Observed local process durations, including disposable fixture acquisition and teardown. Full reply acceptance still requires PR 3073 on main; its failing prerequisite run took 42583ms."},
+  "reply_action_links_measurement": {"card": "WR617.S1.J77", "suite": "reply-action-links-postgres.test.mjs", "local_group_samples_ms": [7211], "hosted_group_samples_ms": [2005], "budget_multiplier": 1, "basis": "New reply suite separated from the legacy raw-cluster lead suite to preserve CI-service isolation. 10000ms rounds above the measured canonical reply group plus process overhead. Shared cold snapshot setup is budgeted separately. The unchanged lead suite retains its prior measured entry. No throughput claim."},
   "source_run": 41339293730,
   "snapshot_template_ms": 167478,
   "timing_refresh": {
@@ -55,6 +56,7 @@
     "a02-rule-enforcement-reader-mutants.test.mjs": {"milliseconds": 1021, "serial": false},
     "a02-rule-enforcement-reader.test.mjs": {"milliseconds": 216, "serial": false},
     "action-links-postgres.test.mjs": {"milliseconds": 1624, "serial": true},
+    "reply-action-links-postgres.test.mjs": {"milliseconds": 10000, "serial": true},
     "action-links.test.mjs": {"milliseconds": 529, "serial": false},
     "action-risk-guardrails.test.mjs": {"milliseconds": 584, "serial": false},
     "activity-deal-attribution-postgres.test.mjs": {"milliseconds": 8766, "serial": true},

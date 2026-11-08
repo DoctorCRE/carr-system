@@ -10,6 +10,24 @@ const joe = { id: '20000000-0000-4000-8000-000000000001', slug: 'joe' };
 const dell = { id: '20000000-0000-4000-8000-000000000002', slug: 'dell' };
 const draftId = '20000000-0000-4000-8000-0000000000d1';
 const leadId = '20000000-0000-4000-8000-0000000000e1';
+
+test('reply issuance pins the canonical proposal, owner and source version', () => {
+  const card = { kind: 'reply_draft', id: draftId, owner: 'joe', version: 1 };
+  const link = buildActionLink(card);
+  assert.deepEqual(parseActionLinkRef(link.ref), card);
+  assert.notEqual(buildActionLink({ ...card, version: 2 }).ref, link.ref);
+  assert.notEqual(buildActionLink({ ...card, owner: 'dell' }).ref, link.ref);
+  assert.throws(() => buildActionLink({ kind: 'reply_draft', id: draftId }), /action_link_input_invalid/);
+  assert.throws(() => buildActionLink({ ...card, version: 0 }), /action_link_input_invalid/);
+  assert.throws(() => buildActionLink({ ...card, owner: 'codex' }), /action_link_input_invalid/);
+});
+
+test('reply reference parsing admits the producer-defined second card kind', () => {
+  const ref = `al1_${Buffer.from(`rd:${draftId}:joe:1`).toString('base64url')}`;
+  assert.deepEqual(parseActionLinkRef(ref), { kind: 'reply_draft', id: draftId, owner: 'joe', version: 1 });
+  for (const identity of [`rd:${draftId}:joe:01`, `rd:${draftId}:joe:${2_147_483_648}`, `rd:${draftId}:dell:1:extra`])
+    assert.equal(parseActionLinkRef(`al1_${Buffer.from(identity).toString('base64url')}`), null);
+});
 const row = (over = {}) => ({
   id: draftId, lead_id: leadId, owner_id: joe.id, revision: 3, approved_at: null,
   subject: 'Synthetic subject', body: 'Synthetic body', scheduled_for: '2026-11-03T14:00:00.000Z',
