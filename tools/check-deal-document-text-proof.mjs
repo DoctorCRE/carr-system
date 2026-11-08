@@ -1,3 +1,4 @@
+// Check recorded viewer text against its original hash and expected text.
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';

@@ -1,3 +1,4 @@
+"""Test deterministic deal text retention and idempotent backfill."""
 import hashlib
 from pathlib import Path
 import sys

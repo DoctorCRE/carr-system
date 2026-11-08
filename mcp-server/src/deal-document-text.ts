@@ -1,3 +1,4 @@
+// Retain deterministic deal page text and serve bounded viewer reads.
 import { authorizationClassForActor } from './identity.js';
 import { ToolError } from './tool-error.ts';
 import type { Actor, Db, VerbInputs } from './verb-contract.js';
