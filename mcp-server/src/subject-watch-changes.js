@@ -1,3 +1,4 @@
+// Read verified partners' current watch change receipts.
 import { parseSubjectWatchChanges } from '../contracts/subject-watch-change.v1.js';
 const uuid = { type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' };
 export function subjectWatchChangeTools({ ToolError }) {
