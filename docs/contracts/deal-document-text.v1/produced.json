@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "schema_version": "deal-document-text.v1",
+  "text_format_version": "page-text.v1",
+  "deal_id": "00000000-0000-4000-8000-000000000003",
+  "attachment_id": "00000000-0000-4000-8000-000000000004",
+  "content_hash": "61de3f43392338ce419e5dced2360ed9f34becf9f04879acfa976ece5a4e6e4b",
+  "status": "produced",
+  "text_hash": "7544e6c59aa492b5100148e6f2378fb219359161ab35f710ad9ef6f5e8201d97",
+  "page_count": 2,
+  "lines": [
+    {
+      "page": 1,
+      "line": 1,
+      "offset": 0,
+      "text": "first",
+      "end_of_line": true
+    }
+  ],
+  "next": {
+    "content_hash": "61de3f43392338ce419e5dced2360ed9f34becf9f04879acfa976ece5a4e6e4b",
+    "page": 1,
+    "line": 2,
+    "offset": 0
+  }
+}
