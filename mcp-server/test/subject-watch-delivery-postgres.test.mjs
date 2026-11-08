@@ -108,6 +108,26 @@ test('quiet lease clocks and pending delivery', async t => {
    assert.equal(await count(),2);
   } finally {await c.query('rollback');}
  });
+ await t.test('statement timeout preserves pending work and quarantines two failed attempts',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("create function ops.watch_timeout_mint() returns trigger language plpgsql as $$ begin perform pg_sleep(1); return new; end $$");
+   await c.query('create trigger watch_timeout_mint before insert on ops.notification for each row execute function ops.watch_timeout_mint()');
+   await c.query("set local statement_timeout='50ms'");
+   await sweep('2028-03-31T12:00:00Z');
+   await c.query("set local statement_timeout='5s'");
+   assert.equal((await c.query('select failure_count,failure_code from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].failure_code,'57014');
+   assert.equal(Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending'",[watch])).rows[0].n),1);
+   await c.query("set local statement_timeout='50ms'");
+   await sweep('2028-03-31T12:05:00Z');
+   await c.query("set local statement_timeout='5s'");
+   assert.equal((await c.query('select failure_count from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].failure_count,2);
+   await c.query('drop trigger watch_timeout_mint on ops.notification');
+   await c.query('update ops.subject_watch_delivery set failure_count=0 where watch_id=$1',[watch]);
+   await sweep('2028-03-31T12:10:00Z');assert.equal(await count(),3);
+   await sweep('2028-03-31T12:15:00Z');assert.equal(await count(),3);
+  } finally {await c.query('rollback');}
+ });
  await t.test('whole transaction rollback retries without loss or duplication',async()=>{
   await c.query('begin'); await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),3); await c.query('rollback'); assert.equal(await count(),2);
   await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),3);

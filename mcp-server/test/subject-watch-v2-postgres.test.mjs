@@ -5,6 +5,7 @@ import pg from 'pg';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
@@ -239,7 +240,7 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   await t.test('pending receipt proof CLI passes, fails assertions and refuses insufficient releases',async()=>{
     const dir=mkdtempSync(join(tmpdir(),'watch-proof-'));
     const python=process.env.CARR_CI_PYTHON || 'python3';
-    const cli=args=>spawnSync(python,['ops/verify-subject-watch-proof.py',...args],{encoding:'utf8'});
+    const cli=args=>spawnSync(python,[fileURLToPath(new URL('../../ops/verify-subject-watch-proof.py',import.meta.url)),...args],{encoding:'utf8'});
     const capture=name=>{
       const file=join(dir,name+'.json');
       const result=cli(['capture','--database',dsn,'--watched',deal,'--subscription',j.id,'--actor','joe','--output',file]);

@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -16,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from proof_release import release_revision
 
 
-class InsufficientEvidence(Exception):
+class InsufficientEvidence(ValueError):
     """The controlled delivery evidence is unavailable."""
 
 
@@ -80,6 +81,10 @@ def verify(sample):
     return expected
 
 
+def proof_deadline(*_):
+    raise TimeoutError('proof_deadline')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-merge', required=True)
@@ -89,10 +94,15 @@ def main():
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--deadline-seconds', type=float, default=15)
     args = parser.parse_args()
-    deadline = time.monotonic() + min(30, max(1, args.deadline_seconds))
+    budget = min(30, max(1, args.deadline_seconds))
+    deadline = time.monotonic() + budget
+    signal.signal(signal.SIGALRM, proof_deadline)
+    signal.setitimer(signal.ITIMER_REAL, budget)
     try:
         if not re.fullmatch(r'[0-9a-f]{40}', args.expected_merge):
             raise InsufficientEvidence('The expected merge requires a full commit SHA.')
+        if args.fixture and args.fixture.stat().st_size > 1048576:
+            raise InsufficientEvidence('fixture_too_large')
         fixture = json.loads(args.fixture.read_text()) if args.fixture else None
         if fixture:
             release = fixture['release']
@@ -101,7 +111,8 @@ def main():
             if response.status != 200:
                 raise InsufficientEvidence(f'Release HTTP {response.status}')
             release = json.loads(response.body)
-        if not containing(args.expected_merge, release_revision(release), deadline-time.monotonic()):
+        revision = release_revision(release)
+        if not containing(args.expected_merge, revision, deadline-time.monotonic()):
             raise InsufficientEvidence('The release does not prove containment of the expected merge.')
         sample = fixture['sample'] if fixture else capture(args.database,args.watch_id,deadline-time.monotonic())
         if sample.get('watch_id') != str(args.watch_id):
@@ -109,14 +120,16 @@ def main():
         result = verify(sample)
         if time.monotonic() > deadline:
             raise InsufficientEvidence('The total proof deadline expired.')
-        print(json.dumps({'status':'pass','counts':result}))
+        print(json.dumps({'state':'passed','release_sha':revision,'offline_fixture':bool(args.fixture),'counts':result}))
         return 0
     except AssertionError as error:
-        print(json.dumps({'status':'assertion_failure','reason':str(error)}))
+        print(json.dumps({'state':'assertion_failure','reason':str(error)}))
         return 1
     except (InsufficientEvidence,OSError,ValueError,KeyError,TypeError,psycopg.Error,subprocess.TimeoutExpired) as error:
-        print(json.dumps({'status':'insufficient_evidence','reason':str(error)}))
+        print(json.dumps({'state':'insufficient_evidence','reason':str(error)}))
         return 78
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
 
 
 if __name__ == '__main__':

@@ -166,7 +166,11 @@ begin
            emits:=emits+1;
          end if;
        end if;
-       exception when others then
+       exception when sqlstate '57014' then
+         update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
+           next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
+         continue;
+       when others then
          update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
            next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
          continue;
@@ -174,7 +178,10 @@ begin
      end if;
      update ops.subject_watch_delivery set last_success_at=p_now,failure_count=0,failure_code=null,
        next_evaluation_at=((p_now at time zone 'America/Chicago')::date+1)::timestamp at time zone 'America/Chicago' where watch_id=w.id;
-   exception when others then
+   exception when sqlstate '57014' then
+     update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
+       next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
+   when others then
      update ops.subject_watch_delivery set failure_count=least(2,failure_count+1),failure_code=sqlstate,
        next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
    end;
