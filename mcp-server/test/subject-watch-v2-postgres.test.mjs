@@ -300,12 +300,14 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   assert.equal((await changes()).changes.length,beforePartnerDue+1,'exact action replay stays quiet');
   await call('set-next-action',{...partnerDue,idempotency_key:randomUUID()});
   assert.equal((await changes()).changes.length,beforePartnerDue+1,'equivalent per-owner action replacement stays quiet');
-  const beforeSwap=(await changes()).changes.length;
+  const swapPrior=(await changes()).changes;
+  const beforeSwap=swapPrior.length;
   await call('set-next-action',{ref:deal,description:'Dell swapped date',due_on:'2027-01-01',owner:'dell',idempotency_key:randomUUID()},dell);
   receipts=(await changes()).changes;
   assert.equal(receipts.length,beforeSwap+1,'date swap second operation adds exactly one receipt');
-  const combined=receipts.find(x=>x.changes.some(v=>v.field==='next_date' && v.after==='2027-01-01') && x.changes.some(v=>v.field==='next_actions'));
-  assert.ok(combined,'one action operation carries both next_actions and next_date');
+  const combined=receipts.find(x=>!swapPrior.some(prior=>prior.id===x.id));
+  assert.deepEqual(combined.changes.map(x=>x.field),['next_actions','next_date'],
+    'one action operation carries both next_actions and next_date');
   const peer=new pg.Client({connectionString:dsn});await peer.connect();
   try {
     const beforeConcurrent=(await changes()).changes.length;
@@ -326,11 +328,12 @@ test('meaningful canonical changes commit once with source writes and isolate ma
     assert.equal((await changes()).changes.length,countPaused+1,'new meaningful transition after resume');
   } finally {await peer.end();}
   await call('set-next-action',{ref:deal,description:'Overdue Joe action',due_on:'2020-01-01',owner:'joe',idempotency_key:randomUUID()});
-  const beforeMulti=(await changes()).changes.length;
+  const multiPrior=(await changes()).changes;
+  const beforeMulti=multiPrior.length;
   await update({closed_on:'2027-08-02',outcome:'won'});
   receipts=(await changes()).changes;
   assert.equal(receipts.length,beforeMulti+1,'multi-field update and overdue action supersession are one operation');
-  assert.ok(receipts.some(x=>['closed_on','outcome','next_actions'].every(field=>x.changes.some(v=>v.field===field))),
+  assert.ok(receipts.filter(x=>!multiPrior.some(prior=>prior.id===x.id)).some(x=>['closed_on','outcome','next_actions'].every(field=>x.changes.some(v=>v.field===field))),
     'one update receipt carries scalar edits and the action supersession');
   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[mail]);
   assert.equal((await changes()).changes.filter(x=>x.category==='reply_arrived').length,0,'retired mailbox evidence is hidden at read time');
