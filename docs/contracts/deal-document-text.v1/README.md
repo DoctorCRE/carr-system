@@ -66,10 +66,31 @@ exposed missing synchronization guards in the model; the SQL source binding and
 read join implement those guards. Run the statechart skill's `from-spec` command
 on `DealDocumentText.tla` with TLC to reproduce the four invariant checks.
 
-The evidence checker is `node tools/check-deal-document-text-proof.mjs RESPONSE ORIGINAL EXPECTED_TEXT`.
-RESPONSE is the saved real registered read response, ORIGINAL is the independently
-read stored original, and EXPECTED_TEXT is the exact concatenated line-fragment
-text expected on that read. It checks the response contract, original SHA256 and
-text equality. It performs no network requests and exits 0 on a match, 1 otherwise.
-It does not establish deployment identity or the live registry. The coordinator
-must collect those production observations separately as specified above.
+The release-aware read-only proof is:
+
+```sh
+python3 tools/prove-deal-document-text.py --expected-merge "$MERGE_SHA" --response "$RESPONSE" --original "$ORIGINAL" --expected-text "$EXPECTED_TEXT"
+```
+
+The coordinator supplies the actual merge commit and saved registered response,
+independently verified original bytes, and exact concatenated line-fragment text.
+The command reads production `/release` through `lib/release_reader.py`, requires
+local Git objects proving the release contains the merge, then invokes the existing
+contract/hash/text checker. All steps share a 30-second deadline. Exit 0 means a
+containing release and matching evidence; 1 means content assertion failure on a
+containing release; 78 means insufficient release, history, transport or deadline
+evidence. `--release PATH --repository PATH` replay a saved release against a
+fixture Git graph without network access. Tests build their own graph from scratch
+and cover equal, descendant, older, unrelated and unknown release identities.
+This checks saved document evidence; the coordinator still collects the live
+registered read and backfill receipts described above after deployment.
+
+The lower-level `node tools/check-deal-document-text-proof.mjs RESPONSE ORIGINAL EXPECTED_TEXT`
+checks only saved content (exit 0/1). It is not the production proof entry point.
+
+The reader requires partner authority in an attended full session. Unattended
+runners refuse at registered dispatch and cannot read retained text. The writer
+and source scan remain automation-only. The page-text.v1 whitespace set is fixed
+to U+0009..000D, U+001C..0020, U+0085, U+00A0, U+1680, U+2000..200A,
+U+2028..2029, U+202F, U+205F and U+3000 in both producer and SQL validation.
+Text itself is retained unchanged, including these characters.

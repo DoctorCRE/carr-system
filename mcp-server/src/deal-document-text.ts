@@ -47,7 +47,7 @@ export function dealDocumentTextTools() {
       },
     },
     'read-deal-document-text': {
-      write: false,
+      write: false, humanOnly: true, fullOnly: true,
       description: 'deal-document-text.v1. Read retained page-text.v1 for an undeleted attachment in a visible deal. Original hash pins pagination and refuses superseded content. Explicit no_text/unavailable. At most 16000 Unicode characters and 200 line fragments. Stable 1-based page/line and 0-based character offsets. No model, parser, object keys or original bytes.',
       inputSchema: object({ deal_id: uuid, attachment_id: uuid, content_hash: hash,
         page: { type: 'integer', minimum: 1, maximum: 1000 }, line: { type: 'integer', minimum: 1, maximum: 500001 },

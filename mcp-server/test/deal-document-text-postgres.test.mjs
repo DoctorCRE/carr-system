@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { execFileSync } from 'node:child_process';
+import { unattendedActorForToken } from '../src/identity.js';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -6,7 +8,7 @@ import { Validator } from '@cfworker/json-schema';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 
-const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true };
+const partner = { id: '00000000-0000-4000-8000-000000000001', slug: 'joe', human: true, via: 'oauth' };
 const robot = { id: '00000000-0000-4000-8000-000000000002', slug: 'codex', human: false, sponsoring_human_slug: 'joe' };
 const deal = '00000000-0000-4000-8000-000000000003';
 const doc = '00000000-0000-4000-8000-000000000004';
@@ -49,7 +51,7 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
     await c.query('create table v_ref_index(subject_type text,subject_id uuid)');
     await c.query(readFileSync(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
-    await c.query(readFileSync(new URL('../../migrations/1161_deal_document_text.sql', import.meta.url), 'utf8'));
+    await c.query(readFileSync(new URL('../../migrations/1164_deal_document_text.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic'),($2,'codex','automation','Synthetic')", [partner.id, robot.id]);
     await c.query("insert into v_ref_index values('deal',$1)", [deal]);
     await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,'documents/synthetic.pdf','Synthetic.pdf','application/pdf',$3,10,$4)", [doc, deal, hash, partner.id]);
@@ -59,6 +61,31 @@ test('retained text lifecycle and authenticated registered contract', async t =>
       assert.deepEqual(await record(), first);
       fixture('produced', await read({ max_characters: 5 }));
       await refuses(record({ pages: ['changed'] }), 'derivative_conflict');
+    });
+    await t.test('unattended and non-partner registered readers refuse retained text', async () => {
+      const unattended = unattendedActorForToken('Bearer fixture', JSON.stringify({ joe: { nightly: 'fixture' } }));
+      unattended.id = robot.id;
+      await refuses(invoke('read-deal-document-text', bound, unattended), 'unattended_runner_authority_not_admitted');
+      await refuses(invoke('read-deal-document-text', bound, robot), 'human_only_verb_requires_verified_partner');
+    });
+    await t.test('Python producer whitespace persists through the registered writer', async () => {
+      const pages = ['\u00a0', '\u001c\u001d\u001e\u001f', '\u0085\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000', ' \t\n\r\v\f'];
+      const unicodeHash = 'a'.repeat(64);
+      const payload = JSON.parse(execFileSync(process.env.CARR_CI_PYTHON || 'python3', ['-c',
+        'import json,sys; from lib.deal_document_text import retained_pages; print(json.dumps(retained_pages(*json.load(sys.stdin))))'],
+        { input: JSON.stringify([{ ...retained, content_hash: unicodeHash }, pages]), cwd: new URL('../..', import.meta.url), encoding: 'utf8' }));
+      assert.equal(payload.status, 'no_text');
+      await c.query('update attachment set sha256=$1 where id=$2', [unicodeHash, doc]);
+      try {
+        await invoke('record-deal-document-text', payload, robot);
+        assert.equal((await read()).status, 'no_text');
+        const stored = await c.query('select pages from ops.deal_document_text where content_hash=$1', [unicodeHash]);
+        assert.deepEqual(stored.rows[0].pages, pages);
+        const visibleHash = 'f'.repeat(64);
+        await c.query('update attachment set sha256=$1 where id=$2', [visibleHash, doc]);
+        await record({ content_hash: visibleHash, status: 'produced', pages: ['\u200b'] });
+        assert.equal((await read()).status, 'produced');
+      } finally { await c.query('update attachment set sha256=$1 where id=$2', [hash, doc]); }
     });
     await t.test('pagination preserves identity and complete page and line text', async () => {
       let next = {}, chunks = [], identity;

@@ -2329,7 +2329,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/deal-document-text.ts",
     "schema_digest": "daae6eec2961a80a96f6217bd0a0b5d842fc8dc3f3535d3650ae70d75a1e3e23",
     "write": false,
-    "human_only": false,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []

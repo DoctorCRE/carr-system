@@ -247,7 +247,7 @@ test("rule-context, rule-adoption and deal-fact verbs refuse the unattended acto
 test("every humanOnly/authorityOnly verb off the allowlist refuses the unattended actor", async () => {
   const off = authorityVerbs().filter(name =>
     !UNATTENDED_AUTHORITY_VERBS.includes(name) && TOOLS[name].humanCallerOnly !== true);
-  for (const verb of ["bind-rule-context-contract", "record-executed-lease"])
+  for (const verb of ["bind-rule-context-contract", "record-executed-lease", "read-deal-document-text"])
     assert.ok(off.includes(verb), verb);
   for (const verb of off)
     assert.equal((await gateError(unattended(), verb))?.payload?.error,
@@ -323,4 +323,14 @@ test("the unattended client profile never falls back to the attended local token
     { CARR_MCP_CLIENT_PROFILE: "unattended", CARR_MCP_LOCAL_TOKEN: "attended-secret" }, "").token, "");
   // and the attended profile never borrows the unattended token
   assert.equal(selectLocalClientCredential({}, "CARR_MCP_UNATTENDED_TOKEN=unattended-secret\n").token, "");
+});
+
+test('document retention verbs have explicit automation and attended reader classifications', async () => {
+  assert.equal(TOOLS['read-deal-document-text'].humanOnly, true);
+  assert.equal(allowedIn('unattended', 'read-deal-document-text', TOOLS['read-deal-document-text']), false);
+  for (const verb of ['record-deal-document-text', 'list-deal-document-text-sources']) {
+    assert.notEqual(TOOLS[verb].humanOnly, true);
+    assert.notEqual(TOOLS[verb].authorityOnly, true);
+    assert.equal(UNATTENDED_AUTHORITY_VERBS.includes(verb), false);
+  }
 });
