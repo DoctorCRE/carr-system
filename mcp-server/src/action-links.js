@@ -1,3 +1,4 @@
+// Resolve credential-free draft addresses without granting write authority.
 import { DRAFT_ELIGIBILITY_SQL } from "./lead-draft-eligibility.js";
 import { authorizationClassForActor } from "./identity.js";
 
