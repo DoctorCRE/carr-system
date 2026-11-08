@@ -461,3 +461,12 @@ test("loop input refusals preserve their names and safe hints", t => {
     assert.deepEqual(payload, { error: code, correlation_id: correlationId, hint });
   }
 });
+
+
+test('document not-found exposes its type without internal document identifiers', t => {
+  t.mock.method(console, 'error', () => {});
+  const value = publicError(new ToolError({ error: 'document_not_found', document_id: privateText }),
+    { env: { CORRELATION_ID: correlationId } });
+  assert.deepEqual(value, { error: 'document_not_found', correlation_id: correlationId,
+    hint: 'The document is unavailable in the current scope.' });
+});

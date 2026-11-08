@@ -16,7 +16,7 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
   ["unauthenticated", "The authenticated actor could not be resolved."],
-  ["document_not_found", "The attachment is unavailable in this visible deal."],
+  ["document_not_found", "The document is unavailable in the current scope."],
   ["source_changed", "The original attachment changed. Restart the document reader from page one."],
   ["content_hash_required", "Supply the original content hash when continuing a document read."],
   ["invalid_position", "Use a page, line and offset from the document reader's continuation."],
