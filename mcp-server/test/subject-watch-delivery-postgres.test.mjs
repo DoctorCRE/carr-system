@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { executeRegisteredTool } from '../src/tools.js';
+import { sweepSubjectWatches } from '../src/subject-watch-scheduler.js';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
@@ -22,7 +23,7 @@ test('quiet lease clocks and pending delivery', async t => {
  const count=async() => Number((await c.query('select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition=\'emitted\'',[watch])).rows[0].n);
  await t.test('crossing without business mutation emits once and later days stay quiet',async()=>{
   await sweep('2027-03-31T12:00:00Z'); assert.equal(await count(),0);
-  await sweep('2027-04-01T12:00:00Z'); assert.equal(await count(),1);
+  await sweepSubjectWatches({scheduledTime:Date.parse('2027-04-01T12:00:00Z')},{DATABASE_URL_WRITER:dsn},pg.Pool); assert.equal(await count(),1);
   await sweep('2027-04-02T12:00:00Z'); assert.equal(await count(),1);
   await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
   const response=await executeRegisteredTool(c,{id:actor,slug:'joe',human:true},'read-subject-watch-changes-v1',{subject_type:'lease',subject_id:lease,subscription_id:watch});
@@ -31,7 +32,7 @@ test('quiet lease clocks and pending delivery', async t => {
 
   if (process.env.J139_CAPTURE_PROOF) {
    const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-proof.py',import.meta.url));
-   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); print(json.dumps({'release':{'git_sha':'a'*40},'sample':sample}))";
+   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); print(json.dumps({'release':{'ok':True,'git_sha':{'value':'a'*40,'reason':None}},'sample':sample}))";
    const fixture=execFileSync(process.env.CARR_CI_PYTHON??'python3',['-c',script,proof,dsn,watch],{encoding:'utf8'});
    const {writeFileSync}=await import('node:fs');writeFileSync(process.env.J139_CAPTURE_PROOF,fixture);
   }

@@ -67,7 +67,7 @@ def verify(sample):
     if not all(sample.get(k) for k in ('first_delivery_at','last_success_at','scheduled_at')):
         raise InsufficientEvidence('A scheduled delivery and later duplicate sweep are required.')
     stamp = lambda key: datetime.fromisoformat(sample[key].replace('Z', '+00:00'))
-    if stamp('last_success_at') <= stamp('first_delivery_at') or stamp('scheduled_at') < stamp('last_success_at'):
+    if stamp('last_success_at') < stamp('first_delivery_at') or stamp('scheduled_at') <= stamp('first_delivery_at'):
         raise InsufficientEvidence('No later successful duplicate sweep was observed.')
     expected = {'clock_receipts': 1, 'notifications': 1, 'business_mutations': 0, 'pending': 0}
     for key, value in expected.items():
@@ -99,7 +99,10 @@ def main():
             if response.status != 200:
                 raise InsufficientEvidence(f'Release HTTP {response.status}')
             release = json.loads(response.body)
-        if not containing(args.expected_merge, release.get('git_sha'), deadline-time.monotonic()):
+        source = release.get('git_sha')
+        if release.get('ok') is not True or not isinstance(source, dict) or source.get('reason') is not None:
+            raise InsufficientEvidence('The release source contract is unavailable.')
+        if not containing(args.expected_merge, source.get('value'), deadline-time.monotonic()):
             raise InsufficientEvidence('The release does not prove containment of the expected merge.')
         sample = fixture['sample'] if fixture else capture(args.database,args.watch_id,deadline-time.monotonic())
         if sample.get('watch_id') != str(args.watch_id):
