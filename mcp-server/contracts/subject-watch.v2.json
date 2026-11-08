@@ -1,0 +1,13 @@
+{
+  "schema_version": "subject-watch.v2",
+  "producer_parser": "mcp-server/contracts/subject-watch.v2.js#parseSubjectWatchV2",
+  "verbs": ["watch-subject-v2", "pause-subject-watch-v2", "resume-subject-watch-v2", "replace-subject-watch-policy-v2", "unwatch-subject-v2", "read-subject-watch-v2", "list-subject-watches-v2"],
+  "actor": "Server-derived authenticated Joe or Dell. No actor arguments accepted.",
+  "generation": "watch.id identifies one subscription. Repeated watch preserves its baseline, policy and state. Removed then watched creates a new id and baseline.",
+  "concurrency": "Every lifecycle mutation requires subscription_id and base_version. Any mismatch refuses watch_stale_version. UUID replay keys bind actor, verb and payload and return the historical receipt.",
+  "policy": "change_kinds selects reply_arrived, lease_threshold_crossed or listing_status_changed. Lease thresholds require lease_threshold_days, 0 through 3650, at most 20 unique entries. include_self_changes defaults true.",
+  "quiet": "Watch, pause, resume, replace and removal never emit notifications. This slice publishes persistence, not v2 alert production.",
+  "pagination": "Live UUID pages, at most 100 visible nonremoved subscriptions. No snapshot guarantee across pages.",
+  "listing": "watch_target_not_found until canonical listing identity and visibility exists.",
+  "compatibility": "V1 tools, storage and producer remain unchanged. V2 storage is independent; no implicit v1 migration or dual subscription."
+}
