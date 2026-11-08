@@ -66,10 +66,18 @@ test('quiet lease clocks and pending delivery', async t => {
   try {await Promise.all([sweep('2028-03-15T12:00:00Z'),sweep('2028-03-15T12:00:00Z',other)]); assert.equal(await count(),2);} finally {await other.end();}
  });
  await t.test('calendar and DST clocks use Chicago dates',async()=>{
-  for(const [instant,expected] of [['2028-03-01T05:59:00Z','2028-02-29'],['2028-03-01T06:00:00Z','2028-03-01'],['2027-03-14T07:59:00Z','2027-03-14'],['2027-03-14T08:01:00Z','2027-03-14']]) {
-   assert.equal((await c.query("select ($1::timestamptz at time zone 'America/Chicago')::date::text d",[instant])).rows[0].d,expected);
-  }
- }); await t.test('mint rollback preserves pending and repeated failures quarantine',async()=>{
+  await c.query('begin');
+  try {
+   await c.query('delete from ops.subject_watch_v2_subscription where id=$1',[watch]);
+   await c.query("update lease set expiration_on='2027-03-15' where id=$1",[lease]);
+   const w=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'lease',$2,'{}',$3,'watching','2027-03-13T12:00:00Z') returning id",[actor,lease,{change_kinds:['lease_threshold_crossed'],lease_threshold_days:[1]}])).rows[0].id;
+   const emitted=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='emitted'",[w])).rows[0].n);
+   await sweep('2027-03-14T05:59:00Z');assert.equal(await emitted(),0);
+   await sweep('2027-03-14T06:00:00Z');assert.equal(await emitted(),1);
+   await sweep('2027-03-14T08:01:00Z');assert.equal(await emitted(),1);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('mint rollback preserves pending and repeated failures quarantine',async()=>{
   await c.query('begin');
   try {
    await c.query("update ops.subject_watch_delivery set next_evaluation_at='2028-03-31',last_emitted_at=null where watch_id=$1",[watch]);
@@ -121,22 +129,28 @@ test('quiet lease clocks and pending delivery', async t => {
   };
   const pending=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending'",[target])).rows[0].n);
   const notices=async()=>Number((await c.query('select count(distinct notification_id) n from ops.subject_watch_change where watch_generation_id=$1',[target])).rows[0].n);
-  await change('2027-01-01');await change('2027-01-02');await change('2027-01-03');assert.equal(await pending(),3);
-  await sweep('2029-01-01T12:00:00Z');assert.equal(await pending(),0);assert.equal(await notices(),1);
-  await change('2027-01-04');await sweep('2029-01-01T12:01:00Z');assert.equal(await pending(),1);assert.equal(await notices(),1);
+  for(let n=0;n<101;n++) await change(new Date(Date.UTC(2027,0,n+1)).toISOString().slice(0,10));
+  assert.equal(await pending(),101);
+  await sweep('2029-01-01T12:00:00Z');assert.equal(await pending(),1,'overflow remains pending');assert.equal(await notices(),1);
+  await change('2027-01-04');await sweep('2029-01-01T12:01:00Z');assert.equal(await pending(),2);assert.equal(await notices(),1);
   const peer=new pg.Client({connectionString:dsn});await peer.connect();
   try {
    await peer.query('begin');await peer.query("select id from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending' for update",[target]);
    await sweep('2029-01-01T12:05:00Z');assert.equal(await notices(),1);
    await peer.query('commit');await sweep('2029-01-01T12:05:00Z');assert.equal(await pending(),0);assert.equal(await notices(),2);
   } finally {await peer.query('rollback');await peer.end();}
-  await change('2027-01-05');
+  await change('2027-01-05');assert.equal(await pending(),1);
+  await c.query("update ops.subject_watch_v2_subscription set state='paused' where id=$1",[target]);assert.equal(await pending(),0);
+  await c.query("update ops.subject_watch_v2_subscription set state='watching' where id=$1",[target]);
+  await sweep('2029-01-01T12:10:00Z');assert.equal(await notices(),2,'resume stays quiet');
+  await change('2027-01-07');
   await c.query("update ops.subject_watch_v2_subscription set policy=jsonb_set(policy,'{include_self_changes}','false') where id=$1",[target]);
   await sweep('2029-01-01T12:10:00Z');assert.equal(await pending(),0);assert.equal(await notices(),2);
   await c.query("update ops.subject_watch_v2_subscription set policy=jsonb_set(policy,'{include_self_changes}','true') where id=$1",[target]);
   await change('2027-01-06');assert.equal(await pending(),1);
   await c.query('update party set deleted_at=now() where id=$1',[party]);
   await sweep('2029-01-01T12:15:00Z');assert.equal(await pending(),0);assert.equal(await notices(),2);
+  assert.equal((await c.query('select state from ops.subject_watch_v2_subscription where id=$1',[target])).rows[0].state,'paused');
   await c.query('update party set deleted_at=null where id=$1',[party]);
  });
  await t.test('1x and 10x synthetic pending loads retain every receipt',async()=>{
