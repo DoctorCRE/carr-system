@@ -8,6 +8,7 @@ import { buildActionCardRef, parseActionCardResponse } from '../src/action-card-
 import { buildActionLink } from '../src/action-links.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import pg from 'pg';
+import { publicError } from '../src/public-errors.ts';
 
 const id = n => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const actors = ['joe', 'dell'].map((slug, i) => ({ id: id(i + 1), slug, human: true }));
@@ -38,8 +39,9 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
   };
   const version = async (who, kind, sourceId) => (await c.query('select ops.resolve_action_card($1,$2,$3) as target', [who.id, kind, sourceId])).rows[0].target.source_version;
   const refusals = [];
+  const refusalErrors = [];
   const refused = promise => assert.rejects(promise, e => {
-    assert.deepEqual(e.payload, { error: 'action_link_not_found' }); refusals.push(e.payload); return true;
+    assert.deepEqual(e.payload, { error: 'action_link_not_found' }); refusals.push(e.payload); refusalErrors.push(e); return true;
   });
   const fixtures = [];
   for (const [i, who] of actors.entries()) {
@@ -127,6 +129,11 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
       assert.equal(new Validator(contract).validate(result).valid, true);
       assert.deepEqual(parseActionCardResponse(result), result);
     }
+    const publicRefusals = {
+      foreign:publicError(refusalErrors[0],{env:{CORRELATION_ID:id(1)}}),
+      unknown:publicError(refusalErrors[1],{env:{CORRELATION_ID:id(2)}}),
+    };
+    assert.deepEqual(JSON.parse(await readFile(new URL('../contracts/fixtures/action-card-public-refusals.v2.json',import.meta.url),'utf8')),publicRefusals);
     const path = new URL('../contracts/fixtures/action-card-targets.v2.json', import.meta.url);
     if (process.env.RECORD_ACTION_CARD_FIXTURES === '1') await writeFile(path, JSON.stringify(fixtures, null, 2) + '\n');
     if (process.env.RECORD_ACTION_CARD_FIXTURES === '1') {

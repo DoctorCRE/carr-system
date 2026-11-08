@@ -53,6 +53,14 @@ class ExactCardProofTests(unittest.TestCase):
     def test_foreign_and_unknown_disclosure_difference_is_failure(self):
         self.assertEqual(self.invoke(lambda v: v['foreign'].update(detail='private'))[0], 1)
 
+    def test_real_public_error_envelopes_ignore_only_request_correlation(self):
+        errors = json.loads((ROOT / 'mcp-server/contracts/fixtures/action-card-public-refusals.v2.json').read_text())
+        self.assertEqual(self.invoke(lambda value: value.update(errors))[0],0)
+        def changed_hint(value):
+            value.update(errors)
+            value['unknown']['hint'] += ' Different disclosure.'
+        self.assertEqual(self.invoke(changed_hint)[0],1)
+
     def test_invalid_registered_response_is_failure(self):
         self.assertEqual(self.invoke(lambda v: v['responses'][0].update(schema_version='unknown'))[0], 1)
 

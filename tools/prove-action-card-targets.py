@@ -86,6 +86,19 @@ def inspect(responses, targets, deadline):
         raise Insufficient('all_three_card_kinds_required')
 
 
+def refusal(value):
+    if not isinstance(value, dict) or value.get('error') != 'action_link_not_found':
+        raise AssertionError('refusal_contract_failed')
+    if set(value) == {'error'}:
+        return value
+    correlation = value.get('correlation_id')
+    if (set(value) != {'error', 'correlation_id', 'hint'} or not isinstance(value.get('hint'), str)
+            or not isinstance(correlation, str)
+            or not re.fullmatch(r'[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}', correlation)):
+        raise AssertionError('refusal_contract_failed')
+    return {'error': value['error'], 'hint': value['hint']}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--expected-merge', required=True)
@@ -125,7 +138,7 @@ def main():
             foreign = resolve(targets[0]['foreign_ref'])
             unknown = resolve(targets[0]['unknown_ref'])
         inspect(responses, targets, deadline)
-        if foreign != {'error': 'action_link_not_found'} or unknown != foreign:
+        if refusal(foreign) != refusal(unknown):
             raise AssertionError('foreign_unknown_parity_failed')
         print(json.dumps({'state': 'passed', 'release_sha': observed, 'targets': 3, 'fixture': fixture is not None}))
         return 0
