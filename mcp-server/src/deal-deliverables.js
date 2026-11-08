@@ -159,11 +159,11 @@ const publicDeliverable = ({ object_key, organization_tenant_id, created_by, exp
 });
 async function documentReceipt(c, row) {
   if (!documentUpload(row) || row.state !== "finalized") return null;
-  const attachment = (await c.query(`select id as attachment_id, subject_id as deal_id, sha256, filename, mime, bytes
-    from public.attachment where id=$1 and subject_type='deal' and subject_id=$2 and r2_key=$3 and deleted_at is null`,
-    [row.id,row.deal_id,row.object_key])).rows[0];
-  if (!attachment) fail("deliverable_denied");
-  return { ...attachment, bytes: Number(attachment.bytes) };
+  const attachment = (await c.query(`select id as attachment_id, deal_id, content_hash as sha256, display_name as filename, document_type as mime
+    from public.v_deal_documents where id=$1 and deal_id=$2`,
+    [row.id,row.deal_id])).rows[0];
+  if (!attachment || attachment.sha256 !== row.sha256 || attachment.filename !== row.filename || attachment.mime !== row.mime) fail("deliverable_denied");
+  return { ...attachment, bytes: Number(row.bytes) };
 }
 
 const columns =

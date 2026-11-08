@@ -170,6 +170,9 @@ test("document intake contract and lifecycle", async (t) => {
       assert.deepEqual(saved.attachment,{attachment_id:id,deal_id:deal,sha256:args.sha256,filename:args.filename,mime:args.mime,bytes:args.bytes});
       assert.deepEqual((await finalize(id)).attachment,saved.attachment);
       assert.deepEqual((await receipt(id)).attachment,saved.attachment);
+      await c.query("set role carr_reader");
+      try { assert.deepEqual((await receipt(id)).attachment,saved.attachment); }
+      finally { await c.query("reset role"); }
       const list = await call("list-deal-documents",{deal_id:deal});
       assert.equal(list.schema_version,"deal-documents.v1");
       assert.deepEqual(list.documents.map(d=>[d.id,d.content_hash]),[[id,args.sha256]]);
