@@ -35,10 +35,11 @@ function isDelivery(value: unknown): value is Delivery {
 }
 
 function isNotificationRoute(link: string, subjectType: string, subjectRef: string): boolean {
+  if (/\s/.test(link)) return false;
   if (/^\/([A-Za-z0-9._~-][A-Za-z0-9._~/-]*)?$/.test(link)) {
     return !link.split('/').some(segment => segment === '.' || segment === '..');
   }
-  if (!UUID.test(subjectRef)) return false;
+  if (subjectRef.length !== 36 || !UUID.test(subjectRef)) return false;
   if (subjectType === 'deal') return link === `/deals?deal=${subjectRef}`;
   if (subjectType === 'lease') {
     const match = /^\/clients\?record=([^?&#]+)$/.exec(link);

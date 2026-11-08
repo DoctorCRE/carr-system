@@ -337,13 +337,14 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
 test('watch alerts reach named Home cards and read, settle, snooze stay independent', async t => {
   const c=new pg.Client({connectionString:dsn}); await c.connect(); t.after(()=>c.end());
   const joe={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
+  let isolated=false;
   const call=async(verb,args={})=>{
-    await c.query('begin');
+    if(!isolated) await c.query('begin');
     try {
       await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true),set_config('carr.organization_tenant_id','carr-internal',true)");
       await c.query('set local role carr_writer');
-      const result=await executeRegisteredTool(c,joe,verb,args); await c.query('commit'); return result;
-    } catch(e) { await c.query('rollback'); throw e; }
+      const result=await executeRegisteredTool(c,joe,verb,args); if(!isolated) await c.query('commit'); return result;
+    } catch(e) { if(!isolated) await c.query('rollback'); throw e; }
   };
   await c.query("insert into client_status(slug,label) values('active','Active') on conflict do nothing");
   const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic inbox client',$1,$1) returning id",[joe.id])).rows[0].id;
@@ -367,8 +368,8 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
     for(const seen of [false,true]) for(const placement of ['inbox','settled','snoozed']) {
       const operations=placement==='inbox'?['acknowledge-notification','settle-home-inbox','snooze-home-inbox']:['acknowledge-notification','unsettle-home-inbox'];
       for(const operation of operations) await t.test(`${kind}: ${seen?'read':'unread'} ${placement} ${operation}`,async()=>{
-        await c.query('delete from ops.notification_read where notification_id=$1',[notice.id]);
-        await c.query('delete from ops.home_inbox_disposition where actor_id=$1 and item_id=$2',[joe.id,item.item_id]);
+        await c.query('begin'); isolated=true;
+        try {
         if(seen) await call('acknowledge-notification',{notification_id:notice.id,idempotency_key:randomUUID()});
         let current=await find();
         const mutate=async verb=>call(verb,{idempotency_key:randomUUID(),items:[{item_id:current.item_id,base_version:current.base_version}],...(verb==='snooze-home-inbox'?{until:'2099-01-01T00:00:00Z'}:{})});
@@ -379,10 +380,9 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
         assert.equal(after.section,operation==='acknowledge-notification'?placement:operation==='settle-home-inbox'?'settled':operation==='snooze-home-inbox'?'snoozed':'inbox');
         assert.equal(after.unseen,operation==='acknowledge-notification'?false:!seen);
         assert.equal(after.source_state,'needs_attention');
+        } finally { await c.query('rollback'); isolated=false; }
       });
     }
-    await c.query('delete from ops.notification_read where notification_id=$1',[notice.id]);
-    await c.query('delete from ops.home_inbox_disposition where actor_id=$1 and item_id=$2',[joe.id,item.item_id]);
     const key=randomUUID();
     await call('acknowledge-notification',{notification_id:notice.id,idempotency_key:key});
     item=await find(); assert.equal(item.unseen,false); assert.equal(item.section,'inbox');

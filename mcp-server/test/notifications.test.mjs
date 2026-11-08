@@ -763,7 +763,7 @@ test('watch routes accept only exact subject destinations', () => {
     assert.equal(shape(type,ref,url).notifications[0].deep_link,url);
     for (const unsafe of [
       `https://foreign.test${url}`, `//foreign.test${url}`, `${url}&extra=1`, `${url}&deal=${deal}`,
-      `${url}#fragment`, url.replace(/=[^=]+$/, '=bad'), url.replace('?', '/?'),
+      `${url}#fragment`, `${url}\n`, url.replace(/=[^=]+$/, '=bad'), url.replace('?', '/?'),
       `/../${url.slice(1)}`, `/safe/../${url.slice(1)}`, '/safe/..', '/safe/./child',
       '/%2e%2e/home', '/safe\\evil',
     ]) assert.throws(()=>shape(type,ref,unsafe),/notification_feed_unavailable/,unsafe);
