@@ -17,12 +17,32 @@ function strings(value: unknown): string[] {
 
 export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json"];
 
-export function projects(pkg: string): string[] {
-  const base = object(resolve(pkg, "tsconfig.base.json"));
-  assert.ok(typeof base.compilerOptions === "object" && base.compilerOptions !== null);
-  const flags = Object.fromEntries(Object.entries(base.compilerOptions));
+function compilerOptions(pkg: string, path: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(
+    execFileSync(resolve(pkg, "node_modules/.bin/tsc"), ["--project", path, "--showConfig"], {
+      cwd: pkg,
+      encoding: "utf8",
+      timeout: 120_000,
+    }),
+  );
+  assert.ok(typeof parsed === "object" && parsed !== null && "compilerOptions" in parsed, path);
+  const flags = parsed.compilerOptions;
+  assert.ok(typeof flags === "object" && flags !== null, path);
+  const options = Object.fromEntries(Object.entries(flags));
+  assert.equal(options.strict, true, `${path} strict`);
   for (const flag of [
-    "strict",
+    "noImplicitAny",
+    "strictNullChecks",
+    "strictFunctionTypes",
+    "strictBindCallApply",
+    "strictPropertyInitialization",
+    "noImplicitThis",
+    "alwaysStrict",
+    "useUnknownInCatchVariables",
+    "strictBuiltinIteratorReturn",
+  ])
+    assert.equal(options[flag] ?? options.strict, true, `${path} ${flag}`);
+  for (const flag of [
     "noEmit",
     "allowImportingTsExtensions",
     "erasableSyntaxOnly",
@@ -32,21 +52,22 @@ export function projects(pkg: string): string[] {
     "noUnusedParameters",
     "exactOptionalPropertyTypes",
   ])
-    assert.equal(flags[flag], true, flag);
+    assert.equal(options[flag], true, `${path} ${flag}`);
+  for (const flag of ["noCheck", "skipLibCheck", "skipDefaultLibCheck", "allowUnreachableCode", "allowUnusedLabels"])
+    assert.notEqual(options[flag], true, `${path} ${flag} suppresses diagnostics`);
+  return options;
+}
+
+export function projects(pkg: string): string[] {
+  const flags = compilerOptions(pkg, "tsconfig.base.json");
   assert.equal(flags.target, "esnext");
   assert.equal(flags.module, "nodenext");
   assert.deepEqual(flags.types, ["node"]);
   return projectPaths.flatMap((path) => {
     const config = object(resolve(pkg, path));
-    assert.equal(config.extends, "./tsconfig.base.json");
     assert.equal(config.include, undefined, "strict projects use explicit file lists");
     assert.equal(config.exclude, undefined, "strict projects cannot exclude admitted files");
-    if (config.compilerOptions !== undefined) {
-      assert.ok(typeof config.compilerOptions === "object" && config.compilerOptions !== null);
-      for (const [key, value] of Object.entries(config.compilerOptions)) {
-        if (flags[key] === true) assert.equal(value, true, `${path} ${key}`);
-      }
-    }
+    compilerOptions(pkg, path);
     return strings(config.files).map((file) => resolve(pkg, file));
   });
 }

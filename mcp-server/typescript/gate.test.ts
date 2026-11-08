@@ -134,6 +134,8 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
         ["noUnusedLocals", false],
         ["noUnusedParameters", false],
         ["exactOptionalPropertyTypes", false],
+        ["noEmit", false],
+        ["allowImportingTsExtensions", false],
         ["erasableSyntaxOnly", false],
         ["verbatimModuleSyntax", false],
         ["noCheck", true],
