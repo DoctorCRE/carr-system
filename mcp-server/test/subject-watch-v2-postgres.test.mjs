@@ -210,9 +210,15 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   await c.query('rollback');assert.equal((await changes()).changes.length,2,'source rollback also rolls back receipt and baseline');
   await assert.rejects(changes(j,dell),e=>e.payload?.error==='watch_target_not_found');
   const event=async(verb,value,scope='none')=>(await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause,personal_scope) values(now(),$1,$2,'deal',$3,$4,'automation_job',$5) returning id",[joe.id,verb,deal,value,scope])).rows[0].id;
-  const mail=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic receipt reply','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,joe.id])).rows[0].id;
-  const e=await event('confirm-email-filing',{activity_id:mail},'joe-personal');
-  await event('inherit-email-thread',{activity_id:mail},'joe-personal');
+  const mailContext={subject:'Synthetic watched reply',conversation_id:randomUUID(),
+    sender:{email:'synthetic@example.test',internal:false},recipients:[{email:'broker@example.test',internal:true,kind:'to'}]};
+  const inbound=async(dealId,minutes)=>(await c.query("insert into activity(kind,occurred_at,client_id,deal_id,actor_id,summary,email_source,email_context) values('email_in',now()-$4*interval '1 minute',$1,$2,$3,'Synthetic receipt reply','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}',$5) returning id",[client,dealId,joe.id,minutes,mailContext])).rows[0].id;
+  const priorMail=await inbound(deal,1),mail=await inbound(null,0);
+  const filing={activity_id:mail,thread_activity_id:priorMail,idempotency_key:randomUUID()};
+  await call('inherit-email-thread',filing);
+  assert.equal((await call('inherit-email-thread',filing)).replayed,true,'registered filing replay captures zero');
+  const e=(await c.query("select id from event where subject_id=$1 and verb='inherit-email-thread' and new_value->>'activity_id'=$2",[deal,mail])).rows[0].id;
+  await event('confirm-email-filing',{activity_id:mail},'joe-personal');
   await c.query('select ops.capture_subject_watch_changes($1)',[e]);
   assert.equal((await changes()).changes.filter(x=>x.category==='reply_arrived').length,1);
   assert.equal((await changes(d,dell)).changes.length,2,'other mailbox sees no receipt or evidence');
