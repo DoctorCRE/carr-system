@@ -12,8 +12,11 @@ P02 converts no product modules. The existing `tsconfig.json` still checks all
 current Worker contracts and generated Cloudflare declarations. Worker
 conversions must include the generated declarations in their strict project.
 
-`migration.json` lists existing JavaScript and hashes unchanged legacy
-TypeScript across the entire repository. A changed or new TypeScript file must
+`migration.json` lists legacy JavaScript and TypeScript paths across the entire repository. Both lists may only shrink against the authoritative base branch. On first
+introduction, only paths already on the base can be listed. Listed TypeScript
+bytes must equal the same path on that base, read directly with Git. No stored
+hash grants an exemption. Legacy JavaScript stays editable.
+A changed or new TypeScript file must
 join a strict project. A new JavaScript file fails, including outside packages.
 There are no tool-required exceptions at this revision. Add exceptions only by
 exact path with the tool requirement documented in the PR. Remove migration

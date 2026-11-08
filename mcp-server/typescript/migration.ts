@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -72,7 +71,11 @@ export function projects(pkg: string): string[] {
   });
 }
 
-function baselineScope(root: string): { javaScript: Set<string>; typeScript: Set<string> } | null {
+function baselineScope(root: string): {
+  base: string;
+  javaScript: Set<string>;
+  typeScript: Set<string>;
+} {
   const branch = process.env.GITHUB_BASE_REF || "main";
   const base = `refs/remotes/origin/${branch}`;
   const git = (args: string[]) =>
@@ -87,18 +90,14 @@ function baselineScope(root: string): { javaScript: Set<string>; typeScript: Set
     const path = "mcp-server/typescript/migration.json";
     if (!git(["ls-tree", "--name-only", base, "--", path]).trim()) {
       process.stdout.write(`Legacy baseline ${base} has no migration list; allowing initial gate introduction\n`);
-      return null;
+      const paths = new Set(git(["ls-tree", "-r", "--name-only", base]).trim().split("\n"));
+      return { base, javaScript: paths, typeScript: paths };
     }
     const parsed: unknown = JSON.parse(git(["show", `${base}:${path}`]));
     assert.ok(typeof parsed === "object" && parsed !== null && !Array.isArray(parsed));
     const scope = Object.fromEntries(Object.entries(parsed));
     const javaScript = new Set(strings(scope.legacyJavaScript));
-    assert.ok(
-      typeof scope.legacyTypeScript === "object" &&
-        scope.legacyTypeScript !== null &&
-        !Array.isArray(scope.legacyTypeScript),
-    );
-    return { javaScript, typeScript: new Set(Object.keys(scope.legacyTypeScript)) };
+    return { base, javaScript, typeScript: new Set(strings(scope.legacyTypeScript)) };
   } catch (cause) {
     throw new Error(`Cannot read legacy migration baseline from ${base}; refusing staged check`, { cause });
   }
@@ -108,8 +107,7 @@ export function migrationIssues(pkg: string, gated: string[]): string[] {
   const root = resolve(pkg, "..");
   const scope = object(resolve(pkg, "typescript/migration.json"));
   const allowed = new Set([...strings(scope.legacyJavaScript), ...strings(scope.toolExceptions)]);
-  assert.ok(typeof scope.legacyTypeScript === "object" && scope.legacyTypeScript !== null);
-  const legacy = new Map(Object.entries(scope.legacyTypeScript));
+  const legacy = new Set(strings(scope.legacyTypeScript));
   const paths = new Set(
     execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
       cwd: root,
@@ -120,23 +118,29 @@ export function migrationIssues(pkg: string, gated: string[]): string[] {
   );
   const issues: string[] = [];
   const baseline = baselineScope(root);
-  if (baseline) {
-    for (const path of strings(scope.legacyJavaScript)) {
-      if (!baseline.javaScript.has(path)) issues.push(`Legacy JavaScript list may only shrink: ${path}`);
-    }
-    for (const path of legacy.keys()) {
-      if (!baseline.typeScript.has(path)) issues.push(`Legacy TypeScript list may only shrink: ${path}`);
-    }
+  for (const path of strings(scope.legacyJavaScript)) {
+    if (!baseline.javaScript.has(path))
+      issues.push(`Legacy JavaScript list may only shrink: ${path}; convert the file into a strict project`);
+  }
+  for (const path of legacy.keys()) {
+    if (!baseline.typeScript.has(path))
+      issues.push(`Legacy TypeScript list may only shrink: ${path}; convert the file into a strict project`);
   }
   for (const path of paths) {
-    if (/\.(?:js|mjs|cjs|jsx)$/.test(path) && !allowed.has(path)) issues.push(`New first-party JavaScript: ${path}`);
+    if (/\.(?:js|mjs|cjs|jsx)$/.test(path) && !allowed.has(path))
+      issues.push(
+        `New first-party JavaScript: ${path}; convert the file into a strict project, or for a pre-existing main file, list it`,
+      );
     if (/\.[cm]?tsx?$/.test(path) && !gated.includes(resolve(root, path))) {
-      const digest = createHash("sha256")
-        .update(readFileSync(resolve(root, path)))
-        .digest("hex");
-      const expected = legacy.get(path);
-      if (typeof expected !== "object" || expected === null || !("sha256" in expected) || expected.sha256 !== digest) {
-        issues.push(`${path} must join a strict project before it changes`);
+      const baseSource = spawnSync("git", ["show", `${baseline.base}:${path}`], { cwd: root, timeout: 30_000 });
+      if (
+        !legacy.has(path) ||
+        baseSource.status !== 0 ||
+        !readFileSync(resolve(root, path)).equals(baseSource.stdout)
+      ) {
+        issues.push(
+          `${path} must join a strict project before it changes; convert the file into a strict project, or for a pre-existing main file, list it`,
+        );
       }
     }
   }

@@ -739,222 +739,78 @@
     "workspace/statecharts/wr586-s3-deliverables/view.mjs"
   ],
   "toolExceptions": [],
-  "legacyTypeScript": {
-    "mcp-server/src/action-closure.ts": {
-      "sha256": "9e121edae7e3bd835f9d1e7f0740b7d8cc50a50c2dcea5f86d6defcbfebbf288"
-    },
-    "mcp-server/src/activity-deal-attribution.ts": {
-      "sha256": "7ac0503959f42aa9c178c59db30f62fc1218ffad61073de127b5894a88bf88a9"
-    },
-    "mcp-server/src/assurance-health-store.v5.ts": {
-      "sha256": "907a4fd6312ff39df3ab98762db1db2d991fdb08403ccbf88d09885a8c0c8223"
-    },
-    "mcp-server/src/bearer.ts": {
-      "sha256": "df43133c542937104dc979a63319927f715651904e65249bac28f359521ba966"
-    },
-    "mcp-server/src/brief-assurance.ts": {
-      "sha256": "280f8d8c05f8dcbd69d0ba676a827e1810a3c50eff85dc7c6f83008f7a963f8c"
-    },
-    "mcp-server/src/brief-queues.ts": {
-      "sha256": "9ccc17e3b0d688b1104e6a485d605ddec42af55e9a8e8a64fccbf9d503d23c04"
-    },
-    "mcp-server/src/calendar-date.ts": {
-      "sha256": "8dbfa61a3383062c8d0e13ebe1ccd2e3cd3386279a8f016ddf90cdc3cc94027f"
-    },
-    "mcp-server/src/client-anniversary-read.ts": {
-      "sha256": "bc109e7f7fc7575ab1fed0d0c086b2f93c888c436f2a5738aaaafe9a85ece2dc"
-    },
-    "mcp-server/src/client-portal.ts": {
-      "sha256": "619eb60370212c8afe1074ae1da4edc63db730f37c6b58ed6b21b7bcdc753c6d"
-    },
-    "mcp-server/src/closed-callable.ts": {
-      "sha256": "cc8037553809a559d362f3bfdb7250bda3d01556265a51dc3cf7494bcbe1bf20"
-    },
-    "mcp-server/src/command-supervisor-admission.v5.ts": {
-      "sha256": "24acacdaf96a7a27e8cacfd9b107a3e270ae8a3dc8c6b8d0b7e815d2b33e2715"
-    },
-    "mcp-server/src/connections.v1.ts": {
-      "sha256": "52dac57073ea0e0adf603168d06f9bd9a8e3e97ed722f2a022725f8549715f4a"
-    },
-    "mcp-server/src/core-rule-ids.ts": {
-      "sha256": "0faf5e21b96bc2031003c28be11bc015bbc0c40c99c7d1b348d2548a9c9aa2bf"
-    },
-    "mcp-server/src/deal-checklist.ts": {
-      "sha256": "7c1dc2e62a8c97979c0bfbab8ab923d2477b30946bd13ed40f5d6aa9abe7e5ad"
-    },
-    "mcp-server/src/deal-document-text.ts": {
-      "sha256": "8896c87a1d028573401ec4cf3c0f33b286a12baecac19c26888f121a0c025fec"
-    },
-    "mcp-server/src/deal-extraction.ts": {
-      "sha256": "a93b4cf6b47b5e90434f79ec0b59c34cf37ccd918264a01597dbb7474787a33b"
-    },
-    "mcp-server/src/deal-items.ts": {
-      "sha256": "9dfeeb921ec01b170748ba611864ff8bde0e40ebe5521a4fd94715b3bc088f11"
-    },
-    "mcp-server/src/deal-vendors.ts": {
-      "sha256": "70712f893c48d99120489c867bef2cfc4a49fd84118d612399354f2df53f7e42"
-    },
-    "mcp-server/src/dealroom.ts": {
-      "sha256": "1cd7341a01ef189e563b798ae979d989c86492ac842d85a3b99846c8d10679bb"
-    },
-    "mcp-server/src/deliverable-qc.ts": {
-      "sha256": "1cf78ffae6dc0f25109dbcca9b70a0b5da347e4b1fa630b8b1d06a3abe535dab"
-    },
-    "mcp-server/src/derived-key.ts": {
-      "sha256": "339e6061c7f18a50333005a2d3866979dad685574e39a5c580fadd10668c899d"
-    },
-    "mcp-server/src/dispatch-spine.ts": {
-      "sha256": "93455689c704e3b8b3f610b0b871043d2a03e88d9f5587e1a427c6e18fe531f4"
-    },
-    "mcp-server/src/doc-profile.ts": {
-      "sha256": "1182a0ff90ec4de4f822b1fdebc991fd3c4ac0508b97b1784f1231dc029ea359"
-    },
-    "mcp-server/src/doc-suggestions.ts": {
-      "sha256": "c3f9ccec80b07394ab28754952630bb58da574f486597a2305293af67dcbdaed"
-    },
-    "mcp-server/src/doctrine-embeddings.ts": {
-      "sha256": "3b21b710f472cee2ec3026a05a0e3b480d825ef2d4560401bb3f06242ed7b1c7"
-    },
-    "mcp-server/src/email-deal-progress.ts": {
-      "sha256": "7ce70126bd7bba3814db3ef697c88e4a8699004c4ebf26791bc4e53f0aa307b8"
-    },
-    "mcp-server/src/email-lead-proposal.ts": {
-      "sha256": "6cec79ce5835c664ab327c7b2e8c652b5110ffc7706adb961ace20c84d31cb42"
-    },
-    "mcp-server/src/email-next-step.ts": {
-      "sha256": "e74d6e275de45c214e53b4b8709f15f8454ae48e440d14ac6ddd7dd7860fc635"
-    },
-    "mcp-server/src/fact-generation.ts": {
-      "sha256": "a0ae66fb430f4820e10d47338013c4d1e750d459ff40a32e236158b20ea8acba"
-    },
-    "mcp-server/src/fact-observations.ts": {
-      "sha256": "345ced19e5d968fdb3e7d868b67774807067dc8127e11dc892ee40cd0378310c"
-    },
-    "mcp-server/src/fact-review.ts": {
-      "sha256": "6fb4a66cdb2d75c2aba31f6eb3f333c53b7aa1d4cbc3e15d9158e62e01a5b7e9"
-    },
-    "mcp-server/src/gate-zero-assurance.v5.ts": {
-      "sha256": "e07872d43a0d3bde5bf7b78a419ec1c71c3c42965449527c174b3f0a62bd42f0"
-    },
-    "mcp-server/src/home-waiting.ts": {
-      "sha256": "8c1609a508509637e483722dcfae25a5c17b4c7d910e264f7590b83c8f7a58d4"
-    },
-    "mcp-server/src/invoice-tracker.ts": {
-      "sha256": "700839b1299452bcd8d6b5a5d1a6813bc546e39773be1f2dbbaa86169eaebd26"
-    },
-    "mcp-server/src/jev-deal-reading.ts": {
-      "sha256": "22e2d15096f12e50cfd86aa2eded7bb6bb76abe162adae0b804b090c40975294"
-    },
-    "mcp-server/src/jev-needs-joe-advisory.ts": {
-      "sha256": "585059518ca06822c70e7a541ecd8f3397524516084ebb3ca4a12052d2c68ba8"
-    },
-    "mcp-server/src/journey-one-clock.v5.ts": {
-      "sha256": "77cd8fd13a4a756a6bcee2fbc091e5f6d57b6893352f3fc9fb17853473246b43"
-    },
-    "mcp-server/src/lead-follow-up.ts": {
-      "sha256": "56577da12aee97b49ca40483a8ff79aa529e838ba28573b21b73d4c379ac4a23"
-    },
-    "mcp-server/src/lead-workspace.ts": {
-      "sha256": "106ca75bc137f717c2a606b3980f22f893c64f6b0d8a844fcf9e1665eb26c067"
-    },
-    "mcp-server/src/mail-needs-partner.ts": {
-      "sha256": "3faa23e0e1b969e88310f6b8d007ed9112bcc3b3809f576fd5c3282839ef910a"
-    },
-    "mcp-server/src/market-terms.ts": {
-      "sha256": "94c8f087cd7cfed71439f76445a3905ff441b28488b2037982b2e80fda53a0c2"
-    },
-    "mcp-server/src/notifications.ts": {
-      "sha256": "53fe3a705e0db22ad9ea652d75dc3f403643ee26abbcdab47fa10a096e6e53ff"
-    },
-    "mcp-server/src/oauth-consent-state.ts": {
-      "sha256": "7ef90ffe8fb6dc3e9174849e40d87898ee0cd975cd3dedbb6f60288bba56ac77"
-    },
-    "mcp-server/src/oauth-policy.ts": {
-      "sha256": "86a8e5b0645df4685c44e1926235dad05f12f3ff026db4f7fc0e50851915199e"
-    },
-    "mcp-server/src/people-directory.ts": {
-      "sha256": "6f960ee6c6aa76a3421a47e321f16e18a118dcc2c9a87a30105fd4130e4c2eb1"
-    },
-    "mcp-server/src/personal-record-ownership.ts": {
-      "sha256": "9c3488f148914295cbee63068d67dd038794b3b1c3d4b504cb703ceb2ccb2880"
-    },
-    "mcp-server/src/practice-origination.ts": {
-      "sha256": "429af8d943446fe260522180b58e70a108e60dac72016d530277567252c5c10f"
-    },
-    "mcp-server/src/program-controller-release-state-holder.v5.ts": {
-      "sha256": "e667bf023b46ecbc4b1720f11b9340cbcf41ffd29cf48a8ffe197941c99017f8"
-    },
-    "mcp-server/src/program6-feature-flag.ts": {
-      "sha256": "42fc3d95d9c1a574c431eee299c3522be2a02d0d1c1fae7a8b83aec5f74f1b95"
-    },
-    "mcp-server/src/public-errors.ts": {
-      "sha256": "66272b53fd2e301c225f6cda4a33c884d65e1dc18da747454e54922d2f5399a8"
-    },
-    "mcp-server/src/relationship-network.ts": {
-      "sha256": "4c30fa82592c068359061d4299aa2ce8e355591d05178867e24d4e6a3fdfb7f4"
-    },
-    "mcp-server/src/replay-receipt.ts": {
-      "sha256": "91377084d7a10fbe102faf23a4894c77ae836ca6feac4ec113cebc9722572558"
-    },
-    "mcp-server/src/research-sites.ts": {
-      "sha256": "e73b39389d82dbfdd73fc7559de7e9a343359f9924686325a1aed6e41bc740e5"
-    },
-    "mcp-server/src/resource-observation.v5.ts": {
-      "sha256": "9c1f5ee3da420f220662129d9c7542ab3b6874a911951375e2d703f6ebe24e20"
-    },
-    "mcp-server/src/rule-boot.ts": {
-      "sha256": "735f3eaa3726cf1acda923586740d7711aa11e5105a8574fb0b486d8fad0228f"
-    },
-    "mcp-server/src/rule-delivery-source.ts": {
-      "sha256": "cd56bf7f8dd090d0282fdbfb2d3daae3b178e8252d72ffca3f78f9011679334b"
-    },
-    "mcp-server/src/safe-integer.ts": {
-      "sha256": "296f1da844330493c65d8c27017b1fcdc57cf0db5f1163cc99a2e99d5eab2725"
-    },
-    "mcp-server/src/session-identity.ts": {
-      "sha256": "5e8725ed716032705a310e869729d773f1b209de9eba4bb5d6fb3373bccb3880"
-    },
-    "mcp-server/src/sha256.ts": {
-      "sha256": "b44f56644f0f214b3267c86a71861daffe315c67e8dcb1cd11f8383d4855a2bb"
-    },
-    "mcp-server/src/staging-browser.ts": {
-      "sha256": "6b8fff26202ea4953879d39fdcee62e13189f9c0ea16480968af5d69718973e7"
-    },
-    "mcp-server/src/tool-error.ts": {
-      "sha256": "560dd7d6509deb1ebe3cb42dcdb50254dd272383f34436c2558d8f53d9f6b57f"
-    },
-    "mcp-server/src/tour-property-evidence.ts": {
-      "sha256": "58a1661246dedcee6feac6294a5e8facd807be8548628010fdc19f569b26eccc"
-    },
-    "mcp-server/src/tour-route-timestamp.ts": {
-      "sha256": "ad367762ac2a51921f60ca547852d49841900f79e3064848fed73469fcddd575"
-    },
-    "mcp-server/src/vendor-relationship.ts": {
-      "sha256": "8c7d6cc37857a1504a7ea6e6f9a0f2d8f1bba3760246407fd1d9822888abe9fd"
-    },
-    "mcp-server/src/verb-contract.ts": {
-      "sha256": "e723791492d8689bccaf9bb4033ca2124b52c8cc2aa57af8f70d5c8e6a97d3ae"
-    },
-    "mcp-server/src/verb-gate-checks.ts": {
-      "sha256": "bfed207f0c31c661cc9e4c1544ebc04eb73ae13f2c540773f79226fc63a428e5"
-    },
-    "mcp-server/src/work-linkage.ts": {
-      "sha256": "db5c2659c0ce14248168211f51123cd1b1137add3dc43b023578c3ebcec956af"
-    },
-    "mcp-server/src/work-request-read.ts": {
-      "sha256": "2ffd8eb2c75e22778ae73cb404f0e13bc741f53dbdb3a818adc6bcb7c260f6c7"
-    },
-    "mcp-server/src/work-shape.ts": {
-      "sha256": "106dfd1c2b4c705e30b7a39a3a5436c489b5ba025b9420b85263710b77c54375"
-    },
-    "mcp-server/src/workflow-cutover.v5.ts": {
-      "sha256": "1ad956a4421ab78bbc7e5f07239266d3aa2f7aec05fc8bf7e63b3b48fef11ee1"
-    },
-    "mcp-server/src/workspace-feature-flag.ts": {
-      "sha256": "8f1b469c98ecedf711561ca16be967c5fce347ee97fe525d9eeb7aca80554763"
-    },
-    "mcp-server/type-tests/deal-extraction.ts": {
-      "sha256": "64f94443677f7060a24697cc5d240dda4b2c1bc9c6c34335cd00031d53903e78"
-    }
-  }
+  "legacyTypeScript": [
+    "mcp-server/src/action-closure.ts",
+    "mcp-server/src/activity-deal-attribution.ts",
+    "mcp-server/src/assurance-health-store.v5.ts",
+    "mcp-server/src/bearer.ts",
+    "mcp-server/src/brief-assurance.ts",
+    "mcp-server/src/brief-queues.ts",
+    "mcp-server/src/calendar-date.ts",
+    "mcp-server/src/client-anniversary-read.ts",
+    "mcp-server/src/client-portal.ts",
+    "mcp-server/src/closed-callable.ts",
+    "mcp-server/src/command-supervisor-admission.v5.ts",
+    "mcp-server/src/connections.v1.ts",
+    "mcp-server/src/core-rule-ids.ts",
+    "mcp-server/src/deal-checklist.ts",
+    "mcp-server/src/deal-document-text.ts",
+    "mcp-server/src/deal-extraction.ts",
+    "mcp-server/src/deal-items.ts",
+    "mcp-server/src/deal-vendors.ts",
+    "mcp-server/src/dealroom.ts",
+    "mcp-server/src/deliverable-qc.ts",
+    "mcp-server/src/derived-key.ts",
+    "mcp-server/src/dispatch-spine.ts",
+    "mcp-server/src/doc-profile.ts",
+    "mcp-server/src/doc-suggestions.ts",
+    "mcp-server/src/doctrine-embeddings.ts",
+    "mcp-server/src/email-deal-progress.ts",
+    "mcp-server/src/email-lead-proposal.ts",
+    "mcp-server/src/email-next-step.ts",
+    "mcp-server/src/fact-generation.ts",
+    "mcp-server/src/fact-observations.ts",
+    "mcp-server/src/fact-review.ts",
+    "mcp-server/src/gate-zero-assurance.v5.ts",
+    "mcp-server/src/home-waiting.ts",
+    "mcp-server/src/invoice-tracker.ts",
+    "mcp-server/src/jev-deal-reading.ts",
+    "mcp-server/src/jev-needs-joe-advisory.ts",
+    "mcp-server/src/journey-one-clock.v5.ts",
+    "mcp-server/src/lead-follow-up.ts",
+    "mcp-server/src/lead-workspace.ts",
+    "mcp-server/src/mail-needs-partner.ts",
+    "mcp-server/src/market-terms.ts",
+    "mcp-server/src/notifications.ts",
+    "mcp-server/src/oauth-consent-state.ts",
+    "mcp-server/src/oauth-policy.ts",
+    "mcp-server/src/people-directory.ts",
+    "mcp-server/src/personal-record-ownership.ts",
+    "mcp-server/src/practice-origination.ts",
+    "mcp-server/src/program-controller-release-state-holder.v5.ts",
+    "mcp-server/src/program6-feature-flag.ts",
+    "mcp-server/src/public-errors.ts",
+    "mcp-server/src/relationship-network.ts",
+    "mcp-server/src/replay-receipt.ts",
+    "mcp-server/src/research-sites.ts",
+    "mcp-server/src/resource-observation.v5.ts",
+    "mcp-server/src/rule-boot.ts",
+    "mcp-server/src/rule-delivery-source.ts",
+    "mcp-server/src/safe-integer.ts",
+    "mcp-server/src/session-identity.ts",
+    "mcp-server/src/sha256.ts",
+    "mcp-server/src/staging-browser.ts",
+    "mcp-server/src/tool-error.ts",
+    "mcp-server/src/tour-property-evidence.ts",
+    "mcp-server/src/tour-route-timestamp.ts",
+    "mcp-server/src/vendor-relationship.ts",
+    "mcp-server/src/verb-contract.ts",
+    "mcp-server/src/verb-gate-checks.ts",
+    "mcp-server/src/work-linkage.ts",
+    "mcp-server/src/work-request-read.ts",
+    "mcp-server/src/work-shape.ts",
+    "mcp-server/src/workflow-cutover.v5.ts",
+    "mcp-server/src/workspace-feature-flag.ts",
+    "mcp-server/type-tests/deal-extraction.ts"
+  ]
 }
