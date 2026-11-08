@@ -1368,8 +1368,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/web-push-subscriptions.ts",
     "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
     "write": true,
-    "human_only": false,
-    "human_caller_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2769,8 +2769,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/web-push-subscriptions.ts",
     "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
     "write": false,
-    "human_only": false,
-    "human_caller_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -3309,8 +3309,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/web-push-subscriptions.ts",
     "schema_digest": "a8f60391fa23287c1f55f4863efe8f99b726fa59842e75e55cb6fb7c73a7296a",
     "write": true,
-    "human_only": false,
-    "human_caller_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -3624,8 +3624,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/web-push-subscriptions.ts",
     "schema_digest": "a0e0026293814628181d655945092b4e3f38c7a4676367ab24409b8287c1a4e1",
     "write": true,
-    "human_only": false,
-    "human_caller_only": false,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },

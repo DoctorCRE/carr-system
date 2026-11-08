@@ -41,4 +41,16 @@ DoctorCRE/carr-system owns this registry. jbookout/doctorcre-app needs no change
 
 ## PRODUCTION PROOF
 
-After a containing release deploys, a later read-only unit lists the four verbs and observes web-push-registry.v1 through an authenticated registry read. Controlled registration, owner-only listing and revocation writes remain a later authorized proof unit. This worker makes no production calls and claims no production delivery.
+Run `python3 ops/web-push-registry-proof.py --merge-sha <expected-merge-commit> --evidence <signed-in-read-recording.json>` after deployment. The CLI reads `/release` through `lib/release_reader.py`, requires its production revision to contain the expected merge (equal or descendant), and validates recorded authenticated reads bound to that exact release. It exits 0 for passing evidence, 1 for an assertion failure on a containing release, and 78 for insufficient evidence, including older, unrelated or unknown releases and unavailable sessions. One total twenty-second deadline covers HTTP, git and response-contract validation. No registry mutation or push-provider request runs.
+
+The recording contains `provenance` with `release_sha`, `actor_slug` (joe or dell), `transport` (`signed-in-app-origin/mcp`), `app_origin` (`https://app.doctorcre.com`), and `queries` in this order: `list-verbs` with `{ "filter": "web-push" }`, then `read-web-push-subscriptions-v1` with `{}`. Store their decoded registered responses as `catalog` and `registry`. Capture these reads through an existing authenticated browser session. The CLI consumes this evidence rather than acquiring session credentials or claiming that a local machine token is a browser partner. The registry response passes the same versioned JSON schema used by the registry suite. Listing may be empty; this proves the deployed read surface, not controlled registration or revocation.
+
+Run `node --test mcp-server/test/web-push-registry-postgres.test.mjs` for offline CLI pass, failure and insufficient-evidence executions. That suite captures the real registered catalog and a real PostgreSQL registry response, builds a temporary git DAG without historical repository objects, and supplies `--fixture --repository` to exercise the same release gate and response parser. Fixture mode takes `release` from the evidence file and reports mode fixture; it is never production proof. All temporary evidence and git objects are removed after execution.
+
+Controlled registration, owner-only listing and revocation writes remain a later authorized write-proof unit. No production observation is claimed by the fixture runs.
+
+## Design and debt pass
+
+Codebase-design keeps authority classification in the existing shared definition and tests the registered dispatcher plus the local guard. The proof uses the existing release reader and response schema rather than a second transport or response contract.
+
+Zero-tech-debt replaces the deferred proof declaration with one executable observation. No compatibility mode, new runtime sender or generic proof framework is introduced.

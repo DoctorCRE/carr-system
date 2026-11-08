@@ -186,10 +186,10 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
   assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
     "append-tour-entrance-verification-receipt", "cancel-pending-deal", "commit-winning-property",
-    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal",
-    "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
+    "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal", "invalidate-web-push-session-v1",
+    "read-web-push-subscriptions-v1", "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "reject-requirement-reply", "retire-retrieval-curation", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing"]);
+    "register-record-source-authority-policy", "register-web-push-subscription-v1", "reject-requirement-reply", "retire-retrieval-curation", "revoke-web-push-subscription-v1", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing"]);
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
@@ -323,4 +323,14 @@ test("the unattended client profile never falls back to the attended local token
     { CARR_MCP_CLIENT_PROFILE: "unattended", CARR_MCP_LOCAL_TOKEN: "attended-secret" }, "").token, "");
   // and the attended profile never borrows the unattended token
   assert.equal(selectLocalClientCredential({}, "CARR_MCP_UNATTENDED_TOKEN=unattended-secret\n").token, "");
+});
+
+test('every push registry verb participates in unattended refusal coverage', async () => {
+  for (const name of ['register-web-push-subscription-v1', 'revoke-web-push-subscription-v1',
+    'read-web-push-subscriptions-v1', 'invalidate-web-push-session-v1']) {
+    assert.ok(authorityVerbs().includes(name), name);
+    assert.equal(TOOLS[name].humanCallerOnly, true, name);
+    assert.equal((await gateError(unattended(), name))?.payload?.error,
+      'human_only_verb_requires_verified_partner', name);
+  }
 });

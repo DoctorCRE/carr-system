@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { randomUUID, webcrypto } from 'node:crypto';
 import pg from 'pg';
 import { Validator } from '@cfworker/json-schema';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { webPushTools } from '../src/web-push-subscriptions.ts';
 import { ToolError } from '../src/tool-error.ts';
-import { executeRegisteredTool } from '../src/tools.js';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
 const partner = { id: '20000000-0000-4000-8000-000000000001', human: true, slug: 'joe', web_push_session: 'a'.repeat(64) };
 const other = { id: '20000000-0000-4000-8000-000000000002', human: true, slug: 'dell', web_push_session: 'b'.repeat(64) };
@@ -53,6 +56,71 @@ test('registry lifecycle, isolation, replay and logout on disposable PostgreSQL'
       assert.equal(first.generation,1);
       assert.equal((await invoke(register,args)).replayed,true);
       assert.equal((await invoke(list,{})).subscriptions.length,1);
+    });
+    await t.test('release-aware read-only proof CLI accepts recorded contracts and refuses false evidence', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'push-proof-'));
+      const cli = new URL('../../ops/web-push-registry-proof.py', import.meta.url).pathname;
+      const git = (...args) => execFileSync('git', ['-c','user.name=Fixture','-c','user.email=fixture@example.invalid',...args],
+        {cwd:root, encoding:'utf8', input:'', env:{...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1'}}).trim();
+      try {
+        git('init','-q');
+        const tree=git('mktree');
+        const older=git('commit-tree',tree,'-m','older');
+        const merge=git('commit-tree',tree,'-p',older,'-m','merge');
+        const descendant=git('commit-tree',tree,'-p',merge,'-m','descendant');
+        const unrelated=git('commit-tree',tree,'-m','unrelated');
+        const catalog = await TOOLS['list-verbs'].handler(c, partner, {filter:'web-push'});
+        const registry = await invoke(list,{});
+        assert.equal(responseContract.validate(registry).valid,true);
+        const bundle = {release:{ok:true,env:{value:'production'},git_sha:{value:merge}},
+          provenance:{release_sha:merge,actor_slug:'joe',transport:'signed-in-app-origin/mcp',
+            app_origin:'https://app.doctorcre.com',queries:[{verb:'list-verbs',args:{filter:'web-push'}},
+              {verb:list,args:{}}]},catalog,registry};
+        const run = async (value,expected,label) => {
+          const path=join(root,'evidence.json');
+          await writeFile(path,JSON.stringify(value));
+          const result=spawnSync(process.env.CARR_CI_PYTHON || 'python3',[cli,'--fixture','--evidence',path,
+            '--merge-sha',merge,'--repository',root],{encoding:'utf8',timeout:10000});
+          assert.equal(result.status,expected,label+': '+result.stdout+result.stderr);
+          console.log('proof fixture '+label+' exit '+result.status);
+        };
+        for (const [label,sha,code] of [['equal',merge,0],['descendant',descendant,0],['older',older,78],
+          ['unrelated',unrelated,78],['unknown','f'.repeat(40),78]]) {
+          const value=structuredClone(bundle);
+          value.release.git_sha.value=sha; value.provenance.release_sha=sha;
+          await run(value,code,label);
+        }
+        const liveEvidence=join(root,'live.json');
+        await writeFile(liveEvidence,JSON.stringify(bundle));
+        const live = spawnSync(process.env.CARR_CI_PYTHON || 'python3',['-c',`
+import importlib.util, json, sys, time
+from types import SimpleNamespace
+spec=importlib.util.spec_from_file_location('proof',sys.argv[1])
+p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
+b=json.load(open(sys.argv[2])); calls=[]
+def read(url, **kwargs):
+    calls.append(url)
+    return SimpleNamespace(status=200,body=json.dumps(b['release']).encode())
+p.read=read
+args=['--evidence',sys.argv[2],'--merge-sha',sys.argv[3],'--repository',sys.argv[4]]
+assert p.main(args)==0
+assert calls==['https://api.doctorcre.com/release']
+def stalled(*args, **kwargs):
+    time.sleep(1)
+p.read=stalled
+assert p.main(args+['--timeout','0.05'])==78
+`,cli,liveEvidence,merge,root],{encoding:'utf8',timeout:10000});
+        assert.equal(live.status,0,live.stdout+live.stderr);
+        const missing=structuredClone(bundle);
+        missing.catalog.verbs=missing.catalog.verbs.filter(v=>v.name!==register);
+        await run(missing,1,'missing registered verb');
+        const malformed=structuredClone(bundle);malformed.registry.subscriptions[0].endpoint='secret';
+        await run(malformed,1,'response contract violation');
+        const refused=structuredClone(bundle);refused.registry={error:'push_session_required'};
+        await run(refused,78,'no authenticated session');
+        const stale=structuredClone(bundle);stale.provenance.release_sha=older;
+        await run(stale,78,'read release mismatch');
+      } finally { await rm(root,{recursive:true,force:true}); }
     });
     await t.test('concurrent duplicate requests return one receipt', async () => {
       const second = new pg.Client(c.connectionParameters);

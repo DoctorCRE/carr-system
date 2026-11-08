@@ -40,6 +40,8 @@ export function webPushTools({ ToolError }: { ToolError: typeof ErrorClass }) {
       ? { installation_id: properties.installation_id, idempotency_key: properties.idempotency_key, base_generation: properties.base_generation } : {};
     return {
       ...(operation === 'list' ? {} : { write: true }),
+      humanOnly: true,
+      humanCallerOnly: true,
       writerConnection: true,
       description: `Web push registry v1 ${operation}. Uses the authenticated browser partner and session. Returns no endpoints or encryption keys.`,
       inputSchema: { type: 'object', additionalProperties: false, properties: fields, required: Object.keys(fields) },
