@@ -8,6 +8,7 @@ stateDiagram-v2
   Verified --> Abandoned: Discard verified file
   Reserved --> Expired: Reservation deadline passes
   Verified --> Expired: Reservation deadline passes
+  Verified --> Verified: Finalize fails and transaction rolls back
   Verified --> Filed: Finalize attachment
   Filed --> Filed: Replay finalize or read receipt
   Reserved --> Reserved: Replay reserve after lost response
@@ -19,3 +20,6 @@ stateDiagram-v2
 %% never Receipt or upload for a non-visible deal
 %% never Finalize after abandon or expiry
 %% never Document listed as a publishable deliverable
+
+%% All five never rules are checked in DocumentIntake.cfg, with counterexample mutations in check_model.py.
+%% Abandoned and Expired both persist as the terminal expired state; their causes differ.

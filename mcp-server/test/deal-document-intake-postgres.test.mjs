@@ -47,9 +47,11 @@ test("document intake contract and lifecycle", async (t) => {
   const objects = new Map();
   let revoked = false,
     revokeOnPut = false,
-    revokeOnGet = false;
+    revokeOnGet = false,
+    failPut = false;
   const bucket = {
     async put(key, b, opts) {
+      if (failPut) throw new Error("synthetic storage failure");
       objects.set(key, { bytes: b, ...opts });
       if (revokeOnPut) revoked = true;
       return { key };
@@ -167,12 +169,14 @@ test("document intake contract and lifecycle", async (t) => {
           }
           await reject(reserve({bytes: 1}), "deliverable_quota_exceeded");
           const discard = {deal_id: deal, deliverable_id: id, idempotency_key: randomUUID()};
+          const eventsBefore = (await c.query("select count(*)::int n from event where verb='abandon-deal-deliverable'")).rows[0].n;
           await call("abandon-deal-deliverable", discard);
           // The replacement must fit without waiting for the reservation deadline.
           await boundedReserve();
           await call("abandon-deal-deliverable", discard);
           const replay = await call("abandon-deal-deliverable", {...discard, idempotency_key: randomUUID()});
           assert.equal(replay.existing, true);
+          assert.equal((await c.query("select count(*)::int n from event where verb='abandon-deal-deliverable'")).rows[0].n, eventsBefore + 1);
           await reject(reserve({bytes: 1}), "deliverable_quota_exceeded");
           const stored = (await c.query("select state,expires_at>now() as future from ops.deal_deliverable where id=$1", [id])).rows[0];
           assert.equal(stored.state, "expired");
@@ -242,6 +246,10 @@ test("document intake contract and lifecycle", async (t) => {
       revoked=true; assert.equal((await put(id)).status,401); revoked=false;
       await reject(call("read-deal-deliverable",{deal_id:otherDeal,deliverable_id:id}),"deliverable_denied");
       await reject(finalize(id),"deliverable_not_verified");
+      failPut = true;
+      try { assert.equal((await put(id)).status,503); }
+      finally { failPut = false; }
+      assert.equal((await receipt(id)).deliverable.state,"started");
       assert.equal((await put(id)).status,201);
       await finalize(id);
     });

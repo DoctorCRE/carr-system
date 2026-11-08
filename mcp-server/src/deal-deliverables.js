@@ -400,8 +400,8 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
       async (c, actor, a) => {
         const row = await deliverableRow(c, actor, a.deal_id, a.deliverable_id, { lock: true });
         if (row.state === "finalized") fail("deliverable_upload_conflict");
-        const updated = (await c.query(`update ops.deal_deliverable set expires_at=least(expires_at,now()) where id=$1 returning *`, [row.id])).rows[0];
-        return { deliverable: publicDeliverable(updated), target_collection: documentUpload(row) ? "documents" : "deliverables", existing: Date.parse(row.expires_at) <= Date.now() };
+        const updated = (await c.query(`update ops.deal_deliverable set state='expired' where id=$1 and state<>'expired' returning *`, [row.id])).rows[0] || row;
+        return { deliverable: publicDeliverable(updated), target_collection: documentUpload(row) ? "documents" : "deliverables", existing: row.state === "expired" };
       },
     ),
     "set-deal-deliverable-visibility": write(
