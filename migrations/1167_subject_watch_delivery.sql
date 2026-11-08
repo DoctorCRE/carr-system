@@ -101,7 +101,7 @@ begin
        '{"change_kinds":["reply_arrived","lease_threshold_crossed"],"lease_threshold_days":[90,30,7,0],"lease_threshold_months":[24,12,6],"include_self_changes":true}'::jsonb policy from ops.subject_watch
      union all select id,actor_id,subject_type,subject_id,lifecycle_version,state,policy from ops.subject_watch_v2_subscription
    ) s join ops.subject_watch_delivery q on q.watch_id=s.id
-   where q.failure_count<2 and (q.next_evaluation_at<=p_now or exists(select 1 from ops.subject_watch_change c
+   where s.state='watching' and q.failure_count<2 and (q.next_evaluation_at<=p_now or exists(select 1 from ops.subject_watch_change c
      where c.watch_generation_id=s.id and c.disposition='pending' and c.eligible_at<=p_now and c.failure_count<2))
    order by q.next_evaluation_at,s.id limit p_limit
  loop

@@ -428,13 +428,13 @@ test('quiet lease clocks and pending delivery', async t => {
  });
  await t.test('pause suppresses pending and resume takes quiet baseline',async()=>{
   await c.query("update ops.subject_watch_v2_subscription set state='paused' where id=$1",[watch]);
-  await sweep('2028-03-30T12:00:00Z'); assert.equal(await count(),2);
+  assert.equal((await sweep('2028-03-30T12:00:00Z')).scanned,0,'paused watches consume no active sweep slots'); assert.equal(await count(),2);
   await c.query("update ops.subject_watch_v2_subscription set state='watching' where id=$1",[watch]);
   await sweep('2028-03-30T12:00:00Z'); assert.equal(await count(),2);
  });
  await t.test('removed generation never emits',async()=>{
   await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[watch]);
-  await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),2);
+  assert.equal((await sweep('2028-03-31T12:00:00Z')).scanned,0,'removed generations consume no active sweep slots'); assert.equal(await count(),2);
  });
  await t.test('busy locks skip and later sweep catches up',async()=>{
   await c.query('delete from ops.subject_watch_v2_subscription where id=$1',[watch]); watch=await make();
