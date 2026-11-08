@@ -201,3 +201,35 @@ test("a verb that is not humanOnly is unchanged for a sponsored agent", async ()
     .then(() => null, (e) => e);
   assert.notEqual(error?.payload?.error, "human_only_verb_requires_verified_partner");
 });
+
+const documentTextProducers = {
+  "record-deal-document-text": {
+    document_ref: "20000000-0000-4000-8000-000000000001",
+    entity_ref: "20000000-0000-4000-8000-000000000002",
+    content_hash: "a".repeat(64), text_format_version: "page-text.v1",
+    status: "produced", pages: ["Synthetic retained text"],
+  },
+  "list-deal-document-text-sources": { limit: 1 },
+};
+
+for (const [verb, args] of Object.entries(documentTextProducers)) {
+  test(`${verb} automation metadata matches its registered handler guard`, async () => {
+    assert.notEqual(TOOLS[verb].humanOnly, true);
+    assert.notEqual(TOOLS[verb].authorityOnly, true);
+    assert.notEqual(TOOLS[verb].humanCallerOnly, true);
+    assert.equal(humanOnlyVerbs.includes(verb), false);
+    for (const actor of [joe, probe, reviewer]) {
+      await assert.rejects(executeRegisteredTool(forbiddenClient, actor, verb, args), error => {
+        assert.ok(error instanceof ToolError);
+        assert.equal(error.payload.error, "not_in_profile", actor.slug);
+        return true;
+      });
+    }
+    const reachedDatabase = new Error("automation producer reached the database");
+    const client = { query: async () => { throw reachedDatabase; } };
+    for (const actor of [joeLocal, claudeForJoe, stranger]) {
+      await assert.rejects(executeRegisteredTool(client, actor, verb, args),
+        error => error === reachedDatabase, actor.slug);
+    }
+  });
+}

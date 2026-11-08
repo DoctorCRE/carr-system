@@ -325,12 +325,40 @@ test("the unattended client profile never falls back to the attended local token
   assert.equal(selectLocalClientCredential({}, "CARR_MCP_UNATTENDED_TOKEN=unattended-secret\n").token, "");
 });
 
-test('document retention verbs have explicit automation and attended reader classifications', async () => {
+test('document retention reader requires attended partner authority', () => {
   assert.equal(TOOLS['read-deal-document-text'].humanOnly, true);
   assert.equal(allowedIn('unattended', 'read-deal-document-text', TOOLS['read-deal-document-text']), false);
-  for (const verb of ['record-deal-document-text', 'list-deal-document-text-sources']) {
+});
+
+const documentTextProducers = [
+  ["record-deal-document-text", false, {
+    document_ref: "20000000-0000-4000-8000-000000000001",
+    entity_ref: "20000000-0000-4000-8000-000000000002",
+    content_hash: "a".repeat(64), text_format_version: "page-text.v1",
+    status: "produced", pages: ["Synthetic retained text"],
+  }],
+  ["list-deal-document-text-sources", true, { limit: 1 }],
+];
+
+for (const [verb, profileAdmitted, args] of documentTextProducers) {
+  test(`${verb} automation metadata matches its registered unattended guard`, async () => {
     assert.notEqual(TOOLS[verb].humanOnly, true);
     assert.notEqual(TOOLS[verb].authorityOnly, true);
+    assert.notEqual(TOOLS[verb].humanCallerOnly, true);
     assert.equal(UNATTENDED_AUTHORITY_VERBS.includes(verb), false);
-  }
-});
+    assert.equal(allowedIn("unattended", verb, TOOLS[verb]), profileAdmitted);
+    const reachedDatabase = new Error("unattended producer reached the database");
+    const client = { query: async () => { throw reachedDatabase; } };
+    const actor = { ...unattended(), id: "10000000-0000-0000-0000-000000000010" };
+    await assert.rejects(executeRegisteredTool(client, actor, verb, args),
+      error => error === reachedDatabase);
+    const partner = {
+      id: "10000000-0000-0000-0000-000000000002", slug: "joe", human: true, via: "oauth",
+    };
+    await assert.rejects(executeRegisteredTool(forbiddenClient, partner, verb, args), error => {
+      assert.ok(error instanceof ToolError);
+      assert.equal(error.payload.error, "not_in_profile");
+      return true;
+    });
+  });
+}
