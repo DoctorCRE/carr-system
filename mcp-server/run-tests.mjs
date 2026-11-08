@@ -39,7 +39,7 @@ async function main() {
   for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
     const source = await readFile(path.join(ROOT, "test", file), "utf8");
     if (source.includes("chrome-launch.mjs")) browserFiles.push(file);
-    if (/disposable-postgres\.mjs|postgres-database\.mjs|initdb/.test(source)) postgresFiles.push(file);
+    if (/-postgres\.test\.(?:js|mjs)$/.test(file) || /disposable-postgres\.mjs|postgres-database\.mjs|initdb/.test(source)) postgresFiles.push(file);
   }
   const { CARR_CI_UNIT_SUITES: selection, ...suiteEnv } = process.env;
   const failures = [];

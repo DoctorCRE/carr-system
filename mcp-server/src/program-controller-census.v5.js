@@ -425,26 +425,3 @@ export async function readProgramControllerCensus({
     coverage,
   };
 }
-
-/**
- * The admission decision for one slice, for the door in engineering-runtime.js.
- * Returns the evaluator's own frozen answer, or a typed dependency failure the
- * door records and returns rather than throwing away.
- */
-export async function evaluateSliceAdmissionForSlice({
-  client, sliceRef, programRef, repositoryRoot = null, now = () => new Date(),
-}) {
-  return evaluateSliceAdmission(await readSliceAdmissionRequest({
-    client, sliceRef, programRef, repositoryRoot, now }));
-}
-
-/**
- * The resume decision for one slice, or `null` when the slice has no checkpoint
- * row — which leaves the replay branch exactly as it was.
- */
-export async function evaluateCheckpointResumeForSlice({
-  client, sliceRef, repositoryRoot = null, now = () => new Date(),
-}) {
-  const request = await readCheckpointResumeRequest({ client, sliceRef, repositoryRoot, now });
-  return request === null ? null : evaluateCheckpointResume(request);
-}

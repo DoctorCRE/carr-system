@@ -14,6 +14,7 @@
   "historical_win_labels_suite_measurement": {"card": "WR647.S16.J1", "command": "CARR_CI_PYTHON=/Users/booko/carr-system/.venv/bin/python node --test mcp-server/test/historical-win-readable-labels-postgres.test.mjs", "local_samples_ms": [2868], "cold_standalone_samples_ms": [65095, 58943], "budget_multiplier": 10, "basis": "Canonical runner with shared snapshot template, registered handler, exclusions and 1001-group refusal. Ten times measured suite duration; template setup is counted separately. Cold standalone samples include snapshot setup. No throughput claim."},
   "action_card_target_suite_measurement": {"card": "WR617.S1.J95", "suite": "action-card-targets-postgres.test.mjs", "lifecycle_process_samples_ms": [2676], "warm_reply_case_samples_ms": [4035, 5684], "canonical_process_samples_ms": [20019, 209748, 146708], "budget_ms": 10000, "basis": "Planning estimate rounds above the measured 2676ms lifecycle process plus the 5684ms warm-snapshot reply case. Cold snapshot setup retains the hosted 167478ms floor separately. Canonical local process samples include cross-worktree waits on the kernel-owned disposable-PostgreSQL lease; observed holder and waiters were unrelated fixture jobs. Hosted shard jobs do not share that local lease across worktrees. This is an estimated isolated CI budget, not a measured whole-file speed or hosted-parity claim. Hosted current-head CI must verify it."},
   "reply_action_links_measurement": {"card": "WR617.S1.J77", "suite": "reply-action-links-postgres.test.mjs", "local_group_samples_ms": [7211], "hosted_group_samples_ms": [2005], "budget_multiplier": 1, "basis": "New reply suite separated from the legacy raw-cluster lead suite to preserve CI-service isolation. 10000ms rounds above the measured canonical reply group plus process overhead. Shared cold snapshot setup is budgeted separately. The unchanged lead suite retains its prior measured entry. No throughput claim."},
+  "shard_budget_measurement": {"card": "WR622.S13.J256", "native_and_shallow_samples_ms": {"snapshot-callers-1-postgres.test.mjs": [218268, 166363], "snapshot-callers-2-postgres.test.mjs": [204525, 180577], "snapshot-service-postgres.test.mjs": [218238, 269108]}, "postgres": 17, "node": "26.12.1", "logs_sha256": ["00b86fee3338819bbfa19465c2c0270c5f1a7dbd4098bdda93afef4df332a71c", "6936a360632c7dc9704a9908a4284cfb0b447c93438e324789b9716bc39d96a2"], "basis": "Both complete real SQL proof runs passed six tests with zero skips. Round each observed maximum up to ten seconds, including local fixture lock contention. Retain hosted cold setup floor and 80% watchdog policy. No speedup claim."},
   "source_run": 41339293730,
   "snapshot_template_ms": 167478,
   "timing_refresh": {
@@ -45,6 +46,8 @@
   "suites": {
     "action-card-targets.test.mjs": {"milliseconds": 1501, "serial": false},
     "action-card-targets-postgres.test.mjs": {"milliseconds": 10000, "serial": true},
+    "snapshot-callers-2-postgres.test.mjs": {"milliseconds": 210000, "serial": true},
+    "snapshot-callers-1-postgres.test.mjs": {"milliseconds": 220000, "serial": true},
     "historical-win-readable-labels-postgres.test.mjs": {"milliseconds": 28680, "serial": true},
     "mail-needs-partner.test.mjs": {"milliseconds": 350, "serial": false},
     "mail-needs-partner-route.test.mjs": {"milliseconds": 335, "serial": false},
@@ -402,7 +405,7 @@
     "situation-retrieval-bigint.test.mjs": {"milliseconds": 419, "serial": false},
     "situation-retrieval-integration.test.mjs": {"milliseconds": 532, "serial": false},
     "situation-retrieval.test.mjs": {"milliseconds": 269, "serial": false},
-    "snapshot-service-postgres.test.mjs": {"milliseconds": 251409, "serial": true},
+    "snapshot-service-postgres.test.mjs": {"milliseconds": 270000, "serial": true},
     "sponsor-runtime.test.mjs": {"milliseconds": 776, "serial": false},
     "staging-journey-preflight.test.mjs": {"milliseconds": 402, "serial": false},
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},
