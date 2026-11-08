@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { types, neon, neonConfig } from '../src/postgres.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { assertRecordingProducer, recordingProvenance } from './helpers/recording-provenance.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.js';
 
@@ -135,11 +136,10 @@ test('owner modes preserve exact ordered subsets and registered response recordi
   const custom = await read({ owner_slug: actor.slug, lead_days: 30, vendor_days: 60 });
   assert.deepEqual(custom.cadence, { lead_days: 30, vendor_days: 60 });
   if (process.env.QUIET_OWNER_FIXTURE_OUTPUT) {
-    const source = readFileSync(new URL('../src/lead-follow-up.ts', import.meta.url));
     writeFileSync(process.env.QUIET_OWNER_FIXTURE_OUTPUT, JSON.stringify({
       provenance: { transport: 'executeRegisteredTool/disposable-postgres',
         producer_revision: execFileSync('git', ['rev-parse','HEAD'], { encoding: 'utf8' }).trim(),
-        producer_sha256: createHash('sha256').update(source).digest('hex'),
+        ...recordingProvenance(['quiet-follow-ups']),
         registry_entry_sha256: registryPin(),
         query: { verb: 'quiet-follow-ups', all: {}, owned: { owner_slug: actor.slug }, unassigned: { owner_slug: null } } },
       owner_slug: actor.slug, all, owned, unassigned,
@@ -178,7 +178,7 @@ test('registered date-bearing verbs serialize real PostgreSQL responses', async 
     }
     if (process.env.PG_DATE_FIXTURE_OUTPUT) writeFileSync(process.env.PG_DATE_FIXTURE_OUTPUT,
       JSON.stringify({ provenance: { transport: 'executeRegisteredTool/disposable-postgres',
-        producer_sha256: createHash('sha256').update(readFileSync(new URL('../src/tools.js', import.meta.url))).digest('hex'),
+        ...recordingProvenance(Object.keys(responses)),
         driver_sha256: createHash('sha256').update(readFileSync(new URL('../src/postgres.js', import.meta.url))).digest('hex') }, date_columns, responses }, null, 2) + '\n');
   } finally { await c.query('rollback'); }
 });
@@ -186,8 +186,7 @@ test('registered date-bearing verbs serialize real PostgreSQL responses', async 
 test('date verb recording is bound to the real producer and calendar contract', () => {
   const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/postgres-date-verbs.json', import.meta.url)));
   assert.equal(recording.provenance.transport, 'executeRegisteredTool/disposable-postgres');
-  assert.equal(recording.provenance.producer_sha256, createHash('sha256').update(
-    readFileSync(new URL('../src/tools.js', import.meta.url))).digest('hex'));
+  assertRecordingProducer(recording);
   assert.equal(recording.provenance.driver_sha256, createHash('sha256').update(
     readFileSync(new URL('../src/postgres.js', import.meta.url))).digest('hex'));
   assert.deepEqual(Object.keys(recording.responses).sort(),
@@ -289,8 +288,7 @@ test('missing actor joins retain assigned rows only in all-owner mode', async ()
 
 test('recorded responses replay through production proof response contract', () => {
   const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/quiet-follow-up-owner-filter.json', import.meta.url)));
-  assert.equal(recording.provenance.producer_sha256, createHash('sha256').update(
-    readFileSync(new URL('../src/lead-follow-up.ts', import.meta.url))).digest('hex'));
+  assertRecordingProducer(recording);
   recordingRegistryMatches(SCAC_MUTATION_OPERATIONS);
   const python = process.env.CARR_CI_PYTHON || 'python3';
   const output = execFileSync(python, ['tools/prove-quiet-follow-up-owner-filter.py', '--fixture',
