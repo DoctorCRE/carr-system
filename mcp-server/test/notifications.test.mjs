@@ -746,3 +746,31 @@ test('proof release fixture refuses unmarked reads and admits the Python reader'
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+
+test('watch routes accept only exact subject destinations', () => {
+  const deal = 'ae000000-0000-4000-8000-000000000060';
+  const lease = 'ae000000-0000-4000-8000-000000000061';
+  const client = 'ae000000-0000-4000-8000-000000000062';
+  const shape = (subject_type, subject_ref, deep_link) => notificationFeedProjection({
+    ok: true, unread_count: 1, notifications: [{
+      id: randomUUID(), severity: 'action_required', reason: 'Watched record changed',
+      subject_type, subject_ref, deep_link, created_at: '2026-11-08T12:00:00Z',
+      read_at: null, delivery: [{channel:'in_app',state:'pending'}],
+    }],
+  }, null, ToolError);
+  for (const [type, ref, url] of [['deal',deal,`/deals?deal=${deal}`], ['lease',lease,`/clients?record=${client}`]]) {
+    assert.equal(shape(type,ref,url).notifications[0].deep_link,url);
+    for (const unsafe of [
+      `https://foreign.test${url}`, `//foreign.test${url}`, `${url}&extra=1`, `${url}&deal=${deal}`,
+      `${url}#fragment`, `${url}\n`, url.replace(/=[^=]+$/, '=bad'), url.replace('?', '/?'),
+      `/../${url.slice(1)}`, `/safe/../${url.slice(1)}`, '/safe/..', '/safe/./child',
+      '/%2e%2e/home', '/safe\\evil',
+    ]) assert.throws(()=>shape(type,ref,unsafe),/notification_feed_unavailable/,unsafe);
+  }
+  assert.throws(()=>shape('deal',lease,`/deals?deal=${deal}`),/notification_feed_unavailable/);
+  assert.throws(()=>shape('lease',lease,`/deals?deal=${deal}`),/notification_feed_unavailable/);
+  assert.throws(()=>shape('deal',deal,`/clients?record=${client}`),/notification_feed_unavailable/);
+  assert.throws(()=>shape('lease','bad',`/clients?record=${client}`),/notification_feed_unavailable/);
+  assert.equal(shape('deal',deal,'/deals/legacy').notifications[0].deep_link,'/deals/legacy');
+});

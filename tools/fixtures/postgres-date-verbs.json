@@ -1,8 +1,6 @@
 {
   "provenance": {
     "transport": "executeRegisteredTool/disposable-postgres",
-    "producer_sha256": "dffe70070ba9da35452aa99bc793aeeebcc4376d17cea3d61ca2be0d5053fe0f",
-    "driver_sha256": "be4b104f47970ace941c42e1eddbdf0839257f233075e38ce4c323e57a4c562f",
     "producer_scope": {
       "scheme": "registered-handler-contract/v1",
       "verbs": [
@@ -14,7 +12,9 @@
         "quiet-follow-ups",
         "stale-records"
       ]
-    }
+    },
+    "producer_sha256": "dffe70070ba9da35452aa99bc793aeeebcc4376d17cea3d61ca2be0d5053fe0f",
+    "driver_sha256": "be4b104f47970ace941c42e1eddbdf0839257f233075e38ce4c323e57a4c562f"
   },
   "date_columns": {
     "morning-brief": [
@@ -245,9 +245,9 @@
     "lead-hot": {
       "leads": [
         {
-          "id": "f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
-          "registry_ref": "L-f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
-          "name": "Synthetic quiet owner a74743e3-374e-441b-abb1-a6dd05be6903",
+          "id": "efb9b6b3-d6ce-4eb8-b2c6-c009f626ed48",
+          "registry_ref": "L-efb9b6b3-d6ce-4eb8-b2c6-c009f626ed48",
+          "name": "Synthetic quiet owner b08d6956-fa55-45d8-9058-8ceb38af12ff",
           "specialty": null,
           "city": null,
           "county": null,
@@ -263,9 +263,9 @@
           "next_action_date": "2000-03-01"
         },
         {
-          "id": "d4eeb725-7bd1-46c4-ae02-de02896573c4",
-          "registry_ref": "L-d4eeb725-7bd1-46c4-ae02-de02896573c4",
-          "name": "Synthetic quiet owner 9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "id": "d028b1b2-a9ff-4275-9986-666bcc9a411f",
+          "registry_ref": "L-d028b1b2-a9ff-4275-9986-666bcc9a411f",
+          "name": "Synthetic quiet owner 59533e02-afec-4edb-941c-d48e71e3cde8",
           "specialty": null,
           "city": null,
           "county": null,
@@ -281,9 +281,9 @@
           "next_action_date": null
         },
         {
-          "id": "bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
-          "registry_ref": "L-bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
-          "name": "Synthetic quiet owner b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "id": "0215f2d4-d5d4-4ae8-9e2c-4341baddbdc6",
+          "registry_ref": "L-0215f2d4-d5d4-4ae8-9e2c-4341baddbdc6",
+          "name": "Synthetic quiet owner d9094eae-55a6-4c99-97a4-e8926aa530a4",
           "specialty": null,
           "city": null,
           "county": null,
@@ -299,9 +299,9 @@
           "next_action_date": null
         },
         {
-          "id": "ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
-          "registry_ref": "L-ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
-          "name": "Synthetic quiet owner c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "id": "1e879b31-1791-45cc-bfc7-c37047804db6",
+          "registry_ref": "L-1e879b31-1791-45cc-bfc7-c37047804db6",
+          "name": "Synthetic quiet owner d657f2de-4ead-4b41-bb10-678951fc48f3",
           "specialty": null,
           "city": null,
           "county": null,
@@ -319,7 +319,7 @@
       ]
     },
     "lead-board": {
-      "generated_at": "2026-11-07T17:56:36.496Z",
+      "generated_at": "2026-11-08T19:11:51.136Z",
       "stages": [
         {
           "slug": "new",
@@ -379,16 +379,16 @@
       ],
       "leads": [
         {
-          "id": "d4eeb725-7bd1-46c4-ae02-de02896573c4",
-          "registry_ref": "L-d4eeb725-7bd1-46c4-ae02-de02896573c4",
-          "name": "Synthetic quiet owner 9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "id": "d028b1b2-a9ff-4275-9986-666bcc9a411f",
+          "registry_ref": "L-d028b1b2-a9ff-4275-9986-666bcc9a411f",
+          "name": "Synthetic quiet owner 59533e02-afec-4edb-941c-d48e71e3cde8",
           "specialty": null,
           "city": null,
           "county": null,
           "state": null,
           "lane": null,
           "stage": "new",
-          "party_id": "9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "party_id": "59533e02-afec-4edb-941c-d48e71e3cde8",
           "stage_label": "New",
           "stage_sort": 10,
           "score": null,
@@ -401,8 +401,8 @@
           "owner": null,
           "owner_label": null,
           "base_version": 1,
-          "created_at": "2026-11-07T17:56:36.394Z",
-          "updated_at": "2026-11-07T17:56:36.394Z",
+          "created_at": "2026-11-08T19:11:51.041Z",
+          "updated_at": "2026-11-08T19:11:51.041Z",
           "conversion_eligible": true,
           "converted": false,
           "stage_moves": [],
@@ -429,16 +429,16 @@
           }
         },
         {
-          "id": "f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
-          "registry_ref": "L-f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
-          "name": "Synthetic quiet owner a74743e3-374e-441b-abb1-a6dd05be6903",
+          "id": "efb9b6b3-d6ce-4eb8-b2c6-c009f626ed48",
+          "registry_ref": "L-efb9b6b3-d6ce-4eb8-b2c6-c009f626ed48",
+          "name": "Synthetic quiet owner b08d6956-fa55-45d8-9058-8ceb38af12ff",
           "specialty": null,
           "city": null,
           "county": null,
           "state": null,
           "lane": null,
           "stage": "new",
-          "party_id": "a74743e3-374e-441b-abb1-a6dd05be6903",
+          "party_id": "b08d6956-fa55-45d8-9058-8ceb38af12ff",
           "stage_label": "New",
           "stage_sort": 10,
           "score": null,
@@ -451,8 +451,8 @@
           "owner": "joe",
           "owner_label": "Joe",
           "base_version": 2,
-          "created_at": "2026-11-07T17:56:36.432Z",
-          "updated_at": "2026-11-07T17:56:36.432Z",
+          "created_at": "2026-11-08T19:11:51.088Z",
+          "updated_at": "2026-11-08T19:11:51.088Z",
           "conversion_eligible": true,
           "converted": false,
           "stage_moves": [],
@@ -479,16 +479,16 @@
           }
         },
         {
-          "id": "bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
-          "registry_ref": "L-bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
-          "name": "Synthetic quiet owner b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "id": "1e879b31-1791-45cc-bfc7-c37047804db6",
+          "registry_ref": "L-1e879b31-1791-45cc-bfc7-c37047804db6",
+          "name": "Synthetic quiet owner d657f2de-4ead-4b41-bb10-678951fc48f3",
           "specialty": null,
           "city": null,
           "county": null,
           "state": null,
           "lane": null,
           "stage": "new",
-          "party_id": "b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
+          "party_id": "d657f2de-4ead-4b41-bb10-678951fc48f3",
           "stage_label": "New",
           "stage_sort": 10,
           "score": null,
@@ -501,8 +501,8 @@
           "owner": "joe",
           "owner_label": "Joe",
           "base_version": 1,
-          "created_at": "2026-11-07T17:56:36.387Z",
-          "updated_at": "2026-11-07T17:56:36.387Z",
+          "created_at": "2026-11-08T19:11:51.038Z",
+          "updated_at": "2026-11-08T19:11:51.038Z",
           "conversion_eligible": true,
           "converted": false,
           "stage_moves": [],
@@ -529,16 +529,16 @@
           }
         },
         {
-          "id": "ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
-          "registry_ref": "L-ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
-          "name": "Synthetic quiet owner c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "id": "0215f2d4-d5d4-4ae8-9e2c-4341baddbdc6",
+          "registry_ref": "L-0215f2d4-d5d4-4ae8-9e2c-4341baddbdc6",
+          "name": "Synthetic quiet owner d9094eae-55a6-4c99-97a4-e8926aa530a4",
           "specialty": null,
           "city": null,
           "county": null,
           "state": null,
           "lane": null,
           "stage": "new",
-          "party_id": "c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "party_id": "d9094eae-55a6-4c99-97a4-e8926aa530a4",
           "stage_label": "New",
           "stage_sort": 10,
           "score": null,
@@ -551,8 +551,8 @@
           "owner": "dell",
           "owner_label": "Dell",
           "base_version": 1,
-          "created_at": "2026-11-07T17:56:36.391Z",
-          "updated_at": "2026-11-07T17:56:36.391Z",
+          "created_at": "2026-11-08T19:11:51.040Z",
+          "updated_at": "2026-11-08T19:11:51.040Z",
           "conversion_eligible": true,
           "converted": false,
           "stage_moves": [],
@@ -604,10 +604,10 @@
       "proposals": [
         {
           "subject_type": "lead",
-          "subject_id": "f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
-          "party_id": "a74743e3-374e-441b-abb1-a6dd05be6903",
-          "ref": "L-f7ce22c8-c235-46eb-af5c-5b8f7f08dc3f",
-          "name": "Synthetic quiet owner a74743e3-374e-441b-abb1-a6dd05be6903",
+          "subject_id": "efb9b6b3-d6ce-4eb8-b2c6-c009f626ed48",
+          "party_id": "b08d6956-fa55-45d8-9058-8ceb38af12ff",
+          "ref": "L-efb9b6b3-d6ce-4eb8-b2c6-c009f626ed48",
+          "name": "Synthetic quiet owner b08d6956-fa55-45d8-9058-8ceb38af12ff",
           "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
           "anchor_on": "2000-01-01",
           "basis": "last_contact",
@@ -616,30 +616,14 @@
           "interval_days": 45,
           "due_on": "2000-03-01",
           "owner": "joe",
-          "days_overdue": 9747
+          "days_overdue": 9748
         },
         {
           "subject_type": "lead",
-          "subject_id": "bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
-          "party_id": "b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
-          "ref": "L-bef027c9-bdf2-4ffa-bf2e-6f3c27c3b23c",
-          "name": "Synthetic quiet owner b8c7e6f7-1fe3-4ff1-986a-a01d0492e1ea",
-          "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
-          "anchor_on": "2026-04-22",
-          "basis": "last_contact",
-          "next_action_date": null,
-          "client_id": null,
-          "interval_days": 45,
-          "due_on": "2026-06-06",
-          "owner": "joe",
-          "days_overdue": 154
-        },
-        {
-          "subject_type": "lead",
-          "subject_id": "ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
-          "party_id": "c735bde0-3629-4daf-9a9b-8b7aa5284507",
-          "ref": "L-ccf9785b-8cf6-4cb8-bf09-41d6c7bc8032",
-          "name": "Synthetic quiet owner c735bde0-3629-4daf-9a9b-8b7aa5284507",
+          "subject_id": "0215f2d4-d5d4-4ae8-9e2c-4341baddbdc6",
+          "party_id": "d9094eae-55a6-4c99-97a4-e8926aa530a4",
+          "ref": "L-0215f2d4-d5d4-4ae8-9e2c-4341baddbdc6",
+          "name": "Synthetic quiet owner d9094eae-55a6-4c99-97a4-e8926aa530a4",
           "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
           "anchor_on": "2026-04-22",
           "basis": "last_contact",
@@ -648,14 +632,30 @@
           "interval_days": 45,
           "due_on": "2026-06-06",
           "owner": "dell",
-          "days_overdue": 154
+          "days_overdue": 155
         },
         {
           "subject_type": "lead",
-          "subject_id": "d4eeb725-7bd1-46c4-ae02-de02896573c4",
-          "party_id": "9546ebc9-4b91-4328-9eec-cd28c82de3d7",
-          "ref": "L-d4eeb725-7bd1-46c4-ae02-de02896573c4",
-          "name": "Synthetic quiet owner 9546ebc9-4b91-4328-9eec-cd28c82de3d7",
+          "subject_id": "1e879b31-1791-45cc-bfc7-c37047804db6",
+          "party_id": "d657f2de-4ead-4b41-bb10-678951fc48f3",
+          "ref": "L-1e879b31-1791-45cc-bfc7-c37047804db6",
+          "name": "Synthetic quiet owner d657f2de-4ead-4b41-bb10-678951fc48f3",
+          "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 45,
+          "due_on": "2026-06-06",
+          "owner": "joe",
+          "days_overdue": 155
+        },
+        {
+          "subject_type": "lead",
+          "subject_id": "d028b1b2-a9ff-4275-9986-666bcc9a411f",
+          "party_id": "59533e02-afec-4edb-941c-d48e71e3cde8",
+          "ref": "L-d028b1b2-a9ff-4275-9986-666bcc9a411f",
+          "name": "Synthetic quiet owner 59533e02-afec-4edb-941c-d48e71e3cde8",
           "owner_id": null,
           "anchor_on": "2026-04-22",
           "basis": "last_contact",
@@ -664,30 +664,14 @@
           "interval_days": 45,
           "due_on": "2026-06-06",
           "owner": null,
-          "days_overdue": 154
+          "days_overdue": 155
         },
         {
           "subject_type": "vendor",
-          "subject_id": "07c60d3c-afeb-4137-84f8-88bed7c611a1",
-          "party_id": "c128afd5-e29a-4027-a18f-c325423b3c94",
-          "ref": "V-07c60d3c-afeb-4137-84f8-88bed7c611a1",
-          "name": "Synthetic quiet owner c128afd5-e29a-4027-a18f-c325423b3c94",
-          "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
-          "anchor_on": "2026-04-22",
-          "basis": "last_contact",
-          "next_action_date": null,
-          "client_id": null,
-          "interval_days": 90,
-          "due_on": "2026-07-21",
-          "owner": "dell",
-          "days_overdue": 109
-        },
-        {
-          "subject_type": "vendor",
-          "subject_id": "a7924c01-0829-454c-a810-5e27cdd176c7",
-          "party_id": "459a4b12-0e88-4989-92bf-2165f500aa22",
-          "ref": "V-a7924c01-0829-454c-a810-5e27cdd176c7",
-          "name": "Synthetic quiet owner 459a4b12-0e88-4989-92bf-2165f500aa22",
+          "subject_id": "85c35b7a-74d2-4d3d-9935-d06af6fa6161",
+          "party_id": "b242e4ea-cb88-40c5-874c-cdb28e6ff1b4",
+          "ref": "V-85c35b7a-74d2-4d3d-9935-d06af6fa6161",
+          "name": "Synthetic quiet owner b242e4ea-cb88-40c5-874c-cdb28e6ff1b4",
           "owner_id": null,
           "anchor_on": "2026-04-22",
           "basis": "last_contact",
@@ -696,14 +680,30 @@
           "interval_days": 90,
           "due_on": "2026-07-21",
           "owner": null,
-          "days_overdue": 109
+          "days_overdue": 110
         },
         {
           "subject_type": "vendor",
-          "subject_id": "fd9772de-dcdd-4405-831a-7cbfa34458b4",
-          "party_id": "142f605f-de51-4615-b2c1-932ffa9e6887",
-          "ref": "V-fd9772de-dcdd-4405-831a-7cbfa34458b4",
-          "name": "Synthetic quiet owner 142f605f-de51-4615-b2c1-932ffa9e6887",
+          "subject_id": "ad2552c0-11f0-4755-bd8a-bdbcf8e70f7c",
+          "party_id": "f4fa42d0-1c7a-49de-8e3f-db960d6f67cf",
+          "ref": "V-ad2552c0-11f0-4755-bd8a-bdbcf8e70f7c",
+          "name": "Synthetic quiet owner f4fa42d0-1c7a-49de-8e3f-db960d6f67cf",
+          "owner_id": "722901b8-efb3-4bd6-bef0-c5d481c0a35e",
+          "anchor_on": "2026-04-22",
+          "basis": "last_contact",
+          "next_action_date": null,
+          "client_id": null,
+          "interval_days": 90,
+          "due_on": "2026-07-21",
+          "owner": "dell",
+          "days_overdue": 110
+        },
+        {
+          "subject_type": "vendor",
+          "subject_id": "d8a21dca-53d2-43ae-a406-1fd3de178122",
+          "party_id": "46d06c5a-76fd-435b-a5fd-d726667f3fe7",
+          "ref": "V-d8a21dca-53d2-43ae-a406-1fd3de178122",
+          "name": "Synthetic quiet owner 46d06c5a-76fd-435b-a5fd-d726667f3fe7",
           "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
           "anchor_on": "2026-04-22",
           "basis": "last_contact",
@@ -712,7 +712,7 @@
           "interval_days": 90,
           "due_on": "2026-07-21",
           "owner": "joe",
-          "days_overdue": 109
+          "days_overdue": 110
         }
       ],
       "sent": false,
