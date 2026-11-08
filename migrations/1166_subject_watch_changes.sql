@@ -88,7 +88,10 @@ create trigger subject_watch_v2_material_start after insert or update on ops.sub
 for each row execute function ops.subject_watch_material_start();
 insert into ops.subject_watch_material_baseline
 select id,ops.subject_watch_material(subject_type,subject_id) from ops.subject_watch
-union all select id,ops.subject_watch_material(subject_type,subject_id) from ops.subject_watch_v2_subscription where subject_type in ('deal','lease');
+where ops.subject_watch_material(subject_type,subject_id) is not null
+union all select id,ops.subject_watch_material(subject_type,subject_id) from ops.subject_watch_v2_subscription
+where subject_type in ('deal','lease') and state<>'removed'
+  and ops.subject_watch_material(subject_type,subject_id) is not null;
 
 create function ops.capture_subject_watch_changes(p_event uuid) returns void
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { writeFileSync } from 'node:fs';
+import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 
@@ -266,4 +267,33 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   const {parseSubjectWatchChanges}=await import('../contracts/subject-watch-change.v1.js');
   parseSubjectWatchChanges(response);
   if(process.env.J118_CAPTURE_FIXTURE) writeFileSync(process.env.J118_CAPTURE_FIXTURE,JSON.stringify(response,null,2)+'\n');
+});
+
+test('migration initializes live watches and skips dangling targets',async t=>{
+  const c=new pg.Client({connectionString:dsn});await c.connect();t.after(()=>c.end());
+  await c.query('begin');
+  try {
+    const joe={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
+    const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic upgrade client',$1,$1) returning id",[joe.id])).rows[0].id;
+    await c.query("insert into client_status(slug,label) values('active','Synthetic active') on conflict do nothing");
+    const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,joe.id])).rows[0].id;
+    const create=async()=> (await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic migration deal','purchase','research','joe',$2,$2) returning id",[client,joe.id])).rows[0].id;
+    const live=await create(),dangling=await create();
+    await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    const watch=async id=>{
+      await c.query('set local role carr_writer');
+      const response=await executeRegisteredTool(c,joe,'watch-subject-v1',{subject_type:'deal',subject_id:id,idempotency_key:randomUUID()});
+      await c.query('reset role');return response.watch;
+    };
+    const current=await watch(live),stale=await watch(dangling);
+    await c.query('delete from deal where id=$1',[dangling]);
+    await c.query('delete from ops.subject_watch_material_baseline');
+    const migration=readMigration(migrationNames().find(name=>name.endsWith('_subject_watch_changes.sql')));
+    const start=migration.indexOf('insert into ops.subject_watch_material_baseline\nselect id');
+    const end=migration.indexOf('\n\ncreate function ops.capture_subject_watch_changes',start);
+    assert.ok(start>0 && end>start);
+    await c.query(migration.slice(start,end));
+    assert.equal((await c.query('select count(*)::integer n from ops.subject_watch_material_baseline where watch_id=$1',[current.id])).rows[0].n,1);
+    assert.equal((await c.query('select count(*)::integer n from ops.subject_watch_material_baseline where watch_id=$1',[stale.id])).rows[0].n,0);
+  } finally {await c.query('rollback');}
 });
