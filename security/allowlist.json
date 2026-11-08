@@ -859,6 +859,12 @@
       "sha256": "8bc3e984ac8784aca89f96a1d3702e6e974695cfdf2eeed3ca48562adebc7cbb",
       "rule": "credential-url",
       "reason": "Historical synthetic recorder-stderr fixture used the literal private:credential at invalid, never a live credential. The current test uses private-data canaries. Exact historical blob retained to preserve no-rebase delivery history."
+    },
+    {
+      "path": "docs/engineering/identity-proof-deadline-design.md",
+      "sha256": "72a1a975b101e278ba02d28f79b71dfbe7b6af742919e6d64dd9d6cfa87f2803",
+      "rule": "pii-phone",
+      "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
     }
   ]
 }
