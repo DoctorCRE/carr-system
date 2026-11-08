@@ -35,6 +35,18 @@ const runnerMap = (sponsor, token = SECRET, runner = RUNNER) =>
 const MAP = runnerMap("joe");
 const BEARER = `Bearer ${SECRET}`;
 
+const WATCH_V2_VERBS = [
+  "list-subject-watches-v2",
+  "pause-subject-watch-v2",
+  "read-subject-watch-v2",
+  "replace-subject-watch-policy-v2",
+  "resume-subject-watch-v2",
+  "unwatch-subject-v2",
+  "watch-subject-v2",
+];
+const watchV2Migration = readFileSync(new URL("../../migrations/1162_subject_watch_v2.sql", import.meta.url), "utf8");
+const watchActorMigration = readFileSync(new URL("../../migrations/1154_subject_watches.sql", import.meta.url), "utf8");
+
 const forbiddenClient = {
   query: async (text) => {
     throw new Error(`the gate let a call reach the database: ${String(text).slice(0, 80)}`);
@@ -189,7 +201,7 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
     "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal", "invalidate-web-push-session-v1",
     "read-web-push-subscriptions-v1", "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "register-web-push-subscription-v1", "reject-requirement-reply", "retire-retrieval-curation", "revoke-web-push-subscription-v1", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing"]);
+    "register-record-source-authority-policy", "register-web-push-subscription-v1", "reject-requirement-reply", "retire-retrieval-curation", "revoke-web-push-subscription-v1", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing", ...WATCH_V2_VERBS].sort());
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
@@ -334,3 +346,18 @@ test('every push registry verb participates in unattended refusal coverage', asy
       'human_only_verb_requires_verified_partner', name);
   }
 });
+for (const verb of WATCH_V2_VERBS) {
+  test(`${verb} metadata matches the literal-human store guard`, () => {
+    assert.match(watchV2Migration, /a uuid:=ops\.subject_watch_actor\(\)/);
+    assert.match(watchActorMigration, /kind='human' and slug in \('joe','dell'\)/);
+    assert.equal(TOOLS[verb].humanOnly, true, verb);
+    assert.equal(TOOLS[verb].humanCallerOnly, true, verb);
+  });
+  test(`${verb} refuses registered unattended dispatch before database access`, async () => {
+    const error = await executeRegisteredTool(forbiddenClient, unattended(), verb, {}).then(() => null, e => e);
+    assert.ok(error instanceof ToolError);
+    assert.equal(error.payload.error, "human_only_verb_requires_verified_partner");
+    assert.equal(error.payload.verb, verb);
+    assert.equal(error.payload.actor_class, "sponsored_agent");
+  });
+}

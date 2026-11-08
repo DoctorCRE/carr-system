@@ -10,6 +10,7 @@
 // list assertion below fails loudly if the set changes without the change being
 // noticed.
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 import { authorizationClassForActor } from "../src/identity.js";
@@ -58,6 +59,18 @@ const SPONSORED_PARTNER_ACTORS = [
 
 // A client that answers nothing. Reaching it at all means the gate let the call
 // through, and the test then fails on this error instead of quietly passing.
+const WATCH_V2_VERBS = [
+  "list-subject-watches-v2",
+  "pause-subject-watch-v2",
+  "read-subject-watch-v2",
+  "replace-subject-watch-policy-v2",
+  "resume-subject-watch-v2",
+  "unwatch-subject-v2",
+  "watch-subject-v2",
+];
+const watchV2Migration = readFileSync(new URL("../../migrations/1162_subject_watch_v2.sql", import.meta.url), "utf8");
+const watchActorMigration = readFileSync(new URL("../../migrations/1154_subject_watches.sql", import.meta.url), "utf8");
+
 const forbiddenClient = {
   query: async (text) => {
     throw new Error(`the human-only gate let a call reach the database: ${String(text).slice(0, 80)}`);
@@ -152,7 +165,8 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "undo-email-thread-filing",
     "undo-invoice-close",
     "undo-lead-move",
-  ]);
+    ...WATCH_V2_VERBS,
+  ].sort());
 });
 
 test("the actor classes this gate refuses are the classes identity.js derives", () => {
@@ -223,3 +237,18 @@ test('push browser guards and registry authority metadata agree', async () => {
       e => e.payload.error === 'push_session_required', name);
   }
 });
+for (const verb of WATCH_V2_VERBS) {
+  test(`${verb} metadata matches the literal-human store guard`, () => {
+    assert.match(watchV2Migration, /a uuid:=ops\.subject_watch_actor\(\)/);
+    assert.match(watchActorMigration, /kind='human' and slug in \('joe','dell'\)/);
+    assert.equal(TOOLS[verb].humanOnly, true, verb);
+    assert.equal(TOOLS[verb].humanCallerOnly, true, verb);
+  });
+  test(`${verb} refuses registered unattended dispatch before database access`, async () => {
+    const error = await executeRegisteredTool(forbiddenClient, { ...joeLocal, unattended: true, via: "unattended-token" }, verb, {}).then(() => null, e => e);
+    assert.ok(error instanceof ToolError);
+    assert.equal(error.payload.error, "human_only_verb_requires_verified_partner");
+    assert.equal(error.payload.verb, verb);
+    assert.equal(error.payload.actor_class, "sponsored_agent");
+  });
+}

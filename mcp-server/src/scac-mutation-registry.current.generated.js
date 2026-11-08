@@ -1693,6 +1693,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-subject-watches-v2": {
+    "ingress_key": "mcp-tool:list-subject-watches-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "b7f31a5cf69fd227a9ff69bf99dc62ae500d326b3a539944643b7f5b7ee2d5e3",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-verbs": {
     "ingress_key": "mcp-tool:list-verbs",
     "source_locator": "mcp-server/src/tools.js",
@@ -1958,6 +1968,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "pause-subject-watch-v2": {
+    "ingress_key": "mcp-tool:pause-subject-watch-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "4cb8bbcdac0d1c30d3768db084ff4979b5d0381b7cddce37e9f9c3f33de6fa39",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -2694,6 +2714,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-subject-watch-v2": {
+    "ingress_key": "mcp-tool:read-subject-watch-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "b98ed0339cc23ac55dd5a1a93bd341b2a9b306d439aab64003cf0fc2e87416c9",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-tour-feedback": {
     "ingress_key": "mcp-tool:read-tour-feedback",
     "source_locator": "mcp-server/src/tour-sharing.js",
@@ -3364,6 +3394,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "replace-subject-watch-policy-v2": {
+    "ingress_key": "mcp-tool:replace-subject-watch-policy-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "7e7c6b27310174e936bb6f2f12ae75781968ee1761efc5124428cdc33310128a",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "report-problem": {
     "ingress_key": "mcp-tool:report-problem",
     "source_locator": "mcp-server/src/work-request-intake.js",
@@ -3476,6 +3516,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "resume-subject-watch-v2": {
+    "ingress_key": "mcp-tool:resume-subject-watch-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "4cb8bbcdac0d1c30d3768db084ff4979b5d0381b7cddce37e9f9c3f33de6fa39",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
@@ -4111,6 +4161,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "unwatch-subject-v2": {
+    "ingress_key": "mcp-tool:unwatch-subject-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "4cb8bbcdac0d1c30d3768db084ff4979b5d0381b7cddce37e9f9c3f33de6fa39",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "update-deal": {
     "ingress_key": "mcp-tool:update-deal",
     "source_locator": "mcp-server/src/tools.js",
@@ -4228,6 +4288,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "write": true,
     "human_only": false,
     "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "watch-subject-v2": {
+    "ingress_key": "mcp-tool:watch-subject-v2",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "2c7c5f0bd3e236ae4c7fa1dcdee10e6542ffb9b0a4230bf79aca7f8b7ca6376e",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
     "authority_only": false,
     "delegates_to": []
   },
