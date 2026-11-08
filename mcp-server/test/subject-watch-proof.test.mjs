@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
-const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-proof.py',import.meta.url));
+const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-delivery-proof.py',import.meta.url));
 test('proof CLI passes exact scheduled evidence and refuses duplicates and insufficient evidence',t=>{
  const sample=JSON.parse(readFileSync(new URL('../contracts/subject-watch-scheduled-proof.v1.fixture.json',import.meta.url)));
  const root=mkdtempSync(join(tmpdir(),'watch-proof-'));t.after(()=>rmSync(root,{recursive:true,force:true}));

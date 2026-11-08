@@ -151,7 +151,7 @@
     "ops.subject_watch_event_receipt": "Runtime event-consumption receipts reference business event identities. A rebuild starts without events or receipts; never carry them.",
     "ops.subject_watch_delivery": "Runtime queue clocks and health; never carry watch identities into schema seeds.",
     "ops.subject_watch_sweep": "Runtime scheduled sweep receipts are not seed data.",
-    "ops.subject_watch_material_baseline": "Runtime per-generation material snapshots contain watch identities and selected deal/lease facts. Subscriptions and business records are excluded from schema snapshots, so a schema-only rebuild has no watch baseline to retain. Never carry these rows.",
+    "ops.subject_watch_material_baseline": "Runtime per-generation material snapshots contain watch identities and selected deal/lease facts, including canonical per-owner next-action due dates. Subscriptions and business records are excluded from schema snapshots, so a schema-only rebuild has no watch baseline to retain. Never carry these rows.",
     "ops.subject_watch_lease_baseline": "Runtime subscription baselines contain watch identities, lease versions and expiration dates. Subscriptions and business leases are not snapshot seeds; never carry these rows."
   },
   "carried_subset_must_not_contain": {

@@ -4,6 +4,10 @@
     "git_sha": {
       "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "reason": null
+    },
+    "env": {
+      "value": "production",
+      "reason": null
     }
   },
   "sample": {

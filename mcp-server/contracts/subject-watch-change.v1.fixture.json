@@ -2,42 +2,48 @@
   "ok": true,
   "changes": [
     {
-      "id": "2520ef56-f7b0-4328-a46d-8c3a761e235f",
+      "id": "0a416f86-22ff-421b-ba58-a73b0a0f5722",
       "changes": [
         {
           "after": [
             {
               "status": "current",
               "executed_on": "2026-01-01",
-              "expiration_on": "2028-01-01"
+              "expiration_on": "2029-01-01"
             }
           ],
           "field": "leases",
-          "before": [],
+          "before": [
+            {
+              "status": "current",
+              "executed_on": "2026-01-01",
+              "expiration_on": "2028-01-01"
+            }
+          ],
           "reason_code": "value_changed"
         }
       ],
       "category": "material_changed",
-      "subject_id": "7349ce50-7cbc-4ceb-9bcd-0e1cc89d2fc9",
+      "subject_id": "5d0939fd-bd65-4e74-b19a-2a7898f184f1",
       "disposition": "pending",
-      "eligible_at": "2026-11-08T14:09:52.697561-06:00",
-      "occurred_at": "2026-11-08T14:09:52.691924-06:00",
-      "recorded_at": "2026-11-08T14:09:52.697561-06:00",
+      "eligible_at": "2026-11-08T14:59:22.970331-06:00",
+      "occurred_at": "2026-11-08T14:59:22.968931-06:00",
+      "recorded_at": "2026-11-08T14:59:22.970331-06:00",
       "subject_type": "deal",
       "evidence_refs": [
         {
-          "event_id": "bb9d6ff1-9ec8-483d-bc79-4c13bc685f73",
+          "event_id": "dcc80a99-a5d9-4132-ab4c-328929fcbbc0",
           "activity_id": null
         }
       ],
       "policy_version": 1,
       "notification_id": null,
-      "source_event_id": "bb9d6ff1-9ec8-483d-bc79-4c13bc685f73",
-      "source_revision": 7,
-      "watch_generation_id": "0e1eba64-93cd-42ee-8179-cb9b6a7e8c57"
+      "source_event_id": "dcc80a99-a5d9-4132-ab4c-328929fcbbc0",
+      "source_revision": 9,
+      "watch_generation_id": "2b170ac7-9aac-410d-b3e0-74576ef52501"
     }
   ],
   "has_more": true,
-  "next_cursor": "2520ef56-f7b0-4328-a46d-8c3a761e235f",
+  "next_cursor": "0a416f86-22ff-421b-ba58-a73b0a0f5722",
   "schema_version": "subject-watch-change.v1"
 }

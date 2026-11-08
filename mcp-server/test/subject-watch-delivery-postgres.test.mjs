@@ -31,8 +31,8 @@ test('quiet lease clocks and pending delivery', async t => {
   assert.equal(response.changes[0].disposition,'emitted');
 
   if (process.env.J139_CAPTURE_PROOF) {
-   const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-proof.py',import.meta.url));
-   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); print(json.dumps({'release':{'ok':True,'git_sha':{'value':'a'*40,'reason':None}},'sample':sample}))";
+   const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-delivery-proof.py',import.meta.url));
+   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); print(json.dumps({'release':{'ok':True,'env':{'value':'production','reason':None},'git_sha':{'value':'a'*40,'reason':None}},'sample':sample}))";
    const fixture=execFileSync(process.env.CARR_CI_PYTHON??'python3',['-c',script,proof,dsn,watch],{encoding:'utf8'});
    const {writeFileSync}=await import('node:fs');writeFileSync(process.env.J139_CAPTURE_PROOF,fixture);
   }

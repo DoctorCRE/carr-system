@@ -171,7 +171,14 @@ test('watch statechart on canonical event ingress', async t => {
   await c.query('select ops.consume_subject_watch_event($1)',[e]);assert.equal(await count(),0,'lost commit acknowledgement');
   assert.equal(await count(dell),0);
   await watch('deal',deal,'dell');
-  await c.query("update deal set owner='dell',version=version+1 where id=$1",[deal]);
+  await c.query('begin');
+  try {
+    const version=(await c.query('select version from deal where id=$1',[deal])).rows[0].version;
+    await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    await c.query(TOOLS['set-lead'].authorityOnly?'set local session authorization carr_authority_joe':'set local role carr_writer');
+    await executeRegisteredTool(c,{id:joe,slug:'joe',human:true},'set-lead',{deal,new_lead:'dell',base_version:version,idempotency_key:randomUUID()});
+    await c.query('commit');
+  } catch(error) {await c.query('rollback');throw error;}
   await event();assert.equal(await count(),0);assert.equal(await count(dell),0);
   assert.equal(Number((await c.query("select count(*) from ops.subject_watch_change where subject_id=$1 and category='material_changed'",[deal])).rows[0].count),2,'material owner change captures both partners');
   const activity=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic inbound','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,joe])).rows[0].id;
