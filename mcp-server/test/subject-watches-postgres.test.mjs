@@ -172,6 +172,7 @@ test('watch statechart on canonical event ingress', async t => {
   assert.equal(await count(dell),0);
   await watch('deal',deal,'dell');
   await c.query("update deal set owner='dell',version=version+1 where id=$1",[deal]);
+  await c.query("insert into deal_participant(deal_id,actor_id,role,set_by) values($1,$2,'lead',$3)",[deal,dell,joe]);
   await event();assert.equal(await count(),0);assert.equal(await count(dell),0);
   assert.equal(Number((await c.query("select count(*) from ops.subject_watch_change where subject_id=$1 and category='material_changed'",[deal])).rows[0].count),2,'material owner change captures both partners');
   const activity=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic inbound','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,joe])).rows[0].id;

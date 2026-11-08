@@ -7,7 +7,8 @@ set local statement_timeout='30s';
 create function ops.subject_watch_material(p_kind text,p_id uuid) returns jsonb
 language sql stable set search_path=pg_catalog,pg_temp as $$
   select jsonb_build_object('phase',btrim(d.phase),'outcome',nullif(btrim(d.outcome),''),
-    'owner',nullif(btrim(d.owner),''),'next_date',d.next_date,'closed_on',d.closed_on,
+    'owner',(select owner.slug from public.deal_participant lead join public.actor owner on owner.id=lead.actor_id
+      where lead.deal_id=d.id and lead.role='lead' and lead.to_at is null),'next_date',d.next_date,'closed_on',d.closed_on,
     'operating_state',d.operating_state,
     'critical_dates',(select coalesce(jsonb_agg(v order by v::text),'[]') from
       (select distinct jsonb_build_object('kind',btrim(kind),'due_on',due_on) v

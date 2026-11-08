@@ -166,8 +166,11 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   const joe={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
   const dell={...(await c.query("select id,slug from actor where slug='dell'")).rows[0],human:true};
   const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic receipt client',$1,$1) returning id",[joe.id])).rows[0].id;
+  await c.query("insert into client_status(slug,label) values('active','Synthetic active') on conflict do nothing");
   const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,joe.id])).rows[0].id;
   const deal=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic receipt deal','purchase','research','joe',$2,$2) returning id",[client,joe.id])).rows[0].id;
+  await c.query("update deal set owner='dell' where id=$1",[deal]);
+  await c.query("insert into deal_participant(deal_id,actor_id,role,set_by) values($1,$2,'lead',$2)",[deal,joe.id]);
   const target={subject_type:'deal',subject_id:deal};
   const call=async(verb,args,who=joe,connection=c)=>{
     await connection.query('begin');
@@ -187,6 +190,8 @@ test('meaningful canonical changes commit once with source writes and isolate ma
     const first=await call('update-deal',args);assert.equal((await call('update-deal',args)).replayed,true);return first;
   };
   assert.deepEqual((await changes()).changes,[]);
+  await call('set-lead',{deal,new_lead:'joe',base_version:await version(),idempotency_key:randomUUID()});
+  assert.equal((await changes()).changes.length,0,'repairing a stale legacy owner does not change the canonical lead');
   await update({notes_path:' Synthetic note '});await update({notes_path:'Synthetic note'});
   await update({outcome:null});
   assert.equal((await changes()).changes.length,0,'bookkeeping and equivalent selected values');
