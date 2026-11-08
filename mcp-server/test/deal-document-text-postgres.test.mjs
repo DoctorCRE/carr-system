@@ -1,4 +1,6 @@
 import test from 'node:test';
+import { callTool } from '../src/mcp.js';
+import { neonConfig } from '../src/postgres.js';
 import { execFileSync } from 'node:child_process';
 import { unattendedActorForToken } from '../src/identity.js';
 import { createHash } from 'node:crypto';
@@ -24,9 +26,25 @@ const retained = { document_ref: doc, entity_ref: deal, content_hash: hash,
 test('retained text lifecycle and authenticated registered contract', async t => {
   const db = await postgresDatabase('document-text-');
   const c = db.client;
+  const statements = [];
+  const previousFetch = neonConfig.fetchFunction;
+  neonConfig.fetchFunction = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    statements.push(body);
+    const result = await c.query(body.query, body.params);
+    return Response.json({
+      fields: result.fields.map(f => ({ name: f.name, dataTypeID: f.dataTypeID })),
+      rows: result.rows.map(row => result.fields.map(f => {
+        const value = row[f.name];
+        return value === null ? null : value instanceof Date ? value.toISOString()
+          : typeof value === 'object' ? JSON.stringify(value) : String(value);
+      })),
+      command: result.command, rowCount: result.rowCount, rowAsArray: true,
+    });
+  };
   const invoke = async (verb, args, actor = partner) => {
     await c.query(`set role ${verb === 'record-deal-document-text' ? 'carr_writer' : 'carr_reader'}`);
-    try { return await executeRegisteredTool(c, actor, verb, args); }
+    try { return verb === 'record-deal-document-text' ? await executeRegisteredTool(c, actor, verb, args) : await callTool({DATABASE_URL_READER:'postgresql://fixture@synthetic.invalid/fixture'}, actor, verb, args); }
     finally { await c.query('reset role'); }
   };
   const read = async (args = {}) => {
@@ -55,12 +73,63 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     await c.query('create schema ops; create role carr_reader; create role carr_writer; grant usage on schema ops to carr_reader,carr_writer');
     await c.query('grant select(id,slug) on public.actor to carr_reader');
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
+    await c.query('create unique index actor_slug_key on actor(slug)');
     await c.query('create table v_ref_index(subject_type text,subject_id uuid)');
     await c.query(readFileSync(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
     await c.query(readFileSync(new URL('../../migrations/1164_deal_document_text.sql', import.meta.url), 'utf8'));
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic'),($2,'codex','automation','Synthetic')", [partner.id, robot.id]);
     await c.query("insert into v_ref_index values('deal',$1)", [deal]);
     await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,'documents/synthetic.pdf','Synthetic.pdf','application/pdf',$3,10,$4)", [doc, deal, hash, partner.id]);
+    await t.test('slug-only extraction source reads the bound document', async () => {
+      await c.query('create table ops.deal_extraction_job(id uuid,organization_tenant_id text,actor_id uuid,contract jsonb,receipt jsonb,document_ref uuid,content_hash text)');
+      const source = readFileSync(new URL('../../migrations/1103_deal_extraction.sql', import.meta.url), 'utf8');
+      await c.query(source.slice(source.indexOf('create function ops.read_deal_extraction_source'),source.indexOf('create function ops.record_deal_extraction')));
+      const contract = {idempotency_key:doc,entity_ref:deal,document_ref:doc,document_type:'lease',model:'haiku',extractor_version:'deal-text.v1'};
+      const {id, ...slugOnly} = robot;
+      assert.equal((await invoke('read-deal-extraction-source',contract,slugOnly)).document.document_ref,doc);
+      assert.equal((await invoke('read-deal-extraction-source',contract,robot)).document.document_ref,doc);
+    });
+    await t.test('slug-only action-link owner resolves the card', async () => {
+      await c.query(`create table party(id uuid,merged_into uuid,deleted_at timestamptz,contact_state text);
+        create table lead(id uuid,party_id uuid,stage text,suppressed boolean);
+        create table lead_contact_draft(id uuid,lead_id uuid,party_id uuid,owner_id uuid,revision integer,approved_at timestamptz,subject text,body text,scheduled_for timestamptz,time_zone text);
+        grant select on party,lead,lead_contact_draft to carr_reader`);
+      await c.query("insert into party values($1,null,null,'active');",[doc]);
+      await c.query("insert into lead values($1,$2,'qualified',false)",[deal,doc]);
+      await c.query("insert into lead_contact_draft values($1,$2,$1,$3,1,null,'Synthetic','Synthetic',now(),'America/Chicago')",[doc,deal,partner.id]);
+      const ref = 'al1_'+Buffer.from('ld:'+doc).toString('base64url');
+      const {id,...slugOnly} = partner;
+      assert.equal((await invoke('resolve-action-link',{ref},slugOnly)).card.id,doc);
+      assert.equal((await invoke('resolve-action-link',{ref},partner)).card.id,doc);
+    });
+    await t.test('review slug-only authority and unresolved identity', async () => {
+      const {id,...slugOnly} = robot;
+      await refuses(invoke('read-deal-document-text',bound,slugOnly),'human_only_verb_requires_verified_partner');
+      await refuses(invoke('list-deal-document-text-sources',{limit:1},{...partner,id:undefined}),'not_in_profile');
+      await c.query("update actor set slug='missing-fixture' where id=$1",[robot.id]);
+      try { await refuses(invoke('list-deal-document-text-sources',{limit:1},slugOnly),'unauthenticated'); }
+      finally { await c.query("update actor set slug='codex' where id=$1",[robot.id]); }
+      await refuses(invoke('read-deal-document-text',bound,{...partner,id:undefined,slug:'dell'}),'unauthenticated');
+    });
+    await t.test('reader identity binds only the slug with one indexed column-only lookup per call', async () => {
+      const actor = { ...robot, id: partner.id };
+      const before = { ...actor };
+      statements.length = 0;
+      await invoke('call-verb', {verb:'list-deal-document-text-sources',args:{limit:1}}, actor);
+      assert.deepEqual(actor, { ...before, id: robot.id });
+      const lookups = statements.filter(s => /from public\.actor where slug=\$1/.test(s.query));
+      assert.equal(lookups.length, 1);
+      assert.deepEqual(lookups[0].params, ['codex']);
+      await c.query('set role carr_reader');
+      try {
+        await assert.rejects(c.query('select kind from actor'), e => e.code === '42501');
+        await assert.rejects(c.query("update actor set slug=slug"), e => e.code === '42501');
+        await c.query('set enable_seqscan=off');
+        const plan = await c.query('explain select id from public.actor where slug=$1', ['codex']);
+        assert.match(JSON.stringify(plan.rows), /Index Scan/);
+      } finally { await c.query('reset enable_seqscan; reset role'); }
+      await refuses(invoke('list-deal-document-text-sources',{limit:1},{...robot,slug:'missing'}),'unauthenticated');
+    });
     await t.test('slug-only automation resolves on the stateless production path', async () => {
       const { id: _robotId, ...readerRobot } = robot;
       const sources = await invoke('list-deal-document-text-sources', { limit: 1 }, readerRobot);
@@ -79,6 +148,30 @@ test('retained text lifecycle and authenticated registered contract', async t =>
       } catch (error) {
         assert.equal(publicError(error).error, 'document_not_found');
       }
+    });
+
+    await t.test('legacy owned mail appears through the reader route', async t => {
+await c.query(`create table activity(id uuid,actor_id uuid,kind text,email_source jsonb,email_context jsonb,version integer,occurred_at timestamptz,recorded_at timestamptz,summary text,detail text);
+create table email_proposal(id uuid,version integer,kind text,activity_id uuid,status text,disposition text,deferred_until timestamptz,owner text,next_date date); grant select on activity,email_proposal to carr_reader;`);
+await c.query("insert into activity values($1,$2,'email_in',null,'{}',1,now(),now(),'Synthetic','Synthetic')",[doc,partner.id]);
+await c.query("insert into email_proposal values($1,1,'next_step',$2,'pending',null,null,'joe',null)",[deal,doc]);
+
+await c.query(`create table deal(id uuid,name text);
+create table email_message_summary(activity_id uuid,source_hash text,generator_version text);
+alter table email_proposal add column resolved_at timestamptz default now(),add column resolved_by uuid,add column resolution_reason text,add column match_evidence jsonb,add column resolution_note text,add column correction_provenance jsonb,add column deal_id uuid,add column evidence_quote text,add column task_text text,add column sender_role text,add column confidence real,add column draft_subject text,add column draft_body text,add column submitted_email jsonb,add column send_result jsonb,add column result_recorded_at timestamptz,add column created_at timestamptz default now();
+grant select on deal,email_message_summary to carr_reader;`);
+
+      for (const [verb,args,key] of [['read-mail-needs-partner',{},'items'],['email-router-queue',{purpose:'summaries'},'emails']]) {
+        await t.test(verb, async () => {
+          assert.equal((await invoke(verb,args,{slug:'joe',human:true}))[key].length,1);
+        });
+      }
+      await c.query("update email_proposal set status='dismissed'");
+      await t.test('list-email-proposals summary ownership', async () => {
+        const result = await invoke('list-email-proposals',{status:'dismissed',include_non_deal:true},{slug:'joe',human:true});
+        assert.equal(result.proposals.length,1);
+        assert.ok(result.proposals[0].email_summary);
+      });
     });
     await t.test('absent returns unavailable', async () => fixture('not-produced', await read()));
     await t.test('absent to produced and immutable replay', async () => {
@@ -184,5 +277,5 @@ test('retained text lifecycle and authenticated registered contract', async t =>
         await c.query('update attachment set deleted_at=null where id=$1', [doc]);
       }
     });
-  } finally { await db.close(); }
+  } finally { neonConfig.fetchFunction = previousFetch; await db.close(); }
 });
