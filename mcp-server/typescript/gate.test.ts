@@ -8,6 +8,7 @@ import test from "node:test";
 import { object } from "./migration.ts";
 
 const source = resolve(import.meta.dirname, "..");
+const fixtureEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
 
 test("staged gate accepts clean code and refuses each negative seed", () => {
   const root = mkdtempSync(join(tmpdir(), "carr-typescript-"));
@@ -29,11 +30,12 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       join(pkg, "typescript/migration.json"),
       JSON.stringify({ legacyJavaScript: [], toolExceptions: [], legacyTypeScript: {} }),
     );
-    execFileSync("git", ["init", "-q", root]);
+    execFileSync("git", ["init", "-q", root], { env: fixtureEnv });
     writeFileSync(join(root, ".gitignore"), "node_modules/\n");
     const run = () =>
       spawnSync(process.execPath, [join(pkg, "typescript/check.ts")], {
         cwd: root,
+        env: fixtureEnv,
         encoding: "utf8",
         timeout: 120_000,
       });
