@@ -156,12 +156,16 @@ test("strict aggregate runs after failed classes and requires complete successfu
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.deepEqual(gate.needs, ["select", "lint", "fast", "gates", "secret", "unit", "unit-coverage", "scope", "classes", "migration-fixtures", "launchd-python39"]);
   assert.deepEqual(ci.jobs["unit-coverage"].needs, ["select", "unit"], "coverage must wait for the entire shard matrix");
-  const cardinality = spawnSync("python3", ["-c",
-    "from ci_unit_shards import COUNT; print(COUNT)"], {
+  const cardinality = spawnSync("python3", ["ci_unit_shards.py", "matrix"], {
     cwd: new URL("../../ops/", import.meta.url), encoding: "utf8", timeout: 5000 });
   assert.equal(cardinality.status, 0, cardinality.stderr);
-  assert.deepEqual(read("unit-shards.yml").jobs.unit.strategy.matrix.shard,
-    Array.from({ length: Number(cardinality.stdout.trim()) }, (_, index) => index + 1));
+  const units = read("unit-shards.yml").jobs;
+  assert.equal(units.unit.strategy.matrix, "${{ fromJSON(needs.plan.outputs.matrix) }}");
+  assert.match(units.plan.steps.find(step => step.id === "assign").run, /python3 ops\/ci_unit_shards.py matrix/);
+  const admitted = JSON.parse(cardinality.stdout).include;
+  assert.deepEqual(admitted, Array.from({ length: admitted.length }, (_, index) => ({ shard: index + 1, count: admitted.length })));
+  assert.ok(admitted.length > 0 && admitted.length <= 16);
+  assert.equal(units.unit.name, "MCP unit shard ${{ matrix.shard }} of ${{ matrix.count }}");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
