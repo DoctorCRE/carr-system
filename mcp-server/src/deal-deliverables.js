@@ -196,9 +196,9 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
     humanCallerOnly: true,
     description: {
       "start-deal-deliverable":
-        "Reserve a partner deliverable upload. Private by default. Returns a byte upload path. Files stay with the deal.",
+        "Reserve a partner upload. Defaults to private deliverables. target_collection documents uses deal-document-intake.v1 and files verified bytes into deal-documents.v1 attachments. Returns a server-issued byte upload path.",
       "finalize-deal-deliverable":
-        "Finalize verified deliverable bytes privately. Repeated finalization returns the existing file.",
+        "Finalize verified bytes. Document destinations return a deal-document-intake.v1 attachment receipt visible in list-deal-documents. Repeated finalization returns the same identity.",
       "abandon-deal-deliverable": "Abandon an unfinished upload. Bytes are never filed after abandonment. Replays return the existing disposition.",
       "set-deal-deliverable-visibility":
         "Versioned private/shared designation. Shared means publishable, never published.",
@@ -218,8 +218,8 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
         const result = await handler(c, actor, args);
         if (!result.existing)
           await writeEvent(c, actor, name, "deal", args.deal_id, {
-            field: "deliverable",
-            new: result.deliverable,
+            field: result.attachment ? "attachment" : "deliverable",
+            new: result.attachment || result.deliverable,
             cause: "human_stated",
             idempotency_key: args.idempotency_key,
           });
@@ -387,7 +387,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
     ),
     "read-deal-deliverable": {
       write: false,
-      description: "Read the current authorized upload state and document attachment receipt after a lost response. No object key or bytes.",
+      description: "Read the current authorized upload state and deal-document-intake.v1 document attachment receipt after a lost response. No object key or bytes.",
       inputSchema: { type: "object", additionalProperties: false, properties: target, required: ["deal_id", "deliverable_id"] },
       handler: async (c, actor, a) => {
         const row = await deliverableRow(c, actor, a.deal_id, a.deliverable_id);
