@@ -1,11 +1,11 @@
 [
   {
     "schema_version": "action-link-resolve.v2",
-    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAwOmYzNTU0N2U0M2UxNmRhZDExNDJlNjZjY2QxYTgxYTAw",
+    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAwOjQzOTJkOWVlOTlhM2U3OTQwOTk5YzU2OGJkNGM3YjYx",
     "card": {
       "kind": "post_call_review",
       "id": "20000000-0000-4000-8000-000000000100",
-      "source_version": "f35547e43e16dad1142e66ccd1a81a00",
+      "source_version": "4392d9ee99a3e7940999c568bd4c7b61",
       "state": "pending_review",
       "detail": {
         "changes": [
@@ -24,7 +24,7 @@
         "reviewed": false,
         "candidates": [],
         "session_id": "20000000-0000-4000-8000-000000000100",
-        "started_at": "2026-10-31T19:00:00-05:00"
+        "started_at": "2026-11-01T00:00:00+00:00"
       },
       "actions": [
         {
@@ -49,7 +49,7 @@
         "action": "comment",
         "comment": "Synthetic feedback",
         "event_id": "20000000-0000-4000-8000-000000000200",
-        "created_at": "2026-10-31T19:00:00-05:00",
+        "created_at": "2026-11-01T00:00:00+00:00",
         "property_id": "20000000-0000-4000-8000-000000000300",
         "shortlisted": null,
         "projection_id": "20000000-0000-4000-8000-000000000300",
@@ -60,11 +60,11 @@
   },
   {
     "schema_version": "action-link-resolve.v2",
-    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAxOjNlOTg3NjA2MDk4MTg2YjU5MzMzNzNiYzM0ZjEyYTcw",
+    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAxOjhlNDUwMTM3Y2UzMjk5ODM1ZTVhMWNkODFjNzUxYWJj",
     "card": {
       "kind": "post_call_review",
       "id": "20000000-0000-4000-8000-000000000101",
-      "source_version": "3e987606098186b5933373bc34f12a70",
+      "source_version": "8e450137ce3299835e5a1cd81c751abc",
       "state": "pending_review",
       "detail": {
         "changes": [
@@ -83,7 +83,7 @@
         "reviewed": false,
         "candidates": [],
         "session_id": "20000000-0000-4000-8000-000000000101",
-        "started_at": "2026-10-31T19:00:00-05:00"
+        "started_at": "2026-11-01T00:00:00+00:00"
       },
       "actions": [
         {
@@ -108,7 +108,7 @@
         "action": "comment",
         "comment": "Synthetic feedback",
         "event_id": "20000000-0000-4000-8000-000000000201",
-        "created_at": "2026-10-31T19:00:00-05:00",
+        "created_at": "2026-11-01T00:00:00+00:00",
         "property_id": "20000000-0000-4000-8000-000000000301",
         "shortlisted": null,
         "projection_id": "20000000-0000-4000-8000-000000000301",

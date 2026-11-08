@@ -17,7 +17,6 @@ before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'action-card-targets-', snapshot: true });
   c = new pg.Client(fixture.connection);
   await c.connect();
-  await c.query("set time zone 'America/Chicago'");
   for (const who of actors) {
     await c.query("update actor set slug=slug||'-snapshot' where slug=$1", [who.slug]);
     await c.query("insert into actor(id,slug,kind,display_name) values($1,$2,'human','Synthetic partner')", [who.id, who.slug]);
@@ -84,6 +83,20 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
       assert.deepEqual(resolvedFeedback.card.actions,[]);
       fixtures.push(first, feedback);
     });
+    await t.test(`${who.slug} unchanged reference survives session timezone changes`, async () => {
+      const initial = (await c.query('show timezone')).rows[0].TimeZone;
+      try {
+        await c.query("set time zone 'America/Chicago'");
+        const chicago = await call(who, 'post_call_review', session, sv);
+        await c.query("set time zone 'UTC'");
+        const utc = await call(who, 'post_call_review', session, sv);
+        assert.equal(chicago.card.state, 'pending_review');
+        assert.equal(utc.card.state, 'pending_review');
+        assert.equal(utc.card.source_version, chicago.card.source_version);
+        assert.equal(utc.card.actions.length, 1);
+        assert.deepEqual(utc, chicago);
+      } finally { await c.query("select set_config('TimeZone',$1,false)", [initial]); }
+    });
     await t.test(`${who.slug} foreign and missing refuse identically before detail`, async () => {
       for (const [kind, sourceId, v] of [['post_call_review', session, sv], ['feedback_event', event, String(i + 1)]]) {
         await refused(call(actors[1 - i], kind, sourceId, v));
@@ -103,6 +116,28 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
       const result = await call(who, 'post_call_review', session, sv);
       assert.equal(result.card.state, 'resolved');
       assert.deepEqual(result.card.actions, []);
+    });
+    await t.test(`${who.slug} canonical successor retires old feedback`, async () => {
+      await c.query('begin');
+      try {
+        await c.query(`insert into ops.tour_share_grant(organization_tenant_id,projection_id,grant_version,
+          token_digest,audience,permission_scopes,rotated_from_grant_id,expires_at,status,receipt_digest,created_by_actor_id)
+          select organization_tenant_id,projection_id,grant_version+1,$2,audience,permission_scopes,id,
+            expires_at,'active',$3,created_by_actor_id from ops.tour_share_grant where id=$1`,
+        [grant, 'sha256:' + String(i + 3).repeat(64), 'sha256:' + 'c'.repeat(64)]);
+        const canonical = (await c.query('select ops.read_tour_internal_detail($1,$2,$3) detail',
+          ['carr-internal', grant, who.id])).rows[0].detail;
+        assert.equal(canonical.shares.find(s => s.share_grant_id === grant).status, 'rotated');
+        assert.equal((await c.query('select status from ops.tour_share_grant where id=$1', [grant])).rows[0].status, 'active');
+        await c.query('set local role carr_writer');
+        const result = await executeRegisteredTool(c, who, 'resolve-action-link-v2', {
+          ref: buildActionCardRef({ kind: 'feedback_event', id: event, version: String(i + 1) }),
+        });
+        assert.equal(result.card.state, 'retired');
+        assert.equal(result.card.detail, null);
+        assert.deepEqual(result.card.actions, []);
+      } finally { await c.query('rollback'); }
+      assert.equal((await call(who, 'feedback_event', event, String(i + 1))).card.state, 'resolved');
     });
     await t.test(`${who.slug} retired sources hide detail and operations`, async () => {
       await c.query('update capture_session set post_call=false where id=$1', [session]);

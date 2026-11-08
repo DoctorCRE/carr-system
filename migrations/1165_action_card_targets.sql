@@ -6,7 +6,8 @@ set local statement_timeout='30s';
 
 create function ops.resolve_action_card(p_actor uuid,p_kind text,p_id uuid)
 returns jsonb language plpgsql stable security definer
-set search_path=pg_catalog,pg_temp as $$
+set search_path=pg_catalog,pg_temp
+set TimeZone='UTC' as $$
 declare target jsonb; source record;
 begin
   if not exists(select 1 from public.actor where id=p_actor and active and slug in ('joe','dell')) then return null; end if;
@@ -33,7 +34,9 @@ begin
   elsif p_kind='feedback_event' then
     select e.*,g.status as grant_status,g.expires_at,
       exists(select 1 from ops.tour_share_grant_revocation_receipt r where r.share_grant_id=g.id
-        and r.organization_tenant_id=g.organization_tenant_id) as revoked
+        and r.organization_tenant_id=g.organization_tenant_id) as revoked,
+      exists(select 1 from ops.tour_share_grant newer where newer.organization_tenant_id=g.organization_tenant_id
+        and newer.rotated_from_grant_id=g.id) as rotated
       into source from ops.tour_share_feedback_event e join ops.tour_share_grant g
         on g.id=e.share_grant_id and g.organization_tenant_id=e.organization_tenant_id and g.projection_id=e.projection_id
       where e.id=p_id and g.created_by_actor_id=p_actor::text and e.organization_tenant_id='carr-internal';
@@ -42,7 +45,7 @@ begin
       'share_grant_id',source.share_grant_id,'property_id',source.property_id,'action',source.action,
       'shortlisted',source.shortlisted,'comment',source.comment,'created_at',source.created_at);
     return jsonb_build_object('detail',target,'source_version',source.event_order::text,
-      'state',case when source.grant_status<>'active' or source.revoked or source.expires_at<=now() then 'retired' else 'resolved' end);
+      'state',case when source.grant_status<>'active' or source.revoked or source.rotated or source.expires_at<=now() then 'retired' else 'resolved' end);
   end if;
   return null;
 end $$;
@@ -57,7 +60,7 @@ begin
     'grantee','carr_writer','signature',signature,'grantable',false,'privilege','execute',
     'ingress_key','db-function-acl:'||signature||':carr_writer:execute',
     'ingress_kind','db_function_acl','function_kind','f','security_definer',true,
-    'volatility','s','parallel','u','config',jsonb_build_array('search_path=pg_catalog, pg_temp'))));
+    'volatility','s','parallel','u','config',jsonb_build_array('search_path=pg_catalog, pg_temp','TimeZone=UTC'))));
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
     'select '||quote_literal(contract::text)||'::jsonb');
 end $grant_contract$;
