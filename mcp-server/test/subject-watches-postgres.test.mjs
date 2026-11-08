@@ -355,6 +355,8 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
     await call('watch-subject-v1',{subject_type,subject_id,idempotency_key:randomUUID()});
   await c.query("update lease set expiration_on=current_date+interval '6 months' where id=$1",[lease]);
   await call('update-deal',{deal,base_version:1,fields:{city:'Synthetic inbox city'},idempotency_key:randomUUID()});
+  const canonical=async()=> (await c.query('select to_jsonb(d) deal,to_jsonb(l) lease from deal d cross join lease l where d.id=$1 and l.id=$2',[deal,lease])).rows[0];
+  const original=await canonical();
   const feed=await call('notification-feed',{limit:200});
   const home=()=>call('read-home-inbox-v5');
   for(const [kind,ref,url,name] of [['deal',deal,`/deals?deal=${deal}`,'Synthetic inbox deal'],['lease',lease,`/clients?record=${client}`,'Synthetic inbox client']]) {
@@ -362,8 +364,9 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
     assert.ok(notice); assert.equal(notice.deep_link,url);
     const find=async()=> (await home()).items.find(i=>i.merged_source_ids.includes(notice.id));
     let item=await find(); assert.ok(item,`${kind} has a Home card`);
-    assert.equal(item.open_url,url); assert.ok(item.title.includes(name)); assert.ok(item.context_label.includes(name));
-    if(kind==='lease') assert.match(item.title,/Lease expires \d{4}-\d{2}-\d{2}/);
+    const context=kind==='lease'?`${name} · Lease expires ${original.lease.expiration_on}`:name;
+    assert.equal(item.open_url,url); assert.equal(item.title,`${notice.reason} · ${context}`);
+    assert.equal(item.context_label,context);
     assert.equal(item.section,'inbox'); assert.equal(item.unseen,true);
     for(const seen of [false,true]) for(const placement of ['inbox','settled','snoozed']) {
       const operations=placement==='inbox'?['acknowledge-notification','settle-home-inbox','snooze-home-inbox']:['acknowledge-notification','unsettle-home-inbox'];
@@ -396,5 +399,6 @@ test('watch alerts reach named Home cards and read, settle, snooze stay independ
     assert.equal(item.unseen,false); assert.equal(item.source_state,'needs_attention');
     assert.ok((await call('notification-feed',{limit:200})).notifications.find(n=>n.id===notice.id).read_at);
     await change('unsettle-home-inbox'); item=await find(); assert.equal(item.section,'inbox');
+    assert.deepEqual(await canonical(),original);
   }
 });
