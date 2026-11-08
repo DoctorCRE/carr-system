@@ -133,6 +133,8 @@
     "deal-deliverables-postgres.test.mjs": {"milliseconds": 78660, "serial": true},
     "deal-deliverables-web.test.mjs": {"milliseconds": 3820, "serial": false},
     "deal-deliverables.test.mjs": {"milliseconds": 2460, "serial": false},
+    "deal-document-text-postgres.test.mjs": {"milliseconds": 12515, "serial": true},
+    "deal-document-text-proof.test.mjs": {"milliseconds": 576, "serial": false},
     "deal-extraction-postgres.test.mjs": {"milliseconds": 1614, "serial": true},
     "deal-files-postgres.test.mjs": {"milliseconds": 1377, "serial": true},
     "deal-items-postgres.test.mjs": {"milliseconds": 2546, "serial": true},

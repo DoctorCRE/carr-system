@@ -39,6 +39,9 @@ class Source:
                     'document_family_id': 'sha256:' + hashlib.sha256(TEXT).hexdigest(),
                     'lineage_verified': False, 'r2_key': 'documents/synthetic/file.pdf',
                     'mime': 'application/pdf', 'bytes': len(TEXT)}, 'receipt': self.receipt}
+        if verb == 'record-deal-document-text':
+            self.text_derivative = args
+            return {'ok': True}
         assert verb == 'record-deal-extraction'
         self.submissions.append(args)
         self.receipt = {'ok': True, 'job_id': KEY, 'batch_id': KEY, 'canonical': False}

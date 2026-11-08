@@ -1,0 +1,148 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ok": {
+      "const": true
+    },
+    "schema_version": {
+      "const": "deal-document-text.v1"
+    },
+    "text_format_version": {
+      "const": "page-text.v1"
+    },
+    "deal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "attachment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "text_hash": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "produced",
+        "no_text",
+        "unavailable"
+      ]
+    },
+    "page_count": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lines": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 16000
+          },
+          "end_of_line": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "page",
+          "line",
+          "offset",
+          "text",
+          "end_of_line"
+        ]
+      }
+    },
+    "next": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "page": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "content_hash",
+            "page",
+            "line",
+            "offset"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reason": {
+      "enum": [
+        "no_text_layer",
+        "not_produced",
+        "unsupported_or_limits"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "schema_version",
+    "text_format_version",
+    "deal_id",
+    "attachment_id",
+    "content_hash",
+    "text_hash",
+    "status",
+    "page_count",
+    "lines",
+    "next"
+  ]
+}
