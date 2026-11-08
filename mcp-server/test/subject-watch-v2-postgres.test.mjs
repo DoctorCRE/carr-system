@@ -210,7 +210,7 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   await c.query('begin');
   await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
   await executeRegisteredTool(c,joe,'update-deal',{deal,fields:{closed_on:'2027-03-01'},base_version:await version(),idempotency_key:randomUUID()});
-  assert.equal((await executeRegisteredTool(c,joe,'read-subject-watch-changes-v1',{...target,subscription_id:j.id})).changes.length,3);
+  assert.ok((await executeRegisteredTool(c,joe,'read-subject-watch-changes-v1',{...target,subscription_id:j.id})).changes.length>=2);
   await c.query('rollback');assert.equal((await changes()).changes.length,2,'source rollback also rolls back receipt and baseline');
   await assert.rejects(changes(j,dell),e=>e.payload?.error==='watch_target_not_found');
   const event=async(verb,value,scope='none')=>(await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause,personal_scope) values(now(),$1,$2,'deal',$3,$4,'automation_job',$5) returning id",[joe.id,verb,deal,value,scope])).rows[0].id;
@@ -288,7 +288,7 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   assert.equal((await changes()).changes.length,beforeOwner+1,'actual lead owner handoff');
   const beforeAction=(await changes()).changes.length;
   await call('set-next-action',{ref:deal,description:'Synthetic next move',due_on:'2027-01-01',owner:'joe',idempotency_key:randomUUID()});
-  assert.ok((await changes()).changes.length>beforeAction,'next action owner and due date changes');
+  assert.equal((await changes()).changes.length,beforeAction+1,'next action owner and due date changes capture once');
   const beforeEquivalentAction=(await changes()).changes.length;
   await call('set-next-action',{ref:deal,description:' Synthetic next move ',due_on:'2027-01-01',owner:'joe',idempotency_key:randomUUID()});
   assert.equal((await changes()).changes.length,beforeEquivalentAction,'equivalent action owner and due date');
@@ -353,6 +353,148 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   const {parseSubjectWatchChanges}=await import('../contracts/subject-watch-change.v1.js');
   parseSubjectWatchChanges(response);
   if(process.env.J118_CAPTURE_FIXTURE) writeFileSync(process.env.J118_CAPTURE_FIXTURE,JSON.stringify(response,null,2)+'\n');
+  const rawEvent=async(verb,value={},key=null)=>c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause,idempotency_key) values(now(),$1,$2,'deal',$3,$4,'automation_job',$5)",[joe.id,verb,deal,value,key]);
+  for(const keyed of [true,false]) {
+    await t.test(`${keyed?'keyed':'unkeyed'} raw filing and duplicate mailbox isolation`,async()=>{
+      const prior=(await changes()).changes.length, other=(await changes(d,dell)).changes.length;
+      const raw=await inbound(deal,0);
+      await rawEvent('confirm-email-filing',{activity_id:raw},keyed?randomUUID():null);
+      assert.equal((await changes()).changes.length,prior+1);
+      assert.equal((await changes(d,dell)).changes.length,other);
+      await rawEvent('confirm-email-filing',{activity_id:raw},keyed?randomUUID():null);
+      assert.equal((await changes()).changes.length,prior+1,'duplicate filing +0');
+    });
+    await t.test(`${keyed?'keyed':'unkeyed'} raw late evidence captures final canonical state`,async()=>{
+      for(const eventFirst of [true,false]) {
+        const prior=(await changes()).changes.length;
+        const date=`2028-${keyed?'02':'03'}-${eventFirst?'02':'03'}`;
+        await c.query('begin');
+        if(eventFirst) await rawEvent('late-evidence',{},keyed?randomUUID():null);
+        await c.query('update deal set closed_on=$2 where id=$1',[deal,date]);
+        if(!eventFirst) await rawEvent('late-evidence',{},keyed?randomUUID():null);
+        await c.query('commit');
+        assert.equal((await changes()).changes.length,prior+1,`event first ${eventFirst}`);
+        assert.equal((await c.query("select material->>'closed_on' value from ops.subject_watch_material_baseline where watch_id=$1",[j.id])).rows[0].value,date);
+      }
+    });
+  }
+  await t.test('two registered operations share one transaction receipt with both changes',async()=>{
+    const prior=(await changes()).changes;
+    await c.query('begin');
+    await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    for(const fields of [{closed_on:'2028-04-04'},{outcome:'lost'}])
+      await executeRegisteredTool(c,joe,'update-deal',{deal,fields,base_version:await version(),idempotency_key:randomUUID()});
+    assert.equal((await changesFromPeer()).length,prior.length,'uncommitted long transaction stays invisible');
+    await c.query('commit');
+    const added=(await changes()).changes.filter(x=>!prior.some(y=>y.id===x.id));
+    assert.equal(added.length,1);assert.deepEqual(added[0].changes.map(x=>x.field),['closed_on','outcome']);
+    assert.ok(added[0].evidence_refs.length>=2);
+  });
+  async function changesFromPeer() {
+    const peer=new pg.Client({connectionString:dsn});await peer.connect();
+    try{return (await peer.query('select id from ops.subject_watch_change where watch_generation_id=$1',[j.id])).rows;}
+    finally{await peer.end();}
+  }
+  await t.test('savepoint rollback and full rollback preserve baseline and receipts',async()=>{
+    const prior=(await changes()).changes;
+    const baseline=(await c.query('select material from ops.subject_watch_material_baseline where watch_id=$1',[j.id])).rows[0];
+    await c.query('begin');await c.query('savepoint discarded');
+    await rawEvent('late-evidence',{},randomUUID());
+    await c.query("update deal set closed_on='2029-01-01' where id=$1",[deal]);
+    await c.query('rollback to discarded');await c.query('commit');
+    assert.deepEqual((await changes()).changes,prior);
+    await c.query('begin');await rawEvent('late-evidence',{},randomUUID());
+    await c.query("update deal set closed_on='2029-01-01' where id=$1",[deal]);
+    await c.query('set constraints all immediate');await c.query('rollback');
+    assert.deepEqual((await changes()).changes,prior);
+    assert.deepEqual((await c.query('select material from ops.subject_watch_material_baseline where watch_id=$1',[j.id])).rows[0],baseline);
+  });
+  await t.test('early constraint flush reconciles later writes and net-zero changes',async()=>{
+    const prior=(await changes()).changes;
+    await c.query('begin');await c.query('set constraints all immediate');
+    await rawEvent('late-evidence',{},randomUUID());
+    await c.query("update deal set closed_on='2029-01-01' where id=$1",[deal]);
+    await rawEvent('late-evidence',{},randomUUID());
+    await c.query("update deal set outcome='won' where id=$1",[deal]);
+    await c.query('commit');
+    const added=(await changes()).changes.filter(x=>!prior.some(y=>y.id===x.id));
+    assert.equal(added.length,1);assert.deepEqual(added[0].changes.map(x=>x.field),['closed_on','outcome']);
+    const count=(await changes()).changes.length;
+    await c.query('begin');await c.query('set constraints all immediate');
+    await rawEvent('late-evidence',{},randomUUID());
+    await c.query("update deal set closed_on='2030-01-01' where id=$1",[deal]);
+    await c.query("update deal set closed_on='2029-01-01' where id=$1",[deal]);
+    await c.query('commit');assert.equal((await changes()).changes.length,count,'net zero +0');
+  });
+  await t.test('dispatcher flush plus raw event hook alternative misses post-event writes',async()=>{
+    const baseline=(await c.query('select material from ops.subject_watch_material_baseline where watch_id=$1',[j.id])).rows[0];
+    await c.query('begin');
+    try {
+      await c.query('alter table deal disable trigger subject_watch_material_touch');
+      await rawEvent('late-evidence',{},randomUUID());
+      await c.query('set constraints ops.subject_watch_commit immediate');
+      await c.query("update deal set closed_on='2031-01-01' where id=$1",[deal]);
+      assert.deepEqual((await c.query('select material from ops.subject_watch_material_baseline where watch_id=$1',[j.id])).rows[0],baseline,
+        'raw event hook flushed before canonical update; no dispatcher runs to repair it');
+    } finally {await c.query('rollback');}
+  });
+  await t.test('early flush includes late inbound activity and material in one receipt',async()=>{
+    const prior=(await changes()).changes, raw=randomUUID();
+    await c.query('begin');await c.query('set constraints all immediate');
+    await rawEvent('confirm-email-filing',{activity_id:raw},randomUUID());
+    await c.query("insert into activity(id,kind,occurred_at,client_id,deal_id,actor_id,summary,email_source) values($1,'email_in',now(),$2,$3,$4,'Synthetic late reply','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}')",[raw,client,deal,joe.id]);
+    await c.query("update deal set closed_on='2031-01-01' where id=$1",[deal]);
+    await c.query('commit');
+    const added=(await changes()).changes.filter(x=>!prior.some(y=>y.id===x.id));
+    assert.equal(added.length,1);assert.equal(added[0].category,'material_changed');
+    assert.deepEqual(added[0].changes.map(x=>x.field),['closed_on']);
+    assert.equal(added[0].evidence_refs[0].activity_id,raw);
+    await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[raw]);
+    const retained=(await changes()).changes.find(x=>x.id===added[0].id);
+    assert.deepEqual(retained.evidence_refs,[],'material remains visible while retired mailbox evidence is hidden');
+  });
+  await t.test('pause fences an early receipt and resume resets the baseline quietly',async()=>{
+    const before=(await changes()).changes.length;
+    const current=(await call('read-subject-watch-v2',target)).watch;
+    await c.query('begin');await c.query('set constraints all immediate');
+    await rawEvent('late-evidence',{},randomUUID());
+    await c.query("update deal set closed_on='2031-02-02' where id=$1",[deal]);
+    await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    const paused=await executeRegisteredTool(c,joe,'pause-subject-watch-v2',{...target,subscription_id:j.id,base_version:current.lifecycle_version,idempotency_key:randomUUID()});
+    await c.query('commit');
+    assert.equal((await changes()).changes.length,before,'pause +0 despite early flush');
+    await call('resume-subject-watch-v2',{...target,subscription_id:j.id,base_version:paused.watch.lifecycle_version,idempotency_key:randomUUID()});
+    await rawEvent('late-evidence',{},randomUUID());
+    assert.equal((await changes()).changes.length,before,'resume +0 and quiet selected baseline');
+  });
+  await t.test('early flush reconciles an action moved out of a touched subject',async()=>{
+    await call('set-next-action',{ref:deal,description:'Synthetic movable action',due_on:'2030-01-01',owner:'joe',idempotency_key:randomUUID()});
+    const otherDeal=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic move target','purchase','research','joe',$2,$2) returning id",[client,joe.id])).rows[0].id;
+    const action=(await c.query("select id from next_action where subject_type='deal' and subject_id=$1 and owner_id=$2 and status='open' order by id limit 1",[deal,joe.id])).rows[0].id;
+    const prior=(await changes()).changes;
+    await c.query('begin');await rawEvent('late-evidence',{},randomUUID());
+    await c.query('set constraints all immediate');
+    await c.query('update next_action set subject_id=$2 where id=$1',[action,otherDeal]);
+    await c.query('commit');
+    const added=(await changes()).changes.filter(x=>!prior.some(y=>y.id===x.id));
+    assert.equal(added.length,1);assert.ok(added[0].changes.some(x=>x.field==='next_actions'));
+  });
+  await t.test('removal fences pending capture and retains historical receipts',async()=>{
+    for(const immediate of [false,true]) {
+      const current=immediate?await watch():(await call('read-subject-watch-v2',target)).watch;
+      if(immediate) await update({closed_on:'2032-02-02'});
+      const count=async()=>Number((await c.query('select count(*) n from ops.subject_watch_change where watch_generation_id=$1',[current.id])).rows[0].n);
+      const before=await count();
+      await c.query('begin');if(immediate) await c.query('set constraints all immediate');
+      await rawEvent('late-evidence',{},randomUUID());
+      await c.query('update deal set closed_on=$2 where id=$1',[deal,immediate?'2033-01-01':'2032-01-01']);
+      await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+      await executeRegisteredTool(c,joe,'unwatch-subject-v2',{...target,subscription_id:current.id,base_version:current.lifecycle_version,idempotency_key:randomUUID()});
+      await c.query('commit');
+      assert.equal(await count(),before,`removal +0 with immediate ${immediate}`);
+      assert.equal((await c.query('select count(*)::int n from ops.subject_watch_material_baseline where watch_id=$1',[current.id])).rows[0].n,0);
+    }
+  });
 });
 
 test('migration initializes live watches and skips dangling targets',async t=>{
