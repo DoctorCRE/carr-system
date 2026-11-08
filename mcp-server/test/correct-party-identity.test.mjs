@@ -900,9 +900,8 @@ test("descendant proof assertions use synchronization instead of elapsed wall ti
       && /^assert(?:\.|\()/.test(source.slice(node.callee.start, node.callee.end) + "(")
       && node.arguments.some(usesClock)).map(node => node.loc.start.line);
   }
-  assert.deepEqual(violations("const start = performance.now(); const elapsed = performance.now() - start; assert.ok(elapsed < 2000);"), [1]);
-  assert.deepEqual(violations("assert.ok(Date.now() - started < 2000);"), [1]);
-  assert.deepEqual(violations("assert.equal(alive, false);"), []);
+  const samples = JSON.parse(await readFile(join(import.meta.dirname, "helpers/identity-deadline-clock-cases.json"), "utf8"));
+  for (const sample of samples) assert.deepEqual(violations(sample.source), sample.lines);
   for (const name of await readdir(import.meta.dirname)) {
     if (!name.endsWith(".test.mjs")) continue;
     const source = await readFile(join(import.meta.dirname, name), "utf8");
