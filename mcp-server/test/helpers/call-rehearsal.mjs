@@ -109,8 +109,8 @@ export async function openCallSession({ root, started, captureUrl, deviceToken, 
     CARR_CAPTURE_LOG: path.join(root, 'capture-bridge.log'), CARR_CALL_MODE_LOG: path.join(root, 'call-mode.log'),
     CARR_POST_CALL_PYTHON: PYTHON, HOME: root, ...extra };
   if (distiller !== 'live') {
-    env.CARR_POST_CALL_DISTILLER_COMMAND = distiller === 'failing' ? `${PYTHON} -c "raise SystemExit(3)"`
-      : `${PYTHON} ${path.join(FIXTURES, 'rehearsal_distiller.py')}`;
+    env.CARR_POST_CALL_DISTILLER_COMMAND = extra.CARR_POST_CALL_DISTILLER_COMMAND || (distiller === 'failing' ? `${PYTHON} -c "raise SystemExit(3)"`
+      : `${PYTHON} ${path.join(FIXTURES, 'rehearsal_distiller.py')}`);
     env.CARR_POST_CALL_JEV_FIXTURE = path.join(FIXTURES, 'rehearsal_jev.py');
   }
   const logs = () => ['capture-bridge.log', 'call-mode.log'].map(f => existsSync(path.join(root, f))
@@ -168,10 +168,11 @@ with patch.object(bridge, 'datetime', Clock), patch.object(bridge, 'time', Simpl
         segments: CALL.map(([speaker, text], i) => ({ start_ms: i * 5000, end_ms: i * 5000 + 4000, speaker, text })) });
     },
     /** Poll the companion until `done(review)` holds. */
-    async waitFor(done, { attempts = 240 } = {}) {
+    async waitFor(done, { attempts = 240, onReview = () => {} } = {}) {
       let review;
       for (let i = 0; i < attempts; i++) {
         review = await request(`/api/post-call?session=${encodeURIComponent(name)}`);
+        await onReview(review);
         if (done(review)) return review;
         await new Promise(r => setTimeout(r, 500));
       }
