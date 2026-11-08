@@ -3,6 +3,8 @@
 // with a call filed through the real Call Mode path.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { PYTHON } from './helpers/call-rehearsal.mjs';
 import { startLocalCarr } from './helpers/local-carr.mjs';
 
 let carr, cookie;
@@ -48,9 +50,29 @@ test('a call filed through Call Mode reaches the signed-in partner and the deal'
 });
 
 test('a call whose extraction fails stays blocked and files nothing', async () => {
-  const call = await carr.fileCall({ distiller: 'failing' });
-  const review = await call.request(`/api/post-call?session=${encodeURIComponent(call.name)}`);
-  assert.equal(review.status.state, 'blocked');
-  assert.equal(review.status.reason, 'local post-call distiller failed');
-  assert.equal((await asPartner('read-call-outcomes')).calls.length, 1, 'only the earlier call is filed');
+  let release, placeholders = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const server = createServer(async (_request, response) => {
+    await gate;
+    response.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const command = `${PYTHON} -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:${server.address().port}', timeout=30); raise SystemExit(3)"`;
+    const call = await carr.fileCall({ distiller: 'failing',
+      env: { CARR_POST_CALL_DISTILLER_COMMAND: command },
+      wait: { onReview(review) {
+        if (review.status?.reason === 'Extraction attempt did not finish.' && ++placeholders === 2) release();
+      } } });
+    assert.ok(placeholders >= 2, 'wait through the in-flight extraction before returning');
+    const review = await call.request(`/api/post-call?session=${encodeURIComponent(call.name)}`);
+    assert.equal(review.status.state, 'blocked');
+    assert.equal(review.status.reason, 'local post-call distiller failed');
+    await assert.rejects(call.waitFor(() => false, { timeoutMs: 25 }),
+      /post-call .* did not settle within 25ms; last status:/);
+    assert.equal((await asPartner('read-call-outcomes')).calls.length, 1, 'only the earlier call is filed');
+  } finally {
+    release();
+    await new Promise(resolve => server.close(resolve));
+  }
 });
