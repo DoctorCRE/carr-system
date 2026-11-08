@@ -1,0 +1,31 @@
+{
+  "ok": true,
+  "watch": {
+    "id": "9e83bd9f-2424-44da-a94a-15fcdc0bf802",
+    "state": "watching",
+    "policy": {
+      "change_kinds": [
+        "reply_arrived",
+        "lease_threshold_crossed"
+      ],
+      "include_self_changes": true,
+      "lease_threshold_days": [
+        30,
+        90
+      ]
+    },
+    "actor_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+    "baseline": {
+      "version": 1,
+      "subject_id": "3c8b7e16-50f8-40de-a757-bf9583df4dd2",
+      "subject_type": "deal",
+      "schema_version": "subject-watch-baseline.v1"
+    },
+    "subject_id": "3c8b7e16-50f8-40de-a757-bf9583df4dd2",
+    "subject_type": "deal",
+    "subscribed_at": "2026-11-08T10:40:38.389907-06:00",
+    "lifecycle_version": 1
+  },
+  "rows_changed": 1,
+  "schema_version": "subject-watch.v2"
+}
