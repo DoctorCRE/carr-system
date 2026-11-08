@@ -1,0 +1,22 @@
+stateDiagram-v2
+ state Capture {
+ state Source {
+  [*] --> Unchanged
+  Unchanged --> Unchanged: Equivalent commit
+  Unchanged --> Unchanged: Rollback
+  Unchanged --> Written: Meaningful commit
+  Written --> Written: Replay
+  Written --> Written: Rollback
+ }
+ --
+ state Receipt {
+  [*] --> Quiet
+  Quiet --> Quiet: Equivalent commit
+  Quiet --> Quiet: Rollback
+  Quiet --> Pending: Meaningful commit
+  Pending --> Pending: Replay
+  Pending --> Pending: Rollback
+ }
+ }
+ %% never AtomicCapture: Pending & Unchanged -- No receipt without a committed material change.
+ %% never NoLostCapture: Quiet & Written -- A committed meaningful change has a pending receipt.
