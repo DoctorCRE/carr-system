@@ -28,9 +28,9 @@ stateDiagram-v2
   s4 --> s1 : Owner opens current source
   s4 --> s2 : Other partner opens source
   s4 --> s3 : Unknown or deleted source
+  s4 --> s0 : No decisions remain
   s1 --> s6 : Source changes
   s1 --> s5 : Source retires
-  s1 --> s0 : Review completed
   class s2 works
   class s3 works
   class s4 works

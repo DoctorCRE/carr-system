@@ -11,7 +11,8 @@ declare target jsonb; source record;
 begin
   if not exists(select 1 from public.actor where id=p_actor and active and slug in ('joe','dell')) then return null; end if;
   if p_kind='post_call_review' then
-    select s.* into source from public.capture_session s where s.id=p_id and s.actor_id=p_actor;
+    select s.id,s.post_call,s.outcome_reviewed_at,s.started_at into source
+      from public.capture_session s where s.id=p_id and s.actor_id=p_actor;
     if not found then return null; end if;
     target:=jsonb_build_object('session_id',source.id,'started_at',source.started_at,
       'reviewed',source.outcome_reviewed_at is not null,
@@ -24,7 +25,11 @@ begin
         'undone_at',c.undone_at) order by c.id) from public.capture_candidate c
         where c.session_id=source.id),'[]'::jsonb));
     return jsonb_build_object('detail',target,'source_version',md5(target::text),
-      'state',case when not source.post_call then 'retired' when source.outcome_reviewed_at is not null then 'resolved' else 'pending_review' end);
+      'state',case when not source.post_call then 'retired'
+        when source.outcome_reviewed_at is not null or not (
+          exists(select 1 from public.capture_candidate c where c.session_id=source.id and (c.status='pending' or c.applied_automatically))
+          or exists(select 1 from public.capture_post_call_candidate c where c.session_id=source.id and c.status='pending'))
+        then 'resolved' else 'pending_review' end);
   elsif p_kind='feedback_event' then
     select e.*,g.status as grant_status,g.expires_at,
       exists(select 1 from ops.tour_share_grant_revocation_receipt r where r.share_grant_id=g.id

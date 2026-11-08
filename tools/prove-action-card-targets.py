@@ -33,7 +33,14 @@ def remaining(deadline):
     return left
 
 
+def document(path):
+    if path.stat().st_size > 1048576:
+        raise Insufficient('input_too_large')
+    return json.loads(path.read_text())
+
+
 def command(argv, deadline, body=None):
+    remaining(deadline)
     with subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           text=True, cwd=ROOT, start_new_session=True) as process:
         try:
@@ -87,9 +94,9 @@ def main():
     parser.add_argument('--call-wrapper', type=Path)
     parser.add_argument('--deadline-seconds', type=float, default=45)
     args = parser.parse_args()
-    deadline = time.monotonic() + min(max(args.deadline_seconds, .1), 60)
+    deadline = time.monotonic() + min(max(args.deadline_seconds, 0), 60)
     try:
-        fixture = json.loads(args.fixture.read_text()) if args.fixture else None
+        fixture = document(args.fixture) if args.fixture else None
         if fixture is not None:
             release, targets = fixture['release'], fixture['targets']
         else:
@@ -97,7 +104,7 @@ def main():
             if reply.status != 200 or len(reply.body) > 1048576:
                 raise Insufficient('release_unavailable')
             release = json.loads(reply.body)
-            targets = json.loads(args.targets.read_text()) if args.targets else []
+            targets = document(args.targets) if args.targets else []
         observed = release.get('git_sha', {}).get('value')
         if release.get('env', {}).get('value') != 'production':
             raise Insufficient('production_identity_required')

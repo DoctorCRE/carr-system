@@ -2,9 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { registeredOperation } from '../src/mutation-registry.js';
+import { buildActionCardRef } from '../src/action-card-targets.ts';
 test('exact-card v2 is registered separately from v1', () => {
   assert.equal(typeof TOOLS['resolve-action-link-v2']?.handler, 'function');
   assert.equal(typeof TOOLS['resolve-action-link'].handler, 'function');
+});
+
+test('new kinds retain the bounded address format and refuse on the v1 resolver', async () => {
+  const actor = {id:'20000000-0000-4000-8000-000000000001',slug:'joe',human:true};
+  for (const kind of ['post_call_review','feedback_event']) {
+    const ref = buildActionCardRef({kind,id:actor.id,version:'a'.repeat(32)});
+    assert.match(ref,/^al1_[A-Za-z0-9_-]+$/);
+    assert.ok(ref.length <= 124);
+    await assert.rejects(executeRegisteredTool({query:()=>assert.fail('new kind reached v1 database')},actor,'resolve-action-link',{ref}),
+      e=>e.payload.error==='action_link_not_found');
+  }
+});
+
+test('malformed and unsupported v2 references refuse without loading detail', async () => {
+  const c = {query: () => assert.fail('malformed reference queried source')};
+  const actor = {id:'20000000-0000-4000-8000-000000000001',slug:'joe',human:true};
+  for (const ref of ['bad', 'al2_post_call_review.bad.1', 'al2_feedback_event.20000000-0000-4000-8000-000000000001.bad/version'])
+    await assert.rejects(executeRegisteredTool(c,actor,'resolve-action-link-v2',{ref}),e => e.payload.error === 'action_link_not_found');
 });
 
 test('exact-card guard and published authority agree before database access', async () => {

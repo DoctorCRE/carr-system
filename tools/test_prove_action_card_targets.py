@@ -47,6 +47,9 @@ class ExactCardProofTests(unittest.TestCase):
     def test_exact_version_near_miss_is_assertion_failure(self):
         self.assertEqual(self.invoke(lambda v: v['targets'][0].update(source_version=999))[0], 1)
 
+    def test_detail_identity_near_miss_is_assertion_failure(self):
+        self.assertEqual(self.invoke(lambda v: v['responses'][1]['card']['detail'].update(session_id='20000000-0000-4000-8000-000000000999'))[0], 1)
+
     def test_foreign_and_unknown_disclosure_difference_is_failure(self):
         self.assertEqual(self.invoke(lambda v: v['foreign'].update(detail='private'))[0], 1)
 
@@ -55,7 +58,7 @@ class ExactCardProofTests(unittest.TestCase):
 
     def test_short_total_deadline_exits_insufficient(self):
         result = subprocess.run([sys.executable, str(CLI), '--expected-merge', 'a' * 40,
-            '--fixture', str(FIXTURE), '--deadline-seconds', '.1'], capture_output=True, text=True, timeout=10)
+            '--fixture', str(FIXTURE), '--deadline-seconds', '0'], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 78)
 
 

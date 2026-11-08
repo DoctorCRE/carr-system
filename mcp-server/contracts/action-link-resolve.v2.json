@@ -11,7 +11,9 @@
       "const": "action-link-resolve.v2"
     },
     "ref": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^al1_[A-Za-z0-9_-]{1,120}$",
+      "maxLength": 124
     },
     "card": {
       "oneOf": [
@@ -160,6 +162,22 @@
                   }
                 }
               }
+            },
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "pending_approval"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "minItems": 1
+                  }
+                }
+              }
             }
           ]
         },
@@ -297,7 +315,8 @@
                     }
                   }
                 }
-              }
+              },
+              "maxItems": 1
             }
           },
           "allOf": [
@@ -317,6 +336,22 @@
                 "properties": {
                   "actions": {
                     "maxItems": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "pending_review"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "minItems": 1
                   }
                 }
               }

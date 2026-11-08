@@ -53,13 +53,27 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
     await c.query(`insert into ops.tour_share_feedback_event(id,event_order,organization_tenant_id,projection_id,
       share_grant_id,property_id,idempotency_key,action,comment,payload_digest,created_at)
       values($1,$2,'carr-internal',$3,$3,$3,$1,'comment','Synthetic feedback',$4,'2026-11-01Z')`, [event, i + 1, grant, 'sha256:' + 'a'.repeat(64)]);
+    await t.test(`${who.slug} processing completion without decisions is resolved`, async () => {
+      const result = await call(who,'post_call_review',session,await version(who,'post_call_review',session));
+      assert.equal(result.card.state,'resolved');
+      assert.deepEqual(result.card.actions,[]);
+    });
+    await c.query(`insert into capture_candidate(id,session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
+      values($1,$2,'fixture','fixture',0,'next_step','{"action":"Synthetic pending action"}','Synthetic evidence',0.95)`, [id(600+i),session]);
     const sv = await version(who, 'post_call_review', session);
     await t.test(`${who.slug} current source resolves repeatedly without mutation`, async () => {
       const first = await call(who, 'post_call_review', session, sv);
       assert.equal(first.card.state, 'pending_review');
       assert.equal(first.card.id, session);
       assert.deepEqual(await call(who, 'post_call_review', session, sv), first);
-      fixtures.push(first, await call(who, 'feedback_event', event, String(i + 1)));
+      const feedback = await call(who, 'feedback_event', event, String(i + 1));
+      assert.equal(feedback.card.state,'resolved');
+      assert.equal(feedback.card.detail.event_id,event);
+      const staleFeedback = await call(who,'feedback_event',event,'999');
+      assert.equal(staleFeedback.card.state,'stale');
+      assert.equal(staleFeedback.card.source_version,String(i+1));
+      assert.deepEqual(staleFeedback.card.actions,[]);
+      fixtures.push(first, feedback);
     });
     await t.test(`${who.slug} foreign and missing refuse identically before detail`, async () => {
       for (const [kind, sourceId, v] of [['post_call_review', session, sv], ['feedback_event', event, String(i + 1)]]) {
@@ -102,6 +116,8 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
     await c.query(`insert into capture_session(id,nonce,device_id,actor_id,mode,started_at,consent_announced_at,
       session_token_hash,expires_at,state,state_at,post_call) select gen_random_uuid(),'fixture','fixture',$1,'meeting',
       now(),now(),'fixture',now()+interval '1 day','done',now(),true from generate_series(1,1001)`, [actors[0].id]);
+    await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
+      select id,id::text,'fixture',0,'next_step','{}','Synthetic pending decision',0.95 from capture_session`);
     const oldest = (await c.query('select id from capture_session order by started_at,id offset 1000 limit 1')).rows[0].id;
     assert.equal((await call(actors[0], 'post_call_review', oldest, await version(actors[0], 'post_call_review', oldest))).card.id, oldest);
   });
@@ -136,13 +152,20 @@ test('reply exact target delegates existing registered reply hydration', async t
     '{"mailbox_owner":"joe","sender_email":"sender@example.test"}')`, [source, who.id]);
   await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,draft_subject,draft_body)
     values($1,'reply_draft',$2,'Synthetic evidence','joe',0.95,$3,'Synthetic subject','Synthetic body')`, [proposal, source, who.id]);
+  await c.query("update email_proposal set created_at='2020-01-01Z' where id=$1", [proposal]);
+  await c.query(`with sources as (insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source)
+    select gen_random_uuid(),now(),$1,'email_in','Synthetic newer source','Synthetic evidence',
+      '{"mailbox_owner":"joe","sender_email":"sender@example.test"}' from generate_series(1,1001) returning id)
+    insert into email_proposal(kind,activity_id,evidence_quote,owner,confidence,created_by,draft_subject,draft_body)
+    select 'reply_draft',id,'Synthetic evidence','joe',0.95,$1,'Synthetic newer draft','Synthetic body' from sources`, [who.id]);
+  assert.equal((await c.query("select id from email_proposal where owner='joe' order by created_at desc limit 1000")).rows.some(r=>r.id===proposal),false);
   const ref = buildActionLink({kind:'reply_draft',id:proposal,owner:'joe',version:1}).ref;
-  const resolve = async () => {
+  const resolve = async (reference = ref, actor = who) => {
     await c.query('begin read only');
     try {
-      await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+      await c.query("select set_config('carr.acting_actor_slug',$1,true),set_config('carr.verified_human_actor_slug',$1,true)",[actor.slug]);
       await c.query('set local role carr_writer');
-      const result = await executeRegisteredTool(c, who, 'resolve-action-link-v2', {ref});
+      const result = await executeRegisteredTool(c, actor, 'resolve-action-link-v2', {ref:reference});
       await c.query('commit'); return result;
     } catch (e) { await c.query('rollback'); throw e; }
   };
@@ -164,13 +187,35 @@ test('reply exact target delegates existing registered reply hydration', async t
       foreign:errors[0],unknown:errors[1]};
     await writeFile(new URL('../contracts/fixtures/action-card-proof.v2.json', import.meta.url), JSON.stringify(proof,null,2)+'\n');
   }
+  const proof = JSON.parse(await readFile(new URL('../contracts/fixtures/action-card-proof.v2.json', import.meta.url),'utf8'));
+  assert.deepEqual(proof.responses[0], value);
+  for (const response of proof.responses) assert.deepEqual(parseActionCardResponse(response), response);
   await c.query('update email_proposal set version=2 where id=$1', [proposal]);
   const stale = await resolve();
   assert.equal(stale.card.state, 'stale');
   assert.equal(stale.card.source_version, 2);
   assert.deepEqual(stale.card.actions, []);
-  await c.query("update email_proposal set status='dismissed' where id=$1", [proposal]);
+  await c.query("update email_proposal set status='dismissed',resolved_by=$2,resolved_at=now(),resolution_reason='Synthetic dismissal' where id=$1", [proposal,who.id]);
   assert.equal((await resolve()).card.state, 'resolved');
   await c.query(`update activity set email_context='{"lifecycle":{"state":"deleted"}}' where id=$1`, [source]);
   assert.equal((await resolve()).card.state, 'retired');
+  await c.query('delete from email_proposal where id=$1',[proposal]);
+  await assert.rejects(resolve(),e=>e.payload.error==='action_link_not_found');
+  const dell = {...(await c.query("select id,slug from actor where slug='dell'")).rows[0],human:true};
+  await c.query(`insert into activity(id,occurred_at,actor_id,kind,summary,detail,email_source)
+    values($1,now(),$2,'email_in','Synthetic source','Synthetic evidence',
+    '{"mailbox_owner":"dell","sender_email":"sender@example.test"}')`,[id(510),dell.id]);
+  await c.query(`insert into email_proposal(id,kind,activity_id,evidence_quote,owner,confidence,created_by,draft_subject,draft_body)
+    values($1,'reply_draft',$2,'Synthetic evidence','dell',0.95,$3,'Synthetic subject','Synthetic body')`,[id(511),id(510),dell.id]);
+  const dellRef = buildActionLink({kind:'reply_draft',id:id(511),owner:'dell',version:1}).ref;
+  assert.equal((await resolve(dellRef,dell)).card.id,id(511));
+  await assert.rejects(resolve(dellRef,who),e=>e.payload.error==='action_link_not_found');
+  await c.query('update email_proposal set version=2 where id=$1',[id(511)]);
+  assert.equal((await resolve(dellRef,dell)).card.state,'stale');
+  await c.query("update email_proposal set status='dismissed',resolved_by=$2,resolved_at=now(),resolution_reason='Synthetic dismissal' where id=$1",[id(511),dell.id]);
+  assert.equal((await resolve(dellRef,dell)).card.state,'resolved');
+  await c.query(`update activity set email_context='{"lifecycle":{"state":"deleted"}}' where id=$1`,[id(510)]);
+  assert.equal((await resolve(dellRef,dell)).card.state,'retired');
+  await c.query('delete from email_proposal where id=$1',[id(511)]);
+  await assert.rejects(resolve(dellRef,dell),e=>e.payload.error==='action_link_not_found');
 });

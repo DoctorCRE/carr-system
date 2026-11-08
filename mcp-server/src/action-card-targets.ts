@@ -19,20 +19,39 @@ type Dependencies = {
 const validator = new Validator(responseSchema as unknown as Schema);
 export function parseActionCardResponse(value: unknown): Response {
   if (!validator.validate(value).valid) throw new Error('action_card_response_invalid');
-  return value as Response;
+  const response = value as Response;
+  const card = response.card;
+  if (card.kind !== 'reply_draft') {
+    const identity = card.kind === 'post_call_review' ? 'session_id' : 'event_id';
+    if (card.state === 'retired' ? card.detail !== null : !card.detail || card.detail[identity] !== card.id)
+      throw new Error('action_card_source_mismatch');
+  }
+  for (const operation of card.actions) {
+    if (card.kind === 'reply_draft'
+      ? operation.args.proposal_id !== card.id || operation.args.base_version !== card.source_version
+      : operation.args.session_id !== card.id) throw new Error('action_card_operation_mismatch');
+  }
+  return response;
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const VERSION = /^[A-Za-z0-9_-]{1,64}$/;
+const VERSION = /^[A-Za-z0-9_-]{1,32}$/;
+const CODES = { post_call_review: 'cr', feedback_event: 'fe' } as const;
 
 export function buildActionCardRef(target: Target): string {
   if (!['post_call_review', 'feedback_event'].includes(target.kind) || !UUID.test(target.id) || !VERSION.test(target.version))
     throw new Error('action_link_input_invalid');
-  return `al2_${target.kind}.${target.id}.${target.version}`;
+  const encoded = btoa(`${CODES[target.kind]}:${target.id}:${target.version}`).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `al1_${encoded}`;
 }
 function parse(ref: string): Target | null {
-  const match = /^al2_(post_call_review|feedback_event)\.([a-f0-9-]+)\.([A-Za-z0-9_-]+)$/.exec(ref);
+  const match = /^al1_([A-Za-z0-9_-]{1,120})$/.exec(ref);
   if (!match) return null;
-  const target = { kind: match[1] as Kind, id: match[2], version: match[3] };
+  let identity: string;
+  try { identity = atob(match[1].replace(/-/g, '+').replace(/_/g, '/')); } catch { return null; }
+  const [code, id, version, ...rest] = identity.split(':');
+  const kind = code === CODES.post_call_review ? 'post_call_review' : code === CODES.feedback_event ? 'feedback_event' : null;
+  if (!kind || rest.length) return null;
+  const target: Target = { kind, id, version };
   try { return buildActionCardRef(target) === ref ? target : null; } catch { return null; }
 }
 
@@ -45,7 +64,7 @@ export function actionCardTargetTools({ ToolError, readTool }: Dependencies) {
       writerConnection: true,
       description: 'Read one exact reply draft, post-call review or feedback event for its verified human owner. No Home scan or mutation. Foreign and unknown targets refuse identically. Stale and retired targets offer no actions.',
       inputSchema: { type: 'object', additionalProperties: false, properties: {
-        ref: { type: 'string', maxLength: 180 },
+        ref: { type: 'string', maxLength: 124 },
       }, required: ['ref'] },
       handler: async (c: Db, actor: Actor, args: { ref: string }): Promise<Response> => {
         if (authorizationClassForActor(actor) !== 'verified_partner') refuse('human_only_verb_requires_verified_partner');

@@ -3377,7 +3377,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "resolve-action-link-v2": {
     "ingress_key": "mcp-tool:resolve-action-link-v2",
     "source_locator": "mcp-server/src/action-card-targets.ts",
-    "schema_digest": "37a6715ef90f1192be4751b7c260335929ac324451c5c727bd56c12c0bc2bc21",
+    "schema_digest": "c62d641eb925ed921cf03a27f05c6d9e8c28aecbb6ef50be14b2f93b4d7d1efa",
     "write": false,
     "human_only": true,
     "human_caller_only": true,

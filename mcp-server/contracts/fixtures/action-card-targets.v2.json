@@ -1,14 +1,26 @@
 [
   {
     "schema_version": "action-link-resolve.v2",
-    "ref": "al2_post_call_review.20000000-0000-4000-8000-000000000100.bfa5e06883448bce66810ac46abf2912",
+    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAwOmYzNTU0N2U0M2UxNmRhZDExNDJlNjZjY2QxYTgxYTAw",
     "card": {
       "kind": "post_call_review",
       "id": "20000000-0000-4000-8000-000000000100",
-      "source_version": "bfa5e06883448bce66810ac46abf2912",
+      "source_version": "f35547e43e16dad1142e66ccd1a81a00",
       "state": "pending_review",
       "detail": {
-        "changes": [],
+        "changes": [
+          {
+            "id": "20000000-0000-4000-8000-000000000600",
+            "kind": "next_step",
+            "status": "pending",
+            "payload": {
+              "action": "Synthetic pending action"
+            },
+            "undone_at": null,
+            "evidence_quote": "Synthetic evidence",
+            "applied_automatically": false
+          }
+        ],
         "reviewed": false,
         "candidates": [],
         "session_id": "20000000-0000-4000-8000-000000000100",
@@ -27,7 +39,7 @@
   },
   {
     "schema_version": "action-link-resolve.v2",
-    "ref": "al2_feedback_event.20000000-0000-4000-8000-000000000200.1",
+    "ref": "al1_ZmU6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMjAwOjE",
     "card": {
       "kind": "feedback_event",
       "id": "20000000-0000-4000-8000-000000000200",
@@ -48,14 +60,26 @@
   },
   {
     "schema_version": "action-link-resolve.v2",
-    "ref": "al2_post_call_review.20000000-0000-4000-8000-000000000101.8aee553cebf4fc837c65beff69fbaae2",
+    "ref": "al1_Y3I6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMTAxOjNlOTg3NjA2MDk4MTg2YjU5MzMzNzNiYzM0ZjEyYTcw",
     "card": {
       "kind": "post_call_review",
       "id": "20000000-0000-4000-8000-000000000101",
-      "source_version": "8aee553cebf4fc837c65beff69fbaae2",
+      "source_version": "3e987606098186b5933373bc34f12a70",
       "state": "pending_review",
       "detail": {
-        "changes": [],
+        "changes": [
+          {
+            "id": "20000000-0000-4000-8000-000000000601",
+            "kind": "next_step",
+            "status": "pending",
+            "payload": {
+              "action": "Synthetic pending action"
+            },
+            "undone_at": null,
+            "evidence_quote": "Synthetic evidence",
+            "applied_automatically": false
+          }
+        ],
         "reviewed": false,
         "candidates": [],
         "session_id": "20000000-0000-4000-8000-000000000101",
@@ -74,7 +98,7 @@
   },
   {
     "schema_version": "action-link-resolve.v2",
-    "ref": "al2_feedback_event.20000000-0000-4000-8000-000000000201.2",
+    "ref": "al1_ZmU6MjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMjAxOjI",
     "card": {
       "kind": "feedback_event",
       "id": "20000000-0000-4000-8000-000000000201",

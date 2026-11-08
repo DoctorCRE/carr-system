@@ -1,7 +1,7 @@
 {
   "view": "customer",
   "modelStates": 7,
-  "modelTransitions": 12,
+  "modelTransitions": 13,
   "chartStates": 7,
   "chartTransitions": 6,
   "chartStatus": {

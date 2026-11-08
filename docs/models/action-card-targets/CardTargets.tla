@@ -10,7 +10,8 @@ ReadMissing == /\ target \in {"Requested", "Resolved"} /\ target' = "Missing" /\
 ReadChanged == /\ target = "Resolved" /\ target' = "Stale" /\ detail' = TRUE /\ actions' = FALSE
 ReadRetired == /\ target = "Resolved" /\ target' = "Retired" /\ detail' = FALSE /\ actions' = FALSE
 ReadReviewed == /\ target = "Resolved" /\ target' = "Resolved" /\ detail' = TRUE /\ actions' = FALSE
-Next == ReadCurrent \/ ReadForeign \/ ReadMissing \/ ReadChanged \/ ReadRetired \/ ReadReviewed
+ReadZeroDecisions == /\ target = "Requested" /\ target' = "Resolved" /\ detail' = TRUE /\ actions' = FALSE
+Next == ReadCurrent \/ ReadForeign \/ ReadMissing \/ ReadChanged \/ ReadRetired \/ ReadReviewed \/ ReadZeroDecisions
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ target \in {"Requested","Resolved","Foreign","Missing","Stale","Retired"} /\ detail \in BOOLEAN /\ actions \in BOOLEAN
 PrivateDetail == target \in {"Foreign","Missing","Retired"} => ~detail

@@ -141,7 +141,7 @@
     }
   },
   "tools/prove-action-card-targets.py": {
-    "sha256": "a4476c05be50786a34cda6caa9c0713f792488bd771e870468d1c333482c40d5",
+    "sha256": "c1f562a3cedcbf29ba278f894d6bdc9477334ca6a831d2a122aae75eb8fdaed2",
     "commands": [
       "node --input-type=module -e fixed PARSER with JSON stdin through parseActionCardResponse",
       "git --no-replace-objects merge-base --is-ancestor expected merge observed release",
