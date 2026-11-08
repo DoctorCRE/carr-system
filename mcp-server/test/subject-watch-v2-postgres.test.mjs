@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
@@ -233,6 +236,43 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   const beforeDates=(await changes()).changes.length;
   for(let n=0;n<2;n++) await call('add-critical-date',{deal,kind:'option_window',due_on:'2027-10-01',source:'synthetic',idempotency_key:randomUUID()});
   assert.equal((await changes()).changes.length,beforeDates+1,'equivalent critical dates do not duplicate receipts');
+  await t.test('pending receipt proof CLI passes, fails assertions and refuses insufficient releases',async()=>{
+    const dir=mkdtempSync(join(tmpdir(),'watch-proof-'));
+    const python=process.env.CARR_CI_PYTHON || 'python3';
+    const cli=args=>spawnSync(python,['ops/verify-subject-watch-proof.py',...args],{encoding:'utf8'});
+    const capture=name=>{
+      const file=join(dir,name+'.json');
+      const result=cli(['capture','--database',dsn,'--watched',deal,'--subscription',j.id,'--actor','joe','--output',file]);
+      assert.equal(result.status,0,result.stdout+result.stderr);return file;
+    };
+    try {
+      const before=capture('before');
+      const meaningful={deal,fields:{closed_on:'2027-08-01'},base_version:await version(),idempotency_key:randomUUID()};
+      await call('update-deal',meaningful);
+      const after=capture('after');
+      const immaterial={deal,fields:{notes_path:'Synthetic proof note'},base_version:await version(),idempotency_key:randomUUID()};
+      await call('update-deal',immaterial);
+      const quiet=capture('immaterial');
+      assert.equal((await call('update-deal',immaterial)).replayed,true);
+      const replay=capture('replay');
+      const revision=spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout.trim();
+      const parent=spawnSync('git',['rev-parse','HEAD^'],{encoding:'utf8'}).stdout.trim();
+      const release=join(dir,'release.json');
+      const setRelease=sha=>writeFileSync(release,JSON.stringify({ok:true,env:{value:'production'},git_sha:{value:sha}}));
+      const args=['verify','--before',before,'--after',after,'--immaterial',quiet,'--replay',replay,'--merge-sha',parent,'--release-fixture',release];
+      setRelease(revision);
+      let result=cli(args);assert.equal(result.status,0,result.stdout+result.stderr);
+      result=cli(args.map(x=>x===parent?revision:x));assert.equal(result.status,0,result.stdout+result.stderr);
+      result=cli(args.map(x=>x===after?before:x));assert.equal(result.status,1,result.stdout+result.stderr);
+      setRelease(parent);
+      result=cli(args.map(x=>x===parent?revision:x));assert.equal(result.status,78,result.stdout+result.stderr);
+      for(const unknown of ['0'.repeat(40),null]) {
+        setRelease(unknown);result=cli(args);assert.equal(result.status,78,result.stdout+result.stderr);
+      }
+      const unrelated=spawnSync('git',['commit-tree','HEAD^{tree}'],{input:'Synthetic unrelated release\n',encoding:'utf8'}).stdout.trim();
+      setRelease(unrelated);result=cli(args);assert.equal(result.status,78,result.stdout+result.stderr);
+    } finally {rmSync(dir,{recursive:true,force:true});}
+  });
   const beforeOwner=(await changes()).changes.length;
   await call('set-lead',{deal,new_lead:'dell',base_version:await version(),idempotency_key:randomUUID()});
   assert.equal((await changes()).changes.length,beforeOwner+1,'actual lead owner handoff');
@@ -242,6 +282,15 @@ test('meaningful canonical changes commit once with source writes and isolate ma
   const beforeEquivalentAction=(await changes()).changes.length;
   await call('set-next-action',{ref:deal,description:' Synthetic next move ',due_on:'2027-01-01',owner:'joe',idempotency_key:randomUUID()});
   assert.equal((await changes()).changes.length,beforeEquivalentAction,'equivalent action owner and due date');
+  await call('set-next-action',{ref:deal,description:'Dell next move',due_on:'2027-09-01',owner:'dell',idempotency_key:randomUUID()},dell);
+  const beforePartnerDue=(await changes()).changes.length;
+  const partnerDue={ref:deal,description:'Synthetic next move',due_on:'2027-09-01',owner:'joe',idempotency_key:randomUUID()};
+  await call('set-next-action',partnerDue);
+  assert.equal((await changes()).changes.length,beforePartnerDue+1,'partner due-date change survives an unchanged shared next_date');
+  assert.equal((await call('set-next-action',partnerDue)).replayed,true);
+  assert.equal((await changes()).changes.length,beforePartnerDue+1,'exact action replay stays quiet');
+  await call('set-next-action',{...partnerDue,idempotency_key:randomUUID()});
+  assert.equal((await changes()).changes.length,beforePartnerDue+1,'equivalent per-owner action replacement stays quiet');
   const peer=new pg.Client({connectionString:dsn});await peer.connect();
   try {
     const beforeConcurrent=(await changes()).changes.length;
