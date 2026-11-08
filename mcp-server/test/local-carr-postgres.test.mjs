@@ -68,6 +68,8 @@ test('a call whose extraction fails stays blocked and files nothing', async () =
     const review = await call.request(`/api/post-call?session=${encodeURIComponent(call.name)}`);
     assert.equal(review.status.state, 'blocked');
     assert.equal(review.status.reason, 'local post-call distiller failed');
+    await assert.rejects(call.waitFor(() => false, { timeoutMs: 25 }),
+      /post-call .* did not settle within 25ms; last status:/);
     assert.equal((await asPartner('read-call-outcomes')).calls.length, 1, 'only the earlier call is filed');
   } finally {
     release();

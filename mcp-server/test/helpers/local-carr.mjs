@@ -229,7 +229,9 @@ export async function startLocalCarr({ port = 0, assets = async () => new Respon
     const { deals: index } = await mcp('get-call-context', { deal_ids: Object.values(deals) });
     call.writeTranscript();
     await call.request('/api/call-context', callContext(call.session, started, index));
-    await call.waitFor(distiller === 'failing' ? review => review.status?.state === 'blocked'
+    await call.waitFor(distiller === 'failing' ? review => review.status?.extraction_attempts > 0
+      && ['blocked', 'needs_attention'].includes(review.status.state)
+      && review.status.reason && review.status.reason !== 'Extraction attempt did not finish.'
       : review => review.report?.automatic?.finished_at, wait);
     return call;
   }
