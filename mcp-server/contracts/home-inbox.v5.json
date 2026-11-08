@@ -27,6 +27,7 @@
   "done_window_days": 7,
   "notification_subject_types": [
     "deal",
+    "lease",
     "loop",
     "call",
     "email",
