@@ -39,7 +39,7 @@
       "deliverable_id",
       "idempotency_key"
     ],
-    "response": "expires reservation; receipt reports expired. Verified bytes stay private and charged."
+    "response": "persists the terminal expired state and releases file and byte quota once; receipt reports expired. Verified bytes remain private."
   },
   "browser": {
     "base_path": "/api/v1/deal-deliverables/{deal_id}",
