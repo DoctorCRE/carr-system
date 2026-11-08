@@ -1,0 +1,28 @@
+stateDiagram-v2
+  state Watch {
+  state Lifecycle {
+    [*] --> Absent
+    Absent --> Watching: Watch
+    Watching --> Watching: Repeat watch
+    Watching --> Paused: Pause
+    Paused --> Watching: Resume
+    Watching --> Replaced: Replace policy
+    Paused --> Paused: Replace paused policy
+    Replaced --> Paused: Pause
+    Replaced --> Removed: Remove
+    Watching --> Removed: Remove
+    Paused --> Removed: Remove
+    Removed --> Rewatched: Watch
+    Rewatched --> Paused: Pause
+    Rewatched --> Removed: Remove
+    Rewatched --> Replaced: Replace policy
+  }
+  --
+  state Subscription {
+    [*] --> Missing
+    Missing --> Present: Watch
+    Present --> Missing: Remove
+  }
+  }
+  %% never RemovalIsExact: Removed & Present -- Removed subscriptions cannot remain present.
+  %% never WatchExists: Watching & Missing -- Watching requires a subscription generation.

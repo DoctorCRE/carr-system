@@ -11,6 +11,36 @@ import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 
 const dsn = await snapshotDatabase('subject-watches-');
+test('watch Home projection preserves email lifecycle visibility', async t => {
+  const c=new pg.Client({connectionString:dsn}); await c.connect(); t.after(()=>c.end());
+  const joe={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
+  const read=async version=>{
+    await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+    return executeRegisteredTool(c,joe,`read-home-inbox-v${version}`,{});
+  };
+  for(const state of ['deleted','recalled','superseded']) await t.test(state,async()=>{
+    await c.query('begin');
+    try {
+      const mail=(await c.query("insert into activity(kind,occurred_at,actor_id,summary,email_source) values('email_in',now(),$1,'Synthetic lifecycle source','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[joe.id])).rows[0].id;
+      const notice=(await c.query(`insert into ops.notification(subject_type,subject_ref,event_ref,event_source,recipient_actor,reason,severity,deep_link,dedupe_key)
+        values('email',$1,$2,'event',$3,'Synthetic lifecycle notice','action_required','/',$4) returning id`,[mail,randomUUID(),joe.id,randomUUID()])).rows[0].id;
+      const draft=(await c.query(`insert into email_proposal(kind,activity_id,owner,draft_subject,draft_body,status,evidence_quote,confidence,created_by)
+        values('reply_draft',$1,'joe','Synthetic lifecycle draft','Synthetic body','pending','Synthetic quote',1,$2) returning id`,[mail,joe.id])).rows[0].id;
+      for(const version of [2,3,4,5]) {
+        const items=(await read(version)).items;
+        assert.ok(items.some(i=>i.source_id===draft),`v${version} includes live draft`);
+        assert.ok(items.some(i=>i.merged_source_ids.includes(notice)),`v${version} includes live email notification`);
+      }
+      await c.query("update activity set email_context=jsonb_build_object('lifecycle',jsonb_build_object('state',$2::text)) where id=$1",[mail,state]);
+      for(const version of [2,3,4,5]) {
+        const items=(await read(version)).items;
+        assert.ok(!items.some(i=>i.source_id===draft),`v${version} excludes ${state} draft`);
+        assert.ok(!items.some(i=>i.merged_source_ids.includes(notice)),`v${version} excludes ${state} email notification`);
+      }
+    } finally { await c.query('rollback'); }
+  });
+});
+
 test('registered watch transitions preserve isolation and initial baseline', async t => {
   const c = new pg.Client({ connectionString: dsn });
   await c.connect(); t.after(() => c.end());
@@ -332,4 +362,73 @@ test('registered partner and sponsored writes wake shared deal watchers', async 
       }
     });
   });
+});
+
+test('watch alerts reach named Home cards and read, settle, snooze stay independent', async t => {
+  const c=new pg.Client({connectionString:dsn}); await c.connect(); t.after(()=>c.end());
+  const joe={...(await c.query("select id,slug from actor where slug='joe'")).rows[0],human:true};
+  let isolated=false;
+  const call=async(verb,args={})=>{
+    if(!isolated) await c.query('begin');
+    try {
+      await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true),set_config('carr.organization_tenant_id','carr-internal',true)");
+      await c.query('set local role carr_writer');
+      const result=await executeRegisteredTool(c,joe,verb,args); if(!isolated) await c.query('commit'); return result;
+    } catch(e) { if(!isolated) await c.query('rollback'); throw e; }
+  };
+  await c.query("insert into client_status(slug,label) values('active','Active') on conflict do nothing");
+  const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic inbox client',$1,$1) returning id",[joe.id])).rows[0].id;
+  const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,joe.id])).rows[0].id;
+  const deal=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic inbox deal','purchase','research','joe',$2,$2) returning id",[client,joe.id])).rows[0].id;
+  const lease=(await c.query("insert into lease(client_id,created_by,updated_by,expiration_on) values($1,$2,$2,current_date+interval '30 months') returning id",[client,joe.id])).rows[0].id;
+  for(const [subject_type,subject_id] of [['deal',deal],['lease',lease]])
+    await call('watch-subject-v1',{subject_type,subject_id,idempotency_key:randomUUID()});
+  await c.query("update lease set expiration_on=current_date+interval '6 months' where id=$1",[lease]);
+  await call('update-deal',{deal,base_version:1,fields:{city:'Synthetic inbox city'},idempotency_key:randomUUID()});
+  const canonical=async()=> (await c.query('select to_jsonb(d) deal,to_jsonb(l) lease from deal d cross join lease l where d.id=$1 and l.id=$2',[deal,lease])).rows[0];
+  const original=await canonical();
+  const feed=await call('notification-feed',{limit:200});
+  const home=()=>call('read-home-inbox-v5');
+  for(const [kind,ref,url,name] of [['deal',deal,`/deals?deal=${deal}`,'Synthetic inbox deal'],['lease',lease,`/clients?record=${client}`,'Synthetic inbox client']]) {
+    const notice=feed.notifications.find(n=>n.subject_type===kind&&n.subject_ref===ref);
+    assert.ok(notice); assert.equal(notice.deep_link,url);
+    const find=async()=> (await home()).items.find(i=>i.merged_source_ids.includes(notice.id));
+    let item=await find(); assert.ok(item,`${kind} has a Home card`);
+    const context=kind==='lease'?`${name} · Lease expires ${original.lease.expiration_on}`:name;
+    assert.equal(item.open_url,url); assert.equal(item.title,`${notice.reason} · ${context}`);
+    assert.equal(item.context_label,context);
+    assert.equal(item.section,'inbox'); assert.equal(item.unseen,true);
+    for(const seen of [false,true]) for(const placement of ['inbox','settled','snoozed']) {
+      const operations=placement==='inbox'?['acknowledge-notification','settle-home-inbox','snooze-home-inbox']:['acknowledge-notification','unsettle-home-inbox'];
+      for(const operation of operations) await t.test(`${kind}: ${seen?'read':'unread'} ${placement} ${operation}`,async()=>{
+        await c.query('begin'); isolated=true;
+        try {
+        if(seen) await call('acknowledge-notification',{notification_id:notice.id,idempotency_key:randomUUID()});
+        let current=await find();
+        const mutate=async verb=>call(verb,{idempotency_key:randomUUID(),items:[{item_id:current.item_id,base_version:current.base_version}],...(verb==='snooze-home-inbox'?{until:'2099-01-01T00:00:00Z'}:{})});
+        if(placement!=='inbox') { await mutate(placement==='settled'?'settle-home-inbox':'snooze-home-inbox'); current=await find(); }
+        if(operation==='acknowledge-notification') await call(operation,{notification_id:notice.id,idempotency_key:randomUUID()});
+        else await mutate(operation);
+        const after=await find();
+        assert.equal(after.section,operation==='acknowledge-notification'?placement:operation==='settle-home-inbox'?'settled':operation==='snooze-home-inbox'?'snoozed':'inbox');
+        assert.equal(after.unseen,operation==='acknowledge-notification'?false:!seen);
+        assert.equal(after.source_state,'needs_attention');
+        } finally { await c.query('rollback'); isolated=false; }
+      });
+    }
+    const key=randomUUID();
+    await call('acknowledge-notification',{notification_id:notice.id,idempotency_key:key});
+    item=await find(); assert.equal(item.unseen,false); assert.equal(item.section,'inbox');
+    assert.equal(item.source_state,'needs_attention');
+    await call('acknowledge-notification',{notification_id:notice.id,idempotency_key:key});
+    const change=async verb=>call(verb,{idempotency_key:randomUUID(),items:[{item_id:item.item_id,base_version:item.base_version}],...(verb==='snooze-home-inbox'?{until:'2099-01-01T00:00:00Z'}:{})});
+    await change('settle-home-inbox'); item=await find();
+    assert.equal(item.section,'settled'); assert.equal(item.source_state,'needs_attention');
+    await change('unsettle-home-inbox'); item=await find(); assert.equal(item.section,'inbox');
+    await change('snooze-home-inbox'); item=await find(); assert.equal(item.section,'snoozed');
+    assert.equal(item.unseen,false); assert.equal(item.source_state,'needs_attention');
+    assert.ok((await call('notification-feed',{limit:200})).notifications.find(n=>n.id===notice.id).read_at);
+    await change('unsettle-home-inbox'); item=await find(); assert.equal(item.section,'inbox');
+    assert.deepEqual(await canonical(),original);
+  }
 });

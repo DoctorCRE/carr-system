@@ -1,0 +1,14 @@
+[
+  {
+    "source": "const start = performance.now(); const elapsed = performance.now() - start; assert.ok(elapsed < 2000);",
+    "lines": [1]
+  },
+  {
+    "source": "assert.ok(Date.now() - started < 2000);",
+    "lines": [1]
+  },
+  {
+    "source": "assert.equal(alive, false);",
+    "lines": []
+  }
+]
