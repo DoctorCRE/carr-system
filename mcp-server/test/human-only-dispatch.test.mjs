@@ -70,6 +70,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
   // over: it means a verb gained or lost the flag, and that is a decision
   // somebody should see in a diff.
   assert.deepEqual(humanOnlyVerbs, [
+    "abandon-deal-deliverable",
     "accept-outcome-feedback",
 
     "accept-ready-plan",
