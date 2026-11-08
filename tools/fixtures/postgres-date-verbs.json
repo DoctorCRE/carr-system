@@ -1,7 +1,19 @@
 {
   "provenance": {
     "transport": "executeRegisteredTool/disposable-postgres",
-    "producer_sha256": "6f3dccb8f37eebff7630991d235cd13fa5244f6c5461439585ddf980956a6bed",
+    "producer_scope": {
+      "scheme": "registered-handler-contract/v1",
+      "verbs": [
+        "claim-card",
+        "deal-board",
+        "lead-board",
+        "lead-hot",
+        "morning-brief",
+        "quiet-follow-ups",
+        "stale-records"
+      ]
+    },
+    "producer_sha256": "dffe70070ba9da35452aa99bc793aeeebcc4376d17cea3d61ca2be0d5053fe0f",
     "driver_sha256": "be4b104f47970ace941c42e1eddbdf0839257f233075e38ce4c323e57a4c562f"
   },
   "date_columns": {
@@ -233,9 +245,9 @@
     "lead-hot": {
       "leads": [
         {
-          "id": "d79b3539-e2ed-468c-a79c-0658e0bdd0fc",
-          "registry_ref": "L-d79b3539-e2ed-468c-a79c-0658e0bdd0fc",
-          "name": "Synthetic quiet owner 7c2851d6-403c-44c6-9336-6418fc1785ec",
+          "id": "4884539e-226d-4d59-afa4-f0bb3769611e",
+          "registry_ref": "L-4884539e-226d-4d59-afa4-f0bb3769611e",
+          "name": "Synthetic quiet owner 1c86548d-553c-4182-a2f6-e7fb1f9d29c4",
           "specialty": null,
           "city": null,
           "county": null,
@@ -253,7 +265,7 @@
       ]
     },
     "lead-board": {
-      "generated_at": "2026-11-08T20:16:08.531Z",
+      "generated_at": "2026-11-08T20:37:16.400Z",
       "stages": [
         {
           "slug": "new",
@@ -313,16 +325,16 @@
       ],
       "leads": [
         {
-          "id": "d79b3539-e2ed-468c-a79c-0658e0bdd0fc",
-          "registry_ref": "L-d79b3539-e2ed-468c-a79c-0658e0bdd0fc",
-          "name": "Synthetic quiet owner 7c2851d6-403c-44c6-9336-6418fc1785ec",
+          "id": "4884539e-226d-4d59-afa4-f0bb3769611e",
+          "registry_ref": "L-4884539e-226d-4d59-afa4-f0bb3769611e",
+          "name": "Synthetic quiet owner 1c86548d-553c-4182-a2f6-e7fb1f9d29c4",
           "specialty": null,
           "city": null,
           "county": null,
           "state": null,
           "lane": null,
           "stage": "new",
-          "party_id": "7c2851d6-403c-44c6-9336-6418fc1785ec",
+          "party_id": "1c86548d-553c-4182-a2f6-e7fb1f9d29c4",
           "stage_label": "New",
           "stage_sort": 10,
           "score": null,
@@ -335,8 +347,8 @@
           "owner": "joe",
           "owner_label": "Joe",
           "base_version": 2,
-          "created_at": "2026-11-08T20:16:08.347Z",
-          "updated_at": "2026-11-08T20:16:08.347Z",
+          "created_at": "2026-11-08T20:37:16.327Z",
+          "updated_at": "2026-11-08T20:37:16.327Z",
           "conversion_eligible": true,
           "converted": false,
           "stage_moves": [],
@@ -388,10 +400,10 @@
       "proposals": [
         {
           "subject_type": "lead",
-          "subject_id": "d79b3539-e2ed-468c-a79c-0658e0bdd0fc",
-          "party_id": "7c2851d6-403c-44c6-9336-6418fc1785ec",
-          "ref": "L-d79b3539-e2ed-468c-a79c-0658e0bdd0fc",
-          "name": "Synthetic quiet owner 7c2851d6-403c-44c6-9336-6418fc1785ec",
+          "subject_id": "4884539e-226d-4d59-afa4-f0bb3769611e",
+          "party_id": "1c86548d-553c-4182-a2f6-e7fb1f9d29c4",
+          "ref": "L-4884539e-226d-4d59-afa4-f0bb3769611e",
+          "name": "Synthetic quiet owner 1c86548d-553c-4182-a2f6-e7fb1f9d29c4",
           "owner_id": "b6c38b27-d006-4fad-9c38-49edf3130a07",
           "anchor_on": "2000-01-01",
           "basis": "last_contact",
