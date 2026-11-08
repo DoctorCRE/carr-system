@@ -148,6 +148,43 @@ test("document intake contract and lifecycle", async (t) => {
     await c.query(await readFile(new URL("../../migrations/1086_deal_documents.sql", import.meta.url), "utf8"));
     const reserve = (args = {}) => start({target_collection: "documents", ...args});
     const receipt = (id) => call("read-deal-deliverable", {deal_id:deal,deliverable_id:id});
+    await t.test("verified abandonment releases file and byte quota exactly once", async () => {
+      for (const quota of ["files", "bytes"]) {
+        const ids = [];
+        const boundedReserve = async (size = bytes.length) => {
+          const result = await reserve({bytes: size});
+          ids.push(result.deliverable.id);
+          return result;
+        };
+        try {
+          const id = (await boundedReserve()).deliverable.id;
+          assert.equal((await put(id)).status, 201);
+          if (quota === "files") {
+            for (let n = 1; n < DELIVERABLE_POLICY.maxDealFiles; n++) await boundedReserve();
+          } else {
+            for (let n = 1; n < 20; n++) await boundedReserve(DELIVERABLE_POLICY.maxBytes);
+            await boundedReserve(DELIVERABLE_POLICY.maxBytes - bytes.length);
+          }
+          await reject(reserve({bytes: 1}), "deliverable_quota_exceeded");
+          const discard = {deal_id: deal, deliverable_id: id, idempotency_key: randomUUID()};
+          await call("abandon-deal-deliverable", discard);
+          // The replacement must fit without waiting for the reservation deadline.
+          await boundedReserve();
+          await call("abandon-deal-deliverable", discard);
+          const replay = await call("abandon-deal-deliverable", {...discard, idempotency_key: randomUUID()});
+          assert.equal(replay.existing, true);
+          await reject(reserve({bytes: 1}), "deliverable_quota_exceeded");
+          const stored = (await c.query("select state,expires_at>now() as future from ops.deal_deliverable where id=$1", [id])).rows[0];
+          assert.equal(stored.state, "expired");
+          assert.equal(stored.future, true);
+          assert.equal((await receipt(id)).deliverable.state, "expired");
+          await reject(finalize(id), "deliverable_upload_expired");
+          assert.equal((await put(id)).status, 410);
+        } finally {
+          await c.query("delete from ops.deal_deliverable where id=any($1::uuid[])", [ids]);
+        }
+      }
+    });
     await t.test("reserve replay, photo upload, atomic attachment finalize and document readback", async () => {
       const photo = new Uint8Array([255,216,255,0,1,2,3]);
       const args = {idempotency_key:randomUUID(),filename:"Photo.jpg",mime:"image/jpeg",bytes:photo.length,sha256:createHash("sha256").update(photo).digest("hex")};
