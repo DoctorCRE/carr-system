@@ -88,6 +88,7 @@ import { CALENDAR_AGENDA_BOARD, calendarSection, addCalendarContacts, addCalenda
 import { emailLeadProposalTools } from "./email-lead-proposal.ts";
 import { leadAutomationTools } from "./lead-automation.js";
 import { actionLinkTools } from "./action-links.js";
+import { actionCardTargetTools } from "./action-card-targets.ts";
 import { workflowCutoverTools } from "./workflow-cutover.v5.ts";
 import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
@@ -11081,6 +11082,7 @@ const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealFiel
 registerTools(invoices.tools,"invoice-automation");
 registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
 registerTools(actionLinkTools({ ToolError, readTool: executeRegisteredTool }), "action-links");
+registerTools(actionCardTargetTools({ ToolError, readTool: executeRegisteredTool }), "mcp-server/src/action-card-targets.ts");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Reads historical acceptance and native retirement evidence rather than
 // duplicating their evidence; retire-workflow-cutover-plan is authority-only.
