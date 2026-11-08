@@ -13,8 +13,8 @@ language sql stable set search_path=pg_catalog,pg_temp as $$
     'critical_dates',(select coalesce(jsonb_agg(v order by v::text),'[]') from
       (select distinct jsonb_build_object('kind',btrim(kind),'due_on',due_on) v
        from public.critical_date where deal_id=d.id and status='open') dates),
-    'action_owners',(select coalesce(jsonb_agg(v order by v::text),'[]') from
-      (select distinct owner_id v from public.next_action where subject_type='deal' and subject_id=d.id and status='open') owners),
+    'next_actions',(select coalesce(jsonb_agg(v order by v::text),'[]') from
+      (select distinct jsonb_build_object('owner_id',owner_id,'due_on',due_on) v from public.next_action where subject_type='deal' and subject_id=d.id and status='open') actions),
     'leases',(select coalesce(jsonb_agg(v order by v::text),'[]') from
       (select distinct jsonb_build_object('expiration_on',expiration_on,'executed_on',executed_on,'status',status) v
        from public.lease where deal_id=d.id and status='current') leases))

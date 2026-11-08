@@ -253,6 +253,7 @@ test('meaningful canonical changes commit once with source writes and isolate ma
       const immaterial={deal,fields:{notes_path:'Synthetic proof note'},base_version:await version(),idempotency_key:randomUUID()};
       await call('update-deal',immaterial);
       const quiet=capture('immaterial');
+      assert.equal((await call('update-deal',meaningful)).replayed,true);
       assert.equal((await call('update-deal',immaterial)).replayed,true);
       const replay=capture('replay');
       const revision=spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout.trim();
