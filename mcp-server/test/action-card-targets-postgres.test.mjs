@@ -17,6 +17,7 @@ before(async () => {
   fixture = await acquireDisposablePostgres({ prefix: 'action-card-targets-', snapshot: true });
   c = new pg.Client(fixture.connection);
   await c.connect();
+  await c.query("set time zone 'America/Chicago'");
   for (const who of actors) {
     await c.query("update actor set slug=slug||'-snapshot' where slug=$1", [who.slug]);
     await c.query("insert into actor(id,slug,kind,display_name) values($1,$2,'human','Synthetic partner')", [who.id, who.slug]);
