@@ -9,6 +9,7 @@ import { acceptsConfirmVerb } from './fixtures/email-followups-app-confirm-verb.
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { buildRelease } from '../src/release.js';
+import { buildActionLink } from '../src/action-links.js';
 
 let fixture, c, actor, deal, clientRef, connection;
 before(async () => {
@@ -1560,6 +1561,7 @@ test('reply draft edits persist exact text and version through list-email-propos
   assert.equal(result.subject, 'Re: Edited floor plan');
   assert.equal(result.body, '  Synthetic saved reply.\nThank you.  ');
   assert.deepEqual(after, { ...before, version: result.version,
+    action_link: buildActionLink({ kind: 'reply_draft', id: proposal.proposal_id, owner: 'joe', version: result.version }),
     reply_draft: { ...before.reply_draft, subject: result.subject, body: result.body } });
   const outbox = await command('outbox-for-sender', {}, machineFor('joe'), 'carr_reader');
   assert.ok(!outbox.drafts.some(item => item.proposal_id === proposal.proposal_id));

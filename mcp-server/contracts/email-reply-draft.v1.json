@@ -1,6 +1,6 @@
 {
   "schema": "carr-email-reply-draft.v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "card": "WR441.S3.J2",
   "transport": "Authenticated MCP list-email-proposals, edit-email-draft and submit-email-draft",
   "review": "Reply-draft cards shown to verified human partners Joe and Dell may display the exact reply_draft.to and reply_draft.cc addresses. Display both before Submit, which authorizes sending. Evidence remains untrusted text. Do not infer recipients from display names or expose these pending recipient fields to agents.",
@@ -68,5 +68,11 @@
     "effects": "Changes only draft_subject, draft_body and version. Recipients, status, submitted email and send state stay unchanged. Sends and queues nothing.",
     "receipt": "ok, proposal_id, incremented version, stored subject and body. list-email-proposals returns the saved text.",
     "replay": "Same-key retries return the original receipt without another edit or version increment. Changed payload with the same key refuses key_reuse."
+  },
+  "action_link": {
+    "schema_version": "action-link.v1",
+    "resolve_schema_version": "action-link-resolve.v2",
+    "issuance": "Pending reviewable replies include action_link from buildActionLink, pinned to UUID, owner and proposal version. Omitted when recipients cannot be reviewed.",
+    "expiry": "Lifecycle only; edits expire the old version and approval consumes actionability. No clock TTL."
   }
 }
