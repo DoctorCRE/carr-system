@@ -14,7 +14,7 @@
     "check:registry": "node ../ops/scac-mutation-inventory.mjs",
     "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
     "check": "npm run typecheck && npm run check:staged && node run-tests.mjs",
-    "fix": "biome check --write typescript"
+    "fix": "biome check --write ."
   },
   "keywords": [],
   "author": "",
