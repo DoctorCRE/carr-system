@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-COUNT = 5
+COUNT = 7
 POSTGRES_PROFILE = "both"
 WATCHDOG_MS = 600000
 BUDGET_MS = WATCHDOG_MS * 4 // 5
@@ -51,6 +51,21 @@ def plan(root=ROOT, count=COUNT):
     if any(not suites for suites in shards):
         raise ValueError('unit shard has zero suites')
     return [sorted(files) for files in shards]
+
+
+def budget(root=ROOT):
+    shards = plan(root)
+    records, setup = durations(root)
+    measured = json.loads((root / 'ops/config/ci-unit-durations.json').read_text()).get('suites', {})
+    missing = sorted(set(records) - set(measured))
+    if missing:
+        raise ValueError(f'unit suites need measured duration entries: {missing}')
+    for index, files in enumerate(shards, 1):
+        predicted = estimate(files, records, setup)
+        if predicted > BUDGET_MS:
+            raise ValueError(f'unit shard {index} predicted {predicted}ms exceeds {BUDGET_MS}ms '
+                             f'budget (80% of {WATCHDOG_MS}ms watchdog); remeasure or split slow suites')
+    return shards
 
 
 def regenerate(logs, source_run, output, root=ROOT):
@@ -104,7 +119,7 @@ def verify(receipts, root=ROOT):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=Path, default=ROOT)
-    parser.add_argument('action', choices=('plan', 'capabilities', 'verify', 'timings'))
+    parser.add_argument('action', choices=('plan', 'capabilities', 'verify', 'timings', 'budget'))
     parser.add_argument('receipts', nargs='*', type=Path)
     parser.add_argument('--source-run', type=int)
     parser.add_argument('--output', type=Path)
@@ -116,6 +131,11 @@ def main():
                               for index, _ in enumerate(plan(args.root), 1)]))
         elif args.action == 'plan':
             print(json.dumps(plan(args.root)))
+        elif args.action == 'budget':
+            records, setup = durations(args.root)
+            print(json.dumps([{'shard': index, 'predicted_ms': estimate(files, records, setup),
+                               'budget_ms': BUDGET_MS}
+                              for index, files in enumerate(budget(args.root), 1)]))
         elif args.action == 'timings':
             if not (args.source_run and args.output):
                 parser.error('timings requires --source-run and --output')

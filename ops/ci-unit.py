@@ -2,7 +2,7 @@
 """Execute every required Node package and refuse unmeasured success."""
 import argparse
 import json
-from ci_unit_shards import COUNT, plan
+from ci_unit_shards import COUNT, budget
 import os
 from pathlib import Path
 import subprocess
@@ -23,7 +23,10 @@ def main():
     if shard:
         if args.part != 'mcp' or shard not in tuple(map(str, range(1, COUNT + 1))):
             parser.error(f'CARR_CI_UNIT_SHARD requires --part mcp and shard 1 through {COUNT}')
-        selected = plan()[int(shard) - 1]
+        try:
+            selected = budget()[int(shard) - 1]
+        except ValueError as error:
+            parser.exit(1, f'{error}\n')
     packages = {'fast': ('practice-plugin',), 'mcp': ('mcp-server',),
                 'practice': ('practice-plugin',), 'all': PACKAGES}[args.part]
     failed = False

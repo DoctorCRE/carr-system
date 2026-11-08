@@ -6,7 +6,7 @@ permissions:
 jobs:
   unit:
     if: ${{ !cancelled() }}
-    name: MCP unit shard ${{ matrix.shard }} of 5
+    name: MCP unit shard ${{ matrix.shard }} of 7
     runs-on: ubuntu-24.04
     container:
       options: --init
@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     services:
       postgres:
         image: pgvector/pgvector:0.8.7-pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84

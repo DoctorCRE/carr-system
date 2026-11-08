@@ -189,6 +189,9 @@ class UnitClassTests(unittest.TestCase):
             (mcp / f'test/extra{n}.test.mjs').write_text(
                 "import test from 'node:test'; test('executes', () => {});")
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+            'suites': {file.name: {'milliseconds': 1, 'serial': True}
+                       for file in (mcp / 'test').glob('*.test.mjs')}}))
         command = ['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp']
         receipt = self.root / 'receipt.json'
         deadline = self.root / 'deadline.txt'
@@ -259,6 +262,27 @@ class UnitClassTests(unittest.TestCase):
         self.assertIn('zero passing tests', result.stderr)
         self.assertFalse(receipt.exists())
 
+    def test_shard_budget_refuses_before_npm(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': COUNT}))
+        for index in range(COUNT - 1):
+            (mcp / f'test/extra{index}.test.mjs').touch()
+        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+            'suites': {file.name: {'milliseconds': 600001, 'serial': True}
+                       for file in (mcp / 'test').glob('*.test.mjs')}}))
+        marker = self.root / 'npm-started'
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': f'touch {marker}'}}))
+        receipt = self.root / 'overweight-receipt.json'
+        result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+            cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)},
+            capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('exceeds 480000ms budget', result.stdout + result.stderr)
+        self.assertFalse(marker.exists(), 'overweight shards must refuse before npm starts')
+        self.assertFalse(receipt.exists())
+
     def test_watchdog_timeout_cannot_emit_a_success_receipt(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
@@ -266,6 +290,9 @@ class UnitClassTests(unittest.TestCase):
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text('')
+        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+            'suites': {file.name: {'milliseconds': 1, 'serial': True}
+                       for file in (mcp / 'test').glob('*.test.mjs')}}))
         (self.root / 'bin/with-timeout.py').write_text("raise SystemExit(124)\n")
         receipt = self.root / 'timeout-receipt.json'
         result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
