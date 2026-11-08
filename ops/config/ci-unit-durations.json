@@ -130,6 +130,7 @@
     "deal-checklist-pings.test.mjs": {"milliseconds": 1025, "serial": false},
     "deal-checklist-transaction-recovery-postgres.test.mjs": {"milliseconds": 1135, "serial": true},
     "deal-checklist.test.mjs": {"milliseconds": 315, "serial": false},
+    "deal-document-intake-postgres.test.mjs": {"milliseconds": 16000, "serial": true},
     "deal-deliverables-postgres.test.mjs": {"milliseconds": 78660, "serial": true},
     "deal-deliverables-web.test.mjs": {"milliseconds": 3820, "serial": false},
     "deal-deliverables.test.mjs": {"milliseconds": 2460, "serial": false},

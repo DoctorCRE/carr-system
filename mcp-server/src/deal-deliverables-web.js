@@ -7,7 +7,7 @@ import {
 } from "./deal-deliverables.js";
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const path = new RegExp(
-  `^${DELIVERABLE_PREFIX}/(${UUID})(?:/(${UUID})/(bytes|download|finalize|visibility))?$`,
+  `^${DELIVERABLE_PREFIX}/(${UUID})(?:/(${UUID})/(bytes|download|finalize|visibility|receipt|abandon))?$`,
 );
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -192,9 +192,9 @@ export function createDealDeliverablesHandler({
         const verified = await verifyDeliverableBytes(bytes, reservation);
         const result = await transaction(async (c) => {
           const row = await deliverableRow(c, actor, deal, id, { lock: true });
-          if (row.state !== "started") refuse("deliverable_upload_conflict");
-          if (Date.parse(row.expires_at) <= Date.now())
+          if (Date.parse(row.expires_at) <= Date.now() || row.state === "expired")
             refuse("deliverable_upload_expired");
+          if (row.state !== "started") refuse("deliverable_upload_conflict");
           await c.query(
             "update ops.deal_deliverable set state='uploading' where id=$1",
             [id],
@@ -275,8 +275,11 @@ export function createDealDeliverablesHandler({
           : request.method === "POST"
             ? "start-deal-deliverable"
             : null
-        : request.method === "POST"
+        : action === "receipt" && request.method === "GET"
+          ? "read-deal-deliverable"
+          : request.method === "POST"
           ? {
+              abandon: "abandon-deal-deliverable",
               finalize: "finalize-deal-deliverable",
               visibility: "set-deal-deliverable-visibility",
             }[action]

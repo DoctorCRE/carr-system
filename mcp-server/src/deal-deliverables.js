@@ -152,6 +152,20 @@ export async function authorizeDeliverable(c, actor, deal) {
   if (!d?.owner || decision?.decision !== "allow") fail("deliverable_denied");
   return tenant;
 }
+const documentUpload = (row) => row.object_key.startsWith("document-intakes/");
+const publicDeliverable = ({ object_key, organization_tenant_id, created_by, expires_at, ...row }) => ({
+  ...row,
+  ...(row.state !== "finalized" && Date.parse(expires_at) <= Date.now() ? { state: "expired" } : {}),
+});
+async function documentReceipt(c, row) {
+  if (!documentUpload(row) || row.state !== "finalized") return null;
+  const attachment = (await c.query(`select id as attachment_id, subject_id as deal_id, sha256, filename, mime, bytes
+    from public.attachment where id=$1 and subject_type='deal' and subject_id=$2 and r2_key=$3 and deleted_at is null`,
+    [row.id,row.deal_id,row.object_key])).rows[0];
+  if (!attachment) fail("deliverable_denied");
+  return { ...attachment, bytes: Number(attachment.bytes) };
+}
+
 const columns =
   "id,deal_id,filename,mime,bytes,sha256,state,visibility,version,created_at,finalized_at";
 export async function deliverableRow(
@@ -169,7 +183,7 @@ export async function deliverableRow(
     )
   ).rows[0];
   if (!row) fail("deliverable_denied");
-  if (row.object_key !== `deliverables/${tenant}/${row.deal_id}/${row.id}`)
+  if (!["deliverables", "document-intakes"].some(prefix => row.object_key === `${prefix}/${tenant}/${row.deal_id}/${row.id}`))
     fail("deliverable_denied");
   return row;
 }
@@ -185,6 +199,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
         "Reserve a partner deliverable upload. Private by default. Returns a byte upload path. Files stay with the deal.",
       "finalize-deal-deliverable":
         "Finalize verified deliverable bytes privately. Repeated finalization returns the existing file.",
+      "abandon-deal-deliverable": "Abandon an unfinished upload. Bytes are never filed after abandonment. Replays return the existing disposition.",
       "set-deal-deliverable-visibility":
         "Versioned private/shared designation. Shared means publishable, never published.",
     }[name],
@@ -208,7 +223,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
             cause: "human_stated",
             idempotency_key: args.idempotency_key,
           });
-        return { ok: true, schema_version: "deal-deliverables.v1", ...result };
+        return { ok: true, schema_version: args.target_collection === "documents" || result.attachment || result.target_collection === "documents" ? "deal-document-intake.v1" : "deal-deliverables.v1", ...result };
       });
     },
   });
@@ -227,7 +242,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
         const tenant = await authorizeDeliverable(c, actor, a.deal_id);
         const rows = (
           await c.query(
-            `select ${columns} from ops.deal_deliverable where organization_tenant_id=$1 and deal_id=$2 and state='finalized' order by created_at,id limit $3`,
+            `select ${columns} from ops.deal_deliverable where organization_tenant_id=$1 and deal_id=$2 and state='finalized' and object_key like 'deliverables/%' order by created_at,id limit $3`,
             [tenant, a.deal_id, DELIVERABLE_POLICY.maxDealFiles],
           )
         ).rows;
@@ -242,6 +257,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
       "start-deal-deliverable",
       {
         ...read,
+        target_collection: { type: "string", enum: ["deliverables", "documents"], description: "Defaults to deliverables. Documents finalize into attachments returned by deal-documents.v1." },
         filename: { type: "string", minLength: 1, maxLength: 255 },
         mime: { type: "string" },
         bytes: {
@@ -253,6 +269,8 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
       },
       ["deal_id", "filename", "mime", "bytes", "sha256"],
       async (c, actor, a) => {
+        if (a.target_collection !== undefined && !["deliverables", "documents"].includes(a.target_collection)) fail("invalid_deliverable");
+        const prefix = a.target_collection === "documents" ? "document-intakes" : "deliverables";
         const dealId = a.deal_id.toLowerCase();
         const tenant = await authorizeDeliverable(c, actor, dealId);
         if (
@@ -315,7 +333,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
               a.mime,
               a.bytes,
               a.sha256,
-              `deliverables/${tenant}/${dealId}/${id}`,
+              `${prefix}/${tenant}/${dealId}/${id}`,
               actor.slug,
             ],
           )
@@ -346,9 +364,15 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
             expires_at,
             ...publicRow
           } = row;
-          return { deliverable: publicRow, existing: true };
+          return { deliverable: publicRow, attachment: await documentReceipt(c, row), existing: true };
         }
+        if (row.state === "expired" || Date.parse(row.expires_at) <= Date.now()) fail("deliverable_upload_expired");
         if (row.state !== "verified") fail("deliverable_not_verified");
+        if (documentUpload(row)) {
+          await c.query(`insert into public.attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by)
+            values($1,'deal',$2,$3,$4,$5,$6,$7,$8)`,
+            [row.id,row.deal_id,row.object_key,row.filename,row.mime,row.sha256,row.bytes,actor.id]);
+        }
         return {
           deliverable: (
             await c.query(
@@ -356,8 +380,28 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
               [row.id],
             )
           ).rows[0],
+          attachment: await documentReceipt(c, { ...row, state: "finalized" }),
           existing: false,
         };
+      },
+    ),
+    "read-deal-deliverable": {
+      write: false,
+      description: "Read the current authorized upload state and document attachment receipt after a lost response. No object key or bytes.",
+      inputSchema: { type: "object", additionalProperties: false, properties: target, required: ["deal_id", "deliverable_id"] },
+      handler: async (c, actor, a) => {
+        const row = await deliverableRow(c, actor, a.deal_id, a.deliverable_id);
+        return { ok: true, schema_version: documentUpload(row) ? "deal-document-intake.v1" : "deal-deliverables.v1",
+          deliverable: publicDeliverable(row), attachment: await documentReceipt(c, row) };
+      },
+    },
+    "abandon-deal-deliverable": write(
+      "abandon-deal-deliverable", target, ["deal_id", "deliverable_id"],
+      async (c, actor, a) => {
+        const row = await deliverableRow(c, actor, a.deal_id, a.deliverable_id, { lock: true });
+        if (row.state === "finalized") fail("deliverable_upload_conflict");
+        const updated = (await c.query(`update ops.deal_deliverable set expires_at=least(expires_at,now()) where id=$1 returning *`, [row.id])).rows[0];
+        return { deliverable: publicDeliverable(updated), target_collection: documentUpload(row) ? "documents" : "deliverables", existing: Date.parse(row.expires_at) <= Date.now() };
       },
     ),
     "set-deal-deliverable-visibility": write(
@@ -376,6 +420,7 @@ export function dealDeliverableTools({ withEnvelope, writeEvent }) {
           a.deliverable_id,
           { lock: true },
         );
+        if (documentUpload(row)) fail("deliverable_denied");
         if (row.state !== "finalized") fail("deliverable_not_finalized");
         if (row.version !== a.expected_version) fail("version_conflict");
         if (!["private", "shared"].includes(a.visibility))

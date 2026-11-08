@@ -7,7 +7,9 @@
   "verbs": {
     "list-deal-deliverables": {
       "write": false,
-      "required": ["deal_id"]
+      "required": [
+        "deal_id"
+      ]
     },
     "start-deal-deliverable": {
       "write": true,
@@ -18,11 +20,18 @@
         "mime",
         "bytes",
         "sha256"
+      ],
+      "optional": [
+        "target_collection"
       ]
     },
     "finalize-deal-deliverable": {
       "write": true,
-      "required": ["idempotency_key", "deal_id", "deliverable_id"]
+      "required": [
+        "idempotency_key",
+        "deal_id",
+        "deliverable_id"
+      ]
     },
     "set-deal-deliverable-visibility": {
       "write": true,
@@ -32,6 +41,21 @@
         "deliverable_id",
         "expected_version",
         "visibility"
+      ]
+    },
+    "read-deal-deliverable": {
+      "write": false,
+      "required": [
+        "deal_id",
+        "deliverable_id"
+      ]
+    },
+    "abandon-deal-deliverable": {
+      "write": true,
+      "required": [
+        "deal_id",
+        "deliverable_id",
+        "idempotency_key"
       ]
     }
   },
@@ -62,10 +86,18 @@
     ],
     "download": "attachment with private no-store caching, nosniff, no bearer URL"
   },
-  "lifecycle": ["started", "uploading", "verified", "finalized"],
+  "lifecycle": [
+    "started",
+    "uploading",
+    "verified",
+    "finalized"
+  ],
   "visibility": {
     "default": "private",
-    "values": ["private", "shared"],
+    "values": [
+      "private",
+      "shared"
+    ],
     "shared": "designated publishable; actual client publication belongs to slice 4"
   },
   "concurrency": "deal reservation advisory lock; upload and finalization row locks; visibility expected_version compare under row lock; finalization replay returns existing without another event",
@@ -89,5 +121,6 @@
     "deliverable_not_finalized",
     "version_conflict"
   ],
-  "content_validation": "PDF, PNG, JPEG, WebP and HEIC signatures; legacy Office compound container signatures and stream markers; OOXML ZIP central directory and required package members. Content validation does not claim malware scanning."
+  "content_validation": "PDF, PNG, JPEG, WebP and HEIC signatures; legacy Office compound container signatures and stream markers; OOXML ZIP central directory and required package members. Content validation does not claim malware scanning.",
+  "document_destination_contract": "workspace/contracts/deal-document-intake.v1.json"
 }
