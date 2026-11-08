@@ -50,7 +50,6 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     await c.query('create table v_ref_index(subject_type text,subject_id uuid)');
     await c.query(readFileSync(new URL('../../migrations/1086_deal_documents.sql', import.meta.url), 'utf8'));
     await c.query(readFileSync(new URL('../../migrations/1161_deal_document_text.sql', import.meta.url), 'utf8'));
-    await c.query('grant select on attachment to carr_reader');
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic'),($2,'codex','automation','Synthetic')", [partner.id, robot.id]);
     await c.query("insert into v_ref_index values('deal',$1)", [deal]);
     await c.query("insert into attachment(id,subject_type,subject_id,r2_key,filename,mime,sha256,bytes,created_by) values($1,'deal',$2,'documents/synthetic.pdf','Synthetic.pdf','application/pdf',$3,10,$4)", [doc, deal, hash, partner.id]);

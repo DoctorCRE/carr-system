@@ -39,13 +39,10 @@ export function dealDocumentTextTools() {
       inputSchema: object({ after: { anyOf: [uuid, { type: 'null' }] }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['limit']),
       handler: async (c: Db, actor: Actor, args: VerbInputs['list-deal-document-text-sources']) => {
         jobOnly(actor);
-        const documents = (await c.query(`select a.id document_ref,a.subject_id entity_ref,a.sha256 content_hash,
-          a.mime,a.bytes::integer,a.r2_key,exists(select 1 from ops.deal_document_text t where
-            t.document_ref=a.id and t.content_hash=a.sha256 and t.text_format_version='page-text.v1') retained
-          from public.attachment a where a.subject_type='deal' and a.deleted_at is null
-            and a.bytes between 1 and 26214400 and ($1::uuid is null or a.id>$1::uuid)
-          order by a.id limit $2`, [args.after ?? null, args.limit])).rows;
-        return { ok: true, documents };
+        const result = (await c.query<{ r: { ok: boolean; error?: string; documents?: unknown[] } }>(
+          'select ops.list_deal_document_text_sources($1,$2,$3) r', [actor.id, args.after ?? null, args.limit])).rows[0].r;
+        if (!result.ok) throw new ToolError({ error: result.error ?? 'source_scan_failed' });
+        return result;
       },
     },
     'read-deal-document-text': {

@@ -55,15 +55,38 @@ begin
 end $$;
 revoke all on function ops.record_deal_document_text(uuid,jsonb) from public;
 grant execute on function ops.record_deal_document_text(uuid,jsonb) to carr_writer;
-do $append_grant$
-declare contract jsonb := ops.scac_current_grant_contract();
+create function ops.list_deal_document_text_sources(p_actor uuid,p_after uuid,p_limit integer) returns jsonb
+language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $$
 begin
- contract:=jsonb_set(contract,'{secdef_execute}',contract->'secdef_execute'||jsonb_build_array(jsonb_build_object(
- 'grantee','carr_writer','signature','ops.record_deal_document_text(p_actor uuid, p_args jsonb)',
- 'grantable',false,'privilege','execute',
- 'ingress_key','db-function-acl:ops.record_deal_document_text(p_actor uuid, p_args jsonb):carr_writer:execute',
+ if not exists(select 1 from public.actor where id=p_actor and kind='automation' and active) then
+   return jsonb_build_object('ok',false,'error','not_in_profile');
+ end if;
+ if p_limit is null or p_limit not between 1 and 100 then
+   return jsonb_build_object('ok',false,'error','validation_error');
+ end if;
+ return jsonb_build_object('ok',true,'documents',coalesce((select jsonb_agg(to_jsonb(d) order by d.document_ref) from (
+   select a.id document_ref,a.subject_id entity_ref,a.sha256 content_hash,a.mime,a.bytes,a.r2_key,
+     exists(select 1 from ops.deal_document_text t where t.document_ref=a.id and t.content_hash=a.sha256
+       and t.text_format_version='page-text.v1') retained
+   from public.attachment a where a.subject_type='deal' and a.deleted_at is null
+     and a.bytes between 1 and 26214400 and (p_after is null or a.id>p_after)
+   order by a.id limit p_limit) d),'[]'::jsonb));
+end $$;
+revoke all on function ops.list_deal_document_text_sources(uuid,uuid,integer) from public;
+grant execute on function ops.list_deal_document_text_sources(uuid,uuid,integer) to carr_reader;
+do $append_grant$
+declare contract jsonb := ops.scac_current_grant_contract(); entries jsonb;
+begin
+ select jsonb_agg(jsonb_build_object(
+ 'grantee',grantee,'signature',signature,'grantable',false,'privilege','execute',
+ 'ingress_key','db-function-acl:'||signature||':'||grantee||':execute',
  'ingress_kind','db_function_acl','function_kind','f','security_definer',true,
- 'volatility','v','parallel','u','config',jsonb_build_array('search_path=pg_catalog, pg_temp'))));
+ 'volatility',volatility,'parallel','u','config',jsonb_build_array('search_path=pg_catalog, pg_temp')))
+ into entries from (values
+ ('ops.record_deal_document_text(p_actor uuid, p_args jsonb)','carr_writer','v'),
+ ('ops.list_deal_document_text_sources(p_actor uuid, p_after uuid, p_limit integer)','carr_reader','s')
+ ) functions(signature,grantee,volatility);
+ contract:=jsonb_set(contract,'{secdef_execute}',contract->'secdef_execute'||entries);
  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
  'select '||quote_literal(contract::text)||'::jsonb');
 end $append_grant$;
