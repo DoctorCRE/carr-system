@@ -1,5 +1,5 @@
 System design
-Canonical snapshots, keyed by watch generation, hold only meaningful selected deal/lease values. The event insert trigger compares that baseline to current canonical state, then commits the receipt and new baseline in the source transaction. A pure SQL classifier returns changed field names and unknown/known reason codes. Reply identity is the inbound activity UUID and mailbox owner.
+Canonical snapshots, keyed by watch generation, hold only meaningful selected deal/lease values. The registered operation completion trigger on public.tool_call compares that baseline to final canonical state, then commits the receipt and new baseline in the source transaction. Keyed intermediate events wait for that completion. Unkeyed source events still capture on insert. Material semantic identity is the operation idempotency key, or the unkeyed event UUID, plus material category. It never includes policy version. A pure SQL classifier returns changed field names and unknown/known reason codes. Reply identity is the inbound activity UUID and mailbox owner.
 Alternative considered: classify event payloads alone. Rejected because lease replacement events omit prior values and late evidence must compare selected canonical state.
 Two partners and the coexisting v1/v2 generations bound each subject to four subscriptions. Indexed subject lookup, per-generation row locks and one bounded read page avoid N+1 external work. At 10x, related-date aggregation is the first expected cost; no measured capacity claim. No cache or external call, hence no circuit breaker. Source and receipt refuse together on failure. Pending receipt delivery belongs to slice 4. Read authority is the verified partner actor, and inaccessible records refuse. Unique generation/semantic key handles replay. Paused/resumed generations reset their snapshot quietly.
 
@@ -43,3 +43,29 @@ releases. `--release-fixture` is offline testing only and labels output accordin
 The PostgreSQL suite records the four samples from registered writers and runs the
 real CLI against equal, descendant, older, unrelated and unknown release fixtures,
 plus an assertion failure. No production observation was run by this worker.
+
+Operation completion regression
+The Meaningful commit transition means a complete registered operation, including
+every intermediate event and canonical write. The date-swap regression asserts
+one receipt for each partner operation and both next_actions and next_date in
+the second receipt. The multi-field update regression combines scalar edits with
+overdue action supersession and asserts one receipt with every changed field.
+Equivalent commit and Replay remain quiet; Rollback still restores the baseline
+and receipts. The migration initializer remains a quiet selected-state baseline.
+
+Writer audit
+update-deal emits per-field events before optional overdue-action supersession;
+the completion trigger handles both together. set-next-action emits action and
+shared-date events around its canonical writes; completion now handles both.
+set-lead and add-critical-date each emit one event after all writes.
+record-executed-lease performs its canonical replacement before its single event.
+Inbound inherit-email-thread and confirm-email-filing emit per-activity filing
+evidence; reply keys remain activity UUIDs with mailbox isolation. Existing
+registered regressions exercise each writer, lease replacement, equivalent dates,
+filing replay, rollback and concurrent partners.
+
+Design and debt pass
+codebase-design keeps classification behind one SQL operation-completion seam.
+zero-tech-debt replaces per-event material identity rather than adding merge or
+receipt-repair logic. No external call, queue or cache is introduced. Indexed
+event-key lookup limits each completion scan to that operation's events.

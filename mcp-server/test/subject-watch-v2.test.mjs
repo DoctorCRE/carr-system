@@ -107,7 +107,9 @@ test('proof CLI passes exact scheduled evidence and refuses duplicates and insuf
 
 test('release containment accepts descendants and rejects older and unrelated commits',t=>{
  const root=mkdtempSync(join(tmpdir(),'watch-proof-git-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
- const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+ const gitEnv={...process.env};
+ for(const key of ['GIT_SHALLOW_FILE','GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE']) delete gitEnv[key];
+ const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8',env:gitEnv,stdio:['ignore','pipe','pipe']}).trim();
  git('init','--initial-branch=main');git('config','user.name','Synthetic proof');git('config','user.email','synthetic@example.test');
  const message=join(root,'message');writeFileSync(message,'synthetic proof commit');
  const commit=()=>{git('commit','--allow-empty','-F',message);return git('rev-parse','HEAD');};
@@ -116,7 +118,7 @@ test('release containment accepts descendants and rejects older and unrelated co
  const base=JSON.parse(readFileSync(new URL('../contracts/subject-watch-scheduled-proof.v1.fixture.json',import.meta.url)));
  for(const [observed,status] of [[expected,0],[descendant,0],[older,78],[unrelated,78]]) {
   const fixture=structuredClone(base);fixture.release.git_sha.value=observed;const path=join(root,'fixture.json');writeFileSync(path,JSON.stringify(fixture));
-  const result=spawnSync(process.env.CARR_CI_PYTHON??'python3',[proof,'--fixture',path,'--expected-merge',expected,'--watch-id',fixture.sample.watch_id],{cwd:root,encoding:'utf8'});
+  const result=spawnSync(process.env.CARR_CI_PYTHON??'python3',[proof,'--fixture',path,'--expected-merge',expected,'--watch-id',fixture.sample.watch_id],{cwd:root,encoding:'utf8',env:gitEnv});
   assert.equal(result.status,status,result.stdout+result.stderr);
  }
 });
