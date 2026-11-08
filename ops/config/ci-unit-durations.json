@@ -13,6 +13,7 @@
   "field_census_suite_measurement": {"card": "WR587.S4.J6", "suite": "ops/outlook-intake-selftest.py", "class": "unit", "local_samples_ms": [55602], "basis": "Existing intake suite extended with census transitions. Measured full suite duration. No new suite."},
   "historical_win_labels_suite_measurement": {"card": "WR647.S16.J1", "command": "CARR_CI_PYTHON=/Users/booko/carr-system/.venv/bin/python node --test mcp-server/test/historical-win-readable-labels-postgres.test.mjs", "local_samples_ms": [2868], "cold_standalone_samples_ms": [65095, 58943], "budget_multiplier": 10, "basis": "Canonical runner with shared snapshot template, registered handler, exclusions and 1001-group refusal. Ten times measured suite duration; template setup is counted separately. Cold standalone samples include snapshot setup. No throughput claim."},
   "reply_action_links_measurement": {"card": "WR617.S1.J77", "suite": "reply-action-links-postgres.test.mjs", "local_group_samples_ms": [7211], "hosted_group_samples_ms": [2005], "budget_multiplier": 1, "basis": "New reply suite separated from the legacy raw-cluster lead suite to preserve CI-service isolation. 10000ms rounds above the measured canonical reply group plus process overhead. Shared cold snapshot setup is budgeted separately. The unchanged lead suite retains its prior measured entry. No throughput claim."},
+  "shard_budget_measurement": {"card": "WR622.S13.J256", "native_and_shallow_samples_ms": {"snapshot-callers-1-postgres.test.mjs": [218268, 166363], "snapshot-callers-2-postgres.test.mjs": [204525, 180577], "snapshot-service-postgres.test.mjs": [218238, 269108]}, "postgres": 17, "node": "26.12.1", "logs_sha256": ["00b86fee3338819bbfa19465c2c0270c5f1a7dbd4098bdda93afef4df332a71c", "6936a360632c7dc9704a9908a4284cfb0b447c93438e324789b9716bc39d96a2"], "basis": "Both complete real SQL proof runs passed six tests with zero skips. Round each observed maximum up to ten seconds, including local fixture lock contention. Retain hosted cold setup floor and 80% watchdog policy. No speedup claim."},
   "source_run": 41339293730,
   "snapshot_template_ms": 167478,
   "timing_refresh": {
@@ -42,6 +43,8 @@
   "quiet_owner_filter_measurement": {"card": "WR647.S15.J4", "command": "node --test mcp-server/test/quiet-follow-up-owner-filter-postgres.test.mjs", "local_samples_ms": [19832, 20731], "basis": "Six passing tests including cold disposable PostgreSQL setup and teardown and recorded-response proof replay. No speedup claim."},
   "quiet_owner_proof_measurement": {"card": "WR647.S15.J4", "suite": "tools/test_prove_quiet_follow_up_owner_filter.py", "command": "python3 -m unittest discover -s tools -p test_prove_quiet_follow_up_owner_filter.py", "local_samples_ms": [674], "basis": "Five passing tests replay the committed real registered responses. No network or history dependency."},
   "suites": {
+    "snapshot-callers-2-postgres.test.mjs": {"milliseconds": 210000, "serial": true},
+    "snapshot-callers-1-postgres.test.mjs": {"milliseconds": 220000, "serial": true},
     "historical-win-readable-labels-postgres.test.mjs": {"milliseconds": 28680, "serial": true},
     "mail-needs-partner.test.mjs": {"milliseconds": 350, "serial": false},
     "mail-needs-partner-route.test.mjs": {"milliseconds": 335, "serial": false},
@@ -399,7 +402,7 @@
     "situation-retrieval-bigint.test.mjs": {"milliseconds": 419, "serial": false},
     "situation-retrieval-integration.test.mjs": {"milliseconds": 532, "serial": false},
     "situation-retrieval.test.mjs": {"milliseconds": 269, "serial": false},
-    "snapshot-service-postgres.test.mjs": {"milliseconds": 251409, "serial": true},
+    "snapshot-service-postgres.test.mjs": {"milliseconds": 270000, "serial": true},
     "sponsor-runtime.test.mjs": {"milliseconds": 776, "serial": false},
     "staging-journey-preflight.test.mjs": {"milliseconds": 402, "serial": false},
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},

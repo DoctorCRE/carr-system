@@ -13,7 +13,7 @@ import re
 import subprocess
 import zipfile
 
-from ci_unit_shards import COUNT
+from ci_unit_shards import MAX_COUNT, plan
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = 'ci-tree-evidence'
@@ -116,12 +116,12 @@ def contract_digest(root=ROOT):
     return digest.hexdigest()
 
 
-def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
-    required = {'ops/ci.sh --strict', 'unit-coverage',
-                *(f'unit / MCP unit shard {n} of {COUNT}' for n in range(1, COUNT + 1)),
+def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups, shard_count):
+    required = {'ops/ci.sh --strict', 'unit / plan', 'unit-coverage',
+                *(f'unit / MCP unit shard {n} of {shard_count}' for n in range(1, shard_count + 1)),
                 *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
-    return (run.get('name') == 'CI' and run.get('event') == 'merge_group'
+    return (1 <= shard_count <= MAX_COUNT and run.get('name') == 'CI' and run.get('event') == 'merge_group'
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'
             and required <= green and receipt.get('schema') == 'carr-ci-evidence/v1'
             and receipt.get('event') == run.get('event') and receipt.get('draft') is False
@@ -154,7 +154,7 @@ class GitHub:
             return json.loads(archive.read('ci-evidence.json'))
 
 
-def resolve(github, sha, tree, contract, groups):
+def resolve(github, sha, tree, contract, groups, shard_count):
     candidates = []
     seen = set()
     for run in github.api('actions/workflows/ci.yml/runs?event=merge_group&per_page=100')['workflow_runs']:
@@ -174,7 +174,7 @@ def resolve(github, sha, tree, contract, groups):
         jobs = github.api(f'actions/runs/{run["id"]}/jobs?per_page=100')['jobs']
         if can_reuse(run, jobs, receipt, tree=tree, head_tree=head_tree,
                      tested_tree=github.tree(receipt['tested_sha']),
-                     contract=contract, groups=groups):
+                     contract=contract, groups=groups, shard_count=shard_count):
             return {'reused': True, 'source_run_id': run['id'],
                     'source_run_attempt': run.get('run_attempt', 1),
                     'source_pr': pr_number, 'source_head_sha': head,
@@ -250,7 +250,7 @@ def main():
                   'tested_sha': sha, 'tree_sha': tree, 'contract': contract, 'groups': groups}
     else:
         try:
-            result = resolve(GitHub(os.environ['GITHUB_REPOSITORY']), sha, tree, contract, groups)
+            result = resolve(GitHub(os.environ['GITHUB_REPOSITORY']), sha, tree, contract, groups, len(plan()))
         except (OSError, ValueError, KeyError, subprocess.SubprocessError, zipfile.BadZipFile):
             result = {'reused': False, 'reason': 'source evidence unavailable; run classes'}
         result.update(main_sha=sha, tree_sha=tree, contract=contract, groups=groups)
