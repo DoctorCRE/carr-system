@@ -17,6 +17,7 @@ create table ops.subject_watch_delivery (
  watch_id uuid primary key,
  next_evaluation_at timestamptz not null,
  clock_seen jsonb not null default '[]',
+ last_evaluated_at timestamptz,
  last_emitted_at timestamptz,
  last_success_at timestamptz,
  failure_count integer not null default 0 check(failure_count between 0 and 2),
@@ -70,7 +71,7 @@ begin
  if tg_op='UPDATE' then
  if old.state='paused' and new.state='watching' or old.policy<>new.policy then
    update ops.subject_watch_delivery set clock_seen=ops.subject_watch_clock_keys(new.subject_type,new.subject_id,pol,clock_timestamp()),
-     next_evaluation_at=clock_timestamp(),failure_count=0,failure_code=null where watch_id=new.id;
+     next_evaluation_at=clock_timestamp(),last_evaluated_at=clock_timestamp(),failure_count=0,failure_code=null where watch_id=new.id;
  end if;
  end if;
  return new;
@@ -107,7 +108,7 @@ begin
  loop
    if not pg_try_advisory_xact_lock(hashtextextended(w.actor_id::text||':'||w.subject_type||':'||w.subject_id::text,0)) then continue; end if;
    select * into st from ops.subject_watch_delivery where watch_id=w.id for update skip locked;
-   if not found or st.failure_count>=2 then continue; end if;
+   if not found or st.failure_count>=2 or st.last_evaluated_at>p_now then continue; end if;
    n:=n+1;
    -- Refresh lifecycle and policy after acquiring the same lock as unwatch.
    if exists(select 1 from ops.subject_watch_v2_subscription where id=w.id) then
@@ -135,7 +136,7 @@ begin
            jsonb_build_array(jsonb_build_object('event_id',event_id,'activity_id',null)),p_now,p_now)
          on conflict(watch_generation_id,semantic_key) do nothing;
        end if;
-       update ops.subject_watch_delivery set clock_seen=keys where watch_id=w.id;
+       update ops.subject_watch_delivery set clock_seen=keys,last_evaluated_at=p_now where watch_id=w.id;
        update ops.subject_watch_change c set disposition='suppressed'
        where c.watch_generation_id=w.id and c.disposition='pending' and (
          c.category='lease_threshold_crossed' and (not pol->'change_kinds' ? 'lease_threshold_crossed'
@@ -189,7 +190,8 @@ begin
  end loop;
  insert into ops.subject_watch_sweep(singleton,scheduled_at,completed_at,event_id,scanned,emitted)
  values(true,p_now,clock_timestamp(),event_id,n,emits) on conflict(singleton) do update set
- scheduled_at=excluded.scheduled_at,completed_at=excluded.completed_at,event_id=excluded.event_id,scanned=excluded.scanned,emitted=excluded.emitted;
+ scheduled_at=excluded.scheduled_at,completed_at=excluded.completed_at,event_id=excluded.event_id,scanned=excluded.scanned,emitted=excluded.emitted
+ where excluded.scheduled_at>=ops.subject_watch_sweep.scheduled_at;
  return jsonb_build_object('scanned',n,'emitted',emits,'event_id',event_id);
 end $$;
 revoke all on function ops.subject_watch_clock_keys(text,uuid,jsonb,timestamptz),ops.subject_watch_delivery_start(),ops.sweep_subject_watches(timestamptz,integer)

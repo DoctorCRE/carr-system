@@ -511,6 +511,24 @@ test('quiet lease clocks and pending delivery', async t => {
    await sweep('2028-03-31T12:15:00Z');assert.equal(await count(),3);
   } finally {await c.query('rollback');}
  });
+ await t.test('older scheduled retries preserve newer pending clock receipts',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,source_event_id,source_revision,policy_version,category,changes,evidence_refs,occurred_at,eligible_at) select watch_generation_id,actor_id,subject_type,subject_id,'fixture:older-pending-material',source_event_id,source_revision,policy_version,'material_changed',jsonb_build_array(jsonb_build_object('field','expiration_on','before','2028-04-01','after','2028-03-31','reason_code','value_changed')),evidence_refs,'2027-01-01'::timestamptz,'2027-01-01'::timestamptz from ops.subject_watch_change where watch_generation_id=$1 and disposition='emitted' limit 1",[watch]);
+   await c.query("create function ops.watch_order_fail() returns trigger language plpgsql as $$ begin raise exception 'synthetic order failure'; end $$");
+   await c.query('create trigger watch_order_fail before insert on ops.notification for each row execute function ops.watch_order_fail()');
+   await sweep('2028-03-31T12:00:00Z');
+   await c.query('drop trigger watch_order_fail on ops.notification');
+   const pendingClock=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and category='lease_threshold_crossed' and disposition='pending'",[watch])).rows[0].n);
+   assert.equal(await pendingClock(),1);
+   const older=await sweep('2028-03-30T12:00:00Z');
+   assert.equal(await pendingClock(),1,'an old clock cannot suppress a newer crossing');
+   assert.equal(older.scanned,0,'older invocation leaves a newer evaluation unchanged');
+   assert.equal((await c.query('select scheduled_at from ops.subject_watch_sweep')).rows[0].scheduled_at.toISOString(),'2028-03-31T12:00:00.000Z');
+   await sweep('2028-03-31T12:00:00Z');
+   assert.equal(await pendingClock(),0);assert.equal(await count(),4,'the pending material and clock receipts converge together');
+  } finally {await c.query('rollback');}
+ });
  await t.test('whole transaction rollback retries without loss or duplication',async()=>{
   await c.query('begin'); await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),3); await c.query('rollback'); assert.equal(await count(),2);
   await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),3);
