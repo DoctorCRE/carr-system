@@ -79,7 +79,7 @@ class Controls(unittest.TestCase):
         import re
         from ci_unit_shards import POSTGRES_PROFILE, COUNT
         self.assertEqual(POSTGRES_PROFILE, 'both')
-        self.assertEqual(COUNT, 5)
+        self.assertEqual(COUNT, 7)
         lanes = {'ci.yml': ('fast', 'gates', 'classes', 'migration-fixtures'),
                  'main-canary.yml': ('classes',), 'unit-shards.yml': ('unit',)}
         images = set()
