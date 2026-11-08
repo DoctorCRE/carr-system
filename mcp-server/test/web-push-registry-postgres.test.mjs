@@ -45,7 +45,7 @@ test('registry lifecycle, isolation, replay and logout on disposable PostgreSQL'
     await c.query(identityFunction[0]);
     await c.query("create function ops.scac_current_grant_contract() returns jsonb language sql as $$select '{\"secdef_execute\":[]}'::jsonb$$");
     for (const role of ['carr_reader','carr_writer','carr_authority','carr_jobs','dot_reader']) await c.query(`create role ${role}`);
-    await c.query(await readFile(new URL('../../migrations/1161_web_push_registry.sql',import.meta.url),'utf8'));
+    await c.query(await readFile(new URL('../../migrations/1163_web_push_registry.sql',import.meta.url),'utf8'));
     assert.equal((await c.query("select has_table_privilege('carr_writer','ops.web_push_subscription','SELECT') as allowed")).rows[0].allowed,false);
     const args = subscription();
     await t.test('Register and duplicate request preserve one confirmed generation', async () => {
