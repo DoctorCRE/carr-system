@@ -1,0 +1,38 @@
+---
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
+---
+stateDiagram-v2
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
+  }
+  class legendWorks works
+  state "Absent | Unreadable" as s0
+  state "Deleted | Unreadable" as s1
+  state "Produced | Readable" as s2
+  state "Superseded | Unreadable" as s3
+  state "Unavailable | Unreadable" as s4
+  [*] --> s0
+  s0 --> s2 : Text layer retained
+  s0 --> s4 : No extractable text
+  s0 --> s1 : Attachment removed
+  s2 --> s3 : Original bytes replaced
+  s2 --> s1 : Attachment removed
+  s4 --> s3 : Original bytes replaced
+  s4 --> s1 : Attachment removed
+  s3 --> s2 : New text retained
+  s3 --> s4 : New source has no text
+  s3 --> s1 : Attachment removed
+  class s0 works
+  class s1 works
+  class s2 works
+  class s3 works
+  class s4 works

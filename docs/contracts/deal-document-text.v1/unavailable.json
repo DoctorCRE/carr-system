@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "schema_version": "deal-document-text.v1",
+  "text_format_version": "page-text.v1",
+  "deal_id": "00000000-0000-4000-8000-000000000003",
+  "attachment_id": "00000000-0000-4000-8000-000000000004",
+  "content_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "status": "unavailable",
+  "reason": "unsupported_or_limits",
+  "text_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "page_count": 0,
+  "lines": [],
+  "next": null
+}
