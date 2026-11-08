@@ -34,6 +34,20 @@ function isDelivery(value: unknown): value is Delivery {
     && ["pending", "delivered", "suppressed_quiet_hours", "failed"].includes(value.state);
 }
 
+function isNotificationRoute(link: string, subjectType: string, subjectRef: string): boolean {
+  if (/\s/.test(link)) return false;
+  if (/^\/([A-Za-z0-9._~-][A-Za-z0-9._~/-]*)?$/.test(link)) {
+    return !link.split('/').some(segment => segment === '.' || segment === '..');
+  }
+  if (subjectRef.length !== 36 || !UUID.test(subjectRef)) return false;
+  if (subjectType === 'deal') return link === `/deals?deal=${subjectRef}`;
+  if (subjectType === 'lease') {
+    const match = /^\/clients\?record=([^?&#]+)$/.exec(link);
+    return match !== null && UUID.test(match[1]);
+  }
+  return false;
+}
+
 function isNotification(value: unknown): value is Notification {
   return isObject(value) && typeof value.id === "string"
     && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.id)
@@ -42,7 +56,7 @@ function isNotification(value: unknown): value is Notification {
     && isText(value.reason) && Array.from(value.reason).length <= 500
     && isText(value.subject_type) && isText(value.subject_ref)
     && typeof value.deep_link === "string" && value.deep_link.length <= 301
-    && /^\/([A-Za-z0-9._~-][A-Za-z0-9._~/-]*)?$/.test(value.deep_link)
+    && isNotificationRoute(value.deep_link, value.subject_type, value.subject_ref)
     && isText(value.created_at) && (value.read_at === null || isText(value.read_at))
     && Array.isArray(value.delivery) && value.delivery.every(isDelivery)
     && new Set(value.delivery.map(entry => entry.channel)).size === value.delivery.length;
