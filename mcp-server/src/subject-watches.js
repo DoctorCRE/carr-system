@@ -88,6 +88,8 @@ export function subjectWatchV2Tools({ withEnvelope, ToolError }) {
       required.push('policy');
     }
     tools[verb] = {
+      humanOnly: true,
+      humanCallerOnly: true,
       ...(write ? { write: true } : { writerConnection: true }),
       description: `Watch v2 ${command}. Server-derived partner only. Separate v2 policy lifecycle; v1 unchanged. Listing targets refuse until a canonical listing contract exists. Watch and resume are quiet. Exact subscription and lifecycle version required for changes.`,
       inputSchema: { type: 'object', additionalProperties: false, properties, required },

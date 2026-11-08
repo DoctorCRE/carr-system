@@ -118,8 +118,8 @@ test('v2 registered lifecycle, policy, replay, generations and isolation', async
     settled=call('unwatch-subject-v2',{...old,idempotency_key:randomUUID()},joe,other).then(value=>({value}),error=>({error}));
     const fresh=await executeRegisteredTool(c,joe,'watch-subject-v2',{...target,policy,idempotency_key:randomUUID()});
     let blocked=false;
-    const deadline=Date.now()+5000;
-    while(Date.now()<deadline && !blocked) {
+    const deadline=performance.now()+5000;
+    while(performance.now()<deadline && !blocked) {
       blocked=(await c.query("select exists(select 1 from pg_locks where pid=$1 and locktype='advisory' and not granted) as blocked",[pid])).rows[0].blocked;
       if(!blocked)await new Promise(resolve=>setTimeout(resolve,10));
     }
