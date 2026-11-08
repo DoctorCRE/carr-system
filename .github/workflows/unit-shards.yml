@@ -4,9 +4,26 @@ on:
 permissions:
   contents: read
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.assign.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: ./.github/actions/ci-downloads
+      - id: assign
+        run: |
+          matrix="$(python3 ops/ci_unit_shards.py matrix)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
   unit:
-    if: ${{ !cancelled() }}
-    name: MCP unit shard ${{ matrix.shard }} of 7
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    name: MCP unit shard ${{ matrix.shard }} of ${{ matrix.count }}
     runs-on: ubuntu-24.04
     container:
       options: --init
@@ -21,8 +38,7 @@ jobs:
     timeout-minutes: 15
     strategy:
       fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7]
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     services:
       postgres:
         image: pgvector/pgvector:0.8.7-pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84

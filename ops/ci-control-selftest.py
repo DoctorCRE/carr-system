@@ -77,9 +77,9 @@ class Controls(unittest.TestCase):
 
     def test_hosted_database_lanes_require_image_without_acquisition(self):
         import re
-        from ci_unit_shards import POSTGRES_PROFILE, COUNT
+        from ci_unit_shards import POSTGRES_PROFILE, MAX_COUNT
         self.assertEqual(POSTGRES_PROFILE, 'both')
-        self.assertEqual(COUNT, 7)
+        self.assertEqual(MAX_COUNT, 16)
         lanes = {'ci.yml': ('fast', 'gates', 'classes', 'migration-fixtures'),
                  'main-canary.yml': ('classes',), 'unit-shards.yml': ('unit',)}
         images = set()

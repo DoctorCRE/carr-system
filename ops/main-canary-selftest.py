@@ -8,7 +8,7 @@ import pathlib
 import re
 import sys
 
-from ci_unit_shards import COUNT
+from ci_unit_shards import plan
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CANARY = REPO / ".github" / "workflows" / "main-canary.yml"
@@ -81,7 +81,8 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           and main_names['migration_shard_2'] == {
               'name': 'ops/ci.sh --strict --only migration --migration-part fixtures', 'classes': 'migration'})
     check('main fallback and CI share the MCP shard workflow and coverage gate; both run practice-plugin separately',
-          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix']['shard'] == list(range(1, COUNT + 1))
+          workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix'] == '${{ fromJSON(needs.plan.outputs.matrix) }}'
+          and len(plan()) > 0
           and pr['jobs']['unit-coverage']['needs'] == ['select', 'unit']
           and 'unit-coverage' in pr['jobs']['checks']['needs']
           and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])

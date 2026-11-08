@@ -8,7 +8,9 @@ import tempfile
 import unittest
 
 from git_env import fixture_env
-from ci_unit_shards import COUNT
+from ci_unit_shards import plan
+
+FIXTURE_COUNT = 7
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ('mcp-server', 'practice-plugin')
@@ -201,6 +203,7 @@ class UnitClassTests(unittest.TestCase):
         watchdog.write_text('import os, sys\nfrom pathlib import Path\n'
                             f'Path({str(deadline)!r}).write_text(sys.argv[1])\n'
                             f'os.execv(sys.executable, [sys.executable, {str(original_watchdog)!r}, *sys.argv[1:]])\n')
+        count = len(plan(self.root))
         shard_env = {**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)}
         (mcp / 'run-tests.mjs').write_text(runner)
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
@@ -209,12 +212,12 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(deadline.read_text(), '600')
         last_receipt = self.root / 'last-receipt.json'
         last = subprocess.run(command, cwd=self.root,
-            env={**shard_env, 'CARR_CI_UNIT_SHARD': str(COUNT), 'CARR_CI_UNIT_RECEIPT': str(last_receipt)},
+            env={**shard_env, 'CARR_CI_UNIT_SHARD': str(count), 'CARR_CI_UNIT_RECEIPT': str(last_receipt)},
             capture_output=True, text=True, timeout=30)
         self.assertEqual(last.returncode, 0, last.stdout + last.stderr)
-        self.assertEqual(json.loads(last_receipt.read_text())['shard'], COUNT)
+        self.assertEqual(json.loads(last_receipt.read_text())['shard'], count)
         invalid = subprocess.run(command, cwd=self.root,
-            env={**shard_env, 'CARR_CI_UNIT_SHARD': str(COUNT + 1)},
+            env={**shard_env, 'CARR_CI_UNIT_SHARD': str(count + 1)},
             capture_output=True, text=True, timeout=30)
         self.assertNotEqual(invalid.returncode, 0)
 
@@ -266,8 +269,8 @@ class UnitClassTests(unittest.TestCase):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
-        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': COUNT}))
-        for index in range(COUNT - 1):
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': FIXTURE_COUNT}))
+        for index in range(FIXTURE_COUNT - 1):
             (mcp / f'test/extra{index}.test.mjs').touch()
         (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
             'suites': {file.name: {'milliseconds': 600001, 'serial': True}
@@ -282,6 +285,25 @@ class UnitClassTests(unittest.TestCase):
         self.assertIn('exceeds 480000ms budget', result.stdout + result.stderr)
         self.assertFalse(marker.exists(), 'overweight shards must refuse before npm starts')
         self.assertFalse(receipt.exists())
+
+    def test_shard_selection_uses_admitted_dynamic_count(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 8}))
+        for index in range(7):
+            (mcp / f'test/extra{index}.test.mjs').write_text("import test from 'node:test'; test('executes', () => {});")
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+            'suites': {file.name: {'milliseconds': 480000, 'serial': True}
+                       for file in (mcp / 'test').glob('*.test.mjs')}}))
+        receipt = self.root / 'dynamic-receipt.json'
+        result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+            cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': '8', 'CARR_CI_UNIT_RECEIPT': str(receipt)},
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(receipt.read_text())['shard'], 8)
 
     def test_watchdog_timeout_cannot_emit_a_success_receipt(self):
         self.package('mcp-server')

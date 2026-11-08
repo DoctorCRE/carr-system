@@ -2,7 +2,7 @@
 """Execute every required Node package and refuse unmeasured success."""
 import argparse
 import json
-from ci_unit_shards import COUNT, budget
+from ci_unit_shards import plan
 import os
 from pathlib import Path
 import subprocess
@@ -21,12 +21,15 @@ def main():
     shard = os.environ.get('CARR_CI_UNIT_SHARD')
     selected = None
     if shard:
-        if args.part != 'mcp' or shard not in tuple(map(str, range(1, COUNT + 1))):
-            parser.error(f'CARR_CI_UNIT_SHARD requires --part mcp and shard 1 through {COUNT}')
+        if args.part != 'mcp' or not shard.isdigit():
+            parser.error('CARR_CI_UNIT_SHARD requires --part mcp and a positive shard number')
         try:
-            selected = budget()[int(shard) - 1]
+            shards = plan()
         except ValueError as error:
             parser.exit(1, f'{error}\n')
+        if int(shard) not in range(1, len(shards) + 1):
+            parser.error(f'CARR_CI_UNIT_SHARD requires shard 1 through {len(shards)}')
+        selected = shards[int(shard) - 1]
     packages = {'fast': ('practice-plugin',), 'mcp': ('mcp-server',),
                 'practice': ('practice-plugin',), 'all': PACKAGES}[args.part]
     failed = False
@@ -97,8 +100,8 @@ def main():
                     print(f"OK unit {package}: {counts['tests']} tests, "
                           f"{counts['pass']} passed, {counts['skipped']} skipped")
                     continue
-                print(f'FAIL unit {package}: {reason}')
                 print(output)
+                print(f'FAIL unit {package}: {reason}')
             except (OSError, ValueError, TypeError) as exc:
                 print(f'FAIL unit {package}: required check could not complete ({type(exc).__name__})')
             failed = True
