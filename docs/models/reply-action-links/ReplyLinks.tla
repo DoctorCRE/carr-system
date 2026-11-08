@@ -30,7 +30,7 @@ IssueCurrentProposal ==
     /\ UNCHANGED <<session>>
 
 ResolveOwningSession ==
-    /\ session = "SignedIn" \* mcp-server/src/action-links.js:54 and tools.js:9267
+    /\ session = "SignedIn" \* mcp-server/src/action-links.js:55 and tools.js:9267
     /\ \/ (card = "Issued" /\ card' = "Review")
     /\ UNCHANGED <<session>>
 
@@ -39,7 +39,7 @@ ResolveForeignOrSignedOut ==
     /\ UNCHANGED <<session>>
 
 ResolveAgainWithoutMutation ==
-    /\ session = "SignedIn" \* mcp-server/src/action-links.js:54 and tools.js:9267
+    /\ session = "SignedIn" \* mcp-server/src/action-links.js:55 and tools.js:9267
     /\ \/ (card = "Review" /\ card' = "Review")
     /\ UNCHANGED <<session>>
 
@@ -49,7 +49,7 @@ EditOrRetireSource ==
     /\ UNCHANGED <<session>>
 
 ExplicitDomainApproval ==
-    /\ session = "SignedIn" \* mcp-server/src/action-links.js:54 and tools.js:9267
+    /\ session = "SignedIn" \* mcp-server/src/action-links.js:55 and tools.js:9267
     /\ \/ (card = "Review" /\ card' = "Consumed")
     /\ UNCHANGED <<session>>
 
@@ -62,7 +62,7 @@ ResolveOrActStaleReference ==
     /\ UNCHANGED <<session>>
 
 ResolveFreshEligibleReference ==
-    /\ session = "SignedIn" \* mcp-server/src/action-links.js:54 and tools.js:9267
+    /\ session = "SignedIn" \* mcp-server/src/action-links.js:55 and tools.js:9267
     /\ \/ (card = "Refused" /\ card' = "Review")
     /\ UNCHANGED <<session>>
 
