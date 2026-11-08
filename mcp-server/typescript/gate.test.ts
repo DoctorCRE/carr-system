@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -39,6 +39,51 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
         encoding: "utf8",
         timeout: 120_000,
       });
+    const scopePath = join(pkg, "typescript/migration.json");
+    const legacySource = "export const legacy = 1;\n";
+    const baseline = {
+      legacyJavaScript: ["mcp-server/legacy.js"],
+      toolExceptions: [],
+      legacyTypeScript: {
+        "mcp-server/legacy.ts": { sha256: createHash("sha256").update(legacySource).digest("hex") },
+      },
+    };
+    writeFileSync(scopePath, JSON.stringify(baseline));
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: fixtureEnv });
+    git("add", "mcp-server/typescript/migration.json");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "baseline");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    const baselineFailures: string[] = [];
+    for (const extension of ["js", "ts"]) {
+      const path = `mcp-server/new.${extension}`;
+      writeFileSync(join(root, path), "export const invalid: string = 1;\n");
+      const scope = structuredClone(baseline);
+      if (extension === "js") scope.legacyJavaScript.push(path);
+      else
+        Object.assign(scope.legacyTypeScript, {
+          [path]: {
+            sha256: createHash("sha256")
+              .update(readFileSync(join(root, path)))
+              .digest("hex"),
+          },
+        });
+      writeFileSync(scopePath, JSON.stringify(scope));
+      const result = run();
+      if (result.status === 0) baselineFailures.push(`appended legacy .${extension} accepted`);
+      else assert.match(result.stdout + result.stderr, /legacy.*only shrink/i);
+      rmSync(join(root, path));
+    }
+    writeFileSync(join(pkg, "legacy.js"), "export const legacy = 1;\n");
+    renameSync(join(pkg, "legacy.js"), join(pkg, "renamed.js"));
+    writeFileSync(scopePath, JSON.stringify({ ...baseline, legacyJavaScript: ["mcp-server/renamed.js"] }));
+    const renamed = run();
+    if (renamed.status === 0) baselineFailures.push("renamed legacy file accepted");
+    else assert.match(renamed.stdout + renamed.stderr, /legacy.*only shrink/i);
+    rmSync(join(pkg, "renamed.js"));
+    writeFileSync(scopePath, JSON.stringify({ legacyJavaScript: [], toolExceptions: [], legacyTypeScript: {} }));
+    const shrunk = run();
+    assert.equal(shrunk.status, 0, shrunk.stdout + shrunk.stderr);
+    assert.deepEqual(baselineFailures, [], baselineFailures.join("\n"));
     const clean = run();
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
     const cases: [string, string, RegExp][] = [
@@ -96,7 +141,6 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       assert.match(result.stdout + result.stderr, expected, path);
     }
     const legacyFile = join(pkg, "legacy.ts");
-    const legacySource = "export const legacy = 1;\n";
     writeFileSync(legacyFile, legacySource);
     writeFileSync(
       join(pkg, "typescript/migration.json"),
