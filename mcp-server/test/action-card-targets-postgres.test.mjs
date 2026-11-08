@@ -1,8 +1,7 @@
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { Validator } from '@cfworker/json-schema';
-import { postgresDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 import { buildActionCardRef, parseActionCardResponse } from '../src/action-card-targets.ts';
 import { buildActionLink } from '../src/action-links.js';
@@ -13,21 +12,19 @@ import { publicError } from '../src/public-errors.ts';
 const id = n => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const actors = ['joe', 'dell'].map((slug, i) => ({ id: id(i + 1), slug, human: true }));
 
-test('exact card lifecycle on disposable PostgreSQL', async t => {
-  const db = await postgresDatabase('action-card-targets-');
-  t.after(() => db.close());
-  const c = db.client;
-  await c.query('create schema ops');
-  await c.query('create role carr_writer');
-  await c.query('grant usage on schema ops to carr_writer');
-  await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $f$ select '{"secdef_execute":[]}'::jsonb $f$`);
-  const schema = await readFile(new URL('../../db/schema.sql', import.meta.url), 'utf8');
-  for (const [ns, table] of [['public', 'actor'], ['public', 'capture_session'], ['public', 'capture_candidate'],
-    ['public', 'capture_post_call_candidate'], ['ops', 'tour_share_grant'], ['ops', 'tour_share_feedback_event'], ['ops', 'tour_share_grant_revocation_receipt']]) {
-    await c.query(schema.match(new RegExp(`CREATE TABLE ${ns}\\.${table} \\([\\s\\S]*?\\n\\);`))[0]);
+let fixture, c;
+before(async () => {
+  fixture = await acquireDisposablePostgres({ prefix: 'action-card-targets-', snapshot: true });
+  c = new pg.Client(fixture.connection);
+  await c.connect();
+  for (const who of actors) {
+    await c.query("update actor set slug=slug||'-snapshot' where slug=$1", [who.slug]);
+    await c.query("insert into actor(id,slug,kind,display_name) values($1,$2,'human','Synthetic partner')", [who.id, who.slug]);
   }
-  await c.query(await readFile(new URL('../../migrations/1165_action_card_targets.sql', import.meta.url), 'utf8'));
-  for (const who of actors) await c.query("insert into actor(id,slug,kind,display_name) values($1,$2,'human','Synthetic partner')", [who.id, who.slug]);
+});
+after(async () => { try { await c?.end(); } finally { await fixture?.close(); } });
+
+test('exact card lifecycle on disposable PostgreSQL', async t => {
   const call = async (who, kind, sourceId, version) => {
     await c.query('begin read only');
     try {
@@ -49,12 +46,21 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
     await c.query(`insert into capture_session(id,nonce,device_id,actor_id,mode,started_at,consent_announced_at,
       session_token_hash,expires_at,state,state_at,post_call) values($1,'fixture','fixture',$2,'meeting',
       '2026-11-01Z','2026-11-01Z','fixture','2026-11-02Z','done','2026-11-01Z',true)`, [session, who.id]);
+    await c.query(`insert into ops.tour(id,organization_tenant_id,tour_name,tour_status,route_version,canonical_dataset_version)
+      values($1,'carr-internal','Synthetic tour','active',1,'fixture')`, [grant]);
+    await c.query("insert into ops.tour_property(id,organization_tenant_id,property_status) values($1,'carr-internal','active')", [grant]);
+    await c.query(`insert into ops.tour_property_membership(organization_tenant_id,tour_id,property_id,
+      route_version,route_sequence,route_label,assertion_set_digest,selected_at)
+      values('carr-internal',$1,$1,1,1,'A',$2,'2026-11-01Z')`, [grant, 'sha256:' + 'a'.repeat(64)]);
+    await c.query(`insert into ops.tour_public_projection(id,organization_tenant_id,tour_id,projection_version,
+      route_version,as_of,facts_only,projection_digest,status)
+      values($1,'carr-internal',$1,1,1,'2026-11-01Z',true,$2,'draft')`, [grant, 'sha256:' + 'a'.repeat(64)]);
     await c.query(`insert into ops.tour_share_grant(id,organization_tenant_id,projection_id,grant_version,
       token_digest,audience,permission_scopes,created_by_actor_id,status,created_at,expires_at)
-      values($1,'carr-internal',$1,1,$2,'client','["view_packet","comment"]',$3,'active','2026-11-01Z','2100-01-01Z')`, [grant, 'sha256:' + 'a'.repeat(64), who.id]);
-    await c.query(`insert into ops.tour_share_feedback_event(id,event_order,organization_tenant_id,projection_id,
+      values($1,'carr-internal',$1,1,$2,'client','["view_packet","comment"]',$3,'active','2026-11-01Z','2100-01-01Z')`, [grant, 'sha256:' + String(i + 1).repeat(64), who.id]);
+    await c.query(`insert into ops.tour_share_feedback_event(id,organization_tenant_id,projection_id,
       share_grant_id,property_id,idempotency_key,action,comment,payload_digest,created_at)
-      values($1,$2,'carr-internal',$3,$3,$3,$1,'comment','Synthetic feedback',$4,'2026-11-01Z')`, [event, i + 1, grant, 'sha256:' + 'a'.repeat(64)]);
+      values($1,'carr-internal',$2,$2,$2,$1,'comment','Synthetic feedback',$3,'2026-11-01Z')`, [event, grant, 'sha256:' + 'a'.repeat(64)]);
     await t.test(`${who.slug} processing completion without decisions is resolved`, async () => {
       const result = await call(who,'post_call_review',session,await version(who,'post_call_review',session));
       assert.equal(result.card.state,'resolved');
@@ -99,7 +105,9 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
     });
     await t.test(`${who.slug} retired sources hide detail and operations`, async () => {
       await c.query('update capture_session set post_call=false where id=$1', [session]);
-      await c.query("update ops.tour_share_grant set status='rotated' where id=$1", [grant]);
+      await c.query(`insert into ops.tour_share_grant_revocation_receipt(organization_tenant_id,share_grant_id,
+        revoked_at,actor_id,reason,receipt_digest) values('carr-internal',$1,'2026-11-02Z',$2,'Synthetic revocation',$3)`,
+      [grant, who.id, 'sha256:' + 'b'.repeat(64)]);
       for (const [kind, sourceId, v] of [['post_call_review', session, sv], ['feedback_event', event, String(i + 1)]]) {
         const result = await call(who, kind, sourceId, v);
         assert.equal(result.card.state, 'retired');
@@ -108,16 +116,18 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
       }
     });
     await t.test(`${who.slug} deleted source becomes missing`, async () => {
+      await c.query('delete from capture_candidate where session_id=$1', [session]);
       await c.query('delete from capture_session where id=$1', [session]);
-      await c.query('delete from ops.tour_share_feedback_event where id=$1', [event]);
+      await assert.rejects(c.query('delete from ops.tour_share_feedback_event where id=$1', [event]), /append-only/);
+      await c.query('truncate ops.tour_share_feedback_event');
       await refused(call(who, 'post_call_review', session, sv));
       await refused(call(who, 'feedback_event', event, String(i + 1)));
     });
   }
   await t.test('target outside first 1000 inbox sources resolves directly', async () => {
     await c.query(`insert into capture_session(id,nonce,device_id,actor_id,mode,started_at,consent_announced_at,
-      session_token_hash,expires_at,state,state_at,post_call) select gen_random_uuid(),'fixture','fixture',$1,'meeting',
-      now(),now(),'fixture',now()+interval '1 day','done',now(),true from generate_series(1,1001)`, [actors[0].id]);
+      session_token_hash,expires_at,state,state_at,post_call) select gen_random_uuid(),gen_random_uuid()::text,'fixture',$1,'meeting',
+      now(),now(),gen_random_uuid()::text,now()+interval '1 day','done',now(),true from generate_series(1,1001)`, [actors[0].id]);
     await c.query(`insert into capture_candidate(session_id,idempotency_key,batch_hash,item_index,kind,payload,evidence_quote,confidence)
       select id,id::text,'fixture',0,'next_step','{}','Synthetic pending decision',0.95 from capture_session`);
     const oldest = (await c.query('select id from capture_session order by started_at,id offset 1000 limit 1')).rows[0].id;
@@ -146,11 +156,7 @@ test('exact card lifecycle on disposable PostgreSQL', async t => {
   });
 });
 
-test('reply exact target delegates existing registered reply hydration', async t => {
-  const fixture = await acquireDisposablePostgres({ prefix: 'action-card-replies-', snapshot: true });
-  const c = new pg.Client(fixture.connection);
-  await c.connect();
-  t.after(async () => { try { await c.end(); } finally { await fixture.close(); } });
+test('reply exact target delegates existing registered reply hydration', async () => {
   const who = { ...(await c.query("select id,slug from actor where slug='joe'")).rows[0], human: true };
   await c.query("update actor set email=slug||'@example.test' where slug in ('joe','dell')");
   const source = id(500), proposal = id(501);
