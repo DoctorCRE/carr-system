@@ -22,14 +22,26 @@ class TextTests(unittest.TestCase):
         self.assertEqual(derivative(doc, b'x', lambda _: [''] * 1001)['pages'], [])
         self.assertEqual(derivative(doc, b'x', lambda _: [' \n'])['status'], 'no_text')
 
+    def test_unsupported_size_and_format_are_counted_without_reads(self):
+        docs = [dict(document_ref=str(n), entity_ref='deal', content_hash='a' * 64,
+                     mime=mime, bytes=size, retained=False)
+                for n, (mime, size) in enumerate([('application/pdf', 26214401), ('office', 10)])]
+        saved = []
+        result = backfill(scan=lambda after, limit: docs if after is None else [],
+                          read_bytes=lambda _: self.fail('unsupported original read'),
+                          text_pages=lambda _: self.fail('unsupported parser call'),
+                          record=saved.append, max_documents=100)
+        self.assertEqual((result['scanned'], result['unavailable']), (2, 2))
+        self.assertEqual([d['status'] for d in saved], ['unavailable', 'unavailable'])
+
     def test_backfill_dry_run_rerun_mixed_and_superseding_hash(self):
-        docs = [{'document_ref': str(n), 'entity_ref': 'deal', 'content_hash': hashlib.sha256(data).hexdigest(), 'mime': 'application/pdf', 'bytes': len(data), 'data': data} for n, data in enumerate([b'text', b''])]
+        docs = [{'document_ref': str(n), 'entity_ref': 'deal', 'content_hash': hashlib.sha256(data).hexdigest(), 'mime': 'application/pdf', 'bytes': len(data), 'data': data} for n, data in enumerate([b'text', b'scan'])]
         saved = {}
         def record(value):
             saved[(value['document_ref'], value['content_hash'])] = value
         def scan(after, limit):
             return [{**d, 'retained': (d['document_ref'], d['content_hash']) in saved} for d in docs if after is None or d['document_ref'] > after][:limit]
-        args = dict(scan=scan, read_bytes=lambda d: d['data'], text_pages=lambda data: [data.decode()], record=record, max_documents=100)
+        args = dict(scan=scan, read_bytes=lambda d: d['data'], text_pages=lambda data: ['' if data == b'scan' else data.decode()], record=record, max_documents=100)
         dry = backfill(**args, dry_run=True)
         self.assertEqual((dry['missing'], len(saved)), (2, 0))
         result = backfill(**args)

@@ -33,7 +33,9 @@ cap, continue with `--after` set to the reported last_document_ref. Restarting
 from the beginning is safe. Infrastructure failures stop the invocation with
 exit 1; already persisted derivatives remain safe to replay.
 
-Non-PDF attachments receive unavailable without parsing. PDF originals are read
+Non-PDF attachments and originals outside the existing 1-byte to 25-MB parser
+budget receive unavailable without parsing. Every undeleted deal attachment is
+scanned, including these unsupported originals. PDF originals are read
 through the existing authenticated R2 adapter and checked against stored byte size
 and SHA256 before parsing. Changing originals produces a new immutable key. Old
 rows remain for audit and cannot be served for current content. No model is called.

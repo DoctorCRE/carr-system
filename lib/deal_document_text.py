@@ -40,7 +40,7 @@ def backfill(*, scan, read_bytes, text_pages, record, max_documents, dry_run=Fal
             counts['missing'] += 1
             if dry_run:
                 continue
-            if doc['mime'] != 'application/pdf':
+            if doc['mime'] != 'application/pdf' or not 1 <= doc['bytes'] <= 25 * 1024 * 1024:
                 value = retained_pages(doc, [])
                 value['status'] = 'unavailable'
             else:

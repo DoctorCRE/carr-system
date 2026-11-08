@@ -69,7 +69,7 @@ begin
      exists(select 1 from ops.deal_document_text t where t.document_ref=a.id and t.content_hash=a.sha256
        and t.text_format_version='page-text.v1') retained
    from public.attachment a where a.subject_type='deal' and a.deleted_at is null
-     and a.bytes between 1 and 26214400 and (p_after is null or a.id>p_after)
+     and (p_after is null or a.id>p_after)
    order by a.id limit p_limit) d),'[]'::jsonb));
 end $$;
 revoke all on function ops.list_deal_document_text_sources(uuid,uuid,integer) from public;

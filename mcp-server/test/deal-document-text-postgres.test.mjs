@@ -87,6 +87,10 @@ test('retained text lifecycle and authenticated registered contract', async t =>
     await t.test('source scan includes retained flag and keyset bounds', async () => {
       const result = await invoke('list-deal-document-text-sources', { limit: 1 }, robot);
       assert.equal(result.documents[0].retained, true);
+      await c.query('update attachment set bytes=26214401 where id=$1', [doc]);
+      const oversized = await invoke('list-deal-document-text-sources', { limit: 1 }, robot);
+      assert.equal(oversized.documents[0].bytes, 26214401);
+      await c.query('update attachment set bytes=10 where id=$1', [doc]);
       assert.equal((await invoke('list-deal-document-text-sources', { limit: 1, after: doc }, robot)).documents.length, 0);
     });
     for (const initial of ['produced', 'no_text', 'unavailable']) {
