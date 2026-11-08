@@ -2,7 +2,6 @@
 import { Validator } from '@cfworker/json-schema';
 import schema from './answer-blocks.v1.schema.json' with { type: 'json' };
 
-export const answerBlocksSchema = schema;
 const validator = new Validator(schema, '2020-12', false);
 
 export function validateAnswerBlocks(blocks, ToolError) {
