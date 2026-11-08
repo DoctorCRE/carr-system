@@ -120,4 +120,3 @@ lock. A busy scanner now returns zero without moving the cursor. A later event
 retries lease scanning from that durable cursor, while direct deal notifications
 remain in the source transaction. Existing bounded-batch and rollback tests
 prove later scans neither skip leases nor commit failed progress.
-
