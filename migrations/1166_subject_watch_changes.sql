@@ -107,6 +107,10 @@ begin
       and deal_id=e.subject_id and kind='email_in'
       and coalesce(email_context#>>'{lifecycle,state}','live')='live';
   end if;
+  -- A registered operation can emit events before its final canonical write.
+  -- Its tool_call insert captures the complete operation below.
+  if e.idempotency_key is not null and not exists(
+    select 1 from public.tool_call where idempotency_key=e.idempotency_key) then return; end if;
   for w in
     select s.*,a.slug from (
       select id,actor_id,subject_type,subject_id,subscribed_at,1 policy_version,true include_self,true replies
@@ -137,7 +141,7 @@ begin
     delta:=ops.classify_subject_watch_change(before_value,after_value);
     update ops.subject_watch_material_baseline set material=after_value where watch_id=w.id;
     select (ops.subject_watch_target(w.subject_type,w.subject_id)->>'version')::integer into version_value;
-    key_value:=e.id||':material'; category_value:='material_changed';
+    key_value:=coalesce('operation:'||e.idempotency_key,'event:'||e.id::text)||':material'; category_value:='material_changed';
     if reply.id is not null then
       if w.subject_type<>'deal' or not w.replies or reply.email_source->>'mailbox_owner' is distinct from w.slug then continue; end if;
       key_value:='reply:'||reply.id; category_value:='reply_arrived'; delta:='[]';
@@ -151,6 +155,24 @@ begin
     on conflict(watch_generation_id,semantic_key) do nothing;
   end loop;
 end $$;
+create index subject_watch_operation_events on public.event(idempotency_key) where idempotency_key is not null;
+
+create function ops.capture_subject_watch_operation() returns trigger
+language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+declare e record;
+begin
+  for e in select id from public.event where idempotency_key=new.idempotency_key
+    order by recorded_at,id
+  loop
+    perform ops.capture_subject_watch_changes(e.id);
+  end loop;
+  return new;
+end $$;
+create trigger subject_watch_operation after insert on public.tool_call
+for each row execute function ops.capture_subject_watch_operation();
+revoke all on function ops.capture_subject_watch_operation()
+  from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
+
 create or replace function ops.consume_subject_watch_event(p_event uuid) returns void
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 declare e public.event%rowtype; s record; d record; reply public.activity%rowtype;
