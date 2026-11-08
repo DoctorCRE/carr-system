@@ -67,9 +67,9 @@ async function subject(kind, owner, days = 200) {
   await c.query(`insert into party(id,kind,name,created_by,updated_by)
     values($1::uuid,'org','Synthetic quiet owner '||$1::uuid::text,$2,$2)`, [party, actor.id]);
   if (kind === 'lead') await c.query(`insert into lead(id,party_id,registry_ref,stage,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'L-'||$1::uuid::text,'new',current_date-$4::int,$3,$5,$5)`, [id,party,owner,days,actor.id]);
+    values($1,$2,'L-'||$1::uuid::text,'new',carr_business_date()-$4::int,$3,$5,$5)`, [id,party,owner,days,actor.id]);
   else await c.query(`insert into vendor(id,party_id,vendor_ref,category,stage,disposition,last_touch,owner_id,created_by,updated_by)
-    values($1,$2,'V-'||$1::uuid::text,'broker',(select slug from vendor_stage order by sort limit 1),'active',current_date-$4::int,$3,$5,$5)`,
+    values($1,$2,'V-'||$1::uuid::text,'broker',(select slug from vendor_stage order by sort limit 1),'active',carr_business_date()-$4::int,$3,$5,$5)`,
     [id,party,owner,days,actor.id]);
   return { id, party };
 }
@@ -250,12 +250,12 @@ test('invalid owner input refuses before database work', async () => {
 
 test('owner filtering preserves eligibility and next action override without writes', async () => {
   const row = await subject('lead', actor.id, 1);
-  await c.query('update lead set next_action_date=current_date-2 where id=$1', [row.id]);
+  await c.query('update lead set next_action_date=carr_business_date()-2 where id=$1', [row.id]);
   const has = async () => (await read({ owner_slug: actor.slug })).proposals.some(p => p.subject_id === row.id);
   assert.equal(await has(), true);
-  await c.query('update lead set next_action_date=current_date+2 where id=$1', [row.id]);
+  await c.query('update lead set next_action_date=carr_business_date()+2 where id=$1', [row.id]);
   assert.equal(await has(), false);
-  await c.query('update lead set next_action_date=current_date-2,suppressed=true where id=$1', [row.id]);
+  await c.query('update lead set next_action_date=carr_business_date()-2,suppressed=true where id=$1', [row.id]);
   assert.equal(await has(), false);
   await c.query("update lead set suppressed=false,stage='closed_lost' where id=$1", [row.id]);
   assert.equal(await has(), false);
@@ -264,7 +264,7 @@ test('owner filtering preserves eligibility and next action override without wri
   assert.equal(await has(), false);
   await c.query("update party set contact_state='active' where id=$1", [row.party]);
   await c.query(`insert into next_action(subject_type,subject_id,owner_id,due_on,description,created_by,updated_by)
-    values('lead',$1,$2,current_date+30,'Synthetic future open task',$2,$2)`, [row.id,actor.id]);
+    values('lead',$1,$2,carr_business_date()+30,'Synthetic future open task',$2,$2)`, [row.id,actor.id]);
   assert.equal(await has(), false);
   const vendor = await subject('vendor', actor.id);
   await c.query("update vendor set disposition=(select slug from vendor_disposition where slug<>'active' order by slug limit 1) where id=$1", [vendor.id]);
@@ -302,7 +302,7 @@ test('owner predicate precedes selected subset overflow and retains missing join
   await c.query(`insert into party(id,kind,name,created_by,updated_by)
     select gen_random_uuid(),'org','Synthetic overflow '||g,$1,$1 from generate_series(1,1001) g`, [actor.id]);
   await c.query(`insert into lead(party_id,stage,last_touch,owner_id,created_by,updated_by)
-    select id,'new',current_date-200,$1,$2,$2 from party where name like 'Synthetic overflow %'`, [other.id,actor.id]);
+    select id,'new',carr_business_date()-200,$1,$2,$2 from party where name like 'Synthetic overflow %'`, [other.id,actor.id]);
   await assert.rejects(() => read(), e => e.payload.error === 'quiet_follow_up_limit_exceeded');
   await assert.rejects(() => read({ owner_slug: other.slug }), e => e.payload.error === 'quiet_follow_up_limit_exceeded');
   assert.ok((await read({ owner_slug: actor.slug })).proposals.length > 0);
