@@ -2,7 +2,7 @@
   "provenance": {
     "transport": "executeRegisteredTool/disposable-postgres",
     "producer_revision": "fd8cd792397de8ef9f3d6a6d4f4463cf698f7a15",
-    "producer_sha256": "56577da12aee97b49ca40483a8ff79aa529e838ba28573b21b73d4c379ac4a23",
+    "producer_sha256": "05d285cdb6bf773bbc8063ee0b8bb83d9af47a1f03e7ad69cd5169843acd1691",
     "registry_entry_sha256": "0b22e503a76360dbba4a25d132c768e5c7cf7c915f54a50ffa62026e0f4ddde7",
     "query": {
       "verb": "quiet-follow-ups",
@@ -13,6 +13,12 @@
       "unassigned": {
         "owner_slug": null
       }
+    },
+    "producer_scope": {
+      "scheme": "registered-handler-contract/v1",
+      "verbs": [
+        "quiet-follow-ups"
+      ]
     }
   },
   "owner_slug": "joe",

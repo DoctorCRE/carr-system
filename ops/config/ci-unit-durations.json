@@ -1,4 +1,5 @@
 {
+  "recording_provenance_measurement": {"card": "WR622.S13.J254", "suite": "ops/recording-provenance-selftest.py", "local_samples_ms": [216], "basis": "Four local enforcement tests including rejection of a whole-registry pin. Discovered automatically by ops/ci.sh gates."},
   "gate_suites": {"ops/guard-selftest.py": {"milliseconds": 576007, "timeout_seconds": 1200, "card": "WR622.S15.J14", "image": "sha256:b5e93fd6ef588fab8877480869f9ae59878e578f699dc94d8174623ce23bd7ba", "command": ["python", "ops/guard-selftest.py"], "cpu_limit": 4, "uid": 1001, "platform": "linux/amd64 via Rosetta", "basis": "Complete real-process suite passed 2219/2219 and 2969 monotonicity probes. Container elapsed includes setup; budget is twice observed duration rounded up to a minute. Shared host and emulation are conservative local evidence, not hosted timing parity."}},
   "prospect_research_proof_measurement": {"card": "WR622.S15.J14", "suite": "tools/test_prove_prospect_research_future_evidence.py", "container_samples_ms": [57053], "read_cap_seconds": 30, "basis": "Only the 21-read cap scenario uses the existing production 30-second budget. Pinned image baseline five-second scenario fails, and its old ten-second outer harness also expires with the production deadline. Short deadline refusal remains unchanged."},
   "lead_contact_address_proof_measurement": {"card": "WR622.S15.J14", "suite": "tools/test_prove_lead_contact_address_membership.py", "container_samples_ms": [24148], "read_cap_seconds": 30, "basis": "Pinned b5e93fd6 image, uid 1001, four CPUs, Linux amd64 through Rosetta. Five-second cap fixture exhausted after 21 wrapper calls; existing production 30-second budget completed all 22 calls in 7425ms including teardown. Only the read-cap scenario uses this budget; timeout refusal remains one second."},
@@ -44,6 +45,7 @@
     "mail-needs-partner-route.test.mjs": {"milliseconds": 335, "serial": false},
     "mail-needs-partner-postgres.test.mjs": {"milliseconds": 1185, "serial": true},
 
+    "recording-provenance.test.mjs": {"milliseconds": 597, "serial": false},
     "quiet-follow-up-owner-filter-postgres.test.mjs": {"milliseconds": 25651, "serial": true},
     "client-anniversary-read.test.mjs": {"milliseconds": 352, "serial": false},
     "client-anniversary-read-route.test.mjs": {"milliseconds": 1123, "serial": false},

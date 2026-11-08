@@ -1,8 +1,20 @@
 {
   "provenance": {
     "transport": "executeRegisteredTool/disposable-postgres",
-    "producer_sha256": "3c9b5020d9f5534d42385da75a6a962bb530bd7a08ede21bb2e278a8a8d27b01",
-    "driver_sha256": "be4b104f47970ace941c42e1eddbdf0839257f233075e38ce4c323e57a4c562f"
+    "producer_sha256": "dffe70070ba9da35452aa99bc793aeeebcc4376d17cea3d61ca2be0d5053fe0f",
+    "driver_sha256": "be4b104f47970ace941c42e1eddbdf0839257f233075e38ce4c323e57a4c562f",
+    "producer_scope": {
+      "scheme": "registered-handler-contract/v1",
+      "verbs": [
+        "claim-card",
+        "deal-board",
+        "lead-board",
+        "lead-hot",
+        "morning-brief",
+        "quiet-follow-ups",
+        "stale-records"
+      ]
+    }
   },
   "date_columns": {
     "morning-brief": [
