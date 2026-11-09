@@ -196,7 +196,7 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
   assert.equal(TOOLS["confirm-merge"].humanCallerOnly, true);
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
-  assert.deepEqual(flagged.sort(), ["answer-board-question", "answer-work-request-for-joe",
+  assert.deepEqual(flagged.sort(), ["abandon-deal-deliverable", "answer-board-question", "answer-work-request-for-joe",
     "append-tour-entrance-verification-receipt", "cancel-pending-deal", "commit-winning-property",
     "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal",
     "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
@@ -215,6 +215,20 @@ test("confirm-merge refuses the unattended actor before database access", async 
   assert.equal(error.payload.error, "human_only_verb_requires_verified_partner");
   assert.equal(error.payload.verb, "confirm-merge");
   assert.equal(error.payload.actor_class, "sponsored_agent");
+});
+
+test("partner upload mutations refuse unattended callers before database access", async () => {
+  for (const verb of ["start-deal-deliverable", "finalize-deal-deliverable", "abandon-deal-deliverable"]) {
+    assert.equal(TOOLS[verb].humanOnly, true, verb);
+    assert.equal(TOOLS[verb].humanCallerOnly, true, verb);
+    assert.equal(UNATTENDED_AUTHORITY_VERBS.includes(verb), false, verb);
+    const error = await executeRegisteredTool(forbiddenClient, unattended(), verb, {})
+      .then(() => null, e => e);
+    assert.ok(error instanceof ToolError, verb);
+    assert.equal(error.payload.error, "human_only_verb_requires_verified_partner", verb);
+    assert.equal(error.payload.verb, verb);
+    assert.equal(error.payload.actor_class, "sponsored_agent", verb);
+  }
 });
 
 // ---------- partner authority: exactly the allowlist ----------
