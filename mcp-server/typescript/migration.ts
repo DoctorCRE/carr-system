@@ -215,6 +215,11 @@ export function migrationIssues(pkg: string, gated: string[]): string[] {
   );
   const issues: string[] = [];
   const baseline = baselineScope(root);
+  const baselinePaths = new Set(
+    execFileSync("git", ["ls-tree", "-r", "--name-only", baseline.base], { cwd: root, encoding: "utf8" })
+      .trim()
+      .split("\n"),
+  );
   for (const path of strings(scope.legacyJavaScript, "mcp-server/typescript/migration.json", "legacyJavaScript")) {
     if (!baseline.javaScript.has(path))
       issues.push(`Legacy JavaScript list may only shrink: ${path}; convert the file into a strict project`);
@@ -224,7 +229,7 @@ export function migrationIssues(pkg: string, gated: string[]): string[] {
       issues.push(`Legacy TypeScript list may only shrink: ${path}; convert the file into a strict project`);
   }
   for (const path of paths) {
-    if (/\.(?:js|mjs|cjs|jsx)$/.test(path) && !allowed.has(path))
+    if (/\.(?:js|mjs|cjs|jsx)$/.test(path) && (!allowed.has(path) || !baselinePaths.has(path)))
       issues.push(
         `New first-party JavaScript: ${path}; convert the file into a strict project, or for a pre-existing main file, list it`,
       );
