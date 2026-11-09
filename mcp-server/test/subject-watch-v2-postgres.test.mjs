@@ -871,6 +871,7 @@ test('quiet lease clocks and pending delivery', async t => {
  for (const lockKind of ['generation','delivery']) await t.test(`locked ${lockKind} prefix advances and unlocked receipts emit exactly once`,async()=>{
   const peer=new pg.Client({connectionString:dsn});await peer.connect();
   const watches=[];
+  const day=lockKind==='generation'?'2040-01-01':'2040-01-02';
   try {
    await c.query('begin');
    for(let i=0;i<51;i++) {
@@ -895,20 +896,20 @@ test('quiet lease clocks and pending delivery', async t => {
    const receipt=async id=>(await c.query('select disposition,notification_id from ops.subject_watch_change where watch_generation_id=$1',[id])).rows;
    assert.equal((await receipt(free))[0].disposition,'pending');
    for(let i=0;i<4;i++) {
-    const result=await sweep('2030-01-01T12:00:00Z');
+    const result=await sweep(`${day}T12:00:00Z`);
     assert.ok(result.scanned<=50,'each transaction scans at most fifty candidates');
    }
    assert.equal((await receipt(free))[0].disposition,'emitted','free work behind a full locked batch progresses');
    for(const {w} of watches.slice(0,50)) assert.equal((await receipt(w))[0].disposition,'pending');
    await peer.query('rollback');
-   for(let i=0;i<4;i++) await sweep('2030-01-01T12:05:00Z');
+   for(let i=0;i<4;i++) await sweep(`${day}T12:05:00Z`);
    const emitted=[];
    for(const {w} of watches) {
     const rows=await receipt(w);assert.equal(rows.length,1);assert.equal(rows[0].disposition,'emitted');
     emitted.push(rows[0].notification_id);
    }
    assert.equal(new Set(emitted).size,51,'each waiting watch emits once after unlock');
-   for(let i=0;i<4;i++) await sweep('2030-01-01T12:10:00Z');
+   for(let i=0;i<4;i++) await sweep(`${day}T12:10:00Z`);
    assert.equal(Number((await c.query('select count(*) n from ops.notification where id=any($1::uuid[])',[emitted])).rows[0].n),51);
    for(const {w} of watches) assert.equal((await receipt(w))[0].notification_id,emitted[watches.findIndex(x=>x.w===w)]);
   } finally {
