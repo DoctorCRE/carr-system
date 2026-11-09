@@ -107,7 +107,9 @@ test("public metrics retain validation when the array iterator is replaced", () 
   const original = Array.prototype[Symbol.iterator];
   let safe: unknown;
   try {
-    Array.prototype[Symbol.iterator] = function* () {};
+    Array.prototype[Symbol.iterator] = function* () {
+      return undefined;
+    };
     safe = contract.publicValueIsSafe("size", { value: 4, secret: "internal" });
   } finally {
     Array.prototype[Symbol.iterator] = original;
