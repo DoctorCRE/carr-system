@@ -1,4 +1,22 @@
-// loop-kind-validation.test.mjs — coverage for the add-loop `kind` defect
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+assert.ok(registered && typeof registered === "object" && "TOOLS" in registered);
+const registry = registered.TOOLS;
+assert.ok(registry && typeof registry === "object");
+assert.ok("add-loop" in registry);
+const addLoopTool = registry["add-loop"];
+assert.ok(
+  addLoopTool &&
+    typeof addLoopTool === "object" &&
+    "handler" in addLoopTool &&
+    typeof addLoopTool.handler === "function",
+);
+const addLoopHandler = addLoopTool.handler;
+
+// loop-kind-validation.test.ts — coverage for the add-loop `kind` defect
 // found live 2026-08-14:
 //
 //   A session filing a cross-session work claim ("Worktree lifecycle build
@@ -18,23 +36,24 @@
 //   serialization silently drops — so the error hid the one field that
 //   named the real mistake and blamed the importer instead.
 //
-// Run with: node --test mcp-server/test/loop-kind-validation.test.mjs
-// (also picked up by `npm test`'s test/*.test.mjs glob).
+// Run with: node --test mcp-server/test/loop-kind-validation.test.ts
+// Also discovered by the canonical test runner.
 
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { TOOLS, ToolError } from "../src/tools.js";
-
-const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe",
-  display: "Joe", human: true, via: "mcp", client_id: "claude" };
+const joe = {
+  id: "10000000-0000-0000-0000-000000000002",
+  slug: "joe",
+  display: "Joe",
+  human: true,
+  via: "mcp",
+  client_id: "claude",
+};
 
 // Validation must refuse before any query beyond the idempotency-replay
 // lookup — a fake that throws on everything else proves it.
 class RefuseBeforeDbFake {
-  async query(text) {
+  async query(text: string) {
     const sql = text.replace(/\s+/g, " ").trim();
-    if (sql.startsWith("select request_hash, response"))
-      return { rows: [] };
+    if (sql.startsWith("select request_hash, response")) return { rows: [] };
     throw new Error(`unhandled fake query (kind validation should refuse before this): ${sql}`);
   }
 }
@@ -42,51 +61,57 @@ class RefuseBeforeDbFake {
 test("add-loop: THE BUG — an omitted kind is refused as missing_kind, never as a no_block blaming the importer", async () => {
   const db = new RefuseBeforeDbFake();
   await assert.rejects(
-    () => TOOLS["add-loop"].handler(db, joe, {
-      idempotency_key: "00000571-0000-4000-8000-000000000181",
-      // the live failing shape: title present, kind absent
-      title: "Worktree lifecycle build in flight",
-      owner: "claude",
-    }),
+    () =>
+      addLoopHandler(db, joe, {
+        idempotency_key: "00000571-0000-4000-8000-000000000181",
+        // the live failing shape: title present, kind absent
+        title: "Worktree lifecycle build in flight",
+        owner: "claude",
+      }),
     (err) => {
       assert.ok(err instanceof ToolError, "must be a structured ToolError");
       assert.equal(err.payload.error, "missing_kind");
       assert.notEqual(err.payload.error, "no_block");
-      assert.deepEqual(err.payload.allowed,
-        ["open_loop", "team_loop", "action_required", "idea"]);
+      assert.deepEqual(err.payload.allowed, ["open_loop", "team_loop", "action_required", "idea"]);
       // the hint must not send the reader chasing the importer
       assert.ok(!String(err.payload.hint).includes("importer"));
       return true;
-    });
+    },
+  );
 });
 
 test("add-loop: a misspelled kind is refused by name with the allowed list", async () => {
   const db = new RefuseBeforeDbFake();
   await assert.rejects(
-    () => TOOLS["add-loop"].handler(db, joe, {
-      idempotency_key: "00000571-0000-4000-8000-000000000182",
-      kind: "work_claim", title: "not a real kind", owner: "claude",
-    }),
+    () =>
+      addLoopHandler(db, joe, {
+        idempotency_key: "00000571-0000-4000-8000-000000000182",
+        kind: "work_claim",
+        title: "not a real kind",
+        owner: "claude",
+      }),
     (err) => {
       assert.ok(err instanceof ToolError);
       assert.equal(err.payload.error, "unknown_kind");
       assert.equal(err.payload.got, "work_claim");
-      assert.deepEqual(err.payload.allowed,
-        ["open_loop", "team_loop", "action_required", "idea"]);
+      assert.deepEqual(err.payload.allowed, ["open_loop", "team_loop", "action_required", "idea"]);
       return true;
-    });
+    },
+  );
 });
 
 // Happy-path fake (same shape as loop-version-and-marker.test.mjs's
 // AddLoopHappyFake) so a legal kind is proven to still reach ok:true —
 // the validation must not over-refuse.
 class AddLoopHappyFake {
+  calls = new Map<unknown, Record<string, unknown>>();
+  blockId: string;
+  events: { verb: unknown }[];
   constructor() {
     this.blockId = "30000000-0000-0000-0000-000000000351";
     this.events = [];
-    this.calls = new Map();
   }
-  async query(text, params = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql.startsWith("select request_hash, response")) {
       const prior = this.calls.get(params[0]);
@@ -100,15 +125,19 @@ class AddLoopHappyFake {
         : { rows: [] };
     if (sql.includes("from loop_item where kind = $1")) return { rows: [{ m: 400 }] }; // nextLoopNumber
     if (sql.startsWith("select coalesce(max(render_seq)")) return { rows: [{ n: 1 }] };
-    if (sql.startsWith("insert into loop_item"))
-      return { rows: [{ id: "20000000-0000-0000-0000-000000000401" }] };
+    if (sql.startsWith("insert into loop_item")) return { rows: [{ id: "20000000-0000-0000-0000-000000000401" }] };
     if (sql.startsWith("insert into event")) {
-      this.events.push({ verb: params[2] }); return { rows: [] };
+      this.events.push({ verb: params[2] });
+      return { rows: [] };
     }
     if (sql.startsWith("insert into tool_call")) {
-      this.calls.set(params[0], { request_hash: params[3], response: JSON.parse(params[4]),
-        actor_id: params[2], organization_tenant_id: params[7] ?? null,
-        application_session_id: params[12] ?? null });
+      this.calls.set(params[0], {
+        request_hash: params[3],
+        response: parseJson(String(params[4])),
+        actor_id: params[2],
+        organization_tenant_id: params[7] ?? null,
+        application_session_id: params[12] ?? null,
+      });
       return { rows: [] };
     }
     throw new Error(`unhandled fake query: ${sql}`);
@@ -117,16 +146,24 @@ class AddLoopHappyFake {
 
 test("add-loop: a legal kind still reaches a genuine ok:true (the validation does not over-refuse)", async () => {
   const db = new AddLoopHappyFake();
-  const result = await TOOLS["add-loop"].handler(db, joe, {
+  const result = await addLoopHandler(db, joe, {
     idempotency_key: "00000571-0000-4000-8000-000000000183",
-    kind: "open_loop", owner: "claude", domain: "system",
+    kind: "open_loop",
+    owner: "claude",
+    domain: "system",
     body: "kind-validation self-test, close immediately",
-    blocker: "capability", blocker_detail: "coverage only, not a real block",
-    residue_kind: "provider_login", residue_host: "github.com",
+    blocker: "capability",
+    blocker_detail: "coverage only, not a real block",
+    residue_kind: "provider_login",
+    residue_host: "github.com",
   });
   assert.equal(result.ok, true);
   assert.equal(result.kind, "open_loop");
   assert.equal(result.section, "backlog");
   assert.equal(db.events.length, 1);
-  assert.equal(db.events[0].verb, "add-loop");
+  assert.equal(db.events[0]?.verb, "add-loop");
 });
+
+function parseJson(value: string): unknown {
+  return JSON.parse(value);
+}
