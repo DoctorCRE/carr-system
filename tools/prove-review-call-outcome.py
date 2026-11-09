@@ -61,6 +61,7 @@ def main():
     parser.add_argument('--timeout-seconds', type=float, default=30)
     args = parser.parse_args()
     deadline = time.monotonic() + args.timeout_seconds
+    fixtures = None
 
     def remaining():
         left = deadline - time.monotonic()
@@ -69,21 +70,30 @@ def main():
         return left
 
     def release():
+        nonlocal fixtures
         if args.release_fixture:
-            return load(args.release_fixture)
-        response = read('https://api.doctorcre.com/release', timeout=remaining(), max_bytes=1048576)
-        if response.status != 200 or len(response.body) > 1048576:
-            raise InsufficientEvidence('release_unavailable')
-        return json.loads(response.body)
+            if fixtures is None:
+                value = load(args.release_fixture)
+                fixtures = iter(value if isinstance(value, list) else [value, value])
+            value = next(fixtures)
+        else:
+            response = read('https://api.doctorcre.com/release', timeout=remaining(), max_bytes=1048576)
+            if response.status != 200 or len(response.body) > 1048576:
+                raise InsufficientEvidence('release_unavailable')
+            value = json.loads(response.body)
+        revision = value['git_sha']['value']
+        worker = value['worker_version']['id']
+        if (value.get('ok') is not True or value['env']['value'] != 'production'
+                or not isinstance(revision, str) or not re.fullmatch('[a-f0-9]{40}', revision)
+                or not isinstance(worker, str) or not worker):
+            raise InsufficientEvidence('release_contract')
+        return {'source_commit': revision, 'worker_version': worker}
 
     try:
         if not 0 < args.timeout_seconds <= 60 or not re.fullmatch('[a-f0-9]{40}', args.merge_sha):
             raise InsufficientEvidence('arguments')
         identity = release()
-        served = identity['git_sha']['value']
-        if (identity.get('ok') is not True or identity['env']['value'] != 'production'
-                or not isinstance(served, str) or not re.fullmatch('[a-f0-9]{40}', served)):
-            raise InsufficientEvidence('release_contract')
+        served = identity['source_commit']
         git = ['git', '--no-replace-objects', '-C', str(args.repo)]
         for revision in [args.merge_sha, served]:
             result = subprocess.run([*git, 'cat-file', '-t', revision], capture_output=True, timeout=remaining())
@@ -107,7 +117,7 @@ def main():
     except AssertionError as error:
         print(json.dumps({'status': 'assertion_failure', 'error': str(error)}))
         return 1
-    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+    except (ValueError, KeyError, TypeError, OSError, StopIteration, subprocess.SubprocessError):
         print(json.dumps({'status': 'insufficient_evidence'}))
         return 78
 

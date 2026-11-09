@@ -29,6 +29,14 @@ class ProofCLI(unittest.TestCase):
             cls.folder.cleanup()
             raise AssertionError(result.stdout + result.stderr)
         cls.observation = json.loads(output.read_text())
+        source = (ROOT / 'mcp-server/src/release.js').as_uri()
+        script = f"import {{buildRelease}} from {json.dumps(source)};" + (
+            "console.log(JSON.stringify(await buildRelease({env:{CARR_ENV:'production',"
+            "GIT_SHA:'a'.repeat(40),CF_VERSION_METADATA:{id:'fixture-worker'}},"
+            "sql:async()=>[],verbCount:1})));"
+        )
+        cls.release = json.loads(subprocess.check_output(
+            ['node', '--input-type=module', '-e', script], cwd=ROOT, env=fixture_env(), text=True))
         cls.repo = cls.path / 'repo'
         cls.repo.mkdir()
         def git(*args):
@@ -51,13 +59,19 @@ class ProofCLI(unittest.TestCase):
     def tearDownClass(cls):
         cls.folder.cleanup()
 
-    def run_cli(self, revision, mutation=None):
+    def run_cli(self, revision, mutation=None, changed_worker=False):
         observations = copy.deepcopy(self.observation)
         observations['source_commit'] = revision
         if mutation:
             mutation(observations)
-        release = {'ok': True, 'env': {'value': 'production'}, 'git_sha': {'value': revision}}
-        (self.path / 'release.json').write_text(json.dumps(release))
+        release = copy.deepcopy(self.release)
+        release['git_sha']['value'] = revision
+        later = copy.deepcopy(release)
+        later['ts'] = '2026-11-08T00:00:01.000Z'
+        later['doctrine_generation'] = {'value': 2, 'reason': None}
+        if changed_worker:
+            later['worker_version']['id'] = 'different-worker'
+        (self.path / 'release.json').write_text(json.dumps([release, later]))
         (self.path / 'observations.json').write_text(json.dumps(observations))
         result = subprocess.run([sys.executable, str(RUNNER), '--merge-sha', self.merge,
                                  '--repo', str(self.repo), '--observations', str(self.path / 'observations.json'),
@@ -75,6 +89,7 @@ class ProofCLI(unittest.TestCase):
         self.assertEqual(self.run_cli(self.merge, lambda o: o['counts'].update(events=2))[0], 1)
         self.assertEqual(self.run_cli(self.merge, lambda o: o.pop('refusal'))[0], 78)
         self.assertEqual(self.run_cli(self.merge, lambda o: o.update(source_commit=self.older))[0], 78)
+        self.assertEqual(self.run_cli(self.merge, changed_worker=True)[0], 78)
 
 
 if __name__ == '__main__':
