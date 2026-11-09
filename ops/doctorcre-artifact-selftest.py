@@ -162,7 +162,7 @@ def test_download_cache() -> None:
                 check("verified files persisted for actions/cache", False)
                 continue
             original = path.read_bytes()
-            path.write_bytes(b'invalid')
+            path.write_bytes(b'X' * len(original))
             with patch.object(ARTIFACT, "download", side_effect=AssertionError("corruption must refuse")) as fetch:
                 try:
                     ARTIFACT.artifact_inputs(pin)
@@ -171,6 +171,10 @@ def test_download_cache() -> None:
                 else:
                     check("cached tamper refused", False)
             path.write_bytes(original)
+        (cache / 'doctorcre-app.manifest.json').unlink(missing_ok=True)
+        with patch.object(ARTIFACT, "download", side_effect=[archive, manifest]) as fetch:
+            result = ARTIFACT.artifact_inputs(pin)
+            check("interrupted cache fill recovers with a verified pair", result == (archive, manifest) and fetch.call_count == 2)
         other_pin, other_archive, other_manifest = bundle("changed-pin")
         with patch.object(ARTIFACT, "download", side_effect=[other_archive, other_manifest]) as fetch:
             result = ARTIFACT.artifact_inputs(other_pin)

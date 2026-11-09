@@ -21,3 +21,8 @@ runs:
       with:
         path: ~/.cache/leak-guard/**/release.tar.gz
         key: gitleaks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ops/gitleaks.py') }}
+    - name: Restore checksum-pinned DoctorCRE artifact
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+      with:
+        path: ~/.cache/doctorcre-artifact
+        key: doctorcre-artifact-${{ hashFiles('ops/config/doctorcre-artifact.v1.json', 'tools/doctorcre-artifact.py') }}

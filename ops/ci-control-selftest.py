@@ -29,10 +29,10 @@ def release_download_violations(root):
             name = path.relative_to(root).as_posix()
             if 'selftest' in path.name or path.name.startswith(('test_', 'test-')):
                 continue
-            # Product artifact retrieval is not a CI tool installer.
+            text = path.read_text()
             if name == 'tools/doctorcre-artifact.py':
-                continue
-            urls = re.findall(r'https://github[.]com/[^\s"\']+/releases/(?:latest/)?download[^\s"\']*', path.read_text())
+                text = text.replace("https://github.com/{pin['repository']}/releases/download/{pin['release_tag']}", "")
+            urls = re.findall(r'https://github[.]com/[^\s"\']+/releases/(?:latest/)?download[^\s"\']*', text)
             for url in urls:
                 if name != 'ops/gitleaks.py' or not url.startswith('https://github.com/gitleaks/gitleaks/releases/download/'):
                     violations.append(name + ': uncached release download')
@@ -49,6 +49,12 @@ class Controls(unittest.TestCase):
         self.assertEqual(archive['with']['key'],
                          "gitleaks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ops/gitleaks.py') }}")
         self.assertNotIn('restore-keys', archive['with'])
+        product = next(step for step in action['runs']['steps']
+                       if step.get('with', {}).get('path') == '~/.cache/doctorcre-artifact')
+        self.assertIn('actions/cache@', product['uses'])
+        self.assertEqual(product['with']['key'],
+                         "doctorcre-artifact-${{ hashFiles('ops/config/doctorcre-artifact.v1.json', 'tools/doctorcre-artifact.py') }}")
+        self.assertNotIn('restore-keys', product['with'])
         for filename in ('ci.yml', 'main-canary.yml', 'unit-shards.yml'):
             for job in workflow(filename)['jobs'].values():
                 steps = job.get('steps', [])
@@ -69,6 +75,13 @@ class Controls(unittest.TestCase):
                 'run: curl https://github.com/vendor/tool/releases/download/v1/tool.tar.gz')
             self.assertEqual(release_download_violations(root),
                              ['.github/workflows/new.yml: uncached release download'])
+            (root / 'tools').mkdir()
+            (root / 'tools/doctorcre-artifact.py').write_text(
+                "base = f\"https://github.com/{pin['repository']}/releases/download/{pin['release_tag']}\"\n"
+                'extra = "https://github.com/vendor/other/releases/download/v1/other.tar"')
+            self.assertIn('tools/doctorcre-artifact.py: uncached release download',
+                          release_download_violations(root))
+
 
     def test_gitleaks_download_states(self):
         import gitleaks
@@ -82,7 +95,7 @@ class Controls(unittest.TestCase):
             member = tarfile.TarInfo('gitleaks')
             member.size = 7
             bundle.addfile(member, io.BytesIO(b'scanner'))
-        trusted = data.getvalue()
+        fixture_archive_bytes = data.getvalue()
         outage = HTTPError('https://github.com', 504, 'outage', {}, None)
         for mode in ('cold', 'cached', 'transient', 'exhausted', 'tampered', 'bad-download'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
@@ -90,11 +103,11 @@ class Controls(unittest.TestCase):
                 archive = home / '.cache/leak-guard' / gitleaks.VERSION / 'linux_x64/release.tar.gz'
                 if mode in ('cached', 'tampered'):
                     archive.parent.mkdir(parents=True)
-                    archive.write_bytes(trusted if mode == 'cached' else b'tampered')
-                effects = ([outage, io.BytesIO(trusted)] if mode == 'transient' else
+                    archive.write_bytes(fixture_archive_bytes if mode == 'cached' else b'tampered')
+                effects = ([outage, io.BytesIO(fixture_archive_bytes)] if mode == 'transient' else
                            [outage] * 3 if mode == 'exhausted' else
-                           [io.BytesIO(b'invalid' if mode == 'bad-download' else trusted)])
-                with patch.object(Path, 'home', return_value=home), patch.object(gitleaks.platform, 'machine', return_value='x86_64'), patch.object(gitleaks.platform, 'system', return_value='Linux'), patch.dict(gitleaks.ARCHIVES, {'linux_x64': hashlib.sha256(trusted).hexdigest()}), patch.object(gitleaks.urllib.request, 'urlopen', side_effect=effects) as network, patch.object(gitleaks.time, 'sleep') as sleep:
+                           [io.BytesIO(b'invalid' if mode == 'bad-download' else fixture_archive_bytes)])
+                with patch.object(Path, 'home', return_value=home), patch.object(gitleaks.platform, 'machine', return_value='x86_64'), patch.object(gitleaks.platform, 'system', return_value='Linux'), patch.dict(gitleaks.ARCHIVES, {'linux_x64': hashlib.sha256(fixture_archive_bytes).hexdigest()}), patch.object(gitleaks.urllib.request, 'urlopen', side_effect=effects) as network, patch.object(gitleaks.time, 'sleep') as sleep:
                     if mode in ('exhausted', 'tampered', 'bad-download'):
                         with self.assertRaises((OSError, ValueError)):
                             gitleaks.binary(install=True)
