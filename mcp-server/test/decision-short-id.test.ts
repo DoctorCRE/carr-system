@@ -220,7 +220,7 @@ test("detach-decision resolves the short form too, instead of reporting not_atta
       reason: "this ruling is not about that client",
     });
   } catch (e) {
-    error = e instanceof ToolError ? e.payload : e;
+    error = e;
   }
 
   assert.notEqual(
@@ -233,4 +233,30 @@ test("detach-decision resolves the short form too, instead of reporting not_atta
     [FULL],
     "the pointer must be looked up by the resolved uuid, which is what it stores",
   );
+});
+
+class MissingPointerFake extends DetachFake {
+  async query(text: string, params: unknown[]) {
+    if (text.includes("new_value->>'decision_id' = $3")) {
+      this.pointerLookups = [params[2]];
+      return { rows: [] };
+    }
+    return super.query(text, params);
+  }
+}
+
+test("detach-decision reports not_attached when the resolved decision has no pointer", async () => {
+  const fake = new MissingPointerFake();
+  const tool = TOOLS["detach-decision"];
+  assert.ok(typeof tool === "object" && tool !== null && "handler" in tool && typeof tool.handler === "function");
+  await assert.rejects(
+    tool.handler(fake, joe, {
+      idempotency_key: "00000571-0000-4000-8000-000000000119",
+      decision_id: SHORT,
+      from: "C-127",
+      reason: "this ruling has no pointer on that client",
+    }),
+    (error) => error instanceof ToolError && error.payload.error === "not_attached",
+  );
+  assert.deepEqual(fake.pointerLookups, [FULL]);
 });
