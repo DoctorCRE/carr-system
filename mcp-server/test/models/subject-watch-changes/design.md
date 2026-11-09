@@ -1,10 +1,114 @@
 System design
-Canonical snapshots, keyed by watch generation, hold only meaningful selected deal/lease values. The registered operation completion trigger on public.tool_call compares that baseline to final canonical state, then commits the receipt and new baseline in the source transaction. Keyed intermediate events wait for that completion. Unkeyed source events still capture on insert. Material semantic identity is the operation idempotency key, or the unkeyed event UUID, plus material category. It never includes policy version. A pure SQL classifier returns changed field names and unknown/known reason codes. Reply identity is the inbound activity UUID and mailbox owner.
-Alternative considered: classify event payloads alone. Rejected because lease replacement events omit prior values and late evidence must compare selected canonical state.
-Two partners and the coexisting v1/v2 generations bound each subject to four subscriptions. Indexed subject lookup, per-generation row locks and one bounded read page avoid N+1 external work. At 10x, related-date aggregation is the first expected cost; no measured capacity claim. No cache or external call, hence no circuit breaker. Source and receipt refuse together on failure. Pending receipt delivery belongs to slice 4. Read authority is the verified partner actor, and inaccessible records refuse. Unique generation/semantic key handles replay. Paused/resumed generations reset their snapshot quietly.
 
-The finite chart models one semantic source commit and its receipt only. PostgreSQL tests cover replay, rollback, lifecycle, mailbox isolation and partner concurrency beyond this two-state abstraction. Equivalent commit, Rollback and Replay are stuttering transitions in the model. The diagram and generated spec live beside this note; regenerate from a scratch copy with the installed statechart from-chart command.
+The receipt belongs to a committed transaction and watch generation. An event is
+provenance and a wake-up signal. Neither an event nor a tool_call is completion.
+The generation baseline owns material, capture_tx, capture_before, capture_events
+and capture_pending. First ingress freezes the generation baseline for this
+transaction and accumulates event IDs. A deferred constraint trigger compares
+final canonical state once, inserts one transaction/generation receipt, and moves
+the baseline atomically. Later queued firings observe capture_pending=false.
 
+PostgreSQL lets SET CONSTRAINTS IMMEDIATE flush early. Canonical writes to deal,
+next_action, deal_participant, critical_date, lease and activity requeue the
+generations already touched by this transaction through a capture_tx index.
+The hook has no table-to-subject routing, so moving a row out of a watched
+subject also invalidates an early comparison.
+An early flush therefore reconciles the same transaction key using capture_before,
+including deleting an intermediate receipt when the final delta is empty. A
+receipt with replies also carries every changed material field. Replies deduplicate
+by activity evidence across transactions. The reader removes retired mailbox
+evidence from mixed material receipts too. Lifecycle updates also invalidate an early comparison. Pause and policy changes
+re-evaluate final eligibility; removal and resume discard only the current
+transaction's provisional receipt. Historical receipts remain. Source, baseline
+and receipt all roll back together, including savepoints. No dispatcher
+completion dependency remains.
+
+Caller usage and types
+
+Existing canonical writers still emit public.event records. They need no new call.
+The private capture_subject_watch_changes(uuid) records provenance and dirty state.
+flush_subject_watch_changes() is the constraint-trigger implementation.
+touch_subject_watch_material() invalidates an early flush after canonical writes.
+All three remain database-private. The reader and registered authority metadata
+are unchanged. The baseline row is also the bounded transaction work record, so
+there is no orphan staging queue or garbage collector.
+
+Executed design comparison
+
+1. Chosen deferred transaction capture plus canonical touch. The PostgreSQL matrix
+   passes keyed and unkeyed raw ingress, multi-event registered writers, early
+   immediate flush, net-zero, lifecycle fences after early flush, savepoints, long-transaction invisibility, rollback,
+   concurrent partners and removal. Two operations in one transaction intentionally
+   produce one receipt carrying both fields and all source events.
+2. Dispatcher-end flush plus a raw event hook. The permanent alternative experiment
+   flushes after raw ingress with canonical touch disabled inside a rolled-back
+   transaction. A subsequent closing-date write leaves the baseline unchanged.
+   Registered writers can call a dispatcher, but raw ingress cannot be required to
+   do so. This loses locality and fails the executed raw post-event case.
+3. Logical-decoding consumer. Rejected before prototype because asynchronous capture
+   cannot atomically commit the baseline and receipt with the source transaction.
+
+The dispatcher/completion prototype was also run against the whole registered/raw
+PostgreSQL matrix, using an initially-immediate flush and a tool_call completion
+hook with canonical touch disabled. Its registered two-operation coalescing and
+keyed filing pass, but raw post-event material changes fail. The final alternative
+run passes 18 of 26 tests; the chosen implementation passes all 357 tests in
+the six-suite run, including every matrix case. Later failures can
+reflect that stale baseline; they are not counted as independent defects. The
+permanent one-case experiment isolates the missing-post-event-write obligation.
+
+The original operation-marker design was also executed against the new matrix.
+It drops keyed raw filing and keyed raw closing-date changes. Unkeyed evidence
+before the canonical write also misses that final state. The new design removes
+tool_call capture and its event-idempotency-key index entirely.
+
+Capacity and failure behavior
+
+There are two partners and up to four coexisting v1/v2 generations per subject.
+Event ingress locks generations in ID order and records provenance in their rows.
+The final read aggregates canonical dates/actions once per dirty generation at
+normal commit. Repeated event wake-ups do not repeat the canonical comparison.
+At 10x load, long transactions holding generation rows and large action/date
+aggregations are the first expected limits. This is an inference, not a benchmark.
+Early immediate mode deliberately trades repeated comparisons for correctness.
+Transaction requeue uses the capture_tx index and only locks rows this
+transaction already owns. Pending event arrays contain only the last transaction per generation, overwritten
+on the next transaction; storage is bounded by watch count and transaction size.
+No external fan-out, network calls, cache, background worker or new delivery queue
+exists, so external rate limits, cache eviction and circuit breakers do not apply.
+PostgreSQL lock/statement timeouts govern the caller. Failure refuses the source
+transaction instead of serving stale receipts. Pending delivery remains slice 4.
+
+State model and tests
+
+The finite model describes one material transaction as observed from another
+connection. Each never rule has its own invariant. AtomicCapture rejects a
+receipt for rollback. NoLostCapture rejects a committed material change without
+a receipt, including keyed raw ingress. NoIntermediateReceipt rejects visibility
+before commit. The PostgreSQL matrix covers the cases intentionally abstracted
+out of the model, including lifecycle, mailbox policy, multiple fields, multiple
+partners, savepoints, immediate flushing, duplicate evidence and material no-ops.
+
+Transition tests
+
+- Registered write, Another write, Commit. two registered operations share one transaction receipt with both changes.
+- Keyed raw ingress, Commit. keyed raw late evidence captures final canonical state.
+- Unkeyed raw ingress, Commit. unkeyed raw late evidence captures final canonical state.
+- Rollback. savepoint rollback and full rollback preserve baseline and receipts.
+- Replay. existing exact action and filing replay assertions in the canonical suite.
+
+Regenerate from a scratch copy of Receipts.tla, Receipts.cfg and Receipts.map.mjs
+with statechart.mjs from-spec Receipts.tla --png. The checked-in Mermaid is the
+rendered reachable chart, with one never comment per invariant. Another write and
+Replay are stuttering transitions and omitted from the rendered overview.
+
+Design and debt pass
+
+codebase-design puts capture behind one database-owned transaction seam. Writers
+know only canonical writes and source events, not dispatcher completion timing.
+zero-tech-debt deletes the tool_call trigger, operation capture function and
+idempotency-key event index. The added trigger machinery replaces the incomplete
+operation-marker mechanism and makes early constraint flushes correct.
 
 Pending receipt proof
 The canonical next-action snapshot holds distinct owner/date pairs, not replacement
@@ -43,29 +147,3 @@ releases. `--release-fixture` is offline testing only and labels output accordin
 The PostgreSQL suite records the four samples from registered writers and runs the
 real CLI against equal, descendant, older, unrelated and unknown release fixtures,
 plus an assertion failure. No production observation was run by this worker.
-
-Operation completion regression
-The Meaningful commit transition means a complete registered operation, including
-every intermediate event and canonical write. The date-swap regression asserts
-one receipt for each partner operation and both next_actions and next_date in
-the second receipt. The multi-field update regression combines scalar edits with
-overdue action supersession and asserts one receipt with every changed field.
-Equivalent commit and Replay remain quiet; Rollback still restores the baseline
-and receipts. The migration initializer remains a quiet selected-state baseline.
-
-Writer audit
-update-deal emits per-field events before optional overdue-action supersession;
-the completion trigger handles both together. set-next-action emits action and
-shared-date events around its canonical writes; completion now handles both.
-set-lead and add-critical-date each emit one event after all writes.
-record-executed-lease performs its canonical replacement before its single event.
-Inbound inherit-email-thread and confirm-email-filing emit per-activity filing
-evidence; reply keys remain activity UUIDs with mailbox isolation. Existing
-registered regressions exercise each writer, lease replacement, equivalent dates,
-filing replay, rollback and concurrent partners.
-
-Design and debt pass
-codebase-design keeps classification behind one SQL operation-completion seam.
-zero-tech-debt replaces per-event material identity rather than adding merge or
-receipt-repair logic. No external call, queue or cache is introduced. Indexed
-event-key lookup limits each completion scan to that operation's events.

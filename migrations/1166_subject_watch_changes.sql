@@ -36,8 +36,11 @@ returns jsonb language sql immutable set search_path=pg_catalog,pg_temp as $$
 $$;
 
 create table ops.subject_watch_material_baseline (
-  watch_id uuid primary key, material jsonb not null
+  watch_id uuid primary key, material jsonb not null,
+  capture_tx xid8, capture_before jsonb, capture_events uuid[] not null default '{}',
+  capture_pending boolean not null default false
 );
+create index subject_watch_material_transaction on ops.subject_watch_material_baseline(capture_tx);
 create table ops.subject_watch_change (
   id uuid primary key default gen_random_uuid(),
   watch_generation_id uuid not null,
@@ -66,20 +69,25 @@ revoke all on ops.subject_watch_material_baseline,ops.subject_watch_change from 
 
 create function ops.subject_watch_material_start() returns trigger
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+declare retired_id uuid; key_value text:='transaction:'||pg_current_xact_id()::text;
 begin
-  if tg_op='DELETE' then
-    delete from ops.subject_watch_material_baseline where watch_id=old.id; return old;
+  if tg_op='DELETE' then retired_id:=old.id;
+  elsif tg_op='UPDATE' and old.id is distinct from new.id then retired_id:=old.id;
+  elsif to_jsonb(new)->>'state'='removed' then retired_id:=new.id;
   end if;
-  if tg_op='UPDATE' and old.id is distinct from new.id then
-    delete from ops.subject_watch_material_baseline where watch_id=old.id;
+  if retired_id is not null then
+    delete from ops.subject_watch_change where watch_generation_id=retired_id and semantic_key=key_value;
+    delete from ops.subject_watch_material_baseline where watch_id=retired_id;
   end if;
-  if to_jsonb(new)->>'state'='removed' then
-    delete from ops.subject_watch_material_baseline where watch_id=new.id; return new;
-  end if;
+  if tg_op='DELETE' then return old; end if;
+  if to_jsonb(new)->>'state'='removed' then return new; end if;
   if tg_op='INSERT' or new.id is distinct from old.id or (to_jsonb(new)->>'state'='watching' and to_jsonb(old)->>'state'='paused') then
+    delete from ops.subject_watch_change where watch_generation_id=new.id and semantic_key=key_value;
     insert into ops.subject_watch_material_baseline(watch_id,material)
     values(new.id,ops.subject_watch_material(new.subject_type,new.subject_id))
-    on conflict(watch_id) do update set material=excluded.material;
+    on conflict(watch_id) do update set material=excluded.material,capture_tx=null,capture_before=null,capture_events='{}',capture_pending=false;
+  elsif tg_op='UPDATE' then
+    update ops.subject_watch_material_baseline set capture_pending=true where watch_id=new.id and capture_tx=pg_current_xact_id();
   end if;
   return new;
 end $$;
@@ -96,81 +104,105 @@ where subject_type in ('deal','lease') and state<>'removed'
 
 create function ops.capture_subject_watch_changes(p_event uuid) returns void
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare e public.event; w record; before_value jsonb; after_value jsonb; delta jsonb;
-  reply public.activity; version_value integer; key_value text; category_value text;
+declare e public.event; w record;
 begin
   select * into strict e from public.event where id=p_event;
   if coalesce(e.organization_tenant_id,'carr-internal')<>'carr-internal'
     or coalesce(e.personal_scope,'none') not in ('none','joe-personal','dell-personal') then return; end if;
-  if e.verb in ('confirm-email-filing','inherit-email-thread') and e.new_value->>'activity_id' is not null then
-    select * into reply from public.activity where id=(e.new_value->>'activity_id')::uuid
-      and deal_id=e.subject_id and kind='email_in'
-      and coalesce(email_context#>>'{lifecycle,state}','live')='live';
-  end if;
-  -- A registered operation can emit events before its final canonical write.
-  -- Its tool_call insert captures the complete operation below.
-  if e.idempotency_key is not null and not exists(
-    select 1 from public.tool_call where idempotency_key=e.idempotency_key) then return; end if;
   for w in
-    select s.*,a.slug from (
-      select id,actor_id,subject_type,subject_id,subscribed_at,1 policy_version,true include_self,true replies
-      from ops.subject_watch
-      union all
-      select id,actor_id,subject_type,subject_id,subscribed_at,lifecycle_version,
-        coalesce((policy->>'include_self_changes')::boolean,true),policy->'change_kinds' ? 'reply_arrived'
-      from ops.subject_watch_v2_subscription where state='watching'
-    ) s join public.actor a on a.id=s.actor_id
-    where (
-      (s.subject_type=e.subject_type and s.subject_id=e.subject_id)
-      or (e.subject_type='deal' and s.subject_type='lease' and exists(select 1 from public.lease where id=s.subject_id and deal_id=e.subject_id)))
-    and ops.subject_watch_target(s.subject_type,s.subject_id) is not null
+    select s.* from (
+      select id,actor_id,subject_type,subject_id from ops.subject_watch
+      union all select id,actor_id,subject_type,subject_id from ops.subject_watch_v2_subscription where state='watching'
+    ) s where (s.subject_type=e.subject_type and s.subject_id=e.subject_id)
+      or (e.subject_type='deal' and s.subject_type='lease' and exists(
+        select 1 from public.lease where id=s.subject_id and deal_id=e.subject_id))
     order by s.id
   loop
     perform pg_advisory_xact_lock(hashtextextended(w.actor_id::text||':'||w.subject_type||':'||w.subject_id::text,0));
-    if not exists(select 1 from ops.subject_watch where id=w.id)
-      and not exists(select 1 from ops.subject_watch_v2_subscription where id=w.id and state='watching') then continue; end if;
-    if exists(select 1 from ops.subject_watch_v2_subscription where id=w.id) then
-    select lifecycle_version,coalesce((policy->>'include_self_changes')::boolean,true),policy->'change_kinds' ? 'reply_arrived'
-      into w.policy_version,w.include_self,w.replies from ops.subject_watch_v2_subscription where id=w.id and state='watching';
-    if not found then continue; end if;
-    end if;
-    select material into before_value from ops.subject_watch_material_baseline where watch_id=w.id for update;
-    if not found then continue; end if;
-    after_value:=ops.subject_watch_material(w.subject_type,w.subject_id);
-    if after_value is null then continue; end if;
-    delta:=ops.classify_subject_watch_change(before_value,after_value);
-    update ops.subject_watch_material_baseline set material=after_value where watch_id=w.id;
-    select (ops.subject_watch_target(w.subject_type,w.subject_id)->>'version')::integer into version_value;
-    key_value:=coalesce('operation:'||e.idempotency_key,'event:'||e.id::text)||':material'; category_value:='material_changed';
-    if reply.id is not null then
-      if w.subject_type<>'deal' or not w.replies or reply.email_source->>'mailbox_owner' is distinct from w.slug then continue; end if;
-      key_value:='reply:'||reply.id; category_value:='reply_arrived'; delta:='[]';
-    elsif delta='[]' then continue;
-    end if;
-    if not w.include_self and (e.actor_id=w.actor_id or e.sponsoring_human_slug=w.slug) then continue; end if;
-    insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,
-      source_event_id,source_revision,policy_version,category,changes,evidence_refs,occurred_at)
-    values(w.id,w.actor_id,w.subject_type,w.subject_id,key_value,e.id,version_value,w.policy_version,
-      category_value,delta,jsonb_build_array(jsonb_build_object('event_id',e.id,'activity_id',reply.id)),e.occurred_at)
-    on conflict(watch_generation_id,semantic_key) do nothing;
+    update ops.subject_watch_material_baseline set
+      capture_before=case when capture_tx=pg_current_xact_id() then capture_before else material end,
+      capture_events=case when capture_tx=pg_current_xact_id() then
+        case when p_event=any(capture_events) then capture_events else array_append(capture_events,p_event) end
+        else array[p_event] end,
+      capture_tx=pg_current_xact_id(),capture_pending=true where watch_id=w.id;
   end loop;
 end $$;
-create index subject_watch_operation_events on public.event(idempotency_key) where idempotency_key is not null;
 
-create function ops.capture_subject_watch_operation() returns trigger
+create function ops.flush_subject_watch_changes() returns trigger
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare e record;
+declare b ops.subject_watch_material_baseline; w record; e public.event;
+  after_value jsonb; delta jsonb; refs jsonb:='[]'; reply public.activity;
+  source_id uuid; source_time timestamptz; version_value integer; has_reply boolean:=false;
+  material_allowed boolean:=false; key_value text:='transaction:'||pg_current_xact_id()::text;
 begin
-  for e in select id from public.event where idempotency_key=new.idempotency_key
-    order by recorded_at,id
-  loop
-    perform ops.capture_subject_watch_changes(e.id);
+  select * into b from ops.subject_watch_material_baseline where watch_id=new.watch_id for update;
+  if not found or not b.capture_pending or b.capture_tx<>pg_current_xact_id() then return null; end if;
+  update ops.subject_watch_material_baseline set capture_pending=false where watch_id=b.watch_id;
+  select s.*,a.slug into w from (
+    select id,actor_id,subject_type,subject_id,1 policy_version,true include_self,true replies from ops.subject_watch
+    union all select id,actor_id,subject_type,subject_id,lifecycle_version,
+      coalesce((policy->>'include_self_changes')::boolean,true),policy->'change_kinds' ? 'reply_arrived'
+      from ops.subject_watch_v2_subscription where state='watching'
+  ) s join public.actor a on a.id=s.actor_id where s.id=b.watch_id;
+  if not found or ops.subject_watch_target(w.subject_type,w.subject_id) is null then
+    delete from ops.subject_watch_change where watch_generation_id=b.watch_id and semantic_key=key_value;
+    return null;
+  end if;
+  after_value:=ops.subject_watch_material(w.subject_type,w.subject_id);
+  if after_value is null then return null; end if;
+  delta:=ops.classify_subject_watch_change(b.capture_before,after_value);
+  for e in select * from public.event where id=any(b.capture_events) order by recorded_at,id loop
+    if not w.include_self and (e.actor_id=w.actor_id or e.sponsoring_human_slug=w.slug) then continue; end if;
+    material_allowed:=true;
+    source_id:=coalesce(source_id,e.id);source_time:=coalesce(source_time,e.occurred_at);
+    reply:=null;
+    if e.verb in ('confirm-email-filing','inherit-email-thread') and e.new_value->>'activity_id' is not null then
+      select * into reply from public.activity where id=(e.new_value->>'activity_id')::uuid
+        and deal_id=w.subject_id and kind='email_in' and email_source->>'mailbox_owner'=w.slug
+        and coalesce(email_context#>>'{lifecycle,state}','live')='live';
+      if reply.id is null or not w.replies or w.subject_type<>'deal' then
+        if delta<>'[]' then refs:=refs||jsonb_build_array(jsonb_build_object('event_id',e.id,'activity_id',null)); end if;
+        continue;
+      end if;
+      if exists(select 1 from ops.subject_watch_change ch where ch.watch_generation_id=w.id
+        and ch.semantic_key<>key_value and ch.evidence_refs @> jsonb_build_array(jsonb_build_object('activity_id',reply.id))) then continue; end if;
+      has_reply:=true;
+    end if;
+    refs:=refs||jsonb_build_array(jsonb_build_object('event_id',e.id,'activity_id',reply.id));
   end loop;
-  return new;
+  update ops.subject_watch_material_baseline set material=after_value where watch_id=w.id;
+  if not material_allowed then delta:='[]'; end if;
+  if delta='[]' and not has_reply then
+    delete from ops.subject_watch_change where watch_generation_id=w.id and semantic_key=key_value;
+    return null;
+  end if;
+  select (ops.subject_watch_target(w.subject_type,w.subject_id)->>'version')::integer into version_value;
+  insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,
+    source_event_id,source_revision,policy_version,category,changes,evidence_refs,occurred_at)
+  values(w.id,w.actor_id,w.subject_type,w.subject_id,key_value,source_id,version_value,w.policy_version,
+    case when delta='[]' then 'reply_arrived' else 'material_changed' end,delta,refs,source_time)
+  on conflict(watch_generation_id,semantic_key) do update set source_revision=excluded.source_revision,
+    policy_version=excluded.policy_version,category=excluded.category,changes=excluded.changes,evidence_refs=excluded.evidence_refs;
+  return null;
 end $$;
-create trigger subject_watch_operation after insert on public.tool_call
-for each row execute function ops.capture_subject_watch_operation();
-revoke all on function ops.capture_subject_watch_operation()
+create constraint trigger subject_watch_commit after update of capture_pending on ops.subject_watch_material_baseline
+  deferrable initially deferred for each row when(new.capture_pending)
+  execute function ops.flush_subject_watch_changes();
+
+-- An early SET CONSTRAINTS flush must be reconciled after later canonical writes.
+create function ops.touch_subject_watch_material() returns trigger
+language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+declare capture_id xid8:=pg_current_xact_id();
+begin
+  update ops.subject_watch_material_baseline set capture_pending=true where capture_tx=capture_id;
+  return null;
+end $$;
+do $$ declare name text; begin
+  foreach name in array array['deal','next_action','deal_participant','critical_date','lease','activity'] loop
+    execute format('create trigger subject_watch_material_touch after insert or update or delete on public.%I for each row execute function ops.touch_subject_watch_material()',name);
+  end loop;
+end $$;
+revoke all on function ops.flush_subject_watch_changes(),ops.touch_subject_watch_material()
   from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
 
 create or replace function ops.consume_subject_watch_event(p_event uuid) returns void
@@ -226,10 +258,14 @@ begin
     return jsonb_build_object('ok',false,'error','watch_target_not_found'); end if;
   select coalesce(jsonb_agg(to_jsonb(page) order by page.id),'[]') into result from (
     select id,watch_generation_id,subject_type,subject_id,source_event_id,source_revision,policy_version,
-      category,changes,evidence_refs,occurred_at,recorded_at,eligible_at,disposition,notification_id
+      category,changes,(select coalesce(jsonb_agg(ref),'[]') from jsonb_array_elements(evidence_refs) ref
+      where ref->>'activity_id' is null or exists(select 1 from public.activity mail join public.actor owner on owner.id=a
+        where mail.id=(ref->>'activity_id')::uuid and mail.email_source->>'mailbox_owner'=owner.slug
+          and coalesce(mail.email_context#>>'{lifecycle,state}','live')='live')) evidence_refs,
+      occurred_at,recorded_at,eligible_at,disposition,notification_id
     from ops.subject_watch_change where actor_id=a and watch_generation_id=p_watch
-      and (category<>'reply_arrived' or exists(select 1 from public.activity mail join public.actor owner on owner.id=a
-        where mail.id=(evidence_refs->0->>'activity_id')::uuid and mail.email_source->>'mailbox_owner'=owner.slug
+      and (category<>'reply_arrived' or exists(select 1 from jsonb_array_elements(evidence_refs) ref join public.activity mail on mail.id=(ref->>'activity_id')::uuid join public.actor owner on owner.id=a
+        where mail.email_source->>'mailbox_owner'=owner.slug
         and coalesce(mail.email_context#>>'{lifecycle,state}','live')='live'))
       and (p_cursor is null or id>p_cursor) order by id limit p_limit+1
   ) page;

@@ -95,6 +95,7 @@ def validate_fields(reply, pages) -> dict[str, dict[str, Any]]:
 
 def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
             text_pages: Callable, model: Callable, ocr_regions: Callable | None = None):
+    from lib.deal_document_text import retained_pages
     contract = job.contract()
     source = call('read-deal-extraction-source', contract)
     if not source.get('ok'):
@@ -121,6 +122,10 @@ def run_job(job: ExtractionJob, *, call: Callable, read_bytes: Callable,
         if len(data) != doc['bytes'] or digest(data) != doc['content_hash']:
             raise ValueError('stored document hash mismatch')
         pages = text_pages(data)
+        if phase == "extract":
+            retained = call("record-deal-document-text", retained_pages(doc, pages))
+            if not retained.get("ok"):
+                raise ValueError("text retention refused")
         if (not isinstance(pages, list) or not all(isinstance(p, str) for p in pages)
                 or len(pages) > 1000 or sum(map(len, pages)) > 500000):
             raise ValueError('text layer exceeds job limits')

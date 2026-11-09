@@ -12,7 +12,7 @@ TypeOK == /\ watch \in {"Watching","Paused","Removed"}
 Init == /\ watch="Watching" /\ receipt="Quiet" /\ inbox="Quiet" /\ health="Healthy"
         /\ unwatchConfirmed=FALSE /\ readStatus="Watching"
         /\ emitted=0 /\ removedAt=1 /\ mailbox \in {"Own","Other"} /\ allowed=TRUE
-\* migrations/1166_subject_watch_changes.sql:117
+\* Committed source transaction only. migrations/1166_subject_watch_changes.sql:188
 Capture == /\ watch="Watching" /\ receipt="Quiet" /\ mailbox="Own"
            /\ receipt'="Pending" /\ UNCHANGED <<watch,inbox,health,emitted,removedAt,mailbox,allowed,unwatchConfirmed,readStatus>>
 \* migrations/1167_subject_watch_delivery.sql:107

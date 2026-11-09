@@ -6,6 +6,16 @@ export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e5
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
 export const SCAC_MUTATION_OPERATIONS = Object.freeze({
+  "abandon-deal-deliverable": {
+    "ingress_key": "mcp-tool:abandon-deal-deliverable",
+    "source_locator": "mcp-server/src/deal-deliverables.js",
+    "schema_digest": "f9781a880e4474c1100230d5855def0489e9201b0c1f62f4207aabd7c1b6ffdd",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "accept-outcome-feedback": {
     "ingress_key": "mcp-tool:accept-outcome-feedback",
     "source_locator": "mcp-server/src/work-request-intake.js",
@@ -1513,6 +1523,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-document-text-sources": {
+    "ingress_key": "mcp-tool:list-deal-document-text-sources",
+    "source_locator": "mcp-server/src/deal-document-text.ts",
+    "schema_digest": "29eac64332f909ae7cd3e04f2b3a61009fb4a08054a3b4520029d0f710271f63",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-deal-documents": {
     "ingress_key": "mcp-tool:list-deal-documents",
     "source_locator": "mcp-server/src/deal-files.js",
@@ -2334,6 +2354,26 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-deal-deliverable": {
+    "ingress_key": "mcp-tool:read-deal-deliverable",
+    "source_locator": "mcp-server/src/deal-deliverables.js",
+    "schema_digest": "748f63ff3d1c0451f7cefd76d9e2e95f79c104210e878df9ce211eab0a133468",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
+  "read-deal-document-text": {
+    "ingress_key": "mcp-tool:read-deal-document-text",
+    "source_locator": "mcp-server/src/deal-document-text.ts",
+    "schema_digest": "daae6eec2961a80a96f6217bd0a0b5d842fc8dc3f3535d3650ae70d75a1e3e23",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-deal-extraction-source": {
     "ingress_key": "mcp-tool:read-deal-extraction-source",
     "source_locator": "mcp-server/src/deal-extraction.ts",
@@ -2904,6 +2944,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "record-deal-document-text": {
+    "ingress_key": "mcp-tool:record-deal-document-text",
+    "source_locator": "mcp-server/src/deal-document-text.ts",
+    "schema_digest": "4007dd3efb9925ed67bbba93afd8ad8faeb918f6580cd33adc330b2b32b4b484",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "record-deal-execution": {
     "ingress_key": "mcp-tool:record-deal-execution",
     "source_locator": "mcp-server/src/cre-lifecycle-store.v5.js",
@@ -3424,6 +3474,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "resolve-action-link-v2": {
+    "ingress_key": "mcp-tool:resolve-action-link-v2",
+    "source_locator": "mcp-server/src/action-card-targets.ts",
+    "schema_digest": "c62d641eb925ed921cf03a27f05c6d9e8c28aecbb6ef50be14b2f93b4d7d1efa",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "resolve-candidate": {
     "ingress_key": "mcp-tool:resolve-candidate",
     "source_locator": "mcp-server/src/tools.js",
@@ -3934,7 +3994,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "start-deal-deliverable": {
     "ingress_key": "mcp-tool:start-deal-deliverable",
     "source_locator": "mcp-server/src/deal-deliverables.js",
-    "schema_digest": "e9bd5d08abd7fb711ac75d37eae9c1f12b5d32d2b510fe1ac1e2e1fd59448df3",
+    "schema_digest": "2db73e60c1563b85f4419ca3dbc16d5f024358658a75362ccc5d35e5d738d540",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
