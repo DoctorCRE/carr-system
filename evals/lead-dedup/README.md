@@ -6,7 +6,7 @@ adjudication. These results do not estimate production accuracy or complete the
 Work Request's human-adjudicated fixture requirement. Capture identity
 evaluation remains a separate slice.
 
-Run `node evals/lead-dedup/scorecard.mjs` from the repository root. It prints JSON
+Run `node evals/lead-dedup/scorecard.ts` from the repository root. It prints JSON
 with the workflow source hash, each label and rationale, observed decisions,
 presented leads, confusion counts, and error rates. It makes no network requests
 and writes no records. The Node VM executes the repository's actual workflow;
@@ -34,7 +34,7 @@ combines duplicate source evidence, and promotes confidence when a duplicate
 observation is HIGH. It never merges canonical identities.
 
 The automatic regression check is
-`node --test mcp-server/test/lead-dedup-scorecard.test.mjs`, also discovered by
+`node --test mcp-server/test/lead-dedup-scorecard.test.ts`, also discovered by
 the repository unit suite. Tests pin the fixture counts and one probe per merge
 rule. A policy change must review the labels and update expected outcomes
 deliberately. Zero class denominators produce null rates.

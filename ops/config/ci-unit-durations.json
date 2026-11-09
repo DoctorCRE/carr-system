@@ -272,7 +272,7 @@
     "lead-automation.test.mjs": {"milliseconds": 733, "serial": false},
     "lead-board-migration.test.mjs": {"milliseconds": 273, "serial": false},
     "lead-board.test.mjs": {"milliseconds": 596, "serial": false},
-    "lead-dedup-scorecard.test.mjs": {"milliseconds": 381, "serial": false},
+    "lead-dedup-scorecard.test.ts": {"milliseconds": 381, "serial": false},
     "lead-follow-up-postgres.test.mjs": {"milliseconds": 1338, "serial": true},
     "lead-history-postgres.test.mjs": {"milliseconds": 37035, "serial": true},
     "lead-history.test.mjs": {"milliseconds": 577, "serial": false},
