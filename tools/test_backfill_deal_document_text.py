@@ -1,3 +1,4 @@
+"""Test backfill reader preflight and failure reporting."""
 import importlib.util
 import json
 from pathlib import Path
