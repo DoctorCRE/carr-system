@@ -93,6 +93,8 @@ class RunnerBaselineTests(unittest.TestCase):
                     patch.dict(os.environ, DATABASE_URL='postgresql://localhost/carr_test'), \
                     patch.object(sys, 'argv', ['migrate.py', '--apply', '--yes']), \
                     patch.object(migrate, 'install_control_catalog') as install, \
+                    patch.object(migrate, 'load_control_catalog', return_value=types.SimpleNamespace(
+                        source_revision=lambda: 'a' * 40)), \
                     patch.object(migrate, 'load_migrations', return_value=[]), \
                     patch.object(migrate, 'load_baseline', return_value=self.baseline), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -101,6 +103,8 @@ class RunnerBaselineTests(unittest.TestCase):
                 else:
                     migrate.main()
             self.assertEqual(install.call_count, 0 if refuses else 1)
+            if not refuses:
+                install.assert_called_once_with(conn, 'a' * 40)
             self.assertEqual(conn.statements, ["select to_regclass('schema_migrations')",
                                                'select filename, sha256 from schema_migrations'])
 

@@ -272,17 +272,22 @@ on conflict (control_key) do update set
 """
 
 
-def install_projection(conn: Any, revision: str) -> dict[str, Any]:
-    """Install one clean checked-out revision atomically; verification never calls this."""
+def source_revision() -> str:
     def git(*args: str) -> str:
         return subprocess.run(["git", *args], cwd=REPO, check=True,
                               capture_output=True, text=True).stdout.strip()
 
+    revision = git("rev-parse", "HEAD")
+    if git("status", "--porcelain", "--untracked-files=no"):
+        raise CatalogError("catalog installation requires a clean revision")
+    return revision
+
+
+def install_projection(conn: Any, revision: str) -> dict[str, Any]:
+    """Install one clean checked-out revision atomically; verification never calls this."""
     def check_revision() -> None:
-        if revision != git("rev-parse", "HEAD"):
+        if revision != source_revision():
             raise CatalogError("catalog revision differs from checked-out HEAD")
-        if git("status", "--porcelain", "--untracked-files=no"):
-            raise CatalogError("catalog installation requires a clean revision")
 
     check_revision()
     rows = compile_catalog()
