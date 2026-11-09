@@ -11,7 +11,8 @@
     "src/subject-watch-scheduler.ts",
     "test/web-push-registry-postgres.test.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
-    "../evals/lead-dedup/scorecard.ts"
+    "../evals/lead-dedup/scorecard.ts",
+    "../docs/models/web-push-sender/PushSender.map.ts"
   ],
   "project": [
     "typescript/check.ts",
@@ -32,9 +33,14 @@
     "test/web-push-config.test.ts",
     "../evals/lead-dedup/scorecard.ts",
     "test/lead-dedup-scorecard.test.ts",
+    "test/web-push-sender.test.ts",
+    "test/web-push-outbox-postgres.test.ts",
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",
-    "src/web-push-config.ts"
+    "src/web-push-config.ts",
+    "src/web-push-sender.ts",
+    "src/web-push-outbox.ts",
+    "../docs/models/web-push-sender/PushSender.map.ts"
   ]
 }
