@@ -14,8 +14,7 @@
     "check:registry": "node ../ops/scac-mutation-inventory.mjs",
     "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
     "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
-    "fix": "biome check --write .",
-    "postinstall": "patch-package --error-on-fail --error-on-warn"
+    "fix": "biome check --write ."
   },
   "keywords": [],
   "author": "",
@@ -32,8 +31,7 @@
     "pg": "8.13.1",
     "playwright-core": "1.63.0",
     "typescript": "7.0.2",
-    "wrangler": "4.149.0",
-    "patch-package": "8.0.1"
+    "wrangler": "4.149.0"
   },
   "dependencies": {
     "@cfworker/json-schema": "4.1.1",
@@ -46,7 +44,8 @@
   },
   "overrides": {
     "@hono/node-server": "2.1.1",
-    "hono": "4.13.11"
+    "hono": "4.13.11",
+    "@apidevtools/json-schema-ref-parser": "13.0.5"
   },
   "engines": {
     "node": ">=26"
