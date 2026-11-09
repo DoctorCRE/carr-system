@@ -24,7 +24,7 @@ class RegistryMergeTests(unittest.TestCase):
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
         shutil.copytree(ROOT / 'mcp-server/contracts', self.repo / 'mcp-server/contracts')
         for path in ('lib/deal_schedule.schema.json', 'mcp-server/package.json',
-                     'mcp-server/run-tests.mjs', 'mcp-server/suite-discovery.ts',
+                     'mcp-server/run-tests.ts', 'mcp-server/suite-discovery.ts',
                      'ops/scac-mutation-inventory.mjs',
                      'ops/git_env.py', 'tools/regen.py', '.gitignore'):
             shutil.copy(ROOT / path, self.repo / path)
@@ -40,7 +40,7 @@ class RegistryMergeTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'jbookout')
         self.git('config', 'user.email', 'jbookout@users.noreply.github.com')
-        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/run-tests.mjs',
+        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/run-tests.ts',
                  'mcp-server/suite-discovery.ts', 'mcp-server/suite-inventory.json',
                  'ops', 'tools', 'lib/deal_schedule.schema.json', '.gitignore')
         self.commit('main plus WR622 implementation')
@@ -120,7 +120,7 @@ for (const name of ['aaa-wr622-a', 'zzz-wr622-b']) {
 console.log('both verbs assembled and present in the sole generated registry');
 ''')
         print(result.stdout.strip(), flush=True)
-        result = self.command('node', 'mcp-server/run-tests.mjs')
+        result = self.command('node', 'mcp-server/run-tests.ts')
         self.assertIn('suite a', result.stdout)
         self.assertIn('suite b', result.stdout)
         print('both newly discovered suites executed; git status clean = ' +

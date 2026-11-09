@@ -120,7 +120,7 @@ test("typed suites retain serialized browser and PostgreSQL batches", () => {
       "--input-type=module",
       "-e",
       `
-    import { suiteBatches } from './mcp-server/run-tests.mjs';
+    import { suiteBatches } from './mcp-server/run-tests.ts';
     console.log(JSON.stringify(suiteBatches([
       'ordinary.test.ts', 'chrome-launch.test.mjs', 'auto-browser.test.ts',
       'source-browser.test.ts', 'auto-postgres.test.ts', 'source-pg.test.ts', 'legacy.test.js'
@@ -145,7 +145,7 @@ test("canonical runner executes mixed suites exactly once and validates shard se
   const directory = await mkdtemp(path.join(tmpdir(), "typed-runner-"));
   try {
     await mkdir(path.join(directory, "test"));
-    for (const file of ["run-tests.mjs", "suite-discovery.ts"]) {
+    for (const file of ["run-tests.ts", "suite-discovery.ts"]) {
       await copyFile(new URL(`../${file}`, import.meta.url), path.join(directory, file));
     }
     await writeFile(path.join(directory, "package.json"), JSON.stringify({ type: "module" }));
@@ -165,7 +165,7 @@ test("canonical runner executes mixed suites exactly once and validates shard se
     const direct = run(["--test", ...files.map((file) => `test/${file}`)], files);
     assert.equal(direct.status, 0, direct.stderr);
     assert.match(direct.stdout, /(?:#|ℹ) tests 3/);
-    const canonical = run(["run-tests.mjs"], files);
+    const canonical = run(["run-tests.ts"], files);
     assert.equal(canonical.status, 0, canonical.stderr);
     const receipts = canonical.stdout
       .split("\n")
@@ -190,12 +190,12 @@ test("canonical runner executes mixed suites exactly once and validates shard se
             /(?:#|ℹ) tests 1/.test(receipt.summary),
         ),
       );
-    const shard = run(["run-tests.mjs"], ["a.test.ts"]);
+    const shard = run(["run-tests.ts"], ["a.test.ts"]);
     assert.equal(shard.status, 0, shard.stderr);
     assert.equal(shard.stdout.split("\n").filter((line) => line.startsWith("suite-result: ")).length, 1);
     assert.match(shard.stdout, /"file":"a.test.ts"/);
     for (const selection of [[], ["a.test.ts", "a.test.ts"], ["missing.test.ts"]]) {
-      const invalid = run(["run-tests.mjs"], selection);
+      const invalid = run(["run-tests.ts"], selection);
       assert.notEqual(invalid.status, 0);
       assert.match(invalid.stderr, /unit shard has empty, duplicate or missing suites/);
     }

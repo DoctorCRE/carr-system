@@ -7,6 +7,12 @@
     "test/models/subject-watch-delivery/Delivery.map.ts",
     "test/models/subject-watch-delivery/Queue.map.ts",
     "suite-discovery.ts",
-    "test/suite-discovery.test.ts"
-  ]
+    "test/suite-discovery.test.ts",
+    "run-tests.ts",
+    "test/run-node-suites.test.ts",
+    "../ops/ci-node-file.mts"
+  ],
+  "compilerOptions": {
+    "allowJs": true
+  }
 }

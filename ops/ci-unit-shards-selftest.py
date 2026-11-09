@@ -211,7 +211,7 @@ class ShardCoverage(unittest.TestCase):
                                     text=True, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('missing=', result.stderr)
-            shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', root / 'mcp-server/run-tests.mjs')
+            shutil.copy2(ROOT / 'mcp-server/run-tests.ts', root / 'mcp-server/run-tests.ts')
             log.write_text('suite-timing: snapshot-template 99ms\nsuite-timing: snapshot-template 101ms\n' +
                            ''.join(f'suite-timing: {file} 10ms\n' for file in [*records, 'new.test.mjs']))
             planner.regenerate([log], 1, timing_file, root)
