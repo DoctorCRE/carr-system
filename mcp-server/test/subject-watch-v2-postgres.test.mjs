@@ -540,7 +540,7 @@ test('quiet lease clocks and pending delivery', async t => {
  let watch=await make();
  const sweep=async(now,conn=c)=>(await conn.query('select ops.sweep_subject_watches($1,50) result',[now])).rows[0].result;
  const count=async() => Number((await c.query('select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition=\'emitted\'',[watch])).rows[0].n);
- await t.test('crossing without business mutation emits once and later days stay quiet',async()=>{
+ await t.test('crossing without business mutation emits once and later days stay quiet',async t=>{
   await c.query('insert into ops.notification_preference(actor,device_opt_in) values($1,true) on conflict(actor) do update set device_opt_in=excluded.device_opt_in where notification_preference.actor=excluded.actor',[actor]);
   await sweep('2027-03-31T12:00:00Z'); assert.equal(await count(),0);
   await sweepSubjectWatches({scheduledTime:Date.parse('2027-04-01T12:00:00Z')},{DATABASE_URL_WRITER:dsn},pg.Pool); assert.equal(await count(),1);
@@ -555,12 +555,33 @@ test('quiet lease clocks and pending delivery', async t => {
 
   assert.equal((await c.query('select a.slug from public.event e join public.actor a on a.id=e.actor_id where e.id=$1',[response.changes[0].source_event_id])).rows[0].slug,'system');
 
-  if (process.env.J139_CAPTURE_PROOF) {
+  await t.test('scheduled proof captures real PostgreSQL evidence through psycopg',async()=>{
    const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-delivery-proof.py',import.meta.url));
-   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); print(json.dumps({'release':{'ok':True,'env':{'value':'production','reason':None},'git_sha':{'value':'a'*40,'reason':None}},'sample':sample}))";
+   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); m.verify(sample); print(json.dumps({'release':{'ok':True,'env':{'value':'production','reason':None},'git_sha':{'value':'a'*40,'reason':None}},'sample':sample}))";
    const fixture=execFileSync(process.env.CARR_CI_PYTHON??'python3',['-c',script,proof,dsn,watch],{encoding:'utf8'});
-   const {writeFileSync}=await import('node:fs');writeFileSync(process.env.J139_CAPTURE_PROOF,fixture);
-  }
+   const sample=JSON.parse(fixture).sample;
+   assert.equal(sample.watch_id,watch);
+   assert.equal(sample.notifications,1);
+   assert.equal(sample.clock_receipts,1);
+   assert.equal(sample.pending,0);
+   assert.equal(sample.business_mutations,0);
+   const {createServer}=await import('node:http');
+   const {spawn}=await import('node:child_process');
+   const release=JSON.parse(fixture).release;
+   const server=createServer((_req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify(release));});
+   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+   try {
+    const child=spawn(process.env.CARR_CI_PYTHON??'python3',[proof,'--expected-merge','a'.repeat(40),
+     '--watch-id',watch,'--database',dsn,'--release-url',`http://127.0.0.1:${server.address().port}/release`,
+     '--deadline-seconds','5'],{timeout:10000});
+    let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);
+    const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
+    assert.equal(code,0,out+err);
+    assert.equal(JSON.parse(out).offline_fixture,false);
+    assert.equal(JSON.parse(out).state,'passed');
+   } finally {await new Promise(resolve=>server.close(resolve));}
+   if(process.env.J139_CAPTURE_PROOF) writeFileSync(process.env.J139_CAPTURE_PROOF,fixture);
+  });
 
  });
  await t.test('outage catch-up summarizes the most urgent threshold',async()=>{
