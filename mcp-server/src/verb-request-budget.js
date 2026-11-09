@@ -5,7 +5,7 @@ const PERIOD_MS = 60_000;
 const LIMITS = Object.freeze({ human: 60, agent: 1200 });
 
 /** @typedef {DurableObject & { __DURABLE_OBJECT_BRAND: never }} VerbRequestBudget */
-/** @type {new (state: DurableObjectState, env: Env) => VerbRequestBudget} */
+/** @type {new (state: DurableObjectState) => VerbRequestBudget} */
 export const VerbRequestBudget = class {
   constructor(state) { this.storage = state.storage; }
 

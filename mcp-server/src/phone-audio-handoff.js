@@ -9,7 +9,7 @@ const reply = (body, status = 200) => Response.json(body, {
 const chunkKeys = (id, entry) => Array.from({ length: entry.chunks || 0 }, (_, i) => `audio:${id}:${i}`);
 
 /** @typedef {DurableObject & { __DURABLE_OBJECT_BRAND: never }} PhoneAudioHandoff */
-/** @type {new (state: DurableObjectState, env: Env) => PhoneAudioHandoff} */
+/** @type {new (state: DurableObjectState) => PhoneAudioHandoff} */
 export const PhoneAudioHandoff = class {
   constructor(ctx) {
     this.storage = ctx.storage;
