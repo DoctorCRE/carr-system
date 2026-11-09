@@ -889,6 +889,12 @@
       "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
       "rule": "pii-address",
       "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
+      "path": "audits/decoder-build-ownership.md",
+      "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
+      "rule": "pii-phone",
+      "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
     }
   ]
 }

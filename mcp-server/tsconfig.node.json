@@ -1,7 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "files": [
+    "local-client-auth.ts",
+    "test/local-client-auth.test.ts",
     "typescript/check.ts",
+    "test/ai-boundary.test.ts",
+    "test/assurance-health-store.v5.test.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "test/models/subject-watch-delivery/Delivery.map.ts",
@@ -19,8 +23,17 @@
     "test/web-push-config.test.ts",
     "src/tour-client-value-safety.ts",
     "test/tour-client-share-allowlist.test.ts",
+    "src/lead-draft-eligibility.ts",
+    "src/lease-term-comparison.ts",
+    "src/market-study-package.ts",
+    "test/lease-term-comparison.test.ts",
+    "test/market-study-package.test.ts",
     "test/web-push-sender.test.ts",
-    "test/web-push-outbox-postgres.test.ts"
+    "test/web-push-outbox-postgres.test.ts",
+    "src/untrusted-text.ts",
+    "src/vendor-people.ts",
+    "test/untrusted-text.test.ts",
+    "test/vendor-people.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
