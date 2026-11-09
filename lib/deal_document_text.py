@@ -1,5 +1,9 @@
 """Deterministic retained page text shared by extraction and historical backfill."""
 import hashlib
+import subprocess
+
+SAFE_ERROR_CLASSES = (FileNotFoundError, PermissionError, TimeoutError, OSError, ValueError,
+                      RuntimeError, subprocess.TimeoutExpired, subprocess.CalledProcessError)
 
 FORMAT = 'page-text.v1'
 MAX_CHARACTERS = 500000
@@ -51,6 +55,7 @@ def backfill(*, scan, read_bytes, text_pages, record, max_documents, dry_run=Fal
                     value = derivative(doc, read_bytes(doc), text_pages)
                 record(value)
                 counts[value['status']] += 1
-            except Exception:  # A failed document must not prevent later documents.
-                errors.append({'document_ref': after, 'code': 'document_processing_failed'})
+            except Exception as error:  # A failed document must not prevent later documents.
+                errors.append({'document_ref': after, 'code': 'document_processing_failed',
+                               'error_class': type(error).__name__ if type(error) in SAFE_ERROR_CLASSES else 'Exception'})
     return {**counts, 'dry_run': dry_run, 'last_document_ref': after, 'errors': errors}

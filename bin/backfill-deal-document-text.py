@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import sys
 import subprocess
@@ -24,6 +25,14 @@ def preflight_reader():
     binary = wrangler_bin()
     if not binary:
         raise StorageReaderError('storage_reader_missing', 'Wrangler is missing; run npm --prefix mcp-server ci.')
+    if not shutil.which('pdftotext'):
+        raise StorageReaderError('parser_missing', 'pdftotext is missing; install poppler (brew install poppler or apt-get install poppler-utils).')
+    try:
+        parser = subprocess.run(['pdftotext', '-v'], capture_output=True, timeout=10)
+        if parser.returncode:
+            raise OSError('parser probe failed')
+    except (OSError, subprocess.SubprocessError) as error:
+        raise StorageReaderError('parser_unavailable', 'pdftotext failed; repair poppler (brew reinstall poppler or apt-get install --reinstall poppler-utils).') from error
     try:
         result = subprocess.run([binary, 'r2', 'bucket', 'info', BUCKET], capture_output=True,
                                 timeout=90, cwd=ROOT / 'mcp-server')

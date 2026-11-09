@@ -41,7 +41,7 @@ class TextTests(unittest.TestCase):
                 raise RuntimeError('secret')
             return b'x'
         result = backfill(scan=lambda after, limit: docs if after is None else [], read_bytes=read, text_pages=lambda _: ['ok'], record=lambda _: None, max_documents=10)
-        self.assertEqual(result['errors'], [{'document_ref': '0', 'code': 'document_processing_failed'}])
+        self.assertEqual(result['errors'], [{'document_ref': '0', 'code': 'document_processing_failed', 'error_class': 'RuntimeError'}])
         self.assertEqual(result['produced'], 1)
 
     def test_backfill_dry_run_rerun_mixed_and_superseding_hash(self):
@@ -60,6 +60,24 @@ class TextTests(unittest.TestCase):
         docs[0].update(data=b'new', bytes=3, content_hash=hashlib.sha256(b'new').hexdigest())
         self.assertEqual(backfill(**args)['produced'], 1)
         self.assertEqual(len(saved), 3)
+
+
+class FailureClassTests(unittest.TestCase):
+    def test_safe_classes_and_continuation(self):
+        private_error = type('PRIVATE_SENTINEL', (Exception,), {})
+        for error in (FileNotFoundError, ValueError, TimeoutError, RuntimeError, private_error):
+            with self.subTest(error=error):
+                docs = [dict(document_ref=str(n), entity_ref='deal', content_hash=hashlib.sha256(b'pdf').hexdigest(), mime='application/pdf', bytes=3, retained=False) for n in range(2)]
+                def read(doc):
+                    if doc['document_ref'] == '0':
+                        raise error('PRIVATE_SENTINEL')
+                    return b'pdf'
+                saved = []
+                result = backfill(scan=lambda after, limit: docs if after is None else [], read_bytes=read, text_pages=lambda _: ['synthetic'], record=saved.append, max_documents=2)
+                self.assertEqual(result['errors'], [{'document_ref': '0', 'code': 'document_processing_failed', 'error_class': error.__name__ if error is not private_error else 'Exception'}])
+                self.assertEqual((result['scanned'], result['produced'], len(result['errors'])), (2, 1, 1))
+                self.assertEqual(saved[0]['document_ref'], '1')
+                self.assertNotIn('PRIVATE_SENTINEL', str(result))
 
 if __name__ == '__main__':
     unittest.main()

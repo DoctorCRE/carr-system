@@ -32,10 +32,13 @@ Each invocation scans at most 10000 attachments serially. If scanned reaches the
 cap, continue with `--after` set to the reported last_document_ref. Restarting
 from the beginning is safe. Scan failures stop the invocation with exit 1; already persisted derivatives remain safe to replay.
 
-A real run checks Wrangler and R2 access before scanning. Install a missing reader
+A real run checks Wrangler, pdftotext and R2 access before scanning. Install a missing reader
 with `npm --prefix mcp-server ci`; check Cloudflare authentication and bucket
-access if the reader fails. A document failure appears in `errors` with its
-`document_ref` and a stable code. The run continues and exits nonzero if any
+access if the reader fails. Missing or failing pdftotext returns `parser_missing`
+or `parser_unavailable` with a Poppler installation or repair remedy.
+A document failure appears in `errors` with its
+`document_ref`, a stable code and an allowlisted `error_class`. Unknown exception
+classes report `Exception`; exception messages and parser output are omitted. The run continues and exits nonzero if any
 document failed. Rerun without `--after` to retry failures; retained documents
 are skipped.
 
