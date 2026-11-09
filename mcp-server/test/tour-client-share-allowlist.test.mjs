@@ -27,7 +27,7 @@ import {
 import { renderTourPacket, TourPacketRenderError } from "../src/tour-packet-render.js";
 import { tourRightsProjectionTools } from "../src/tour-rights-projection.js";
 import { projectTourClientMap, projectTourClientPacket, tourSharingBrowserAccess, tourSharingTools } from "../src/tour-sharing.js";
-import { adversarialRefused, adversarialAllowed, ACCESS_TRIGGERS, ASCII_PUNCTUATION, UNICODE_PUNCTUATION, GULF_FEATURE_LIST, REVIEWER_FEATURE_LIST } from "./fixtures/tour-client-text-adversarial.mjs";
+import { adversarialRefused, adversarialAllowed, ACCESS_TRIGGERS, ASCII_PUNCTUATION, UNICODE_PUNCTUATION, GULF_FEATURE_LIST, REVIEWER_FEATURE_LIST } from "./fixtures/tour-client-text-adversarial.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 
