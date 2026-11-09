@@ -61,6 +61,23 @@ test('changed candidate after card read refuses without session, event or receip
   assert.equal((await review({session_id:session,expected_source_version:await version(session),idempotency_key:randomUUID()})).reviewed,true);
 });
 
+test('capture-device sessions expose the canonical version only to their partner', async () => {
+  const {session,candidate}=await seed();
+  await db.query("update capture_session set actor_id=(select id from actor where slug='quill-joe-mac') where id=$1",[session]);
+  const expected_source_version=await version(session);
+  assert.match(expected_source_version,/^[a-f0-9]{32}$/);
+  const calls=(await executeRegisteredTool(db,actor,'read-call-outcomes',{})).calls;
+  assert.equal(calls.find(call=>call.session_id===session).source_version,expected_source_version);
+  for(const slug of ['dell','joe-local']) {
+    assert.equal((await db.query("select ops.resolve_action_card(id,'post_call_review',$1) target from actor where slug=$2",[session,slug])).rows[0].target,null);
+  }
+  await db.query(`update capture_candidate set payload='{"action":"Device edit"}' where id=$1`,[candidate]);
+  const key=randomUUID();
+  await assert.rejects(review({session_id:session,expected_source_version,idempotency_key:key}),stale);
+  await unchanged(session,key);
+  assert.equal((await review({session_id:session,expected_source_version:await version(session),idempotency_key:randomUUID()})).reviewed,true);
+});
+
 test('matching review stores one receipt and replay returns original receipt after source changes', async () => {
   const { session,candidate } = await seed();
   const args = {session_id:session, expected_source_version:await version(session), idempotency_key:randomUUID()};
