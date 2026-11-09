@@ -134,7 +134,7 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -152,7 +152,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/chrome-launch.test.mjs').write_text(
             "import test from 'node:test'; test('early failure', () => { throw Error('original diagnostic'); });")
@@ -164,7 +164,7 @@ class UnitClassTests(unittest.TestCase):
     def test_all_failed_suite_diagnostics_survive_the_log_tail(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
-        for name in ('run-tests.mjs', 'suite-discovery.mjs'):
+        for name in ('run-tests.mjs', 'suite-discovery.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -186,7 +186,7 @@ class UnitClassTests(unittest.TestCase):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
         runner = (ROOT / 'mcp-server/run-tests.mjs').read_text()
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text(
@@ -269,7 +269,7 @@ class UnitClassTests(unittest.TestCase):
     def test_new_suite_without_timing_runs_and_verifies(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.mjs'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -290,7 +290,7 @@ class UnitClassTests(unittest.TestCase):
     def test_successful_shard_warns_only_when_elapsed_exceeds_estimate(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.mjs'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -316,7 +316,7 @@ class UnitClassTests(unittest.TestCase):
     def test_shard_budget_refuses_before_npm(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': FIXTURE_COUNT}))
         for index in range(FIXTURE_COUNT - 1):
             (mcp / f'test/extra{index}.test.mjs').touch()
@@ -337,7 +337,7 @@ class UnitClassTests(unittest.TestCase):
     def test_shard_selection_uses_admitted_dynamic_count(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.mjs'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 8}))
         for index in range(7):
@@ -356,7 +356,7 @@ class UnitClassTests(unittest.TestCase):
     def test_watchdog_timeout_cannot_emit_a_success_receipt(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text('')
@@ -409,7 +409,7 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'test/workspace-command-center-browser.test.mjs').write_text(

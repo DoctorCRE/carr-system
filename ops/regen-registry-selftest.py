@@ -24,7 +24,7 @@ class RegistryMergeTests(unittest.TestCase):
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
         shutil.copytree(ROOT / 'mcp-server/contracts', self.repo / 'mcp-server/contracts')
         for path in ('lib/deal_schedule.schema.json', 'mcp-server/package.json',
-                     'mcp-server/run-tests.mjs', 'mcp-server/suite-discovery.mjs',
+                     'mcp-server/run-tests.mjs', 'mcp-server/suite-discovery.ts',
                      'ops/scac-mutation-inventory.mjs',
                      'ops/git_env.py', 'tools/regen.py', '.gitignore'):
             shutil.copy(ROOT / path, self.repo / path)
@@ -41,7 +41,7 @@ class RegistryMergeTests(unittest.TestCase):
         self.git('config', 'user.name', 'jbookout')
         self.git('config', 'user.email', 'jbookout@users.noreply.github.com')
         self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/run-tests.mjs',
-                 'mcp-server/suite-discovery.mjs', 'mcp-server/suite-inventory.json',
+                 'mcp-server/suite-discovery.ts', 'mcp-server/suite-inventory.json',
                  'ops', 'tools', 'lib/deal_schedule.schema.json', '.gitignore')
         self.commit('main plus WR622 implementation')
         clone = Path(self.temp.name) / 'clone'
