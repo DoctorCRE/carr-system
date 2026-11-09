@@ -1,3 +1,4 @@
+// Keep intake retries and sent receipts on the same captured email identity.
 type Identity = { mailbox_owner: string; mailbox_account: string; item_id: string };
 type EmailContext = { lifecycle?: { state?: string }; [key: string]: unknown };
 type Activity = { id?: string; kind?: string; email_context?: EmailContext | null };
@@ -11,7 +12,6 @@ type Action = {
 };
 type ErrorConstructor = new (fields: { error: string }) => Error;
 
-// Keep intake retries and sent receipts on the same captured email identity.
 export const EMAIL_IDENTITY_SCHEMA = {
   type: "object",
   additionalProperties: false,

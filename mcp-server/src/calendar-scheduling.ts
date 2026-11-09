@@ -1,3 +1,4 @@
+// Derive candidate scheduling gaps from stored calendar coverage.
 type CalendarItem = { start: string; end: string; time_changed?: unknown; conflict?: unknown };
 type CalendarSection = {
   sources?: { outlook_calendar: { state: string } };
@@ -7,7 +8,6 @@ type CalendarSection = {
   state: string;
 };
 
-// Derive candidate scheduling gaps from stored calendar coverage.
 const NOTE =
   "Candidate openings from stored meetings, not confirmed availability. May include overnight hours. Check Outlook before booking.";
 
