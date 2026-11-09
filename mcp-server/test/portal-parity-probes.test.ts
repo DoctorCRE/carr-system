@@ -85,6 +85,19 @@ test("probe loading refuses undeclared aliases, kinds, differences and duplicate
   await assert.rejects(loadProbes(file), /duplicate id/);
 });
 
+test("probe loading keeps the default when allowed differences are omitted", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "parity-default-differences-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "probes.json");
+  const doc = {
+    schema: "carr.portal-parity-probes.v1",
+    aliases: {},
+    probes: [{ id: "A-G01", kind: "dom", td: "T", target: "body" }],
+  };
+  await writeFile(file, JSON.stringify(doc));
+  assert.deepEqual(await loadProbes(file), doc);
+});
+
 for (const allowed_differences of ["bad", [[]]]) {
   test(`probe loading refuses malformed allowed differences ${JSON.stringify(allowed_differences)}`, async (t) => {
     const dir = await mkdtemp(path.join(tmpdir(), "parity-differences-"));

@@ -66,7 +66,7 @@ export async function loadProbes(file: string | URL): Promise<ProbeDocument> {
   if (doc.schema !== "carr.portal-parity-probes.v1")
     throw new Error("probe file schema must be carr.portal-parity-probes.v1");
   const allowed_differences: Record<string, unknown[]> = {};
-  for (const [id, aspects] of Object.entries(isObject(doc.allowed_differences) ? doc.allowed_differences : {})) {
+  for (const [id, aspects] of Object.entries(doc.allowed_differences ?? {})) {
     if (!/^AD\d+$/.test(id) || !Array.isArray(aspects))
       throw new Error(`allowed difference ${id} must list the aspects it may differ in`);
     allowed_differences[id] = aspects;
