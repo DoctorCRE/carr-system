@@ -510,7 +510,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/intake-research-gates.test.mjs"
+        "mcp-server/test/intake-research-gates.test.ts"
       ]
     },
     "scheduled_run_record": {

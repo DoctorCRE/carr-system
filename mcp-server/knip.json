@@ -15,6 +15,12 @@
   ],
   "project": [
     "typescript/check.ts",
+    "test/helpers/relink-source-imports.ts",
+    "test/idempotency-key-uuid.test.ts",
+    "test/industry-events.test.ts",
+    "test/ingest-body-limit.test.ts",
+    "test/intake-research-gates.test.ts",
+    "test/invoice-authority-dispatch.test.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "test/models/subject-watch-delivery/Delivery.map.ts",

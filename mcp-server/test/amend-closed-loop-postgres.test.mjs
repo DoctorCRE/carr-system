@@ -13,7 +13,7 @@ import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Each unit invocation owns a migrated snapshot clone.
 
 import test from "node:test";
-import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
+import { relinkSourceImports } from "./helpers/relink-source-imports.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
