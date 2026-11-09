@@ -1,0 +1,8 @@
+{
+  "node": [
+    "run-tests.ts"
+  ],
+  "entry": [
+    "run-tests.ts"
+  ]
+}

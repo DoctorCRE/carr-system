@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "spec/outlook/build-fixtures.v1.json"
@@ -96,10 +97,7 @@ def decode(binary, fixture, directory):
 class BuildFixtures(unittest.TestCase):
     def test_build_fixture_manifest_requires_evidence_and_exact_decoder_output(self):
         fixtures = validate(json.loads(MANIFEST.read_text()))
-        binary = ROOT / "vendor/hxprobe/target/debug/hxprobe"
-        subprocess.run(["cargo", "build", "--locked", "--manifest-path",
-                        str(ROOT / "vendor/hxprobe/Cargo.toml")], check=True,
-                       capture_output=True, timeout=180)
+        binary = test_binary()
         self.assertTrue(binary.is_file())
         for fixture in fixtures:
             with self.subTest(fixture=fixture["id"]), tempfile.TemporaryDirectory() as temp:
