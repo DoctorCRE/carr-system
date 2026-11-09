@@ -18,7 +18,11 @@
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
     "test/web-push-sender.test.ts",
-    "test/web-push-outbox-postgres.test.ts"
+    "test/web-push-outbox-postgres.test.ts",
+    "src/org-conventions.ts",
+    "src/party-duplicate-candidates.ts",
+    "test/org-conventions-postgres.test.ts",
+    "test/party-duplicate-candidates.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
