@@ -256,21 +256,27 @@ p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
           const query = execFileSync(process.env.CARR_CI_PYTHON || 'python3',['-c',
             loadInventory+"print(p.SECDEF_EXECUTE_SQL)",inventoryPath],{encoding:'utf8'});
           const projection = (await c.query(query)).rows.map(row=>Object.values(row)[0]);
+          let altered;
+          await c.query('begin');
+          try {
+            await c.query('alter function ops.web_push_registry(text,jsonb,text) security invoker');
+            altered = (await c.query(query)).rows.map(row=>Object.values(row)[0]);
+          } finally { await c.query('rollback'); }
           const validation = spawnSync(process.env.CARR_CI_PYTHON || 'python3',['-c',loadInventory+`
 import json
-rows,contract=json.load(sys.stdin)
+rows,altered,contract=json.load(sys.stdin)
 contract.pop('retired_secdef_execute')
 projection={'secdef_execute':rows,'relation_dml':[],'column_dml':[]}
 baseline={name:{'count':0,'digest':p.digest([])} for name in projection}
 p.validate_registered_grants(projection,baseline,contract)
-projection['secdef_execute'][0]['security_definer']=False
+projection['secdef_execute']=altered
 try:
     p.validate_registered_grants(projection,baseline,contract)
 except RuntimeError as error:
     assert 'registered grant missing or altered' in str(error)
 else:
     raise AssertionError('real catalog metadata mismatch was accepted')
-`,inventoryPath],{input:JSON.stringify([projection,row.contract]),encoding:'utf8'});
+`,inventoryPath],{input:JSON.stringify([projection,altered,row.contract]),encoding:'utf8'});
           assert.equal(validation.status,0,validation.stdout+validation.stderr);
         }
         row.body = execFileSync(join(execFileSync('pg_config',['--bindir'],{encoding:'utf8'}).trim(),'pg_dump'),
