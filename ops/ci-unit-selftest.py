@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -264,6 +265,27 @@ class UnitClassTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('zero passing tests', result.stderr)
         self.assertFalse(receipt.exists())
+
+    def test_new_suite_without_timing_runs_and_verifies(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'test/new.test.mjs').write_text("import test from 'node:test'; test('new suite', () => {});")
+        receipts = []
+        for index, _ in enumerate(plan(self.root), 1):
+            receipt = self.root / f'new-{index}.json'
+            result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+                cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': str(index), 'CARR_CI_UNIT_RECEIPT': str(receipt)},
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipts.append(str(receipt))
+        result = subprocess.run([sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(self.root),
+                                 'verify', *receipts], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('2 suites exactly once', result.stdout)
 
     def test_shard_budget_refuses_before_npm(self):
         self.package('mcp-server')

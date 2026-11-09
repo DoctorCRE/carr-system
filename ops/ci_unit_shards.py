@@ -13,6 +13,7 @@ MAX_COUNT = 16
 POSTGRES_PROFILE = "both"
 WATCHDOG_MS = 600000
 BUDGET_MS = WATCHDOG_MS * 4 // 5
+DEFAULT_SUITE_MS = 60000
 
 
 def suite_files(root):
@@ -36,8 +37,7 @@ def durations(root=ROOT):
     timing_file = root / 'ops/config/ci-unit-durations.json'
     data = json.loads(timing_file.read_text()) if timing_file.exists() else {}
     measured = data.get('suites', {})
-    fallback = max((row['milliseconds'] for row in measured.values()), default=WATCHDOG_MS)
-    records = {file: measured.get(file, {'milliseconds': fallback, 'serial': True}) for file in suite_files(root)}
+    records = {file: measured.get(file, {'milliseconds': DEFAULT_SUITE_MS, 'serial': True}) for file in suite_files(root)}
     return records, data.get('snapshot_template_ms', 0)
 
 
@@ -58,11 +58,6 @@ def plan(root=ROOT, count=None):
     records, setup = durations(root)
     if count is not None:
         return _assign(records, setup, count)
-    timing_file = root / 'ops/config/ci-unit-durations.json'
-    measured = json.loads(timing_file.read_text()).get('suites', {}) if timing_file.exists() else {}
-    missing = sorted(set(records) - set(measured))
-    if missing:
-        raise ValueError(f'unit suites need measured duration entries: {missing}')
     for file, row in records.items():
         predicted = setup + row['milliseconds']
         if predicted > BUDGET_MS:
