@@ -19,6 +19,7 @@
     "mcp-server/bin/seal-candidate-manifest.mjs",
     "mcp-server/bin/seal-foundation-assurance-evidence.mjs",
     "mcp-server/check-ai-boundary.mjs",
+    "mcp-server/check-party-names.mjs",
     "mcp-server/codex-continuity-stdio-proxy.mjs",
     "mcp-server/continuity-reference-manifest.mjs",
     "mcp-server/contracts/subject-watch-change.v1.js",
