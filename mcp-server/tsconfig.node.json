@@ -21,7 +21,9 @@
     "src/lease-term-comparison.ts",
     "src/market-study-package.ts",
     "test/lease-term-comparison.test.ts",
-    "test/market-study-package.test.ts"
+    "test/market-study-package.test.ts",
+    "test/web-push-sender.test.ts",
+    "test/web-push-outbox-postgres.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
