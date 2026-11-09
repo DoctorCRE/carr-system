@@ -123,7 +123,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "propose-doc-correction",
     "read-deal-document-text",
     "read-home-review",
-    "read-web-push-subscriptions-v1",
+    "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
     "record-artifact-preservation-hold",
@@ -225,7 +225,7 @@ test("a verb that is not humanOnly is unchanged for a sponsored agent", async ()
 });
 
 const pushVerbs = ['register-web-push-subscription-v1', 'revoke-web-push-subscription-v1',
-  'read-web-push-subscriptions-v1', 'invalidate-web-push-session-v1'];
+  'read-web-push-delivery-status-v1', 'read-web-push-subscriptions-v1', 'invalidate-web-push-session-v1'];
 test('push browser guards and registry authority metadata agree', async () => {
   for (const name of pushVerbs) {
     assert.equal(TOOLS[name].humanOnly, true, name);
