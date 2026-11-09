@@ -188,7 +188,7 @@ CONTINUITY_SURFACE_ENFORCEMENT = "required"
 CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
 CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
 CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
-VAPID_PUBLIC_KEY = ""
+VAPID_PUBLIC_KEY = "BCeWfcTFPdZ3JfnONMUgO1YFgPjEAkQj0qISbxiJvp2J4CvdoNvBiO8Y8G3dNoMguzpm9pBjspCwhHiVFe6MO-k"
 # Cloudflare supplies the immutable version ID, optional tag, and creation
 # timestamp at runtime. /release reads this binding as provider identity; it is
 # deliberately separate from GIT_SHA, which is source provenance stamped by the
