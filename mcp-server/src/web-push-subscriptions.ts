@@ -1,9 +1,11 @@
 // Persist private installation subscriptions with authenticated ownership and logout fencing.
 
+import { type Schema, Validator } from "@cfworker/json-schema";
+import deliverySchema from "../contracts/web-push-delivery.v1.json" with { type: "json" };
 import type { ToolError as ErrorClass } from "./tool-error.ts";
 import type { Actor, Db } from "./verb-contract.ts";
 
-type Operation = "register" | "revoke" | "list" | "logout";
+type Operation = "register" | "revoke" | "list" | "logout" | "status";
 type Subscription = {
   installation_id: string;
   idempotency_key: string;
@@ -77,7 +79,7 @@ export function webPushTools({ ToolError }: { ToolError: typeof ErrorClass }) {
             }
           : {};
     return {
-      ...(operation === "list" ? {} : { write: true }),
+      ...(["list", "status"].includes(operation) ? {} : { write: true }),
       humanOnly: true,
       humanCallerOnly: true,
       writerConnection: true,
@@ -128,6 +130,12 @@ export function webPushTools({ ToolError }: { ToolError: typeof ErrorClass }) {
           throw new ToolError({ error: "push_invalid_request" });
         }
         try {
+          if (operation === "status") {
+            const value: unknown = (await c.query("select ops.web_push_transport('status','{}'::jsonb) as result"))
+              .rows[0]?.result;
+            if (!new Validator(deliverySchema as unknown as Schema).validate(value).valid) throw new Error();
+            return value;
+          }
           const r = await c.query("select ops.web_push_registry($1::text,$2::jsonb,$3::text) as result", [
             operation,
             JSON.stringify(args),
@@ -149,6 +157,7 @@ export function webPushTools({ ToolError }: { ToolError: typeof ErrorClass }) {
     "register-web-push-subscription-v1": definition("register"),
     "revoke-web-push-subscription-v1": definition("revoke"),
     "read-web-push-subscriptions-v1": definition("list"),
+    "read-web-push-delivery-status-v1": definition("status"),
     "invalidate-web-push-session-v1": definition("logout"),
   };
 }

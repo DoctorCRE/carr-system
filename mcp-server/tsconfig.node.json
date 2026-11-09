@@ -18,7 +18,9 @@
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
     "check-ai-boundary.ts",
-    "test/ai-boundary.test.ts"
+    "test/ai-boundary.test.ts",
+    "test/web-push-sender.test.ts",
+    "test/web-push-outbox-postgres.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,

@@ -1,0 +1,43 @@
+stateDiagram-v2
+ state Transport {
+  state Delivery {
+   [*] --> Pending
+   Pending --> Held: Policy holds
+   Held --> Pending: Hold ends
+   Pending --> Submitting: Claim persisted [unless Ambiguous]
+   %% when not Ambiguous
+   Submitting --> Accepted: Provider accepts
+   Submitting --> Failed: Permanent rejection
+   Submitting --> Pending: Explicit retryable rejection
+   Submitting --> Unknown: Connection lost or worker closes
+   Pending --> Cancelled: Source or subscription unavailable
+   Held --> Cancelled: Source or subscription unavailable
+   Pending --> Expired: Lifetime ends
+   Held --> Expired: Lifetime ends
+   Submitting --> Cancelled: Preflight refuses
+  }
+  --
+  state AttemptAuthority {
+   [*] --> RetryAllowed
+   RetryAllowed --> Ambiguous: Connection lost or worker closes [during submission]
+   %% when Submitting
+  }
+  --
+  state Subscription {
+   [*] --> Active
+   Active --> Revoked: Revoke [unless Sending]
+   %% when not Sending
+  }
+  --
+  state Submission {
+   [*] --> Idle
+   Idle --> Sending: Begin HTTP [active current generation and pending attempt]
+   %% when Active, Submitting
+   Sending --> Idle: Provider accepts
+   Sending --> Idle: Permanent rejection
+   Sending --> Idle: Explicit retryable rejection
+   Sending --> Idle: Connection lost or worker closes
+  }
+ }
+ %% never NoAmbiguousRetry: Pending & Ambiguous -- unknown attempts never automatically retry
+ %% never NoRevokedSubmission: Sending & Revoked -- completed revocation prevents submission
