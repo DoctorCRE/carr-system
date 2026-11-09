@@ -829,6 +829,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // a refused write killed the answer (migration 0223). Anything using this
     // must treat the write as optional: losing it costs a record, never a reply.
     const client = {
+      vapidPublicKey: env.VAPID_PUBLIC_KEY,
       ai: budgetedAi(env),
       pullRequests: isolatePullRequests(env.GITHUB_TOKEN),
       production: isolateProduction(env.GITHUB_TOKEN),

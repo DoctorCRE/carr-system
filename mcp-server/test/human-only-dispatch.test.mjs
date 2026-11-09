@@ -123,7 +123,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "propose-doc-correction",
     "read-deal-document-text",
     "read-home-review",
-    "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1",
+    "read-web-push-config-v1", "read-web-push-delivery-status-v1", "read-web-push-subscriptions-v1",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
     "record-artifact-preservation-hold",

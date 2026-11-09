@@ -50,6 +50,8 @@
   "suites": {
     "web-push-outbox-postgres.test.ts": {"milliseconds": 60000, "serial": true, "local_samples_ms": [55395, 51507], "card": "WR617.S1.J269"},
     "web-push-sender.test.ts": {"milliseconds": 300, "serial": false, "local_samples_ms": [150], "card": "WR617.S1.J269"},
+
+    "web-push-config.test.ts": {"milliseconds": 300, "serial": false, "local_samples_ms": [273], "card": "WR617.S1.J270"},
     "web-push-registry-postgres.test.ts": {"milliseconds": 10000, "serial": true, "local_samples_ms": [2987], "card": "WR617.S1.J96"},
     "review-call-outcome-postgres.test.ts": {"milliseconds": 20610, "serial": true},
     "action-card-targets.test.mjs": {"milliseconds": 1501, "serial": false},

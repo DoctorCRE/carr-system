@@ -29,11 +29,13 @@
     "test/worker-types.test.ts",
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
+    "test/web-push-config.test.ts",
     "test/web-push-sender.test.ts",
     "test/web-push-outbox-postgres.test.ts",
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",
+    "src/web-push-config.ts",
     "src/web-push-sender.ts",
     "src/web-push-outbox.ts",
     "../docs/models/web-push-sender/PushSender.map.ts"

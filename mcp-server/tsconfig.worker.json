@@ -13,6 +13,7 @@
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",
+    "src/web-push-config.ts",
     "src/web-push-sender.ts",
     "src/web-push-outbox.ts",
     "../docs/models/web-push-sender/PushSender.map.ts"
