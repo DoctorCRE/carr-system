@@ -60,6 +60,7 @@ import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
+import { webPushConfigTools } from "./web-push-config.ts";
 import { webPushTools } from "./web-push-subscriptions.ts";
 import { notificationTools } from "./notifications.ts";
 import { sessionIdentityTools } from "./session-identity.ts";
@@ -11023,6 +11024,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
 registerTools(webPushTools({ ToolError }), "web-push-subscriptions");
+registerTools(webPushConfigTools({ ToolError }), "mcp-server/src/web-push-config.ts");
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
 registerTools(peopleDirectoryTools(), "mcp-server/src/people-directory.ts");

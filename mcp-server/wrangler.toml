@@ -166,6 +166,7 @@ fallthrough = true
 
 # /release reports the production identity stamped by the deployment workflow.
 [vars]
+VAPID_PUBLIC_KEY = ""
 CARR_ENV = "production"
 APP_HOST = "app.doctorcre.com"
 LEGACY_DEALROOM_HOST = "dealroom.doctorcre.com"

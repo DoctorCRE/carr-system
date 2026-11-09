@@ -12,6 +12,7 @@
   "files": [
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
-    "src/subject-watch-scheduler.ts"
+    "src/subject-watch-scheduler.ts",
+    "src/web-push-config.ts"
   ]
 }
