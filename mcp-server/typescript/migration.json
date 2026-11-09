@@ -23,7 +23,6 @@
     "mcp-server/codex-continuity-stdio-proxy.mjs",
     "mcp-server/continuity-reference-manifest.mjs",
     "mcp-server/contracts/subject-watch-change.v1.js",
-    "mcp-server/contracts/subject-watch.v2.js",
     "mcp-server/generate-worker-types.mjs",
     "mcp-server/human-only-hint.mjs",
     "mcp-server/local-client-auth.mjs",

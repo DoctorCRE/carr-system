@@ -29,9 +29,11 @@
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
+    "test/subject-watch-v2-contract.test.ts",
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",
-    "src/web-push-config.ts"
+    "src/web-push-config.ts",
+    "contracts/subject-watch.v2.ts"
   ]
 }
