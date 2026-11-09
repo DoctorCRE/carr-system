@@ -201,7 +201,7 @@ test("identity merges, retrieval, board answers, partner-only deal acts and huma
     "confirm-email-deal-progress", "confirm-email-filing", "confirm-email-next-step", "confirm-merge", "confirm-requirement-reply", "dismiss-email-proposal", "edit-email-draft", "finalize-deal-deliverable", "handle-email-proposal", "invalidate-web-push-session-v1",
     "read-web-push-subscriptions-v1", "record-artifact-preservation-hold", "record-deal-closing", "record-evidence-subject-link", "record-lifecycle-correction",
     "record-partner-lifecycle-fact", "record-tour-map-promotion-receipt", "record-tour-pdf-human-review",
-    "register-record-source-authority-policy", "register-web-push-subscription-v1", "reject-requirement-reply", "resolve-action-link-v2", "retire-retrieval-curation", "revoke-web-push-subscription-v1", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing", ...WATCH_V2_VERBS].sort());
+    "register-record-source-authority-policy", "register-web-push-subscription-v1", "reject-requirement-reply", "resolve-action-link-v2", "retire-retrieval-curation", "revoke-web-push-subscription-v1", "set-deal-deliverable-visibility", "snooze-email-proposal", "start-deal-deliverable", "submit-doc-request", "submit-email-draft", "undo-email-thread-filing", ...WATCH_V2_VERBS, "read-subject-watch-changes-v1"].sort());
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
