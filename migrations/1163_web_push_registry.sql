@@ -145,12 +145,14 @@ begin
     into entries from (values
       ('ops.web_push_registry(p_operation text, p_args jsonb, p_session text)','v')
     ) functions(signature,volatility) cross join (values('carr_writer'),('carr_authority')) roles(grantee);
-  -- 1164 may already be installed. Keep its grants after 1163 in both upgrade orders.
+  -- Later migrations may already be installed. Preserve filename order for their grants.
   select jsonb_agg(entry order by
     case when entry->>'signature' in (
       'ops.record_deal_document_text(p_actor uuid, p_args jsonb)',
       'ops.list_deal_document_text_sources(p_actor uuid, p_after uuid, p_limit integer)'
-    ) then 1 else 0 end, ordinal)
+    ) then 1
+    when entry->>'signature'='ops.resolve_action_card(p_actor uuid, p_kind text, p_id uuid)'
+      then 2 else 0 end, ordinal)
     into entries from jsonb_array_elements((contract->'secdef_execute')||entries)
       with ordinality as grants(entry,ordinal);
   contract:=jsonb_set(contract,'{secdef_execute}',entries);

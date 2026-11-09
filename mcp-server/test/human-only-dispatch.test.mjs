@@ -146,6 +146,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "register-web-push-subscription-v1",
     "reject-requirement-reply",
     "reopen-one-action",
+    "resolve-action-link-v2",
     "resolve-critical-date",
     "resolve-fact-review",
     "resolve-post-call-candidate",

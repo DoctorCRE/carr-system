@@ -3474,6 +3474,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "resolve-action-link-v2": {
+    "ingress_key": "mcp-tool:resolve-action-link-v2",
+    "source_locator": "mcp-server/src/action-card-targets.ts",
+    "schema_digest": "c62d641eb925ed921cf03a27f05c6d9e8c28aecbb6ef50be14b2f93b4d7d1efa",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "resolve-candidate": {
     "ingress_key": "mcp-tool:resolve-candidate",
     "source_locator": "mcp-server/src/tools.js",
