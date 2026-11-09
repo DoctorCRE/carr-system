@@ -403,7 +403,7 @@
     "salesforce-reconciliation-rw02.v5.test.mjs": {"milliseconds": 249, "serial": false},
     "salesforce-reconciliation-store-rw02-mutants.v5.test.mjs": {"milliseconds": 350, "serial": false},
     "salesforce-reconciliation-store-rw02.v5.test.mjs": {"milliseconds": 145, "serial": false},
-    "salesforce-report-capture.test.mjs": {"milliseconds": 149, "serial": false},
+    "salesforce-report-capture.test.ts": {"milliseconds": 1435, "serial": false},
     "schedule-board.test.js": {"milliseconds": 133, "serial": false},
     "self-closing-records-sql.test.mjs": {"milliseconds": 1475, "serial": true},
     "session-checkpoints-auth.test.mjs": {"milliseconds": 805, "serial": false},
