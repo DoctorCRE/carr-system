@@ -83,7 +83,7 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 // at its own call site below, since a 401 is invisible to a >=500 check.
 
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
-import { neon, Pool } from "./postgres.js";
+import { neon, Pool } from "./postgres.ts";
 import { scheduledPushOutbox } from "./web-push-outbox.ts";
 import { scheduledSubjectWatches } from "./subject-watch-scheduler.ts";
 import { mcpApiHandler, dispatch } from "./mcp.js";
@@ -112,7 +112,7 @@ import { publicError } from "./public-errors.ts";
 import { bearerCredential } from "./bearer.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";
 import { createTourInternalWebHandler } from "./tour-internal-web.js";
-import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.js";
+import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.ts";
 import { createReportsRuntimeAdapters, createTourRuntimeAdapters } from "./tour-runtime.js";
 
 const JSON_HEADERS = { "content-type": "application/json" };

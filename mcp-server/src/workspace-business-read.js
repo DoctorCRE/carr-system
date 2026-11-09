@@ -34,7 +34,7 @@ import { vendorRelationshipJoin, enrichRelationship } from "./vendor-relationshi
 // Tenant and audience are the same boundary the Command Center read uses:
 // carr-internal, and one of the two verified partner actors.
 
-import { neon } from "./postgres.js";
+import { neon } from "./postgres.ts";
 import { organizationTenantForActor } from "./identity.js";
 
 export const BUSINESS_API_PREFIX = "/api/v1/business/";

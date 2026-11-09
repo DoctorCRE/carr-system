@@ -108,7 +108,7 @@ import { authenticatedIdentity, authorizationClassForActor, organizationTenantFo
 import { automaticApplyHold } from "./call-auto-apply.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
-import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
+import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.ts";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
 import { recordSourceAuthorityStoreTools } from "./record-source-authority-store.v5.js";
 // V5-J102's healthcare CRE lifecycle door: every verb on the writer connection

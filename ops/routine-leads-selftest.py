@@ -25,7 +25,7 @@ NOW = datetime.fromisoformat(FIXTURE["as_of"])
 def validate_payload(verb, payload):
     result = subprocess.run(["node", "--input-type=module", "-e", """
         import { TOOLS, assertRequiredArgs, coerceArgsToSchema } from './mcp-server/src/tools.js';
-        import { assertClosedTopLevel } from './mcp-server/src/mutation-registry.js';
+        import { assertClosedTopLevel } from './mcp-server/src/mutation-registry.ts';
         let input = '';
         for await (const chunk of process.stdin) input += chunk;
         const {verb, payload} = JSON.parse(input);

@@ -4,7 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
-import { types, neon, neonConfig } from '../src/postgres.js';
+import { types, neon, neonConfig } from '../src/postgres.ts';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { assertRecordingProducer, recordingProvenance } from './helpers/recording-provenance.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
@@ -179,7 +179,7 @@ test('registered date-bearing verbs serialize real PostgreSQL responses', async 
     if (process.env.PG_DATE_FIXTURE_OUTPUT) writeFileSync(process.env.PG_DATE_FIXTURE_OUTPUT,
       JSON.stringify({ provenance: { transport: 'executeRegisteredTool/disposable-postgres',
         ...recordingProvenance(Object.keys(responses)),
-        driver_sha256: createHash('sha256').update(readFileSync(new URL('../src/postgres.js', import.meta.url))).digest('hex') }, date_columns, responses }, null, 2) + '\n');
+        driver_sha256: createHash('sha256').update(readFileSync(new URL('../src/postgres.ts', import.meta.url))).digest('hex') }, date_columns, responses }, null, 2) + '\n');
   } finally { await c.query('rollback'); }
 });
 
@@ -188,7 +188,7 @@ test('date verb recording is bound to the real producer and calendar contract', 
   assert.equal(recording.provenance.transport, 'executeRegisteredTool/disposable-postgres');
   assertRecordingProducer(recording);
   assert.equal(recording.provenance.driver_sha256, createHash('sha256').update(
-    readFileSync(new URL('../src/postgres.js', import.meta.url))).digest('hex'));
+    readFileSync(new URL('../src/postgres.ts', import.meta.url))).digest('hex'));
   assert.deepEqual(Object.keys(recording.responses).sort(),
     ['morning-brief','deal-board','lead-hot','lead-board','claim-card','stale-records','quiet-follow-ups'].sort());
   for (const verb of ['lead-hot','lead-board']) {
