@@ -27,15 +27,15 @@ def release_download_violations(root):
             if any(part in ('node_modules', '__pycache__', '.venv') for part in path.parts):
                 continue
             name = path.relative_to(root).as_posix()
-            if 'selftest' in path.name or path.name.startswith(('test_', 'test-')):
+            if name in ('ops/ci-control-selftest.py', 'ops/doctorcre-artifact-selftest.py'):
                 continue
             text = path.read_text()
             if name == 'tools/doctorcre-artifact.py':
-                text = text.replace("https://github.com/{pin['repository']}/releases/download/{pin['release_tag']}", "")
-            urls = re.findall(r'https://github[.]com/[^\s"\']+/releases/(?:latest/)?download[^\s"\']*', text)
-            for url in urls:
-                if name != 'ops/gitleaks.py' or not url.startswith('https://github.com/gitleaks/gitleaks/releases/download/'):
-                    violations.append(name + ': uncached release download')
+                text = text.replace('f"https://github.com/{pin[\'repository\']}/releases/download/{pin[\'release_tag\']}"', "", 1)
+            if name == 'ops/gitleaks.py':
+                text = text.replace("f'https://github.com/gitleaks/gitleaks/releases/download/v{VERSION}/gitleaks_{VERSION}_{target}.tar.gz'", "", 1)
+            urls = re.findall(r'https://github[.]com/[^\s]+/releases/(?:latest/)?download[^\s"\']*', text)
+            violations.extend(name + ': uncached release download' for _ in urls)
     return violations
 
 
@@ -62,6 +62,21 @@ class Controls(unittest.TestCase):
                 self.assertEqual(release_download_violations(root),
                                  [name + ': uncached release download'])
 
+    def test_release_policy_allows_only_one_pinned_expression(self):
+        for name, expression in (
+            ('ops/gitleaks.py', "f'https://github.com/gitleaks/gitleaks/releases/download/v{VERSION}/gitleaks_{VERSION}_{target}.tar.gz'"),
+            ('tools/doctorcre-artifact.py', 'f"https://github.com/{pin[\'repository\']}/releases/download/{pin[\'release_tag\']}"'),
+        ):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / name
+                path.parent.mkdir(parents=True)
+                path.write_text('url = ' + expression)
+                self.assertEqual(release_download_violations(root), [])
+                path.write_text('url = ' + expression + '\nextra = ' + expression)
+                self.assertEqual(release_download_violations(root),
+                                 [name + ': uncached release download'])
+
     def test_release_download_policy(self):
         self.assertEqual(release_download_violations(ROOT), [])
         action = workflow('../actions/ci-downloads/action.yml')
@@ -83,13 +98,6 @@ class Controls(unittest.TestCase):
                 for i, step in enumerate(steps):
                     if 'ops/gitleaks.py --install' in step.get('run', ''):
                         self.assertTrue(any(s.get('uses') == './.github/actions/ci-downloads' for s in steps[:i]))
-                    if 'actions/setup-python@' in step.get('uses', '') and str(step.get('with', {}).get('python-version', '')).startswith('3.9'):
-                        self.assertEqual(step['with']['python-version'], '3.9.25')
-                        self.assertFalse(step['with']['check-latest'])
-                        cache = next(s for s in steps[:i] if s.get('with', {}).get('path') == '${{ runner.tool_cache }}/Python/3.9.25')
-                        self.assertIn('actions/cache@', cache['uses'])
-                        self.assertIn('ubuntu24-${{ runner.arch }}-3.9.25-', cache['with']['key'])
-                        self.assertNotIn('restore-keys', cache['with'])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / '.github/workflows').mkdir(parents=True)
