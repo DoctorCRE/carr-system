@@ -108,6 +108,31 @@ test("generation refuses mismatched legacy module and schema contracts at load",
   }
 });
 
+test("legacy Durable Object constructors do not add a runtime brand property", async (t) => {
+  for (const [file, className] of [
+    ["ai-budget.js", "AiNeuronBudget"],
+    ["verb-request-budget.js", "VerbRequestBudget"],
+    ["phone-audio-handoff.js", "PhoneAudioHandoff"],
+  ]) {
+    await t.test(className, () => {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-"],
+        {
+          cwd: root,
+          encoding: "utf8",
+          input: `import assert from "node:assert/strict";
+import { ${className} } from "./src/${file}";
+const instance = new ${className}({ storage: {} }, {});
+assert.equal(Object.hasOwn(instance, "__DURABLE_OBJECT_BRAND"), false);
+`,
+        },
+      );
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+    });
+  }
+});
+
 test("Worker declarations contain no suppressions and preserve Durable Object bindings", () => {
   const output = readFileSync(path.join(root, ".generated/worker-configuration.d.ts"), "utf8");
   assert.doesNotMatch(output, /@ts-(?:expect-error|ignore|nocheck)/);
