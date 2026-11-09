@@ -1,10 +1,12 @@
 {
   "entry": [
-    "typescript/*.test.ts"
+    "typescript/*.test.ts",
+    "test/action-card-targets-postgres.test.mjs"
   ],
   "project": [
     "typescript/check.ts",
     "typescript/migration.ts",
-    "typescript/gate.test.ts"
+    "typescript/gate.test.ts",
+    "src/public-errors.ts"
   ]
 }

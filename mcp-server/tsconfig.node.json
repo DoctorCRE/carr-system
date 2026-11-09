@@ -3,6 +3,11 @@
   "files": [
     "typescript/check.ts",
     "typescript/migration.ts",
-    "typescript/gate.test.ts"
-  ]
+    "typescript/gate.test.ts",
+    "src/public-errors.ts"
+  ],
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  }
 }
