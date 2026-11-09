@@ -16,7 +16,12 @@
     "test/worker-types.test.ts",
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
-    "test/web-push-config.test.ts"
+    "test/web-push-config.test.ts",
+    "test/tour-internal-web.test.ts",
+    "test/tour-client-feedback-flow.test.ts",
+    "test/tour-deal-access.test.ts",
+    "test/tour-web-session-write.test.ts",
+    "test/tour-stop-assembly.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
