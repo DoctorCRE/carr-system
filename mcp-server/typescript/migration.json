@@ -702,7 +702,6 @@
     "pipelines/capture-salesforce-report.js",
     "practice-plugin/build-ui.mjs",
     "practice-plugin/src/conversion.mjs",
-    "practice-plugin/src/evidence.mjs",
     "practice-plugin/src/modern.mjs",
     "practice-plugin/src/planner.mjs",
     "practice-plugin/src/resources.mjs",
