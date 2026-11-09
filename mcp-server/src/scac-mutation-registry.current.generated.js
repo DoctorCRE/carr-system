@@ -3612,7 +3612,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "review-call-outcome": {
     "ingress_key": "mcp-tool:review-call-outcome",
     "source_locator": "mcp-server/src/tools.js",
-    "schema_digest": "190f9debf0677c0a8d1d9ce011c963b284ee22e4f35a25b999fced09262c2f6a",
+    "schema_digest": "5cf296e25f22be197a41b4b01adacfeced5ef459dfdd6dd771dcb4df6edf55cb",
     "write": true,
     "human_only": false,
     "human_caller_only": false,

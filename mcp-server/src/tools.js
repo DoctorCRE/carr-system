@@ -413,7 +413,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
-  if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (verb === "review-call-outcome" || FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
@@ -10470,9 +10470,23 @@ registerTools({
     description: "Mark one pipeline call's outcome reviewed by a partner, so it leaves Home. Applied changes stay applied and still undoable from the deal; open cards stay open.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       idempotency_key: { type: "string" }, session_id: { type: "string" },
+      expected_source_version: { type: "string", minLength: 1, description: "Canonical card source_version the partner reviewed. Omission is legacy Home compatibility until 2026-12-08; migrate js/live-client.js before requiring it." },
     }, required: ["idempotency_key", "session_id"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "review-call-outcome", args, async () => {
       if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+      if (args.expected_source_version !== undefined) {
+        // The parent lock also blocks new candidate FK references. Child locks
+        // cover edits/deletes; a separate statement sees edits committed while waiting.
+        const session = (await c.query(`select actor_id from capture_session
+          where id=$1 and post_call for update /* call-outcome:review-session-lock */`, [args.session_id])).rows[0];
+        if (!session) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+        await c.query("select id from capture_candidate where session_id=$1 order by id for update", [args.session_id]);
+        await c.query("select id from capture_post_call_candidate where session_id=$1 order by id for update", [args.session_id]);
+        const current = (await c.query(`select ops.resolve_action_card($1,'post_call_review',$2)->>'source_version' as source_version
+          /* call-outcome:review-version */`, [session.actor_id, args.session_id])).rows[0];
+        if (current?.source_version !== args.expected_source_version)
+          throw new ToolError({ error: "source_version_changed" });
+      }
       const row = (await c.query(
         `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
           where id=$1 and post_call and outcome_reviewed_at is null returning id

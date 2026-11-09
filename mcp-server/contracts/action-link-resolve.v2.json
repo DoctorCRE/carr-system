@@ -1,4 +1,5 @@
 {
+  "$comment": "Post-call review clients copy card.source_version into review-call-outcome.expected_source_version and retain one idempotency_key per review intent. The atomic write, replay and source_version_changed refusal contract is review-call-outcome.v1.json. Legacy Home omission is temporary through 2026-12-08.",
   "type": "object",
   "additionalProperties": false,
   "required": [
