@@ -19,7 +19,9 @@
     "test/web-push-config.test.ts",
     "src/repository-identity.ts",
     "src/review-gate-comments.ts",
-    "test/review-gate-comments.test.ts"
+    "test/review-gate-comments.test.ts",
+    "test/web-push-sender.test.ts",
+    "test/web-push-outbox-postgres.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,

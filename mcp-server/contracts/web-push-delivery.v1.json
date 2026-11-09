@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "web-push-delivery.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "deliveries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "web-push-delivery.v1"
+    },
+    "deliveries": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "notification_id",
+          "installation_id",
+          "generation",
+          "state",
+          "reason",
+          "attempt_id",
+          "attempt_count",
+          "created_at",
+          "due_at",
+          "expires_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "notification_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "installation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "held",
+              "submitting",
+              "provider_accepted",
+              "failed",
+              "unknown",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}
