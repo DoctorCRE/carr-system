@@ -17,6 +17,8 @@
     "local-client-auth.ts",
     "test/local-client-auth.test.ts",
     "typescript/check.ts",
+    "test/ai-boundary.test.ts",
+    "test/assurance-health-store.v5.test.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "test/models/subject-watch-delivery/Delivery.map.ts",
