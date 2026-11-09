@@ -132,9 +132,12 @@ test("MCP read-doctrine names a missing document through the real reader path", 
   t.mock.method(console, "error", () => {});
   const previous = neonConfig.fetchFunction;
   t.after(() => { neonConfig.fetchFunction = previous; });
-  neonConfig.fetchFunction = async () => Response.json({
-    fields: [], rows: [], rowCount: 0, command: "SELECT", rowAsArray: true,
-  });
+  neonConfig.fetchFunction = async (_url, options) => {
+    const identity = JSON.parse(options.body).query.includes('from public.actor where slug=');
+    return Response.json({ fields: identity ? [{name:'id',dataTypeID:25}] : [],
+      rows: identity ? [['00000000-0000-4000-8000-000000000001']] : [],
+      rowCount: identity ? 1 : 0, command: 'SELECT', rowAsArray: true });
+  };
   const request = new Request("https://synthetic.example/mcp", { method: "POST",
     body: JSON.stringify({ jsonrpc: "2.0", id: 31, method: "tools/call", params: {
       name: "read-doctrine", arguments: { document: "synthetic-missing-refinement-plan" },
@@ -460,4 +463,13 @@ test("loop input refusals preserve their names and safe hints", t => {
       { env: { CORRELATION_ID: correlationId } });
     assert.deepEqual(payload, { error: code, correlation_id: correlationId, hint });
   }
+});
+
+
+test('document not-found exposes its type without internal document identifiers', t => {
+  t.mock.method(console, 'error', () => {});
+  const value = publicError(new ToolError({ error: 'document_not_found', document_id: privateText }),
+    { env: { CORRELATION_ID: correlationId } });
+  assert.deepEqual(value, { error: 'document_not_found', correlation_id: correlationId,
+    hint: 'The document is unavailable in the current scope.' });
 });
