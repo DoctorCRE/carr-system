@@ -17,7 +17,7 @@ SCHEMA = json.loads((ROOT / 'client-portal/market-study.v1.schema.json').read_te
 NODE = r'''
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { validateMarketStudyPackage, RECORD_LAYER_GROUPS } from './mcp-server/src/market-study-package.js';
+import { validateMarketStudyPackage, RECORD_LAYER_GROUPS } from './mcp-server/src/market-study-package.ts';
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 if (input.action === 'validate') {
   console.log(JSON.stringify({...validateMarketStudyPackage(input.package, {mode: input.mode}), groups: RECORD_LAYER_GROUPS}));
@@ -405,7 +405,7 @@ def extract(source, output, mapping_name, mode):
                 'counts': counts, 'assets': assets, 'rows': rows, 'inputs': inputs,
                 'mapping_sha256': digest(source_path(source, mapping_name).read_bytes()),
                 'validator': {p: digest((ROOT / p).read_bytes()) for p in (
-                    'mcp-server/src/market-study-package.js', 'client-portal/market-study.v1.schema.json',
+                    'mcp-server/src/market-study-package.ts', 'client-portal/market-study.v1.schema.json',
                     'mcp-server/package-lock.json', 'client-portal/parity/probes.v1.json')}}
     package_bytes, manifest_bytes = encode(package), encode(manifest)
     staging = Path(tempfile.mkdtemp(prefix='.reference-extract-', dir=output.parent))
