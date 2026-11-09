@@ -8,6 +8,8 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+from git_env import fixture_env
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('catalog', ROOT / 'ops/sync_control_catalog.py')
@@ -37,6 +39,26 @@ class SuiteClassificationTests(unittest.TestCase):
                     str(root)], cwd=ROOT, capture_output=True, text=True, check=True)
                 self.assertEqual(json.loads(result.stdout), [target.name])
                 subprocess.run(['node', '--test', str(target)], check=True, capture_output=True)
+
+    def test_checkout_moving_during_compilation_refuses_before_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            env = fixture_env()
+            def git(*args):
+                return subprocess.check_output(['git', '-c', 'core.hooksPath=/dev/null', *args],
+                                               cwd=root, env=env, text=True).strip()
+            git('init', '-q')
+            git('config', 'user.name', 'Fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            git('commit', '--allow-empty', '-qm', 'initial')
+            revision = git('rev-parse', 'HEAD')
+            def move_checkout():
+                git('commit', '--allow-empty', '-qm', 'candidate changed')
+                return []
+            with patch.dict(os.environ, env, clear=True), patch.object(catalog, 'REPO', root), \
+                    patch.object(catalog, 'compile_catalog', side_effect=move_checkout):
+                with self.assertRaisesRegex(catalog.CatalogError, 'revision differs'):
+                    catalog.install_projection(None, revision)
 
     def test_nested_or_missing_suite_cannot_verify(self):
         self.assertFalse(catalog._runs_in_ci('path', 'mcp-server/test/nested/proof.test.ts'))

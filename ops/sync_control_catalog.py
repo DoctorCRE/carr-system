@@ -30,7 +30,7 @@ hiding it would be worse — but as installed=false with no verified_at, so
 approve-rule refuses it and says why.
 
 DETERMINISTIC BY CONSTRUCTION. No model, no judgment, no network: a pure
-function of two files on disk plus `git ls-files`. It is the compiled-check
+function of three files on disk plus `git ls-files`. It is the compiled-check
 shape the control-plane architecture contract asks for.
 """
 
@@ -278,16 +278,20 @@ def install_projection(conn: Any, revision: str) -> dict[str, Any]:
         return subprocess.run(["git", *args], cwd=REPO, check=True,
                               capture_output=True, text=True).stdout.strip()
 
-    if revision != git("rev-parse", "HEAD"):
-        raise CatalogError("catalog revision differs from checked-out HEAD")
-    if git("status", "--porcelain", "--untracked-files=no"):
-        raise CatalogError("catalog installation requires a clean revision")
+    def check_revision() -> None:
+        if revision != git("rev-parse", "HEAD"):
+            raise CatalogError("catalog revision differs from checked-out HEAD")
+        if git("status", "--porcelain", "--untracked-files=no"):
+            raise CatalogError("catalog installation requires a clean revision")
+
+    check_revision()
     rows = compile_catalog()
     missing = [r["control_key"] for r in rows
                if r["not_installed_reason"].startswith("declared but not tracked")]
     if missing:
         raise CatalogError("unresolved catalog bindings: " + ", ".join(missing))
     digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+    check_revision()
     with conn.transaction():
         with conn.cursor() as cur:
             cur.execute("set local lock_timeout = '5s'")
