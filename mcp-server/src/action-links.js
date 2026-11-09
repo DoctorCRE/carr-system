@@ -1,5 +1,5 @@
 // Resolve credential-free draft addresses without granting write authority.
-import { DRAFT_ELIGIBILITY_SQL } from "./lead-draft-eligibility.js";
+import { DRAFT_ELIGIBILITY_SQL } from "./lead-draft-eligibility.ts";
 import { authorizationClassForActor } from "./identity.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
