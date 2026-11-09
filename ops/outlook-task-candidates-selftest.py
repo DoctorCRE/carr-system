@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -21,7 +22,6 @@ HELPERS = runpy.run_path(str(ROOT / 'ops/fixtures/outlook-builds/write-inputs.py
 STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 GENERATION = '00000000-0000-4000-8000-000000000007'
 REVISION = '1' * 40
-BINARY = ROOT / 'vendor/hxprobe/target/debug/hxprobe'
 
 
 def message(account=7, key=70, classifier='IPM.Task'):
@@ -53,7 +53,7 @@ class Candidates(unittest.TestCase):
         source.write_bytes(STORE(payload) if isinstance(payload, (bytes, bytearray)) else
                            STORE(payload[0]) + b''.join(STORE(block)[64:] for block in payload[1:]))
         target.unlink(missing_ok=True)
-        done = subprocess.run([str(BINARY), 'task-candidates', '--immutable-copy', str(source),
+        done = subprocess.run([str(test_binary()), 'task-candidates', '--immutable-copy', str(source),
                                str(target), str(account), GENERATION, 'synthetic-build', REVISION,
                                str(after)], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -89,7 +89,7 @@ class Candidates(unittest.TestCase):
         revision = git('rev-parse', 'HEAD')
         source, database = self.root / 'copy.hxd', self.root / 'proof.db'
         source.write_bytes(STORE(message()))
-        subprocess.run([str(BINARY), 'task-candidates', '--immutable-copy', str(source), str(database),
+        subprocess.run([str(test_binary()), 'task-candidates', '--immutable-copy', str(source), str(database),
                         '7', GENERATION, 'synthetic-build', revision], check=True, capture_output=True)
         producer = [sys.executable, str(runtime / 'tools/outlook-task-evidence.py'), str(database),
                     '7', GENERATION, '--studio-receipt']
@@ -418,7 +418,7 @@ class Candidates(unittest.TestCase):
     def test_corrupt_block_and_live_store_name_fail_closed(self):
         source, target = self.root / 'synthetic.hxd', self.root / 'evidence.db'
         source.write_bytes(STORE(message()))
-        command = [str(BINARY), 'task-candidates', '--immutable-copy', str(source),
+        command = [str(test_binary()), 'task-candidates', '--immutable-copy', str(source),
                    str(target), '7', GENERATION, 'synthetic-build', REVISION]
         corrupt = bytearray(source.read_bytes())
         corrupt[-1] ^= 1
