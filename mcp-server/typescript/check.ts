@@ -75,14 +75,7 @@ function main(): void {
 try {
   main();
 } catch (error) {
-  const refusal =
-    error instanceof GateError
-      ? error
-      : new GateError(
-          "typescript/check.ts",
-          "staged input could not be checked",
-          "Repair the admitted files and gate inputs, then rerun check:staged.",
-        );
-  process.stderr.write(`${refusal.message}\n`);
+  if (!(error instanceof GateError)) throw error;
+  process.stderr.write(`${error.message}\n`);
   process.exitCode = 1;
 }

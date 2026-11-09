@@ -274,6 +274,7 @@
     "mcp-server/test/deal-deliverables-postgres.test.mjs",
     "mcp-server/test/deal-deliverables-web.test.mjs",
     "mcp-server/test/deal-deliverables.test.mjs",
+    "mcp-server/test/deal-document-intake-postgres.test.mjs",
     "mcp-server/test/deal-document-text-postgres.test.mjs",
     "mcp-server/test/deal-document-text-proof.test.mjs",
     "mcp-server/test/deal-extraction-postgres.test.mjs",

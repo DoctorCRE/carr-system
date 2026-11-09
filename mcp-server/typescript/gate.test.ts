@@ -83,6 +83,22 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     assert.match(internalOutput, /TypeError: internal bug/);
     assert.match(internalOutput, /\n\s+at migrationIssues .*migration\.ts:/);
     assert.doesNotMatch(internalOutput, /Remedy:/);
+    const inputRefusals: [string, string | null, RegExp][] = [
+      ["typescript/migration.json", "[]", /migration.json.*JSON object/],
+      ["typescript/migration.json", null, /migration.json.*readable valid JSON/],
+      ["typescript/migration.json", '{"legacyJavaScript":null,"legacyTypeScript":[]}', /legacyJavaScript.*array/],
+      ["knip.json", '{"project":[]}', /knip.json.*cover every admitted file/],
+      ["tsconfig.node.json", "{", /tsconfig.node.json.*readable valid JSON/],
+      ["tsconfig.base.json", null, /tsconfig.base.json.*configuration must resolve/],
+    ];
+    for (const [path, content, rule] of inputRefusals) {
+      const file = join(pkg, path);
+      const original = readFileSync(file, "utf8");
+      if (content === null) rmSync(file);
+      else writeFileSync(file, content);
+      refusal(run(), rule);
+      writeFileSync(file, original);
+    }
     const baselineFailures: string[] = [];
     for (const extension of ["js", "ts"]) {
       const path = `mcp-server/new.${extension}`;
@@ -189,8 +205,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       writeFileSync(nodeConfig, original);
       writeFileSync(graphPath, originalGraph);
       writeFileSync(testPath, originalTest);
-      assert.notEqual(result.status, 0, path);
-      assert.match(result.stdout + result.stderr, expected, path);
+      refusal(result, expected);
     }
     const legacyFile = join(pkg, "legacy.ts");
     writeFileSync(legacyFile, legacySource);

@@ -20,7 +20,8 @@ A changed or new TypeScript file must
 join a strict project. A new JavaScript file fails, including outside packages.
 There is no tool-exception allowlist. New first-party files must join a strict
 TypeScript project. Config, migration-schema and baseline refusals end with a
-`Remedy:` line and exit 1 without a stack trace. Remove migration
+`Remedy:` line and exit 1 without a stack trace. Unexpected internal errors
+propagate unchanged with their original message and stack trace. Remove migration
 entries as their files are converted. Delete the temporary migration gate when
 these lists empty.
 
