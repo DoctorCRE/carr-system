@@ -181,7 +181,7 @@ def test_download_cache() -> None:
             check("changed pin cannot reuse previous bytes", result == (other_archive, other_manifest) and fetch.call_count == 2)
     for mode in ('bad-archive', 'bad-manifest', 'outage'):
         with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
-            effects = [archive, b'invalid'] if mode == 'bad-manifest' else [b'invalid', manifest]
+            effects: list[bytes | urllib.error.HTTPError] = [archive, b'invalid'] if mode == 'bad-manifest' else [b'invalid', manifest]
             if mode == 'outage':
                 effects = [urllib.error.HTTPError(pin['archive_url'], 504, 'outage', Message(), None)]
             with patch.object(ARTIFACT, "download", side_effect=effects):
