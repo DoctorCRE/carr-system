@@ -1,0 +1,70 @@
+{
+  "reserve": {
+    "ok": true,
+    "schema_version": "deal-document-intake.v1",
+    "deliverable": {
+      "id": "b612902d-e54b-4e5c-b86b-2a2d13ab1b84",
+      "deal_id": "2458b273-ee94-459a-ae29-3d83118a94d5",
+      "filename": "Photo.jpg",
+      "mime": "image/jpeg",
+      "bytes": "7",
+      "sha256": "9923793242133ba7d7990d8f9d7934b0d0ef6057cf631d68750bfac7f9d6429b",
+      "state": "started",
+      "visibility": "private",
+      "version": 0,
+      "created_at": "2026-11-08T16:26:29.158Z",
+      "finalized_at": null
+    },
+    "upload_path": "/api/v1/deal-deliverables/2458b273-ee94-459a-ae29-3d83118a94d5/b612902d-e54b-4e5c-b86b-2a2d13ab1b84/bytes"
+  },
+  "upload": {
+    "ok": true,
+    "state": "verified",
+    "deliverable_id": "b612902d-e54b-4e5c-b86b-2a2d13ab1b84",
+    "sha256": "9923793242133ba7d7990d8f9d7934b0d0ef6057cf631d68750bfac7f9d6429b",
+    "mime": "image/jpeg",
+    "bytes": 7
+  },
+  "finalize": {
+    "ok": true,
+    "schema_version": "deal-document-intake.v1",
+    "deliverable": {
+      "id": "b612902d-e54b-4e5c-b86b-2a2d13ab1b84",
+      "deal_id": "2458b273-ee94-459a-ae29-3d83118a94d5",
+      "filename": "Photo.jpg",
+      "mime": "image/jpeg",
+      "bytes": "7",
+      "sha256": "9923793242133ba7d7990d8f9d7934b0d0ef6057cf631d68750bfac7f9d6429b",
+      "state": "finalized",
+      "visibility": "private",
+      "version": 1,
+      "created_at": "2026-11-08T16:26:29.158Z",
+      "finalized_at": "2026-11-08T16:26:29.194Z"
+    },
+    "attachment": {
+      "attachment_id": "b612902d-e54b-4e5c-b86b-2a2d13ab1b84",
+      "deal_id": "2458b273-ee94-459a-ae29-3d83118a94d5",
+      "sha256": "9923793242133ba7d7990d8f9d7934b0d0ef6057cf631d68750bfac7f9d6429b",
+      "filename": "Photo.jpg",
+      "mime": "image/jpeg",
+      "bytes": 7
+    },
+    "existing": false
+  },
+  "list": {
+    "ok": true,
+    "schema_version": "deal-documents.v1",
+    "documents": [
+      {
+        "id": "b612902d-e54b-4e5c-b86b-2a2d13ab1b84",
+        "display_name": "Photo.jpg",
+        "document_type": "image/jpeg",
+        "page_count": null,
+        "content_hash": "9923793242133ba7d7990d8f9d7934b0d0ef6057cf631d68750bfac7f9d6429b",
+        "stored_at": "2026-11-08T16:26:29.194Z"
+      }
+    ],
+    "has_more": false,
+    "next_cursor": null
+  }
+}
