@@ -500,7 +500,7 @@
     "work-request-withdrawal.test.mjs": {"milliseconds": 586, "serial": false},
     "work-shape.test.mjs": {"milliseconds": 711, "serial": false},
     "worker-types-slice4.test.mjs": {"milliseconds": 1203, "serial": false},
-    "worker-types.test.mjs": {"milliseconds": 95703, "serial": false},
+    "worker-types.test.ts": {"milliseconds": 95703, "serial": false},
     "workflow-cutover.v5.test.mjs": {"milliseconds": 609, "serial": false},
     "workflow-effect-envelope.v5.test.mjs": {"milliseconds": 346, "serial": false},
     "workspace-business-read.test.mjs": {"milliseconds": 296, "serial": false},

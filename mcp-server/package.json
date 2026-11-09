@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "npm run generate:types && node run-tests.ts",
-    "generate:types": "npm run check:registry && node generate-verb-types.mjs && node generate-worker-types.mjs",
+    "generate:types": "npm run check:registry && node generate-verb-types.ts && node generate-worker-types.mjs",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json",
     "test:routing-replay": "node test/doctrine-routing-replay.mjs",
     "portal-parity": "node portal-parity/cli.mjs",
