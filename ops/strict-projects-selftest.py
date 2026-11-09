@@ -2,11 +2,12 @@
 """Check that independent admissions compose without shared list edits."""
 import importlib.util
 import json
-import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+
+from git_env import fixture_env
 
 SPEC = importlib.util.spec_from_file_location('strict_projects', Path(__file__).with_name('strict-projects.py'))
 assert SPEC and SPEC.loader
@@ -27,7 +28,7 @@ class StrictProjects(unittest.TestCase):
             for group, files in [('node', ['old.ts', 'new.test.ts']), ('worker', [])]:
                 (pkg / f'tsconfig.{group}.json').write_text(json.dumps({'files': files}))
             (pkg / 'knip.json').write_text(json.dumps({'entry': ['old.ts', '*.test.ts']}))
-            env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+            env = fixture_env()
             def git(*args):
                 subprocess.run(['git', *args], cwd=root, env=env, check=True, capture_output=True)
             git('init', '-q')
