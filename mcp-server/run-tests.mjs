@@ -1,6 +1,6 @@
 // Run MCP test suites in isolated batches.
 import { readFile } from "node:fs/promises";
-import { discoverSuites } from './suite-discovery.mjs';
+import { discoverSuites } from './suite-discovery.ts';
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,10 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCH_REGRESSIONS = "chrome-launch.test.mjs";
 
 export function suiteBatches(files, browserFiles = [], postgresFiles = []) {
-  const suites = files.filter((file) => /\.test\.(?:js|mjs)$/.test(file)).sort();
+  const suites = files.filter((file) => /\.test\.(?:js|mjs|ts)$/.test(file)).sort();
   const browsers = suites.filter((file) => file !== LAUNCH_REGRESSIONS
-    && (browserFiles.includes(file) || /-browser\.test\.(?:js|mjs)$/.test(file)));
-  const postgres = suites.filter((file) => (postgresFiles.includes(file) || /-postgres\.test\.(?:js|mjs)$/.test(file)) && !browsers.includes(file));
+    && (browserFiles.includes(file) || /-browser\.test\.(?:js|mjs|ts)$/.test(file)));
+  const postgres = suites.filter((file) => (postgresFiles.includes(file) || /-postgres\.test\.(?:js|mjs|ts)$/.test(file)) && !browsers.includes(file));
   return [suites.filter((file) => file === LAUNCH_REGRESSIONS),
     ...browsers.map((file) => [file]),
     ...postgres.map((file) => [file]),
@@ -36,10 +36,10 @@ async function main() {
   const files = selected || discovered;
   const browserFiles = [];
   const postgresFiles = [];
-  for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
+  for (const file of files.filter(file => /\.test\.(?:js|mjs|ts)$/.test(file))) {
     const source = await readFile(path.join(ROOT, "test", file), "utf8");
     if (source.includes("chrome-launch.mjs")) browserFiles.push(file);
-    if (/-postgres\.test\.(?:js|mjs)$/.test(file) || /disposable-postgres\.mjs|postgres-database\.mjs|initdb/.test(source)) postgresFiles.push(file);
+    if (/-postgres\.test\.(?:js|mjs|ts)$/.test(file) || /disposable-postgres\.mjs|postgres-database\.mjs|initdb/.test(source)) postgresFiles.push(file);
   }
   const { CARR_CI_UNIT_SUITES: selection, ...suiteEnv } = process.env;
   const failures = [];

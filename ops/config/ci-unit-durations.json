@@ -419,7 +419,7 @@
     "subject-watch-v2.test.mjs": {"milliseconds": 540, "serial": false},
     "subject-watches-postgres.test.mjs": {"milliseconds": 25540, "serial": true},
     "subject-watches.test.mjs": {"milliseconds": 2130, "serial": false},
-    "suite-discovery.test.mjs": {"milliseconds": 852, "serial": false},
+    "suite-discovery.test.ts": {"milliseconds": 1753, "serial": false},
     "system-work-census.test.mjs": {"milliseconds": 616, "serial": false},
     "system-work-postgres.test.mjs": {"milliseconds": 909, "serial": true},
     "system-work-successor.test.mjs": {"milliseconds": 561, "serial": false},
