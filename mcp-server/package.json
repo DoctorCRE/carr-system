@@ -14,7 +14,8 @@
     "check:registry": "node ../ops/scac-mutation-inventory.mjs",
     "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
     "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
-    "fix": "biome check --write ."
+    "fix": "biome check --write .",
+    "postinstall": "patch-package"
   },
   "keywords": [],
   "author": "",
@@ -30,7 +31,8 @@
     "wrangler": "4.149.0",
     "@biomejs/biome": "2.6.6",
     "@types/node": "26.6.6",
-    "knip": "6.44.2"
+    "knip": "6.44.2",
+    "patch-package": "8.0.1"
   },
   "dependencies": {
     "@cfworker/json-schema": "4.1.1",

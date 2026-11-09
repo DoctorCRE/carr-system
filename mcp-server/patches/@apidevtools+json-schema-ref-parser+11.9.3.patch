@@ -1,0 +1,306 @@
+diff --git a/node_modules/@apidevtools/json-schema-ref-parser/dist/lib/options.d.ts b/node_modules/@apidevtools/json-schema-ref-parser/dist/lib/options.d.ts
+index fbae827..a7bb8b5 100644
+--- a/node_modules/@apidevtools/json-schema-ref-parser/dist/lib/options.d.ts
++++ b/node_modules/@apidevtools/json-schema-ref-parser/dist/lib/options.d.ts
+@@ -105,300 +105,7 @@ export interface $RefParserOptions<S extends object = JSONSchema> {
+     timeoutMs?: number;
+ }
+ export declare const getJsonSchemaRefParserDefaultOptions: () => $RefParserOptions<JSONSchema>;
+-export declare const getNewOptions: <S extends object = JSONSchema, O extends ParserOptions<S> = {
+-    parse?: {
+-        [x: string]: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            allowEmpty?: boolean | undefined;
+-            allowBOM?: boolean | undefined;
+-            encoding?: BufferEncoding | undefined;
+-            canParse?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            parse?: string | number | {} | undefined;
+-        } | undefined;
+-        json?: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            allowEmpty?: boolean | undefined;
+-            allowBOM?: boolean | undefined;
+-            encoding?: BufferEncoding | undefined;
+-            canParse?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            parse?: string | number | {} | undefined;
+-        } | undefined;
+-        yaml?: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            allowEmpty?: boolean | undefined;
+-            allowBOM?: boolean | undefined;
+-            encoding?: BufferEncoding | undefined;
+-            canParse?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            parse?: string | number | {} | undefined;
+-        } | undefined;
+-        binary?: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            allowEmpty?: boolean | undefined;
+-            allowBOM?: boolean | undefined;
+-            encoding?: BufferEncoding | undefined;
+-            canParse?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            parse?: string | number | {} | undefined;
+-        } | undefined;
+-        text?: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            allowEmpty?: boolean | undefined;
+-            allowBOM?: boolean | undefined;
+-            encoding?: BufferEncoding | undefined;
+-            canParse?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            parse?: string | number | {} | undefined;
+-        } | undefined;
+-    } | undefined;
+-    resolve?: {
+-        [x: string]: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            canRead?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            read?: string | object | {} | undefined;
+-        } | {
+-            headers?: ([(string | undefined)?, (string | undefined)?] | undefined)[] | {
+-                [x: string]: string | undefined;
+-            } | {
+-                append?: {} | undefined;
+-                delete?: {} | undefined;
+-                get?: {} | undefined;
+-                getSetCookie?: {} | undefined;
+-                has?: {} | undefined;
+-                set?: {} | undefined;
+-                forEach?: {} | undefined;
+-            } | null | undefined;
+-            timeout?: number | undefined;
+-            redirects?: number | undefined;
+-            withCredentials?: boolean | undefined;
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            canRead?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            read?: string | object | {} | undefined;
+-        } | undefined;
+-        external?: boolean | undefined;
+-        file?: boolean | {
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            canRead?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            read?: string | object | {} | undefined;
+-        } | undefined;
+-        http?: boolean | {
+-            headers?: ([(string | undefined)?, (string | undefined)?] | undefined)[] | {
+-                [x: string]: string | undefined;
+-            } | {
+-                append?: {} | undefined;
+-                delete?: {} | undefined;
+-                get?: {} | undefined;
+-                getSetCookie?: {} | undefined;
+-                has?: {} | undefined;
+-                set?: {} | undefined;
+-                forEach?: {} | undefined;
+-            } | null | undefined;
+-            timeout?: number | undefined;
+-            redirects?: number | undefined;
+-            withCredentials?: boolean | undefined;
+-            name?: string | undefined;
+-            order?: number | undefined;
+-            canRead?: string | boolean | {
+-                exec?: {} | undefined;
+-                test?: {} | undefined;
+-                readonly source?: string | undefined;
+-                readonly global?: boolean | undefined;
+-                readonly ignoreCase?: boolean | undefined;
+-                readonly multiline?: boolean | undefined;
+-                lastIndex?: number | undefined;
+-                compile?: {} | undefined;
+-                readonly flags?: string | undefined;
+-                readonly sticky?: boolean | undefined;
+-                readonly unicode?: boolean | undefined;
+-                readonly dotAll?: boolean | undefined;
+-                readonly hasIndices?: boolean | undefined;
+-                readonly unicodeSets?: boolean | undefined;
+-                [Symbol.match]?: {} | undefined;
+-                [Symbol.replace]?: {} | undefined;
+-                [Symbol.search]?: {} | undefined;
+-                [Symbol.split]?: {} | undefined;
+-                [Symbol.matchAll]?: {} | undefined;
+-            } | (string | undefined)[] | {} | undefined;
+-            read?: string | object | {} | undefined;
+-        } | undefined;
+-    } | undefined;
+-    continueOnError?: boolean | undefined;
+-    dereference?: {
+-        circular?: boolean | "ignore" | undefined;
+-        excludedPathMatcher?: {} | undefined;
+-        onCircular?: {} | undefined;
+-        onDereference?: {} | undefined;
+-        preservedProperties?: (string | undefined)[] | undefined;
+-        externalReferenceResolution?: "relative" | "root" | undefined;
+-    } | undefined;
+-    mutateInputSchema?: boolean | undefined;
+-    timeoutMs?: number | undefined;
+-}>(options: O | undefined) => O & $RefParserOptions<S>;
++export declare const getNewOptions: <S extends object = JSONSchema, O extends ParserOptions<S> = ParserOptions<S>>(options: O | undefined) => O & $RefParserOptions<S>;
+ export type Options<S extends object = JSONSchema> = $RefParserOptions<S>;
+ export type ParserOptions<S extends object = JSONSchema> = DeepPartial<$RefParserOptions<S>>;
+ export default $RefParserOptions;
