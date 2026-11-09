@@ -11,6 +11,7 @@
   },
   "files": [
     "src/web-push-subscriptions.ts",
-    "../docs/models/web-push-registry/PushRegistry.map.ts"
+    "../docs/models/web-push-registry/PushRegistry.map.ts",
+    "src/subject-watch-scheduler.ts"
   ]
 }

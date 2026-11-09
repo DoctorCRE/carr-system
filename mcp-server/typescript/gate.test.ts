@@ -27,19 +27,15 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     ]) {
       cpSync(join(source, file), join(pkg, file));
     }
-    const nodeConfig = object(join(pkg, "tsconfig.node.json"));
-    assert.ok(Array.isArray(nodeConfig.files));
-    nodeConfig.files = nodeConfig.files.filter(
-      (file: unknown) => typeof file === "string" && file.startsWith("typescript/"),
-    );
-    writeFileSync(join(pkg, "tsconfig.node.json"), JSON.stringify(nodeConfig));
-    const workerConfig = object(join(pkg, "tsconfig.worker.json"));
-    workerConfig.files = [];
-    writeFileSync(join(pkg, "tsconfig.worker.json"), JSON.stringify(workerConfig));
-    const graph = object(join(pkg, "knip.json"));
-    graph.project = nodeConfig.files;
-    graph.entry = ["typescript/*.test.ts"];
-    writeFileSync(join(pkg, "knip.json"), JSON.stringify(graph));
+    const fixtureFiles = ["typescript/check.ts", "typescript/migration.ts", "typescript/gate.test.ts"];
+    for (const [name, files] of [
+      ["tsconfig.node.json", fixtureFiles],
+      ["tsconfig.worker.json", []],
+    ] satisfies [string, string[]][]) {
+      const config = object(join(pkg, name));
+      writeFileSync(join(pkg, name), JSON.stringify({ ...config, files }));
+    }
+    writeFileSync(join(pkg, "knip.json"), JSON.stringify({ entry: ["typescript/*.test.ts"], project: fixtureFiles }));
     symlinkSync(join(source, "node_modules"), join(pkg, "node_modules"), "dir");
     writeFileSync(
       join(pkg, "typescript/migration.json"),
