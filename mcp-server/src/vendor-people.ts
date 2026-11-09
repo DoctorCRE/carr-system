@@ -27,7 +27,7 @@ export const vendorPersonFields = `'contact',case when contact_id is not null th
     'research',jsonb_build_object('status',case when flag_id is null then 'not_researched' when office_verified then 'office_verified' else 'needs_review' end,
       'finding_id',flag_id,'observed_at',observed_at,'expires_on',expires_on)`;
 
-export function vendorDirectoryPayload(rowAlias) {
+export function vendorDirectoryPayload(rowAlias: string) {
   return `${rowAlias}.row_payload::jsonb || jsonb_build_object('people', (
     select coalesce(jsonb_agg(jsonb_build_object('company',company,${vendorPersonFields}) order by contact_id),'[]'::jsonb)
     from public.v_vendor_assignment_context a
