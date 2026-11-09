@@ -26,7 +26,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'bin').mkdir()
         shutil.copy2(ROOT / 'bin/with-timeout.py', self.root / 'bin/with-timeout.py')
         for name in ('ci.sh', 'ci.py', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
-                     'ci_unit_shards.py', 'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
+                     'ci_unit_shards.py', 'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mts'):
             source = ROOT / 'ops' / name
             if source.exists():
                 shutil.copy2(source, self.root / 'ops' / name)
@@ -133,11 +133,11 @@ class UnitClassTests(unittest.TestCase):
     def test_mcp_direct_suites_report_combined_executed_tests(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/run-tests.ts', mcp / 'run-tests.ts')
         shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         (mcp / 'test/second.test.mjs').write_text("import test from 'node:test'; test('second', () => {});")
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -145,18 +145,71 @@ class UnitClassTests(unittest.TestCase):
         self.assertRegex(result.stdout, r'suite-timing: second\.test\.mjs \d+ms')
         self.assertRegex(result.stdout, r'suite-timing: workspace-command-center-browser\.test\.mjs \d+ms')
 
+    def test_typescript_preload_refuses_empty_and_skipped_files(self):
+        self.all_packages()
+        package = self.root / 'practice-plugin'
+        (package / 'package.json').write_text(json.dumps({'type': 'module', 'scripts': {
+            'test': 'node --test test/suite.test.ts'}}))
+        suite = package / 'test/suite.test.ts'
+        for body, expected in (("", 1), ("import test from 'node:test'; test.skip('skip', () => {});", 1),
+                               ("import test from 'node:test'; const value: number = 2; test('typed', () => { if(value !== 2) throw Error(); });", 0)):
+            suite.write_text(body)
+            result = self.run_class()
+            self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+            if expected == 0:
+                self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
+
+    def test_runner_caps_parallel_children_and_serializes_browser_batches(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        for name in ('run-tests.ts', 'suite-discovery.ts'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'package.json').write_text(json.dumps({'type': 'module', 'scripts': {'test': 'node run-tests.ts'}}))
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 6}))
+        events = self.root / 'events.jsonl'
+        for name in ('suite.test.mjs', 'a.test.mjs', 'b.test.mjs', 'c.test.mjs', 'd.test.mjs', 'browser.test.mjs'):
+            body = ("import test from 'node:test'; import {appendFileSync} from 'node:fs'; "
+                    f"const destination = {json.dumps(str(events))}; "
+                    f"const record = state => appendFileSync(destination, JSON.stringify({{file: {json.dumps(name)}, state}}) + '\\n'); "
+                    "test('bounded child', async () => { record('start'); await new Promise(resolve => setTimeout(resolve, 80)); record('end'); });")
+            if name == 'browser.test.mjs':
+                body += "\n// chrome-launch.mjs\n"
+            (mcp / 'test' / name).write_text(body)
+        result = subprocess.run(['node', 'run-tests.ts'], cwd=mcp,
+                                env={**self.env, 'CARR_CI_NODE_JOBS': '2'}, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        active = set()
+        peak = 0
+        for event in map(json.loads, events.read_text().splitlines()):
+            if event['state'] == 'start':
+                active.add(event['file'])
+            else:
+                active.remove(event['file'])
+            peak = max(peak, len(active))
+            self.assertLessEqual(len(active), 2)
+            if 'browser.test.mjs' in active:
+                self.assertEqual(active, {'browser.test.mjs'})
+        self.assertEqual(peak, 2)
+        self.assertFalse(active)
+        self.assertEqual(result.stdout.count('suite-result: '), 6)
+        for jobs in ('0', '-1', '1.5', 'NaN'):
+            refused = subprocess.run(['node', 'run-tests.ts'], cwd=mcp,
+                                    env={**self.env, 'CARR_CI_NODE_JOBS': jobs}, capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn('invalid CARR_CI_NODE_JOBS', refused.stderr)
+
     def test_mcp_failed_suite_survives_later_passing_suites(self):
         self.all_packages()
         package_body = "import test from 'node:test';" + "".join(
             f"test('later {i}', () => {{}});" for i in range(60))
         (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/run-tests.ts', mcp / 'run-tests.ts')
         shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/chrome-launch.test.mjs').write_text(
             "import test from 'node:test'; test('early failure', () => { throw Error('original diagnostic'); });")
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('original diagnostic', result.stderr)
@@ -164,10 +217,10 @@ class UnitClassTests(unittest.TestCase):
     def test_all_failed_suite_diagnostics_survive_the_log_tail(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
-        for name in ('run-tests.mjs', 'suite-discovery.ts'):
+        for name in ('run-tests.ts', 'suite-discovery.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         (mcp / 'test/chrome-launch.test.mjs').write_text(
             "import test from 'node:test'; test('early', () => { throw Error('first suite assertion detail'); });")
         (mcp / 'test/suite.test.mjs').write_text(
@@ -185,13 +238,13 @@ class UnitClassTests(unittest.TestCase):
     def test_shard_refuses_hidden_suite_and_zero_executed_tests(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        runner = (ROOT / 'mcp-server/run-tests.mjs').read_text()
+        runner = (ROOT / 'mcp-server/run-tests.ts').read_text()
         shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text(
                 "import test from 'node:test'; test('executes', () => {});")
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
             'suites': {file.name: {'milliseconds': 1, 'serial': True}
                        for file in (mcp / 'test').glob('*.test.mjs')}}))
@@ -206,7 +259,7 @@ class UnitClassTests(unittest.TestCase):
                             f'os.execv(sys.executable, [sys.executable, {str(original_watchdog)!r}, *sys.argv[1:]])\n')
         count = len(plan(self.root))
         shard_env = {**self.env, 'CARR_CI_UNIT_SHARD': '1', 'CARR_CI_UNIT_RECEIPT': str(receipt)}
-        (mcp / 'run-tests.mjs').write_text(runner)
+        (mcp / 'run-tests.ts').write_text(runner)
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(receipt.read_text())['suites'])
@@ -231,7 +284,7 @@ class UnitClassTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, 'one skipped or unstarted suite must fail even beside passing suites')
             self.assertFalse(receipt.exists(), 'unexecuted suites must never produce a shard receipt')
             first.write_text(original)
-            (mcp / 'run-tests.mjs').write_text(runner)
+            (mcp / 'run-tests.ts').write_text(runner)
             result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         exceptions = self.root / 'ops/config/hosted-suite-exceptions.json'
@@ -251,14 +304,14 @@ class UnitClassTests(unittest.TestCase):
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         receipt.unlink()
-        (mcp / 'run-tests.mjs').write_text(runner.replace('const files = selected || discovered;',
-                                                         f'const files = (selected || discovered).filter(file => file !== {json.dumps(first.name)});'))
+        (mcp / 'run-tests.ts').write_text(runner.replace('const files: string[] = Array.isArray(selected) ? selected : discovered;',
+                                                         f'const files = (Array.isArray(selected) ? selected : discovered).filter(file => file !== {json.dumps(first.name)});'))
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('shard coverage mismatch', result.stderr)
         self.assertFalse(receipt.exists())
         exceptions.write_text('{}')
-        (mcp / 'run-tests.mjs').write_text(runner)
+        (mcp / 'run-tests.ts').write_text(runner)
         for suite in (mcp / 'test').glob('*.test.mjs'):
             suite.write_text("import test from 'node:test'; test.skip('not executed', () => {});")
         result = subprocess.run(command, cwd=self.root, env=shard_env, capture_output=True, text=True, timeout=30)
@@ -269,10 +322,10 @@ class UnitClassTests(unittest.TestCase):
     def test_new_suite_without_timing_runs_and_verifies(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.ts', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         (mcp / 'test/new.test.mjs').write_text("import test from 'node:test'; test('new suite', () => {});")
         receipts = []
         for index, _ in enumerate(plan(self.root), 1):
@@ -290,10 +343,10 @@ class UnitClassTests(unittest.TestCase):
     def test_successful_shard_warns_only_when_elapsed_exceeds_estimate(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.ts', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         receipt = self.root / 'receipt.json'
         for predicted, warning in ((1, True), (60000, False)):
             with self.subTest(predicted=predicted):
@@ -337,12 +390,12 @@ class UnitClassTests(unittest.TestCase):
     def test_shard_selection_uses_admitted_dynamic_count(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.ts', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 8}))
         for index in range(7):
             (mcp / f'test/extra{index}.test.mjs').write_text("import test from 'node:test'; test('executes', () => {});")
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
             'suites': {file.name: {'milliseconds': 480000, 'serial': True}
                        for file in (mcp / 'test').glob('*.test.mjs')}}))
@@ -408,13 +461,13 @@ class UnitClassTests(unittest.TestCase):
     def test_mcp_skipped_only_suites_fail(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
+        shutil.copy2(ROOT / 'mcp-server/run-tests.ts', mcp / 'run-tests.ts')
         shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'test/workspace-command-center-browser.test.mjs').write_text(
             "import test from 'node:test'; test.skip('missing dependency', () => {});")
-        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.ts'}}))
         self.env['CARR_CI_PYTHON'] = shutil.which('python3')
         result = self.run_class()
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)

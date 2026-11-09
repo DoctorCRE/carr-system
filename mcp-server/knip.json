@@ -1,13 +1,19 @@
 {
   "entry": [
     "typescript/*.test.ts",
-    "suite-discovery.ts"
+    "suite-discovery.ts",
+    "run-tests.ts",
+    "test/*.test.ts",
+    "../ops/ci-node-file.mts"
   ],
   "project": [
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "suite-discovery.ts",
-    "test/suite-discovery.test.ts"
+    "test/suite-discovery.test.ts",
+    "run-tests.ts",
+    "test/run-node-suites.test.ts",
+    "../ops/ci-node-file.mts"
   ]
 }

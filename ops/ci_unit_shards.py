@@ -90,7 +90,7 @@ def regenerate(logs, source_run, output, root=ROOT):
     if set(samples) != set(expected):
         raise ValueError(f'timings must cover current suites: missing={sorted(set(expected) - samples.keys())}, '
                          f'unexpected={sorted(samples.keys() - set(expected))}')
-    script = """import {suiteBatches} from './mcp-server/run-tests.mjs';
+    script = """import {suiteBatches} from './mcp-server/run-tests.ts';
 import {readFile} from 'node:fs/promises';
 const files=JSON.parse(process.argv[1]), browsers=[], postgres=[];
 for(const file of files) {
