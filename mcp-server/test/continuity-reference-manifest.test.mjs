@@ -96,3 +96,20 @@ test("local v12 capture packs losslessly when supplied without committing it", {
   assert.ok(packed.semantic_state_bytes <= SEMANTIC_STATE_LIMIT);
   assert.ok(packed.reference_manifest_bytes <= REFERENCE_MANIFEST_LIMIT);
 });
+
+test("manifest refuses invalid shape, paths and ordering before hydration", () => {
+  const state = { acceptance: [{ text: "one" }, { text: "two" }], progress: [{ text: "three" }] };
+  const entry = (field, index, refs = ["ref"]) => ({ field, index, refs });
+  const manifests = [
+    { version: 2, entries: [] },
+    { version: 1, entries: [entry("acceptance", 2)] },
+    { version: 1, entries: [entry("acceptance", 0, [42])] },
+    { version: 1, entries: [entry("progress", 0), entry("acceptance", 0)] },
+    { version: 1, entries: [entry("acceptance", 1), entry("acceptance", 0)] },
+  ];
+  for (const manifest of manifests) {
+    assert.throws(() => hydrateReferenceManifest(state, manifest),
+      error => error?.code === "codex_reference_manifest_invalid");
+    assert.deepEqual(state, { acceptance: [{ text: "one" }, { text: "two" }], progress: [{ text: "three" }] });
+  }
+});
