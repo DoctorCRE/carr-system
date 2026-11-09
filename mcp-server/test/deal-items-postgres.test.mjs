@@ -688,3 +688,38 @@ test('post-call merges keep partner dates unless the incoming date is stated', a
     }
   } finally { await c.query('rollback'); }
 });
+
+test('board action identities select their own Home cards across both source tables', async () => {
+  await c.query('begin');
+  try {
+    const actionId = '20000000-0000-4000-8000-000000000777';
+    const nonce = randomUUID();
+    const session = (await c.query(`insert into capture_session(nonce,device_id,actor_id,mode,started_at,
+      consent_announced_at,session_token_hash,expires_at,state_at)
+      values($1,'synthetic-device',$2,'meeting',now(),now(),$1,now()+interval '1 hour',now()) returning id`, [nonce, actor.id])).rows[0].id;
+    const candidate = (await c.query(`insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,
+      item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+      values($1,$2,'synthetic',0,'assigned_action',$3,'joe','Synthetic call follow-up','2027-01-02','Synthetic evidence',0.9) returning id`,
+    [session, randomUUID(), deal])).rows[0].id;
+    await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
+      values($1,'deal',$2,$3,'Synthetic next action','2027-01-01',$3)`, [actionId, deal, actor.id]);
+    await c.query(`insert into capture_post_call_action(id,candidate_id,deal_id,owner_id,description,due_on,accepted_by)
+      values($1,$2,$3,$4,'Synthetic call follow-up','2027-01-02',$4)`, [actionId, candidate, deal, actor.id]);
+    await c.query("select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true)");
+    await c.query('set local role carr_reader');
+    const board = await executeRegisteredTool(c, actor, 'deal-room-board', { workspace: 'team' });
+    const actions = board.deals.find(row => row.id === deal).open_actions;
+    assert.deepEqual(actions.map(row => row.item_id), [`next_action:${actionId}`, `capture_post_call_action:${actionId}`]);
+    assert.equal(new Set(actions.map(row => row.item_id)).size, 2, 'table-local UUID collisions preserve distinct cards');
+    await c.query('set local role carr_writer');
+    const home = await executeRegisteredTool(c, actor, 'read-home-inbox-v4', {});
+    for (const action of actions) {
+      const card = home.items.find(row => row.item_id === action.item_id);
+      assert.ok(card, 'Home exact-card identity selects a current card');
+      assert.equal(card.source_id, action.id);
+      assert.equal(card.title, action.description);
+      assert.equal(card.deal_id, deal);
+      assert.equal(card.source_type, action.item_id.split(':')[0]);
+    }
+  } finally { await c.query('rollback'); }
+});
