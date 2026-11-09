@@ -28,10 +28,10 @@
     ]
   },
   "tools/prove-identity-domain-recorded-addresses.py": {
-    "sha256": "15ce1802214c4ac85dadb97c2e3b136f8e74e097c0a633b854315394090a1cd8",
+    "sha256": "401785a9301029e212c2276dd5ad88aa0e0e0a1cce3b17b20435a05eb2c79ba4",
     "commands": [
       "declared --call-wrapper call prospect-research/catch-me-up",
-      "git log -1 --format=%H -- mcp-server/src/party-identity.js",
+      "git log -1 --format=%H -- mcp-server/src/party-identity.ts",
       "git merge-base --is-ancestor"
     ]
   },
