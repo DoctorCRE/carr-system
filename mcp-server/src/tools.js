@@ -8,6 +8,8 @@ import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import clientAnniversaryFamily from "./tool-families/client-anniversary-read.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+import callOutcomesOutputSchema from "../contracts/read-call-outcomes.v1.json" with { type: "json" };
+const REVIEW_CALL_OUTCOME_LEGACY_SUNSET = Date.parse("2026-12-09T06:00:00Z");
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
   .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
@@ -58,6 +60,7 @@ import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
+import { webPushTools } from "./web-push-subscriptions.ts";
 import { notificationTools } from "./notifications.ts";
 import { sessionIdentityTools } from "./session-identity.ts";
 import { dispatchSpineTools } from "./dispatch-spine.ts";
@@ -413,7 +416,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   if ((verb === "set-next-action" && Object.hasOwn(args, "expected_action")) || verb === "update-vendor" || verb === "log-activity" || verb === "record-email-lifecycle" || ["confirm-requirement-reply", "reject-requirement-reply", "dismiss-email-proposal", "confirm-email-filing", "inherit-email-thread", "undo-email-thread-filing", "clear-the-deck-apply"].includes(verb) || verb === "undo-call" || ["add-deal-note", "review-deal-update", "set-next-step", "set-market-agent", "set-national-account-owner", "ping-deal-checklist", "complete-doc-request"].includes(verb) || verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "complete-work-request" || verb === "append-work-request-scope" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "accept-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
 
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
-  if (FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
+  if (verb === "review-call-outcome" || FEATURE_SWITCH_WRITES.has(verb) || HOME_INBOX_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   // A receipt older than REPLAY_WINDOW is not a replay: the key is unknown and the
   // write runs as new (tool_call_expire frees the key on insert). A durable
   // receipt is read back by key elsewhere and keeps replaying.
@@ -9354,6 +9357,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "web-push-subscriptions": "mcp-server/src/web-push-subscriptions.ts",
   "home-inbox": "mcp-server/src/home-inbox.js",
   "home-review": "mcp-server/src/home-review.js",
   "session-identity": "mcp-server/src/session-identity.ts",
@@ -10420,12 +10424,14 @@ registerTools({
   // change with its evidence, plus every card still open) stays on record and
   // on Home until a partner has looked it over, in case one was wrong.
   "read-call-outcomes": {
+    outputSchema: callOutcomesOutputSchema,
     writerConnection: true,
-    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
+    description: "Pipeline-call outcomes not yet reviewed: each call includes its canonical source_version for review-call-outcome.expected_source_version, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const sessions = (await c.query(`
         select s.id as session_id, a.slug as recorder, to_jsonb(s.started_at)#>>'{}' as started_at,
+               ops.post_call_review_target(s.id)->>'source_version' as source_version,
                (s.started_at at time zone 'America/Chicago')::date::text as call_date
           from capture_session s join actor a on a.id=s.actor_id
          where s.post_call and s.outcome_reviewed_at is null
@@ -10466,26 +10472,47 @@ registerTools({
   },
 
   "review-call-outcome": {
-    write: true,
+    write: true, humanOnly: true,
     description: "Mark one pipeline call's outcome reviewed by a partner, so it leaves Home. Applied changes stay applied and still undoable from the deal; open cards stay open.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       idempotency_key: { type: "string" }, session_id: { type: "string" },
+      expected_source_version: { type: "string", minLength: 1, description: "Canonical card source_version the partner reviewed. Required at and after the legacy omission sunset; supplied versions are always enforced." },
     }, required: ["idempotency_key", "session_id"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "review-call-outcome", args, async () => {
-      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
-      const row = (await c.query(
-        `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
-          where id=$1 and post_call and outcome_reviewed_at is null returning id
-          /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
-      if (!row) {
-        const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
-        if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
-        return { ok: true, session_id: args.session_id, already: "reviewed" };
-      }
-      await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
-        new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
-      return { ok: true, session_id: args.session_id, reviewed: true };
-    }),
+    handler: async (c, actor, args) => {
+      const legacyOmission = args.expected_source_version === undefined;
+      if (legacyOmission && Date.now() >= REVIEW_CALL_OUTCOME_LEGACY_SUNSET)
+        throw new ToolError({ error: "missing_required", missing: ["expected_source_version"],
+          hint: 'this verb requires "expected_source_version"' });
+      const result = await withEnvelope(c, actor, "review-call-outcome", args, async () => {
+        if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+        // The parent lock also blocks new candidate FK references. Child locks
+        // cover edits/deletes; a separate statement sees edits committed while waiting.
+        const session = (await c.query(`select id from capture_session
+          where id=$1 and post_call for update /* call-outcome:review-session-lock */`, [args.session_id])).rows[0];
+        if (!session) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+        await c.query("select id from capture_candidate where session_id=$1 order by id for update", [args.session_id]);
+        await c.query("select id from capture_post_call_candidate where session_id=$1 order by id for update", [args.session_id]);
+        const current = (await c.query(`select ops.post_call_review_target($1)->>'source_version' as source_version
+          /* call-outcome:review-version */`, [args.session_id])).rows[0];
+        if (!legacyOmission && current?.source_version !== args.expected_source_version)
+          throw new ToolError({ error: "source_version_changed" });
+        const row = (await c.query(
+          `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
+            where id=$1 and post_call and outcome_reviewed_at is null returning id
+            /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
+        if (!row) {
+          const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
+          if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+          return { ok: true, session_id: args.session_id, already: "reviewed" };
+        }
+        await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
+          new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
+        return { ok: true, session_id: args.session_id, reviewed: true };
+      });
+      if (legacyOmission) console.info(JSON.stringify({ event: "review_call_outcome_legacy_omission",
+        actor_kind: authorizationClassForActor(actor) }));
+      return result;
+    },
   },
 
   "undo-call": {
@@ -10995,6 +11022,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // WR-000113: the R03 notification feed and its acknowledgement receipt.
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
+registerTools(webPushTools({ ToolError }), "web-push-subscriptions");
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
 registerTools(peopleDirectoryTools(), "mcp-server/src/people-directory.ts");

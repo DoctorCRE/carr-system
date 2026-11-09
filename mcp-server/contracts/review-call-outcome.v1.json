@@ -1,0 +1,123 @@
+{
+  "schema": "carr-review-call-outcome/v1",
+  "verb": "review-call-outcome",
+  "request": {
+    "idempotency_key": "UUID per intended review; preserve exact arguments and key on transport retry",
+    "session_id": "Post-call session UUID",
+    "expected_source_version": "String copied from read-call-outcomes calls[].source_version or resolve-action-link-v2 card.source_version"
+  },
+  "compatibility": {
+    "caller": "All callers, including Home and exact action cards",
+    "expected_source_version": "Supplied versions are always enforced. Omission is accepted only before 2026-12-09T06:00:00Z.",
+    "migration": "Expand step. Home migrates separately; a later contract PR removes omission after the migrated Home is deployed. Every accepted omission logs its actor kind."
+  },
+  "receipt": {
+    "ok": true,
+    "session_id": "Requested session UUID",
+    "reviewed": true
+  },
+  "already_reviewed_receipt": {
+    "ok": true,
+    "session_id": "Requested session UUID",
+    "already": "reviewed"
+  },
+  "refusal": {
+    "error": "source_version_changed",
+    "correlation_id": "Server correlation UUID",
+    "hint": "This call changed. Reopen the card and review the current outcome."
+  },
+  "consistency": "Require expected_source_version for every caller at and after the coded sunset. Before then, accept and log omissions. Always enforce supplied versions. Lock the post-call session and both candidate collections, read the canonical SQL card version in a fresh statement, and compare supplied versions before any update. Mismatch rolls back with no session update, event or receipt. Candidate inserts wait on the parent FK lock. Candidate edits and deletes wait on child locks. A concurrent edit either commits before comparison and is checked, or waits until the review transaction completes.",
+  "replay": "The same key, request and principal replay the original receipt with replayed=true within the shared envelope replay window, even after the source changes. Concurrent retries serialize before receipt lookup. Changed request or principal refuses key_reuse.",
+  "authority": "Partner authority is declared by humanOnly metadata and enforced by the existing canExercisePartnerAuthority guard. Sponsored native/local agents remain eligible; unsponsored agents and non-allowlisted unattended calls refuse through the registry. No external sends or candidate resolutions occur.",
+  "source_version": "Exactly ops.post_call_review_target(session.id).source_version, shared by the authorized action-card resolver, outcome read and guarded review. Migration 1168 preserves the existing hash over reviewed state and mutable candidate detail. Content identity is independent of recorder activity or slug. Card access still requires an active authorized principal and the existing recorder-to-partner mapping.",
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "idempotency_key": {
+        "type": "string"
+      },
+      "session_id": {
+        "type": "string"
+      },
+      "expected_source_version": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Canonical card source_version the partner reviewed. Required at and after the legacy omission sunset; supplied versions are always enforced."
+      }
+    },
+    "required": [
+      "idempotency_key",
+      "session_id"
+    ]
+  },
+  "responseSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "session_id": {
+        "type": "string"
+      },
+      "reviewed": {
+        "const": true
+      },
+      "already": {
+        "const": "reviewed"
+      },
+      "replayed": {
+        "const": true
+      }
+    },
+    "required": [
+      "ok",
+      "session_id"
+    ],
+    "oneOf": [
+      {
+        "required": [
+          "reviewed"
+        ]
+      },
+      {
+        "required": [
+          "already"
+        ]
+      }
+    ]
+  },
+  "refusalSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "error": {
+        "const": "source_version_changed"
+      },
+      "correlation_id": {
+        "type": "string"
+      },
+      "hint": {
+        "const": "This call changed. Reopen the card and review the current outcome."
+      }
+    },
+    "required": [
+      "error",
+      "correlation_id",
+      "hint"
+    ]
+  },
+  "statechart": "stateDiagram-v2\nstate Call {\n  state Recorder {\n    [*] --> Active\n    Active --> Revoked: recorder access revoked\n  }\n  --\n  state Source {\n    [*] --> Current\n    Current --> Unseen: candidate edited [Open]\n    %% when Open\n    Unseen --> Current: reopen current card [Refused]\n    %% when Refused\n  }\n  --\n  state Review {\n    [*] --> Open\n    Open --> Refused: stale review attempted [Unseen]\n    %% when Unseen\n    Open --> Reviewed: matching review commits [Current]\n    %% when Current\n    Refused --> Open: reopen current card [Refused]\n    Reviewed --> Reviewed: replay original intent\n  }\n}\n%% never NoUnseenReview: Unseen & Reviewed -- A stale review never marks unseen changes reviewed.\n",
+  "production_proof": {
+    "runner": "tools/prove-review-call-outcome.py",
+    "input": "--merge-sha is the expected merge revision; --observations is a JSON bundle collected by the authorized synthetic production exercise, with source_commit equal to the observed /release git_sha.value. The verifier makes no production writes.",
+    "observations": "session_id, old_version, current_version, refusal (public projection), before (outcome_reviewed_at after refused transaction), receipt, replay, counts (events, receipts, stale_events, stale_receipts, reviewed). Counts are SQL readbacks filtered by the two exact intent keys. The PostgreSQL proof-observations regression records this shape from real registered writes.",
+    "exits": {
+      "0": "Containing release and all supplied observations pass.",
+      "1": "Assertion failure on a containing release.",
+      "78": "Missing, unavailable, older, unrelated, unknown or changed release, or missing observations."
+    },
+    "coverage": "Supplied registered responses and SQL readbacks. Production exercise and evidence collection are separate authorized steps; fixture success is not live proof."
+  }
+}
