@@ -8,8 +8,8 @@
   },
   "compatibility": {
     "caller": "All callers, including Home and exact action cards",
-    "expected_source_version": "required",
-    "migration": "Home must copy the canonical source_version into the review intent. No unversioned exception remains to retire on 2026-12-08."
+    "expected_source_version": "Supplied versions are always enforced. Omission is accepted only before 2026-12-09T06:00:00Z.",
+    "migration": "Expand step. Home migrates separately; a later contract PR removes omission after the migrated Home is deployed. Every accepted omission logs its actor kind."
   },
   "receipt": {
     "ok": true,
@@ -26,7 +26,7 @@
     "correlation_id": "Server correlation UUID",
     "hint": "This call changed. Reopen the card and review the current outcome."
   },
-  "consistency": "Require expected_source_version for every caller. Lock the post-call session and both candidate collections, read the canonical SQL card version in a fresh statement, and compare before any update. Mismatch rolls back with no session update, event or receipt. Candidate inserts wait on the parent FK lock. Candidate edits and deletes wait on child locks. A concurrent edit either commits before comparison and is checked, or waits until the review transaction completes.",
+  "consistency": "Require expected_source_version for every caller at and after the coded sunset. Before then, accept and log omissions. Always enforce supplied versions. Lock the post-call session and both candidate collections, read the canonical SQL card version in a fresh statement, and compare supplied versions before any update. Mismatch rolls back with no session update, event or receipt. Candidate inserts wait on the parent FK lock. Candidate edits and deletes wait on child locks. A concurrent edit either commits before comparison and is checked, or waits until the review transaction completes.",
   "replay": "The same key, request and principal replay the original receipt with replayed=true within the shared envelope replay window, even after the source changes. Concurrent retries serialize before receipt lookup. Changed request or principal refuses key_reuse.",
   "authority": "Partner authority is declared by humanOnly metadata and enforced by the existing canExercisePartnerAuthority guard. Sponsored native/local agents remain eligible; unsponsored agents and non-allowlisted unattended calls refuse through the registry. No external sends or candidate resolutions occur.",
   "source_version": "Exactly ops.resolve_action_card(session.actor_id, post_call_review, session.id).source_version; includes reviewed state and mutable candidate detail. Migration 1167 recognizes the named Quill partner recorders, including Joe MacBook and Studio without changing the hash formula. Partner resolver reads map quill-joe-mac to joe and quill-dell-mac to dell; other principals do not gain access.",
@@ -43,13 +43,12 @@
       "expected_source_version": {
         "type": "string",
         "minLength": 1,
-        "description": "Canonical card source_version the partner reviewed. Required for every caller, including Home."
+        "description": "Canonical card source_version the partner reviewed. Required at and after the legacy omission sunset; supplied versions are always enforced."
       }
     },
     "required": [
       "idempotency_key",
-      "session_id",
-      "expected_source_version"
+      "session_id"
     ]
   },
   "responseSchema": {

@@ -8,6 +8,7 @@ import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import clientAnniversaryFamily from "./tool-families/client-anniversary-read.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+const REVIEW_CALL_OUTCOME_LEGACY_SUNSET = Date.parse("2026-12-09T06:00:00Z");
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
   .filter(address => /^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/u.test(address)).map(address => address.toLowerCase()))];
@@ -10471,34 +10472,43 @@ registerTools({
     description: "Mark one pipeline call's outcome reviewed by a partner, so it leaves Home. Applied changes stay applied and still undoable from the deal; open cards stay open.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       idempotency_key: { type: "string" }, session_id: { type: "string" },
-      expected_source_version: { type: "string", minLength: 1, description: "Canonical card source_version the partner reviewed. Required for every caller, including Home." },
-    }, required: ["idempotency_key", "session_id", "expected_source_version"] },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "review-call-outcome", args, async () => {
-      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
-      // The parent lock also blocks new candidate FK references. Child locks
-      // cover edits/deletes; a separate statement sees edits committed while waiting.
-      const session = (await c.query(`select actor_id from capture_session
-        where id=$1 and post_call for update /* call-outcome:review-session-lock */`, [args.session_id])).rows[0];
-      if (!session) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
-      await c.query("select id from capture_candidate where session_id=$1 order by id for update", [args.session_id]);
-      await c.query("select id from capture_post_call_candidate where session_id=$1 order by id for update", [args.session_id]);
-      const current = (await c.query(`select ops.resolve_action_card($1,'post_call_review',$2)->>'source_version' as source_version
-        /* call-outcome:review-version */`, [session.actor_id, args.session_id])).rows[0];
-      if (current?.source_version !== args.expected_source_version)
-        throw new ToolError({ error: "source_version_changed" });
-      const row = (await c.query(
-        `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
-          where id=$1 and post_call and outcome_reviewed_at is null returning id
-          /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
-      if (!row) {
-        const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
-        if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
-        return { ok: true, session_id: args.session_id, already: "reviewed" };
-      }
-      await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
-        new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
-      return { ok: true, session_id: args.session_id, reviewed: true };
-    }),
+      expected_source_version: { type: "string", minLength: 1, description: "Canonical card source_version the partner reviewed. Required at and after the legacy omission sunset; supplied versions are always enforced." },
+    }, required: ["idempotency_key", "session_id"] },
+    handler: async (c, actor, args) => {
+      const legacyOmission = args.expected_source_version === undefined;
+      if (legacyOmission && Date.now() >= REVIEW_CALL_OUTCOME_LEGACY_SUNSET)
+        throw new ToolError({ error: "missing_required", missing: ["expected_source_version"],
+          hint: 'this verb requires "expected_source_version"' });
+      const result = await withEnvelope(c, actor, "review-call-outcome", args, async () => {
+        if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
+        // The parent lock also blocks new candidate FK references. Child locks
+        // cover edits/deletes; a separate statement sees edits committed while waiting.
+        const session = (await c.query(`select actor_id from capture_session
+          where id=$1 and post_call for update /* call-outcome:review-session-lock */`, [args.session_id])).rows[0];
+        if (!session) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+        await c.query("select id from capture_candidate where session_id=$1 order by id for update", [args.session_id]);
+        await c.query("select id from capture_post_call_candidate where session_id=$1 order by id for update", [args.session_id]);
+        const current = (await c.query(`select ops.resolve_action_card($1,'post_call_review',$2)->>'source_version' as source_version
+          /* call-outcome:review-version */`, [session.actor_id, args.session_id])).rows[0];
+        if (!legacyOmission && current?.source_version !== args.expected_source_version)
+          throw new ToolError({ error: "source_version_changed" });
+        const row = (await c.query(
+          `update capture_session set outcome_reviewed_at=now(), outcome_reviewed_by=$2
+            where id=$1 and post_call and outcome_reviewed_at is null returning id
+            /* call-outcome:review */`, [args.session_id, actor.id])).rows[0];
+        if (!row) {
+          const known = (await c.query("select outcome_reviewed_at from capture_session where id=$1 and post_call", [args.session_id])).rows[0];
+          if (!known) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
+          return { ok: true, session_id: args.session_id, already: "reviewed" };
+        }
+        await writeEvent(c, actor, "review-call-outcome", "actor", actor.id, {
+          new: { session_id: args.session_id, reviewed: true }, idempotency_key: args.idempotency_key });
+        return { ok: true, session_id: args.session_id, reviewed: true };
+      });
+      if (legacyOmission) console.info(JSON.stringify({ event: "review_call_outcome_legacy_omission",
+        actor_kind: authorizationClassForActor(actor) }));
+      return result;
+    },
   },
 
   "undo-call": {

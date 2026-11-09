@@ -136,7 +136,7 @@ for (const [phase, instant] of [
         assert.deepEqual(counts,{events:1,receipts:1});
         const entry=JSON.parse(log.mock.calls.at(-1).arguments[0]);
         assert.equal(entry.event,'review_call_outcome_legacy_omission');
-        assert.equal(entry.actor_kind,identity.human ? 'human' : 'sponsored_agent');
+        assert.equal(entry.actor_kind,identity.human ? 'verified_partner' : 'sponsored_agent');
       } else {
         await assert.rejects(review(args,db,identity),error=>{
           assert.equal(error.payload.error,'missing_required');

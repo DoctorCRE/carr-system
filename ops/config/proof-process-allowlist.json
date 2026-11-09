@@ -160,7 +160,7 @@
     }
   },
   "tools/prove-review-call-outcome.py": {
-    "sha256": "9d886135aff2b74003e33789216475e90b39d95dbe2b553fcba7b95d9ad7c036",
+    "sha256": "5ab81881c918e54b97c5865a0c22ceac1e5b1fb0cdc4cc59651e410b02cad344",
     "commands": [
       "git --no-replace-objects -C repository cat-file -t revision",
       "git --no-replace-objects -C repository merge-base --is-ancestor expected served"

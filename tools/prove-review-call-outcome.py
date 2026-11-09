@@ -28,11 +28,14 @@ def load(path):
     return json.loads(path.read_text())
 
 
-def inspect(observation):
+def validate_observation(observation):
     required = {'source_commit', 'session_id', 'old_version', 'current_version', 'refusal',
                 'before', 'receipt', 'replay', 'counts'}
     if not isinstance(observation, dict) or not required <= observation.keys():
         raise InsufficientEvidence('missing_observations')
+
+
+def inspect(observation):
     session = observation['session_id']
     expected = {'ok': True, 'session_id': session, 'reviewed': True}
     checks = [
@@ -104,6 +107,7 @@ def main():
         if result.returncode:
             raise InsufficientEvidence('release_does_not_contain_merge')
         observation = load(args.observations)
+        validate_observation(observation)
         if observation.get('source_commit') != served:
             raise InsufficientEvidence('observations_from_different_release')
         inspect(observation)
