@@ -696,7 +696,6 @@
     "mcp-server/type-tests/verb-requests.js",
     "mcp-server/uptime-worker.js",
     "ops/fixtures/outlook-triage-unread/UnreadFix.map.mjs",
-    "ops/runtime-error-watch.mjs",
     "ops/scac-mutation-inventory.mjs",
     "pipelines/capture-salesforce-list.js",
     "pipelines/capture-salesforce-report.js",

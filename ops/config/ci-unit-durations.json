@@ -388,6 +388,7 @@
     "rule-scope-catalog.test.mjs": {"milliseconds": 701, "serial": false},
     "rule-scope.test.mjs": {"milliseconds": 662, "serial": false},
     "run-node-suites.test.ts": {"milliseconds": 161, "serial": false},
+    "runtime-error-watch-unit.test.ts": {"milliseconds": 5000, "serial": false},
     "runtime-error-watch.test.mjs": {"milliseconds": 2846, "serial": false},
     "salesforce-browser-read-rw02-mutants.v5.test.mjs": {"milliseconds": 400, "serial": false},
     "salesforce-browser-read-rw02.v5.test.mjs": {"milliseconds": 218, "serial": false},
