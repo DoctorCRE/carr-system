@@ -217,3 +217,53 @@ test('registered contract errors never echo invalid sensitive arguments', async 
       error => !JSON.stringify(error.payload).includes(secret));
   }
 });
+
+
+test('grant collection comparison accepts all migration orders and future appends', async t => {
+  const migrations = new Map();
+  for (const number of [1163,1164,1165]) {
+    const { readdir } = await import('node:fs/promises');
+    const directory = new URL('../../migrations/',import.meta.url);
+    const name = (await readdir(directory)).find(name => name.startsWith(number+'_'));
+    migrations.set(number,await readFile(new URL(name,directory),'utf8'));
+  }
+  const future = migrations.get(1165).match(/do \$grant_contract\$[\s\S]*end \$grant_contract\$;/)[0]
+    .replaceAll('ops.resolve_action_card(p_actor uuid, p_kind text, p_id uuid)','ops.future_grant(p_actor uuid)');
+  migrations.set(1166,future);
+  const references = new Map();
+  for (const order of [[1163,1164,1165],[1164,1165,1163],[1165,1164,1163],
+    [1163,1165,1164],[1164,1163,1165],[1165,1163,1164],
+    [1163,1164,1165,1166],[1164,1165,1166,1163]]) {
+    await t.test(order.join(','),async () => {
+      const db = await postgresDatabase('push-grant-order-');
+      try {
+        const c = db.client;
+        await c.query(`create schema ops;
+          create table public.actor(id uuid primary key,active boolean,kind text,slug text);
+          create table public.attachment(id uuid primary key);
+          create function ops.portfolio_writer_actor_id() returns uuid language sql as $$ select null::uuid $$;
+          create function ops.scac_current_grant_contract() returns jsonb language sql as $$
+            select '{"secdef_execute":[],"retired_secdef_execute":[{"signature":"sentinel","config":["a","b"]}]}'::jsonb $$;`);
+        for (const role of ['carr_reader','carr_writer','carr_authority','carr_jobs','dot_reader']) await c.query('create role '+role);
+        for (const number of order) await c.query('begin;'+migrations.get(number)+';commit;');
+        const row = (await c.query(`select ops.scac_current_grant_contract() as contract,
+          pg_get_functiondef('ops.scac_current_grant_contract()'::regprocedure) as body`)).rows[0];
+        assert.deepEqual(row.contract.retired_secdef_execute,[{signature:'sentinel',config:['a','b']}]);
+        const expected = references.get(order.length) ?? row;
+        references.set(order.length,expected);
+        assert.deepEqual([...row.contract.secdef_execute].map(JSON.stringify).sort(),
+          [...expected.contract.secdef_execute].map(JSON.stringify).sort());
+        const comparison = spawnSync(process.env.CARR_CI_PYTHON || 'python3',['-c',`
+import importlib.util, json, sys
+spec=importlib.util.spec_from_file_location('shadow',sys.argv[1])
+p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
+a,b=json.load(sys.stdin)
+header='-- Name: scac_current_grant_contract(); Type: FUNCTION; Schema: ops; Owner: -\\n'
+assert not p.schema_difference(header+a,header+b), 'grant collection differs across migration order'
+`,new URL('../../ops/migration-shadow.py',import.meta.url).pathname],
+          {input:JSON.stringify([expected.body,row.body]),encoding:'utf8'});
+        assert.equal(comparison.status,0,comparison.stdout+comparison.stderr);
+      } finally { await db.close(); }
+    });
+  }
+});
