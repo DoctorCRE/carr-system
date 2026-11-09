@@ -3,10 +3,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ToolError } from "../src/tool-error.ts";
+import type { VerbInputs } from "../src/verb-contract.ts";
 
 // Keep the legacy registry at its runtime seam until its separate conversion.
 const registryPath = "../src/tools.js";
-const { TOOLS, executeRegisteredTool } = await import(registryPath);
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+const legacy = object(registry);
+const invoke = legacy.executeRegisteredTool;
+assert.ok(typeof invoke === "function");
+async function executeRegisteredTool(client: object, actor: object, verb: keyof VerbInputs, args: object) {
+  assert.ok(typeof invoke === "function");
+  const result: unknown = await invoke(client, actor, verb, args);
+  return object(result);
+}
+const tools = object(legacy.TOOLS);
+const TOOLS = {
+  "record-executed-lease": object(tools["record-executed-lease"]),
+};
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",

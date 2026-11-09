@@ -3,10 +3,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ToolError } from "../src/tool-error.ts";
+import type { VerbInputs } from "../src/verb-contract.ts";
 
 // Keep the legacy registry at its runtime seam until its separate conversion.
 const registryPath = "../src/tools.js";
-const { executeRegisteredTool } = await import(registryPath);
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+function providers(value: unknown): Record<string, unknown>[] {
+  assert.ok(Array.isArray(value));
+  return value.map((item: unknown) => object(item));
+}
+function findProvider(value: unknown, name: string) {
+  const found = providers(value).find((item) => item.provider === name);
+  assert.ok(found);
+  return found;
+}
+function string(value: unknown): string {
+  assert.ok(typeof value === "string");
+  return value;
+}
+const legacy = object(registry);
+const invoke = legacy.executeRegisteredTool;
+assert.ok(typeof invoke === "function");
+async function executeRegisteredTool(client: object, actor: object, verb: keyof VerbInputs, args: object) {
+  assert.ok(typeof invoke === "function");
+  const result: unknown = await invoke(client, actor, verb, args);
+  return object(result);
+}
 
 const AGENT = { id: "10000000-0000-0000-0000-000000000021", slug: "codex", human: false, via: "test" };
 
@@ -210,16 +236,16 @@ test("read-resource-dashboard always returns all five providers, none fabricated
   const client = new ResourceObservationFake();
   const result = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
   assert.equal(result.ok, true);
-  assert.equal(result.providers.length, 5);
-  const byProvider = Object.fromEntries(result.providers.map((p: Observation) => [p.provider, p]));
+  assert.equal(providers(result.providers).length, 5);
+  const byProvider = Object.fromEntries(providers(result.providers).map((p) => [p.provider, p]));
   for (const provider of ["neon", "github", "cloudflare"]) {
-    assert.equal(byProvider[provider].state, "unconfigured");
-    assert.match(byProvider[provider].reason, /C03\/C04\/C05 not built/);
-    assert.equal(byProvider[provider].quantity, null);
+    assert.equal(object(byProvider[provider]).state, "unconfigured");
+    assert.match(string(object(byProvider[provider]).reason), /C03\/C04\/C05 not built/);
+    assert.equal(object(byProvider[provider]).quantity, null);
   }
   for (const provider of ["local_compute", "model_route"]) {
-    assert.equal(byProvider[provider].state, "collector_absent");
-    assert.match(byProvider[provider].reason, /no collector observation received yet/);
+    assert.equal(object(byProvider[provider]).state, "collector_absent");
+    assert.match(string(object(byProvider[provider]).reason), /no collector observation received yet/);
   }
 });
 
@@ -240,7 +266,7 @@ test("record-resource-observation writes a local_compute row with measured and c
   assert.equal(result.state, "ok");
   assert.equal(result.replayed, undefined);
   const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-  const localCompute = dashboard.providers.find((p: Observation) => p.provider === "local_compute");
+  const localCompute = findProvider(dashboard.providers, "local_compute");
   assert.deepEqual(localCompute.measured_capacity, args.measured_capacity);
   assert.deepEqual(localCompute.configured_capacity, args.configured_capacity);
   assert.notDeepEqual(localCompute.measured_capacity, localCompute.configured_capacity);
@@ -294,7 +320,7 @@ test("record-resource-observation host_offline observation carries a reason, nev
   };
   const result = await executeRegisteredTool(client, AGENT, "record-resource-observation", args);
   assert.equal(result.state, "host_offline");
-  assert.match(result.reason, /did not answer/);
+  assert.match(string(result.reason), /did not answer/);
 });
 
 // C03-C05 are not built: neon, github and cloudflare pass JSON-schema
@@ -322,7 +348,7 @@ for (const [index, provider] of NOT_YET_COLLECTIBLE_PROVIDERS.entries()) {
     // And the read door still shows it unconfigured -- the refused write
     // left no trace for this test's own fake to leak either.
     const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-    assert.equal(dashboard.providers.find((p: Observation) => p.provider === provider).state, "unconfigured");
+    assert.equal(findProvider(dashboard.providers, provider).state, "unconfigured");
   });
 }
 
@@ -339,9 +365,9 @@ test("read-resource-dashboard reports a dead collector as stale, not ok forever"
     observed_at: "2026-09-24T11:40:00Z",
   });
   const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-  const modelRoute = dashboard.providers.find((p: Observation) => p.provider === "model_route");
+  const modelRoute = findProvider(dashboard.providers, "model_route");
   assert.equal(modelRoute.state, "stale");
-  assert.match(modelRoute.reason, /20 minute\(s\) old/);
+  assert.match(string(modelRoute.reason), /20 minute\(s\) old/);
 });
 
 test("read-resource-dashboard keeps a fresh observation as its own state, not stale", async () => {
@@ -357,7 +383,7 @@ test("read-resource-dashboard keeps a fresh observation as its own state, not st
     observed_at: "2026-09-24T11:55:00Z",
   });
   const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-  assert.equal(dashboard.providers.find((p: Observation) => p.provider === "local_compute").state, "ok");
+  assert.equal(findProvider(dashboard.providers, "local_compute").state, "ok");
 });
 
 test("record-resource-observation refuses an observed_at more than 5 minutes in the future", async () => {
@@ -392,5 +418,5 @@ test("record-resource-observation accepts a local_compute observation reporting 
   };
   const result = await executeRegisteredTool(client, AGENT, "record-resource-observation", args);
   assert.equal(result.state, "partial");
-  assert.match(result.reason, /memory_total_gb/);
+  assert.match(string(result.reason), /memory_total_gb/);
 });

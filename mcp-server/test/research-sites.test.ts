@@ -13,10 +13,51 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ToolError } from "../src/tool-error.ts";
+import type { VerbInputs } from "../src/verb-contract.ts";
 
 // Keep the legacy registry at its runtime seam until its separate conversion.
 const registryPath = "../src/tools.js";
-const { TOOLS, executeRegisteredTool } = await import(registryPath);
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+const legacy = object(registry);
+const invoke = legacy.executeRegisteredTool;
+assert.ok(typeof invoke === "function");
+async function executeRegisteredTool(client: object, actor: object, verb: keyof VerbInputs, args: object) {
+  assert.ok(typeof invoke === "function");
+  const result: unknown = await invoke(client, actor, verb, args);
+  return object(result);
+}
+const tools = object(legacy.TOOLS);
+function tool(name: string) {
+  const entry = object(tools[name]);
+  const schema = object(entry.inputSchema);
+  const handler = entry.handler;
+  assert.ok(typeof handler === "function");
+  return {
+    write: entry.write,
+    humanOnly: entry.humanOnly,
+    authorityOnly: entry.authorityOnly,
+    description: entry.description,
+    inputSchema: {
+      ...schema,
+      properties: object(schema.properties),
+      required: schema.required,
+      additionalProperties: schema.additionalProperties,
+    },
+    async handler(client: object, actor: object, args: object) {
+      const result: unknown = await handler(client, actor, args);
+      return object(result);
+    },
+  };
+}
+const TOOLS = {
+  "add-research-site": tool("add-research-site"),
+  "remove-research-site": tool("remove-research-site"),
+  "list-research-sites": tool("list-research-sites"),
+};
 
 import { normalizeResearchHost, normalizeTopics, RESEARCH_SITE_WRITE_VERBS, startUrl } from "../src/research-sites.ts";
 
@@ -59,10 +100,11 @@ class Fake {
 }
 
 test("the index verbs are registered and none is human-only", () => {
-  for (const name of ["add-research-site", "remove-research-site", "list-research-sites"]) {
-    assert.ok(TOOLS[name], name);
-    assert.notEqual(TOOLS[name].humanOnly, true, name);
-    assert.notEqual(TOOLS[name].authorityOnly, true, name);
+  for (const name of Object.keys(TOOLS)) {
+    assert.ok(name in TOOLS, name);
+    const entry = tool(name);
+    assert.notEqual(entry.humanOnly, true, name);
+    assert.notEqual(entry.authorityOnly, true, name);
   }
   assert.equal(TOOLS["add-research-site"].write, true);
   assert.equal(TOOLS["remove-research-site"].write, true);
@@ -70,7 +112,9 @@ test("the index verbs are registered and none is human-only", () => {
   assert.deepEqual([...RESEARCH_SITE_WRITE_VERBS].sort(), ["add-research-site", "remove-research-site"]);
   assert.deepEqual(TOOLS["add-research-site"].inputSchema.required, ["idempotency_key", "host", "topics"]);
   assert.deepEqual(TOOLS["remove-research-site"].inputSchema.required, ["idempotency_key", "host", "reason"]);
-  assert.match(TOOLS["list-research-sites"].description, /open internet/);
+  const description = TOOLS["list-research-sites"].description;
+  assert.ok(typeof description === "string");
+  assert.match(description, /open internet/);
 });
 
 test("a machine identity passes the dispatcher into add-research-site", async () => {
@@ -243,6 +287,7 @@ test("a credential-bearing start url is refused before SQL and never echoed", as
         return e;
       },
     );
+  assert.ok(other instanceof ToolError);
   assert.ok(!JSON.stringify(other.payload).includes("synthetic"));
   // A credential pasted as the host is not echoed.
   assert.throws(
@@ -462,6 +507,7 @@ test("the read filters by topic and text and reminds the caller to search beyond
   assert.ok(sql.includes("s.topics @> array[$1]::text[]"));
   assert.deepEqual(params, ["cre-market", "%office%"]);
   assert.deepEqual(out.topics_in_use, ["cre-market", "npi"]);
+  assert.ok(typeof out.reminder === "string");
   assert.match(out.reminder, /open internet/);
   const all = new Fake();
   await TOOLS["list-research-sites"].handler(all, joe, { include_removed: true });

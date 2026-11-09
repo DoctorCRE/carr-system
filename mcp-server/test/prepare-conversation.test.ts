@@ -2,12 +2,46 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { ToolError } from "../src/tool-error.ts";
+import type { VerbInputs } from "../src/verb-contract.ts";
 
 // Keep the legacy registry at its runtime seam until its separate conversion.
 const registryPath = "../src/tools.js";
-const { TOOLS, executeRegisteredTool } = await import(registryPath);
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+function array(value: unknown): unknown[] {
+  assert.ok(Array.isArray(value));
+  return value;
+}
+const legacy = object(registry);
+const invoke = legacy.executeRegisteredTool;
+assert.ok(typeof invoke === "function");
+async function executeRegisteredTool(client: object, actor: object, verb: keyof VerbInputs, args: object) {
+  assert.ok(typeof invoke === "function");
+  const result: unknown = await invoke(client, actor, verb, args);
+  return object(result);
+}
+const tools = object(legacy.TOOLS);
+function tool(name: string) {
+  const entry = object(tools[name]);
+  const schema = object(entry.inputSchema);
+  return {
+    write: entry.write,
+    fullOnly: entry.fullOnly,
+    inputSchema: {
+      ...schema,
+      properties: object(schema.properties),
+      required: schema.required,
+      additionalProperties: schema.additionalProperties,
+    },
+  };
+}
+const TOOLS = {
+  "prepare-conversation": tool("prepare-conversation"),
+};
 
 const JOE = { id: "actor-joe", slug: "joe", human: true };
 
@@ -126,10 +160,10 @@ test("one live record returns its timeline and exact-ref introduction paths", as
 
   assert.equal(out.state, "completed");
   assert.deepEqual(out.match, { kind: "client", name: "Dr. Example", target: "C-127" });
-  assert.equal(out.catch_up.timeline.length, 1);
-  assert.equal(out.introduction.status, "evaluated");
-  assert.equal(out.introduction.target, "C-127");
-  assert.equal(out.introduction.paths[0].ask_ref, "V-CPA-006");
+  assert.equal(array(object(out.catch_up).timeline).length, 1);
+  assert.equal(object(out.introduction).status, "evaluated");
+  assert.equal(object(out.introduction).target, "C-127");
+  assert.equal(object(array(object(out.introduction).paths)[0]).ask_ref, "V-CPA-006");
 
   const timeline = db.calls.find(({ sql }) => sql.includes("from v_subject_timeline"));
   const graph = db.calls.find(({ sql }) => sql.startsWith("with recursive e as"));
@@ -161,7 +195,7 @@ test("a deal brief returns the timeline without pretending a deal is an intro-gr
     query: "Example Dental Expansion",
   });
   assert.equal(out.state, "completed");
-  assert.equal(out.match.kind, "deal");
+  assert.equal(object(out.match).kind, "deal");
   assert.deepEqual(out.introduction, {
     status: "not_applicable",
     reason: "Deals do not represent people or organizations in the introduction graph.",

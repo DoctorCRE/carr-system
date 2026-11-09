@@ -8,7 +8,27 @@ import { ToolError } from "../src/tool-error.ts";
 
 // Keep the legacy registry at its runtime seam until its separate conversion.
 const registryPath = "../src/tools.js";
-const { TOOLS } = await import(registryPath);
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+const legacy = object(registry);
+const tools = object(legacy.TOOLS);
+function tool(name: string) {
+  const entry = object(tools[name]);
+  const handler = entry.handler;
+  assert.ok(typeof handler === "function");
+  return {
+    async handler(client: object, actor: object, args: object) {
+      const result: unknown = await handler(client, actor, args);
+      return object(result);
+    },
+  };
+}
+const TOOLS = {
+  "promote-pool": tool("promote-pool"),
+};
 
 const joe = {
   id: "10000000-0000-0000-0000-000000000002",
