@@ -99,7 +99,7 @@ class Rotation(unittest.TestCase):
                 self.assertIn('Include your retiring T3 thread id in both the handoff and successor prompt.', reason)
                 self.assertNotIn('action "pin"', reason)
                 self.assertIn('call t3_thread_organize with action "unpin"', reason)
-                self.assertIn('only if it is pinned', reason)
+                self.assertIn('only if the handoff or launch prompt says an earlier seat pinned it; otherwise leave pins alone.', reason)
                 self.assertIn('Neither seat may archive the retiring thread.', reason)
                 self.assertIn('Do not use the Claude session id as the T3 thread id.', reason)
 
