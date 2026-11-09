@@ -251,6 +251,10 @@ test('proof CLI consumes registered read replies and refuses contradictions and 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
+    const probe = await fetch(origin, {headers: {'user-agent': 'BlitzClean/31'}, signal: AbortSignal.timeout(2000)});
+    assert.equal(probe.status, 403);
+    assert.equal(await probe.text(), 'proof_release_reader_required');
+    assert.equal(releaseReads, 0);
     await writeFile(wrapper, `#!/usr/bin/env python3
 import json, os, pathlib, sys, time
 pathlib.Path(__file__).with_name("pid").write_text(str(os.getpid()))
