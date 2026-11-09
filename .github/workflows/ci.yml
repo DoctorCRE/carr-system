@@ -68,9 +68,15 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore pinned Python 3.9 tool directory
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.tool_cache }}/Python/3.9.25
+          key: python-tool-ubuntu24-${{ runner.arch }}-3.9.25-${{ hashFiles('.github/workflows/ci.yml') }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.9'
+          python-version: '3.9.25'
+          check-latest: false
       - uses: ./.github/actions/ci-downloads
       - run: python -I tools/dictation-rig/tests/test_python39_imports.py
 

@@ -17,7 +17,96 @@ def workflow(filename="ci.yml"):
         str(ROOT / '.github/workflows' / filename)], cwd=ROOT / 'mcp-server', text=True))
 
 
+def release_download_violations(root):
+    import re
+    violations = []
+    for folder in ('.github', 'ops', 'tools'):
+        for path in (root / folder).rglob('*'):
+            if not path.is_file() or path.suffix not in ('.py', '.sh', '.yml', '.yaml', '.js', '.mjs', '.ts'):
+                continue
+            if any(part in ('node_modules', '__pycache__', '.venv') for part in path.parts):
+                continue
+            name = path.relative_to(root).as_posix()
+            if 'selftest' in path.name or path.name.startswith(('test_', 'test-')):
+                continue
+            # Product artifact retrieval is not a CI tool installer.
+            if name == 'tools/doctorcre-artifact.py':
+                continue
+            urls = re.findall(r'https://github[.]com/[^\s"\']+/releases/(?:latest/)?download[^\s"\']*', path.read_text())
+            for url in urls:
+                if name != 'ops/gitleaks.py' or not url.startswith('https://github.com/gitleaks/gitleaks/releases/download/'):
+                    violations.append(name + ': uncached release download')
+    return violations
+
+
 class Controls(unittest.TestCase):
+    def test_release_download_policy(self):
+        self.assertEqual(release_download_violations(ROOT), [])
+        action = workflow('../actions/ci-downloads/action.yml')
+        archive = next(step for step in action['runs']['steps']
+                       if step.get('with', {}).get('path') == '~/.cache/leak-guard/**/release.tar.gz')
+        self.assertIn('actions/cache@', archive['uses'])
+        self.assertEqual(archive['with']['key'],
+                         "gitleaks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('ops/gitleaks.py') }}")
+        self.assertNotIn('restore-keys', archive['with'])
+        for filename in ('ci.yml', 'main-canary.yml', 'unit-shards.yml'):
+            for job in workflow(filename)['jobs'].values():
+                steps = job.get('steps', [])
+                for i, step in enumerate(steps):
+                    if 'ops/gitleaks.py --install' in step.get('run', ''):
+                        self.assertTrue(any(s.get('uses') == './.github/actions/ci-downloads' for s in steps[:i]))
+                    if 'actions/setup-python@' in step.get('uses', '') and str(step.get('with', {}).get('python-version', '')).startswith('3.9'):
+                        self.assertEqual(step['with']['python-version'], '3.9.25')
+                        self.assertFalse(step['with']['check-latest'])
+                        cache = next(s for s in steps[:i] if s.get('with', {}).get('path') == '${{ runner.tool_cache }}/Python/3.9.25')
+                        self.assertIn('actions/cache@', cache['uses'])
+                        self.assertIn('ubuntu24-${{ runner.arch }}-3.9.25-', cache['with']['key'])
+                        self.assertNotIn('restore-keys', cache['with'])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/new.yml').write_text(
+                'run: curl https://github.com/vendor/tool/releases/download/v1/tool.tar.gz')
+            self.assertEqual(release_download_violations(root),
+                             ['.github/workflows/new.yml: uncached release download'])
+
+    def test_gitleaks_download_states(self):
+        import gitleaks
+        import hashlib
+        import io
+        import tarfile
+        from unittest.mock import patch
+        from urllib.error import HTTPError
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode='w:gz') as bundle:
+            member = tarfile.TarInfo('gitleaks')
+            member.size = 7
+            bundle.addfile(member, io.BytesIO(b'scanner'))
+        trusted = data.getvalue()
+        outage = HTTPError('https://github.com', 504, 'outage', {}, None)
+        for mode in ('cold', 'cached', 'transient', 'exhausted', 'tampered', 'bad-download'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                home = Path(directory)
+                archive = home / '.cache/leak-guard' / gitleaks.VERSION / 'linux_x64/release.tar.gz'
+                if mode in ('cached', 'tampered'):
+                    archive.parent.mkdir(parents=True)
+                    archive.write_bytes(trusted if mode == 'cached' else b'tampered')
+                effects = ([outage, io.BytesIO(trusted)] if mode == 'transient' else
+                           [outage] * 3 if mode == 'exhausted' else
+                           [io.BytesIO(b'invalid' if mode == 'bad-download' else trusted)])
+                with patch.object(Path, 'home', return_value=home), patch.object(gitleaks.platform, 'machine', return_value='x86_64'), patch.object(gitleaks.platform, 'system', return_value='Linux'), patch.dict(gitleaks.ARCHIVES, {'linux_x64': hashlib.sha256(trusted).hexdigest()}), patch.object(gitleaks.urllib.request, 'urlopen', side_effect=effects) as network, patch.object(gitleaks.time, 'sleep') as sleep:
+                    if mode in ('exhausted', 'tampered', 'bad-download'):
+                        with self.assertRaises((OSError, ValueError)):
+                            gitleaks.binary(install=True)
+                        self.assertFalse((archive.parent / 'gitleaks').exists())
+                    else:
+                        executable = gitleaks.binary(install=True)
+                        self.assertEqual(executable.read_bytes(), b'scanner')
+                        self.assertEqual(gitleaks.binary(), executable)
+                    self.assertEqual(network.call_count, {'cached': 0, 'tampered': 0, 'transient': 2, 'exhausted': 3}.get(mode, 1))
+                    self.assertEqual([c.args[0] for c in sleep.call_args_list],
+                                     [2, 4] if mode == 'exhausted' else [2] if mode == 'transient' else [])
+
     def test_pr_gates_install_the_shared_pinned_scanner_before_checks(self):
         jobs = workflow()['jobs']
         install = next(step for step in jobs['secret']['steps']
@@ -33,7 +122,7 @@ class Controls(unittest.TestCase):
         self.assertFalse(setup['with']['package-manager-cache'])
         cache = workflow('../actions/ci-downloads/action.yml')
         self.assertIn('$ImageOS-$ImageVersion', cache['runs']['steps'][0]['run'])
-        npm, pip = cache['runs']['steps'][1:]
+        npm, pip = cache['runs']['steps'][1:3]
         for step, locks in ((npm, ('.nvmrc', 'mcp-server/package-lock.json', 'practice-plugin/package-lock.json')),
                             (pip, ('.python-version', 'requirements.lock'))):
             key = step['with']['key']
@@ -159,4 +248,9 @@ class Controls(unittest.TestCase):
         self.assertEqual(verdict['env']['CI_NEEDS'], '${{ toJSON(needs) }}')
         self.assertNotIn('GH_TOKEN', verdict['env'])
 
-if __name__=='__main__': unittest.main()
+if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--check-downloads':
+        failures = release_download_violations(Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT)
+        print('\n'.join(failures) if failures else 'Release download policy passed')
+        sys.exit(bool(failures))
+    unittest.main()
