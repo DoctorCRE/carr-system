@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/web-push-outbox-postgres.test.ts"
+  ],
+  "entry": [
+    "test/web-push-outbox-postgres.test.ts"
+  ]
+}
