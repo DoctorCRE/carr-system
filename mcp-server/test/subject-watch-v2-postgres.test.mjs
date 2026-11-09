@@ -732,6 +732,35 @@ test('quiet lease clocks and pending delivery', async t => {
    assert.equal(Number((await c.query('select count(distinct notification_id) n from ops.subject_watch_change where watch_generation_id=$1',[target])).rows[0].n),1);
   } finally {await c.query('rollback');}
  });
+ await t.test('committed multi-event transaction delivers one final receipt and retry stays quiet',async()=>{
+  const subject=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic committed delivery','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+  const generation=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,ops.subject_watch_target('deal',$2),'{\"change_kinds\":[\"reply_arrived\"]}','watching') returning id",[actor,subject])).rows[0].id;
+  const receipts=async()=>(await c.query('select * from ops.subject_watch_change where watch_generation_id=$1',[generation])).rows;
+  try {
+   await c.query('begin');
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,subject]);
+   await c.query("update deal set closed_on='2027-01-01' where id=$1",[subject]);
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,subject]);
+   await c.query("update deal set outcome='won' where id=$1",[subject]);
+   assert.equal((await receipts()).length,0,'source events do not finish capture');
+   await c.query('commit');
+   let rows=await receipts();assert.equal(rows.length,1);
+   assert.deepEqual(rows[0].changes.map(x=>x.field),['closed_on','outcome']);
+   assert.equal(rows[0].evidence_refs.length,2);
+   assert.equal(rows[0].disposition,'pending');
+   await c.query('begin');
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].disposition,'emitted');
+   const notification=rows[0].notification_id;assert.ok(notification);
+   await sweep('2033-01-01T12:00:00Z');await sweep('2033-01-01T12:05:00Z');
+   rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].notification_id,notification);
+   assert.equal(Number((await c.query("select count(*) n from ops.notification where dedupe_key like $1",['subject-watch:'+generation+':%'])).rows[0].n),1);
+  } finally {
+   await c.query('rollback');
+   await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[generation]);
+   await c.query('delete from ops.subject_watch_delivery where watch_id=$1',[generation]);
+  }
+ });
  await t.test('1x and 10x synthetic pending loads retain every receipt',async()=>{
   for(const size of [50,500]) {
    let deals=[];
@@ -743,6 +772,7 @@ test('quiet lease clocks and pending delivery', async t => {
     await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) select now(),$1,'update-deal','deal',id,'automation_job' from deal where id=any($2::uuid[])",[actor,deals]);
     assert.equal(Number((await c.query("select count(*) n from ops.subject_watch_change where subject_id=any($1::uuid[])",[deals])).rows[0].n),0,'deferred source transaction has no premature receipts');
     await c.query('commit');
+    await c.query('begin');
     const started=performance.now();let batches=0;
     for(let n=0;n<Math.ceil(size/50)+2;n++){await sweep('2030-01-01T12:00:00Z');batches++;}
     const duration=performance.now()-started;

@@ -8,7 +8,7 @@ Transition coverage:
 
 | Model action | Executable test |
 | --- | --- |
-| Capture, Emit, Replay | crossing without business mutation emits once and later days stay quiet |
+| Capture, Emit, Replay | committed multi-event transaction delivers one final receipt and retry stays quiet; crossing without business mutation emits once and later days stay quiet |
 | Pause, Resume | pause suppresses pending and resume takes quiet baseline |
 | Unwatch | removed generation never emits; busy locks skip and later sweep catches up |
 | Failure, Repair | mint rollback preserves pending and repeated failures quarantine; statement timeout preserves pending work and quarantines two failed attempts |
