@@ -85,6 +85,26 @@ test("probe loading refuses undeclared aliases, kinds, differences and duplicate
   await assert.rejects(loadProbes(file), /duplicate id/);
 });
 
+for (const allowed_differences of ["bad", [[]]]) {
+  test(`probe loading refuses malformed allowed differences ${JSON.stringify(allowed_differences)}`, async (t) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "parity-differences-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const file = path.join(dir, "probes.json");
+    await writeFile(
+      file,
+      JSON.stringify({
+        schema: "carr.portal-parity-probes.v1",
+        aliases: {},
+        allowed_differences,
+        probes: [{ id: "A-G01", kind: "dom", td: "T", target: "body" }],
+      }),
+    );
+    await assert.rejects(loadProbes(file), {
+      message: "allowed difference 0 must list the aspects it may differ in",
+    });
+  });
+}
+
 test("row selection preserves inventory order and refuses malformed ranges", () => {
   const ids = ["A-T01", "A-T02", "A-T03", "V-G01"];
   assert.deepEqual(selectRows("A-T03,A-T01..A-T02,A-T01", ids), ids.slice(0, 3));
