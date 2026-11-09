@@ -2,7 +2,9 @@
   "entry": [
     "typescript/*.test.ts",
     "suite-discovery.ts",
+    "run-tests.ts",
     "test/*.test.ts",
+    "../ops/ci-node-file.mts",
     "test/models/subject-watch-delivery/Delivery.map.ts",
     "test/models/subject-watch-delivery/Queue.map.ts",
     "src/subject-watch-scheduler.ts"
@@ -17,6 +19,9 @@
     "test/suite-discovery.test.ts",
     "src/public-errors.ts",
     "test/review-call-outcome-postgres.test.ts",
+    "run-tests.ts",
+    "test/run-node-suites.test.ts",
+    "../ops/ci-node-file.mts",
     "src/subject-watch-scheduler.ts"
   ]
 }
