@@ -39,6 +39,9 @@ class Source:
                     'document_family_id': 'sha256:' + hashlib.sha256(TEXT).hexdigest(),
                     'lineage_verified': False, 'r2_key': 'documents/synthetic/file.pdf',
                     'mime': 'application/pdf', 'bytes': len(TEXT)}, 'receipt': self.receipt}
+        if verb == 'record-deal-document-text':
+            self.text_derivative = args
+            return {'ok': True}
         assert verb == 'record-deal-extraction'
         self.submissions.append(args)
         self.receipt = {'ok': True, 'job_id': KEY, 'batch_id': KEY, 'canonical': False}
@@ -64,6 +67,19 @@ class ExtractionTests(unittest.TestCase):
         run_job(job, call=store, read_bytes=lambda doc: self.fail('retry read source'),
                 text_pages=lambda data: [], model=model)
         self.assertEqual(len(store.submissions), 1)
+
+    def test_complete_text_is_retained_before_model_work_even_when_model_fails(self):
+        store = Source()
+        pages = [TEXT.decode() + '\nUncited complete-document sentinel.', 'Second page.\n']
+        def model(*args, **kwargs):
+            self.assertEqual(store.text_derivative['pages'], pages)
+            self.assertEqual(store.text_derivative['content_hash'], hashlib.sha256(TEXT).hexdigest())
+            raise RuntimeError('synthetic failure after retention')
+        with self.assertRaisesRegex(RuntimeError, 'synthetic failure after retention'):
+            run_job(ExtractionJob(UUID(KEY), UUID(ENTITY), UUID(DOC), 'lease', 'haiku'),
+                    call=store, read_bytes=lambda doc: TEXT, text_pages=lambda data: pages, model=model)
+        self.assertEqual(store.text_derivative['status'], 'produced')
+        self.assertEqual(store.submissions, [])
 
     def test_all_document_types_have_schema_valid_bound_observations(self):
         for kind in ('loi', 'lease', 'counter', 'amendment'):

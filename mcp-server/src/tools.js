@@ -26,6 +26,7 @@ import { invoiceTrackerTools } from "./invoice-tracker.ts";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.ts";
 import { readDealChecklist } from "./deal-checklist.ts";
+import { dealDocumentTextTools } from "./deal-document-text.ts";
 import { dealExtractionTools } from "./deal-extraction.ts";
 import { factGenerationTools } from "./fact-generation.ts";
 import { factReviewTools } from "./fact-review.ts";
@@ -9367,6 +9368,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "market-terms": "mcp-server/src/market-terms.ts",
   "fact-generation": "mcp-server/src/fact-generation.ts",
   "deal-extraction": "mcp-server/src/deal-extraction.ts",
+  "deal-document-text": "mcp-server/src/deal-document-text.ts",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
   "agent-profile": "mcp-server/src/agent-profiles.js",
@@ -11054,6 +11056,7 @@ registerTools(marketTermsTools(), "market-terms");
 registerTools(leadFollowUpTools(), "lead-follow-up");
 registerTools(factGenerationTools({ withEnvelope, writeEvent }), "fact-generation");
 registerTools(dealExtractionTools(), "deal-extraction");
+registerTools(dealDocumentTextTools(), "deal-document-text");
 
 // The partner room (Idea 78): shared AI-to-AI transcript both Macs poll; raw
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.

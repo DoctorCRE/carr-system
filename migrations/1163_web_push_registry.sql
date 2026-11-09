@@ -145,7 +145,15 @@ begin
     into entries from (values
       ('ops.web_push_registry(p_operation text, p_args jsonb, p_session text)','v')
     ) functions(signature,volatility) cross join (values('carr_writer'),('carr_authority')) roles(grantee);
-  contract:=jsonb_set(contract,'{secdef_execute}',(contract->'secdef_execute')||entries);
+  -- 1164 may already be installed. Keep its grants after 1163 in both upgrade orders.
+  select jsonb_agg(entry order by
+    case when entry->>'signature' in (
+      'ops.record_deal_document_text(p_actor uuid, p_args jsonb)',
+      'ops.list_deal_document_text_sources(p_actor uuid, p_after uuid, p_limit integer)'
+    ) then 1 else 0 end, ordinal)
+    into entries from jsonb_array_elements((contract->'secdef_execute')||entries)
+      with ordinality as grants(entry,ordinal);
+  contract:=jsonb_set(contract,'{secdef_execute}',entries);
   execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
     'select '||quote_literal(contract::text)||'::jsonb');
 end $append_grant$;

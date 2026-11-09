@@ -1523,6 +1523,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "list-deal-document-text-sources": {
+    "ingress_key": "mcp-tool:list-deal-document-text-sources",
+    "source_locator": "mcp-server/src/deal-document-text.ts",
+    "schema_digest": "29eac64332f909ae7cd3e04f2b3a61009fb4a08054a3b4520029d0f710271f63",
+    "write": false,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "list-deal-documents": {
     "ingress_key": "mcp-tool:list-deal-documents",
     "source_locator": "mcp-server/src/deal-files.js",
@@ -2344,6 +2354,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-deal-document-text": {
+    "ingress_key": "mcp-tool:read-deal-document-text",
+    "source_locator": "mcp-server/src/deal-document-text.ts",
+    "schema_digest": "daae6eec2961a80a96f6217bd0a0b5d842fc8dc3f3535d3650ae70d75a1e3e23",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": false,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-deal-extraction-source": {
     "ingress_key": "mcp-tool:read-deal-extraction-source",
     "source_locator": "mcp-server/src/deal-extraction.ts",
@@ -2912,6 +2932,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": true,
     "human_caller_only": true,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "record-deal-document-text": {
+    "ingress_key": "mcp-tool:record-deal-document-text",
+    "source_locator": "mcp-server/src/deal-document-text.ts",
+    "schema_digest": "4007dd3efb9925ed67bbba93afd8ad8faeb918f6580cd33adc330b2b32b4b484",
+    "write": true,
+    "human_only": false,
+    "human_caller_only": false,
+    "authority_only": false,
     "delegates_to": []
   },
   "record-deal-execution": {
