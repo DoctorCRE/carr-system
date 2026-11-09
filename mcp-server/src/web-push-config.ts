@@ -1,3 +1,5 @@
+// Read the public VAPID configuration for signed-in partners.
+
 import type { ToolError as ErrorClass } from "./tool-error.ts";
 import type { Actor, Db } from "./verb-contract.ts";
 
