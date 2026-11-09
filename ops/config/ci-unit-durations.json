@@ -421,7 +421,7 @@
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},
     "standing-context-territory.test.mjs": {"milliseconds": 5044, "serial": true},
     "subject-watch-v2-postgres.test.mjs": {"milliseconds": 13292, "serial": true},
-    "subject-watch-v2-contract.test.ts": {"milliseconds": 200, "serial": false},
+    "subject-watch-v2-contract.test.ts": {"milliseconds": 1000, "serial": false},
     "subject-watch-v2.test.mjs": {"milliseconds": 2000, "serial": false},
     "subject-watches-postgres.test.mjs": {"milliseconds": 25540, "serial": true},
     "subject-watches.test.mjs": {"milliseconds": 2130, "serial": false},
