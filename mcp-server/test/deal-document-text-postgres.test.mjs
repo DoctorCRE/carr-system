@@ -126,9 +126,9 @@ test('retained text lifecycle and authenticated registered contract', async t =>
         await assert.rejects(c.query("update actor set slug=slug"), e => e.code === '42501');
         await c.query('set enable_seqscan=off');
         const plan = await c.query('explain select id from public.actor where slug=$1', ['codex']);
-        assert.match(JSON.stringify(plan.rows), /Index Scan/);
+        assert.match(JSON.stringify(plan.rows), /Index (Only )?Scan/);
       } finally { await c.query('reset enable_seqscan; reset role'); }
-      await refuses(invoke('list-deal-document-text-sources',{limit:1},{...robot,slug:'missing'}),'unauthenticated');
+      await refuses(invoke('list-deal-document-text-sources',{limit:1},{...partner,slug:'dell'}),'unauthenticated');
     });
     await t.test('slug-only automation resolves on the stateless production path', async () => {
       const { id: _robotId, ...readerRobot } = robot;
@@ -182,7 +182,8 @@ grant select on deal,email_message_summary to carr_reader;`);
     });
     await t.test('unattended and non-partner registered readers refuse retained text', async () => {
       const unattended = unattendedActorForToken('Bearer fixture', JSON.stringify({ joe: { nightly: 'fixture' } }));
-      unattended.id = robot.id;
+      await c.query("insert into actor(id,slug,kind,display_name) values($1,$2,'automation','Synthetic runner')",
+        ['00000000-0000-4000-8000-000000000005', unattended.slug]);
       await refuses(invoke('read-deal-document-text', bound, unattended), 'unattended_runner_authority_not_admitted');
       await refuses(invoke('read-deal-document-text', bound, robot), 'human_only_verb_requires_verified_partner');
     });
