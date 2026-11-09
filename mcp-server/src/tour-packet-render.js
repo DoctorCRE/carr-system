@@ -4,7 +4,7 @@
  * routing, or map capability.
  */
 
-import { CLIENT_TOUR_PACKET_COLUMNS, CLIENT_TOUR_STOP_ENVELOPE_KEYS } from "./tour-operations-contract.js";
+import { CLIENT_TOUR_PACKET_COLUMNS, CLIENT_TOUR_STOP_ENVELOPE_KEYS } from "./tour-operations-contract.ts";
 import { CLIENT_TEXT_MAX_CHARS, isClientRouteLabel, isClientSafeText, normalizeClientText } from "./tour-client-value-safety.js";
 
 // 1.3.0 (V5-J303): fields are CLIENT_TOUR_FIELD_KEYS only (no per-property

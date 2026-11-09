@@ -18,7 +18,7 @@ import test from "node:test";
 import {
   CLIENT_TOUR_FIELD_KEYS, CLIENT_TOUR_PACKET_COLUMNS, CLIENT_TOUR_STOP_ENVELOPE_KEYS,
   isClientTourFieldKey,
-} from "../src/tour-operations-contract.js";
+} from "../src/tour-operations-contract.ts";
 import {
   CLIENT_ROUTE_LABEL_PATTERN, CLIENT_TEXT_DIGIT_JOIN, CLIENT_TEXT_DISALLOWED, CLIENT_TEXT_DISALLOWED_SOURCE, CLIENT_TEXT_MAX_CHARS, CLIENT_TEXT_PHONE_JOIN,
   CLIENT_TEXT_RULES, CLIENT_TEXT_SUITE_RANGE,

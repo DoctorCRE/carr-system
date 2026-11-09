@@ -18,7 +18,10 @@
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
     "test/web-push-sender.test.ts",
-    "test/web-push-outbox-postgres.test.ts"
+    "test/web-push-outbox-postgres.test.ts",
+    "src/tour-operations-contract.ts",
+    "test/tour-operations-characterization.test.ts",
+    "src/sha256.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
