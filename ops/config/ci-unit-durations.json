@@ -269,6 +269,7 @@
     "invoice-tracker.test.mjs": {"milliseconds": 1126, "serial": false},
     "jev-deal-reading.test.mjs": {"milliseconds": 232, "serial": false},
     "jev-needs-joe-advisory.test.mjs": {"milliseconds": 2722, "serial": false},
+    "job-passport-characterization.test.ts": {"milliseconds": 1225, "serial": false},
     "job-passport-panel.test.mjs": {"milliseconds": 746, "serial": false},
     "journey-one-clock.v5.test.mjs": {"milliseconds": 263, "serial": false},
     "lead-approval-queue-reader.test.mjs": {"milliseconds": 18480, "serial": true},

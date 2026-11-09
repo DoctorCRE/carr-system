@@ -16,6 +16,7 @@
     "src/web-push-config.ts",
     "src/web-push-sender.ts",
     "src/web-push-outbox.ts",
-    "../docs/models/web-push-sender/PushSender.map.ts"
+    "../docs/models/web-push-sender/PushSender.map.ts",
+    "../dealroom/js/job-passport.ts"
   ]
 }
