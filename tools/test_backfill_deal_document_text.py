@@ -9,6 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('backfill_cli', Path(__file__).resolve().parents[1] / 'bin/backfill-deal-document-text.py')
+assert spec is not None and spec.loader is not None
 cli = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cli)
 
