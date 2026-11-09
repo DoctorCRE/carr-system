@@ -7,6 +7,7 @@ import fcntl
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import tempfile
 from collections.abc import Callable
@@ -191,8 +192,12 @@ def capture_chrome(url: str, *, run: Callable[..., Any] | None = None,
     bridge = ['/usr/bin/osascript', str(ROOT / 'pipelines/read-salesforce-list.applescript')]
     tab = ''
     try:
+        node = shutil.which('node', path=os.pathsep.join([os.environ.get('PATH', os.defpath),
+                                                        '/opt/homebrew/bin', '/usr/local/bin']))
+        if node is None:
+            raise OSError('Node is unavailable for Salesforce capture')
         script = subprocess.run([
-            'node', '--input-type=module', '-e',
+            node, '--input-type=module', '-e',
             'import {readFileSync} from "node:fs"; '
             'import {stripTypeScriptTypes} from "node:module"; '
             'process.stdout.write(stripTypeScriptTypes(readFileSync(process.argv[1], "utf8")))',

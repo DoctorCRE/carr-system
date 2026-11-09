@@ -4,6 +4,7 @@ import io
 import datetime as dt
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -125,7 +126,8 @@ class RefreshTests(unittest.TestCase):
         run = Mock(side_effect=[subprocess.CompletedProcess([], 0, '123', ''),
                                subprocess.CompletedProcess([], 0, json.dumps({'state': 'failed', 'reason': 'Salesforce sign-in needed'}), ''),
                                subprocess.CompletedProcess([], 0, '', '')])
-        result = refresh.capture_chrome(URL, run=run, wait=lambda _: None)
+        with patch.dict(os.environ, {'PATH': '/usr/bin:/bin'}):
+            result = refresh.capture_chrome(URL, run=run, wait=lambda _: None)
         self.assertEqual(result['reason'], 'Salesforce sign-in needed')
         expression = run.call_args_list[1].args[0][-1]
         self.assertIn('window.__carrSalesforceRefresh', expression)
