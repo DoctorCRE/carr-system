@@ -101,45 +101,10 @@ tests retain the foreign-tenant and own-mailbox cases.
 
 # Execute the production proof
 
-The coordinator owns the live mutations and release observation. This worker
-used disposable synthetic PostgreSQL only. Release smoke alone cannot establish
-notification behavior. The supplemental verifier is
-`ops/verify-subject-watch-proof.py`. It has no write mode or provider sends.
-Each capture runs one repeatable-read transaction with a five-second SQL timeout,
-returns two aggregate rows and saves only a selection hash, subscription presence, and counts.
-The initial live selection must contain a watched, visible deal and an unwatched, visible
-control for the same partner. Merged clients and deleted or merged parties fail
-selection. Keep these records otherwise quiet during the experiment. Concurrent
-changes fail closed through unexpected count deltas. Use a configured libpq
-service with read access to the watch, event, notification and receipt tables.
-Never place a live connection string in a command or artifact.
-
-The coordinator runs all of these steps after release identity matches.
-
-1. Select the live watched and unwatched deal UUIDs for one partner.
-2. Run `python ops/verify-subject-watch-proof.py capture` with those `--watched`, `--unwatched`, and `--actor` values and `--output /tmp/watch-before.json`.
-3. Execute one registered update-deal per selected deal, changing one field each, and retain each exact idempotency key and request.
-4. Capture the same selection to `/tmp/watch-after.json`.
-5. Replay both original registered requests with their original idempotency keys.
-6. Capture the same selection to `/tmp/watch-replay.json`.
-7. Execute registered unwatch-subject-v1 for the watched deal and the selected partner.
-8. Capture the same selection to `/tmp/watch-removed.json`.
-9. Execute a distinct registered update-deal on that deal with its current version and a fresh idempotency key.
-10. Capture the same selection to `/tmp/watch-suppressed.json`.
-11. Run `python ops/verify-subject-watch-proof.py verify --before /tmp/watch-before.json --after /tmp/watch-after.json --replay /tmp/watch-replay.json --removed /tmp/watch-removed.json --suppressed /tmp/watch-suppressed.json`.
-
-The final command must return zero and report watched 1, unwatched 0, replay 0,
-and suppressed 0. Each initial change adds one receipt. Replay adds neither
-receipts nor notifications. The watched change adds one notification with exactly
-`/deals?deal=<watched UUID>`. Unwatch changes only subscription presence. The
-post-unwatch change adds one receipt and zero notifications. A missing source,
-wrong destination, wrong subscription state, zero watched wake, duplicate wake,
-or changed control fails. The PostgreSQL suite executes the exact CLI against
-registered Joe, Dell and sponsored writer paths. It injects wrong destinations
-at notification insertion and verifies refusal. Production observation remains
-coordinator-owned and has not run in this worker.
-
-
+`ops/verify-subject-watch-proof.py` is the single pending-receipt observation CLI.
+It replaces the obsolete notification-count experiment. Delivered-notification
+proof belongs to WATCH slice 4. See the pending-receipt procedure in
+`../subject-watch-changes/design.md`. This worker used synthetic PostgreSQL only.
 
 # Cursor contention regression
 
@@ -155,64 +120,3 @@ lock. A busy scanner now returns zero without moving the cursor. A later event
 retries lease scanning from that durable cursor, while direct deal notifications
 remain in the source transaction. Existing bounded-batch and rollback tests
 prove later scans neither skip leases nor commit failed progress.
-
-# Proof verifier correction
-
-Card: WR617.S4.J16
-
-This is a bounded one-session correction to proof observation, not a consumer
-redesign. The read-only capture owns a selection hash, subscription presence,
-and three counts per deal: notifications, event receipts, and notifications
-whose destination equals `/deals?deal=<selected UUID>`. The verifier owns the
-five-snapshot sequence. The consumer and notification storage retain ownership
-of all writes.
-
-Two interfaces were considered. Exporting notification IDs and destinations
-would let the verifier inspect individual rows. Computing exact-destination
-counts in the same repeatable-read SQL statement preserves aggregate artifacts
-and avoids a second read or per-notification query. Choose the latter. Existing
-wrong destinations do not invalidate a fresh experiment; the new notification
-must increase the exact-destination count by one.
-
-The proof states are Watched baseline, Changed once, Replayed unchanged,
-Unsubscribed, and Changed while unsubscribed. Capture records subscription
-presence instead of requiring it throughout the experiment. Verification
-requires it in the first three samples and refuses it in the final two.
-Unsubscribe must leave counts unchanged. The subsequent registered change must
-add one receipt and zero notifications. All five samples bind the same selection.
-Concurrent changes fail the expected deltas. Schema-invalid old count-only
-artifacts fail closed rather than retain a compatibility mode.
-
-Capture still uses one two-record query with indexed subqueries, one repeatable
-read transaction, and a five-second timeout. At 10x retained notifications the
-aggregate lookup is the first growing cost; no new N+1 query, fan-out, cache,
-queue, external call, circuit breaker, or write idempotency key is introduced.
-SQL or file failures refuse the proof. Source writes remain separately authorized
-registered requests with retained idempotency keys. Five bounded captures replace
-three. Release observation remains in the existing registered release runner,
-so this supplemental CLI does not read `/release`.
-
-Throughput checkpoint: reproduce both proof gaps on the existing registered
-writer fixture, commit the failing tests, fix the capture and verifier, then run
-focused acceptance and strict CI. No new suite needs a duration entry.
-
-```mermaid
-stateDiagram-v2
-    [*] --> WatchedBaseline: capture subscribed deal and unwatched control
-    WatchedBaseline --> ChangedOnce: registered changes add one exact destination
-    ChangedOnce --> ReplayedUnchanged: same-key requests add nothing
-    ReplayedUnchanged --> Unsubscribed: unwatch removes subscription only
-    Unsubscribed --> ChangedWhileUnsubscribed: registered change adds receipt only
-    ChangedWhileUnsubscribed --> Proven: verify all captures
-    ChangedOnce --> Refused: new destination does not match watched deal
-    Unsubscribed --> Refused: subscription still exists
-    ChangedWhileUnsubscribed --> Refused: notification count increases
-```
-
-The proof sequence is executable PostgreSQL acceptance, not a new TLC claim.
-The original finite model does not model source merges, deletion, resubscription,
-or actor isolation. The checked-in database tests exercise these cases.
-
-The supplemental read-only verifier lives in `ops/` alongside other production
-proof runners. The current delivery inventory reserves `tools/` for installed
-Studio runtime. This verifier does not install or operate a Studio service.

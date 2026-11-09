@@ -41,3 +41,26 @@ test('v2 schemas exclude actor overrides and require generation for lifecycle mu
       assert.ok(verb.inputSchema.required.includes('subscription_id') && verb.inputSchema.required.includes('base_version'));
   }
 });
+
+test('change read declares and enforces verified human authority', async()=>{
+  const { TOOLS, executeRegisteredTool } = await import('../src/tools.js');
+  const tool=TOOLS['read-subject-watch-changes-v1'];
+  assert.ok(tool);
+  assert.equal(tool.humanOnly,true);
+  assert.equal(tool.humanCallerOnly,true);
+  let queries=0;
+  await assert.rejects(executeRegisteredTool({query:async()=>{queries++;}},
+    {slug:'joe-local',human:false},'read-subject-watch-changes-v1',
+    {subject_type:'deal',subject_id:'00000000-0000-4000-8000-000000000001',subscription_id:'00000000-0000-4000-8000-000000000002'}));
+  assert.equal(queries,0);
+});
+
+test('change response fixture uses the production parser and refuses malformed receipts',async()=>{
+  const {parseSubjectWatchChanges}=await import('../contracts/subject-watch-change.v1.js');
+  const schema=JSON.parse(readFileSync(new URL('../contracts/subject-watch-change.v1.json',import.meta.url)));
+  const fixture=JSON.parse(readFileSync(new URL('../contracts/subject-watch-change.v1.fixture.json',import.meta.url)));
+  assert.equal(new Validator(schema).validate(fixture).valid,true);
+  assert.equal(parseSubjectWatchChanges(fixture),fixture);
+  const malformed=structuredClone(fixture);malformed.changes[0].disposition='delivered';
+  assert.throws(()=>parseSubjectWatchChanges(malformed),/invalid_subject_watch_change_v1/);
+});
