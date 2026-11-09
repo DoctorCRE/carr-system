@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolCallContent } from "../src/untrusted-text.js";
+import { toolCallContent } from "../src/untrusted-text.ts";
 
 const LOCAL_VERB = fileURLToPath(new URL("../local-verb.mjs", import.meta.url));
 
