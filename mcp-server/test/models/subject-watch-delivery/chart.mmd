@@ -1,0 +1,94 @@
+---
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
+---
+stateDiagram-v2
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
+  }
+  class legendWorks works
+  state "Watch on, alert delivered,<br/>card settled, processing<br/>healthy" as s0
+  state "Watch on, alert delivered,<br/>card visible, processing<br/>healthy" as s1
+  state "Watch on, change waiting,<br/>no inbox card, processing<br/>delayed" as s2
+  state "Watch on, change waiting,<br/>no inbox card, processing<br/>healthy" as s3
+  state "Watch on, change waiting,<br/>no inbox card, processing<br/>needs repair" as s4
+  state "Watch on, no waiting<br/>change, no inbox card,<br/>processing delayed" as s5
+  state "Watch on, no waiting<br/>change, no inbox card,<br/>processing healthy" as s6
+  state "Watch on, no waiting<br/>change, no inbox card,<br/>processing needs repair" as s7
+  state "Watch paused, alert<br/>delivered, card settled,<br/>processing healthy" as s8
+  state "Watch paused, alert<br/>delivered, card visible,<br/>processing healthy" as s9
+  state "Watch paused, no waiting<br/>change, no inbox card,<br/>processing delayed" as s10
+  state "Watch paused, no waiting<br/>change, no inbox card,<br/>processing healthy" as s11
+  state "Watch paused, no waiting<br/>change, no inbox card,<br/>processing needs repair" as s12
+  state "Watch removed, alert<br/>delivered, card settled,<br/>processing healthy" as s13
+  state "Watch removed, alert<br/>delivered, card visible,<br/>processing healthy" as s14
+  state "Watch removed, no waiting<br/>change, no inbox card,<br/>processing delayed" as s15
+  state "Watch removed, no waiting<br/>change, no inbox card,<br/>processing healthy" as s16
+  state "Watch removed, no waiting<br/>change, no inbox card,<br/>processing needs repair" as s17
+  [*] --> s6
+  s6 --> s3 : A meaningful change arrives
+  s6 --> s11 : Pause watch or Access is<br/>withdrawn
+  s6 --> s16 : Remove watch
+  s3 --> s1 : The alert appears
+  s3 --> s11 : Pause watch or Access is<br/>withdrawn
+  s3 --> s16 : Remove watch
+  s3 --> s2 : Processing fails
+  s11 --> s6 : Resume quietly
+  s11 --> s16 : Remove watch
+  s1 --> s9 : Pause watch or Access is<br/>withdrawn
+  s1 --> s14 : Remove watch
+  s1 --> s0 : Settle the card
+  s2 --> s1 : The alert appears
+  s2 --> s10 : Pause watch or Access is<br/>withdrawn
+  s2 --> s15 : Remove watch
+  s2 --> s4 : Processing fails
+  s9 --> s1 : Resume quietly
+  s9 --> s14 : Remove watch
+  s9 --> s8 : Settle the card
+  s14 --> s13 : Settle the card
+  s0 --> s8 : Pause watch or Access is<br/>withdrawn
+  s0 --> s13 : Remove watch
+  s10 --> s5 : Resume quietly
+  s10 --> s15 : Remove watch
+  s4 --> s12 : Pause watch or Access is<br/>withdrawn
+  s4 --> s17 : Remove watch
+  s4 --> s3 : Repair processing
+  s8 --> s0 : Resume quietly
+  s8 --> s13 : Remove watch
+  s5 --> s2 : A meaningful change arrives
+  s5 --> s10 : Pause watch or Access is<br/>withdrawn
+  s5 --> s15 : Remove watch
+  s12 --> s7 : Resume quietly
+  s12 --> s17 : Remove watch
+  s12 --> s11 : Repair processing
+  s17 --> s16 : Repair processing
+  s7 --> s4 : A meaningful change arrives
+  s7 --> s12 : Pause watch or Access is<br/>withdrawn
+  s7 --> s17 : Remove watch
+  s7 --> s6 : Repair processing
+  class s0 works
+  class s1 works
+  class s2 works
+  class s3 works
+  class s4 works
+  class s5 works
+  class s6 works
+  class s7 works
+  class s8 works
+  class s9 works
+  class s10 works
+  class s11 works
+  class s12 works
+  class s13 works
+  class s14 works
+  class s15 works
+  class s16 works
+  class s17 works
