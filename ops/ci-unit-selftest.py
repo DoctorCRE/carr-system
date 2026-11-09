@@ -287,6 +287,32 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('2 suites exactly once', result.stdout)
 
+    def test_successful_shard_warns_only_when_elapsed_exceeds_estimate(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        receipt = self.root / 'receipt.json'
+        for predicted, warning in ((1, True), (60000, False)):
+            with self.subTest(predicted=predicted):
+                (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+                    'suites': {'suite.test.mjs': {'milliseconds': predicted, 'serial': True}}}))
+                result = subprocess.run(
+                    ['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+                    cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': '1',
+                                       'CARR_CI_UNIT_RECEIPT': str(receipt)},
+                    capture_output=True, text=True, timeout=30)
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0, output)
+                self.assertEqual(json.loads(receipt.read_text()), {'shard': 1, 'suites': ['suite.test.mjs']})
+                self.assertEqual('::warning::CI timing refresh needed' in output, warning, output)
+                if warning:
+                    self.assertIn('delivery coordinator', output)
+                    self.assertIn('predicted 1ms', output)
+                    self.assertRegex(output, r'observed [0-9]+ms')
+
     def test_shard_budget_refuses_before_npm(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
