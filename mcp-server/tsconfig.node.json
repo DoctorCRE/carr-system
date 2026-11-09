@@ -18,7 +18,11 @@
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
     "test/web-push-sender.test.ts",
-    "test/web-push-outbox-postgres.test.ts"
+    "test/web-push-outbox-postgres.test.ts",
+    "test/export-email-domains.test.ts",
+    "test/fact-observations.test.ts",
+    "test/find-and-catch-up.test.ts",
+    "test/fixtures/chrome-launch-fixture.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
