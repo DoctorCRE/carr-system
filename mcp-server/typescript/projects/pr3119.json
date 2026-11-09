@@ -1,0 +1,16 @@
+{
+  "node": [
+    "src/mutation-registry.ts",
+    "src/postgres.ts",
+    "src/reports-web.ts",
+    "test/postgres.test.ts",
+    "test/reports-web.test.ts",
+    "test/siep-11-mutation-registry.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/postgres.test.ts",
+    "test/reports-web.test.ts",
+    "test/siep-11-mutation-registry.test.ts"
+  ]
+}

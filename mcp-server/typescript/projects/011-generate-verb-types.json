@@ -1,0 +1,8 @@
+{
+  "node": [
+    "generate-verb-types.ts"
+  ],
+  "entry": [
+    "generate-verb-types.ts"
+  ]
+}

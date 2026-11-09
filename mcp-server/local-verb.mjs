@@ -96,7 +96,7 @@ import { fileURLToPath } from "node:url";
 import { humanOnlyGuidance, isHumanOnlyError } from "./human-only-hint.mjs";
 import {
   LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential, tokenFileSecurityIssue,
-} from "./local-client-auth.mjs";
+} from "./local-client-auth.ts";
 
 // ZERO-INSTALL DEFAULT PATH. The ordinary `run.sh call` route is only an HTTPS
 // client of the deployed Worker. It must therefore boot from a clean checkout
