@@ -142,9 +142,62 @@ def test_download_failures() -> None:
             check("wrong byte count fails closed", False)
 
 
+def test_download_cache() -> None:
+    pin, archive, manifest = bundle("cache")
+    with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
+        with patch.object(ARTIFACT, "download", side_effect=[archive, manifest]) as fetch:
+            result = ARTIFACT.artifact_inputs(pin)
+            ARTIFACT.verify(pin, *result)
+            check("cold cache downloads and verifies exact artifact", result == (archive, manifest) and fetch.call_count == 2)
+        with patch.object(ARTIFACT, "download", side_effect=AssertionError("offline cache must not fetch")):
+            try:
+                result = ARTIFACT.artifact_inputs(pin)
+                check("warm cache works offline", result == (archive, manifest))
+            except AssertionError:
+                check("warm cache works offline", False)
+        cache = Path(directory) / '.cache/doctorcre-artifact' / pin['archive_sha256'] / pin['manifest_sha256']
+        for filename in ('doctorcre-app.tar', 'doctorcre-app.manifest.json'):
+            path = cache / filename
+            if not path.exists():
+                check("verified files persisted for actions/cache", False)
+                continue
+            original = path.read_bytes()
+            path.write_bytes(b'X' * len(original))
+            with patch.object(ARTIFACT, "download", side_effect=AssertionError("corruption must refuse")) as fetch:
+                try:
+                    ARTIFACT.artifact_inputs(pin)
+                except ValueError:
+                    check("cached " + filename + " tamper refused without fetch", not fetch.called)
+                else:
+                    check("cached tamper refused", False)
+            path.write_bytes(original)
+        (cache / 'doctorcre-app.manifest.json').unlink(missing_ok=True)
+        with patch.object(ARTIFACT, "download", side_effect=[archive, manifest]) as fetch:
+            result = ARTIFACT.artifact_inputs(pin)
+            check("interrupted cache fill recovers with a verified pair", result == (archive, manifest) and fetch.call_count == 2)
+        other_pin, other_archive, other_manifest = bundle("changed-pin")
+        with patch.object(ARTIFACT, "download", side_effect=[other_archive, other_manifest]) as fetch:
+            result = ARTIFACT.artifact_inputs(other_pin)
+            check("changed pin cannot reuse previous bytes", result == (other_archive, other_manifest) and fetch.call_count == 2)
+    for mode in ('bad-archive', 'bad-manifest', 'outage'):
+        with tempfile.TemporaryDirectory() as directory, patch.object(Path, "home", return_value=Path(directory)):
+            effects: list[bytes | urllib.error.HTTPError] = [archive, b'invalid'] if mode == 'bad-manifest' else [b'invalid', manifest]
+            if mode == 'outage':
+                effects = [urllib.error.HTTPError(pin['archive_url'], 504, 'outage', Message(), None)]
+            with patch.object(ARTIFACT, "download", side_effect=effects):
+                try:
+                    result = ARTIFACT.artifact_inputs(pin)
+                    ARTIFACT.verify(pin, *result)
+                except (ValueError, urllib.error.HTTPError):
+                    check(mode + " leaves no published cache files", not list(Path(directory).rglob('doctorcre-app.*')))
+                else:
+                    check(mode + " refused", False)
+
+
 def main() -> int:
     print("doctorcre-artifact-selftest: exact pin and reversible activation")
     test_download_failures()
+    test_download_cache()
     prior_pin, prior_archive, prior_manifest = bundle("prior")
     candidate_pin, candidate_archive, candidate_manifest = bundle("candidate", repository="DoctorCRE/doctorcre-app")
 
