@@ -29,7 +29,7 @@ class RunnerTests(unittest.TestCase):
 
         def transport(argv, **kwargs):
             selected = run([node, '--input-type=module', '-e',
-                'import {selectLocalClientCredential} from "./mcp-server/local-client-auth.mjs"; '
+                'import {selectLocalClientCredential} from "./mcp-server/local-client-auth.ts"; '
                 'let raw = ""; for await (const chunk of process.stdin) raw += chunk; '
                 'const env = JSON.parse(raw); const value = selectLocalClientCredential(env); '
                 'console.log(JSON.stringify({profile: value.profile, '

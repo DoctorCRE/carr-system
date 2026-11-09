@@ -1,6 +1,6 @@
 // Contact evidence is captured from the local mail/calendar stores. This job
 // consumes those dated activities; it never opens a mailbox or sends a message.
-import { DRAFT_ELIGIBILITY_SQL } from "./lead-draft-eligibility.js";
+import { DRAFT_ELIGIBILITY_SQL } from "./lead-draft-eligibility.ts";
 import { createHash } from "node:crypto";
 import { canExercisePartnerAuthority } from "./partner-authority.js";
 import { isCalendarDate } from "./calendar-date.ts";

@@ -21,12 +21,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as intake
 
-CRATE = ROOT / 'vendor/hxprobe'
 STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 EPOCH_TICKS = 621_355_968_000_000_000
 OUTBOX = 3_155_378_975_999_999_999  # DateTime.MaxValue: last-modified time of a message in the Outbox
@@ -125,7 +125,7 @@ def decode(*objects, files=None):
     atexit.register(shutil.rmtree, tmp, True)
     source, target = tmp / 'synthetic.hxd', tmp / 'synthetic.db'
     source.write_bytes(STORE(b''.join(objects)))
-    args = [str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)] + ([str(files)] if files else [])
+    args = [str(test_binary()), 'db', str(source), str(target)] + ([str(files)] if files else [])
     result = subprocess.run(args, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     return target
@@ -134,7 +134,7 @@ def decode(*objects, files=None):
 class LocalKeyExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True, timeout=180)
+        test_binary()
 
     def export(self, *objects, columns='sender, sent_unix, copies, local_keys', files=None):
         db = sqlite3.connect(decode(folder(50, 'Inbox'), *objects, files=files))
@@ -151,7 +151,7 @@ class LocalKeyExportTests(unittest.TestCase):
             source.write_bytes(STORE(b''.join(objects)))
             cache = Path(files) if files else root / 'Files'
             cache.mkdir(exist_ok=True)
-            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'census', '--immutable-copy',
+            result = subprocess.run([str(test_binary()), 'census', '--immutable-copy',
                                      str(source), str(cache), '7'], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, 'census rejected synthetic input')
             for secret in ('PRIVATE-SUBJECT', 'private@example.test', 'PRIVATE-BODY', 'PRIVATE-NAME'):
@@ -192,7 +192,7 @@ class LocalKeyExportTests(unittest.TestCase):
                     block = STORE(b''.join(message(1000 + k) for k in range(start, start + 40)))
                     handle.write(block if start == 0 else block[64:])
             (out / 'Files').mkdir()
-            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'census', '--immutable-copy',
+            result = subprocess.run([str(test_binary()), 'census', '--immutable-copy',
                                      str(source), str(out / 'Files'), '7'], capture_output=True, check=True)
             self.assertEqual(result.stderr, b'')
             self.assertLess(len(result.stdout), 8 * 1024 * 1024)
@@ -220,7 +220,7 @@ class LocalKeyExportTests(unittest.TestCase):
             def fail_decode(*args):
                 raise intake.DecodeError('synthetic')
             with patch.object(intake, '_snapshot', snapshot), patch.object(intake, 'load_settings',
-                    return_value=SimpleNamespace(decoder=CRATE / 'target/debug/hxprobe')):
+                    return_value=SimpleNamespace(decoder=test_binary())):
                 with self.assertRaises(intake.DecodeError), intake._decode(out, out, fail_decode, 7, 'synthetic@example.test'):
                     self.fail('decoder must fail')
             self.assertFalse(list(out.glob('work-*')))
@@ -280,7 +280,7 @@ class LocalKeyExportTests(unittest.TestCase):
             root = Path(temp)
             source = root / 'PRIVATE-SUBJECT.hxd'
             source.write_bytes(b'PRIVATE-BODY')
-            command = [str(CRATE / 'target/debug/hxprobe'), 'census', '--immutable-copy',
+            command = [str(test_binary()), 'census', '--immutable-copy',
                        str(source), str(root), '7']
             bad = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual((bad.returncode, bad.stdout, bad.stderr), (2, '', 'census input rejected\n'))

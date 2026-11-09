@@ -11,12 +11,12 @@ import tempfile
 import sys
 from unittest.mock import patch
 import unittest
+from hxprobe_test_binary import test_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_send as send
 
-CRATE = ROOT / 'vendor/hxprobe'
 FIXTURE = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
 STORE, SLOTS, utf16, recipient = FIXTURE['STORE'], FIXTURE['SLOTS'], FIXTURE['utf16'], FIXTURE['recipient']
 TO, CC, BCC, OTHER = 204, 205, 206, 413
@@ -36,14 +36,14 @@ def message(key, guid=b'\x11' * 16, replies=0, subject='Synthetic thread', in_re
 class RecipientThreadExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True, timeout=180)
+        test_binary()
 
     def export(self, *objects):
         with tempfile.TemporaryDirectory() as tmp:
             source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
             source.write_bytes(STORE(b''.join(objects)))
             before = source.read_bytes()
-            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+            result = subprocess.run([str(test_binary()), 'db', str(source), str(target)],
                                     capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(source.read_bytes(), before)
