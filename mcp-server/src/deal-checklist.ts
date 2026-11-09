@@ -32,7 +32,7 @@ type ChecklistItem = {
 type ChecklistPhase = { id: string; label: string; items: ChecklistItem[] };
 /** The deal fields the checklist reads; tools.js passes its full Deal Room record. */
 type ChecklistDeal = {
-  requests?: RequirementRequest[];
+  requests?: RequirementRequest[] | undefined;
   id: string;
   owner?: string | null;
   type?: string | null;
@@ -291,11 +291,7 @@ export async function readDealChecklist(
     day: "2-digit",
   }).format(now);
   return {
-    ...deriveDealChecklist(
-      { ...record, commissions: commissions.rows, ...(requests ? { requests: requests.rows } : {}) },
-      sources.rows,
-      today,
-    ),
+    ...deriveDealChecklist({ ...record, commissions: commissions.rows, requests: requests?.rows }, sources.rows, today),
     requests_state: requests ? "current" : "unavailable",
   };
 }

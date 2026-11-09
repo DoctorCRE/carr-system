@@ -285,3 +285,41 @@ test("failure to establish a savepoint propagates without rollback", async (t) =
   await assert.rejects(readDealChecklist(client, { id: "synthetic" }), (value) => value === error);
   assert.equal(statements.length, 1);
 });
+
+test("unavailable request storage discards caller-supplied request projections", async (t) => {
+  const { readDealChecklist } = await import("../src/deal-checklist.ts");
+  const client = new Client();
+  t.mock.method(client, "query", async (sql: string) => ({
+    rows: sql.includes("checklist:doctrine") ? sources() : [],
+  }));
+  const result = await readDealChecklist(
+    client,
+    {
+      id: "synthetic",
+      type: "renewal",
+      requests: [
+        {
+          id: "stale",
+          row_key: "requirements",
+          owner: "joe",
+          due_on: "2026-10-19",
+          document_type: "requirements",
+          satisfied: false,
+          receipts: [],
+          status: "open",
+          fulfilled_at: null,
+          fulfilled_by: null,
+          evidence_attachment_id: null,
+        },
+      ],
+    },
+    new Date("2026-10-20T12:00:00Z"),
+  );
+  assert.ok("requests_state" in result);
+  assert.equal(result.requests_state, "unavailable");
+  const row = result.phases.flatMap((phase) => phase.items).find((item) => item.id === "requirements");
+  assert.ok(row);
+  assert.equal(row.request, undefined);
+  assert.equal(row.status, "not_recorded");
+  assert.deepEqual(result.due_items, []);
+});
