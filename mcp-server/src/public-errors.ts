@@ -24,6 +24,9 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["push_not_configured", "Web push is not configured."],
+  ["push_config_invalid", "The configured web push public key is invalid."],
+  ["push_session_required", "Sign in as a partner to read web push configuration."],
   ["unauthenticated", "The authenticated actor could not be resolved."],
   ["document_not_found", "The document is unavailable in the current scope."],
   ["source_version_changed", "This call changed. Reopen the card and review the current outcome."],

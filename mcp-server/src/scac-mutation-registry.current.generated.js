@@ -2844,6 +2844,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-web-push-config-v1": {
+    "ingress_key": "mcp-tool:read-web-push-config-v1",
+    "source_locator": "mcp-server/src/web-push-config.ts",
+    "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-web-push-subscriptions-v1": {
     "ingress_key": "mcp-tool:read-web-push-subscriptions-v1",
     "source_locator": "mcp-server/src/web-push-subscriptions.ts",

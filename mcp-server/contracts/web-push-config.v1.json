@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "web-push-config.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ok": { "const": true },
+    "schema_version": { "const": "web-push-config.v1" },
+    "public_key": { "type": "string", "pattern": "^B[A-Za-z0-9_-]{86}$" },
+    "vapid_key_version": { "const": "v1" }
+  },
+  "required": ["ok", "schema_version", "public_key", "vapid_key_version"]
+}
