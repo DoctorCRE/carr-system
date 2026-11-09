@@ -14,4 +14,4 @@ The chart and bounded TLC model cover request session state and card lifecycle. 
 
 Repository impact. carr-system owns this producer contract. doctorcre-app consumes the reply response in its next slice and needs no edit in this producer PR. software-factory owns no product runtime or contract and needs no change.
 
-Regenerate the model check in a scratch directory by copying statechart.mmd as reply-links.mmd together with ReplyLinks.tla, ReplyLinks.cfg and ReplyLinks.map.mjs, then running the statechart skill from-spec ReplyLinks.tla command with the installed TLA2TOOLS and JAVA paths. PostgreSQL tests remain the authority for locks, recipient binding and idempotency.
+Regenerate the model check in a scratch directory by copying statechart.mmd as reply-links.mmd together with ReplyLinks.tla, ReplyLinks.cfg and ReplyLinks.map.ts, then running the statechart skill from-spec ReplyLinks.tla command with the installed TLA2TOOLS and JAVA paths. PostgreSQL tests remain the authority for locks, recipient binding and idempotency.
