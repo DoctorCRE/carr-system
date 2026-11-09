@@ -1,0 +1,56 @@
+---
+config:
+  markdownAutoWrap: false
+  state:
+    useMaxWidth: false
+---
+stateDiagram-v2
+  classDef works fill:#f4f6f7,stroke:#566573,color:#1b2631
+  classDef wrong fill:#fdedec,stroke:#c0392b,color:#7b241c
+  classDef fixed fill:#e9f7ef,stroke:#1e8449,color:#145a32
+  classDef worksPath fill:#f4f6f7,stroke:#1f3a93,stroke-width:4px,color:#1b2631
+  classDef wrongPath fill:#fdedec,stroke:#1f3a93,stroke-width:4px,color:#7b241c
+  classDef fixedPath fill:#e9f7ef,stroke:#1f3a93,stroke-width:4px,color:#145a32
+  state "Legend" as legend {
+    state "Works" as legendWorks
+  }
+  class legendWorks works
+  state "Accepted by push service |<br/>Retry is permitted |<br/>Installation active | No<br/>HTTP request" as s0
+  state "Accepted by push service |<br/>Retry is permitted |<br/>Installation revoked | No<br/>HTTP request" as s1
+  state "Notification being<br/>submitted | Retry is<br/>permitted | Installation<br/>active | No HTTP request" as s2
+  state "Notification being<br/>submitted | Retry is<br/>permitted | Installation<br/>active | Submitting to<br/>push service" as s3
+  state "Notification cancelled |<br/>Retry is permitted |<br/>Installation active | No<br/>HTTP request" as s4
+  state "Notification cancelled |<br/>Retry is permitted |<br/>Installation revoked | No<br/>HTTP request" as s5
+  state "Notification expired |<br/>Retry is permitted |<br/>Installation active | No<br/>HTTP request" as s6
+  state "Notification expired |<br/>Retry is permitted |<br/>Installation revoked | No<br/>HTTP request" as s7
+  state "Notification failed |<br/>Retry is permitted |<br/>Installation active | No<br/>HTTP request" as s8
+  state "Notification failed |<br/>Retry is permitted |<br/>Installation revoked | No<br/>HTTP request" as s9
+  state "Submission outcome unknown<br/>| Automatic retry stopped<br/>| Installation active | No<br/>HTTP request" as s10
+  state "Submission outcome unknown<br/>| Automatic retry stopped<br/>| Installation revoked |<br/>No HTTP request" as s11
+  state "Waiting to notify | Retry<br/>is permitted |<br/>Installation active | No<br/>HTTP request" as s12
+  [*] --> s12
+  s12 --> s2 : claim persisted
+  s12 --> s4 : source or subscription<br/>unavailable
+  s12 --> s6 : lifetime ends
+  s2 --> s3 : begin http
+  s2 --> s10 : connection lost or worker<br/>closes
+  s4 --> s5 : revoke
+  s6 --> s7 : revoke
+  s3 --> s0 : provider accepts
+  s3 --> s8 : permanent rejection
+  s10 --> s11 : revoke
+  s0 --> s1 : revoke
+  s8 --> s9 : revoke
+  class s0 works
+  class s1 works
+  class s2 works
+  class s3 works
+  class s4 works
+  class s5 works
+  class s6 works
+  class s7 works
+  class s8 works
+  class s9 works
+  class s10 works
+  class s11 works
+  class s12 works
