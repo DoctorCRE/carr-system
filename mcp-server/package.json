@@ -12,7 +12,7 @@
     "portal-parity": "node portal-parity/cli.mjs",
     "generate:registry": "python3 ../tools/regen.py registry",
     "check:registry": "node ../ops/scac-mutation-inventory.mjs",
-    "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
+    "check:staged": "python3 ../ops/strict-projects.py && node typescript/check.ts && node --test typescript/*.test.ts",
     "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
     "fix": "biome check --write ."
   },
