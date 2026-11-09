@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { toolCallContent, UNTRUSTED_NOTICE } from '../src/untrusted-text.js';
+import { toolCallContent, UNTRUSTED_NOTICE } from '../src/untrusted-text.ts';
 import { emailProposalTools } from '../src/email-proposals.js';
 
 test('link queue executes hydration, filing and cursor paging in PostgreSQL', async t => {

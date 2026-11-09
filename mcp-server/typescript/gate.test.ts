@@ -27,6 +27,12 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     ]) {
       cpSync(join(source, file), join(pkg, file));
     }
+    const packagePath = join(pkg, "package.json");
+    const packageConfig = object(packagePath);
+    writeFileSync(
+      packagePath,
+      JSON.stringify({ ...packageConfig, scripts: { "check:staged": "node typescript/check.ts" } }),
+    );
     const fixtureFiles = ["typescript/check.ts", "typescript/migration.ts", "typescript/gate.test.ts"];
     for (const [name, files] of [
       ["tsconfig.node.json", fixtureFiles],
@@ -35,7 +41,10 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       const config = object(join(pkg, name));
       writeFileSync(join(pkg, name), JSON.stringify({ ...config, files }));
     }
-    writeFileSync(join(pkg, "knip.json"), JSON.stringify({ entry: ["typescript/*.test.ts"], project: fixtureFiles }));
+    writeFileSync(
+      join(pkg, "knip.json"),
+      JSON.stringify({ entry: ["typescript/*.test.ts"], project: [...fixtureFiles].sort() }),
+    );
     symlinkSync(join(source, "node_modules"), join(pkg, "node_modules"), "dir");
     writeFileSync(
       join(pkg, "typescript/migration.json"),
@@ -66,7 +75,8 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     writeFileSync(scopePath, JSON.stringify(baseline));
     const git = (...args: string[]) => execFileSync("git", args, { cwd: root, env: fixtureEnv });
     writeFileSync(join(pkg, "legacy.ts"), legacySource);
-    git("add", "mcp-server/typescript/migration.json", "mcp-server/legacy.ts");
+    writeFileSync(join(pkg, "legacy.js"), legacySource);
+    git("add", "mcp-server/typescript/migration.json", "mcp-server/legacy.ts", "mcp-server/legacy.js");
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "baseline");
     git("update-ref", "refs/remotes/origin/main", "HEAD");
     writeFileSync(join(pkg, "new.js"), "export const value = 1;\n");
@@ -206,6 +216,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
         const graph: unknown = JSON.parse(originalGraph);
         assert.ok(typeof graph === "object" && graph !== null && "project" in graph && Array.isArray(graph.project));
         graph.project.push(path.replace("mcp-server/", ""));
+        graph.project.sort();
         writeFileSync(graphPath, JSON.stringify(graph));
         writeFileSync(nodeConfig, JSON.stringify(config));
       }
@@ -392,6 +403,15 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
       list.pop();
       rmSync(join(root, path));
     }
+    save();
+    git("add", "mcp-server/typescript/migration.json");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "frozen ceiling");
+    git("rm", "-f", js);
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "converted");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    writeFileSync(join(root, js), text);
+    assert.match(migrationIssues(pkg, gated).join("\n"), /New first-party JavaScript/);
+    rmSync(join(root, js));
     scope.legacyTypeScript.pop();
     save();
     assert.match(migrationIssues(pkg, gated).join("\n"), /main-only.ts.*pre-existing main file, list it/);

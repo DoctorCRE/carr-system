@@ -25,7 +25,7 @@ import {
 } from "../src/identity.js";
 import { partnerAuthoritySlugForActor } from "../src/partner-authority.js";
 import { PROFILES, allowedIn, authorityDsnForActor, profileForActor, readCallCountSQL } from "../src/mcp.js";
-import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.mjs";
+import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.ts";
 import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
 
 const SECRET = "unattended-secret-fixture";
@@ -413,3 +413,25 @@ for (const verb of WATCH_V2_VERBS) {
     assert.equal(error.payload.actor_class, "sponsored_agent");
   });
 }
+
+import { hermesActorForToken, hermesCosActorForToken } from "../src/identity.js";
+
+test("Hermes credentials retain server-derived sponsorship", () => {
+  const selected = selectLocalClientCredential({ CARR_MCP_CLIENT_PROFILE: "hermes-projector" }, "CARR_HERMES_MCP_TOKEN=hermes-secret");
+  const serverActor = hermesActorForToken(
+    `Bearer ${selected.token}`, JSON.stringify({ "hermes-pilot": "hermes-secret" }));
+  assert.deepEqual({ slug: serverActor.slug, sponsor: serverActor.sponsoring_human_slug,
+    via: serverActor.via, hermes: serverActor.hermes }, {
+    slug: "hermes-pilot", sponsor: "joe", via: "hermes-token", hermes: true,
+  }, "the selected client credential resolves to exact server-derived reader provenance");
+});
+
+test("Hermes CoS credentials retain server-derived sponsorship", () => {
+  const selected = selectLocalClientCredential({ CARR_MCP_CLIENT_PROFILE: "hermes-cos" }, "CARR_HERMES_COS_MCP_TOKEN=cos-secret");
+  const serverActor = hermesCosActorForToken(
+    `Bearer ${selected.token}`, JSON.stringify({ "hermes-pilot": "cos-secret" }));
+  assert.deepEqual({ slug: serverActor.slug, sponsor: serverActor.sponsoring_human_slug,
+    via: serverActor.via, hermesCos: serverActor.hermesCos }, {
+    slug: "hermes-pilot", sponsor: "joe", via: "hermes-cos-token", hermesCos: true,
+  });
+});

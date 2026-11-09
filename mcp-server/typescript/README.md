@@ -1,37 +1,42 @@
 # Staged strict TypeScript gate
 
-Run `npm --prefix mcp-server run check` for the existing Worker contract checks,
-strict gate, typed gate tests and bounded legacy test runner. CI's existing
-`types` class runs `check:staged`, the Worker contract checks and Python types.
-CI's `unit` class owns the legacy runner, so it does not run twice in CI.
+Run `npm --prefix mcp-server run check`. `check:staged` first runs
+`python3 ops/strict-projects.py` from the repository root (npm supplies the
+relative path). The generated strict configs, Knip graph and Fallow baseline
+are ignored build products, never conversion PR edits.
 
-`tsconfig.base.json` owns the standard flags. Node-run files join the explicit
-list in `tsconfig.node.json`. Worker files join `tsconfig.worker.json`, which
-retains strict flags and removes Node globals. Its list starts empty because
-P02 converts no product modules. The existing `tsconfig.json` still checks all
-current Worker contracts and generated Cloudflare declarations. Worker
-conversions must include the generated declarations in their strict project.
+Each conversion adds its own JSON file under `typescript/projects/`, named
+for its card or PR. Fields `node`, `worker` and `entry` contain paths relative
+to mcp-server. List each strict file in node or worker, and real executable
+and test roots in entry. Libraries remain reachable through consumers.
+The generator unions admissions deterministically, ignores retired paths,
+and refuses uncovered entries or malformed admissions. Compiler flags remain
+strict, Worker globals remain separate, and Knip checks all admitted files,
+exports, types and duplicates. Biome and syntax refusals cover the same graph.
 
-`migration.json` lists legacy JavaScript and TypeScript paths across the entire repository. Both lists may only shrink against the authoritative base branch. On first
-introduction, only paths already on the base can be listed. Listed TypeScript
-bytes must equal the same path on that base, read directly with Git. No stored
-hash grants an exemption. Legacy JavaScript stays editable.
-A changed or new TypeScript file must
-join a strict project. A new JavaScript file fails, including outside packages.
-There is no tool-exception allowlist. New first-party files must join a strict
-TypeScript project. Config, migration-schema and baseline refusals end with a
-`Remedy:` line and exit 1 without a stack trace. Unexpected internal errors
-propagate unchanged with their original message and stack trace. Remove migration
-entries as their files are converted. Delete the temporary migration gate when
-these lists empty.
+`migration.json` is a frozen historical ceiling. Do not prune it during a
+conversion. Its lists may never grow against main. JavaScript is allowed only
+if both the ceiling and main's actual tree contain its path. A deleted path
+cannot return. Legacy TypeScript must match main's bytes unless admitted to
+a strict project. New JavaScript fails throughout the repository.
 
-Add every strict file to Knip's explicit project list. List real executable or
-test roots as entries; libraries must remain reachable through their consumers.
-Knip checks files, exports, types and duplicates in this admitted graph.
-Dependency analysis remains with the existing package checks while legacy
-modules own those dependencies. Biome and prohibited-syntax checks run over
-every admitted file, with warnings treated as errors.
+Suite discovery remains authoritative. Duration measurements are advisory.
+Extension-only TypeScript renames reuse the old JavaScript timing; genuinely
+new suites receive the conservative serial 60-second default and are planned
+separately from measured work. Budget and exact-once receipt checks still
+refuse unsafe plans. Only a dedicated timing capture updates the table.
 
-The typed tests copy the real gate and configuration into a disposable Git
-repository and run the installed compiler, Biome and Knip against clean code
-and negative seeds. They need only the checked-out files and installed packages.
+Fallow's historical baseline lives in `fallow-baselines/dead-code.legacy.json`.
+The generator maps existing finding identities to a TypeScript replacement
+only when the old file is absent and its replacement exists. It never grants
+new export exemptions. Weekly Fallow generates its input before auditing.
+
+## Updating an in-flight conversion
+
+After merging main, preserve the pre-merge head in `conversion_head` and run
+`python3 ops/strict-projects.py --admit-from "$conversion_head" --name pr3103`
+(use that PR's unique number). This imports the old compiler and Knip admissions
+into one independent fragment, then regenerates the ignored tool inputs.
+Keep main's migration inventory, duration table and Fallow historical baseline.
+Remove the old tracked generated configs from the index. Resolve actual source
+conflicts individually, then rerun the normal checks before committing.

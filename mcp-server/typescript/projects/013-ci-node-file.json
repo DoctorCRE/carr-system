@@ -1,0 +1,8 @@
+{
+  "node": [
+    "../ops/ci-node-file.mts"
+  ],
+  "entry": [
+    "../ops/ci-node-file.mts"
+  ]
+}
