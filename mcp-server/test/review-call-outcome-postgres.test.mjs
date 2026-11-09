@@ -1,7 +1,7 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { Validator } from '@cfworker/json-schema';
 import pg from 'pg';
 import { TOOLS, ToolError, executeRegisteredTool } from '../src/tools.js';
@@ -72,9 +72,48 @@ test('matching review stores one receipt and replay returns original receipt aft
   assert.equal((await db.query('select count(*)::int n from event where idempotency_key=$1',[args.idempotency_key])).rows[0].n,1);
 });
 
-test('legacy Home caller can omit version until its 2026-12-08 retirement', async () => {
-  const {session} = await seed();
-  assert.equal((await review({session_id:session,idempotency_key:randomUUID()})).reviewed,true);
+test('proof observations come from the registered writer and SQL readback', async () => {
+  const {session,candidate}=await seed();
+  const old=await version(session), staleKey=randomUUID(), matchKey=randomUUID();
+  await db.query(`update capture_candidate set payload='{"action":"Proof unseen edit"}' where id=$1`,[candidate]);
+  const current=await version(session);
+  let refusal;
+  try { await review({session_id:session,expected_source_version:old,idempotency_key:staleKey}); }
+  catch(error) { refusal=publicError(error,{env:{CORRELATION_ID:randomUUID()}}); }
+  await unchanged(session,staleKey);
+  const before=(await db.query('select outcome_reviewed_at from capture_session where id=$1',[session])).rows[0];
+  const args={session_id:session,expected_source_version:current,idempotency_key:matchKey};
+  const receipt=await review(args), replay=await review(args);
+  const counts=(await db.query(`select
+    (select count(*)::int from event where idempotency_key=$1) events,
+    (select count(*)::int from tool_call where idempotency_key=$1) receipts,
+    (select count(*)::int from event where idempotency_key=$2) stale_events,
+    (select count(*)::int from tool_call where idempotency_key=$2) stale_receipts,
+    (select outcome_reviewed_at is not null from capture_session where id=$3) reviewed`,[matchKey,staleKey,session])).rows[0];
+  const observations={session_id:session,old_version:old,current_version:current,refusal,before,receipt,replay,counts};
+  const contract=JSON.parse(await readFile(new URL('../contracts/review-call-outcome.v1.json',import.meta.url),'utf8'));
+  assert.equal(new Validator(contract.refusalSchema).validate(refusal).valid,true);
+  for(const response of [receipt,replay]) assert.equal(new Validator(contract.responseSchema).validate(response).valid,true);
+  if(process.env.REVIEW_PROOF_OBSERVATIONS) await writeFile(process.env.REVIEW_PROOF_OBSERVATIONS,JSON.stringify(observations));
+});
+
+test('every caller including Home and sponsored exact-card agents must supply a version', async () => {
+  for (const identity of [actor, {...(await db.query("select id,slug from actor where slug='joe-local'")).rows[0],human:false,native_agent_verified:true,
+    sponsoring_human_slug:'joe',via:'local-token',client_id:'local-verb'}]) {
+    const {session,candidate} = await seed(), key=randomUUID();
+    const seen=await version(session);
+    await db.query(`update capture_candidate set payload='{"action":"Unseen edit"}' where id=$1`,[candidate]);
+    assert.notEqual(await version(session),seen);
+    await db.query('begin');
+    try {
+      await db.query('set local role carr_writer');
+      await assert.rejects(executeRegisteredTool(db,identity,'review-call-outcome',{
+        session_id:session,idempotency_key:key}), error => {
+        assert.equal(error.payload.error,'missing_required'); return true;
+      });
+    } finally { await db.query('rollback'); }
+    await unchanged(session,key);
+  }
 });
 
 for (const table of ['capture_candidate','capture_session']) {

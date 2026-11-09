@@ -287,7 +287,8 @@ test('a recorded weekly call updates every confidently discussed card and leaves
   }
 
   // 7. Once a partner has looked it over, the outcome leaves Home.
-  await verb(joe, 'review-call-outcome', { session_id: outcome.session_id });
+  await verb(joe, 'review-call-outcome', { session_id: outcome.session_id,
+    expected_source_version: (await verb(joe, 'read-call-outcomes')).calls.find(call => call.session_id === outcome.session_id).source_version });
   assert.equal((await verb(joe, 'read-call-outcomes')).calls.length, 0);
 });
 
