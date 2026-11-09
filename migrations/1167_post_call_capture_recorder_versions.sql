@@ -1,5 +1,5 @@
 -- rollback: restore ops.resolve_action_card from migration 1165.
--- expand-contract: map the two named capture recorders to their partner for post-call cards.
+-- expand-contract: map the named capture recorders to their partner for post-call cards.
 -- lock-review: function and grant metadata only; no business rows rewritten.
 set local lock_timeout='5s';
 set local statement_timeout='30s';
@@ -10,14 +10,15 @@ set search_path=pg_catalog,pg_temp
 set TimeZone='UTC' as $$
 declare target jsonb; source record;
 begin
-  if not exists(select 1 from public.actor where id=p_actor and active and slug in ('joe','dell','quill-joe-mac','quill-dell-mac')) then return null; end if;
+  if not exists(select 1 from public.actor where id=p_actor and active and slug in ('joe','dell','quill-joe-mac','quill-joe-studio','quill-dell-mac')) then return null; end if;
   if p_kind='post_call_review' then
     select s.id,s.post_call,s.outcome_reviewed_at,s.started_at into source
       from public.capture_session s
       join public.actor recorder on recorder.id=s.actor_id
       join public.actor reader on reader.id=p_actor
       where s.id=p_id and (s.actor_id=p_actor or reader.slug=case recorder.slug
-        when 'quill-joe-mac' then 'joe' when 'quill-dell-mac' then 'dell' end);
+        when 'quill-joe-mac' then 'joe' when 'quill-joe-studio' then 'joe'
+        when 'quill-dell-mac' then 'dell' end);
     if not found then return null; end if;
     target:=jsonb_build_object('session_id',source.id,'started_at',source.started_at,
       'reviewed',source.outcome_reviewed_at is not null,
