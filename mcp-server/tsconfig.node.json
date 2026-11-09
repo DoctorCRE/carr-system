@@ -16,7 +16,9 @@
     "test/worker-types.test.ts",
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
-    "test/web-push-config.test.ts"
+    "test/web-push-config.test.ts",
+    "test/web-push-sender.test.ts",
+    "test/web-push-outbox-postgres.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
