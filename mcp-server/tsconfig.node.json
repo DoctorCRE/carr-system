@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
   "files": [
+    "local-client-auth.ts",
+    "test/local-client-auth.test.ts",
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",

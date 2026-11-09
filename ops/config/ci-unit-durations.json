@@ -290,7 +290,7 @@
     "linkedin-activity-urn.test.mjs": {"milliseconds": 356, "serial": false},
     "literal-human-authority-dispatch.test.mjs": {"milliseconds": 447, "serial": false},
     "local-carr-postgres.test.mjs": {"milliseconds": 7079, "serial": true},
-    "local-client-auth.test.mjs": {"milliseconds": 145, "serial": false},
+    "local-client-auth.test.ts": {"milliseconds": 145, "serial": false},
     "local-deals-ci-fixture.test.mjs": {"milliseconds": 81068, "serial": true},
     "local-deals-read.test.mjs": {"milliseconds": 664, "serial": false},
     "local-deals-store.test.mjs": {"milliseconds": 40639, "serial": true},

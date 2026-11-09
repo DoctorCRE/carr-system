@@ -14,6 +14,8 @@
     "../docs/models/web-push-sender/PushSender.map.ts"
   ],
   "project": [
+    "local-client-auth.ts",
+    "test/local-client-auth.test.ts",
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
