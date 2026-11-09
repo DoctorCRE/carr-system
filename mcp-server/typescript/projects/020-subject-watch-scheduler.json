@@ -1,0 +1,8 @@
+{
+  "worker": [
+    "src/subject-watch-scheduler.ts"
+  ],
+  "entry": [
+    "src/subject-watch-scheduler.ts"
+  ]
+}

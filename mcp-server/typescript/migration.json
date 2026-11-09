@@ -4,6 +4,7 @@
     "client-portal/fixtures/reference-extractor/ref-a/data.js",
     "client-portal/fixtures/reference-extractor/ref-v/app.js",
     "client-portal/fixtures/reference-extractor/ref-v/data.js",
+    "dealroom/js/job-passport.js",
     "deliverables/instagram-grid-reset-2026-08-11/render.mjs",
     "docs/contracts/deal-document-text.v1/DealDocumentText.map.mjs",
     "docs/models/action-card-targets/CardTargets.map.mjs",
