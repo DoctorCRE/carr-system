@@ -4,7 +4,7 @@
   "request": {
     "idempotency_key": "UUID per intended review; preserve exact arguments and key on transport retry",
     "session_id": "Post-call session UUID",
-    "expected_source_version": "String copied from resolve-action-link-v2 card.source_version"
+    "expected_source_version": "String copied from read-call-outcomes calls[].source_version or resolve-action-link-v2 card.source_version"
   },
   "compatibility": {
     "caller": "All callers, including Home and exact action cards",

@@ -51,15 +51,15 @@ test("Fallow sees exactly the suites loaded dynamically by the Node runner", asy
   const files = await readdir(new URL("./", import.meta.url));
   const matches = file => config.dynamicallyLoaded.some(pattern => matchesGlob(`test/${file}`, pattern));
   assert.deepEqual(files.filter(matches).sort(), suiteBatches(files).flat().sort());
-  for (const file of ["future.test.js", "future.test.mjs"]) assert.equal(matches(file), true, file);
+  for (const file of ["future.test.js", "future.test.mjs", "future.test.ts"]) assert.equal(matches(file), true, file);
   for (const file of ["helper.mjs", "future.js", "nested/future.test.mjs", "../src/unused.js"])
     assert.equal(matches(file), false, file);
 });
 
 test("new PostgreSQL suites need no runner list entry", () => {
-  const files = ["future-postgres.test.mjs", "ordinary.test.mjs", "new-store.test.mjs"];
+  const files = ["future-postgres.test.ts", "ordinary.test.ts", "new-store.test.mjs"];
   const batches = suiteBatches(files, [], ["new-store.test.mjs"]);
-  assert.deepEqual(batches.find(batch => batch.includes("future-postgres.test.mjs")), ["future-postgres.test.mjs"]);
+  assert.deepEqual(batches.find(batch => batch.includes("future-postgres.test.ts")), ["future-postgres.test.ts"]);
   assert.deepEqual(batches.find(batch => batch.includes("new-store.test.mjs")), ["new-store.test.mjs"]);
   assert.deepEqual(batches.flat().sort(), files.sort());
 });

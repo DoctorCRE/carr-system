@@ -4,7 +4,8 @@
     "ignoreLazyImports": true
   },
   "dynamicallyLoaded": [
-    "test/*.test.{js,mjs}"
+    "test/*.test.{js,mjs}",
+    "test/*.test.ts"
   ],
   "ignoreExports": [
     {

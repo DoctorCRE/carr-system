@@ -23,7 +23,7 @@ class ProofCLI(unittest.TestCase):
         cls.path = Path(cls.folder.name)
         output = cls.path / 'observations.json'
         result = subprocess.run(['node', '--test', '--test-name-pattern=proof observations',
-                                 'mcp-server/test/review-call-outcome-postgres.test.mjs'], cwd=ROOT,
+                                 'mcp-server/test/review-call-outcome-postgres.test.ts'], cwd=ROOT,
                                 env={**os.environ, 'REVIEW_PROOF_OBSERVATIONS': str(output)},
                                 capture_output=True, text=True, timeout=240)
         if result.returncode:

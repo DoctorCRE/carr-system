@@ -11,7 +11,7 @@ export async function discoverSuites(directory, { expected, external = [] }) {
       const name = path.posix.join(relative, entry.name);
       if (entry.isDirectory()) { await visit(name); continue; }
       if (!entry.isFile() || !/\.(?:[cm]?[jt]sx?)$/.test(name)) continue;
-      if (!relative && /\.test\.(?:mjs|js)$/.test(name)) { files.push(name); continue; }
+      if (!relative && /\.test\.(?:mjs|js|ts)$/.test(name)) { files.push(name); continue; }
       // Separate database acceptance scripts are owned by ops/ci-gates.py.
       if (external.includes(name)) continue;
       const source = await readFile(path.join(directory, name), 'utf8');
@@ -21,7 +21,7 @@ export async function discoverSuites(directory, { expected, external = [] }) {
     }
   }
   await visit();
-  if (omitted.length) throw new Error(`Unit discovery would omit ${omitted.sort().join(', ')}; put unit suites directly in test/ and name them *.test.mjs or *.test.js.`);
+  if (omitted.length) throw new Error(`Unit discovery would omit ${omitted.sort().join(', ')}; put unit suites directly in test/ and name them *.test.ts, *.test.mjs or *.test.js.`);
   if (!Number.isInteger(expected) || expected < 1) throw new Error('Invalid checked-in unit suite count');
   // A floor, not an exact count: independent PRs that add suites must not edit one shared line.
   if (files.length < expected)

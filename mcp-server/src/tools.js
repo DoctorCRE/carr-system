@@ -8,6 +8,7 @@ import scheduleBoardFamily from "./tool-families/schedule-board.js";
 import clientAnniversaryFamily from "./tool-families/client-anniversary-read.js";
 import vendorMeetingsFamily from "./tool-families/vendor-meetings.js";
 import subjectWatchesFamily from "./tool-families/subject-watches.js";
+import callOutcomesOutputSchema from "../contracts/read-call-outcomes.v1.json" with { type: "json" };
 const REVIEW_CALL_OUTCOME_LEGACY_SUNSET = Date.parse("2026-12-09T06:00:00Z");
 const mailRecipientAddress = /^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$/;
 const recordedEmailAddresses = email => [...new Set((email?.split(/[\s,;<>]+/u) ?? [])
@@ -10421,8 +10422,9 @@ registerTools({
   // change with its evidence, plus every card still open) stays on record and
   // on Home until a partner has looked it over, in case one was wrong.
   "read-call-outcomes": {
+    outputSchema: callOutcomesOutputSchema,
     writerConnection: true,
-    description: "Pipeline-call outcomes not yet reviewed: for each call, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
+    description: "Pipeline-call outcomes not yet reviewed: each call includes its canonical source_version for review-call-outcome.expected_source_version, every change applied automatically (deal, change, transcript evidence quote, applied_at, undone_at, and the deal's current version for undo-call-change) and every card still waiting on Joe or Dell. Assigned task cards include existing_action_comparison (post-call-action-comparison.v2): exact_match previews acceptance; related_open_tasks lists up to five newest open tasks on the same deal as neutral context, with no similarity claim; related_open_task_total counts all open tasks on the deal. Closed history is excluded from context. An unavailable assignee or failed read must never be presented as no match. Nothing here sends anything.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => {
       const sessions = (await c.query(`

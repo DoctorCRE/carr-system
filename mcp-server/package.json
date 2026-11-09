@@ -21,16 +21,17 @@
   "license": "ISC",
   "devDependencies": {
     "@babel/parser": "7.28.5",
+    "@biomejs/biome": "2.6.6",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "16.0.0",
+    "knip": "6.44.2",
     "neonctl": "2.38.5",
     "pg": "8.13.1",
     "playwright-core": "1.63.0",
     "typescript": "7.0.2",
-    "wrangler": "4.149.0",
-    "@biomejs/biome": "2.6.6",
-    "@types/node": "26.6.6",
-    "knip": "6.44.2"
+    "wrangler": "4.149.0"
   },
   "dependencies": {
     "@cfworker/json-schema": "4.1.1",
