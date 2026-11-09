@@ -1,7 +1,20 @@
 // Test rule boot digest and sponsor visibility.
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
-import { executeRegisteredTool } from "../src/tools.js";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("Expected object");
+  return Object.fromEntries(Object.entries(value));
+}
+const registry = record(await import(new URL("../src/tools.js", import.meta.url).href));
+async function executeRegisteredTool(...args: unknown[]) {
+  const invoke = registry.executeRegisteredTool;
+  if (typeof invoke !== "function") throw new TypeError("Expected registered executor");
+  return record(await invoke(...args));
+}
+
 import { ruleBootPage } from "../src/rule-boot.ts";
 
 const JOE = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: true, via: "oauth-google" };
@@ -9,19 +22,24 @@ const rows = [
   { id: "11111111-0000-4000-8000-000000000000", statement: "Shared rule.", personal_to: null },
   { id: "22222222-0000-4000-8000-000000000000", statement: "Joe personal rule.", personal_to: "joe" },
   { id: "33333333-0000-4000-8000-000000000000", statement: "Dell personal rule.", personal_to: "dell" },
+] satisfies [
+  NonNullable<Parameters<typeof ruleBootPage>[0]>[number],
+  ...NonNullable<Parameters<typeof ruleBootPage>[0]>,
 ];
 
 test("digest is deterministic and changes for every visible rule amendment", async () => {
   const boot = await ruleBootPage(rows, "joe");
   assert.deepEqual(await ruleBootPage([...rows].reverse(), "joe"), boot);
-  assert.equal((await ruleBootPage([rows[0]], "joe")).digest,
+  assert.equal(
+    (await ruleBootPage(rows.slice(0, 1), "joe")).digest,
     "sha256:e773f997df1e228b99e779d8554de745d23003f85bfb2e2066d270c4e17e8b1c",
-    "the existing boot digest stays stable when its hashing utility moves");
+    "the existing boot digest stays stable when its hashing utility moves",
+  );
   for (const index of [0, 1]) {
-    const amended = rows.map((r, i) => i === index ? { ...r, statement: r.statement + " Amendment." } : r);
+    const amended = rows.map((r, i) => (i === index ? { ...r, statement: r.statement + " Amendment." } : r));
     assert.notEqual((await ruleBootPage(amended, "joe")).digest, boot.digest);
   }
-  const ownerChanged = rows.map((r, i) => i === 1 ? { ...r, personal_to: null } : r);
+  const ownerChanged = rows.map((r, i) => (i === 1 ? { ...r, personal_to: null } : r));
   assert.notEqual((await ruleBootPage(ownerChanged, "joe")).digest, boot.digest);
   const added = [...rows, { ...rows[0], id: "44444444-0000-4000-8000-000000000000" }];
   assert.notEqual((await ruleBootPage(added, "joe")).digest, boot.digest);
@@ -30,7 +48,7 @@ test("digest is deterministic and changes for every visible rule amendment", asy
 
 test("other sponsors' personal rows affect neither digest nor counts", async () => {
   for (const sponsor of ["joe", "dell", null]) {
-    const visible = rows.filter(r => !r.personal_to || r.personal_to === sponsor);
+    const visible = rows.filter((r) => !r.personal_to || r.personal_to === sponsor);
     const boot = await ruleBootPage(rows, sponsor);
     assert.deepEqual(boot, await ruleBootPage(visible, sponsor));
     assert.deepEqual(boot.counts, { rules: sponsor ? 2 : 1, shared: 1, personal: sponsor ? 1 : 0 });
@@ -42,6 +60,7 @@ test("other sponsors' personal rows affect neither digest nor counts", async () 
 test("empty corpus still has a valid one-page boot", async () => {
   const boot = await ruleBootPage([], null);
   assert.equal(boot.pages_total, 1);
+  if (boot.text === undefined) throw new TypeError("Expected boot text");
   assert.equal(boot.total_chars, boot.text.length);
   assert.deepEqual(boot.counts, { rules: 0, shared: 0, personal: 0 });
   assert.match(boot.next, /^complete/);
@@ -56,22 +75,25 @@ test("scope edits invalidate the digest while object key order does not", async 
 });
 
 test("registered boot uses authenticated sponsor and retains the old client envelope", async () => {
-  const client = { query: async (sql, params) => {
-    if (/standing-context:rule-boot/.test(sql)) {
-      assert.deepEqual(params, ["joe"]);
-      assert.match(sql, /personal_to is null/);
-      assert.match(sql, /select id, statement, scope, personal_to/);
-      return { rows };
-    }
-    return { rows: [] };
-  } };
+  const client = {
+    query: async (sql: string, params: unknown[]) => {
+      if (/standing-context:rule-boot/.test(sql)) {
+        assert.deepEqual(params, ["joe"]);
+        assert.match(sql, /personal_to is null/);
+        assert.match(sql, /select id, statement, scope, personal_to/);
+        return { rows };
+      }
+      return { rows: [] };
+    },
+  };
   const out = await executeRegisteredTool(client, JOE, "standing-context", { detail: "boot", page: 1 });
   assert.equal(out.ok, true);
-  assert.equal(out.rule_boot.schema, "carr-rule-boot/v1");
-  assert.equal(out.rule_boot.pages_total, 1);
-  assert.equal(out.identity.personal_brain_scope, "joe-personal");
+  assert.equal(record(out.rule_boot).schema, "carr-rule-boot/v1");
+  assert.equal(record(out.rule_boot).pages_total, 1);
+  assert.equal(record(out.identity).personal_brain_scope, "joe-personal");
   assert.deepEqual(out.rule_boot, await ruleBootPage(rows.slice(0, 2), "joe"));
   await assert.rejects(
     executeRegisteredTool(client, JOE, "standing-context", { detail: "boot", page: 2 }),
-    e => e.payload?.error === "page_out_of_range");
+    (e) => e instanceof ToolError && e.payload.error === "page_out_of_range",
+  );
 });
