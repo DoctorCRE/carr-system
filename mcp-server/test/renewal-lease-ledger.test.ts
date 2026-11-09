@@ -1,8 +1,12 @@
-// renewal-lease-ledger.test.mjs — authenticated first-party renewal authority.
+// renewal-lease-ledger.test.ts — authenticated first-party renewal authority.
 
-import test from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+import test from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+
+// Keep the legacy registry at its runtime seam until its separate conversion.
+const registryPath = "../src/tools.js";
+const { TOOLS, executeRegisteredTool } = await import(registryPath);
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -15,14 +19,23 @@ const ids = {
 const JOE = { id: ids.joe, slug: "joe", display: "Joe", human: true, via: "oauth-google" };
 const DELL = { id: ids.dell, slug: "dell", display: "Dell", human: true, via: "oauth-google" };
 
+type CurrentLease = { id: string; version: number; expiration_on?: string };
 class LeaseClient {
-  constructor({ owner = "joe", session = "joe", current = null } = {}) {
+  owner: string;
+  session: string;
+  current: CurrentLease | null;
+  queries: { sql: string; params: unknown[] }[];
+  constructor({
+    owner = "joe",
+    session = "joe",
+    current = null,
+  }: { owner?: string; session?: string; current?: CurrentLease | null } = {}) {
     this.owner = owner;
     this.session = session;
     this.current = current;
     this.queries = [];
   }
-  async query(text, params = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     this.queries.push({ sql, params });
     if (sql.startsWith("select pg_advisory_xact_lock")) return { rows: [] };
@@ -31,8 +44,17 @@ class LeaseClient {
       if (this.owner !== this.session) throw new Error("lease authority does not own the current deal");
       if (this.current && params[1] !== this.current.version)
         throw new Error(`lease version conflict: expected ${this.current.version}`);
-      return { rows: [{ lease_id: ids.newLease, version: 1,
-        superseded_lease_id: this.current?.id || null, deal_id: ids.deal, client_id: ids.client }] };
+      return {
+        rows: [
+          {
+            lease_id: ids.newLease,
+            version: 1,
+            superseded_lease_id: this.current?.id || null,
+            deal_id: ids.deal,
+            client_id: ids.client,
+          },
+        ],
+      };
     }
     if (sql.startsWith("insert into event") || sql.startsWith("insert into tool_call")) return { rows: [] };
     throw new Error(`unexpected SQL: ${sql}`);
@@ -69,8 +91,12 @@ test("record-executed-lease replaces the current fact only with its fresh base v
   const result = await executeRegisteredTool(c, JOE, "record-executed-lease", { ...args, base_version: 3 });
   assert.equal(result.superseded_lease_id, ids.oldLease);
   await assert.rejects(
-    executeRegisteredTool(new LeaseClient({ current: { id: ids.oldLease, version: 4 } }), JOE,
-      "record-executed-lease", { ...args, base_version: 3, idempotency_key: "55555555-5555-5555-5555-555555555555" }),
+    executeRegisteredTool(
+      new LeaseClient({ current: { id: ids.oldLease, version: 4 } }),
+      JOE,
+      "record-executed-lease",
+      { ...args, base_version: 3, idempotency_key: "55555555-5555-5555-5555-555555555555" },
+    ),
     (error) => error instanceof ToolError && error.payload.error === "version_conflict",
   );
 });
@@ -86,8 +112,11 @@ test("record-executed-lease is sponsor-fenced and rejects weak evidence or incoh
     { expiration_on: "2026-08-01", commencement_on: "2026-09-01" },
   ]) {
     await assert.rejects(
-      executeRegisteredTool(new LeaseClient(), JOE, "record-executed-lease",
-        { ...args, ...bad, idempotency_key: crypto.randomUUID() }),
+      executeRegisteredTool(new LeaseClient(), JOE, "record-executed-lease", {
+        ...args,
+        ...bad,
+        idempotency_key: crypto.randomUUID(),
+      }),
       (error) => error instanceof ToolError,
     );
   }
