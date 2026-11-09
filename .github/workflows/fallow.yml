@@ -28,6 +28,9 @@ jobs:
       - name: Install package dependencies when locked
         working-directory: ${{ matrix.root }}
         run: if [ -f package-lock.json ]; then npm ci --no-audit; fi
+      - name: Derive conversion baseline paths
+        if: matrix.root == 'mcp-server'
+        run: python3 ops/strict-projects.py
       - uses: fallow-rs/fallow@4f2657d30ad9639d1f8ec29f0bd5b9d48ee44f31 # v3.35.0
         with:
           version: '3.35.0'

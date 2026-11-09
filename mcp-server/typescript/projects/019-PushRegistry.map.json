@@ -1,0 +1,8 @@
+{
+  "worker": [
+    "../docs/models/web-push-registry/PushRegistry.map.ts"
+  ],
+  "entry": [
+    "../docs/models/web-push-registry/PushRegistry.map.ts"
+  ]
+}
