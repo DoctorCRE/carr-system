@@ -115,19 +115,15 @@ test("legacy Durable Object constructors do not add a runtime brand property", a
     ["phone-audio-handoff.js", "PhoneAudioHandoff"],
   ]) {
     await t.test(className, () => {
-      const result = spawnSync(
-        process.execPath,
-        ["--input-type=module", "-"],
-        {
-          cwd: root,
-          encoding: "utf8",
-          input: `import assert from "node:assert/strict";
+      const result = spawnSync(process.execPath, ["--input-type=module", "-"], {
+        cwd: root,
+        encoding: "utf8",
+        input: `import assert from "node:assert/strict";
 import { ${className} } from "./src/${file}";
 const instance = new ${className}({ storage: {} }, {});
 assert.equal(Object.hasOwn(instance, "__DURABLE_OBJECT_BRAND"), false);
 `,
-        },
-      );
+      });
       assert.equal(result.status, 0, result.stdout + result.stderr);
     });
   }

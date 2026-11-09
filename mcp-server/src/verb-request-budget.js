@@ -4,10 +4,9 @@ import { isKnownPartner, organizationTenantForActor } from "./identity.js";
 const PERIOD_MS = 60_000;
 const LIMITS = Object.freeze({ human: 60, agent: 1200 });
 
-export class VerbRequestBudget {
-  /** @type {never} Cloudflare nominal marker for a legacy Durable Object. */
-  __DURABLE_OBJECT_BRAND;
-
+/** @typedef {DurableObject & { __DURABLE_OBJECT_BRAND: never }} VerbRequestBudget */
+/** @type {new (state: DurableObjectState, env: Env) => VerbRequestBudget} */
+export const VerbRequestBudget = class {
   constructor(state) { this.storage = state.storage; }
 
   async fetch(request) {
@@ -34,7 +33,7 @@ export class VerbRequestBudget {
       else await tx.setAlarm(counter.windowStart + PERIOD_MS);
     });
   }
-}
+};
 
 function refused(error, retryAfter) {
   return Response.json({ error }, {
