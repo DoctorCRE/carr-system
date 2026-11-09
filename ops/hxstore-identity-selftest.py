@@ -7,10 +7,9 @@ import struct
 import subprocess
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 
 ROOT = Path(__file__).resolve().parents[1]
-CRATE = ROOT / 'vendor/hxprobe'
-BINARY = CRATE / 'target/debug/hxprobe'
 spec = importlib.util.spec_from_file_location('observe_fixture', ROOT / 'ops/hxstore-observe-selftest.py')
 assert spec is not None and spec.loader is not None
 fixture = importlib.util.module_from_spec(spec)
@@ -35,14 +34,14 @@ def metadata(key=9876543210987654321, tail=b'7' * 46, text=SECRET):
 class IdentityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True, timeout=180)
+        test_binary()
 
     def compare(self, before, after, coordinates=('64:0', '64:0'), flag='--immutable-copies'):
         with tempfile.TemporaryDirectory() as tmp:
             paths = [Path(tmp) / f'NeverEmitPath-{i}.hxd' for i in range(2)]
             for path, data in zip(paths, (before, after)):
                 path.write_bytes(data)
-            result = subprocess.run([str(BINARY), 'identity-compare', flag,
+            result = subprocess.run([str(test_binary()), 'identity-compare', flag,
                                      str(paths[0]), coordinates[0], str(paths[1]), coordinates[1]],
                                     capture_output=True, timeout=10)
             for path, data in zip(paths, (before, after)):
@@ -167,7 +166,7 @@ class IdentityTests(unittest.TestCase):
         good = fixture.store(object_bytes())
         self.rejected(self.compare(good, good, flag='NeverEmitPath'))
         for args in ([], ['--immutable-copies'], ['NeverEmitPath'] * 9):
-            result = subprocess.run([str(BINARY), 'identity-compare', *args], capture_output=True, timeout=10)
+            result = subprocess.run([str(test_binary()), 'identity-compare', *args], capture_output=True, timeout=10)
             self.rejected(result)
 
 
