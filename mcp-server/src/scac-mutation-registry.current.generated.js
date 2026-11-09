@@ -2734,6 +2734,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-subject-watch-changes-v1": {
+    "ingress_key": "mcp-tool:read-subject-watch-changes-v1",
+    "source_locator": "mcp-server/src/subject-watches.js",
+    "schema_digest": "f47a87c341e8cf9ec1f186b3981dc51dec684d50164fb2885a7e8d36eac677cf",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-subject-watch-v1": {
     "ingress_key": "mcp-tool:read-subject-watch-v1",
     "source_locator": "mcp-server/src/subject-watches.js",

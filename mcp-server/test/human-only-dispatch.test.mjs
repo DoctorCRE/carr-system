@@ -165,6 +165,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "undo-invoice-close",
     "undo-lead-move",
     ...WATCH_V2_VERBS,
+    "read-subject-watch-changes-v1",
   ].sort());
 });
 

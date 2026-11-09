@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ok": {
+      "const": true
+    },
+    "schema_version": {
+      "const": "subject-watch-change.v1"
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "watch_generation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subject_type": {
+            "enum": [
+              "deal",
+              "lease"
+            ]
+          },
+          "source_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "policy_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "category": {
+            "enum": [
+              "material_changed",
+              "reply_arrived"
+            ]
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "before": {},
+                "after": {},
+                "reason_code": {
+                  "enum": [
+                    "value_changed",
+                    "unknown_to_known",
+                    "known_to_unknown"
+                  ]
+                }
+              },
+              "required": [
+                "field",
+                "before",
+                "after",
+                "reason_code"
+              ]
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "event_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "activity_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "event_id",
+                "activity_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "disposition": {
+            "enum": [
+              "pending",
+              "emitted",
+              "suppressed"
+            ]
+          },
+          "notification_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "eligible_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "watch_generation_id",
+          "subject_id",
+          "source_event_id",
+          "subject_type",
+          "source_revision",
+          "policy_version",
+          "category",
+          "changes",
+          "evidence_refs",
+          "disposition",
+          "notification_id",
+          "occurred_at",
+          "recorded_at",
+          "eligible_at"
+        ]
+      }
+    },
+    "has_more": {
+      "type": "boolean"
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "ok",
+    "schema_version",
+    "changes",
+    "has_more",
+    "next_cursor"
+  ]
+}
