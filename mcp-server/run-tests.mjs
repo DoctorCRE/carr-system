@@ -1,6 +1,6 @@
 // Run MCP test suites in isolated batches.
 import { readFile } from "node:fs/promises";
-import { discoverSuites } from './suite-discovery.mjs';
+import { discoverSuites } from './suite-discovery.ts';
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

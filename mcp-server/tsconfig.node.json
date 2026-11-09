@@ -4,6 +4,8 @@
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
+    "suite-discovery.ts",
+    "test/suite-discovery.test.ts",
     "src/public-errors.ts",
     "test/review-call-outcome-postgres.test.ts"
   ],

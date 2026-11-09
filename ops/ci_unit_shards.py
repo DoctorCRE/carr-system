@@ -17,7 +17,7 @@ DEFAULT_SUITE_MS = 60000
 
 
 def suite_files(root):
-    return json.loads(subprocess.check_output(['node', str(root / 'mcp-server/suite-discovery.mjs')],
+    return json.loads(subprocess.check_output(['node', str(root / 'mcp-server/suite-discovery.ts')],
                                               cwd=root, text=True))
 
 
@@ -82,7 +82,7 @@ def regenerate(logs, source_run, output, root=ROOT):
     setup_samples = []
     for log in logs:
         setup_samples.extend(map(int, re.findall(r'suite-timing: snapshot-template (\d+)ms', log.read_text())))
-        for file, milliseconds in re.findall(r'suite-timing: (\S+\.test\.(?:mjs|js)) (\d+)ms', log.read_text()):
+        for file, milliseconds in re.findall(r'suite-timing: (\S+\.test\.(?:mjs|js|ts)) (\d+)ms', log.read_text()):
             if file in samples:
                 raise ValueError(f'duplicate suite timing: {file}')
             samples[file] = int(milliseconds)

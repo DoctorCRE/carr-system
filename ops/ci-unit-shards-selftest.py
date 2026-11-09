@@ -178,7 +178,7 @@ class ShardCoverage(unittest.TestCase):
 
     def inventory(self, root, expected):
         mcp = root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': expected}))
 
     def test_measured_durations_balance_and_discovery_keeps_new_suites(self):
