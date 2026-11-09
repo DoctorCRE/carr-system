@@ -847,6 +847,11 @@ export async function callTool(env, actor, name, args, profile = "full") {
     // only — never the result itself, never args.
     let ok = true;
     try {
+      if (!actor?.slug) throw new ToolError({ error: "unauthenticated" });
+      const resolved = await client.query("select id from public.actor where slug=$1", [actor.slug]);
+      if (!resolved.rows.length) throw new ToolError({ error: "unauthenticated" });
+      // Preserve identity.js's object-identity brand and all authenticated authority fields.
+      Object.assign(actor, { id: resolved.rows[0].id });
       return await executeRegisteredTool(client, actor, name, args || {});
     } catch (e) {
       ok = false;

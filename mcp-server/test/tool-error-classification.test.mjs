@@ -64,7 +64,6 @@ const INTERNAL_ONLY = new Set([
   "different_parties",
   "dispatcher_only",
   "do_not_contact_requires_suppression",
-  "document_not_found",
   "duplicate_claim",
   "engagement_reason_required",
   "event_not_revertible",

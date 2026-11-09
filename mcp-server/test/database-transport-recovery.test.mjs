@@ -19,7 +19,12 @@ const selected = () => Response.json({ fields: [{ name: 'number', dataTypeID: 25
 function fetchFixture(t, fetch) {
   const previous = neonConfig.fetchFunction;
   t.after(() => { neonConfig.fetchFunction = previous; });
-  neonConfig.fetchFunction = fetch;
+  neonConfig.fetchFunction = async (url, options) => {
+    if (JSON.parse(options.body).query.includes('from public.actor where slug='))
+      return Response.json({fields:[{name:'id',dataTypeID:25}],
+        rows:[['00000000-0000-4000-8000-000000000001']],rowCount:1,command:'SELECT',rowAsArray:true});
+    return fetch(url, options);
+  };
   t.mock.method(console, 'error', () => {});
 }
 
