@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,7 @@ STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 class ContactDecoderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True, timeout=180)
+        test_binary()
 
     def export(self, version):
         synthetic = STORE('Synthetic Contact +1-555-0199 pat@example.test'.encode('utf-16le'))
@@ -26,7 +27,7 @@ class ContactDecoderTests(unittest.TestCase):
         source = Path(self.temp.name) / 'synthetic.hxd'
         target = Path(self.temp.name) / 'synthetic.db'
         source.write_bytes(synthetic)
-        subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+        subprocess.run([str(test_binary()), 'db', str(source), str(target)],
                        check=True, capture_output=True, timeout=30)
         self.assertEqual(source.read_bytes(), synthetic)
         db = sqlite3.connect(target)

@@ -1,5 +1,5 @@
 // Read paginated client and vendor workspace data.
-import { vendorDirectoryPayload } from './vendor-people.js';
+import { vendorDirectoryPayload } from './vendor-people.ts';
 import { networkStatement, projectNetwork } from './relationship-network.ts';
 import { vendorRelationshipJoin, enrichRelationship } from "./vendor-relationship.ts";
 // Journey 1 business workspace: the Clients and Vendors READ model.

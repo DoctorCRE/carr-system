@@ -499,16 +499,21 @@ def test_gates_build_hxprobe_before_parallel_selftests():
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()
         (root / "ops/probe-selftest.py").write_text(
+            "import os\n"
             "from pathlib import Path\n"
+            "binary = Path(os.environ['CARR_HXPROBE_TEST_BINARY'])\n"
+            "assert binary.is_file() and binary.parent.parent != Path('vendor/hxprobe/target').resolve()\n"
             "assert Path('worker-built').exists(), 'worker not built before pool'\n"
             "Path('gate-ran').touch()\n")
         (root / "hooks").mkdir()
         (root / "hooks/gate-integrity.py").write_text("raise SystemExit(0)\n")
         cargo = root / "bin/cargo"
         cargo.write_text("#!/bin/sh\n"
-                         'test "$*" = "build --locked" || exit 9\n'
+                         'test "$1 $2 $3" = "build --locked --target-dir" || exit 9\n'
+                         'test -d "$4" || exit 11\n'
                          'test "$PWD" = "$CARR_TEST_ROOT/vendor/hxprobe" || exit 10\n'
                          'test "$CARR_BUILD_FAIL" = 0 || exit 1\n'
+                         'mkdir -p "$4/debug" && touch "$4/debug/hxprobe"\n'
                          'touch "$CARR_TEST_ROOT/worker-built"\n')
         cargo.chmod(0o755)
         env = fixture_env()
