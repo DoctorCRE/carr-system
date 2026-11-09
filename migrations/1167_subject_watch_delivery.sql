@@ -142,13 +142,17 @@ begin
          c.category='lease_threshold_crossed' and (not pol->'change_kinds' ? 'lease_threshold_crossed'
            or not keys ? substring(c.semantic_key from 7))
          or c.category='reply_arrived' and (not pol->'change_kinds' ? 'reply_arrived'
-           or not exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value) where refs.value->>'activity_id' is not null)
-           or exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value)
-             where refs.value->>'activity_id' is not null and not exists(
-               select 1 from public.activity a where a.id=(refs.value->>'activity_id')::uuid
-                 and a.email_source->>'mailbox_owner'=slug_value and coalesce(a.email_context#>>'{lifecycle,state}','live')='live')))
-         or coalesce((pol->>'include_self_changes')::boolean,true)=false and c.category<>'lease_threshold_crossed' and exists(
-           select 1 from public.event e where e.id=c.source_event_id and (e.actor_id=w.actor_id or e.sponsoring_human_slug=slug_value)));
+           or not exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value)
+             join public.activity a on a.id=(refs.value->>'activity_id')::uuid
+             join public.event e on e.id=(refs.value->>'event_id')::uuid
+             where a.email_source->>'mailbox_owner'=slug_value
+               and coalesce(a.email_context#>>'{lifecycle,state}','live')='live'
+               and (coalesce((pol->>'include_self_changes')::boolean,true)
+                 or e.actor_id is distinct from w.actor_id and e.sponsoring_human_slug is distinct from slug_value)))
+         or coalesce((pol->>'include_self_changes')::boolean,true)=false and c.category='material_changed'
+           and not exists(select 1 from jsonb_array_elements(c.evidence_refs) refs(value)
+             join public.event e on e.id=(refs.value->>'event_id')::uuid
+             where e.actor_id is distinct from w.actor_id and e.sponsoring_human_slug is distinct from slug_value));
        begin
        if st.last_emitted_at is null or st.last_emitted_at<=p_now-interval '5 minutes' then
          select array_agg(id order by id) into ids from (

@@ -738,16 +738,18 @@ test('quiet lease clocks and pending delivery', async t => {
   const receipts=async()=>(await c.query('select * from ops.subject_watch_change where watch_generation_id=$1',[generation])).rows;
   try {
    await c.query('begin');
-   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,subject]);
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause,recorded_at) values(now(),$1,'update-deal','deal',$2,'automation_job',clock_timestamp())",[actor,subject]);
    await c.query("update deal set closed_on='2027-01-01' where id=$1",[subject]);
-   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,subject]);
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause,recorded_at) values(now(),$1,'update-deal','deal',$2,'automation_job',clock_timestamp())",[(await c.query("select id from actor where slug='dell'")).rows[0].id,subject]);
    await c.query("update deal set outcome='won' where id=$1",[subject]);
    assert.equal((await receipts()).length,0,'source events do not finish capture');
    await c.query('commit');
    let rows=await receipts();assert.equal(rows.length,1);
    assert.deepEqual(rows[0].changes.map(x=>x.field),['closed_on','outcome']);
    assert.equal(rows[0].evidence_refs.length,2);
+   assert.equal((await c.query('select actor_id from event where id=$1',[rows[0].source_event_id])).rows[0].actor_id,actor,'the first provenance event belongs to self');
    assert.equal(rows[0].disposition,'pending');
+   await c.query("update ops.subject_watch_v2_subscription set policy=policy||'{\"include_self_changes\":false}'::jsonb where id=$1",[generation]);
    await c.query('begin');
    await sweep('2033-01-01T12:00:00Z');
    rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].disposition,'emitted');
@@ -755,6 +757,39 @@ test('quiet lease clocks and pending delivery', async t => {
    await sweep('2033-01-01T12:00:00Z');await sweep('2033-01-01T12:05:00Z');
    rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].notification_id,notification);
    assert.equal(Number((await c.query("select count(*) n from ops.notification where dedupe_key like $1",['subject-watch:'+generation+':%'])).rows[0].n),1);
+  } finally {
+   await c.query('rollback');
+   await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[generation]);
+   await c.query('delete from ops.subject_watch_delivery where watch_id=$1',[generation]);
+  }
+ });
+ await t.test('committed reply receipt retains live mailbox evidence when another reply retires',async()=>{
+  const subject=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic committed replies','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+  const generation=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,ops.subject_watch_target('deal',$2),'{\"change_kinds\":[\"reply_arrived\"]}','watching') returning id",[actor,subject])).rows[0].id;
+  const mail=[];
+  const dell=(await c.query("select id from actor where slug='dell'")).rows[0].id;
+  try {
+   await c.query('begin');
+   for(let i=0;i<2;i++) {
+    const id=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic committed reply','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[subject,actor])).rows[0].id;mail.push(id);
+    await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause,personal_scope) values(now(),$1,'confirm-email-filing','deal',$2,$3,'automation_job','joe-personal')",[i===0?dell:actor,subject,{activity_id:id}]);
+   }
+   await c.query('commit');
+   const receipts=async()=>(await c.query('select * from ops.subject_watch_change where watch_generation_id=$1',[generation])).rows;
+   let rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].category,'reply_arrived');assert.equal(rows[0].evidence_refs.length,2);
+   await c.query('begin');
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[mail[0]]);
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows[0].disposition,'emitted','a live reply survives retirement of another reply in the same committed receipt');
+   await c.query('rollback');await c.query('begin');
+   await c.query("update ops.subject_watch_v2_subscription set policy=policy||'{\"include_self_changes\":false}'::jsonb where id=$1",[generation]);
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[mail[0]]);
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows[0].disposition,'suppressed','self policy and live mailbox eligibility must hold for the same reference');
+   await c.query('rollback');await c.query('begin');
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=any($1::uuid[])",[mail]);
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows[0].disposition,'suppressed','no live mailbox evidence means no delivery');
   } finally {
    await c.query('rollback');
    await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[generation]);
