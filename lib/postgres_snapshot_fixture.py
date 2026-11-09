@@ -16,6 +16,10 @@ def snapshot_key(schema, baseline=False):
             for chunk in iter(lambda: source.read(1024 * 1024), b''):
                 digest.update(chunk)
     if not baseline:
+        revision = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=root,
+                                  text=True, capture_output=True)
+        if revision.returncode == 0:
+            digest.update(revision.stdout.strip().encode())
         for relative in ('ops/sync_control_catalog.py', 'ops/config/rule-enforcement-map.json',
                          'ops/config/control-enforcement-classes.v1.json',
                          'mcp-server/suite-inventory.json', 'tools/migrate.py'):

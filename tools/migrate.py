@@ -663,7 +663,7 @@ def main() -> None:
     ap.add_argument(
         "--through",
         metavar="FILENAME",
-        help="consider only the forward migration prefix through this exact checked-in filename",
+        help="apply only this migration prefix, without installing the full revision catalog",
     )
     args = ap.parse_args()
 
