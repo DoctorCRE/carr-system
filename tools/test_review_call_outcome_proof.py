@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import fixture_env
 
+UNSET = object()
 RUNNER = ROOT / 'tools/prove-review-call-outcome.py'
 
 
@@ -59,7 +60,7 @@ class ProofCLI(unittest.TestCase):
     def tearDownClass(cls):
         cls.folder.cleanup()
 
-    def run_cli(self, revision, mutation=None, changed_worker=False):
+    def run_cli(self, revision, mutation=None, changed_worker=False, bundle=UNSET):
         observations = copy.deepcopy(self.observation)
         observations['source_commit'] = revision
         if mutation:
@@ -72,12 +73,23 @@ class ProofCLI(unittest.TestCase):
         if changed_worker:
             later['worker_version']['id'] = 'different-worker'
         (self.path / 'release.json').write_text(json.dumps([release, later]))
-        (self.path / 'observations.json').write_text(json.dumps(observations))
+        (self.path / 'observations.json').write_text(json.dumps(observations if bundle is UNSET else bundle))
         result = subprocess.run([sys.executable, str(RUNNER), '--merge-sha', self.merge,
                                  '--repo', str(self.repo), '--observations', str(self.path / 'observations.json'),
                                  '--release-fixture', str(self.path / 'release.json')],
                                 env=fixture_env(), capture_output=True, text=True)
+        self.assertNotIn("Traceback", result.stderr)
         return result.returncode, result.stdout
+
+    def test_malformed_bundles_are_insufficient_evidence(self):
+        for bundle in [[], None, 'scalar', 7, True, {}]:
+            with self.subTest(bundle=bundle):
+                code, output = self.run_cli(self.merge, bundle=bundle)
+                self.assertEqual(code, 78)
+                self.assertEqual(json.loads(output), {'status': 'insufficient_evidence'})
+        code, output = self.run_cli(self.merge, lambda o: o.clear())
+        self.assertEqual(code, 78)
+        self.assertEqual(json.loads(output), {'status': 'insufficient_evidence'})
 
     def test_release_and_assertion_exits(self):
         for revision in [self.merge, self.descendant]:

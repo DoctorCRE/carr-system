@@ -29,11 +29,11 @@ async function seed() {
 async function version(session) {
   return (await db.query("select ops.resolve_action_card($1,'post_call_review',$2) target", [actor.id,session])).rows[0].target.source_version;
 }
-async function review(args, client = db) {
+async function review(args, client = db, identity = actor) {
   await client.query('begin');
   try {
     await client.query('set local role carr_writer');
-    const result = await executeRegisteredTool(client, actor, 'review-call-outcome', args);
+    const result = await executeRegisteredTool(client, identity, 'review-call-outcome', args);
     await client.query('commit');
     return result;
   } catch (error) { await client.query('rollback'); throw error; }
@@ -116,24 +116,44 @@ test('proof observations come from the registered writer and SQL readback', asyn
   if(process.env.REVIEW_PROOF_OBSERVATIONS) await writeFile(process.env.REVIEW_PROOF_OBSERVATIONS,JSON.stringify(observations));
 });
 
-test('every caller including Home and sponsored exact-card agents must supply a version', async () => {
-  for (const identity of [actor, {...(await db.query("select id,slug from actor where slug='joe-local'")).rows[0],human:false,native_agent_verified:true,
-    sponsoring_human_slug:'joe',via:'local-token',client_id:'local-verb'}]) {
-    const {session,candidate} = await seed(), key=randomUUID();
-    const seen=await version(session);
-    await db.query(`update capture_candidate set payload='{"action":"Unseen edit"}' where id=$1`,[candidate]);
-    assert.notEqual(await version(session),seen);
-    await db.query('begin');
-    try {
-      await db.query('set local role carr_writer');
-      await assert.rejects(executeRegisteredTool(db,identity,'review-call-outcome',{
-        session_id:session,idempotency_key:key}), error => {
-        assert.equal(error.payload.error,'missing_required'); return true;
-      });
-    } finally { await db.query('rollback'); }
-    await unchanged(session,key);
-  }
-});
+for (const [phase, instant] of [
+  ['before', '2026-12-09T05:59:59.999Z'],
+  ['at', '2026-12-09T06:00:00.000Z'],
+  ['after', '2026-12-09T06:00:00.001Z'],
+]) {
+  test(`legacy omission ${phase} sunset has bounded acceptance for human and sponsored actors`, async t => {
+    t.mock.method(Date, 'now', () => Date.parse(instant));
+    const log = t.mock.method(console, 'info', () => {});
+    for (const identity of [actor, {...(await db.query("select id,slug from actor where slug='joe-local'")).rows[0],
+      human:false,native_agent_verified:true,sponsoring_human_slug:'joe',via:'local-token',client_id:'local-verb'}]) {
+      const {session} = await seed(), key=randomUUID();
+      const args={session_id:session,idempotency_key:key};
+      if (phase === 'before') {
+        assert.equal((await review(args,db,identity)).reviewed,true);
+        const counts=(await db.query(`select
+          (select count(*)::int from event where idempotency_key=$1) events,
+          (select count(*)::int from tool_call where idempotency_key=$1) receipts`,[key])).rows[0];
+        assert.deepEqual(counts,{events:1,receipts:1});
+        const entry=JSON.parse(log.mock.calls.at(-1).arguments[0]);
+        assert.equal(entry.event,'review_call_outcome_legacy_omission');
+        assert.equal(entry.actor_kind,identity.human ? 'human' : 'sponsored_agent');
+      } else {
+        await assert.rejects(review(args,db,identity),error=>{
+          assert.equal(error.payload.error,'missing_required');
+          assert.deepEqual(error.payload.missing,['expected_source_version']);
+          return true;
+        });
+        await unchanged(session,key);
+      }
+      const {session:staleSession,candidate}=await seed();
+      const seen=await version(staleSession), staleKey=randomUUID();
+      await db.query(`update capture_candidate set payload='{"action":"Unseen edit"}' where id=$1`,[candidate]);
+      await assert.rejects(review({session_id:staleSession,expected_source_version:seen,idempotency_key:staleKey},db,identity),stale);
+      await unchanged(staleSession,staleKey);
+    }
+    assert.equal(log.mock.callCount(),phase === 'before' ? 2 : 0);
+  });
+}
 
 for (const table of ['capture_candidate','capture_session']) {
   test(`concurrent ${table} edit committed during review is compared before write`, async () => {
