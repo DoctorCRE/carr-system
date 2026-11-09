@@ -867,6 +867,12 @@
       "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
     },
     {
+      "path": "audits/decoder-build-ownership.md",
+      "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
+      "rule": "pii-phone",
+      "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
+    },
+    {
       "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
       "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
       "rule": "client-data",
