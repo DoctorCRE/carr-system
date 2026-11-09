@@ -8,7 +8,7 @@ import { submitPush } from "./web-push-sender.ts";
 type Environment = {
   DATABASE_URL_WRITER: string;
   WEB_PUSH_ENABLED?: string;
-  WEB_PUSH_VAPID_PUBLIC_KEY?: string;
+  VAPID_PUBLIC_KEY?: string;
   WEB_PUSH_VAPID_PRIVATE_KEY?: string;
   WEB_PUSH_VAPID_SUBJECT?: string;
 };
@@ -61,7 +61,7 @@ export async function drainPushOutbox(
 export async function scheduledPushOutbox(env: Environment) {
   if (
     env.WEB_PUSH_ENABLED !== "true" ||
-    !env.WEB_PUSH_VAPID_PUBLIC_KEY ||
+    !env.VAPID_PUBLIC_KEY ||
     !env.WEB_PUSH_VAPID_PRIVATE_KEY ||
     !env.WEB_PUSH_VAPID_SUBJECT
   )
@@ -79,7 +79,7 @@ export async function scheduledPushOutbox(env: Environment) {
     await drainPushOutbox(
       client,
       {
-        publicKey: env.WEB_PUSH_VAPID_PUBLIC_KEY,
+        publicKey: env.VAPID_PUBLIC_KEY,
         privateKey: env.WEB_PUSH_VAPID_PRIVATE_KEY,
         subject: env.WEB_PUSH_VAPID_SUBJECT,
       },
