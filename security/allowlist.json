@@ -876,103 +876,31 @@
       "path": "mcp-server/test/correct-party-identity.test.ts",
       "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
       "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 148; reserved phone, fictional address or example domain."
+      "reason": "Historical pre-correction test blob only. Covers ten phone findings in that immutable blob; no exception applies to the current fixture. Retained for no-rebase history scanning."
     },
     {
       "path": "mcp-server/test/correct-party-identity.test.ts",
       "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
       "rule": "pii-address",
-      "reason": "Synthetic identity test fixture at line 152; reserved phone, fictional address or example domain."
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
     },
     {
       "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 196; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 228; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 299; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
       "rule": "pii-address",
-      "reason": "Synthetic identity test fixture at line 300; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 420; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-address",
-      "reason": "Synthetic identity test fixture at line 421; reserved phone, fictional address or example domain."
+      "reason": "Synthetic identity fixture literals; exact current blob only."
     },
     {
       "path": "mcp-server/test/correct-party-identity.test.ts",
       "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
       "rule": "pii-email",
-      "reason": "Synthetic identity test fixture at line 495; reserved phone, fictional address or example domain."
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
     },
     {
       "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "rule 54e2bcb9 firm placeholder line"
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 795; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 929; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 934; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-phone",
-      "reason": "Synthetic identity test fixture at line 976; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-address",
-      "reason": "Synthetic identity test fixture at line 995; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-address",
-      "reason": "Synthetic identity test fixture at line 1005; reserved phone, fictional address or example domain."
-    },
-    {
-      "path": "mcp-server/test/correct-party-identity.test.ts",
-      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
-      "rule": "pii-address",
-      "reason": "Synthetic identity test fixture at line 1007; reserved phone, fictional address or example domain."
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-email",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
     }
   ]
 }

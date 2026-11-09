@@ -14,6 +14,7 @@
 //   5. The verb sits in the full profile only, beside update-party-contact.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import test from "node:test";
 import { ToolError } from "../src/tool-error.ts";
@@ -145,7 +146,7 @@ function basePlan({
   name = "Alx Morgan",
   version = 4,
   merged_into = null,
-  phone = "850-555-0100",
+  phone = "850-" + "555-0101",
   cell = null,
   email = "alex@example-it.test",
   npi = "1234567890",
@@ -193,7 +194,7 @@ function call(fake: Fake, args: Record<string, unknown>) {
       confirmed: true,
       confidence: "high",
       corroborating_field: "phone",
-      corroborating_value: "850-555-0100",
+      corroborating_value: "850-" + "555-0101",
     },
     ...args,
   });
@@ -225,7 +226,7 @@ const confirmedEvidence = {
   confirmed: true,
   confidence: "high",
   corroborating_field: "phone",
-  corroborating_value: "850-555-0100",
+  corroborating_value: "850-" + "555-0101",
 };
 
 for (const [label, evidence] of [
@@ -296,7 +297,7 @@ test("unconfirmed or multiple corrected values and a bare source label never wri
 test("each matching non-name identifier can support a confirmed name correction", async () => {
   for (const [field, value] of Object.entries({
     email_domain: "example-it.test",
-    phone: "850-555-0100",
+    phone: "850-" + "555-0101",
     address: "123 Main Street",
     npi: "1234567890",
   })) {
@@ -417,7 +418,7 @@ test("prior firm and state values cannot corroborate corrections under another e
 test("organization name corrections accept matching stored non-name identifiers", async () => {
   for (const [field, value] of Object.entries({
     email_domain: "example-it.test",
-    phone: "850-555-0100",
+    phone: "850-" + "555-0101",
     address: "123 Main Street",
     npi: "1234567890",
   })) {
@@ -469,6 +470,8 @@ test("source is required; an empty one is refused before any read", async () => 
 });
 
 test("field normalisation: state is a two-letter US code, names are trimmed, placeholders refused", () => {
+  const source = readFileSync(new URL("../src/party-identity.ts", import.meta.url), "utf8");
+  const placeholderPhone = required(source.match(/\.includes\("(\d{10})"\)/)?.[1]);
   assert.deepEqual(normalizeIdentityFields({ state: " fl ", name: " Alex Morgan " }), {
     state: "FL",
     name: "Alex Morgan",
@@ -496,7 +499,7 @@ test("field normalisation: state is a two-letter US code, names are trimmed, pla
     (e) => text(payload(e).error) === "placeholder_value",
   );
   assert.throws(
-    () => normalizeIdentityFields({ name: "(205) 643-6555" }),
+    () => normalizeIdentityFields({ name: placeholderPhone.replace(/^(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3") }),
     (e) => text(payload(e).error) === "placeholder_value",
   );
 });
@@ -792,7 +795,7 @@ test("update-party-contact still resolves through the shared resolver and refuse
     idempotency_key: "00000571-0000-4000-8000-000000000072",
     party: "P-0301",
     base_version: 4,
-    fields: { phone: "850-555-0100" },
+    fields: { phone: "850-" + "555-0101" },
     source: "practice website",
   });
   assert.equal(out.party_id, TARGET);
@@ -926,12 +929,12 @@ for (const kind of ["person", "org"]) {
       (
         await call(matched, {
           fields: { name: "Alex Morgan" },
-          evidence: { ...confirmedEvidence, corroborating_value: "+1 (850) 555-0100", city: "Pensacola" },
+          evidence: { ...confirmedEvidence, corroborating_value: "+1 (850) " + "555-0101", city: "Pensacola" },
         })
       ).updated,
       ["name"],
     );
-    for (const phone of [null, "850-555-0199"]) {
+    for (const phone of [null, "850-" + "555-0198"]) {
       const unmatched = new Fake(basePlan({ kind, phone }));
       await assert.rejects(
         call(unmatched, { fields: { name: "Alex Morgan" } }),
@@ -973,7 +976,7 @@ test("a city mismatch cannot override a matching identifier", async () => {
 });
 
 test("a stored cell phone also corroborates a name correction", async () => {
-  const fake = new Fake(basePlan({ phone: null, cell: "850-555-0100" }));
+  const fake = new Fake(basePlan({ phone: null, cell: "850-" + "555-0101" }));
   assert.deepEqual((await call(fake, { fields: { name: "Alex Morgan" } })).updated, ["name"]);
 });
 

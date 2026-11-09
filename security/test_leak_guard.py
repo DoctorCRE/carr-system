@@ -305,6 +305,22 @@ class LeakGuardTest(unittest.TestCase):
         self.assertIn('sample.txt:1', result.stdout)
         self.assertNotIn(value, result.stdout + result.stderr)
 
+    def test_identity_fixture_has_no_phone_exemptions(self):
+        root = SCRIPT.parents[1]
+        path = 'mcp-server/test/correct-party-identity.test.ts'
+        raw = (root / path).read_bytes()
+        allowed = guard.load_allowlist(root / 'security/allowlist.json')
+        digest = hashlib.sha256(raw).hexdigest()
+        self.assertFalse(any(p == path and h == digest and rule == 'pii-phone'
+                             for p, h, rule, _ in allowed))
+        self.assertEqual([hit for hit in guard.pii_findings(raw.decode(), None)
+                          if hit[2] == 'pii-phone'], [])
+        probe = raw + ('\n' + '(212)' + ' 555-0101\n').encode()
+        hits = [hit for hit in guard.pii_findings(probe.decode(), None)
+                if hit[2] == 'pii-phone']
+        self.assertEqual(len(hits), 1)
+        self.assertNotIn((path, hashlib.sha256(probe).hexdigest(), 'pii-phone', ''), allowed)
+
     def test_allowlist_is_bound_to_fixture_bytes_and_requires_reason(self):
         raw = ('test@' + 'fictional-mail.com\n').encode()
         (self.root / 'fixture.txt').write_bytes(raw)
