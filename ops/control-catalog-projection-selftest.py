@@ -2,6 +2,7 @@
 """Regression checks for suite renames and revision-bound catalog installation."""
 import importlib.util
 import os
+import sys
 import json
 import pathlib
 import subprocess
@@ -10,6 +11,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('catalog', ROOT / 'ops/sync_control_catalog.py')
+assert spec is not None and spec.loader is not None
 catalog = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(catalog)
 
@@ -64,7 +66,7 @@ class ProjectionDatabaseTests(unittest.TestCase):
             conn.commit()
             try:
                 for command, error in (
-                    (['python3', 'ops/control-catalog-parity-gate.py'], 'test reference drifted'),
+                    ([sys.executable, 'ops/control-catalog-parity-gate.py'], 'test reference drifted'),
                     (['bin/schema-snapshot.sh', '--from-disposable-local', dsn, '--verify-only'],
                      'exact reviewed control catalog is missing or drifted'),
                 ):

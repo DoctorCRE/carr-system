@@ -645,6 +645,7 @@ def install_control_catalog(conn) -> None:
 
     root = Path(__file__).resolve().parent.parent
     spec = importlib.util.spec_from_file_location("catalog_projection", root / "ops/sync_control_catalog.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,

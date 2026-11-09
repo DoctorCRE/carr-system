@@ -15,6 +15,13 @@ def snapshot_key(schema, baseline=False):
         with path.open('rb') as source:
             for chunk in iter(lambda: source.read(1024 * 1024), b''):
                 digest.update(chunk)
+    if not baseline:
+        for relative in ('ops/sync_control_catalog.py', 'ops/config/rule-enforcement-map.json',
+                         'ops/config/control-enforcement-classes.v1.json',
+                         'mcp-server/suite-inventory.json', 'tools/migrate.py'):
+            path = root / relative
+            if path.is_file():
+                digest.update(relative.encode() + b'\0' + path.read_bytes())
     return digest.hexdigest() + (':baseline' if baseline else ':current')
 
 

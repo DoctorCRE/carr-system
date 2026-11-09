@@ -176,12 +176,15 @@ def compile_rows(catalog: dict[str, Any], tracked: set[str]) -> list[dict[str, A
         # An implementation that is only ever described in prose is not an
         # implementation; a control needs at least one real file behind it.
         concrete_impl = [r for r in impl if resolved[r][0] in ("path", "glob", "command")]
-        runnable = [r for r in test if any(
-            _runs_in_ci("path", candidate)
-            for candidate in tracked
-            if (pathlib.PurePosixPath(candidate).match(resolved[r][1])
-                if resolved[r][0] == "glob" else candidate == resolved[r][1])
-        ) and resolved[r][0] in ("path", "glob")]
+        runnable = []
+        for ref in test:
+            kind, path = resolved[ref]
+            if kind not in ("path", "glob") or path is None:
+                continue
+            candidates = (candidate for candidate in tracked
+                          if pathlib.PurePosixPath(candidate).match(path)) if kind == "glob" else [path]
+            if any(_runs_in_ci("path", candidate) for candidate in candidates):
+                runnable.append(ref)
 
         if missing:
             reason = "declared but not tracked by git: " + ", ".join(sorted(missing))
