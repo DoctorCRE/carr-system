@@ -248,7 +248,7 @@
     "home-waiting-postgres.test.mjs": {"milliseconds": 26370, "serial": true},
     "http-public-errors.test.mjs": {"milliseconds": 987, "serial": false},
     "human-only-dispatch.test.mjs": {"milliseconds": 351, "serial": false},
-    "human-only-hint.test.mjs": {"milliseconds": 243, "serial": false},
+    "human-only-hint.test.ts": {"milliseconds": 243, "serial": false},
     "idempotency-key-uuid.test.mjs": {"milliseconds": 879, "serial": false},
     "identity.test.mjs": {"milliseconds": 364, "serial": false},
     "incident-evidence-close.test.mjs": {"milliseconds": 655, "serial": false},

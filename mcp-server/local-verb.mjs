@@ -93,7 +93,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { humanOnlyGuidance, isHumanOnlyError } from "./human-only-hint.mjs";
+import { humanOnlyGuidance, isHumanOnlyError } from "./human-only-hint.ts";
 import {
   LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential, tokenFileSecurityIssue,
 } from "./local-client-auth.mjs";

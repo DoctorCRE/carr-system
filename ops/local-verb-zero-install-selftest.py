@@ -58,7 +58,7 @@ assert node, "node is required"
 with tempfile.TemporaryDirectory() as td:
     scratch = Path(td) / "mcp-server"
     scratch.mkdir()
-    for name in ("local-verb.mjs", "local-client-auth.mjs", "human-only-hint.mjs"):
+    for name in ("local-verb.mjs", "local-client-auth.mjs", "human-only-hint.ts"):
         shutil.copy2(SOURCE / name, scratch / name)
     assert not (scratch / "node_modules").exists()
     assert not (scratch / "package.json").exists()

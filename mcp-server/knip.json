@@ -28,6 +28,8 @@
     "test/worker-types.test.ts",
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
+    "human-only-hint.ts",
+    "test/human-only-hint.test.ts",
     "test/web-push-config.test.ts",
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
