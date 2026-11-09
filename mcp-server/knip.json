@@ -1,0 +1,10 @@
+{
+  "entry": [
+    "typescript/*.test.ts"
+  ],
+  "project": [
+    "typescript/check.ts",
+    "typescript/migration.ts",
+    "typescript/gate.test.ts"
+  ]
+}
