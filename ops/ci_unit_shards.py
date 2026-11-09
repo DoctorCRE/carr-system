@@ -37,7 +37,13 @@ def durations(root=ROOT):
     timing_file = root / 'ops/config/ci-unit-durations.json'
     data = json.loads(timing_file.read_text()) if timing_file.exists() else {}
     measured = data.get('suites', {})
-    records = {file: measured.get(file, {'milliseconds': DEFAULT_SUITE_MS, 'serial': True, 'unmeasured': True}) for file in suite_files(root)}
+    records = {}
+    for file in suite_files(root):
+        previous = [measured[name] for suffix in ('.mjs', '.js')
+                    if (name := str(Path(file).with_suffix(suffix))) in measured
+                    and not (root / 'mcp-server/test' / name).exists()] if file.endswith('.ts') else []
+        records[file] = measured.get(file, max(previous, key=lambda row: row['milliseconds']) if previous else
+                                     {'milliseconds': DEFAULT_SUITE_MS, 'serial': True, 'unmeasured': True})
     return records, data.get('snapshot_template_ms', 0)
 
 

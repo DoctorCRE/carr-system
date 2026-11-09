@@ -29,6 +29,26 @@ class ShardCoverage(unittest.TestCase):
             self.assertGreater(max(planner.estimate(shard, records, setup) for shard in planner.plan(count=count)),
                                planner.BUDGET_MS, f'{count} shards would fit with headroom')
 
+    def test_extension_rename_preserves_measured_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / 'mcp-server/test'
+            tests.mkdir(parents=True)
+            (tests / 'converted.test.ts').touch()
+            self.inventory(root, 1)
+            timing = root / 'ops/config/ci-unit-durations.json'
+            timing.parent.mkdir(parents=True)
+            timing.write_text(json.dumps({'suites': {'converted.test.mjs': {
+                'milliseconds': 310000, 'serial': True}}}))
+            records, _ = planner.durations(root)
+            self.assertEqual(records['converted.test.ts'], {'milliseconds': 310000, 'serial': True})
+            self.assertEqual(planner.plan(root), [['converted.test.ts']])
+            (tests / 'converted.test.mjs').touch()
+            self.inventory(root, 2)
+            records, _ = planner.durations(root)
+            self.assertTrue(records['converted.test.ts']['unmeasured'])
+            self.assertEqual(records['converted.test.ts']['milliseconds'], planner.DEFAULT_SUITE_MS)
+
     def test_budget_admission_refuses_injected_overweight_shard(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
