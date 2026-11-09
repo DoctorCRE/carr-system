@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as timerSleep } from 'node:timers/promises';
 import { digest, relativeTo } from './observe.mjs';
-import { neutralize } from './probes.mjs';
+import { neutralize } from './probes.ts';
 
 const HEADERS = ['allow', 'content-type', 'cache-control', 'x-content-type-options', 'x-robots-tag', 'referrer-policy'];
 const CROSS_ORIGIN = 'https://cross-origin.invalid';
