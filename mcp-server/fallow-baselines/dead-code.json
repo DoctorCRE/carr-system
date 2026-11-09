@@ -36,7 +36,6 @@
     "unused-file:test/amend-closed-loop.test.mjs",
     "unused-file:test/app-document-gate-web.test.mjs",
     "unused-file:test/arg-type-coercion.test.mjs",
-    "unused-file:test/assurance-health-store.v5.test.mjs",
     "unused-file:test/atlas-inventory-graph-read.test.mjs",
     "unused-file:test/atlas-inventory-graph-web.test.mjs",
     "unused-file:test/automation-undo-archive-invoice.postgres.mjs",

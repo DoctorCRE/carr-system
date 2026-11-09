@@ -2,6 +2,8 @@
   "extends": "./tsconfig.base.json",
   "files": [
     "typescript/check.ts",
+    "test/ai-boundary.test.ts",
+    "test/assurance-health-store.v5.test.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "test/models/subject-watch-delivery/Delivery.map.ts",
