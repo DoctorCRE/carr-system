@@ -10466,7 +10466,7 @@ registerTools({
   },
 
   "review-call-outcome": {
-    write: true,
+    write: true, humanOnly: true,
     description: "Mark one pipeline call's outcome reviewed by a partner, so it leaves Home. Applied changes stay applied and still undoable from the deal; open cards stay open.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       idempotency_key: { type: "string" }, session_id: { type: "string" },

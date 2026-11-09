@@ -3614,7 +3614,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "source_locator": "mcp-server/src/tools.js",
     "schema_digest": "5cf296e25f22be197a41b4b01adacfeced5ef459dfdd6dd771dcb4df6edf55cb",
     "write": true,
-    "human_only": false,
+    "human_only": true,
     "human_caller_only": false,
     "authority_only": false,
     "delegates_to": []

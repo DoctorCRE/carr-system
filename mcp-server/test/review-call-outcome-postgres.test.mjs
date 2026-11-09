@@ -147,6 +147,8 @@ test('candidate edits, inserts and same-key retries wait until review commits', 
 test('versioned write contract matches registered schema and public projection is closed', async () => {
   const contract = JSON.parse(await readFile(new URL('../contracts/review-call-outcome.v1.json',import.meta.url),'utf8'));
   assert.deepEqual(contract.inputSchema,TOOLS['review-call-outcome'].inputSchema);
+  assert.equal(TOOLS['review-call-outcome'].humanOnly,true);
+  assert.notEqual(TOOLS['review-call-outcome'].humanCallerOnly,true);
   const {session} = await seed();
   const receipt = await review({session_id:session,expected_source_version:await version(session),idempotency_key:randomUUID()});
   assert.equal(new Validator(contract.responseSchema).validate(receipt).valid,true);

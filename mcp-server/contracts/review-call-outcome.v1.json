@@ -29,7 +29,7 @@
   },
   "consistency": "When expected_source_version is supplied, lock the post-call session and both candidate collections, read the canonical SQL card version in a fresh statement, and compare before any update. Mismatch rolls back with no session update, event or receipt. Candidate inserts wait on the parent FK lock. Candidate edits and deletes wait on child locks. A concurrent edit either commits before comparison and is checked, or waits until the review transaction completes.",
   "replay": "The same key, request and principal replay the original receipt with replayed=true within the shared envelope replay window, even after the source changes. Concurrent retries serialize before receipt lookup. Changed request or principal refuses key_reuse.",
-  "authority": "Existing partner-authority policy is unchanged. No external sends or candidate resolutions occur.",
+  "authority": "Partner authority is declared by humanOnly metadata and enforced by the existing canExercisePartnerAuthority guard. Sponsored native/local agents remain eligible; unsponsored agents and non-allowlisted unattended calls refuse through the registry. No external sends or candidate resolutions occur.",
   "source_version": "Exactly ops.resolve_action_card(session.actor_id, 'post_call_review', session.id).source_version; includes reviewed state and mutable candidate detail.",
   "inputSchema": {
     "type": "object",
