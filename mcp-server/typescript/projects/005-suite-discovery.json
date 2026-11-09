@@ -1,0 +1,8 @@
+{
+  "node": [
+    "suite-discovery.ts"
+  ],
+  "entry": [
+    "suite-discovery.ts"
+  ]
+}
