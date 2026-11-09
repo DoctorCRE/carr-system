@@ -17,6 +17,11 @@
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
+    "src/lead-draft-eligibility.ts",
+    "src/lease-term-comparison.ts",
+    "src/market-study-package.ts",
+    "test/lease-term-comparison.test.ts",
+    "test/market-study-package.test.ts",
     "test/web-push-sender.test.ts",
     "test/web-push-outbox-postgres.test.ts"
   ],
