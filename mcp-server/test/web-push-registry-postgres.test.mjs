@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -222,7 +222,6 @@ test('registered contract errors never echo invalid sensitive arguments', async 
 test('grant collection comparison accepts all migration orders and future appends', async t => {
   const migrations = new Map();
   for (const number of [1163,1164,1165]) {
-    const { readdir } = await import('node:fs/promises');
     const directory = new URL('../../migrations/',import.meta.url);
     const name = (await readdir(directory)).find(name => name.startsWith(number+'_'));
     migrations.set(number,await readFile(new URL(name,directory),'utf8'));
@@ -246,9 +245,38 @@ test('grant collection comparison accepts all migration orders and future append
             select '{"secdef_execute":[],"retired_secdef_execute":[{"signature":"sentinel","config":["a","b"]}]}'::jsonb $$;`);
         for (const role of ['carr_reader','carr_writer','carr_authority','carr_jobs','dot_reader']) await c.query('create role '+role);
         for (const number of order) await c.query('begin;'+migrations.get(number)+';commit;');
-        const row = (await c.query(`select ops.scac_current_grant_contract() as contract,
-          pg_get_functiondef('ops.scac_current_grant_contract()'::regprocedure) as body`)).rows[0];
+        const row = (await c.query('select ops.scac_current_grant_contract() as contract')).rows[0];
         assert.deepEqual(row.contract.retired_secdef_execute,[{signature:'sentinel',config:['a','b']}]);
+        if (order.join(',') === '1163,1164,1165') {
+          const inventoryPath = new URL('../../ops/scac_mutation_db_inventory.py',import.meta.url).pathname;
+          const loadInventory = `import importlib.util, sys
+spec=importlib.util.spec_from_file_location('inventory',sys.argv[1])
+p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
+`;
+          const query = execFileSync(process.env.CARR_CI_PYTHON || 'python3',['-c',
+            loadInventory+"print(p.SECDEF_EXECUTE_SQL)",inventoryPath],{encoding:'utf8'});
+          const projection = (await c.query(query)).rows.map(row=>Object.values(row)[0]);
+          const validation = spawnSync(process.env.CARR_CI_PYTHON || 'python3',['-c',loadInventory+`
+import json
+rows,contract=json.load(sys.stdin)
+contract.pop('retired_secdef_execute')
+projection={'secdef_execute':rows,'relation_dml':[],'column_dml':[]}
+baseline={name:{'count':0,'digest':p.digest([])} for name in projection}
+p.validate_registered_grants(projection,baseline,contract)
+projection['secdef_execute'][0]['security_definer']=False
+try:
+    p.validate_registered_grants(projection,baseline,contract)
+except RuntimeError as error:
+    assert 'registered grant missing or altered' in str(error)
+else:
+    raise AssertionError('real catalog metadata mismatch was accepted')
+`,inventoryPath],{input:JSON.stringify([projection,row.contract]),encoding:'utf8'});
+          assert.equal(validation.status,0,validation.stdout+validation.stderr);
+        }
+        row.body = execFileSync(join(execFileSync('pg_config',['--bindir'],{encoding:'utf8'}).trim(),'pg_dump'),
+          ['--schema-only','--no-owner','--schema=ops','-h',c.connectionParameters.host,
+            '-p',String(c.connectionParameters.port),'-U',c.connectionParameters.user,'-d',c.connectionParameters.database],
+          {encoding:'utf8'});
         const expected = references.get(order.length) ?? row;
         references.set(order.length,expected);
         assert.deepEqual([...row.contract.secdef_execute].map(JSON.stringify).sort(),
@@ -258,8 +286,7 @@ import importlib.util, json, sys
 spec=importlib.util.spec_from_file_location('shadow',sys.argv[1])
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
 a,b=json.load(sys.stdin)
-header='-- Name: scac_current_grant_contract(); Type: FUNCTION; Schema: ops; Owner: -\\n'
-assert not p.schema_difference(header+a,header+b), 'grant collection differs across migration order'
+assert not p.schema_difference(a,b), 'grant collection differs across migration order'
 `,new URL('../../ops/migration-shadow.py',import.meta.url).pathname],
           {input:JSON.stringify([expected.body,row.body]),encoding:'utf8'});
         assert.equal(comparison.status,0,comparison.stdout+comparison.stderr);
