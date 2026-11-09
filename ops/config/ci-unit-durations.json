@@ -437,7 +437,7 @@
     "tool-read-call.test.mjs": {"milliseconds": 424, "serial": false},
     "tour-artifacts.test.mjs": {"milliseconds": 331, "serial": false},
     "tour-client-feedback-flow.test.mjs": {"milliseconds": 302, "serial": false},
-    "tour-client-share-allowlist.test.mjs": {"milliseconds": 1112, "serial": false},
+    "tour-client-share-allowlist.test.ts": {"milliseconds": 1112, "serial": false},
     "tour-deal-access.test.mjs": {"milliseconds": 2600, "serial": false},
     "tour-delivery-data-plane-migration.test.mjs": {"milliseconds": 178, "serial": false},
     "tour-domain-route-cheat-sheet-migration.test.mjs": {"milliseconds": 502, "serial": false},
