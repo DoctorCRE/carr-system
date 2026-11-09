@@ -1,0 +1,23 @@
+{
+  "node": [
+    "local-client-auth.ts",
+    "src/lead-draft-eligibility.ts",
+    "src/lease-term-comparison.ts",
+    "src/market-study-package.ts",
+    "src/untrusted-text.ts",
+    "src/vendor-people.ts",
+    "test/lease-term-comparison.test.ts",
+    "test/local-client-auth.test.ts",
+    "test/market-study-package.test.ts",
+    "test/untrusted-text.test.ts",
+    "test/vendor-people.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/lease-term-comparison.test.ts",
+    "test/local-client-auth.test.ts",
+    "test/market-study-package.test.ts",
+    "test/untrusted-text.test.ts",
+    "test/vendor-people.test.ts"
+  ]
+}
