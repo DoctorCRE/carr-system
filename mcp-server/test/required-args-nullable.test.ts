@@ -93,7 +93,7 @@ test("registry imports reject nonexistent APIs and never infer any", () => {
     writeFileSync(
       config,
       JSON.stringify({
-        extends: resolve(server, "tsconfig.node.json"),
+        extends: resolve(server, "tsconfig.base.json"),
         files,
         compilerOptions: {
           noUnusedLocals: false,
