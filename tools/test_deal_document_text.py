@@ -34,6 +34,16 @@ class TextTests(unittest.TestCase):
         self.assertEqual((result['scanned'], result['unavailable']), (2, 2))
         self.assertEqual([d['status'] for d in saved], ['unavailable', 'unavailable'])
 
+    def test_failure_does_not_stop_later_documents(self):
+        docs = [dict(document_ref=str(n), entity_ref='deal', content_hash=hashlib.sha256(b'x').hexdigest(), mime='application/pdf', bytes=1, retained=False) for n in range(2)]
+        def read(doc):
+            if doc['document_ref'] == '0':
+                raise RuntimeError('secret')
+            return b'x'
+        result = backfill(scan=lambda after, limit: docs if after is None else [], read_bytes=read, text_pages=lambda _: ['ok'], record=lambda _: None, max_documents=10)
+        self.assertEqual(result['errors'], [{'document_ref': '0', 'code': 'document_processing_failed'}])
+        self.assertEqual(result['produced'], 1)
+
     def test_backfill_dry_run_rerun_mixed_and_superseding_hash(self):
         docs = [{'document_ref': str(n), 'entity_ref': 'deal', 'content_hash': hashlib.sha256(data).hexdigest(), 'mime': 'application/pdf', 'bytes': len(data), 'data': data} for n, data in enumerate([b'text', b'scan'])]
         saved = {}
