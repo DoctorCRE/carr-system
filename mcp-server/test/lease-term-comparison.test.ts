@@ -1,9 +1,19 @@
 // Test lease term comparison calculations and read-only tool dispatch.
-import test from "node:test";
-import assert from "node:assert/strict";
 
-import { compareLeaseTerms } from "../src/lease-term-comparison.js";
-import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { DRAFT_ELIGIBILITY_SQL } from "../src/lead-draft-eligibility.ts";
+import { compareLeaseTerms } from "../src/lease-term-comparison.ts";
+import { ToolError } from "../src/tool-error.ts";
+
+// Narrow the legacy registry at runtime without pulling its unconverted graph into this strict project.
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+assert.ok(typeof registered === "object" && registered !== null && "executeRegisteredTool" in registered);
+const executeRegisteredTool = registered.executeRegisteredTool;
+assert.ok(typeof executeRegisteredTool === "function");
+assert.ok("TOOLS" in registered && typeof registered.TOOLS === "object" && registered.TOOLS !== null);
+const registry = registered.TOOLS;
 
 const sample = () => ({
   square_feet: 2500,
@@ -51,17 +61,31 @@ test("reproduces the CARR 5-vs-10 workbook sample", () => {
 });
 
 test("is registered as a strict read-only pure-computation tool", async () => {
-  const tool = TOOLS["compare-lease-terms"];
+  assert.ok("compare-lease-terms" in registry);
+  const tool = registry["compare-lease-terms"];
+  assert.ok(typeof tool === "object" && tool !== null && "write" in tool && "inputSchema" in tool);
+  assert.ok(typeof tool.inputSchema === "object" && tool.inputSchema !== null);
+  assert.ok("additionalProperties" in tool.inputSchema && "required" in tool.inputSchema);
+  assert.ok(Array.isArray(tool.inputSchema.required));
   assert.ok(tool);
   assert.equal(tool.write, false);
   assert.equal(tool.inputSchema.additionalProperties, false);
-  assert.deepEqual([...tool.inputSchema.required].sort(),
-    ["financing", "long_term", "short_term", "square_feet"]);
+  assert.deepEqual([...tool.inputSchema.required].sort(), ["financing", "long_term", "short_term", "square_feet"]);
 
-  const db = { query: async () => { throw new Error("database must not be called"); } };
-  const out = await executeRegisteredTool(db, { id: "joe", human: true },
-    "compare-lease-terms", sample());
-  assert.equal(out.comparison.additional_cost_of_shorter_term, 89112.3);
+  const db = {
+    query: async () => {
+      throw new Error("database must not be called");
+    },
+  };
+  const out: unknown = await executeRegisteredTool(db, { id: "joe", human: true }, "compare-lease-terms", sample());
+  assert.deepEqual(out, compareLeaseTerms(sample()));
+  assert.ok(
+    typeof out === "object" &&
+      out !== null &&
+      "calls_models" in out &&
+      "writes_records" in out &&
+      "allowed_actions" in out,
+  );
   assert.equal(out.calls_models, false);
   assert.equal(out.writes_records, false);
   assert.deepEqual(out.allowed_actions, []);
@@ -72,11 +96,14 @@ test("dispatcher returns the standard redacted tool error for malformed input", 
   const input = sample();
   input.long_term.term_years = 5;
   input.long_term.label = "CARR-SECRET-CANARY-7F4A";
-  const db = { query: async () => { throw new Error("database must not be called"); } };
+  const db = {
+    query: async () => {
+      throw new Error("database must not be called");
+    },
+  };
 
   await assert.rejects(
-    () => executeRegisteredTool(db, { id: "joe", human: true },
-      "compare-lease-terms", input),
+    () => executeRegisteredTool(db, { id: "joe", human: true }, "compare-lease-terms", input),
     (error) => {
       assert.ok(error instanceof ToolError);
       assert.equal(error.payload.error, "invalid_long_term_years");
@@ -123,27 +150,55 @@ test("rounds negative half-cents away from zero like the workbook", () => {
 });
 
 test("rejects malformed, nonfinite, bounded, and authority-bearing inputs without echo", () => {
-  const attacks = [
-    (x) => { x.canary = "CARR-SECRET-CANARY-7F4A"; },
-    (x) => { x.square_feet = true; },
-    (x) => { x.square_feet = Number.NaN; },
-    (x) => { x.long_term.base_rent_per_sf = [18, 18.5]; },
-    (x) => { x.long_term.base_rent_per_sf[2] = Number.POSITIVE_INFINITY; },
-    (x) => { x.long_term.free_rent_months = 2.5; },
-    (x) => { x.long_term.term_years = 5; },
-    (x) => { x.short_term.term_years = 10; },
-    (x) => { x.short_term.landlord_ti_per_sf = -1; },
-    (x) => { x.financing.annual_interest_rate = 1.01; },
-    (x) => { x.financing.actor = "joe"; },
+  const attacks: ((x: ReturnType<typeof sample>) => void)[] = [
+    (x) => {
+      Reflect.set(x, "canary", "CARR-SECRET-CANARY-7F4A");
+    },
+    (x) => {
+      Reflect.set(x, "square_feet", true);
+    },
+    (x) => {
+      x.square_feet = Number.NaN;
+    },
+    (x) => {
+      x.long_term.base_rent_per_sf = [18, 18.5];
+    },
+    (x) => {
+      x.long_term.base_rent_per_sf[2] = Number.POSITIVE_INFINITY;
+    },
+    (x) => {
+      x.long_term.free_rent_months = 2.5;
+    },
+    (x) => {
+      x.long_term.term_years = 5;
+    },
+    (x) => {
+      x.short_term.term_years = 10;
+    },
+    (x) => {
+      x.short_term.landlord_ti_per_sf = -1;
+    },
+    (x) => {
+      x.financing.annual_interest_rate = 1.01;
+    },
+    (x) => {
+      Reflect.set(x.financing, "actor", "joe");
+    },
   ];
 
   for (const mutate of attacks) {
     const input = sample();
     mutate(input);
-    let thrown;
-    try { compareLeaseTerms(input); } catch (error) { thrown = error; }
-    assert.ok(thrown?.payload);
-    assert.match(thrown.payload.error, /^invalid_|^unexpected_/);
+    let thrown: unknown;
+    try {
+      compareLeaseTerms(input);
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof Error && "payload" in thrown);
+    assert.ok(typeof thrown.payload === "object" && thrown.payload !== null && "error" in thrown.payload);
+    assert.equal(typeof thrown.payload.error, "string");
+    assert.match(String(thrown.payload.error), /^invalid_|^unexpected_/);
     assert.equal(JSON.stringify(thrown.payload).includes("CARR-SECRET-CANARY-7F4A"), false);
   }
 });
@@ -152,13 +207,13 @@ test("detaches accepted inputs and outputs", () => {
   const input = sample();
   const first = compareLeaseTerms(input);
   input.long_term.base_rent_per_sf[0] = 999;
+  assert.ok(first.long_term.base_rent_schedule[0]);
   first.long_term.base_rent_schedule[0].annual_base_rent = 999;
   const second = compareLeaseTerms(sample());
 
   assert.equal(first.comparison.additional_cost_of_shorter_term, 89112.3);
-  assert.equal(second.long_term.base_rent_schedule[0].annual_base_rent, 45000);
+  assert.equal(second.long_term.base_rent_schedule[0]?.annual_base_rent, 45000);
 });
-
 
 test("tiny admitted rates converge to zero interest without non-finite economics", () => {
   for (const rate of [Number.MIN_VALUE, 1e-320, 1e-20, 1e-16, 1e-12]) {
@@ -198,10 +253,18 @@ test("financing agrees with an independently summed discount-factor reference", 
         discount /= 1 + rate / 12;
         discountSum += discount;
       }
-      const expected = principal * (years * 12 / discountSum - 1);
+      const expected = principal * ((years * 12) / discountSum - 1);
       const actual = compareLeaseTerms(input).long_term.total_interest_on_tenant_ti;
       assert.ok(Number.isFinite(actual));
       assert.ok(Math.abs(actual - expected) < 0.005, `${rate}, ${years}: ${actual} vs ${expected}`);
     }
   }
+});
+
+test("draft eligibility retains qualified, unsuppressed, active canonical parties", () => {
+  assert.equal(
+    DRAFT_ELIGIBILITY_SQL,
+    "d.party_id=l.party_id and l.stage='qualified' and not l.suppressed\n" +
+      "  and p.merged_into is null and p.deleted_at is null and p.contact_state='active'",
+  );
 });

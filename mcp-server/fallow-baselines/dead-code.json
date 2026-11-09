@@ -171,7 +171,6 @@
     "unused-file:test/lead-workspace.test.mjs",
     "unused-file:test/lease-radar-postgres.test.mjs",
     "unused-file:test/lease-radar-read.test.mjs",
-    "unused-file:test/lease-term-comparison.test.mjs",
     "unused-file:test/lifecycle-assurance.v5.test.mjs",
     "unused-file:test/lifecycle-classifiers.v5.testhelper.mjs",
     "unused-file:test/linkedin-activity-urn.test.mjs",
