@@ -1,6 +1,6 @@
 // Register MCP tools and their shared write envelope.
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
-import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.js";
+import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.ts";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";

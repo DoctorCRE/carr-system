@@ -1,5 +1,5 @@
 // Phone intake stores metadata in CARR; the Studio pulls transient audio.
-import { audioHandoff } from './phone-audio-handoff.js';
+import { audioHandoff } from './phone-audio-handoff.ts';
 import { bearerCredential } from './bearer.ts';
 
 export const PHONE_CALL_PREFIX = '/api/v1/call-sessions';
