@@ -1,0 +1,13 @@
+{
+  "entry": [
+    "typescript/*.test.ts",
+    "suite-discovery.ts"
+  ],
+  "project": [
+    "typescript/check.ts",
+    "typescript/migration.ts",
+    "typescript/gate.test.ts",
+    "suite-discovery.ts",
+    "test/suite-discovery.test.ts"
+  ]
+}

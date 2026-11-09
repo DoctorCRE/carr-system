@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [
+    "typescript/check.ts",
+    "typescript/migration.ts",
+    "typescript/gate.test.ts",
+    "suite-discovery.ts",
+    "test/suite-discovery.test.ts"
+  ]
+}

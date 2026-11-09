@@ -1,5 +1,9 @@
 """Deterministic retained page text shared by extraction and historical backfill."""
 import hashlib
+import subprocess
+
+SAFE_ERROR_CLASSES = (FileNotFoundError, PermissionError, TimeoutError, OSError, ValueError,
+                      RuntimeError, subprocess.TimeoutExpired, subprocess.CalledProcessError)
 
 FORMAT = 'page-text.v1'
 MAX_CHARACTERS = 500000
@@ -29,6 +33,7 @@ def backfill(*, scan, read_bytes, text_pages, record, max_documents, dry_run=Fal
     if not 1 <= max_documents <= 10000:
         raise ValueError('max_documents must be 1..10000')
     counts = dict(scanned=0, missing=0, skipped=0, produced=0, no_text=0, unavailable=0)
+    errors = []
     while counts['scanned'] < max_documents:
         docs = scan(after, min(100, max_documents - counts['scanned']))
         if not docs:
@@ -42,11 +47,15 @@ def backfill(*, scan, read_bytes, text_pages, record, max_documents, dry_run=Fal
             counts['missing'] += 1
             if dry_run:
                 continue
-            if doc['mime'] != 'application/pdf' or not 1 <= doc['bytes'] <= 25 * 1024 * 1024:
-                value = retained_pages(doc, [])
-                value['status'] = 'unavailable'
-            else:
-                value = derivative(doc, read_bytes(doc), text_pages)
-            record(value)
-            counts[value['status']] += 1
-    return {**counts, 'dry_run': dry_run, 'last_document_ref': after}
+            try:
+                if doc['mime'] != 'application/pdf' or not 1 <= doc['bytes'] <= 25 * 1024 * 1024:
+                    value = retained_pages(doc, [])
+                    value['status'] = 'unavailable'
+                else:
+                    value = derivative(doc, read_bytes(doc), text_pages)
+                record(value)
+                counts[value['status']] += 1
+            except Exception as error:  # A failed document must not prevent later documents.
+                errors.append({'document_ref': after, 'code': 'document_processing_failed',
+                               'error_class': type(error).__name__ if type(error) in SAFE_ERROR_CLASSES else 'Exception'})
+    return {**counts, 'dry_run': dry_run, 'last_document_ref': after, 'errors': errors}

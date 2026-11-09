@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -133,7 +134,7 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -151,7 +152,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'mcp-server/test/suite.test.mjs').write_text(package_body)
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'test/chrome-launch.test.mjs').write_text(
             "import test from 'node:test'; test('early failure', () => { throw Error('original diagnostic'); });")
@@ -163,7 +164,7 @@ class UnitClassTests(unittest.TestCase):
     def test_all_failed_suite_diagnostics_survive_the_log_tail(self):
         self.all_packages()
         mcp = self.root / 'mcp-server'
-        for name in ('run-tests.mjs', 'suite-discovery.mjs'):
+        for name in ('run-tests.mjs', 'suite-discovery.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 2}))
         (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
@@ -185,7 +186,7 @@ class UnitClassTests(unittest.TestCase):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
         runner = (ROOT / 'mcp-server/run-tests.mjs').read_text()
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text(
@@ -265,10 +266,57 @@ class UnitClassTests(unittest.TestCase):
         self.assertIn('zero passing tests', result.stderr)
         self.assertFalse(receipt.exists())
 
+    def test_new_suite_without_timing_runs_and_verifies(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        for name in ('suite-discovery.ts', 'run-tests.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        (mcp / 'test/new.test.mjs').write_text("import test from 'node:test'; test('new suite', () => {});")
+        receipts = []
+        for index, _ in enumerate(plan(self.root), 1):
+            receipt = self.root / f'new-{index}.json'
+            result = subprocess.run(['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+                cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': str(index), 'CARR_CI_UNIT_RECEIPT': str(receipt)},
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipts.append(str(receipt))
+        result = subprocess.run([sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(self.root),
+                                 'verify', *receipts], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('2 suites exactly once', result.stdout)
+
+    def test_successful_shard_warns_only_when_elapsed_exceeds_estimate(self):
+        self.package('mcp-server')
+        mcp = self.root / 'mcp-server'
+        for name in ('suite-discovery.ts', 'run-tests.mjs'):
+            shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
+        (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node run-tests.mjs'}}))
+        receipt = self.root / 'receipt.json'
+        for predicted, warning in ((1, True), (60000, False)):
+            with self.subTest(predicted=predicted):
+                (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+                    'suites': {'suite.test.mjs': {'milliseconds': predicted, 'serial': True}}}))
+                result = subprocess.run(
+                    ['bash', str(self.root / 'ops/ci.sh'), '--strict', '--only', 'unit', '--unit-part', 'mcp'],
+                    cwd=self.root, env={**self.env, 'CARR_CI_UNIT_SHARD': '1',
+                                       'CARR_CI_UNIT_RECEIPT': str(receipt)},
+                    capture_output=True, text=True, timeout=30)
+                output = result.stdout + result.stderr
+                self.assertEqual(result.returncode, 0, output)
+                self.assertEqual(json.loads(receipt.read_text()), {'shard': 1, 'suites': ['suite.test.mjs']})
+                self.assertEqual('::warning::CI timing refresh needed' in output, warning, output)
+                if warning:
+                    self.assertIn('delivery coordinator', output)
+                    self.assertIn('predicted 1ms', output)
+                    self.assertRegex(output, r'observed [0-9]+ms')
+
     def test_shard_budget_refuses_before_npm(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': FIXTURE_COUNT}))
         for index in range(FIXTURE_COUNT - 1):
             (mcp / f'test/extra{index}.test.mjs').touch()
@@ -289,7 +337,7 @@ class UnitClassTests(unittest.TestCase):
     def test_shard_selection_uses_admitted_dynamic_count(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        for name in ('suite-discovery.mjs', 'run-tests.mjs'):
+        for name in ('suite-discovery.ts', 'run-tests.mjs'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 8}))
         for index in range(7):
@@ -308,7 +356,7 @@ class UnitClassTests(unittest.TestCase):
     def test_watchdog_timeout_cannot_emit_a_success_receipt(self):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 33}))
         for n in range(32):
             (mcp / f'test/extra{n}.test.mjs').write_text('')
@@ -361,7 +409,7 @@ class UnitClassTests(unittest.TestCase):
         self.all_packages()
         mcp = self.root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/run-tests.mjs', mcp / 'run-tests.mjs')
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 1}))
         (mcp / 'test/suite.test.mjs').rename(mcp / 'test/workspace-command-center-browser.test.mjs')
         (mcp / 'test/workspace-command-center-browser.test.mjs').write_text(

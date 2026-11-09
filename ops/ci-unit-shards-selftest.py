@@ -63,8 +63,7 @@ class ShardCoverage(unittest.TestCase):
             records.pop('0.test.mjs')
             timing.write_text(json.dumps({'suites': records}))
             missing = subprocess.run(command, capture_output=True, text=True)
-            self.assertNotEqual(missing.returncode, 0)
-            self.assertIn('need measured duration entries', missing.stderr)
+            self.assertEqual(missing.returncode, 0, missing.stderr)
 
     def test_combined_additions_expand_capacity_without_trimming_estimates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -138,16 +137,48 @@ class ShardCoverage(unittest.TestCase):
             self.inventory(root, 1)
             records, _ = planner.durations(root)
             self.assertTrue(records['new.test.mjs']['serial'])
-            self.assertGreaterEqual(records['new.test.mjs']['milliseconds'], planner.WATCHDOG_MS)
+            self.assertEqual(records['new.test.mjs']['milliseconds'], planner.DEFAULT_SUITE_MS)
+            self.assertEqual(planner.plan(root), [['new.test.mjs']])
             timing = root / 'ops/config/ci-unit-durations.json'
             timing.parent.mkdir(parents=True)
-            timing.write_text(json.dumps({'suites': {'known': {'milliseconds': 251409, 'serial': False}}}))
+            timing.write_text(json.dumps({'suites': {'retired.test.mjs': {'milliseconds': planner.WATCHDOG_MS * 100, 'serial': False}}}))
             records, _ = planner.durations(root)
-            self.assertEqual(records['new.test.mjs'], {'milliseconds': 251409, 'serial': True})
+            self.assertEqual(records['new.test.mjs'], {'milliseconds': planner.DEFAULT_SUITE_MS, 'serial': True, 'unmeasured': True})
+            self.assertEqual(planner.plan(root), [['new.test.mjs']])
+
+    def test_unknown_work_cannot_consume_measured_headroom(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / 'mcp-server/test'
+            tests.mkdir(parents=True)
+            timing = root / 'ops/config/ci-unit-durations.json'
+            timing.parent.mkdir(parents=True)
+            measured = 'known-browser.test.mjs'
+            (tests / measured).touch()
+            timing.write_text(json.dumps({'snapshot_template_ms': 167478, 'suites': {
+                measured: {'milliseconds': 310000, 'serial': True}}}))
+            self.inventory(root, 1)
+            for count in (1, 10, 20):
+                unknown = [f'new-{index}-browser.test.mjs' for index in range(count)]
+                for file in unknown:
+                    (tests / file).touch()
+                shards = planner.plan(root)
+                self.assertIn([measured], shards)
+                self.assertEqual(sorted(file for shard in shards for file in shard),
+                                 sorted([measured, *unknown]))
+                self.assertLessEqual(len(shards), planner.MAX_COUNT)
+                records, setup = planner.durations(root)
+                records[unknown[0]]['milliseconds'] = 300000
+                assigned = next(shard for shard in shards if unknown[0] in shard)
+                self.assertLessEqual(planner.estimate(assigned, records, setup), planner.WATCHDOG_MS)
+            for index in range(200):
+                (tests / f'overflow-{index}.test.mjs').touch()
+            with self.assertRaisesRegex(ValueError, '16-shard cap'):
+                planner.plan(root)
 
     def inventory(self, root, expected):
         mcp = root / 'mcp-server'
-        shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
+        shutil.copy2(ROOT / 'mcp-server/suite-discovery.ts', mcp / 'suite-discovery.ts')
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': expected}))
 
     def test_measured_durations_balance_and_discovery_keeps_new_suites(self):
