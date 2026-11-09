@@ -4,6 +4,8 @@
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
+    "test/models/subject-watch-delivery/Delivery.map.ts",
+    "test/models/subject-watch-delivery/Queue.map.ts",
     "suite-discovery.ts",
     "test/suite-discovery.test.ts"
   ]

@@ -1,13 +1,19 @@
 {
   "entry": [
     "typescript/*.test.ts",
+    "test/models/subject-watch-delivery/Delivery.map.ts",
+    "test/models/subject-watch-delivery/Queue.map.ts",
+    "src/subject-watch-scheduler.ts",
     "suite-discovery.ts"
   ],
   "project": [
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
+    "test/models/subject-watch-delivery/Delivery.map.ts",
+    "test/models/subject-watch-delivery/Queue.map.ts",
     "suite-discovery.ts",
-    "test/suite-discovery.test.ts"
+    "test/suite-discovery.test.ts",
+    "src/subject-watch-scheduler.ts"
   ]
 }
