@@ -540,6 +540,55 @@ test('quiet lease clocks and pending delivery', async t => {
  let watch=await make();
  const sweep=async(now,conn=c)=>(await conn.query('select ops.sweep_subject_watches($1,50) result',[now])).rows[0].result;
  const count=async() => Number((await c.query('select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition=\'emitted\'',[watch])).rows[0].n);
+ for (const lockKind of ['generation','delivery']) await t.test(`locked ${lockKind} prefix advances and unlocked receipts emit exactly once`,async()=>{
+  const peer=new pg.Client({connectionString:dsn});await peer.connect();
+  const watches=[];
+  try {
+   await c.query('begin');
+   for(let i=0;i<51;i++) {
+    const d=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic queue contention','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+    const w=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'deal',$2,ops.subject_watch_target('deal',$2),'{\"change_kinds\":[\"reply_arrived\"]}','watching','2000-01-01') returning id",[actor,d])).rows[0].id;
+    watches.push({d,w});
+   }
+   await c.query('commit');
+   watches.sort((a,b)=>a.w.localeCompare(b.w));
+   for(const {d} of watches) {
+    await c.query('begin');
+    await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,d]);
+    await c.query("update deal set closed_on='2030-01-01' where id=$1",[d]);
+    await c.query('commit');
+   }
+   await peer.query('begin');
+   for(const {d,w} of watches.slice(0,50)) {
+    if(lockKind==='generation') await peer.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor+':deal:'+d]);
+    else await peer.query('select watch_id from ops.subject_watch_delivery where watch_id=$1 for update',[w]);
+   }
+   const free=watches[50].w;
+   const receipt=async id=>(await c.query('select disposition,notification_id from ops.subject_watch_change where watch_generation_id=$1',[id])).rows;
+   assert.equal((await receipt(free))[0].disposition,'pending');
+   for(let i=0;i<4;i++) {
+    const result=await sweep('2030-01-01T12:00:00Z');
+    assert.ok(result.scanned<=50,'each transaction scans at most fifty candidates');
+   }
+   assert.equal((await receipt(free))[0].disposition,'emitted','free work behind a full locked batch progresses');
+   for(const {w} of watches.slice(0,50)) assert.equal((await receipt(w))[0].disposition,'pending');
+   await peer.query('rollback');
+   for(let i=0;i<4;i++) await sweep('2030-01-01T12:05:00Z');
+   const emitted=[];
+   for(const {w} of watches) {
+    const rows=await receipt(w);assert.equal(rows.length,1);assert.equal(rows[0].disposition,'emitted');
+    emitted.push(rows[0].notification_id);
+   }
+   assert.equal(new Set(emitted).size,51,'each waiting watch emits once after unlock');
+   for(let i=0;i<4;i++) await sweep('2030-01-01T12:10:00Z');
+   assert.equal(Number((await c.query('select count(*) n from ops.notification where id=any($1::uuid[])',[emitted])).rows[0].n),51);
+   for(const {w} of watches) assert.equal((await receipt(w))[0].notification_id,emitted[watches.findIndex(x=>x.w===w)]);
+  } finally {
+   await c.query('rollback');await peer.query('rollback');await peer.end();
+   await c.query('delete from ops.subject_watch_v2_subscription where id=any($1::uuid[])',[watches.map(x=>x.w)]);
+   await c.query('delete from ops.subject_watch_delivery where watch_id=any($1::uuid[])',[watches.map(x=>x.w)]);
+  }
+ });
  await t.test('crossing without business mutation emits once and later days stay quiet',async()=>{
   await c.query('insert into ops.notification_preference(actor,device_opt_in) values($1,true) on conflict(actor) do update set device_opt_in=excluded.device_opt_in where notification_preference.actor=excluded.actor',[actor]);
   await sweep('2027-03-31T12:00:00Z'); assert.equal(await count(),0);
