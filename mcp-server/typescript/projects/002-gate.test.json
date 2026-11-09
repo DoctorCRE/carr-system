@@ -1,0 +1,8 @@
+{
+  "node": [
+    "typescript/gate.test.ts"
+  ],
+  "entry": [
+    "typescript/gate.test.ts"
+  ]
+}
