@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/worker-types.test.ts"
+  ],
+  "entry": [
+    "test/worker-types.test.ts"
+  ]
+}

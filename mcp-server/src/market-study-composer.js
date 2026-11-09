@@ -1,6 +1,6 @@
 // Compose reviewed market study record groups without publication effects.
 import schema from '../../client-portal/market-study.v1.schema.json' with { type: 'json' };
-import { RECORD_LAYER_GROUPS, validateMarketStudyPackage } from './market-study-package.js';
+import { RECORD_LAYER_GROUPS, validateMarketStudyPackage } from './market-study-package.ts';
 
 const identityFields = ['deal_id', 'client_id'];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);

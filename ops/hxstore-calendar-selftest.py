@@ -7,9 +7,9 @@ import struct
 import subprocess
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 
 ROOT = Path(__file__).resolve().parents[1]
-CRATE = ROOT / 'vendor/hxprobe'
 STORE = runpy.run_path(str(ROOT / 'ops/hxstore-observe-selftest.py'))['store']
 
 
@@ -39,7 +39,7 @@ def candidate(attendees=(), start=1_793_000_000, metadata=0, response=0):
 class CalendarExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True, timeout=180)
+        test_binary()
 
     def test_distinct_schedule_candidates_export_as_unsupported_without_merging(self):
         attendee = [('Bo Example', 'bo@example.test')]
@@ -49,7 +49,7 @@ class CalendarExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source, target = Path(tmp) / 'synthetic.hxd', Path(tmp) / 'synthetic.db'
             source.write_bytes(STORE(b''.join(rows)))
-            result = subprocess.run([str(CRATE / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+            result = subprocess.run([str(test_binary()), 'db', str(source), str(target)],
                                     capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
             with sqlite3.connect(target) as db:

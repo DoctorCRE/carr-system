@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/review-call-outcome-postgres.test.ts"
+  ],
+  "entry": [
+    "test/review-call-outcome-postgres.test.ts"
+  ]
+}

@@ -877,6 +877,12 @@
       "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
       "rule": "credential-url",
       "reason": "WR622.S1.J590. The inherited rejected credential URL uses an explicitly synthetic password on a reserved example domain, not a live credential. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
+      "path": "audits/decoder-build-ownership.md",
+      "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
+      "rule": "pii-phone",
+      "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
     }
   ]
 }

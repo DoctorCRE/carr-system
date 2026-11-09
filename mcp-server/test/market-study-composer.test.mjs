@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { composeMarketStudyPackage } from '../src/market-study-composer.js';
-import { RECORD_LAYER_GROUPS, validateMarketStudyPackage } from '../src/market-study-package.js';
+import { RECORD_LAYER_GROUPS, validateMarketStudyPackage } from '../src/market-study-package.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('../../client-portal/fixtures/example-health.market-study.json', import.meta.url), 'utf8'));
 const target = { deal_id: 'synthetic-deal', client_id: 'synthetic-client' };
