@@ -30,7 +30,7 @@ CARR-Session-Role: orchestrator
 Tell the successor: Start with /pstack:poteto-mode in its Orchestrate playbook.
 As part of your opening act, call t3_thread_organize with action "unpin" and
 threadId set to the retiring T3 thread id named in this launch prompt and handoff,
-only if it is pinned.
+only if it is pinned. Neither seat may archive the retiring thread.
 Resume from team-memory handoff/orchestrator-latest and pstack's Session pickup
 playbook. Run as the coordinator that owns the program, never the code (rule
 974655e1). pstack lives at /Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack.

@@ -100,6 +100,7 @@ class Rotation(unittest.TestCase):
                 self.assertNotIn('action "pin"', reason)
                 self.assertIn('call t3_thread_organize with action "unpin"', reason)
                 self.assertIn('only if it is pinned', reason)
+                self.assertIn('Neither seat may archive the retiring thread.', reason)
                 self.assertIn('Do not use the Claude session id as the T3 thread id.', reason)
 
     def test_above(self):

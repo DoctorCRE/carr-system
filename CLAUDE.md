@@ -64,6 +64,7 @@ and stop. The successor starts `/pstack:poteto-mode` in Orchestrate, reads the
 handoff and Session pickup playbook, and owns the program, never the code
 (rule 974655e1). Seats never pin themselves or any thread. The successor unpins
 the retiring thread only if it was pinned by an earlier seat (rule 5ddc8cf8).
+Neither seat may archive the retiring thread (rule 82eb869e).
 Every delegated job starts with `delegate_task`; `t3_thread_launch` is reserved
 for an orchestrator successor or a thread Joe requests.
 
