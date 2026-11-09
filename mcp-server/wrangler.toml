@@ -362,3 +362,9 @@ new_sqlite_classes = ["PhoneAudioHandoff"]
 
 [build]
 command = "node ../ops/scac-mutation-inventory.mjs"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[env.staging.triggers]
+crons = ["*/5 * * * *"]

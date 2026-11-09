@@ -3427,7 +3427,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "replace-subject-watch-policy-v2": {
     "ingress_key": "mcp-tool:replace-subject-watch-policy-v2",
     "source_locator": "mcp-server/src/subject-watches.js",
-    "schema_digest": "7e7c6b27310174e936bb6f2f12ae75781968ee1761efc5124428cdc33310128a",
+    "schema_digest": "451267f650c0a6e94314fc051d5c3b46249be3bbc3983f43d23c0d751c402235",
     "write": true,
     "human_only": true,
     "human_caller_only": true,
@@ -4324,7 +4324,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "watch-subject-v2": {
     "ingress_key": "mcp-tool:watch-subject-v2",
     "source_locator": "mcp-server/src/subject-watches.js",
-    "schema_digest": "2c7c5f0bd3e236ae4c7fa1dcdee10e6542ffb9b0a4230bf79aca7f8b7ca6376e",
+    "schema_digest": "c5c55bc471a113f279fbf0a329333bd98a558fb1614843c67afcbde30db63837",
     "write": true,
     "human_only": true,
     "human_caller_only": true,

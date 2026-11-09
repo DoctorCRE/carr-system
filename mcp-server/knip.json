@@ -2,15 +2,21 @@
   "entry": [
     "typescript/*.test.ts",
     "suite-discovery.ts",
-    "test/*.test.ts"
+    "test/*.test.ts",
+    "test/models/subject-watch-delivery/Delivery.map.ts",
+    "test/models/subject-watch-delivery/Queue.map.ts",
+    "src/subject-watch-scheduler.ts"
   ],
   "project": [
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
+    "test/models/subject-watch-delivery/Delivery.map.ts",
+    "test/models/subject-watch-delivery/Queue.map.ts",
     "suite-discovery.ts",
     "test/suite-discovery.test.ts",
     "src/public-errors.ts",
-    "test/review-call-outcome-postgres.test.ts"
+    "test/review-call-outcome-postgres.test.ts",
+    "src/subject-watch-scheduler.ts"
   ]
 }

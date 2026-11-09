@@ -6,10 +6,11 @@ import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
+import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 
 const dsn = await snapshotDatabase('subject-watches-');
 test('v2 registered lifecycle, policy, replay, generations and isolation', async t => {
@@ -524,4 +525,419 @@ test('migration initializes live watches and skips dangling targets',async t=>{
     assert.equal((await c.query('select count(*)::integer n from ops.subject_watch_material_baseline where watch_id=$1',[current.id])).rows[0].n,1);
     assert.equal((await c.query('select count(*)::integer n from ops.subject_watch_material_baseline where watch_id=$1',[stale.id])).rows[0].n,0);
   } finally {await c.query('rollback');}
+});
+
+test('quiet lease clocks and pending delivery', async t => {
+ const c = new pg.Client({connectionString:dsn}); await c.connect(); t.after(()=>c.end());
+ await c.query('delete from ops.subject_watch_delivery where watch_id in (select id from ops.subject_watch_v2_subscription)');
+ const actor=(await c.query("select id from actor where slug='joe'")).rows[0].id;
+ const party=(await c.query("insert into party(kind,name,created_by,updated_by) values('person','Synthetic clock client',$1,$1) returning id",[actor])).rows[0].id;
+ await c.query("insert into client_status(slug,label) values('active','Active') on conflict do nothing");
+ const client=(await c.query("insert into client(party_id,status,created_by,updated_by) values($1,'active',$2,$2) returning id",[party,actor])).rows[0].id;
+ const deal=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic clock deal','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+ const lease=(await c.query("insert into lease(deal_id,client_id,expiration_on,status,owner_id,executed_on,evidence_kind,evidence_ref,created_by,updated_by) values($1,$2,'2028-03-31','current',$3,'2026-01-01','executed_lease','synthetic:clock',$3,$3) returning id",[deal,client,actor])).rows[0].id;
+ const make=async(date='2027-01-01T12:00:00Z')=>(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'lease',$2,ops.subject_watch_target('lease',$2),$3,'watching',$4) returning id",[actor,lease,{change_kinds:['lease_threshold_crossed'],lease_threshold_days:[0,30,90,365]},date])).rows[0].id;
+ let watch=await make();
+ const sweep=async(now,conn=c)=>(await conn.query('select ops.sweep_subject_watches($1,50) result',[now])).rows[0].result;
+ const count=async() => Number((await c.query('select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition=\'emitted\'',[watch])).rows[0].n);
+ await t.test('crossing without business mutation emits once and later days stay quiet',async t=>{
+  await c.query('insert into ops.notification_preference(actor,device_opt_in) values($1,true) on conflict(actor) do update set device_opt_in=excluded.device_opt_in where notification_preference.actor=excluded.actor',[actor]);
+  await sweep('2027-03-31T12:00:00Z'); assert.equal(await count(),0);
+  await sweepSubjectWatches({scheduledTime:Date.parse('2027-04-01T12:00:00Z')},{DATABASE_URL_WRITER:dsn},pg.Pool); assert.equal(await count(),1);
+  await sweep('2027-04-02T12:00:00Z'); assert.equal(await count(),1);
+  await c.query("select set_config('carr.acting_actor_slug','joe',false),set_config('carr.verified_human_actor_slug','joe',false)");
+  const response=await executeRegisteredTool(c,{id:actor,slug:'joe',human:true},'read-subject-watch-changes-v1',{subject_type:'lease',subject_id:lease,subscription_id:watch});
+  assert.equal(response.changes[0].category,'lease_threshold_crossed');
+  assert.equal(response.changes[0].disposition,'emitted');
+  assert.deepEqual((await c.query('select channel from ops.notification_delivery where notification_id=$1 order by channel',[response.changes[0].notification_id])).rows.map(r=>r.channel),['in_app'],'global device permission does not authorize WATCH push');
+  const normal=(await c.query("select ops.mint_notification('event',$1,'lease',$2,'Synthetic ordinary notification','action_required',$3,$4,'joe',false,false) result",[response.changes[0].source_event_id,lease,'/clients?record='+client,'synthetic-control:'+watch])).rows[0].result;
+  assert.deepEqual((await c.query('select channel from ops.notification_delivery where notification_id=$1 order by channel',[normal.notification_id])).rows.map(r=>r.channel),['device','in_app'],'ordinary notification device behavior stays available');
+
+  assert.equal((await c.query('select a.slug from public.event e join public.actor a on a.id=e.actor_id where e.id=$1',[response.changes[0].source_event_id])).rows[0].slug,'system');
+
+  await t.test('scheduled proof captures real PostgreSQL evidence through psycopg',async()=>{
+   const proof=fileURLToPath(new URL('../../ops/verify-subject-watch-delivery-proof.py',import.meta.url));
+   const script="import importlib.util,json,sys; s=importlib.util.spec_from_file_location('proof',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); sample=m.capture(sys.argv[2],sys.argv[3],5); m.verify(sample); print(json.dumps({'release':{'ok':True,'env':{'value':'production','reason':None},'git_sha':{'value':'a'*40,'reason':None}},'sample':sample}))";
+   const fixture=execFileSync(process.env.CARR_CI_PYTHON??'python3',['-c',script,proof,dsn,watch],{encoding:'utf8'});
+   const sample=JSON.parse(fixture).sample;
+   assert.equal(sample.watch_id,watch);
+   assert.equal(sample.notifications,1);
+   assert.equal(sample.clock_receipts,1);
+   assert.equal(sample.pending,0);
+   assert.equal(sample.business_mutations,0);
+   const {createServer}=await import('node:http');
+   const {spawn}=await import('node:child_process');
+   const release=JSON.parse(fixture).release;
+   const server=createServer((_req,res)=>{res.setHeader('content-type','application/json');res.end(JSON.stringify(release));});
+   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+   try {
+    const child=spawn(process.env.CARR_CI_PYTHON??'python3',[proof,'--expected-merge','a'.repeat(40),
+     '--watch-id',watch,'--database',dsn,'--release-url',`http://127.0.0.1:${server.address().port}/release`,
+     '--deadline-seconds','5'],{timeout:10000});
+    let out='',err='';child.stdout.on('data',chunk=>out+=chunk);child.stderr.on('data',chunk=>err+=chunk);
+    const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
+    assert.equal(code,0,out+err);
+    assert.equal(JSON.parse(out).offline_fixture,false);
+    assert.equal(JSON.parse(out).state,'passed');
+   } finally {await new Promise(resolve=>server.close(resolve));}
+   if(process.env.J139_CAPTURE_PROOF) writeFileSync(process.env.J139_CAPTURE_PROOF,fixture);
+  });
+
+ });
+ await t.test('outage catch-up summarizes the most urgent threshold',async()=>{
+  await sweep('2028-03-15T12:00:00Z'); assert.equal(await count(),2);
+  assert.equal(Number((await c.query('select count(*) n from ops.notification where id in (select notification_id from ops.subject_watch_change where watch_generation_id=$1)',[watch])).rows[0].n),2);
+  await sweep('2028-03-16T12:00:00Z'); assert.equal(await count(),2);
+ });
+ await t.test('pause suppresses pending and resume takes quiet baseline',async()=>{
+  await c.query("update ops.subject_watch_v2_subscription set state='paused' where id=$1",[watch]);
+  assert.equal((await sweep('2028-03-30T12:00:00Z')).scanned,0,'paused watches consume no active sweep slots'); assert.equal(await count(),2);
+  await c.query("update ops.subject_watch_v2_subscription set state='watching' where id=$1",[watch]);
+  await sweep('2028-03-30T12:00:00Z'); assert.equal(await count(),2);
+ });
+ await t.test('removed generation never emits',async()=>{
+  await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[watch]);
+  assert.equal((await sweep('2028-03-31T12:00:00Z')).scanned,0,'removed generations consume no active sweep slots'); assert.equal(await count(),2);
+ });
+ await t.test('busy locks skip and later sweep catches up',async()=>{
+  await c.query('delete from ops.subject_watch_v2_subscription where id=$1',[watch]); watch=await make();
+  const other=new pg.Client({connectionString:dsn}); await other.connect();
+  try {await other.query('begin'); await other.query("select pg_advisory_xact_lock(hashtextextended($1,0))",[`${actor}:lease:${lease}`]);
+   await sweep('2027-04-01T12:00:00Z'); assert.equal(await count(),0);
+   await other.query('commit'); await sweep('2027-04-01T12:00:00Z'); assert.equal(await count(),1);
+  } finally {await other.query('rollback'); await other.end();}
+ });
+ await t.test('concurrent sweepers converge',async()=>{
+  const other=new pg.Client({connectionString:dsn}); await other.connect();
+  try {await Promise.all([sweep('2028-03-15T12:00:00Z'),sweep('2028-03-15T12:00:00Z',other)]); assert.equal(await count(),2);} finally {await other.end();}
+ });
+ await t.test('calendar and DST clocks use Chicago dates',async()=>{
+  await c.query('begin');
+  try {
+   await c.query('delete from ops.subject_watch_v2_subscription where id=$1',[watch]);
+   await c.query("update lease set expiration_on='2027-03-15' where id=$1",[lease]);
+   const w=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'lease',$2,'{}',$3,'watching','2027-03-13T12:00:00Z') returning id",[actor,lease,{change_kinds:['lease_threshold_crossed'],lease_threshold_days:[1]}])).rows[0].id;
+   const emitted=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='emitted'",[w])).rows[0].n);
+   await sweep('2027-03-14T05:59:00Z');assert.equal(await emitted(),0);
+   await sweep('2027-03-14T06:00:00Z');assert.equal(await emitted(),1);
+   await sweep('2027-03-14T08:01:00Z');assert.equal(await emitted(),1);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('mint rollback preserves pending and repeated failures quarantine',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("update ops.subject_watch_delivery set next_evaluation_at='2028-03-31',last_emitted_at=null where watch_id=$1",[watch]);
+   await c.query("create function ops.watch_delivery_fail() returns trigger language plpgsql as $$ begin raise exception 'synthetic failure'; end $$");
+   await c.query('create trigger watch_delivery_fail before insert on ops.notification for each row execute function ops.watch_delivery_fail()');
+   await sweep('2028-03-31T12:00:00Z');
+   assert.equal((await c.query('select failure_count from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].failure_count,1);
+   assert.equal(Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending'",[watch])).rows[0].n),1);
+   await sweep('2028-03-31T12:05:00Z');
+   assert.equal((await c.query('select failure_count from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].failure_count,2);
+   await sweep('2028-03-31T12:10:00Z'); assert.equal(await count(),2);
+   await c.query('drop trigger watch_delivery_fail on ops.notification');
+   await c.query('update ops.subject_watch_delivery set failure_count=0 where watch_id=$1',[watch]);
+   await sweep('2028-03-31T12:15:00Z'); assert.equal(await count(),3);
+   await sweep('2028-03-31T12:20:00Z'); assert.equal(await count(),3);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('removing a selected threshold suppresses its pending clock receipt',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("create function ops.watch_policy_fail() returns trigger language plpgsql as $$ begin raise exception 'synthetic policy failure'; end $$");
+   await c.query('create trigger watch_policy_fail before insert on ops.notification for each row execute function ops.watch_policy_fail()');
+   await sweep('2028-03-31T12:00:00Z');
+   await c.query('drop trigger watch_policy_fail on ops.notification');
+   await c.query("update ops.subject_watch_v2_subscription set policy=jsonb_set(policy,'{lease_threshold_days}','[30,90,365]') where id=$1",[watch]);
+   await sweep('2028-03-31T12:05:00Z');
+   assert.equal(Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending'",[watch])).rows[0].n),0);
+   assert.equal(await count(),2);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('statement timeout preserves pending work and quarantines two failed attempts',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("create function ops.watch_timeout_mint() returns trigger language plpgsql as $$ begin perform pg_sleep(1); return new; end $$");
+   await c.query('create trigger watch_timeout_mint before insert on ops.notification for each row execute function ops.watch_timeout_mint()');
+   await c.query("set local statement_timeout='50ms'");
+   await sweep('2028-03-31T12:00:00Z');
+   await c.query("set local statement_timeout='5s'");
+   assert.equal((await c.query('select failure_count,failure_code from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].failure_code,'57014');
+   assert.equal(Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending'",[watch])).rows[0].n),1);
+   await c.query("set local statement_timeout='50ms'");
+   await sweep('2028-03-31T12:05:00Z');
+   await c.query("set local statement_timeout='5s'");
+   assert.equal((await c.query('select failure_count from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].failure_count,2);
+   await c.query('drop trigger watch_timeout_mint on ops.notification');
+   await c.query('update ops.subject_watch_delivery set failure_count=0 where watch_id=$1',[watch]);
+   await sweep('2028-03-31T12:10:00Z');assert.equal(await count(),3);
+   await sweep('2028-03-31T12:15:00Z');assert.equal(await count(),3);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('older scheduled retries preserve newer pending clock receipts',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,source_event_id,source_revision,policy_version,category,changes,evidence_refs,occurred_at,eligible_at) select watch_generation_id,actor_id,subject_type,subject_id,'fixture:older-pending-material',source_event_id,source_revision,policy_version,'material_changed',jsonb_build_array(jsonb_build_object('field','expiration_on','before','2028-04-01','after','2028-03-31','reason_code','value_changed')),evidence_refs,'2027-01-01'::timestamptz,'2027-01-01'::timestamptz from ops.subject_watch_change where watch_generation_id=$1 and disposition='emitted' limit 1",[watch]);
+   await c.query("create function ops.watch_order_fail() returns trigger language plpgsql as $$ begin raise exception 'synthetic order failure'; end $$");
+   await c.query('create trigger watch_order_fail before insert on ops.notification for each row execute function ops.watch_order_fail()');
+   await sweep('2028-03-31T12:00:00Z');
+   await c.query('drop trigger watch_order_fail on ops.notification');
+   const pendingClock=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and category='lease_threshold_crossed' and disposition='pending'",[watch])).rows[0].n);
+   assert.equal(await pendingClock(),1);
+   const older=await sweep('2028-03-30T12:00:00Z');
+   assert.equal(await pendingClock(),1,'an old clock cannot suppress a newer crossing');
+   assert.equal(older.scanned,0,'older invocation leaves a newer evaluation unchanged');
+   assert.equal((await c.query('select scheduled_at from ops.subject_watch_sweep')).rows[0].scheduled_at.toISOString(),'2028-03-31T12:00:00.000Z');
+   await sweep('2028-03-31T12:00:00Z');
+   assert.equal(await pendingClock(),0);assert.equal(await count(),4,'the pending material and clock receipts converge together');
+  } finally {await c.query('rollback');}
+ });
+ await t.test('whole transaction rollback retries without loss or duplication',async()=>{
+  await c.query('begin'); await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),3); await c.query('rollback'); assert.equal(await count(),2);
+  await sweep('2028-03-31T12:00:00Z'); assert.equal(await count(),3);
+ });
+ await t.test('access loss suppresses pending and health detects stale scheduler',async()=>{
+  await c.query('begin');
+  try {
+   await c.query('update party set deleted_at=now() where id=$1',[party]);
+   await sweep('2028-04-01T12:00:00Z');assert.equal(await count(),3);
+   await c.query("update ops.subject_watch_sweep set scheduled_at=clock_timestamp()-interval '16 minutes' where singleton");
+   assert.equal((await c.query('select ops.subject_watch_health($1) health',[watch])).rows[0].health.status,'delayed');
+  } finally {await c.query('rollback');}
+ });
+ await t.test('coalescing, rate limit, busy receipts and delivery policy use current state',async()=>{
+  const target=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,'{}',$3,'watching') returning id",[actor,deal,{change_kinds:['reply_arrived'],include_self_changes:true}])).rows[0].id;
+  const change=async(day)=>{
+   await c.query('update deal set closed_on=$2 where id=$1',[deal,day]);
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,deal]);
+  };
+  const pending=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending'",[target])).rows[0].n);
+  const notices=async()=>Number((await c.query('select count(distinct notification_id) n from ops.subject_watch_change where watch_generation_id=$1',[target])).rows[0].n);
+  for(let n=0;n<101;n++) await change(new Date(Date.UTC(2027,0,n+1)).toISOString().slice(0,10));
+  assert.equal(await pending(),101);
+  await sweep('2029-01-01T12:00:00Z');assert.equal(await pending(),1,'overflow remains pending');assert.equal(await notices(),1);
+  await change('2027-01-04');await sweep('2029-01-01T12:01:00Z');assert.equal(await pending(),2);assert.equal(await notices(),1);
+  const peer=new pg.Client({connectionString:dsn});await peer.connect();
+  try {
+   await peer.query('begin');await peer.query("select id from ops.subject_watch_change where watch_generation_id=$1 and disposition='pending' for update",[target]);
+   await sweep('2029-01-01T12:05:00Z');assert.equal(await notices(),1);
+   await peer.query('commit');await sweep('2029-01-01T12:05:00Z');assert.equal(await pending(),0);assert.equal(await notices(),2);
+  } finally {await peer.query('rollback');await peer.end();}
+  await change('2027-01-05');assert.equal(await pending(),1);
+  await c.query("update ops.subject_watch_v2_subscription set state='paused' where id=$1",[target]);assert.equal(await pending(),0);
+  await c.query("update ops.subject_watch_v2_subscription set state='watching' where id=$1",[target]);
+  await sweep('2029-01-01T12:10:00Z');assert.equal(await notices(),2,'resume stays quiet');
+  await change('2027-01-07');
+  await c.query("update ops.subject_watch_v2_subscription set policy=jsonb_set(policy,'{include_self_changes}','false') where id=$1",[target]);
+  await sweep('2029-01-01T12:10:00Z');assert.equal(await pending(),0);assert.equal(await notices(),2);
+  await c.query("update ops.subject_watch_v2_subscription set policy=jsonb_set(policy,'{include_self_changes}','true') where id=$1",[target]);
+  await change('2027-01-06');assert.equal(await pending(),1);
+  await c.query('update party set deleted_at=now() where id=$1',[party]);
+  await sweep('2029-01-01T12:15:00Z');assert.equal(await pending(),0);assert.equal(await notices(),2);
+  assert.equal((await c.query('select state from ops.subject_watch_v2_subscription where id=$1',[target])).rows[0].state,'paused');
+  await c.query('update party set deleted_at=null where id=$1',[party]);
+ });
+ await t.test('reply delivery validates every evidence reference without a positional assumption',async()=>{
+  await c.query('begin');
+  try {
+   const dell=(await c.query("select id from actor where slug='dell'")).rows[0].id;
+   const target=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,'{}','{\"change_kinds\":[\"reply_arrived\"]}','watching') returning id",[dell,deal])).rows[0].id;
+   const activity=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic multi-evidence reply','{\"mailbox_owner\":\"dell\",\"sender_email\":\"synthetic@example.test\"}') returning id",[deal,dell])).rows[0].id;
+   const source=(await c.query('select source_event_id from ops.subject_watch_change where watch_generation_id=$1 limit 1',[watch])).rows[0].source_event_id;
+   const seed=async(key)=>(await c.query("insert into ops.subject_watch_change(watch_generation_id,actor_id,subject_type,subject_id,semantic_key,source_event_id,source_revision,policy_version,category,changes,evidence_refs,occurred_at,eligible_at) values($1,$2,'deal',$3,$4,$5,1,1,'reply_arrived','[]',$6,now(),now()) returning id",[target,dell,deal,key,source,JSON.stringify([{event_id:source,activity_id:null},{event_id:source,activity_id:activity}])])).rows[0].id;
+   const first=await seed('fixture:multi-evidence');await sweep('2032-01-01T12:00:00Z');
+   assert.equal((await c.query('select disposition from ops.subject_watch_change where id=$1',[first])).rows[0].disposition,'emitted');
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[activity]);
+   const revoked=await seed('fixture:revoked-evidence');await sweep('2032-01-01T12:05:00Z');
+   assert.equal((await c.query('select disposition from ops.subject_watch_change where id=$1',[revoked])).rows[0].disposition,'suppressed');
+   assert.equal(Number((await c.query('select count(distinct notification_id) n from ops.subject_watch_change where watch_generation_id=$1',[target])).rows[0].n),1);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('committed multi-event transaction delivers one final receipt and retry stays quiet',async()=>{
+  const subject=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic committed delivery','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+  const generation=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,ops.subject_watch_target('deal',$2),'{\"change_kinds\":[\"reply_arrived\"]}','watching') returning id",[actor,subject])).rows[0].id;
+  const receipts=async()=>(await c.query('select * from ops.subject_watch_change where watch_generation_id=$1',[generation])).rows;
+  try {
+   await c.query('begin');
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause,recorded_at) values(now(),$1,'update-deal','deal',$2,'automation_job',clock_timestamp())",[actor,subject]);
+   await c.query("update deal set closed_on='2027-01-01' where id=$1",[subject]);
+   await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause,recorded_at) values(now(),$1,'update-deal','deal',$2,'automation_job',clock_timestamp())",[(await c.query("select id from actor where slug='dell'")).rows[0].id,subject]);
+   await c.query("update deal set outcome='won' where id=$1",[subject]);
+   assert.equal((await receipts()).length,0,'source events do not finish capture');
+   await c.query('commit');
+   let rows=await receipts();assert.equal(rows.length,1);
+   assert.deepEqual(rows[0].changes.map(x=>x.field),['closed_on','outcome']);
+   assert.equal(rows[0].evidence_refs.length,2);
+   assert.equal((await c.query('select actor_id from event where id=$1',[rows[0].source_event_id])).rows[0].actor_id,actor,'the first provenance event belongs to self');
+   assert.equal(rows[0].disposition,'pending');
+   await c.query("update ops.subject_watch_v2_subscription set policy=policy||'{\"include_self_changes\":false}'::jsonb where id=$1",[generation]);
+   await c.query('begin');
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].disposition,'emitted');
+   const notification=rows[0].notification_id;assert.ok(notification);
+   await sweep('2033-01-01T12:00:00Z');await sweep('2033-01-01T12:05:00Z');
+   rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].notification_id,notification);
+   assert.equal(Number((await c.query("select count(*) n from ops.notification where dedupe_key like $1",['subject-watch:'+generation+':%'])).rows[0].n),1);
+  } finally {
+   await c.query('rollback');
+   await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[generation]);
+   await c.query('delete from ops.subject_watch_delivery where watch_id=$1',[generation]);
+  }
+ });
+ await t.test('committed reply receipt retains live mailbox evidence when another reply retires',async()=>{
+  const subject=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic committed replies','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+  const generation=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) values($1,'deal',$2,ops.subject_watch_target('deal',$2),'{\"change_kinds\":[\"reply_arrived\"]}','watching') returning id",[actor,subject])).rows[0].id;
+  const mail=[];
+  const dell=(await c.query("select id from actor where slug='dell'")).rows[0].id;
+  try {
+   await c.query('begin');
+   for(let i=0;i<2;i++) {
+    const id=(await c.query("insert into activity(kind,occurred_at,deal_id,actor_id,summary,email_source) values('email_in',now(),$1,$2,'Synthetic committed reply','{\"mailbox_owner\":\"joe\",\"sender_email\":\"synthetic@example.test\"}') returning id",[subject,actor])).rows[0].id;mail.push(id);
+    await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,new_value,cause,personal_scope) values(now(),$1,'confirm-email-filing','deal',$2,$3,'automation_job','joe-personal')",[i===0?dell:actor,subject,{activity_id:id}]);
+   }
+   await c.query('commit');
+   const receipts=async()=>(await c.query('select * from ops.subject_watch_change where watch_generation_id=$1',[generation])).rows;
+   let rows=await receipts();assert.equal(rows.length,1);assert.equal(rows[0].category,'reply_arrived');assert.equal(rows[0].evidence_refs.length,2);
+   await c.query('begin');
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[mail[0]]);
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows[0].disposition,'emitted','a live reply survives retirement of another reply in the same committed receipt');
+   await c.query('rollback');await c.query('begin');
+   await c.query("update ops.subject_watch_v2_subscription set policy=policy||'{\"include_self_changes\":false}'::jsonb where id=$1",[generation]);
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=$1",[mail[0]]);
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows[0].disposition,'suppressed','self policy and live mailbox eligibility must hold for the same reference');
+   await c.query('rollback');await c.query('begin');
+   await c.query("update activity set email_context='{\"lifecycle\":{\"state\":\"deleted\"}}' where id=any($1::uuid[])",[mail]);
+   await sweep('2033-01-01T12:00:00Z');
+   rows=await receipts();assert.equal(rows[0].disposition,'suppressed','no live mailbox evidence means no delivery');
+  } finally {
+   await c.query('rollback');
+   await c.query("update ops.subject_watch_v2_subscription set state='removed' where id=$1",[generation]);
+   await c.query('delete from ops.subject_watch_delivery where watch_id=$1',[generation]);
+  }
+ });
+ await t.test('1x and 10x synthetic pending loads retain every receipt',async()=>{
+  for(const size of [50,500]) {
+   let deals=[];
+   await c.query('begin');
+   try {
+    deals=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) select $1,'Synthetic load '||n,'purchase','research','joe',$2,$2 from generate_series(1,$3) n returning id",[client,actor,size])).rows.map(r=>r.id);
+    await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state) select $1,'deal',id,'{}','{\"change_kinds\":[\"reply_arrived\"]}','watching' from deal where id=any($2::uuid[])",[actor,deals]);
+    await c.query("update deal set closed_on='2027-01-01' where id=any($1::uuid[])",[deals]);
+    await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) select now(),$1,'update-deal','deal',id,'automation_job' from deal where id=any($2::uuid[])",[actor,deals]);
+    assert.equal(Number((await c.query("select count(*) n from ops.subject_watch_change where subject_id=any($1::uuid[])",[deals])).rows[0].n),0,'deferred source transaction has no premature receipts');
+    await c.query('commit');
+    await c.query('begin');
+    const started=performance.now();let batches=0;
+    for(let n=0;n<Math.ceil(size/50)+2;n++){await sweep('2030-01-01T12:00:00Z');batches++;}
+    const duration=performance.now()-started;
+    const counts=(await c.query("select count(*)::integer total,count(*) filter(where disposition='emitted')::integer emitted,count(distinct notification_id)::integer notices from ops.subject_watch_change where subject_id=any($1::uuid[])",[deals])).rows[0];
+    assert.deepEqual(counts,{total:size,emitted:size,notices:size});
+    console.log(JSON.stringify({synthetic_watches:size,batches,sweep_ms:duration,errors:0,...counts}));
+   } finally {
+    await c.query('rollback');
+    await c.query("update ops.subject_watch_v2_subscription set state='removed' where subject_id=any($1::uuid[])",[deals]);
+    await c.query('delete from ops.subject_watch_delivery where watch_id in (select id from ops.subject_watch_v2_subscription where subject_id=any($1::uuid[]))',[deals]);
+   }
+  }
+ });
+ await t.test('leap-day threshold crosses only at Chicago midnight',async()=>{
+  await c.query('begin');
+  try {
+   await c.query('delete from ops.subject_watch_v2_subscription where id=$1',[watch]);
+   await c.query("update lease set expiration_on='2028-02-29' where id=$1",[lease]);
+   const w=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'lease',$2,'{}',$3,'watching','2028-02-27T12:00:00Z') returning id",[actor,lease,{change_kinds:['lease_threshold_crossed'],lease_threshold_days:[1]}])).rows[0].id;
+   const emitted=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='emitted'",[w])).rows[0].n);
+   await sweep('2028-02-28T05:59:00Z');assert.equal(await emitted(),0);
+   await sweep('2028-02-28T06:00:00Z');assert.equal(await emitted(),1);
+   await sweep('2028-02-29T12:00:00Z');assert.equal(await emitted(),1);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('12-calendar-month window honors leap dates and month ends',async()=>{
+  await c.query('begin');
+  try {
+   await c.query('delete from ops.subject_watch_v2_subscription where id=$1',[watch]);
+   await c.query("update lease set expiration_on='2028-02-29' where id=$1",[lease]);
+   const w=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'lease',$2,'{}',$3,'watching','2027-02-27T12:00:00Z') returning id",[actor,lease,{change_kinds:['lease_threshold_crossed'],lease_threshold_months:[12]}])).rows[0].id;
+   const emitted=async()=>Number((await c.query("select count(*) n from ops.subject_watch_change where watch_generation_id=$1 and disposition='emitted'",[w])).rows[0].n);
+   await sweep('2027-02-28T12:00:00Z');assert.equal(await emitted(),0);
+   await sweep('2027-03-01T05:59:00Z');assert.equal(await emitted(),0);
+   await sweep('2027-03-01T06:00:00Z');assert.equal(await emitted(),1);
+   await sweep('2027-03-31T12:00:00Z');assert.equal(await emitted(),1);
+  } finally {await c.query('rollback');}
+ });
+ await t.test('registered month policy and current health pass the producer parser',async()=>{
+  await c.query('begin');
+  try {
+   const current=(await c.query('select lifecycle_version from ops.subject_watch_v2_subscription where id=$1',[watch])).rows[0];
+   await c.query('set local role carr_writer');
+   const result=await executeRegisteredTool(c,{id:actor,slug:'joe',human:true},'replace-subject-watch-policy-v2',{
+    subject_type:'lease',subject_id:lease,subscription_id:watch,base_version:current.lifecycle_version,
+    policy:{change_kinds:['lease_threshold_crossed'],lease_threshold_months:[12]},idempotency_key:randomUUID()});
+   assert.deepEqual(result.watch.policy.lease_threshold_months,[12]);
+   assert.ok(['healthy','delayed','needs_repair'].includes(result.health.status));
+  } finally {await c.query('rollback');}
+ });
+ await t.test('missing expiration never becomes a reminder from commencement and term',async()=>{
+  await c.query('begin');
+  try {
+   await c.query("update lease set status='legacy_unverified',expiration_on=null,commencement_on='2025-01-01',term_months=36 where id=$1",[lease]);
+   await sweep('2030-01-01T12:00:00Z');
+   assert.equal(await count(),3);
+   assert.deepEqual((await c.query('select clock_seen from ops.subject_watch_delivery where watch_id=$1',[watch])).rows[0].clock_seen,[]);
+  } finally {await c.query('rollback');}
+ });
+
+ for (const lockKind of ['generation','delivery']) await t.test(`locked ${lockKind} prefix advances and unlocked receipts emit exactly once`,async()=>{
+  const peer=new pg.Client({connectionString:dsn});await peer.connect();
+  const watches=[];
+  const day=lockKind==='generation'?'2040-01-01':'2040-01-02';
+  try {
+   await c.query('begin');
+   for(let i=0;i<51;i++) {
+    const d=(await c.query("insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,'Synthetic queue contention','purchase','research','joe',$2,$2) returning id",[client,actor])).rows[0].id;
+    const w=(await c.query("insert into ops.subject_watch_v2_subscription(actor_id,subject_type,subject_id,baseline,policy,state,subscribed_at) values($1,'deal',$2,ops.subject_watch_target('deal',$2),'{\"change_kinds\":[\"reply_arrived\"]}','watching','2000-01-01') returning id",[actor,d])).rows[0].id;
+    watches.push({d,w});
+   }
+   await c.query('commit');
+   watches.sort((a,b)=>a.w.localeCompare(b.w));
+   for(const {d} of watches) {
+    await c.query('begin');
+    await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause) values(now(),$1,'update-deal','deal',$2,'automation_job')",[actor,d]);
+    await c.query("update deal set closed_on='2030-01-01' where id=$1",[d]);
+    await c.query('commit');
+   }
+   await peer.query('begin');
+   for(const {d,w} of watches.slice(0,50)) {
+    if(lockKind==='generation') await peer.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[actor+':deal:'+d]);
+    else await peer.query('select watch_id from ops.subject_watch_delivery where watch_id=$1 for update',[w]);
+   }
+   const free=watches[50].w;
+   const receipt=async id=>(await c.query('select disposition,notification_id from ops.subject_watch_change where watch_generation_id=$1',[id])).rows;
+   assert.equal((await receipt(free))[0].disposition,'pending');
+   for(let i=0;i<4;i++) {
+    const result=await sweep(`${day}T12:00:00Z`);
+    assert.ok(result.scanned<=50,'each transaction scans at most fifty candidates');
+   }
+   assert.equal((await receipt(free))[0].disposition,'emitted','free work behind a full locked batch progresses');
+   for(const {w} of watches.slice(0,50)) assert.equal((await receipt(w))[0].disposition,'pending');
+   await peer.query('rollback');
+   for(let i=0;i<4;i++) await sweep(`${day}T12:05:00Z`);
+   const emitted=[];
+   for(const {w} of watches) {
+    const rows=await receipt(w);assert.equal(rows.length,1);assert.equal(rows[0].disposition,'emitted');
+    emitted.push(rows[0].notification_id);
+   }
+   assert.equal(new Set(emitted).size,51,'each waiting watch emits once after unlock');
+   for(let i=0;i<4;i++) await sweep(`${day}T12:10:00Z`);
+   assert.equal(Number((await c.query('select count(*) n from ops.notification where id=any($1::uuid[])',[emitted])).rows[0].n),51);
+   for(const {w} of watches) assert.equal((await receipt(w))[0].notification_id,emitted[watches.findIndex(x=>x.w===w)]);
+  } finally {
+   await c.query('rollback');await peer.query('rollback');await peer.end();
+   await c.query('delete from ops.subject_watch_v2_subscription where id=any($1::uuid[])',[watches.map(x=>x.w)]);
+   await c.query('delete from ops.subject_watch_delivery where watch_id=any($1::uuid[])',[watches.map(x=>x.w)]);
+  }
+ });
+
 });

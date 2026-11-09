@@ -49,6 +49,7 @@
           "category": {
             "enum": [
               "material_changed",
+              "lease_threshold_crossed",
               "reply_arrived"
             ]
           },
