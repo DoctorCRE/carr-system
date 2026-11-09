@@ -360,7 +360,7 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
     assert.deepEqual(migrationIssues(pkg, gated), []);
     writeFileSync(join(root, legacy), `${text}export const explicitAny: any = 1;\n`);
     assert.match(migrationIssues(pkg, gated).join("\n"), /legacy.ts.*convert.*strict project/);
-    for (const edited of [`${text}\n`, text.replace("\n", "\r\n"), text.repeat(100)]) {
+    for (const edited of [`${text}\n`, text.replaceAll("\n", "\r\n"), text.repeat(100)]) {
       writeFileSync(join(root, legacy), edited);
       assert.match(migrationIssues(pkg, gated).join("\n"), /legacy.ts.*strict project/);
     }
