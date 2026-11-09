@@ -84,6 +84,7 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "./postgres.js";
+import { scheduledPushOutbox } from "./web-push-outbox.ts";
 import { scheduledSubjectWatches } from "./subject-watch-scheduler.ts";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
@@ -748,6 +749,9 @@ async function routeRequest(request, env, ctx) {
 // ordering is load-bearing) so every route's >=500 responses and uncaught
 // throws are covered the same single-wrap way.
 export default {
-  scheduled: scheduledSubjectWatches,
+  scheduled(controller, env, context) {
+    if (new Date(controller.scheduledTime).getUTCMinutes() % 5 === 0) scheduledSubjectWatches(controller, env, context);
+    context.waitUntil(scheduledPushOutbox(env));
+  },
   fetch: wrapWithCorrelation(withFailureRecording(routeRequest)),
 };
