@@ -1,7 +1,7 @@
-import type { DurableObjectId, DurableObjectState, DurableObjectStorage } from "@cloudflare/workers-types";
-
 // One Durable Object per unpredictable consent id. KV cannot provide an
 // atomic read/delete; this transaction is the sole consumption authority.
+import type { DurableObjectId, DurableObjectState, DurableObjectStorage } from "@cloudflare/workers-types";
+
 type ConsentInput = { state: string; browser: string; csrf: string; expiresAt: number; [field: string]: unknown };
 type ConsentNamespace = {
   idFromName(name: string): DurableObjectId;
