@@ -1,5 +1,5 @@
-type ReviewComment = { body?: string | null; html_url?: string };
 // The review gate and WR completion consume the same SHA-bound agent comment grammar.
+type ReviewComment = { body?: string | null; html_url?: string };
 export function reviewComments(sha: string, comments: ReviewComment[]) {
   return comments.flatMap((comment) => {
     const lines = (comment.body ?? "").split(/\r\n|\n|\r/);
