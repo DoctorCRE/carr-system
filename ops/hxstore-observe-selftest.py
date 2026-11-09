@@ -8,11 +8,10 @@ import struct
 import subprocess
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
-CRATE = ROOT / 'vendor/hxprobe'
-BINARY = CRATE / 'target/debug/hxprobe'
 SECRET = b'SyntheticNeverEmitPayload987654321'
 
 
@@ -41,14 +40,13 @@ def store(data, compressed=None, inflated=None):
 class ObservationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True,
-                       timeout=180)
+        test_binary()
 
     def observe(self, data, *args):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'SyntheticNeverEmitPath.hxd'
             path.write_bytes(data)
-            result = subprocess.run([str(BINARY), 'observe', str(path), *args],
+            result = subprocess.run([str(test_binary()), 'observe', str(path), *args],
                                     capture_output=True, timeout=10)
             self.assertNotIn(str(path).encode(), result.stdout + result.stderr)
             self.assertEqual(path.read_bytes(), data)
@@ -87,7 +85,7 @@ class ObservationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             source, db = Path(tmp) / 'store.hxd', Path(tmp) / 'decoded.db'
             source.write_bytes(data)
-            result = subprocess.run([str(BINARY), 'db', str(source), str(db)],
+            result = subprocess.run([str(test_binary()), 'db', str(source), str(db)],
                                     capture_output=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(source.read_bytes(), data)
@@ -112,7 +110,7 @@ class ObservationTests(unittest.TestCase):
             exports = set()
             for run in range(6):
                 db = Path(tmp) / f'run{run}.db'
-                result = subprocess.run([str(BINARY), 'db', str(source), str(db)], capture_output=True, timeout=10)
+                result = subprocess.run([str(test_binary()), 'db', str(source), str(db)], capture_output=True, timeout=10)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 with sqlite3.connect(db) as con:
                     rows = con.execute('SELECT id, sender, sent_unix FROM messages ORDER BY id').fetchall()
@@ -269,7 +267,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_argument_and_io_errors_never_echo_arguments(self):
         for args in ([], ['/SyntheticNeverEmitMissingPath'], ['a', 'SyntheticNeverEmitArgument']):
-            result = subprocess.run([str(BINARY), 'observe', *args], capture_output=True)
+            result = subprocess.run([str(test_binary()), 'observe', *args], capture_output=True)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.stdout, b'')
             self.assertEqual(json.loads(result.stderr), {

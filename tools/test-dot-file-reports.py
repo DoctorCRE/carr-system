@@ -323,7 +323,7 @@ class StdinTransportTests(unittest.TestCase):
             (root / "tools").mkdir()
             (root / "mcp-server").mkdir()
             shutil.copy2(ROOT / "tools/call-verb.py", root / "tools/call-verb.py")
-            for name in ("local-verb.mjs", "local-client-auth.mjs", "human-only-hint.ts"):
+            for name in ("local-verb.mjs", "local-client-auth.ts", "human-only-hint.ts"):
                 shutil.copy2(ROOT / "mcp-server" / name, root / "mcp-server" / name)
             # Load source up to its parsed args; zero authority side effects.
             client = root / "mcp-server/local-verb.mjs"
