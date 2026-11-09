@@ -146,6 +146,36 @@ class ShardCoverage(unittest.TestCase):
             self.assertEqual(records['new.test.mjs'], {'milliseconds': planner.DEFAULT_SUITE_MS, 'serial': True})
             self.assertEqual(planner.plan(root), [['new.test.mjs']])
 
+    def test_unknown_work_cannot_consume_measured_headroom(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tests = root / 'mcp-server/test'
+            tests.mkdir(parents=True)
+            timing = root / 'ops/config/ci-unit-durations.json'
+            timing.parent.mkdir(parents=True)
+            measured = 'known-browser.test.mjs'
+            (tests / measured).touch()
+            timing.write_text(json.dumps({'suites': {
+                measured: {'milliseconds': 310000, 'serial': True}}}))
+            self.inventory(root, 1)
+            for count in (1, 10):
+                unknown = [f'new-{index}-browser.test.mjs' for index in range(count)]
+                for file in unknown:
+                    (tests / file).touch()
+                shards = planner.plan(root)
+                self.assertIn([measured], shards)
+                self.assertEqual(sorted(file for shard in shards for file in shard),
+                                 sorted([measured, *unknown]))
+                self.assertLessEqual(len(shards), planner.MAX_COUNT)
+                records, setup = planner.durations(root)
+                records[unknown[0]]['milliseconds'] = 300000
+                assigned = next(shard for shard in shards if unknown[0] in shard)
+                self.assertLessEqual(planner.estimate(assigned, records, setup), planner.WATCHDOG_MS)
+            for index in range(100):
+                (tests / f'overflow-{index}.test.mjs').touch()
+            with self.assertRaisesRegex(ValueError, '16-shard cap'):
+                planner.plan(root)
+
     def inventory(self, root, expected):
         mcp = root / 'mcp-server'
         shutil.copy2(ROOT / 'mcp-server/suite-discovery.mjs', mcp / 'suite-discovery.mjs')
