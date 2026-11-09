@@ -24,6 +24,8 @@ type Refusal = { error: string; hint?: string };
 type ErrorConstructor = new (payload: Refusal) => Error;
 type LeaseOption = ReturnType<typeof validateOption>;
 type Financing = ReturnType<typeof validate>["financing"];
+type RentYear = { year: number; per_sf: number; annual_base_rent: number };
+type RentSchedule = [RentYear, RentYear, RentYear, RentYear, RentYear];
 
 class LeaseComparisonInputError extends Error {
   declare payload: Refusal;
@@ -92,8 +94,7 @@ function validateOption(value: unknown, ErrorType: ErrorConstructor, side: "long
   return {
     label: value.label.trim(),
     termYears: requiredTerm,
-    // The boundary above checks exactly five entries and validates every number.
-    baseRent: baseRent as [number, number, number, number, number],
+    baseRent,
     operatingExpenses: finiteNumber(
       value.operating_expenses_per_sf,
       ErrorType,
@@ -145,14 +146,15 @@ function totalFinancingInterest(principal: number, annualRate: number, years: nu
 }
 
 function calculateOption(option: LeaseOption, squareFeet: number, financing: Financing) {
+  // Validation pins five years; map widens tuple length. Retain row access so sparse JS arrays fail as before.
   const rawSchedule = option.baseRent.map((perSf, index) => ({
     year: index + 1,
     per_sf: perSf,
     annual_base_rent: perSf * squareFeet,
-  }));
+  })) as RentSchedule;
   const annualOpex = option.operatingExpenses * squareFeet;
   const costOfRent = rawSchedule.reduce((total, row) => total + row.annual_base_rent, 0) + annualOpex * HORIZON_YEARS;
-  const firstYearBaseRent = option.baseRent[0] * squareFeet;
+  const firstYearBaseRent = rawSchedule[0].annual_base_rent;
   const freeRent = (option.freeRentMonths * firstYearBaseRent) / 12;
   const freeOpex = (option.freeOpexMonths * annualOpex) / 12;
   const tenantTi = Math.max((option.buildoutCost - option.landlordTi) * squareFeet, 0);

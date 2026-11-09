@@ -268,3 +268,9 @@ test("draft eligibility retains qualified, unsuppressed, active canonical partie
       "  and p.merged_into is null and p.deleted_at is null and p.contact_state='active'",
   );
 });
+
+test("sparse JavaScript schedules retain the original TypeError", () => {
+  const input = sample();
+  input.long_term.base_rent_per_sf = new Array<number>(5);
+  assert.throws(() => compareLeaseTerms(input), TypeError);
+});
