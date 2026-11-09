@@ -18,8 +18,9 @@ bytes must equal the same path on that base, read directly with Git. No stored
 hash grants an exemption. Legacy JavaScript stays editable.
 A changed or new TypeScript file must
 join a strict project. A new JavaScript file fails, including outside packages.
-There are no tool-required exceptions at this revision. Add exceptions only by
-exact path with the tool requirement documented in the PR. Remove migration
+There is no tool-exception allowlist. New first-party files must join a strict
+TypeScript project. Config, migration-schema and baseline refusals end with a
+`Remedy:` line and exit 1 without a stack trace. Remove migration
 entries as their files are converted. Delete the temporary migration gate when
 these lists empty.
 
