@@ -27,6 +27,15 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     ]) {
       cpSync(join(source, file), join(pkg, file));
     }
+    const fixtureFiles = ["typescript/check.ts", "typescript/migration.ts", "typescript/gate.test.ts"];
+    for (const [name, files] of [
+      ["tsconfig.node.json", fixtureFiles],
+      ["tsconfig.worker.json", []],
+    ] satisfies [string, string[]][]) {
+      const config = object(join(pkg, name));
+      writeFileSync(join(pkg, name), JSON.stringify({ ...config, files }));
+    }
+    writeFileSync(join(pkg, "knip.json"), JSON.stringify({ entry: ["typescript/*.test.ts"], project: fixtureFiles }));
     symlinkSync(join(source, "node_modules"), join(pkg, "node_modules"), "dir");
     writeFileSync(
       join(pkg, "typescript/migration.json"),

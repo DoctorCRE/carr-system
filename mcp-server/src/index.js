@@ -84,7 +84,7 @@ import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
 
 import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "./postgres.js";
-import { scheduledSubjectWatches } from "./subject-watch-scheduler.js";
+import { scheduledSubjectWatches } from "./subject-watch-scheduler.ts";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
 export { PhoneAudioHandoff } from './phone-audio-handoff.js';

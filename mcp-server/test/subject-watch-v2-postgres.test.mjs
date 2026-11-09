@@ -10,7 +10,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
-import { sweepSubjectWatches } from '../src/subject-watch-scheduler.js';
+import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 
 const dsn = await snapshotDatabase('subject-watches-');
 test('v2 registered lifecycle, policy, replay, generations and isolation', async t => {

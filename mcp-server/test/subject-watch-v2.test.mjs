@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { sweepSubjectWatches } from '../src/subject-watch-scheduler.js';
+import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 import { Validator } from '@cfworker/json-schema';
 import { subjectWatchV2Tools, parseSubjectWatchV2 } from '../src/subject-watches.js';
 import { subjectWatchPolicySchema, validSubjectWatchPolicy } from '../contracts/subject-watch.v2.js';
