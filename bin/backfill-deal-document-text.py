@@ -57,8 +57,8 @@ def main():
     except StorageReaderError as error:
         print(json.dumps({'ok': False, 'error': error.code, 'remedy': str(error)}), file=sys.stderr)
         return 1
-    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
-        print(json.dumps({'ok': False, 'error': type(error).__name__}), file=sys.stderr)
+    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError):
+        print(json.dumps({'ok': False, 'error': 'backfill_failed', 'remedy': 'Check the scan service and arguments, then retry.'}), file=sys.stderr)
         return 1
     print(json.dumps({'ok': not result['errors'], **result}, sort_keys=True))
     return 1 if result['errors'] else 0
