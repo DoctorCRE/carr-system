@@ -24,13 +24,15 @@ The normal test run compares them exactly and validates the response contract.
 
 The coordinator runs `python3 bin/backfill-deal-document-text.py --dry-run` first,
 then `python3 bin/backfill-deal-document-text.py`. This worker never runs either
-against production. Both print one JSON summary with `ok`, `scanned`, `missing`,
+against production. On success, each prints one JSON summary with `ok`,
+`scanned`, `missing`,
 `skipped`, `produced`, `no_text`, `unavailable`, `dry_run`, `last_document_ref`.
 On an unchanged complete rerun, missing and all production counts are zero and
 skipped equals scanned. In dry run no bytes are fetched and no writes occur.
 Each invocation scans at most 10000 attachments serially. If scanned reaches the
 cap, continue with `--after` set to the reported last_document_ref. Restarting
-from the beginning is safe. Scan failures stop the invocation with exit 1; already persisted derivatives remain safe to replay.
+from the beginning is safe. Scan failures stop the invocation with exit 1 and print a
+JSON error to stderr; already persisted derivatives remain safe to replay.
 
 A real run checks Wrangler, pdftotext and R2 access before scanning. Install a missing reader
 with `npm --prefix mcp-server ci`; check Cloudflare authentication and bucket
@@ -51,8 +53,9 @@ and SHA256 before parsing. Changing originals produces a new immutable key. Old
 rows remain for audit and cannot be served for current content. No model is called.
 
 New J76 intake attachments are covered when the existing extraction job runs for
-them. This PR adds no intake scheduling hook. Non-extraction intake requires the
-same bounded backfill command; it is not automatically parsed on upload.
+them. The retention implementation adds no intake scheduling hook. Non-extraction
+intake requires the same bounded backfill command; it is not automatically parsed
+on upload.
 
 ## Production proof
 
@@ -76,11 +79,44 @@ exposed missing synchronization guards in the model; the SQL source binding and
 read join implement those guards. Run the statechart skill's `from-spec` command
 on `DealDocumentText.tla` with TLC to reproduce the four invariant checks.
 
-The release-aware read-only proof is:
+Build the expected text independently from the byte-verified PDF, not from the
+retained response. The following example uses `/tmp/original.pdf` for that
+original and writes `/tmp/expected-text.txt` for the checker.
 
-```sh
-python3 tools/prove-deal-document-text.py --expected-merge "$MERGE_SHA" --response "$RESPONSE" --original "$ORIGINAL" --expected-text "$EXPECTED_TEXT"
-```
+1. Extract with the same layout and encoding as the retention adapter.
+
+   ```sh
+   pdftotext -layout -enc UTF-8 /tmp/original.pdf /tmp/extracted-layout.txt
+   ```
+
+2. Split on U+000C, removing only the final empty page as the adapter does.
+   Join each page's LF-split lines, then join the pages, with no separator.
+
+   ```sh
+   python3 - <<'PYCODE'
+   from pathlib import Path
+   text = Path('/tmp/extracted-layout.txt').read_text(encoding='utf-8')
+   pages = text.split('\f')
+   if pages[-1] == '':
+       pages = pages[:-1]
+   expected = ''.join(''.join(page.split('\n')) for page in pages)
+   Path('/tmp/expected-text.txt').write_text(expected, encoding='utf-8')
+   PYCODE
+   ```
+
+Preserve every other character, including spaces. Do not use default `pdftotext`
+mode, NFC or NFKC normalization, or whitespace stripping. The checker joins
+line fragments without separators, so this projection discards line and page
+boundaries. A passing proof does not by itself establish line or page integrity;
+verify those separately when required.
+
+3. Run the release-aware proof using the collected response, original, expected
+   text, and actual merge commit. Set `MERGE_SHA` and `RESPONSE` to the merge
+   commit and saved response path.
+
+   ```sh
+   python3 tools/prove-deal-document-text.py --expected-merge "$MERGE_SHA" --response "$RESPONSE" --original /tmp/original.pdf --expected-text /tmp/expected-text.txt
+   ```
 
 The coordinator supplies the actual merge commit and saved registered response,
 independently verified original bytes, and exact concatenated line-fragment text.
