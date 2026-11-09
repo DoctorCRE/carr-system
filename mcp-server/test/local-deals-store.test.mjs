@@ -255,15 +255,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       let value = await board();
       const contract = JSON.parse(readFileSync(path.join(root, 'mcp-server/contracts/local-deals-board.v2.json'), 'utf8'));
       assert.equal(value.schema_version, contract.schema);
-      assert.equal(contract.version, '2.0.0');
+      assert.equal(contract.version, '2.1.0');
       assert.equal(value.deals[0].last_step, null);
       assert.deepEqual(value.deals[0].open_actions, []);
       await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
         values($1,'deal',$3,$4,'Later action','2027-02-01',$4),($2,'deal',$3,$5,'Earlier action','2027-01-01',$5)`, [id(10),id(11),id(4),actor.id,id(8)]);
       value = await board();
       assert.deepEqual(value.deals[0].open_actions, [
-        {id:id(11),owner:'dell',description:'Earlier action',due_on:'2027-01-01'},
-        {id:id(10),owner:'joe',description:'Later action',due_on:'2027-02-01'},
+        {id:id(11),item_id:`next_action:${id(11)}`,owner:'dell',description:'Earlier action',due_on:'2027-01-01'},
+        {id:id(10),item_id:`next_action:${id(10)}`,owner:'joe',description:'Later action',due_on:'2027-02-01'},
       ]);
       await c.query(`insert into next_action(id,subject_type,subject_id,owner_id,description,due_on,created_by)
         values($1,'deal',$3,$4,'Undated action',null,$4),($2,'deal',$3,$4,'Third action','2027-03-01',$4)`, [id(13),id(14),id(4),actor.id]);

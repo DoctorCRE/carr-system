@@ -1,9 +1,44 @@
 {
   "schema": "local-deals-board.v2",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "verb": "deal-room-board",
   "changes": {
-    "open_actions": "Each deal has up to three open next actions, ordered by due date with undated actions last and ID as a tie-breaker. Each action has id, owner, description and nullable due_on. Structured items are excluded.",
+    "open_actions": "Each deal has up to three open next actions, ordered by due date with undated actions last and ID as a tie-breaker. Each action has id, owner, description and nullable due_on. Structured items are excluded. Each action also has producer-owned item_id, next_action:<UUID> or capture_post_call_action:<UUID>, matching the Home exact-card identity. IDs are table-local; clients must use item_id for card destinations. This field is additive in 2.1.0. The existing action-link resolver does not accept these task kinds.",
     "last_step": "Each deal has the latest logged activity or completed next action, or null. It contains kind, summary and occurred_at. Activity kind and summary are preserved. Completed actions use kind completed_action and their outcome, falling back to the action description when no outcome is recorded. Field edits and last_touch are not steps."
+  },
+  "$defs": {
+    "open_action": {
+      "type": "object",
+      "required": [
+        "id",
+        "item_id",
+        "owner",
+        "description",
+        "due_on"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "item_id": {
+          "type": "string",
+          "pattern": "^(next_action|capture_post_call_action):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "due_on": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date"
+        }
+      }
+    }
   }
 }
