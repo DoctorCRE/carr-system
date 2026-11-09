@@ -60,6 +60,7 @@ import { docSuggestionTools } from "./doc-suggestions.ts";
 import { docActivityTools } from "./doc-activity.js";
 import { whatsNewTools } from "./whats-new.js";
 import { MEETING_MODE_WRITE_VERBS, meetingModeTools } from "./meeting-mode.js";
+import { webPushTools } from "./web-push-subscriptions.ts";
 import { notificationTools } from "./notifications.ts";
 import { sessionIdentityTools } from "./session-identity.ts";
 import { dispatchSpineTools } from "./dispatch-spine.ts";
@@ -3944,10 +3945,10 @@ export const TOOLS = {
                   'due_on',to_jsonb(i.due_on)#>>'{}','status',i.status,'bullets',i.item_bullets,'source_ref',i.source_ref)
                   order by i.created_order,i.id) from v_deal_room_action i where i.deal_id=b.id
                   and i.item_title is not null and i.status not in ('dropped', 'expired')),'[]'::jsonb) as items,
-                coalesce((select jsonb_agg(jsonb_build_object('id', n.id, 'owner', n.owner,
+                coalesce((select jsonb_agg(jsonb_build_object('id', n.id, 'item_id', n.item_id, 'owner', n.owner,
                   'description', n.description, 'due_on', to_jsonb(n.due_on)#>>'{}')
                   order by n.due_on nulls last, n.id)
-                  from (select id, owner, description, due_on from v_deal_room_action
+                  from (select id, item_id, owner, description, due_on from v_deal_room_action
                          where deal_id=b.id and status='open' and item_title is null
                          order by due_on nulls last, id limit 3) n), '[]'::jsonb) as open_actions,
                 (select jsonb_build_object('kind', step.kind, 'summary', step.summary,
@@ -9356,6 +9357,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "doc-activity": "mcp-server/src/doc-activity.js",
   "meeting-mode": "mcp-server/src/meeting-mode.js",
   "notifications": "mcp-server/src/notifications.ts",
+  "web-push-subscriptions": "mcp-server/src/web-push-subscriptions.ts",
   "home-inbox": "mcp-server/src/home-inbox.js",
   "home-review": "mcp-server/src/home-review.js",
   "session-identity": "mcp-server/src/session-identity.ts",
@@ -11020,6 +11022,7 @@ registerTools(meetingModeTools({ withEnvelope, writeEvent, ToolError,
 // WR-000113: the R03 notification feed and its acknowledgement receipt.
 // acknowledge-notification writes ops.notification_read and nothing else, which
 // is why a session may never report it as having moved a task.
+registerTools(webPushTools({ ToolError }), "web-push-subscriptions");
 registerTools(notificationTools({ withEnvelope, writeEvent, ToolError }), "notifications");
 registerTools(homeWaitingTools({ withEnvelope }), "mcp-server/src/home-waiting.ts");
 registerTools(peopleDirectoryTools(), "mcp-server/src/people-directory.ts");

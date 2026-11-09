@@ -1373,6 +1373,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "invalidate-web-push-session-v1": {
+    "ingress_key": "mcp-tool:invalidate-web-push-session-v1",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "invoice-close-queue": {
     "ingress_key": "mcp-tool:invoice-close-queue",
     "source_locator": "mcp-server/src/invoice-automation.js",
@@ -2834,6 +2844,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": false,
     "delegates_to": []
   },
+  "read-web-push-subscriptions-v1": {
+    "ingress_key": "mcp-tool:read-web-push-subscriptions-v1",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f",
+    "write": false,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "read-work-shape": {
     "ingress_key": "mcp-tool:read-work-shape",
     "source_locator": "mcp-server/src/work-shape.ts",
@@ -3374,6 +3394,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "authority_only": true,
     "delegates_to": []
   },
+  "register-web-push-subscription-v1": {
+    "ingress_key": "mcp-tool:register-web-push-subscription-v1",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "a8f60391fa23287c1f55f4863efe8f99b726fa59842e75e55cb6fb7c73a7296a",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
+    "delegates_to": []
+  },
   "reject-requirement-reply": {
     "ingress_key": "mcp-tool:reject-requirement-reply",
     "source_locator": "mcp-server/src/requirement-replies.js",
@@ -3707,6 +3737,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "human_only": false,
     "human_caller_only": false,
     "authority_only": true,
+    "delegates_to": []
+  },
+  "revoke-web-push-subscription-v1": {
+    "ingress_key": "mcp-tool:revoke-web-push-subscription-v1",
+    "source_locator": "mcp-server/src/web-push-subscriptions.ts",
+    "schema_digest": "a0e0026293814628181d655945092b4e3f38c7a4676367ab24409b8287c1a4e1",
+    "write": true,
+    "human_only": true,
+    "human_caller_only": true,
+    "authority_only": false,
     "delegates_to": []
   },
   "rotate-tour-share-grant": {

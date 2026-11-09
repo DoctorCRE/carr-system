@@ -118,10 +118,12 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "finalize-deal-deliverable",
     "handle-email-proposal",
     "instruct-deal-item",
+    "invalidate-web-push-session-v1",
     "link-lead-client",
     "propose-doc-correction",
     "read-deal-document-text",
     "read-home-review",
+    "read-web-push-subscriptions-v1",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
     "record-artifact-preservation-hold",
@@ -142,6 +144,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "record-tour-pdf-human-review",
     "register-client-portal",
     "register-record-source-authority-policy",
+    "register-web-push-subscription-v1",
     "reject-requirement-reply",
     "reopen-one-action",
     "resolve-action-link-v2",
@@ -155,6 +158,7 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
+    "revoke-web-push-subscription-v1",
     "set-deal-deliverable-visibility",
     "set-prospect-engagement-status",
     "snooze-email-proposal",
@@ -220,6 +224,24 @@ test("a verb that is not humanOnly is unchanged for a sponsored agent", async ()
   assert.notEqual(error?.payload?.error, "human_only_verb_requires_verified_partner");
 });
 
+const pushVerbs = ['register-web-push-subscription-v1', 'revoke-web-push-subscription-v1',
+  'read-web-push-subscriptions-v1', 'invalidate-web-push-session-v1'];
+test('push browser guards and registry authority metadata agree', async () => {
+  for (const name of pushVerbs) {
+    assert.equal(TOOLS[name].humanOnly, true, name);
+    assert.equal(TOOLS[name].humanCallerOnly, true, name);
+    assert.ok(humanOnlyVerbs.includes(name), name);
+    for (const [, actor] of SPONSORED_PARTNER_ACTORS) {
+      const error = await executeRegisteredTool(forbiddenClient, actor, name, {}).catch(e => e);
+      assert.equal(error.payload.error, 'human_only_verb_requires_verified_partner', name);
+      await assert.rejects(TOOLS[name].handler(forbiddenClient,
+        {...actor, slug: 'joe', web_push_session: 'a'.repeat(64)}, {}),
+        e => e.payload.error === 'push_session_required', name);
+    }
+    await assert.rejects(TOOLS[name].handler(forbiddenClient, joe, {}),
+      e => e.payload.error === 'push_session_required', name);
+  }
+});
 const documentTextProducers = {
   "record-deal-document-text": {
     document_ref: "20000000-0000-4000-8000-000000000001",

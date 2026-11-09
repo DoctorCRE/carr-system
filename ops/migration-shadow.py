@@ -98,9 +98,31 @@ def _structure(snapshot: str) -> str | None:
         "select pg_catalog.setval('ops.work_request_ref_seq', <current>, true);", text)
 
 
+def normalize_grant_collection(piece: str) -> str:
+    """Only the append-only grant array is unordered; all other SQL stays bound."""
+    if not re.search(r"^CREATE FUNCTION ops\.scac_current_grant_contract\(\) RETURNS jsonb$", piece, re.M):
+        return piece
+    body = re.search(r"(?P<prefix>AS (?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$)\s*select )"
+                     r"'(?P<json>(?:[^']|'')*)'(?P<suffix>::jsonb\s*(?P=tag);)", piece, re.S | re.I)
+    if body is None:
+        return piece
+    try:
+        contract = json.loads(body['json'].replace("''", "'"))
+    except ValueError:
+        return piece
+    if not isinstance(contract, dict) or not isinstance(contract.get('secdef_execute'), list):
+        return piece
+    # Sorting, rather than a set, keeps duplicate declarations and exact metadata.
+    contract['secdef_execute'] = sorted(contract['secdef_execute'],
+                                        key=lambda row: json.dumps(row, sort_keys=True))
+    literal = json.dumps(contract, sort_keys=True, ensure_ascii=False).replace("'", "''")
+    return piece[:body.start('json')] + literal + piece[body.end('json'):]
+
+
 def dump_objects(text: str) -> Counter[str]:
     # Only pg_dump's envelope varies independently of the catalog. Preserve
-    # comments, SQL text and function bodies byte for byte. Both inputs must
+    # comments, SQL text and function bodies byte for byte except the declared
+    # grant collection, whose append order has no catalog meaning. Inputs must
     # already be owner-free pg_dump output. Retain ACLs when comparing databases
     # in the same disposable cluster.
     literals = re.compile(r'''(?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$).*?(?P=tag)|E'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|/\*.*?\*/''', re.S)
@@ -121,7 +143,7 @@ def dump_objects(text: str) -> Counter[str]:
     pieces.append('\n'.join(current).strip())
     if not headers:
         raise ValueError('schema dump has no object headers')
-    return Counter(piece for piece in pieces if piece)
+    return Counter(normalize_grant_collection(piece) for piece in pieces if piece)
 
 
 def schema_difference(reconstructed: str, snapshot: str, *, schema_only: bool = True,

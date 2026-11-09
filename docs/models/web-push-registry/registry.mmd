@@ -1,0 +1,19 @@
+stateDiagram-v2
+ state Registry {
+  state Subscription {
+   [*] --> Off
+   Off --> Active: Register
+   Active --> Active: Replace
+   Active --> Revoked: Revoke
+   Revoked --> Active: Enable
+   Active --> Revoked: Logout
+   Off --> Off: Logout
+   Revoked --> Revoked: Logout
+  }
+  --
+  state Authentication {
+   [*] --> SignedIn
+   SignedIn --> SignedOut: Logout
+  }
+ }
+ %% never NoActiveAfterLogout: Active & SignedOut -- logout prevents registration through the old session
