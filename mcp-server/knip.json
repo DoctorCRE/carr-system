@@ -24,6 +24,7 @@
     "test/run-node-suites.test.ts",
     "generate-verb-types.ts",
     "test/worker-types.test.ts",
+    "test/patch-install.test.ts",
     "../ops/ci-node-file.mts",
     "src/subject-watch-scheduler.ts"
   ]

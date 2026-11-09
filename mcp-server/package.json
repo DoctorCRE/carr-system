@@ -15,7 +15,7 @@
     "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
     "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
     "fix": "biome check --write .",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package --error-on-fail --error-on-warn"
   },
   "keywords": [],
   "author": "",
