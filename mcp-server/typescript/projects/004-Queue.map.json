@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/models/subject-watch-delivery/Queue.map.ts"
+  ],
+  "entry": [
+    "test/models/subject-watch-delivery/Queue.map.ts"
+  ]
+}
