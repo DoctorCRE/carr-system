@@ -79,7 +79,7 @@
     "add-party-name-guard.test.mjs": {"milliseconds": 1585, "serial": false},
     "add-party-org-identity.test.mjs": {"milliseconds": 556, "serial": false},
     "agent-profiles.test.mjs": {"milliseconds": 258, "serial": false},
-    "ai-boundary.test.mjs": {"milliseconds": 3619, "serial": false},
+    "ai-boundary.test.ts": {"milliseconds": 12845, "serial": false},
     "ai-budget.test.mjs": {"milliseconds": 3342, "serial": false},
     "amend-closed-loop-mutants.test.mjs": {"milliseconds": 780, "serial": false},
     "amend-closed-loop-postgres.test.mjs": {"milliseconds": 2224, "serial": true},
