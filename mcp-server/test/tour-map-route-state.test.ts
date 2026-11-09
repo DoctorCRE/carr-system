@@ -517,6 +517,43 @@ test("version mapping reports removed, added and unchanged stops explicitly", ()
   });
 });
 
+test("route revisions carry independent map state and progress by property or clear removed progress", () => {
+  let state = tourState();
+  for (const event of [
+    { type: "bounds_change", bounds: [-88.1, 30.5, -87.9, 30.7] },
+    { type: "filter_state", filters: { locked_state: "locked" } },
+    { type: "slider_state", name: "horizon_days", value: 7 },
+    { type: "draw_result", geometry: square },
+    { type: "route_stop_change", route_stop_id: "rs-c" },
+  ])
+    state = reduceMapEvent(state, { ...event, route_version: 3 }).state;
+  const before = structuredClone(state);
+  const next = route({ route_version: 4 });
+  next.stops = renumber([must(next.stops[2]), must(next.stops[0]), must(next.stops[1])], "-v4");
+  const revised = applyRouteVersion(state, next).state;
+  assert.equal(revised.current_route_stop_id, "rs-c-v4");
+  assert.equal(revised.selected_property_id, "prop-c");
+  assert.equal(revised.mode, "tour");
+  assert.deepEqual(revised.camera, before.camera);
+  assert.deepEqual(revised.filters, before.filters);
+  assert.deepEqual(revised.sliders, before.sliders);
+  assert.deepEqual(revised.drawn_geometry, before.drawn_geometry);
+  const projection = projectRoute(revised);
+  assert.equal(must(projection.card).route_stop_id, "rs-c-v4");
+  assert.equal(must(projection.list.find((stop) => stop.current)).route_stop_id, "rs-c-v4");
+  const removed = route({ route_version: 5 });
+  removed.stops = renumber([must(removed.stops[0]), must(removed.stops[1])]);
+  const cleared = applyRouteVersion(revised, removed).state;
+  assert.equal(cleared.current_route_stop_id, null);
+  assert.equal(cleared.selected_property_id, null);
+  assert.equal(projectRoute(cleared).card, null);
+  for (const badRoute of [route(), route({ route_version: 2 }), route({ tour_id: "other-tour", route_version: 4 })]) {
+    assert.throws(() => applyRouteVersion(state, badRoute), /stale_route_version|tour_mismatch/);
+    assert.deepEqual(state, before);
+  }
+  assert.deepEqual(state, before);
+});
+
 test("a removed selection clears selection instead of pointing at a stale stop", () => {
   const state = tourState({}, { selected_property_id: "prop-b" });
   const next = route({ route_version: 4 });
@@ -560,6 +597,91 @@ test("typed events never remount the map and keep camera and selection", () => {
   assert.equal(state.filters.locked_state, "locked");
   assert.equal(state.sliders.horizon_days, 7);
   assert.deepEqual(state.drawn_geometry, square);
+});
+
+test("map regions replace values independently in Search and Tour", () => {
+  const triangle = {
+    type: "Polygon",
+    coordinates: [
+      [
+        [0, 0],
+        [0, 1],
+        [1, 1],
+        [0, 0],
+      ],
+    ],
+  };
+  const steps: [Record<string, unknown>, Partial<RouteState>][] = [
+    [{ type: "bounds_change", bounds: [-88, 30, -87, 31] }, { camera: { bounds: [-88, 30, -87, 31] } }],
+    [{ type: "bounds_change", bounds: [-89, 29, -86, 32] }, { camera: { bounds: [-89, 29, -86, 32] } }],
+    [{ type: "feature_click", property_id: "prop-a" }, { selected_property_id: "prop-a" }],
+    [{ type: "feature_click", property_id: "prop-b" }, { selected_property_id: "prop-b" }],
+    [{ type: "selected_record", property_id: "prop-c" }, { selected_property_id: "prop-c" }],
+    [{ type: "filter_state", filters: { locked_state: "locked" } }, { filters: { locked_state: "locked" } }],
+    [{ type: "filter_state", filters: { owner: "synthetic" } }, { filters: { owner: "synthetic" } }],
+    [{ type: "slider_state", name: "days", value: 7 }, { sliders: { days: 7 } }],
+    [{ type: "slider_state", name: "days", value: 14 }, { sliders: { days: 14 } }],
+    [{ type: "draw_result", geometry: square }, { drawn_geometry: square }],
+    [{ type: "draw_result", geometry: triangle }, { drawn_geometry: triangle }],
+  ];
+  for (const mode of ["search", "tour"] as const) {
+    let state = buildRouteVersionState(route(), { mode });
+    for (const [event, patch] of steps) {
+      const before = structuredClone(state);
+      const result = reduceMapEvent(state, { ...event, route_version: 3 });
+      assert.deepEqual(result.state, { ...before, ...patch }, String(event.type));
+      assert.deepEqual(result.effects, { remount: false, map_instance: "keep" });
+      assert.deepEqual(state, before);
+      state = result.state;
+    }
+    for (const nextMode of ["search", "tour"] as const) {
+      const before = structuredClone(state);
+      state = reduceMapEvent(state, { type: "mode_change", mode: nextMode, route_version: 3 }).state;
+      assert.deepEqual(state, { ...before, mode: nextMode });
+    }
+  }
+});
+
+test("selected_record selects the card and marker without moving route progress", () => {
+  for (const mode of ["search", "tour"] as const) {
+    for (const selected_property_id of [null, "prop-a"]) {
+      let state = buildRouteVersionState(route(), { mode, selected_property_id });
+      if (mode === "tour" && selected_property_id !== null) {
+        state = reduceMapEvent(state, { type: "route_stop_change", route_version: 3, route_stop_id: "rs-a" }).state;
+      }
+      const before = structuredClone(state);
+      const result = reduceMapEvent(state, { type: "selected_record", route_version: 3, property_id: "prop-c" });
+      assert.deepEqual(result.state, { ...before, selected_property_id: "prop-c" });
+      assert.deepEqual(result.effects, { remount: false, map_instance: "keep" });
+      const projection = projectRoute(result.state);
+      assert.equal(must(projection.card).property_id, "prop-c");
+      assert.deepEqual(
+        projection.markers.filter((marker) => marker.selected).map((marker) => marker.property_id),
+        ["prop-c"],
+      );
+      assert.equal(checkParity(projection).ok, true);
+      assert.deepEqual(state, before);
+    }
+  }
+});
+
+test("selection events refuse unknown properties and stale versions without mutation", () => {
+  for (const mode of ["search", "tour"] as const) {
+    const state = buildRouteVersionState(route(), { mode, selected_property_id: "prop-a" });
+    const before = structuredClone(state);
+    for (const type of ["feature_click", "selected_record"]) {
+      assert.throws(
+        () => reduceMapEvent(state, { type, route_version: 3, property_id: "prop-missing" }),
+        /unknown_property/,
+      );
+      assert.throws(
+        () => reduceMapEvent(state, { type, route_version: 2, property_id: "prop-c" }),
+        /stale_route_version/,
+      );
+      assert.deepEqual(state, before);
+      assert.equal(must(projectRoute(state).card).property_id, "prop-a");
+    }
+  }
 });
 
 test("accepted payloads are snapshots: mutating the event afterwards changes nothing", () => {
