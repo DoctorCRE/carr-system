@@ -46,7 +46,7 @@
           "source_version": {
             "type": "string",
             "pattern": "^[a-f0-9]{32}$",
-            "description": "Canonical ops.resolve_action_card(session.actor_id, post_call_review, session.id).source_version. Send unchanged as review-call-outcome.expected_source_version."
+            "description": "Canonical ops.post_call_review_target(session.id).source_version, independent of recorder activity. Send unchanged as review-call-outcome.expected_source_version."
           },
           "applied": {
             "type": "array",

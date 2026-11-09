@@ -10429,7 +10429,7 @@ registerTools({
     handler: async (c) => {
       const sessions = (await c.query(`
         select s.id as session_id, a.slug as recorder, to_jsonb(s.started_at)#>>'{}' as started_at,
-               ops.resolve_action_card(s.actor_id,'post_call_review',s.id)->>'source_version' as source_version,
+               ops.post_call_review_target(s.id)->>'source_version' as source_version,
                (s.started_at at time zone 'America/Chicago')::date::text as call_date
           from capture_session s join actor a on a.id=s.actor_id
          where s.post_call and s.outcome_reviewed_at is null
@@ -10485,13 +10485,13 @@ registerTools({
         if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "partner_required" });
         // The parent lock also blocks new candidate FK references. Child locks
         // cover edits/deletes; a separate statement sees edits committed while waiting.
-        const session = (await c.query(`select actor_id from capture_session
+        const session = (await c.query(`select id from capture_session
           where id=$1 and post_call for update /* call-outcome:review-session-lock */`, [args.session_id])).rows[0];
         if (!session) throw new ToolError({ error: "not_found", table: "capture_session", id: args.session_id });
         await c.query("select id from capture_candidate where session_id=$1 order by id for update", [args.session_id]);
         await c.query("select id from capture_post_call_candidate where session_id=$1 order by id for update", [args.session_id]);
-        const current = (await c.query(`select ops.resolve_action_card($1,'post_call_review',$2)->>'source_version' as source_version
-          /* call-outcome:review-version */`, [session.actor_id, args.session_id])).rows[0];
+        const current = (await c.query(`select ops.post_call_review_target($1)->>'source_version' as source_version
+          /* call-outcome:review-version */`, [args.session_id])).rows[0];
         if (!legacyOmission && current?.source_version !== args.expected_source_version)
           throw new ToolError({ error: "source_version_changed" });
         const row = (await c.query(

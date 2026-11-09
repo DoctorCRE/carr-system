@@ -160,6 +160,82 @@ for (const recorder of ["quill-joe-mac", "quill-joe-studio"]) {
   });
 }
 
+test("session-only derivation installation is repeatable and limited to the writer role", async () => {
+  const migration = await readFile(
+    new URL("../../migrations/1168_post_call_capture_recorder_versions.sql", import.meta.url),
+    "utf8",
+  );
+  const { session } = await seed();
+  const original = await version(session);
+  for (let pass = 0; pass < 2; pass++) {
+    await db.query(migration);
+    assert.equal(await version(session), original);
+  }
+  const permissions = (
+    await db.query(`select
+    has_function_privilege('carr_writer','ops.post_call_review_target(uuid)','execute') writer,
+    has_function_privilege('carr_reader','ops.post_call_review_target(uuid)','execute') reader`)
+  ).rows[0];
+  assert.deepEqual(permissions, { writer: true, reader: false });
+  assert.equal(
+    (
+      await db.query(`select count(*)::int n from jsonb_array_elements(ops.scac_current_grant_contract()->'secdef_execute') entry
+    where entry->>'ingress_key'='db-function-acl:ops.post_call_review_target(p_id uuid):carr_writer:execute'`)
+    ).rows[0].n,
+    1,
+  );
+});
+
+for (const recorder of ["quill-joe-mac", "joe-local"]) {
+  test(`${recorder} revocation preserves historical read version and guarded review`, async () => {
+    const { session } = await seed();
+    const recorderId = (await db.query("select id from actor where slug=$1", [recorder])).rows[0].id;
+    await db.query("update capture_session set actor_id=$2 where id=$1", [session, recorderId]);
+    const contract = JSON.parse(
+      await readFile(new URL("../contracts/read-call-outcomes.v1.json", import.meta.url), "utf8"),
+    );
+    async function readVersion() {
+      const response = await executeRegisteredTool(db, actor, "read-call-outcomes", {});
+      assert.equal(new Validator(contract).validate(response).valid, true);
+      assert.ok(Array.isArray(response.calls));
+      const value = object(response.calls.find((call) => object(call).session_id === session)).source_version;
+      assert.ok(typeof value === "string");
+      return value;
+    }
+    try {
+      const seen = await readVersion();
+      await db.query("update actor set active=false where id=$1", [recorderId]);
+      assert.equal(await readVersion(), seen);
+      assert.equal(
+        (await db.query("select ops.resolve_action_card($1,'post_call_review',$2) target", [recorderId, session]))
+          .rows[0].target,
+        null,
+      );
+      if (recorder === "quill-joe-mac") assert.equal(await version(session), seen);
+      assert.equal(
+        (await review({ session_id: session, expected_source_version: seen, idempotency_key: randomUUID() })).reviewed,
+        true,
+      );
+      const next = await seed();
+      await db.query("update capture_session set actor_id=$2 where id=$1", [next.session, recorderId]);
+      const response = await executeRegisteredTool(db, actor, "read-call-outcomes", {});
+      assert.ok(Array.isArray(response.calls));
+      const old = object(response.calls.find((call) => object(call).session_id === next.session)).source_version;
+      await db.query(`update capture_candidate set payload='{"action":"Unseen after revocation"}' where id=$1`, [
+        next.candidate,
+      ]);
+      const key = randomUUID();
+      await assert.rejects(
+        review({ session_id: next.session, expected_source_version: old, idempotency_key: key }),
+        stale,
+      );
+      await unchanged(next.session, key);
+    } finally {
+      await db.query("update actor set active=true where id=$1", [recorderId]);
+    }
+  });
+}
+
 test("matching review stores one receipt and replay returns original receipt after source changes", async () => {
   const { session, candidate } = await seed();
   const args = { session_id: session, expected_source_version: await version(session), idempotency_key: randomUUID() };
@@ -328,6 +404,93 @@ for (const table of ["capture_candidate", "capture_session"]) {
     }
   });
 }
+
+async function seedPostCallCandidate() {
+  const { session } = await seed();
+  const party = (
+    await db.query(
+      "insert into party(kind,name,created_by,updated_by) values('person','Synthetic second collection',$1,$1) returning id",
+      [actor.id],
+    )
+  ).rows[0].id;
+  await db.query(
+    "insert into client_status(slug,label) values('fixture_active','Synthetic active') on conflict do nothing",
+  );
+  const client = (
+    await db.query(
+      "insert into client(party_id,status,created_by,updated_by) values($1,'fixture_active',$2,$2) returning id",
+      [party, actor.id],
+    )
+  ).rows[0].id;
+  const deal = (
+    await db.query(
+      "insert into deal(name,client_id,deal_type,phase,owner,created_by,updated_by) values('Synthetic second collection',$1,'lease','site_selection','joe',$2,$2) returning id",
+      [client, actor.id],
+    )
+  ).rows[0].id;
+  const candidate = (
+    await db.query(
+      `insert into capture_post_call_candidate(session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,evidence_quote,confidence)
+    values($1,$2,'fixture',0,'assigned_action',$3,'joe','Original second','Synthetic evidence',1) returning id`,
+      [session, randomUUID(), deal],
+    )
+  ).rows[0].id;
+  return { session, candidate };
+}
+
+test("post-call candidate edit committed during review wait refuses stale review", async () => {
+  const { session, candidate } = await seedPostCallCandidate();
+  const args = { session_id: session, expected_source_version: await version(session), idempotency_key: randomUUID() };
+  const editor = new pg.Client(fixture.connection),
+    writer = new pg.Client(fixture.connection);
+  await editor.connect();
+  await writer.connect();
+  let pending: Promise<unknown> | undefined;
+  try {
+    await editor.query("begin");
+    await editor.query("update capture_post_call_candidate set action_description='Unseen second' where id=$1", [
+      candidate,
+    ]);
+    pending = assert.rejects(review(args, writer), stale);
+    await waitForLock(editor, writer);
+    await editor.query("commit");
+    await pending;
+    await unchanged(session, args.idempotency_key);
+  } finally {
+    await editor.query("rollback");
+    await pending;
+    await editor.end();
+    await writer.end();
+  }
+});
+
+test("post-call candidate deletion waits until review commits", async () => {
+  const { session, candidate } = await seedPostCallCandidate();
+  const args = { session_id: session, expected_source_version: await version(session), idempotency_key: randomUUID() };
+  const writer = new pg.Client(fixture.connection),
+    editor = new pg.Client(fixture.connection);
+  await writer.connect();
+  await editor.connect();
+  let pending: Promise<unknown> | undefined;
+  try {
+    await writer.query("begin");
+    await writer.query("set local role carr_writer");
+    assert.equal((await executeRegisteredTool(writer, actor, "review-call-outcome", args)).reviewed, true);
+    pending = editor.query("delete from capture_post_call_candidate where id=$1", [candidate]);
+    await waitForLock(writer, editor);
+    await writer.query("commit");
+    await pending;
+    assert.equal(
+      (await db.query("select count(*)::int n from capture_post_call_candidate where id=$1", [candidate])).rows[0].n,
+      0,
+    );
+  } finally {
+    await writer.query("rollback");
+    await pending;
+    await editor.end();
+    await writer.end();
+  }
+});
 
 async function waitForLock(holder: pg.Client, waiter: pg.Client) {
   assert.ok("processID" in holder && typeof holder.processID === "number");
