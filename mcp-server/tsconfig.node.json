@@ -29,7 +29,14 @@
     "src/untrusted-text.ts",
     "src/vendor-people.ts",
     "test/untrusted-text.test.ts",
-    "test/vendor-people.test.ts"
+    "test/vendor-people.test.ts",
+    "test/gate-zero-seam-stores.v5.fixture.ts",
+    "test/gate-zero-seam-stores.v5.receipt-fixture.ts",
+    "test/global-boundaries-mutants.v5.test.ts",
+    "test/governance-queue.test.ts",
+    "test/governed-correspondence-dispatch-mutants.v5.test.ts",
+    "test/helpers/call-rehearsal.ts",
+    "test/helpers/chromium-binary.ts"
   ],
   "compilerOptions": {
     "allowJs": true,

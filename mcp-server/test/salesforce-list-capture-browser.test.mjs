@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { findDisposableChromium } from './helpers/chromium-binary.mjs';
+import { findDisposableChromium } from './helpers/chromium-binary.ts';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
