@@ -16,12 +16,12 @@
 // Printed by the local client, so it costs no Worker deploy.
 
 /** True only for a parsed tool-error payload whose error is human_only. */
-export function isHumanOnlyError(payload) {
-  return Boolean(payload) && typeof payload === "object" && payload.error === "human_only";
+export function isHumanOnlyError(payload: unknown): boolean {
+  return payload !== null && typeof payload === "object" && "error" in payload && payload.error === "human_only";
 }
 
 /** What to actually do about it, with the caller's own verb already filled in. */
-export function humanOnlyGuidance(verb) {
+export function humanOnlyGuidance(verb?: unknown): string {
   const v = String(verb || "<verb>");
   return [
     "",
