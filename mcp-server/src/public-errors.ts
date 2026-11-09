@@ -1,14 +1,23 @@
 // Convert internal errors into closed public error responses.
-import { ToolError } from "./tool-error.ts";
+
 import { isValidCorrelationId, logLine } from "./correlation.js";
+import { ToolError } from "./tool-error.ts";
 
 /** The public JSON-RPC/HTTP refusal shape. Every optional field is opt-in per code. */
 type PublicError = {
-  error: string; correlation_id: string; hint: string;
-  candidates?: Record<string, string | null>[]; retired_aliases?: Record<string, string | null>[];
-  current_version?: number; fields?: unknown[]; invalid_deal_ids?: string[]; recorded_titles?: string[];
+  error: string;
+  correlation_id: string;
+  hint: string;
+  candidates?: Record<string, string | null>[];
+  retired_aliases?: Record<string, string | null>[];
+  current_version?: number;
+  fields?: unknown[];
+  invalid_deal_ids?: string[];
+  recorded_titles?: string[];
   field_errors?: { field: string; value: unknown; code: string; pattern?: string; allowed_values?: string[] }[];
-  suggested_card_title?: string; suggested_description?: string; allowed_values?: string[];
+  suggested_card_title?: string;
+  suggested_description?: string;
+  allowed_values?: string[];
 };
 type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSchema; enum?: unknown[] };
 
@@ -17,39 +26,73 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 const PUBLIC_ERRORS = new Map<unknown, string>([
   ["unauthenticated", "The authenticated actor could not be resolved."],
   ["document_not_found", "The document is unavailable in the current scope."],
+  ["source_version_changed", "This call changed. Reopen the card and review the current outcome."],
   ["source_changed", "The original attachment changed. Restart the document reader from page one."],
   ["content_hash_required", "Supply the original content hash when continuing a document read."],
   ["invalid_position", "Use a page, line and offset from the document reader's continuation."],
   ["derivative_conflict", "Retained text already exists with different content for this original."],
-  ["research_evidence_required", "Research is required before creating this person or assigning a business role. Supply the documented research_evidence."],
+  [
+    "research_evidence_required",
+    "Research is required before creating this person or assigning a business role. Supply the documented research_evidence.",
+  ],
   ["research_source_invalid", "Each research source needs an HTTPS URL and a valid non-future observed_at timestamp."],
-  ["research_evidence_incomplete", "Link every required research field to source indexes and supply discrepancies, including an empty array when none exist."],
-  ["full_person_name_required", "Resolve the full first and last personal name before creating a person. Initials and partial names are not records."],
+  [
+    "research_evidence_incomplete",
+    "Link every required research field to source indexes and supply discrepancies, including an empty array when none exist.",
+  ],
+  [
+    "full_person_name_required",
+    "Resolve the full first and last personal name before creating a person. Initials and partial names are not records.",
+  ],
   ["conflicting_party_inputs", "Supply one consistent party identity input using the documented operation shape."],
   ["field_required", "Supply the required field using the documented operation shape."],
   ["calendar_event_key_invalid", "Use the meeting review key: exactly 16 lowercase hexadecimal characters."],
   ["calendar_event_key_requires_deal_meeting", "Confirm the calendar meeting on a deal with kind meeting."],
-  ["answer_blocks_invalid", "Use table.v1 or chart.v1 answer blocks with typed columns and sourced numbers. Limit each answer to 8 blocks, each table to 200 rows and 20 columns, and the payload to 128 KiB. Charts must reference a table in the answer."],
-  ["comparison_fact_blocked", "Confirm the named deal field and refresh its canonical version before preparing the comparison."],
+  [
+    "answer_blocks_invalid",
+    "Use table.v1 or chart.v1 answer blocks with typed columns and sourced numbers. Limit each answer to 8 blocks, each table to 200 rows and 20 columns, and the payload to 128 KiB. Charts must reference a table in the answer.",
+  ],
+  [
+    "comparison_fact_blocked",
+    "Confirm the named deal field and refresh its canonical version before preparing the comparison.",
+  ],
   ["comparison_template_unavailable", "Register a reviewed LOI grid template matching the generation snapshot."],
   ["invalid_snapshot", "Prepare a new confirmed-fact comparison draft."],
   ["stale_snapshot", "The comparison evidence changed. Prepare a new draft."],
-  ["email_draft_failure_not_resubmittable", "This failed draft cannot be resubmitted. Review the failure before creating a new draft."],
+  [
+    "email_draft_failure_not_resubmittable",
+    "This failed draft cannot be resubmitted. Review the failure before creating a new draft.",
+  ],
   ["email_identity_owner_mismatch", "Use the authenticated partner as the mailbox owner."],
   ["email_identity_account_mismatch", "Use the mailbox account recorded for the authenticated partner."],
   ["email_identity_conflict", "The captured email belongs to another direction or submitted send. Re-read its record."],
   ["email_touch_requires_email_occurrence", "Use an email contact kind and its explicit occurrence time."],
   ["email_touch_role_mismatch", "Use the role proven by the canonical client, prospect or vendor target."],
   ["email_touch_target_not_live", "Resolve a live canonical target before applying this email contact."],
-  ["email_touch_already_applied", "This source version and target already have an application. Replay its original request key."],
-  ["email_touch_occurrence_conflict", "The captured activity has another occurrence or target. Review its existing application."],
-  ["email_touch_window_invalid", "Supply ordered half-open occurrence bounds and either both recorded-time bounds or neither."],
+  [
+    "email_touch_already_applied",
+    "This source version and target already have an application. Replay its original request key.",
+  ],
+  [
+    "email_touch_occurrence_conflict",
+    "The captured activity has another occurrence or target. Review its existing application.",
+  ],
+  [
+    "email_touch_window_invalid",
+    "Supply ordered half-open occurrence bounds and either both recorded-time bounds or neither.",
+  ],
   ["email_touch_duplicate_expectation", "Submit each original key and source-version target effect once per cohort."],
   ["email_identity_not_found", "Read the captured message identity before recording a lifecycle observation."],
-  ["email_not_live", "This email was deleted, recalled or superseded. Review its lifecycle notes before taking further action."],
+  [
+    "email_not_live",
+    "This email was deleted, recalled or superseded. Review its lifecycle notes before taking further action.",
+  ],
   ["email_observation_in_future", "Supply the real observation time within the server clock window."],
   ["email_observation_conflict", "This observation ID already records different evidence. Re-read its receipt."],
-  ["email_lifecycle_terminal", "This message already has a terminal lifecycle observation. Restoration requires an explicit supported contract."],
+  [
+    "email_lifecycle_terminal",
+    "This message already has a terminal lifecycle observation. Restoration requires an explicit supported contract.",
+  ],
   ["email_source_owner_mismatch", "Use the mailbox owner that matches the email source."],
   ["email_proposal_confidence_invalid", "Provide a confidence between zero and one."],
   ["email_proposal_fields_invalid", "Check the fields for the proposal kind."],
@@ -58,7 +101,10 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["email_proposal_evidence_invalid", "Review the email evidence and create a new proposal."],
   ["email_proposal_deal_invalid", "Choose an eligible deal and review the proposal again."],
   ["email_proposal_not_pending", "Re-read the proposal before confirming."],
-  ["email_proposal_repair_conflict", "A filing proposal already exists for this email and deal. Re-read the proposals before repairing."],
+  [
+    "email_proposal_repair_conflict",
+    "A filing proposal already exists for this email and deal. Re-read the proposals before repairing.",
+  ],
   ["email_delivery_filing_changed", "Source filings changed. Retry delivery attribution with current evidence."],
   ["email_proposal_stale", "Re-read and review the current proposal before confirming."],
   ["email_sender_contact_required", "Create the sender contact before confirming the filing."],
@@ -73,61 +119,151 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["email_new_deal_not_found", "Choose an existing deal before confirming."],
   ["email_new_deal_client_mismatch", "Choose a deal belonging to the email client."],
   ["version_conflict", "Re-read the record and ask the human before retrying."],
-  ["next_action_conflict", "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action."],
+  [
+    "next_action_conflict",
+    "Re-read get-next-action with ref and owner. Review the current action before retrying set-next-action with its id and version, or null if absent, in expected_action.",
+  ],
   ["needs_confirm", "Ask the human to confirm before resubmitting with confirm:true."],
   ["not_found", "The requested record was not found."],
-  ["action_link_not_found", "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link."],
-  ["action_link_no_longer_actionable", "This card has already been handled or has changed. Open Home for what needs you now."],
-  ["unsupported_decision_about", "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale."],
-  ["decision_about_work_request_not_found", "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale."],
+  [
+    "action_link_not_found",
+    "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link.",
+  ],
+  [
+    "action_link_no_longer_actionable",
+    "This card has already been handled or has changed. Open Home for what needs you now.",
+  ],
+  [
+    "unsupported_decision_about",
+    "The about field accepts lead, client, vendor, party, and deal references or names; Work Request references are not supported. Omit about and name the Work Request in the rationale.",
+  ],
+  [
+    "decision_about_work_request_not_found",
+    "The Work Request in the about field was not found. Check its reference, or omit about and name the Work Request in the rationale.",
+  ],
   ["future_work_link_conflict", "This record already has a Work Request. Reuse its existing link."],
   ["work_request_not_found", "Re-read the Work Request reference before retrying."],
-  ["work_request_terminal_state", "The Work Request is already terminal. Re-read its card before choosing another action."],
+  [
+    "work_request_terminal_state",
+    "The Work Request is already terminal. Re-read its card before choosing another action.",
+  ],
   ["work_request_not_completable", "Complete only a captured, triaged, ready, or verification Work Request."],
   ["invalid_completion", "Supply the documented completion inputs and a current base_version."],
-  ["missing_criterion_evidence", "Supply exactly one non-empty evidence line for every acceptance criterion id on the Work Request."],
+  [
+    "missing_criterion_evidence",
+    "Supply exactly one non-empty evidence line for every acceptance criterion id on the Work Request.",
+  ],
   ["missing_change_ref", "Supply a merged pull request URL and its full merge commit SHA for each change reference."],
   ["missing_user_journey_ref", "User-facing completion requires a reference to an exercised user journey."],
-  ["completion_capsule_refused", "The completion evidence was refused. Supply complete evidence and an attestor independent of the executor or owner."],
-  ["invalid_scope_append", "Supply a UUID key, human_ref, current base_version, 1-12 criteria {id,text}, source_ref, and an optional outcome_addendum of at most 500 characters."],
-  ["work_request_scope_frozen", "Append scope only to a captured or triaged Work Request. A ready plan needs a plan amendment instead."],
-  ["duplicate_criterion_id", "Each appended criterion id must be new on the Work Request. Choose unused ids and retry."],
-  ["criteria_cap_exceeded", "A Work Request holds at most 12 acceptance criteria. Merge related criteria before appending; nothing was appended."],
+  [
+    "completion_capsule_refused",
+    "The completion evidence was refused. Supply complete evidence and an attestor independent of the executor or owner.",
+  ],
+  [
+    "invalid_scope_append",
+    "Supply a UUID key, human_ref, current base_version, 1-12 criteria {id,text}, source_ref, and an optional outcome_addendum of at most 500 characters.",
+  ],
+  [
+    "work_request_scope_frozen",
+    "Append scope only to a captured or triaged Work Request. A ready plan needs a plan amendment instead.",
+  ],
+  [
+    "duplicate_criterion_id",
+    "Each appended criterion id must be new on the Work Request. Choose unused ids and retry.",
+  ],
+  [
+    "criteria_cap_exceeded",
+    "A Work Request holds at most 12 acceptance criteria. Merge related criteria before appending; nothing was appended.",
+  ],
   ["sponsored_actor_required", "An authenticated partner or sponsored agent must perform this operation."],
-  ["memory_attach_required", "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory."],
-  ["memory_read_only", "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id."],
-  ["convention_proposal_not_found", "Choose an active proposal from governance-queue pending_convention_proposals. An adopted proposal is consumed. To amend it, write a new Convention proposal with Retires: [<full rule UUID as a JSON string>] and adopt the new section."],
-  ["convention_proposal_malformed", "Use 'Convention: <statement>' with Card or Packs, or 'Retires: [<full rule UUID>, ...]' for retirement only. A replacement may also name Retires."],
-  ["convention_retirement_rule_not_found", "A retirement target does not exist. Re-read find-rule and use its full rule UUID."],
-  ["convention_retirement_rule_not_active", "A retirement target is no longer active. Re-read find-rule and review the proposal before adopting."],
-  ["convention_card_already_active", "An active rule already carries this card id. Name it in Retires when replacing the card, or use another card id."],
-  ["convention_pack_unknown", "The proposal names a pack outside the existing pack index; name only packs listed by standing-context."],
-  ["rule_adoption_requires_joe","Rule activation runs on Joe's approval chain; Joe or an agent he sponsors adopts this proposal."],
+  [
+    "memory_attach_required",
+    "Call attach-memory first, then pass the attach_id it returned to this actor when writing or retiring team-memory.",
+  ],
+  [
+    "memory_read_only",
+    "This attach is read_only. Call attach-memory with access read_write, then retry with the new attach_id.",
+  ],
+  [
+    "convention_proposal_not_found",
+    "Choose an active proposal from governance-queue pending_convention_proposals. An adopted proposal is consumed. To amend it, write a new Convention proposal with Retires: [<full rule UUID as a JSON string>] and adopt the new section.",
+  ],
+  [
+    "convention_proposal_malformed",
+    "Use 'Convention: <statement>' with Card or Packs, or 'Retires: [<full rule UUID>, ...]' for retirement only. A replacement may also name Retires.",
+  ],
+  [
+    "convention_retirement_rule_not_found",
+    "A retirement target does not exist. Re-read find-rule and use its full rule UUID.",
+  ],
+  [
+    "convention_retirement_rule_not_active",
+    "A retirement target is no longer active. Re-read find-rule and review the proposal before adopting.",
+  ],
+  [
+    "convention_card_already_active",
+    "An active rule already carries this card id. Name it in Retires when replacing the card, or use another card id.",
+  ],
+  [
+    "convention_pack_unknown",
+    "The proposal names a pack outside the existing pack index; name only packs listed by standing-context.",
+  ],
+  [
+    "rule_adoption_requires_joe",
+    "Rule activation runs on Joe's approval chain; Joe or an agent he sponsors adopts this proposal.",
+  ],
   ["rule_id_required", "Supply a rule ID."],
   ["rule_id_malformed", "Supply a full rule UUID or a valid short rule ID."],
   ["rule_not_found", "Choose an existing rule ID."],
   ["ambiguous_rule_id", "Use a longer rule ID to identify one rule."],
   ["decision_id_required", "Provide a decision id: the full uuid or its 8-character short form."],
   ["decision_id_malformed", "Use the full decision uuid or the 8-character short form this system prints."],
-  ["decision_not_found", "No decision id begins with that prefix. Check decision-history; log-decision returns the decision_id, not the event_id."],
-  ["ambiguous_decision_id", "That prefix matches more than one decision. Pass more characters or the full decision id."],
-  ["doctrine_doc_not_found", "The document was not found. Use doctrine-index to choose a current document id or slug for the document argument."],
+  [
+    "decision_not_found",
+    "No decision id begins with that prefix. Check decision-history; log-decision returns the decision_id, not the event_id.",
+  ],
+  [
+    "ambiguous_decision_id",
+    "That prefix matches more than one decision. Pass more characters or the full decision id.",
+  ],
+  [
+    "doctrine_doc_not_found",
+    "The document was not found. Use doctrine-index to choose a current document id or slug for the document argument.",
+  ],
   ["needs_disambiguation", "Choose an exact record reference from the candidates before retrying."],
-  ["decline_claims_completion", "Use complete-work-request to close built work. Decline only work that will not be built."],
+  [
+    "decline_claims_completion",
+    "Use complete-work-request to close built work. Decline only work that will not be built.",
+  ],
   ["loop_not_open", "Re-read the loop before choosing another action."],
   ["action_not_found", "Re-read the action list. This action is unavailable in your organization."],
   ["invalid_action_id", "Supply the action UUID from a fresh action list."],
-  ["action_not_open", "Re-read the current action. It is already closed; review its status before choosing another action."],
-  ["critical_date_not_open", "Re-read the current critical date. It is already resolved; review its status before choosing another action."],
+  [
+    "action_not_open",
+    "Re-read the current action. It is already closed; review its status before choosing another action.",
+  ],
+  [
+    "critical_date_not_open",
+    "Re-read the current critical date. It is already resolved; review its status before choosing another action.",
+  ],
   ["personal_doc_not_owner", "This personal doctrine belongs to another owner."],
   ["personal_loop_not_owner", "This personal loop belongs to another owner."],
   ["unauthorized", "Authentication is required."],
   ["invalid_call_context_deals", "Choose only open, active deal UUIDs from the current deal board."],
   ["invalid_field_value", "Check the named fields against the tool's documented input."],
-  ["invalid_report_problem", "Supply a UUID idempotency_key, non-empty situation (at most 1000 characters), title (200), desired_outcome (2000), and 1 through 12 acceptance criteria."],
+  [
+    "invalid_report_problem",
+    "Supply a UUID idempotency_key, non-empty situation (at most 1000 characters), title (200), desired_outcome (2000), and 1 through 12 acceptance criteria.",
+  ],
   ["invalid_report_problem_fields", "Remove fields outside the documented input for report-problem."],
-  ["invalid_acceptance_criteria", "Supply criteria with only id and text; use unique uppercase letters, digits, or hyphens for ids and non-empty text of at most 500 characters."],
-  ["current_situation_source_not_found", "Revise situation to match a current shared doctrine source, then retry report-problem."],
+  [
+    "invalid_acceptance_criteria",
+    "Supply criteria with only id and text; use unique uppercase letters, digits, or hyphens for ids and non-empty text of at most 500 characters.",
+  ],
+  [
+    "current_situation_source_not_found",
+    "Revise situation to match a current shared doctrine source, then retry report-problem.",
+  ],
   ["work_request_capture_refused", "The database refused this capture. Quote the correlation_id when reporting it."],
   ["validation_error", "Check the named fields against the tool's documented input."],
   ["missing_required", "Supply the named required fields from the tool's documented input."],
@@ -140,50 +276,89 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["invalid_base_version", "Supply an integer base_version from a fresh read."],
   ["missing_plan_base", "Review this older call proposal before applying it."],
   ["newer_change_exists", "The record changed after this proposal. Review its current state before deciding."],
-  ["invalid_work_queue_fields", "Use only the documented queue fields and positive 32-bit slice, job, and position numbers."],
+  [
+    "invalid_work_queue_fields",
+    "Use only the documented queue fields and positive 32-bit slice, job, and position numbers.",
+  ],
   ["invalid_job_type", "Supply job_type from the documented job-types.v1.json vocabulary."],
   ["invalid_work_request", "Supply a numeric Work Request reference such as WR-000014."],
   ["invalid_idempotency_key", "Supply a UUID as idempotency_key and reuse it only for the same action."],
   ["invalid_slice_plan", "Supply one through one hundred non-empty slice titles, each at most 200 characters."],
   ["slice_plan_conflict", "Keep the recorded titles in order and append new titles after them."],
-  ["joint_ownership_refused", "A loop has one owner: pass joe, dell or claude, and name the blocker for what it waits on."],
+  [
+    "joint_ownership_refused",
+    "A loop has one owner: pass joe, dell or claude, and name the blocker for what it waits on.",
+  ],
   ["unknown_owner", "Owner is one of joe, dell or claude."],
-  ["blocker_detail_required", "Provide blocker_detail of at least 12 characters naming the specific person, ruling, date or prerequisite."],
+  [
+    "blocker_detail_required",
+    "Provide blocker_detail of at least 12 characters naming the specific person, ruling, date or prerequisite.",
+  ],
   ["blocker_detail_vague", "Make blocker_detail specific about who or what must happen first."],
-  ["blocker_not_carried_by_kind", "Use kind open_loop for blocker, blocker_detail, residue_kind and residue_host, or omit those fields."],
-  ["blocker_required", "For kind open_loop, provide blocker as human_only, counterparty, ruling, external_event, other_lane or capability."],
+  [
+    "blocker_not_carried_by_kind",
+    "Use kind open_loop for blocker, blocker_detail, residue_kind and residue_host, or omit those fields.",
+  ],
+  [
+    "blocker_required",
+    "For kind open_loop, provide blocker as human_only, counterparty, ruling, external_event, other_lane or capability.",
+  ],
   ["dated_marker_needs_date", "Provide due_on as YYYY-MM-DD when marker is dated."],
   ["due_date_needs_dated_marker", "Use marker dated with due_on, omit marker on add-loop to infer it, or omit due_on."],
   ["empty_loop", "Provide body or title with the loop text."],
   ["missing_kind", "Provide kind as open_loop, team_loop, action_required or idea."],
   ["unknown_blocker_class", "Use blocker human_only, counterparty, ruling, external_event, other_lane or capability."],
   ["unknown_domain", "Use domain deals, prospecting, networking, marketing, business or system, or omit it."],
-  ["unknown_kind", "For loops use kind open_loop, team_loop, action_required or idea; for party links use the documented link kind vocabulary."],
+  [
+    "unknown_kind",
+    "For loops use kind open_loop, team_loop, action_required or idea; for party links use the documented link kind vocabulary.",
+  ],
   ["unknown_marker", "Use marker bell, dated, decision or none."],
-  ["residue_not_carried_by_class", "Omit residue_kind and residue_host unless blocker is human_only, ruling or capability."],
+  [
+    "residue_not_carried_by_class",
+    "Omit residue_kind and residue_host unless blocker is human_only, ruling or capability.",
+  ],
   ["residue_required", "Provide residue_kind and residue_host for blocker human_only, ruling or capability."],
-  ["unknown_residue_kind", "Use residue_kind provider_login, os_password, physical_act, money_movement, external_send or joe_only_fact."],
+  [
+    "unknown_residue_kind",
+    "Use residue_kind provider_login, os_password, physical_act, money_movement, external_send or joe_only_fact.",
+  ],
   ["residue_host_required", "Provide residue_host with at least two characters naming the provider or host."],
   ["bad_number", "Use digits only for number."],
   ["bad_last_surfaced", "Use YYYY-MM-DD for last_surfaced."],
   ["need_block_id_or_file_and_section", "Provide block_id or both file and section."],
   ["empty_prose", "Provide a non-empty replacement paragraph in prose_md."],
-  ["outcome_required", "Provide a non-empty outcome describing what happened, and use resolution dropped if abandoning the work."],
-  ["bookkeeping_close_is_dropped", "Use resolution dropped and name successor_loop when work continues in another loop."],
+  [
+    "outcome_required",
+    "Provide a non-empty outcome describing what happened, and use resolution dropped if abandoning the work.",
+  ],
+  [
+    "bookkeeping_close_is_dropped",
+    "Use resolution dropped and name successor_loop when work continues in another loop.",
+  ],
   ["bookkeeping_outcome_prefix", "Start outcome with renumbered or superseded when naming successor_loop."],
   ["successor_loop_required", "Provide successor_loop as the open loop number or loop_id carrying the work forward."],
   ["invalid_slice_outcome", "Choose done or retired with the evidence for that outcome."],
-  ["slice_outcome_already_recorded", "The recorded outcome and its evidence are final. Plan a new slice for further work."],
+  [
+    "slice_outcome_already_recorded",
+    "The recorded outcome and its evidence are final. Plan a new slice for further work.",
+  ],
   ["slice_reason_required", "Explain why the slice is retired."],
   ["slice_merged_change_required", "Supply at least one merged PR URL and its full merge commit SHA."],
-  ["slice_independent_review_required", "Each shipped PR needs a current-head APPROVE comment from a reviewer Card different from its author Card."],
+  [
+    "slice_independent_review_required",
+    "Each shipped PR needs a current-head APPROVE comment from a reviewer Card different from its author Card.",
+  ],
   ["invalid_slice_successor", "Only a retired slice may name a different recorded slice as its replacement."],
   ["work_request_open_slices", "Finish or retire every open slice before completing the Work Request."],
   ["slice_not_found", "Choose a slice from the recorded plan."],
   ["invalid_card_title", "Supply a card title of two or three plain words."],
   ["card_title_verb", "Start the title with an imperative from mcp-server/src/job-card-verbs.v1.json."],
   ["card_title_duplicate", "Choose a title not already used by another job in this Work Request."],
-  ["invalid_job_description", "Supply a new description as one sentence starting with an imperative from mcp-server/src/job-card-verbs.v1.json."],
+  [
+    "invalid_job_description",
+    "Supply a new description as one sentence starting with an imperative from mcp-server/src/job-card-verbs.v1.json.",
+  ],
   ["job_already_started", "This job already has a runner; choose the next unstarted queue job."],
   ["job_repository_mismatch", "Start this job in its recorded repository."],
   ["job_not_found", "Choose an existing job under this Work Request and slice."],
@@ -210,17 +385,35 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["dispatch_ack_not_authorized", "Only the dispatch's delivering desk or its target session may acknowledge it."],
   ["AUTHORIZATION_REFUSED", "This operation requires partner authority."],
   ["vendor_meetings_query_invalid", "Check the vendor meeting filters and restart paging if the query changed."],
-  ["vendor_meetings_unavailable", "Vendor meetings are temporarily unavailable. Quote the correlation_id when reporting it."],
+  [
+    "vendor_meetings_unavailable",
+    "Vendor meetings are temporarily unavailable. Quote the correlation_id when reporting it.",
+  ],
   ["not_a_deal", "Choose a deal record, not a client or lead."],
-  ["portal_slug_invalid", "Use lowercase letters, digits and hyphens for the portal name, starting with a letter or digit, at most 63 characters."],
+  [
+    "portal_slug_invalid",
+    "Use lowercase letters, digits and hyphens for the portal name, starting with a letter or digit, at most 63 characters.",
+  ],
   ["portal_password_invalid", "Supply a portal password of 1 to 1024 characters."],
   ["portal_deal_not_found", "The deal was not found or its client was merged. Re-read the deal before retrying."],
   ["portal_slug_taken", "Choose another portal name. This one is already in use."],
-  ["portal_password_differs", "This deal already has that portal name with a different password. Use the original password to retry."],
-  ["portal_deal_already_registered", "This deal already has an active client portal. Open its link instead of registering another."],
+  [
+    "portal_password_differs",
+    "This deal already has that portal name with a different password. Use the original password to retry.",
+  ],
+  [
+    "portal_deal_already_registered",
+    "This deal already has an active client portal. Open its link instead of registering another.",
+  ],
   ["tour_share_scope_invalid", "Choose one or more documented tour share scopes, each once."],
-  ["database_refused_the_statement", "The operation could not be completed. Quote the correlation_id when reporting it."],
-  ["doctrine_version_invalid", "The doctrine document contains a version that cannot be represented safely. Quote the correlation_id when reporting it."],
+  [
+    "database_refused_the_statement",
+    "The operation could not be completed. Quote the correlation_id when reporting it.",
+  ],
+  [
+    "doctrine_version_invalid",
+    "The doctrine document contains a version that cannot be represented safely. Quote the correlation_id when reporting it.",
+  ],
 ]);
 
 const CANDIDATE_SHAPES = [
@@ -235,13 +428,15 @@ const CANDIDATE_SHAPES = [
 
 function publicCandidates(candidates: unknown, shapes = CANDIDATE_SHAPES): Record<string, string | null>[] {
   if (!Array.isArray(candidates)) return [];
-  return candidates.flatMap(candidate => {
+  return candidates.flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object") return [];
-    const fields = shapes.find(shape => shape.every(field => Object.hasOwn(candidate, field)));
+    const fields = shapes.find((shape) => shape.every((field) => Object.hasOwn(candidate, field)));
     if (!fields) return [];
-    const result = Object.fromEntries(fields
-      .filter(field => candidate[field] === null || typeof candidate[field] === "string")
-      .map(field => [field, candidate[field]]));
+    const result = Object.fromEntries(
+      fields
+        .filter((field) => candidate[field] === null || typeof candidate[field] === "string")
+        .map((field) => [field, candidate[field]]),
+    );
     return Object.keys(result).length ? [result] : [];
   });
 }
@@ -259,7 +454,11 @@ function inputFields(schema: InputSchema | undefined, names = new Set<string>())
 // caller can see which one to remove (2026-10-28 retro: the wire said
 // "fields": [] and the orchestrator had to diff schemas by hand). Only
 // identifier-shaped keys travel; values and free-form keys never do.
-const REJECTED_KEY_CODES = new Set(["unregistered_operation_fields", "invalid_report_problem_fields", "caller_authority_field_forbidden"]);
+const REJECTED_KEY_CODES = new Set([
+  "unregistered_operation_fields",
+  "invalid_report_problem_fields",
+  "caller_authority_field_forbidden",
+]);
 const REJECTED_KEY = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 
 // Row values travel in these: pg's "Failing row contains (...)" and ToolError payloads.
@@ -267,38 +466,61 @@ const UNLOGGED = new Set(["detail", "hint", "where", "payload"]);
 
 function diagnostics(error: unknown) {
   const seen = new WeakSet();
-  return JSON.parse(JSON.stringify(error, (_key, value) => {
-    if (value && typeof value === "object") {
-      if (seen.has(value)) return "[circular]";
-      seen.add(value);
-      if (value instanceof Error) return {
-        ...Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(value))
-          .filter(([key, descriptor]) => "value" in descriptor && !UNLOGGED.has(key))
-          .map(([key, descriptor]) => [key, descriptor.value])),
-        name: value.name, message: value.message, stack: value.stack,
-      };
-    }
-    return typeof value === "bigint" ? String(value) : value;
-  }) ?? "null");
+  return JSON.parse(
+    JSON.stringify(error, (_key, value) => {
+      if (value && typeof value === "object") {
+        if (seen.has(value)) return "[circular]";
+        seen.add(value);
+        if (value instanceof Error)
+          return {
+            ...Object.fromEntries(
+              Object.entries(Object.getOwnPropertyDescriptors(value))
+                .filter(([key, descriptor]) => "value" in descriptor && !UNLOGGED.has(key))
+                .map(([key, descriptor]) => [key, descriptor.value]),
+            ),
+            name: value.name,
+            message: value.message,
+            stack: value.stack,
+          };
+      }
+      return typeof value === "bigint" ? String(value) : value;
+    }) ?? "null",
+  );
 }
 
 /** The sole projection for caught MCP/HTTP failures. Full diagnostics stay in
  * server logs. Validation fields come from the input schema; disambiguation
  * choices use curated record shapes. */
-export function publicError(error: unknown, { env, inputSchema, fallback = "unhandled_verb_failure" }:
-  { env?: { CORRELATION_ID?: string }; inputSchema?: InputSchema; fallback?: string } = {}) {
+export function publicError(
+  error: unknown,
+  {
+    env,
+    inputSchema,
+    fallback = "unhandled_verb_failure",
+  }: { env?: { CORRELATION_ID?: string }; inputSchema?: InputSchema; fallback?: string } = {},
+) {
   const correlationId = isValidCorrelationId(env?.CORRELATION_ID)
-    ? env!.CORRELATION_ID!.trim().toLowerCase() : crypto.randomUUID();
+    ? String(env?.CORRELATION_ID).trim().toLowerCase()
+    : crypto.randomUUID();
   if (env) env.CORRELATION_ID = correlationId;
   logLine("error", "request_error", { correlation_id: correlationId, diagnostic: diagnostics(error) });
   const payload = error instanceof ToolError ? error.payload : null;
-  const code = PUBLIC_ERRORS.has(payload?.error) ? payload!.error : fallback;
-  const result: PublicError = { error: code, correlation_id: correlationId,
-    hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it." };
-  if (code === "comparison_fact_blocked" && ["base_rent_per_sf", "landlord_ti_per_sf", "term_months", "free_rent_months"].includes(String(payload?.field)))
-    result.fields = [payload!.field];
-  if (["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
-      typeof payload?.ref === "string" && /^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$/i.test(payload.ref))
+  const code = PUBLIC_ERRORS.has(payload?.error) ? (payload?.error ?? fallback) : fallback;
+  const result: PublicError = {
+    error: code,
+    correlation_id: correlationId,
+    hint: PUBLIC_ERRORS.get(code) || "The operation failed. Quote the correlation_id when reporting it.",
+  };
+  if (
+    code === "comparison_fact_blocked" &&
+    ["base_rent_per_sf", "landlord_ti_per_sf", "term_months", "free_rent_months"].includes(String(payload?.field))
+  )
+    result.fields = [payload?.field];
+  if (
+    ["unsupported_decision_about", "decision_about_work_request_not_found"].includes(code) &&
+    typeof payload?.ref === "string" &&
+    /^WR-(?:[0-9]{1,12}|AI-[0-9]{3}|SIEP-[0-9A-Z]{2,3})$/i.test(payload.ref)
+  )
     result.hint += ` Reference: ${payload.ref}.`;
   if (code === "needs_disambiguation") {
     result.candidates = publicCandidates(payload?.candidates);
@@ -306,48 +528,110 @@ export function publicError(error: unknown, { env, inputSchema, fallback = "unha
       result.retired_aliases = publicCandidates(payload.retired_aliases, [["ref", "name"]]);
   }
   if (code === "invalid_call_context_deals")
-    result.invalid_deal_ids = [...new Set((Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : [])
-      .filter(id => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id)))].slice(0, 50);
-  if (code === "slice_plan_conflict" && Array.isArray(payload?.recorded_titles)
-      && payload.recorded_titles.length <= 100
-      && payload.recorded_titles.every(title => typeof title === "string" && title.trim() && title.length <= 200))
+    result.invalid_deal_ids = [
+      ...new Set(
+        (Array.isArray(payload?.invalid_deal_ids) ? payload.invalid_deal_ids : []).filter(
+          (id) => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id),
+        ),
+      ),
+    ].slice(0, 50);
+  if (
+    code === "slice_plan_conflict" &&
+    Array.isArray(payload?.recorded_titles) &&
+    payload.recorded_titles.length <= 100 &&
+    payload.recorded_titles.every((title) => typeof title === "string" && title.trim() && title.length <= 200)
+  )
     result.recorded_titles = payload.recorded_titles;
-  if (["invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_card_title === "string")
+  if (
+    ["invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_work_queue_fields"].includes(code) &&
+    typeof payload?.suggested_card_title === "string"
+  )
     result.suggested_card_title = payload.suggested_card_title;
-  if (["invalid_job_description", "invalid_work_queue_fields"].includes(code) && typeof payload?.suggested_description === "string")
+  if (
+    ["invalid_job_description", "invalid_work_queue_fields"].includes(code) &&
+    typeof payload?.suggested_description === "string"
+  )
     result.suggested_description = payload.suggested_description;
   if (code === "invalid_job_type" && Array.isArray(payload?.allowed_values))
     result.allowed_values = payload.allowed_values.filter((value): value is string => typeof value === "string");
   if (code === "value_not_in_declared_vocabulary" && typeof payload?.field === "string") {
     const spec = inputSchema?.properties?.[payload.field];
     const values = spec?.enum ?? spec?.items?.enum;
-    if (Array.isArray(values) && values.every(value => typeof value === "string")) result.allowed_values = values as string[];
+    if (Array.isArray(values) && values.every((value) => typeof value === "string"))
+      result.allowed_values = values.filter((value): value is string => typeof value === "string");
   }
-  if (code === "version_conflict" && Number.isSafeInteger(payload?.current_version) && (payload!.current_version as number) >= 0)
-    result.current_version = payload!.current_version as number;
-  if (["invalid_idempotency_key", "invalid_report_problem", "invalid_report_problem_fields", "caller_authority_field_forbidden", "invalid_acceptance_criteria", "current_situation_source_not_found", "invalid_field_value", "validation_error", "value_not_in_declared_vocabulary", "unregistered_operation_fields", "missing_required", "invalid_boolean", "invalid_number", "tool_call_markup_in_value"].includes(code)) {
+  if (
+    code === "version_conflict" &&
+    typeof payload?.current_version === "number" &&
+    Number.isSafeInteger(payload.current_version) &&
+    payload.current_version >= 0
+  )
+    result.current_version = payload.current_version;
+  if (
+    [
+      "invalid_idempotency_key",
+      "invalid_report_problem",
+      "invalid_report_problem_fields",
+      "caller_authority_field_forbidden",
+      "invalid_acceptance_criteria",
+      "current_situation_source_not_found",
+      "invalid_field_value",
+      "validation_error",
+      "value_not_in_declared_vocabulary",
+      "unregistered_operation_fields",
+      "missing_required",
+      "invalid_boolean",
+      "invalid_number",
+      "tool_call_markup_in_value",
+    ].includes(code)
+  ) {
     const allowed = inputFields(inputSchema);
-    const candidates = [payload?.field, payload?.column,
+    const candidates = [
+      payload?.field,
+      payload?.column,
       ...(Array.isArray(payload?.fields) ? payload.fields : []),
       ...(Array.isArray(payload?.missing) ? payload.missing : []),
-      ...(Array.isArray(payload?.columns) ? payload.columns : [])];
-    const rejected = (field: unknown) => REJECTED_KEY_CODES.has(code) && typeof field === "string" && REJECTED_KEY.test(field);
-    result.fields = [...new Set(candidates.filter(field => allowed.has(field) || rejected(field)))].slice(0, 20);
+      ...(Array.isArray(payload?.columns) ? payload.columns : []),
+    ];
+    const rejected = (field: unknown) =>
+      REJECTED_KEY_CODES.has(code) && typeof field === "string" && REJECTED_KEY.test(field);
+    result.fields = [...new Set(candidates.filter((field) => allowed.has(field) || rejected(field)))].slice(0, 20);
     if (code === "invalid_field_value" && result.fields.length === 0) {
       result.error = "database_refused_the_statement";
-      result.hint = PUBLIC_ERRORS.get(result.error)!;
+      result.hint = PUBLIC_ERRORS.get(result.error) ?? result.hint;
       delete result.fields;
     }
   }
-  if (["invalid_work_queue_fields", "invalid_card_title", "card_title_verb", "card_title_duplicate", "invalid_job_description",
-    "invalid_work_request", "invalid_idempotency_key", "invalid_job_type", "value_not_in_declared_vocabulary",
-    "convention_pack_unknown", "convention_proposal_malformed"].includes(code) && Array.isArray(payload?.field_errors)) {
-    result.field_errors = payload.field_errors.filter((item): item is Record<string, unknown> =>
-      !!item && typeof item === "object" && typeof item.field === "string" && typeof item.code === "string")
-      .map(item => ({ field: String(item.field), value: item.value, code: String(item.code),
+  if (
+    [
+      "invalid_work_queue_fields",
+      "invalid_card_title",
+      "card_title_verb",
+      "card_title_duplicate",
+      "invalid_job_description",
+      "invalid_work_request",
+      "invalid_idempotency_key",
+      "invalid_job_type",
+      "value_not_in_declared_vocabulary",
+      "convention_pack_unknown",
+      "convention_proposal_malformed",
+    ].includes(code) &&
+    Array.isArray(payload?.field_errors)
+  ) {
+    result.field_errors = payload.field_errors
+      .filter(
+        (item): item is Record<string, unknown> =>
+          !!item && typeof item === "object" && typeof item.field === "string" && typeof item.code === "string",
+      )
+      .map((item) => ({
+        field: String(item.field),
+        value: item.value,
+        code: String(item.code),
         ...(typeof item.pattern === "string" ? { pattern: item.pattern } : {}),
-        ...(Array.isArray(item.allowed_values) && item.allowed_values.every(v => typeof v === "string")
-          ? { allowed_values: item.allowed_values } : {}) }));
+        ...(Array.isArray(item.allowed_values) && item.allowed_values.every((v) => typeof v === "string")
+          ? { allowed_values: item.allowed_values }
+          : {}),
+      }));
   }
   return result;
 }
