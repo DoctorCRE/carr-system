@@ -108,8 +108,6 @@ export async function withPostCallActionComparisons<T extends Row>(c: Db, rows: 
         schema_version: "post-call-action-comparison.v2",
         status: "exact_match",
         exact_match: actionSnapshot(exact, candidate.assignee_slug),
-        related_open_tasks: [],
-        related_open_task_total: null,
         date_effect: {
           current_due_on: exact.due_on,
           proposed_due_on: candidate.due_on,
@@ -117,6 +115,8 @@ export async function withPostCallActionComparisons<T extends Row>(c: Db, rows: 
           changes_due_on: resulting !== exact.due_on,
           reason: candidate.due_on == null ? "unstated_date" : stated ? "stated_date" : "defaulted_date",
         },
+        related_open_tasks: [],
+        related_open_task_total: null,
       };
     } else if (ownerId) {
       const actions = (
