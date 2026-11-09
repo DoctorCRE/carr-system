@@ -1,9 +1,10 @@
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 import io
 import sys
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('backfill_cli', Path(__file__).resolve().parents[1] / 'bin/backfill-deal-document-text.py')
@@ -32,3 +33,10 @@ class PreflightTests(unittest.TestCase):
         scan.assert_not_called()
         self.assertIn('storage_reader_missing', output.getvalue())
         self.assertIn('npm --prefix mcp-server ci', output.getvalue())
+
+    def test_cli_reports_document_failures_and_nonzero(self):
+        output = io.StringIO()
+        result = {'errors': [{'document_ref': 'doc-1', 'code': 'document_processing_failed'}], 'produced': 1}
+        with patch.object(sys, 'argv', ['backfill']), patch.object(cli, 'preflight_reader'), patch.object(cli, 'backfill', return_value=result), redirect_stdout(output):
+            self.assertEqual(cli.main(), 1)
+        self.assertEqual(json.loads(output.getvalue()), {'ok': False, **result})
