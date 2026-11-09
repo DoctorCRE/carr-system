@@ -9,6 +9,9 @@ const reply = (body, status = 200) => Response.json(body, {
 const chunkKeys = (id, entry) => Array.from({ length: entry.chunks || 0 }, (_, i) => `audio:${id}:${i}`);
 
 export class PhoneAudioHandoff {
+  /** @type {never} Cloudflare nominal marker for a legacy Durable Object. */
+  __DURABLE_OBJECT_BRAND;
+
   constructor(ctx) {
     this.storage = ctx.storage;
   }

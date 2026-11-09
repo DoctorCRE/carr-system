@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "npm run generate:types && node run-tests.ts",
-    "generate:types": "npm run check:registry && node generate-verb-types.ts && node generate-worker-types.mjs",
+    "generate:types": "npm run check:registry && node generate-verb-types.ts && node generate-worker-types.ts",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json",
     "test:routing-replay": "node test/doctrine-routing-replay.mjs",
     "portal-parity": "node portal-parity/cli.mjs",
@@ -22,6 +22,7 @@
   "devDependencies": {
     "@babel/parser": "7.28.5",
     "@biomejs/biome": "2.6.6",
+    "@cloudflare/workers-types": "5.20261109.1",
     "@types/node": "26.6.6",
     "@types/pg": "8.23.1",
     "esbuild": "0.28.1",

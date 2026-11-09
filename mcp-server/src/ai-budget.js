@@ -123,6 +123,9 @@ export function budgetedAi(env) {
 }
 
 export class AiNeuronBudget {
+  /** @type {never} Cloudflare nominal marker for a legacy Durable Object. */
+  __DURABLE_OBJECT_BRAND;
+
   constructor(state, env) {
     this.storage = state.storage;
     this.env = env;

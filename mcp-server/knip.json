@@ -5,6 +5,7 @@
     "run-tests.ts",
     "test/*.test.ts",
     "generate-verb-types.ts",
+    "generate-worker-types.ts",
     "../ops/ci-node-file.mts",
     "test/models/subject-watch-delivery/Delivery.map.ts",
     "test/models/subject-watch-delivery/Queue.map.ts",
@@ -25,6 +26,7 @@
     "run-tests.ts",
     "test/run-node-suites.test.ts",
     "generate-verb-types.ts",
+    "generate-worker-types.ts",
     "test/worker-types.test.ts",
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
@@ -32,6 +34,7 @@
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",
-    "src/web-push-config.ts"
+    "src/web-push-config.ts",
+    "src/oauth-consent-state.ts"
   ]
 }

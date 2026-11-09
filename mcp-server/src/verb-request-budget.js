@@ -5,6 +5,9 @@ const PERIOD_MS = 60_000;
 const LIMITS = Object.freeze({ human: 60, agent: 1200 });
 
 export class VerbRequestBudget {
+  /** @type {never} Cloudflare nominal marker for a legacy Durable Object. */
+  __DURABLE_OBJECT_BRAND;
+
   constructor(state) { this.storage = state.storage; }
 
   async fetch(request) {
