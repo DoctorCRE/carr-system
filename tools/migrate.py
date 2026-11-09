@@ -638,6 +638,23 @@ def validate_ledger_identities(current: dict[str, str], applied: dict[str, str])
             )
 
 
+def install_control_catalog(conn) -> None:
+    import importlib.util
+    import json
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("catalog_projection", root / "ops/sync_control_catalog.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                              capture_output=True, text=True, check=True).stdout.strip()
+    conn.commit()
+    receipt = module.install_projection(conn, revision)
+    conn.commit()
+    print("control-catalog-projection: " + json.dumps(receipt, sort_keys=True))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true", help="apply pending migrations")
@@ -702,6 +719,8 @@ def main() -> None:
             print(f"  held back: {name}")
         if not pending:
             print("nothing to do in authorized prefix")
+            if args.apply and not args.through:
+                install_control_catalog(conn)
             return
         if not args.apply:
             print("dry run — pass --apply to run these")
@@ -808,6 +827,8 @@ def main() -> None:
             if len(batch) > 1:
                 print("atomic migration group committed: "
                       + ", ".join(name for name, _sql, _digest in batch))
+        if not args.through:
+            install_control_catalog(conn)
         print("done")
 
 

@@ -2,6 +2,11 @@ import { readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const suiteInventory: { unitPattern: string } = JSON.parse(
+  await readFile(new URL("./suite-inventory.json", import.meta.url), "utf8"),
+);
+const unitPattern = new RegExp(suiteInventory.unitPattern);
+
 export async function discoverSuites(directory: string, inventory: unknown): Promise<string[]> {
   if (
     typeof inventory !== "object" ||
@@ -28,7 +33,7 @@ export async function discoverSuites(directory: string, inventory: unknown): Pro
         continue;
       }
       if (!entry.isFile() || !/\.(?:[cm]?[jt]sx?)$/.test(name)) continue;
-      if (!relative && /\.test\.(?:mjs|js|ts)$/.test(name)) {
+      if (unitPattern.test(name)) {
         files.push(name);
         continue;
       }

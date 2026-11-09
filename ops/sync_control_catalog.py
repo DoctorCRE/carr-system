@@ -36,12 +36,15 @@ shape the control-plane architecture contract asks for.
 
 from __future__ import annotations
 
+import hashlib
+import re
 import json
 import pathlib
 import subprocess
 from typing import Any
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+UNIT_PATTERN = re.compile(json.loads((REPO / "mcp-server/suite-inventory.json").read_text())["unitPattern"])
 MAP = REPO / "ops" / "config" / "rule-enforcement-map.json"
 
 # THE CLASS LIVES BESIDE THE MAP, NOT INSIDE IT, and that is deliberate.
@@ -111,9 +114,8 @@ def _runs_in_ci(kind: str, path: str | None) -> bool:
     p = pathlib.PurePosixPath(path)
     if p.match("ops/*-selftest.py") or p.match("tools/test-*.py"):
         return True
-    if path.startswith("mcp-server/test/") and path.endswith((".test.mjs", ".test.js", "*.test.js", "*.test.mjs")):
-        return True
-    return False
+    prefix = "mcp-server/test/"
+    return path.startswith(prefix) and UNIT_PATTERN.fullmatch(path[len(prefix):]) is not None
 
 
 def load_map(path: pathlib.Path = MAP,
@@ -174,7 +176,12 @@ def compile_rows(catalog: dict[str, Any], tracked: set[str]) -> list[dict[str, A
         # An implementation that is only ever described in prose is not an
         # implementation; a control needs at least one real file behind it.
         concrete_impl = [r for r in impl if resolved[r][0] in ("path", "glob", "command")]
-        runnable = [r for r in test if _runs_in_ci(*resolved[r])]
+        runnable = [r for r in test if any(
+            _runs_in_ci("path", candidate)
+            for candidate in tracked
+            if (pathlib.PurePosixPath(candidate).match(resolved[r][1])
+                if resolved[r][0] == "glob" else candidate == resolved[r][1])
+        ) and resolved[r][0] in ("path", "glob")]
 
         if missing:
             reason = "declared but not tracked by git: " + ", ".join(sorted(missing))
@@ -219,6 +226,12 @@ on conflict (control_key) do update set
     installed          = excluded.installed,
     verified_at        = excluded.verified_at,
     updated_at         = now()
+where (enforcement_control_catalog.implementation_ref,
+       enforcement_control_catalog.test_ref,
+       enforcement_control_catalog.enforcement_class,
+       enforcement_control_catalog.installed) is distinct from
+      (excluded.implementation_ref, excluded.test_ref,
+       excluded.enforcement_class, excluded.installed)
 """
 
 
@@ -254,6 +267,39 @@ on conflict (control_key) do update set
     verified_at        = excluded.verified_at,
     updated_at         = now();
 """
+
+
+def install_projection(conn: Any, revision: str) -> dict[str, Any]:
+    """Install one clean checked-out revision atomically; verification never calls this."""
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=REPO, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    if revision != git("rev-parse", "HEAD"):
+        raise CatalogError("catalog revision differs from checked-out HEAD")
+    if git("status", "--porcelain", "--untracked-files=no"):
+        raise CatalogError("catalog installation requires a clean revision")
+    rows = compile_catalog()
+    missing = [r["control_key"] for r in rows
+               if r["not_installed_reason"].startswith("declared but not tracked")]
+    if missing:
+        raise CatalogError("unresolved catalog bindings: " + ", ".join(missing))
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
+    with conn.transaction():
+        with conn.cursor() as cur:
+            cur.execute("set local lock_timeout = '5s'")
+            cur.execute("set local statement_timeout = '60s'")
+            cur.execute("lock table ops.enforcement_control_catalog in share row exclusive mode")
+            cur.execute("select control_key from ops.enforcement_control_catalog")
+            stranded = {r[0] for r in cur.fetchall()} - {r["control_key"] for r in rows}
+            if stranded:
+                raise CatalogError("undeclared controls require explicit retirement: "
+                                   + ", ".join(sorted(stranded)))
+            for row in rows:
+                cur.execute(UPSERT, (row["control_key"], row["implementation_ref"],
+                            row["test_ref"], row["enforcement_class"],
+                            row["installed"], row["installed"]))
+    return {"version": 1, "revision": revision, "sha256": digest, "controls": len(rows)}
 
 
 def main() -> int:
@@ -300,42 +346,12 @@ def main() -> int:
 
     import psycopg
 
-    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-        # Rows the map no longer declares are REPORTED, never deleted. Removing a
-        # registered control could silently un-enforce an active rule, and that
-        # is a decision, not a sync's business.
-        cur.execute("select control_key from ops.enforcement_control_catalog")
-        existing = {r[0] for r in cur.fetchall()}
-        # EACH ROW ON ITS OWN SAVEPOINT. ops.refuse_live_approved_control_rewrite()
-        # makes a control that backs an approved rule immutable, so a single such
-        # row aborted the whole transaction and the sync could never apply against
-        # a production that had approved anything. A refusal is reported and the
-        # remaining rows still land; rewriting a live approved control is a
-        # deliberate act, not something a sync should force.
-        refused = []
-        for r in rows:
-            cur.execute("savepoint sync_row")
-            try:
-                cur.execute(UPSERT, (r["control_key"], r["implementation_ref"], r["test_ref"],
-                                     r["enforcement_class"], r["installed"], r["installed"]))
-                cur.execute("release savepoint sync_row")
-            except psycopg.errors.RaiseException as exc:
-                cur.execute("rollback to savepoint sync_row")
-                refused.append((r["control_key"], str(exc).splitlines()[0]))
-        conn.commit()
-        stranded = sorted(existing - {r["control_key"] for r in rows})
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO,
+                              text=True, capture_output=True, check=True).stdout.strip()
+    with psycopg.connect(dsn) as conn:
+        receipt = install_projection(conn, revision)
+    print("control-catalog-projection: " + json.dumps(receipt, sort_keys=True))
 
-    print(f"applied {len(rows) - len(refused)} of {len(rows)} control(s)")
-    if refused:
-        print("  REFUSED by the live-approved-control guard — these back an approved rule "
-              "and are immutable; changing one is a deliberate act:")
-        for key, why in refused:
-            print(f"    {key}: {why}")
-    if stranded:
-        print("  IN THE DATABASE BUT NO LONGER DECLARED — left in place deliberately; "
-              "removing one could un-enforce an active rule:")
-        for key in stranded:
-            print(f"    {key}")
     return 0
 
 
