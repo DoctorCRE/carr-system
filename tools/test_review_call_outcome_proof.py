@@ -9,6 +9,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'ops'))
+from git_env import fixture_env
+
 RUNNER = ROOT / 'tools/prove-review-call-outcome.py'
 
 
@@ -29,7 +32,8 @@ class ProofCLI(unittest.TestCase):
         cls.repo = cls.path / 'repo'
         cls.repo.mkdir()
         def git(*args):
-            return subprocess.check_output(['git', '-C', str(cls.repo), *args], text=True).strip()
+            return subprocess.check_output(['git', '-C', str(cls.repo), *args],
+                                           env=fixture_env(), text=True).strip()
         git('init', '-q')
         git('config', 'user.name', 'Fixture')
         git('config', 'user.email', 'fixture@example.test')
@@ -57,7 +61,8 @@ class ProofCLI(unittest.TestCase):
         (self.path / 'observations.json').write_text(json.dumps(observations))
         result = subprocess.run([sys.executable, str(RUNNER), '--merge-sha', self.merge,
                                  '--repo', str(self.repo), '--observations', str(self.path / 'observations.json'),
-                                 '--release-fixture', str(self.path / 'release.json')], capture_output=True, text=True)
+                                 '--release-fixture', str(self.path / 'release.json')],
+                                env=fixture_env(), capture_output=True, text=True)
         return result.returncode, result.stdout
 
     def test_release_and_assertion_exits(self):
