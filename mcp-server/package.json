@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "npm run generate:types && node run-tests.mjs",
+    "test": "npm run generate:types && node run-tests.ts",
     "generate:types": "npm run check:registry && node generate-verb-types.mjs && node generate-worker-types.mjs",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json",
     "test:routing-replay": "node test/doctrine-routing-replay.mjs",
@@ -13,7 +13,7 @@
     "generate:registry": "python3 ../tools/regen.py registry",
     "check:registry": "node ../ops/scac-mutation-inventory.mjs",
     "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
-    "check": "npm run typecheck && npm run check:staged && node run-tests.mjs",
+    "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
     "fix": "biome check --write ."
   },
   "keywords": [],
@@ -23,7 +23,7 @@
     "@babel/parser": "7.28.5",
     "@biomejs/biome": "2.6.6",
     "@types/node": "26.6.6",
-    "@types/pg": "8.15.6",
+    "@types/pg": "8.23.1",
     "esbuild": "0.28.1",
     "json-schema-to-typescript": "16.0.0",
     "knip": "6.44.2",

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "calls",
+    "send"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "call-outcomes.v1"
+    },
+    "send": {
+      "const": false
+    },
+    "calls": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session_id",
+          "recorder",
+          "started_at",
+          "source_version",
+          "call_date",
+          "applied",
+          "open_cards"
+        ],
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recorder": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "call_date": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$",
+            "description": "Canonical ops.post_call_review_target(session.id).source_version, independent of recorder activity. Send unchanged as review-call-outcome.expected_source_version."
+          },
+          "applied": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "open_cards": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  }
+}

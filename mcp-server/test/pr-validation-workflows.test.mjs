@@ -262,7 +262,7 @@ test("MCP shards retain per-program evidence even after failure", () => {
 test("Python 3.9 imports block full events and selected PRs", () => {
   const ci = read("ci.yml");
   const job = ci.jobs["launchd-python39"];
-  assert.equal(job.steps.find(step => step.uses?.startsWith("actions/setup-python@")).with["python-version"], "3.9");
+  assert.match(job.container.image, /^python:3\.9\.25-slim-bookworm@sha256:[a-f0-9]{64}$/);
   assert.equal(job.steps.at(-1).run, "python -I tools/dictation-rig/tests/test_python39_imports.py");
   const guard = ci.jobs.checks.steps.find(step => step.name === "Require launchd Python 3.9 imports");
   for (const event_name of ["pull_request", "merge_group", "schedule"]) {
