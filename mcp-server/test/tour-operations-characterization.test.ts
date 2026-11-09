@@ -108,6 +108,7 @@ test("public metrics retain validation when the array iterator is replaced", () 
   let safe: unknown;
   try {
     Array.prototype[Symbol.iterator] = function* () {
+      yield* new Set<never>();
       return undefined;
     };
     safe = contract.publicValueIsSafe("size", { value: 4, secret: "internal" });
