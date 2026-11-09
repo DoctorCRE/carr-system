@@ -1,4 +1,4 @@
-// export-email-domains.test.mjs — the verb that lets a second machine hold no
+// export-email-domains.test.ts — the verb that lets a second machine hold no
 // database credential (decision 2026-08-19).
 //
 // WHAT THIS VERB IS FOR. ops/fetch-allowlist.py builds the egress guard's
@@ -21,70 +21,87 @@
 //   5. The verb is read-only — no write flag — since a write here would make
 //      the credential argument it exists to settle moot.
 //
-// Run with: node --test mcp-server/test/export-email-domains.test.mjs
-// (also picked up by `npm test`'s test/*.test.mjs glob).
+// Run with: node --test mcp-server/test/export-email-domains.test.ts
+// Also discovered by the package test runner.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS, ToolError } from "../src/tools.js";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
 
-const verb = TOOLS["export-email-domains"];
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+assert.ok(typeof registered === "object" && registered !== null && "TOOLS" in registered);
+assert.ok(typeof registered.TOOLS === "object" && registered.TOOLS !== null);
+const TOOLS = registered.TOOLS;
+assert.ok("export-email-domains" in TOOLS);
+const tool = TOOLS["export-email-domains"];
+assert.ok(typeof tool === "object" && tool !== null && "handler" in tool && typeof tool.handler === "function");
+const handler = tool.handler;
 
 // A stub connection: answers each view from a table, or throws for a view
 // named in `broken`, which is how a permission failure actually presents.
-const conn = (rowsByView, broken = []) => ({
-  query: async (sql) => {
-    const view = ["v_export_clients", "v_export_leads"].find(v => sql.includes(v));
+const conn = (rowsByView: Record<string, string[]>, broken: string[] = []) => ({
+  query: async (sql: string) => {
+    const view = ["v_export_clients", "v_export_leads"].find((v) => sql.includes(v));
+    assert.ok(view);
     if (broken.includes(view)) {
       const e = new Error("permission denied for view " + view);
       e.name = "InsufficientPrivilege";
       throw e;
     }
-    return { rows: (rowsByView[view] || []).map(domain => ({ domain })) };
+    return { rows: (rowsByView[view] || []).map((domain) => ({ domain })) };
   },
 });
 
 test("the verb exists and is READ-ONLY — a write here would defeat its purpose", () => {
-  assert.ok(verb, "export-email-domains is not registered");
-  assert.ok(!verb.write, "must not be a write verb");
+  assert.ok(tool, "export-email-domains is not registered");
+  assert.ok(!("write" in tool && tool.write), "must not be a write verb");
 });
 
 test("returns domains only — an email address cannot leave through this verb", async () => {
-  const out = await verb.handler(conn({
-    v_export_clients: ["example-pelvichealth.com", "example-dental.com"],
-    v_export_leads: ["example-familymed.com"],
-  }));
+  const out = await handler(
+    conn({
+      v_export_clients: ["example-pelvichealth.com", "example-dental.com"],
+      v_export_leads: ["example-familymed.com"],
+    }),
+  );
   assert.equal(out.ok, true);
-  for (const d of out.domains)
-    assert.ok(!d.includes("@"), `"${d}" looks like an address, not a domain`);
-  assert.deepEqual(out.domains,
-    ["example-dental.com", "example-familymed.com", "example-pelvichealth.com"]);
+  for (const d of out.domains) assert.ok(!d.includes("@"), `"${d}" looks like an address, not a domain`);
+  assert.deepEqual(out.domains, ["example-dental.com", "example-familymed.com", "example-pelvichealth.com"]);
 });
 
 test("the union is deduplicated across both books", async () => {
-  const out = await verb.handler(conn({
-    v_export_clients: ["shared-practice.com", "only-client.com"],
-    v_export_leads: ["shared-practice.com", "only-lead.com"],
-  }));
+  const out = await handler(
+    conn({
+      v_export_clients: ["shared-practice.com", "only-client.com"],
+      v_export_leads: ["shared-practice.com", "only-lead.com"],
+    }),
+  );
   assert.deepEqual(out.domains, ["only-client.com", "only-lead.com", "shared-practice.com"]);
   assert.equal(out.counts.v_export_clients, 2);
   assert.equal(out.counts.v_export_leads, 2);
 });
 
 test("per-source domains survive, so the caller can still report N seen per view", async () => {
-  const out = await verb.handler(conn({
-    v_export_clients: ["a-clinic.com"],
-    v_export_leads: ["b-clinic.com", "c-clinic.com"],
-  }));
+  const out = await handler(
+    conn({
+      v_export_clients: ["a-clinic.com"],
+      v_export_leads: ["b-clinic.com", "c-clinic.com"],
+    }),
+  );
   assert.deepEqual(out.by_source.v_export_clients, ["a-clinic.com"]);
   assert.deepEqual(out.by_source.v_export_leads, ["b-clinic.com", "c-clinic.com"]);
 });
 
 test("ONE unreadable view is REPORTED, never folded silently into a shorter answer", async () => {
-  const out = await verb.handler(conn({
-    v_export_clients: ["still-readable.com"],
-    v_export_leads: ["never-seen.com"],
-  }, ["v_export_leads"]));
+  const out = await handler(
+    conn(
+      {
+        v_export_clients: ["still-readable.com"],
+        v_export_leads: ["never-seen.com"],
+      },
+      ["v_export_leads"],
+    ),
+  );
   assert.equal(out.ok, true);
   assert.deepEqual(out.domains, ["still-readable.com"]);
   assert.equal(out.counts.v_export_leads, undefined, "a skipped view must not report a count");
@@ -94,19 +111,22 @@ test("ONE unreadable view is REPORTED, never folded silently into a shorter answ
 
 test("BOTH views unreadable raises — an empty allowlist is not a valid answer", async () => {
   await assert.rejects(
-    () => verb.handler(conn({}, ["v_export_clients", "v_export_leads"])),
+    () => handler(conn({}, ["v_export_clients", "v_export_leads"])),
     (err) => {
       assert.ok(err instanceof ToolError);
       assert.equal(err.payload?.error ?? JSON.parse(err.message).error, "no_export_view_readable");
       return true;
-    });
+    },
+  );
 });
 
 test("blank and whitespace domains are dropped rather than counted", async () => {
-  const out = await verb.handler(conn({
-    v_export_clients: ["", "  ", "real-practice.com", ".trailing-dot.com."],
-    v_export_leads: [],
-  }));
+  const out = await handler(
+    conn({
+      v_export_clients: ["", "  ", "real-practice.com", ".trailing-dot.com."],
+      v_export_leads: [],
+    }),
+  );
   assert.deepEqual(out.domains, ["real-practice.com", "trailing-dot.com"]);
   assert.equal(out.counts.v_export_clients, 2);
 });
