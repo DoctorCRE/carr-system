@@ -9,7 +9,7 @@ import readline from "node:readline";
 
 import { selectLocalClientCredential, tokenFileSecurityIssue } from "./local-client-auth.mjs";
 
-import { REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, splitReferenceManifest } from "./continuity-reference-manifest.mjs";
+import { REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, splitReferenceManifest } from "./continuity-reference-manifest.ts";
 
 const PROFILE = "codex-continuity";
 const ALLOWED = new Set(["codex-checkpoint", "codex-read-recovery"]);

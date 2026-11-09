@@ -64,7 +64,6 @@
     "unused-file:test/conflict-tiering.test.mjs",
     "unused-file:test/connections.test.mjs",
     "unused-file:test/constraint-refusal-legibility.test.mjs",
-    "unused-file:test/continuity-reference-manifest.test.mjs",
     "unused-file:test/control-plane-authority-boundary.test.mjs",
     "unused-file:test/core-rule-delivery.test.mjs",
     "unused-file:test/correct-party-identity.test.mjs",

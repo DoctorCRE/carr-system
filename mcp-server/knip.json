@@ -29,6 +29,8 @@
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
+    "continuity-reference-manifest.ts",
+    "test/continuity-reference-manifest.test.ts",
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",

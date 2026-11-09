@@ -133,7 +133,7 @@
     "conflict-tiering.test.mjs": {"milliseconds": 816, "serial": false},
     "connections.test.mjs": {"milliseconds": 278, "serial": false},
     "constraint-refusal-legibility.test.mjs": {"milliseconds": 881, "serial": false},
-    "continuity-reference-manifest.test.mjs": {"milliseconds": 166, "serial": false},
+    "continuity-reference-manifest.test.ts": {"milliseconds": 166, "serial": false},
     "control-plane-authority-boundary.test.mjs": {"milliseconds": 681, "serial": false},
     "core-rule-delivery.test.mjs": {"milliseconds": 724, "serial": false},
     "correct-party-identity.test.mjs": {"milliseconds": 785, "serial": false},
