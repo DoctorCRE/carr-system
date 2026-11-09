@@ -2,7 +2,7 @@
 import { lockEmailIdentity, capturedEmail } from './email-identity.ts';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
-import { suspected } from './untrusted-text.js';
+import { suspected } from './untrusted-text.ts';
 import { buildActionLink } from './action-links.js';
 const LIMIT = 200;
 const SUMMARY_VERSION = 'email-summary.v1';
