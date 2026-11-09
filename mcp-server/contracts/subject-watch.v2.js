@@ -6,6 +6,8 @@ export const subjectWatchPolicySchema = {
     change_kinds: { type: 'array', minItems: 1, maxItems: 3, uniqueItems: true,
       items: { type: 'string', enum: ['reply_arrived', 'lease_threshold_crossed', 'listing_status_changed'] } },
     include_self_changes: { type: 'boolean', default: true },
+    lease_threshold_months: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true,
+      items: { type: 'integer', minimum: 0, maximum: 120 } },
     lease_threshold_days: { type: 'array', minItems: 1, maxItems: 20, uniqueItems: true,
       items: { type: 'integer', minimum: 0, maximum: 3650 } },
   }, required: ['change_kinds'],
@@ -33,6 +35,14 @@ export const subjectWatchV2ResponseSchema = {
   type: 'object', required: ['ok','schema_version'],
   properties: {
     ok: { const: true }, schema_version: { const: 'subject-watch.v2' },
+    health: { type: ['object','null'], additionalProperties: false,
+      required: ['last_success_at','pending_count','oldest_pending_at','status'],
+      properties: {
+        last_success_at: { type: ['string','null'], format: 'date-time' },
+        oldest_pending_at: { type: ['string','null'], format: 'date-time' },
+        pending_count: { type: 'integer', minimum: 0, maximum: 1001 },
+        status: { enum: ['healthy','delayed','needs_repair'] },
+      } },
     watch: { anyOf: [watch,{type:'null'}] },
     watches: { type: 'array', maxItems: 100, items: watch },
     rows_changed: { type: 'integer', minimum: 0, maximum: 1 },
@@ -43,7 +53,7 @@ export const subjectWatchV2ResponseSchema = {
 const policyValidator = new Validator(subjectWatchPolicySchema);
 export function validSubjectWatchPolicy(policy) {
   return policyValidator.validate(policy).valid
-    && (!policy.change_kinds.includes('lease_threshold_crossed') || Array.isArray(policy.lease_threshold_days));
+    && (!policy.change_kinds.includes('lease_threshold_crossed') || (Array.isArray(policy.lease_threshold_days) || Array.isArray(policy.lease_threshold_months)));
 }
 const response = new Validator(subjectWatchV2ResponseSchema);
 export function parseSubjectWatchV2(value) {

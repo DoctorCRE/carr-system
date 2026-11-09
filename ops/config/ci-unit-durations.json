@@ -45,6 +45,7 @@
   "client_anniversary_read_suite_measurement": {"card": "WR648.S4.J4", "source_sha": "37cb3be257e3cf4fae28721580901ff0a147c3ee", "hosted_run": 42239667958, "measured_ms": {"client-anniversary-read.test.mjs": 352, "client-anniversary-read-route.test.mjs": 1123, "client-anniversary-read-postgres.test.mjs": 1306}, "logs": [{"job": 127966583015, "sha256": "70c1f57ed4424a90caa43b9a8840e751d86f939dc142dd001566585b51af8d8f"}, {"job": 127966583004, "sha256": "cd63037e5e08e7fa61ae68097a2a9672b63cb0aaf6c816f4316215fb19f2d7fb"}], "basis": "Successful hosted canonical runner timings including child teardown. PostgreSQL snapshot setup is counted separately by snapshot_template_ms. Replaces local standalone timings multiplied by 10; retains five shards, cold setup floor and 20 percent watchdog headroom."},
   "quiet_owner_filter_measurement": {"card": "WR647.S15.J4", "command": "node --test mcp-server/test/quiet-follow-up-owner-filter-postgres.test.mjs", "local_samples_ms": [19832, 20731], "basis": "Six passing tests including cold disposable PostgreSQL setup and teardown and recorded-response proof replay. No speedup claim."},
   "quiet_owner_proof_measurement": {"card": "WR647.S15.J4", "suite": "tools/test_prove_quiet_follow_up_owner_filter.py", "command": "python3 -m unittest discover -s tools -p test_prove_quiet_follow_up_owner_filter.py", "local_samples_ms": [674], "basis": "Five passing tests replay the committed real registered responses. No network or history dependency."},
+  "watch_delivery_suite_measurement": {"real_driver_regression_ms":7461,"real_driver_regression_card":"WR617.S1.J232","card":"WR617.S1.J139","command":"CARR_CI_UNIT_SUITES selected watch suites via mcp-server/run-tests.mjs","canonical_samples_ms":{"subject-watch-v2-postgres.test.mjs":[11344],"subject-watch-v2.test.mjs":[1851],"subject-watches-postgres.test.mjs":[2675]},"snapshot_setup_ms":17612,"basis":"Delivery, scheduler and proof cases share the existing watch suites and one database fixture. This removes additional serial snapshot startup while preserving the existing watchdog and headroom. Existing PostgreSQL weight remains above the measured consolidated suite; parser/unit weight rounds above its measured 12 tests. Synthetic loads check exact counts, not production capacity."},
   "suites": {
     "action-card-targets.test.mjs": {"milliseconds": 1501, "serial": false},
     "action-card-targets-postgres.test.mjs": {"milliseconds": 10000, "serial": true},
@@ -416,7 +417,7 @@
     "standing-context-query-batch.test.mjs": {"milliseconds": 461, "serial": false},
     "standing-context-territory.test.mjs": {"milliseconds": 5044, "serial": true},
     "subject-watch-v2-postgres.test.mjs": {"milliseconds": 13292, "serial": true},
-    "subject-watch-v2.test.mjs": {"milliseconds": 540, "serial": false},
+    "subject-watch-v2.test.mjs": {"milliseconds": 2000, "serial": false},
     "subject-watches-postgres.test.mjs": {"milliseconds": 25540, "serial": true},
     "subject-watches.test.mjs": {"milliseconds": 2130, "serial": false},
     "suite-discovery.test.ts": {"milliseconds": 1753, "serial": false},
