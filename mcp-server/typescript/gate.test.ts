@@ -155,6 +155,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     const clean = run();
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
     const cases: [string, string, RegExp][] = [
+      ["mcp-server/typescript/broken.ts", "export const = ;\n", /typescript\/broken\.ts:1:14/],
       ["outside.js", "export const value = 1;\n", /new first-party JavaScript/i],
       ["mcp-server/new.js", "export const value = 1;\n", /new first-party JavaScript/i],
       ["mcp-server/typescript/seed.ts", "export const value: any = 1;\n", /any/i],
@@ -175,13 +176,13 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       const original = readFileSync(nodeConfig, "utf8");
       const graphPath = join(pkg, "knip.json");
       const originalGraph = readFileSync(graphPath, "utf8");
-      if (path.endsWith("seed.ts")) {
+      if (path.endsWith("seed.ts") || path.endsWith("broken.ts")) {
         const config: unknown = JSON.parse(original);
         assert.ok(typeof config === "object" && config !== null && "files" in config && Array.isArray(config.files));
-        config.files.push("typescript/seed.ts");
+        config.files.push(path.replace("mcp-server/", ""));
         const graph: unknown = JSON.parse(originalGraph);
         assert.ok(typeof graph === "object" && graph !== null && "project" in graph && Array.isArray(graph.project));
-        graph.project.push("typescript/seed.ts");
+        graph.project.push(path.replace("mcp-server/", ""));
         writeFileSync(graphPath, JSON.stringify(graph));
         writeFileSync(nodeConfig, JSON.stringify(config));
       }
