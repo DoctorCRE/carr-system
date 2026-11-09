@@ -40,6 +40,28 @@ def release_download_violations(root):
 
 
 class Controls(unittest.TestCase):
+    def test_python39_uses_digest_verified_distribution(self):
+        job = workflow()['jobs']['launchd-python39']
+        self.assertRegex(job.get('container', {}).get('image', ''),
+                         r'^python:3[.]9[.]25-slim-bookworm@sha256:[0-9a-f]{64}$')
+        for step in job['steps']:
+            self.assertNotIn('actions/cache@', step.get('uses', ''))
+            self.assertNotIn('actions/setup-python@', step.get('uses', ''))
+        self.assertEqual(job['steps'][-1]['run'],
+                         'python -I tools/dictation-rig/tests/test_python39_imports.py')
+
+    def test_release_policy_rejects_test_named_operational_sources(self):
+        for name in ('.github/workflows/new.yml', '.github/workflows/test-download.yml',
+                     '.github/workflows/release-selftest.yml', 'ops/test-bootstrap.py',
+                     'ops/bootstrap-selftest.py', 'tools/installer.sh', 'ops/gitleaks.py'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / name
+                path.parent.mkdir(parents=True)
+                path.write_text('curl -L https://github.com/gitleaks/gitleaks/releases/download/v999/new.tar.gz')
+                self.assertEqual(release_download_violations(root),
+                                 [name + ': uncached release download'])
+
     def test_release_download_policy(self):
         self.assertEqual(release_download_violations(ROOT), [])
         action = workflow('../actions/ci-downloads/action.yml')
