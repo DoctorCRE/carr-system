@@ -248,3 +248,23 @@ test("CLI prints an empty reconciliation and redacts a refused record reply", as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a non-string incident fingerprint refuses without writes", async () => {
+  const ref = "INC-20260101-01";
+  const calls: string[] = [];
+  await assert.rejects(
+    () =>
+      reconcileRuntimeErrors(async (verb) => {
+        calls.push(verb);
+        return verb === "unfinished-work"
+          ? {
+              ok: true,
+              coverage: [{ kind: "incident", state: "complete", count_total: 1 }],
+              items: [{ id: ref, kind: "incident" }],
+            }
+          : { incident: { fingerprint: 42 }, links: [] };
+      }),
+    /runtime_incident_card_incomplete/,
+  );
+  assert.deepEqual(calls, ["unfinished-work", "get-incident"]);
+});

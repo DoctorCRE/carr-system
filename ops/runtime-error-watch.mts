@@ -77,6 +77,8 @@ export async function reconcileRuntimeErrors(call: RecordCall = callRecord) {
     const card = object(await call("get-incident", { ref: row.id, fact_limit: 1 }), "runtime_incident_card_incomplete");
     const incident = object(card.incident, "runtime_incident_card_incomplete");
     if (!Array.isArray(card.links)) throw new Error("runtime_incident_card_incomplete");
+    if (incident.fingerprint != null && typeof incident.fingerprint !== "string")
+      throw new Error("runtime_incident_card_incomplete");
     const fingerprint = typeof incident.fingerprint === "string" ? incident.fingerprint : "";
     const failureClass = fingerprint.split("|").at(-1);
     if (
