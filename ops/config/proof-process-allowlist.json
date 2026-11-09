@@ -158,5 +158,12 @@
     "helpers": {
       "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
     }
+  },
+  "tools/prove-review-call-outcome.py": {
+    "sha256": "5ab81881c918e54b97c5865a0c22ceac1e5b1fb0cdc4cc59651e410b02cad344",
+    "commands": [
+      "git --no-replace-objects -C repository cat-file -t revision",
+      "git --no-replace-objects -C repository merge-base --is-ancestor expected served"
+    ]
   }
 }

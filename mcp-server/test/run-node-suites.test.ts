@@ -91,11 +91,11 @@ test("Fallow sees exactly the suites loaded dynamically by the Node runner", asy
 });
 
 test("new PostgreSQL suites need no runner list entry", () => {
-  const files = ["future-postgres.test.mjs", "ordinary.test.mjs", "new-store.test.mjs"];
+  const files = ["future-postgres.test.ts", "ordinary.test.ts", "new-store.test.mjs"];
   const batches = suiteBatches(files, [], ["new-store.test.mjs"]);
   assert.deepEqual(
-    batches.find((batch) => batch.includes("future-postgres.test.mjs")),
-    ["future-postgres.test.mjs"],
+    batches.find((batch) => batch.includes("future-postgres.test.ts")),
+    ["future-postgres.test.ts"],
   );
   assert.deepEqual(
     batches.find((batch) => batch.includes("new-store.test.mjs")),

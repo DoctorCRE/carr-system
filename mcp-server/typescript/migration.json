@@ -789,7 +789,6 @@
     "mcp-server/src/practice-origination.ts",
     "mcp-server/src/program-controller-release-state-holder.v5.ts",
     "mcp-server/src/program6-feature-flag.ts",
-    "mcp-server/src/public-errors.ts",
     "mcp-server/src/relationship-network.ts",
     "mcp-server/src/replay-receipt.ts",
     "mcp-server/src/research-sites.ts",
