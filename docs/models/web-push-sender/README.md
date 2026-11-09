@@ -12,7 +12,7 @@ At present and 10x load, scheduled work remains at most four candidate claims pe
 
 `ops.web_push_policy` is the single configuration home for batch size, actor caps, maximum lifetime, attempts, deadlines, backoff and breaker thresholds. Constraints bound increases to the reviewed ceilings. There is no cache of eligibility, permission, subscription or circuit state. Database unavailability refuses submission. Reads require current state.
 
-The claim transaction records a fresh attempt UUID before HTTP. A second transaction obtains the same advisory lock used by registration, replacement, revocation and logout, checks source eligibility and current subscription generation, submits HTTP, settles and commits. It holds the lock until settlement. Revocation that commits first prevents submission. An already-started submission finishes before revocation can commit. Accepted messages cannot be recalled. A lost database settlement leaves a committed attempt for lease recovery, which records `unknown` without another HTTP call. A fencing token and lease are required for settlement.
+The claim transaction records a fresh attempt UUID before HTTP. A second transaction obtains the same advisory lock used by registration, replacement, revocation and logout, checks source eligibility and current subscription generation, submits HTTP, settles and commits. It holds the lock until settlement. Revocation that commits first prevents submission. An already-started submission finishes before revocation can commit. Accepted messages cannot be recalled. A lost database settlement leaves a committed attempt for lease recovery, which records `unknown` without another HTTP call. A non-null matching fencing token and unexpired lease are required for both preflight and settlement. Missing, JSON-null, wrong and expired tokens return null without exposing transport data or changing the outbox or attempt.
 
 Quiet hours use the existing timezone and overnight-window semantics. Disabled intent, quiet hours, volume caps and circuits persist a hold and bounded due time. Every hold rechecks source, generation and expiry. Expiry is capped by both outbox expiry and policy lifetime; HTTP TTL uses the remaining lifetime. There is no urgent bypass.
 
@@ -45,7 +45,7 @@ Regenerate in a scratch directory. Copy `PushSender.tla`, `PushSender.cfg` and `
 | Active to expired | Controlled 404/410 tests |
 | Circuit closed to open | Authentication and transient threshold tests |
 | Circuit open to probe to closed | Transient circuit recovery test |
-| Duplicate or stale attempt | Unique triple, concurrent consumer and stale settlement tests |
+| Duplicate or stale attempt | Unique triple, concurrent consumer, stale settlement and eight `preflight/settle refuses absent/null/wrong/expired attempt token without effects` tests |
 | Status metadata | Real response-schema validation and secret-redaction test |
 | Database unavailable or scheduler disabled | No-submission tests |
 
@@ -57,4 +57,24 @@ Zero tech debt retained existing registry authority and notification records. No
 
 ## PRODUCTION PROOF
 
-Not executed. Real pushes and production calls are forbidden for this worker. After merge and a containing deployed release, an authorized controlled-device proof must record one persisted outbox row, attempt UUID, installation UUID and generation, push-service acceptance, observed phone notification and exact-card tap. A revoked generation must produce zero HTTP submissions. Provider acceptance alone cannot satisfy the phone observation. Runtime bindings and account usage alerts must be verified before activation.
+Live delivery is unverified. Real pushes and production calls are forbidden for this fix round. The verifier is runnable locally without either:
+
+```sh
+python3 ops/web-push-delivery-proof-selftest.py
+```
+
+Expected exit 0. This runs contract-checked positive and negative status fixtures through the CLI, including equal/descendant releases (0), mismatched phone identity or revoked submission (1), and older/unrelated/unknown releases or missing evidence (78). Fixtures create their own Git history, including in shallow checkouts.
+
+After a containing release and an independently authorized controlled-device observation, run:
+
+```sh
+python3 ops/web-push-delivery-proof.py --merge-sha "$MERGE_SHA" --evidence /tmp/web-push-delivery-evidence.json
+```
+
+Set `MERGE_SHA` to this PR's actual merge commit from GitHub. Expected exit 0. The verifier uses the shared release reader for `https://api.doctorcre.com/release` and `git merge-base --is-ancestor` in the local repository. Fetch the merge and observed release objects beforehand. It makes one release read with no retry, caps evidence and response at 1 MiB, and charges HTTP, Git and schema validation to one deadline (20 seconds, maximum 60). It never sends a push, acquires credentials or launches a browser. Insufficient evidence exits 78; assertions against a containing release exit 1.
+
+The evidence JSON contains `provenance`, `status`, `phone` and `revoked`. Capture `status` by calling the existing owner-only `read-web-push-delivery-status-v1` verb with `{}` in the signed-in app-origin MCP client. Its response must validate against `mcp-server/contracts/web-push-delivery.v1.json`. `provenance` declares the observed `release_sha`, `actor_slug` (`joe` or `dell`), `transport: "signed-in-app-origin/mcp"`, `app_origin: "https://app.doctorcre.com"` and `queries: [{"verb":"read-web-push-delivery-status-v1","args":{}}]`. This is replayed authenticated-read evidence, as with the registry verifier, rather than a machine CLI bypass of the human-only verb.
+
+Supply the independent phone receipt in `phone`, with `release_sha`, `actor_slug`, `observed_at`, `outbox_id`, `notification_id`, `attempt_id`, `installation_id`, `generation`, `notification_observed: true` and `exact_card_opened: true`. The verifier matches every identity to one accepted status row. The external observer must record the phone notification and exact-card tap; provider acceptance cannot establish either. This tool checks correlation, not the authenticity of a human observation.
+
+Supply `revoked` with `outbox_id`, `installation_id`, `generation` and `submissions: 0`. The same status read must include that cancelled row from an older generation of the same installation, with zero attempts and no attempt UUID. Missing rows (including rows beyond the latest-100 status window) are not a pass. An external observer supplies the zero-submission receipt. Runtime bindings and account usage alerts remain prerequisites to activation outside this worker's scope.

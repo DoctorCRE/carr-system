@@ -82,6 +82,28 @@ test("durable outbox lifecycle and concurrent consumers on real PostgreSQL", asy
         /duplicate key/,
       );
     });
+    for (const operation of ["preflight", "settle"]) {
+      for (const token of ["absent", "null", "wrong", "expired"]) {
+        await t.test(`${operation} refuses ${token} attempt token without effects`, async () => {
+          await reset();
+          const id = await enqueue();
+          const claim = await sql("claim");
+          assert.ok(claim);
+          const args: Record<string, unknown> = { id, outcome: "provider_accepted" };
+          if (token === "null") args.attempt_id = null;
+          if (token === "wrong") args.attempt_id = randomUUID();
+          if (token === "expired") {
+            args.attempt_id = claim.attempt_id;
+            await c.query("update ops.web_push_outbox set lease_until=clock_timestamp()-interval '1 second'");
+          }
+          const before = (await c.query("select to_jsonb(d) row from ops.web_push_outbox d")).rows;
+          const attempts = (await c.query("select to_jsonb(a) row from ops.web_push_attempt a")).rows;
+          assert.equal(await sql(operation, args), null);
+          assert.deepEqual((await c.query("select to_jsonb(d) row from ops.web_push_outbox d")).rows, before);
+          assert.deepEqual((await c.query("select to_jsonb(a) row from ops.web_push_attempt a")).rows, attempts);
+        });
+      }
+    }
     await t.test("accepted is not phone delivered and stale settlement refuses", async () => {
       await reset();
       const id = await enqueue();

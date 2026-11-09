@@ -85,7 +85,8 @@ begin
   end if;
  elsif p_op in ('preflight','settle') then
   select * into d from ops.web_push_outbox where id=(p_args->>'id')::uuid for update;
-  if not found or d.state<>'submitting' or d.attempt_id<>(p_args->>'attempt_id')::uuid
+  if not found or d.state<>'submitting' or p_args->>'attempt_id' is null
+    or d.attempt_id is distinct from (p_args->>'attempt_id')::uuid
     or d.lease_until<=v_now then return null; end if;
  else raise exception 'push_invalid_operation';
  end if;
