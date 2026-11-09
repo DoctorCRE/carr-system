@@ -1,0 +1,12 @@
+{
+  "foreign": {
+    "error": "action_link_not_found",
+    "correlation_id": "20000000-0000-4000-8000-000000000001",
+    "hint": "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link."
+  },
+  "unknown": {
+    "error": "action_link_not_found",
+    "correlation_id": "20000000-0000-4000-8000-000000000002",
+    "hint": "This link does not open a card for you. Sign in as the partner it was sent to, or ask for a fresh link."
+  }
+}
