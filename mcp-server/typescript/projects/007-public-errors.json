@@ -1,0 +1,5 @@
+{
+  "node": [
+    "src/public-errors.ts"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "worker": [
+    "../docs/models/web-push-sender/PushSender.map.ts"
+  ],
+  "entry": [
+    "../docs/models/web-push-sender/PushSender.map.ts"
+  ]
+}
