@@ -154,3 +154,9 @@ output/
 # Codex imports of tracked Claude project hooks and the publish-artifact skill.
 /.codex/hooks.json
 /.agents/skills/publish-artifact/
+
+# Derived strict-tool projects; source admissions live in typescript/projects.
+/mcp-server/tsconfig.node.json
+/mcp-server/tsconfig.worker.json
+/mcp-server/knip.json
+/mcp-server/fallow-baselines/dead-code.json

@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/web-push-config.test.ts"
+  ],
+  "entry": [
+    "test/web-push-config.test.ts"
+  ]
+}
