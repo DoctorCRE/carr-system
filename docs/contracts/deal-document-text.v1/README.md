@@ -31,8 +31,19 @@ On an unchanged complete rerun, missing and all production counts are zero and
 skipped equals scanned. In dry run no bytes are fetched and no writes occur.
 Each invocation scans at most 10000 attachments serially. If scanned reaches the
 cap, continue with `--after` set to the reported last_document_ref. Restarting
-from the beginning is safe. Failures stop the invocation with exit 1 and print a
+from the beginning is safe. Scan failures stop the invocation with exit 1 and print a
 JSON error to stderr; already persisted derivatives remain safe to replay.
+
+A real run checks Wrangler, pdftotext and R2 access before scanning. Install a missing reader
+with `npm --prefix mcp-server ci`; check Cloudflare authentication and bucket
+access if the reader fails. Missing or failing pdftotext returns `parser_missing`
+or `parser_unavailable` with a Poppler installation or repair remedy.
+A document failure appears in `errors` with its
+`document_ref`, a stable code and an allowlisted `error_class`. Unknown exception
+classes report `Exception`; exception messages and parser output are omitted. The run continues and exits nonzero if any
+document failed. Rerun without `--after` to retry failures; retained documents
+are skipped.
+
 
 Non-PDF attachments and originals outside the existing 1-byte to 25-MB parser
 budget receive unavailable without parsing. Every undeleted deal attachment is

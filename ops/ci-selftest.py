@@ -76,7 +76,8 @@ def ci_fixture():
         tsc = REPO / "mcp-server/node_modules/typescript/bin/tsc"
         (root / "mcp-server/package.json").write_text(json.dumps({
             "private": True,
-            "scripts": {"typecheck": f"node {shlex.quote(str(tsc))} --noEmit --allowJs --checkJs fixture.js"},
+            "scripts": {"typecheck": f"node {shlex.quote(str(tsc))} --noEmit --allowJs --checkJs fixture.js",
+                        "check:staged": "node -e \"process.stdout.write(\'synthetic staged gate\\n\')\""},
         }))
         (root / "mcp-server/fixture.js").write_text("const value = 1;\n")
         mypy = REPO / ".venv/bin/mypy"
@@ -842,8 +843,16 @@ def test_types_class_catches_a_seeded_type_error():
 
         (root / fixture).write_text(original)
         rc, out = run(["--only", "types"], root=root)
-    check("removing the seed turns the types class green again", rc == 0,
-          f"rc={rc} out={out[-400:]}")
+        check("removing the seed turns the types class green again", rc == 0,
+              f"rc={rc} out={out[-400:]}")
+        package_path = root / "mcp-server/package.json"
+        package = json.loads(package_path.read_text())
+        package["scripts"]["check:staged"] = "node -e 'process.exit(7)'"
+        package_path.write_text(json.dumps(package))
+        rc, out = run(["--only", "types"], root=root)
+        check("types refuses a failing staged strict gate", rc == 1
+              and "staged strict TypeScript gate failed" in out,
+              f"rc={rc} out={out[-400:]}")
 
 UNCOLLECTED_BY_DECISION = {
     "docs/frontier-finding/breakglass_selftest.py":
