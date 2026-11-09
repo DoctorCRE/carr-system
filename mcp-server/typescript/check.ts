@@ -38,7 +38,30 @@ function main(): void {
 
   for (const file of files) {
     const start = issues.length;
-    syntaxIssues(parse(readFileSync(file, "utf8"), { sourceType: "module", plugins: ["typescript", "jsx"] }));
+    let syntax: ReturnType<typeof parse>;
+    try {
+      syntax = parse(readFileSync(file, "utf8"), { sourceType: "module", plugins: ["typescript", "jsx"] });
+    } catch (error) {
+      if (
+        !(error instanceof SyntaxError) ||
+        !("code" in error) ||
+        (error.code !== "BABEL_PARSER_SYNTAX_ERROR" && error.code !== "BABEL_PARSER_SOURCETYPE_MODULE_REQUIRED") ||
+        !("loc" in error) ||
+        typeof error.loc !== "object" ||
+        error.loc === null ||
+        !("line" in error.loc) ||
+        typeof error.loc.line !== "number" ||
+        !("column" in error.loc) ||
+        typeof error.loc.column !== "number"
+      )
+        throw error;
+      throw new GateError(
+        `${relative(pkg, file)}:${error.loc.line}:${error.loc.column + 1}`,
+        error.message,
+        "Repair this file's TypeScript syntax and rerun check:staged.",
+      );
+    }
+    syntaxIssues(syntax);
     for (let index = start; index < issues.length; index++) issues[index] = `${relative(pkg, file)}: ${issues[index]}`;
   }
   if (issues.length) {

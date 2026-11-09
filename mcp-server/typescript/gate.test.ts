@@ -83,6 +83,19 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     assert.match(internalOutput, /TypeError: internal bug/);
     assert.match(internalOutput, /\n\s+at migrationIssues .*migration\.ts:/);
     assert.doesNotMatch(internalOutput, /Remedy:/);
+    const checkerPath = join(pkg, "typescript/check.ts");
+    const originalChecker = readFileSync(checkerPath, "utf8");
+    writeFileSync(
+      checkerPath,
+      originalChecker.replace("syntax = parse(", 'throw new TypeError("parser boundary bug");\n      syntax = parse('),
+    );
+    const parserBug = run();
+    writeFileSync(checkerPath, originalChecker);
+    const parserOutput = parserBug.stdout + parserBug.stderr;
+    assert.equal(parserBug.status, 1, parserOutput);
+    assert.match(parserOutput, /TypeError: parser boundary bug/);
+    assert.match(parserOutput, /\n\s+at main .*check\.ts:/);
+    assert.doesNotMatch(parserOutput, /Remedy:/);
     const inputRefusals: [string, string | null, RegExp][] = [
       ["typescript/migration.json", "[]", /migration.json.*JSON object/],
       ["typescript/migration.json", null, /migration.json.*readable valid JSON/],
@@ -347,7 +360,18 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
     assert.deepEqual(migrationIssues(pkg, gated), []);
     writeFileSync(join(root, legacy), `${text}export const explicitAny: any = 1;\n`);
     assert.match(migrationIssues(pkg, gated).join("\n"), /legacy.ts.*convert.*strict project/);
+    for (const edited of [`${text}\n`, text.replace("\n", "\r\n"), text.repeat(100)]) {
+      writeFileSync(join(root, legacy), edited);
+      assert.match(migrationIssues(pkg, gated).join("\n"), /legacy.ts.*strict project/);
+    }
     writeFileSync(join(root, legacy), text);
+    renameSync(join(root, legacy), join(pkg, "Legacy.ts"));
+    scope.legacyTypeScript[0] = "mcp-server/Legacy.ts";
+    save();
+    assert.match(migrationIssues(pkg, gated).join("\n"), /only shrink/);
+    renameSync(join(pkg, "Legacy.ts"), join(root, legacy));
+    scope.legacyTypeScript[0] = legacy;
+    save();
     for (const extension of ["js", "ts"]) {
       const path = `mcp-server/new.${extension}`;
       writeFileSync(join(root, path), text);
