@@ -43,7 +43,7 @@ def capture(database, watch, remaining):
                   and c.category='lease_threshold_crossed' and c.disposition='emitted'),
                 'notifications',(select count(*) from ops.notification n
                   join public.event e on e.id=n.event_ref and e.verb='subject-watch-scheduled-sweep'
-                  where n.recipient_actor=w.actor_id and n.dedupe_key like 'subject-watch:'||w.id||':%'),
+                  where n.recipient_actor=w.actor_id and n.dedupe_key like 'subject-watch:'||w.id||':%%'),
                 'first_delivery_at',(select min(e.occurred_at) from ops.subject_watch_change c
                   join ops.notification n on n.id=c.notification_id join public.event e on e.id=n.event_ref
                   where c.watch_generation_id=w.id and c.category='lease_threshold_crossed'),
