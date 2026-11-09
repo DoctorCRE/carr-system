@@ -1,8 +1,12 @@
-import type { DurableObjectNamespace, DurableObjectState, DurableObjectStorage } from "@cloudflare/workers-types";
+import type { DurableObjectId, DurableObjectState, DurableObjectStorage } from "@cloudflare/workers-types";
 
 // One Durable Object per unpredictable consent id. KV cannot provide an
 // atomic read/delete; this transaction is the sole consumption authority.
 type ConsentInput = { state: string; browser: string; csrf: string; expiresAt: number; [field: string]: unknown };
+type ConsentNamespace = {
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): { fetch(request: Request): Promise<Response> };
+};
 
 export class OAuthConsentState {
   declare __DURABLE_OBJECT_BRAND: never;
@@ -41,15 +45,17 @@ export class OAuthConsentState {
 }
 
 export async function consentState(
-  env: { OAUTH_CONSENT_STATE: DurableObjectNamespace },
+  env: { OAUTH_CONSENT_STATE: ConsentNamespace },
   id: string,
   operation: "create" | "consume",
   input: Partial<ConsentInput>,
 ) {
   const stub = env.OAUTH_CONSENT_STATE.get(env.OAUTH_CONSENT_STATE.idFromName(id));
-  return stub.fetch(`https://consent.internal/${operation}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
+  return stub.fetch(
+    new Request(`https://consent.internal/${operation}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
 }
