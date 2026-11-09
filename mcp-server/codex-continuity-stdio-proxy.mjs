@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 
-import { selectLocalClientCredential, tokenFileSecurityIssue } from "./local-client-auth.mjs";
+import { selectLocalClientCredential, tokenFileSecurityIssue } from "./local-client-auth.ts";
 
 import { REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, splitReferenceManifest } from "./continuity-reference-manifest.ts";
 
