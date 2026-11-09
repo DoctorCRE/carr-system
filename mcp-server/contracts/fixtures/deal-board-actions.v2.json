@@ -1,0 +1,16 @@
+[
+  {
+    "id": "20000000-0000-4000-8000-000000000777",
+    "owner": "joe",
+    "due_on": "2027-01-01",
+    "item_id": "next_action:20000000-0000-4000-8000-000000000777",
+    "description": "Synthetic next action"
+  },
+  {
+    "id": "20000000-0000-4000-8000-000000000777",
+    "owner": "joe",
+    "due_on": "2027-01-02",
+    "item_id": "capture_post_call_action:20000000-0000-4000-8000-000000000777",
+    "description": "Synthetic call follow-up"
+  }
+]
