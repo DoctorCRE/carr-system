@@ -9,7 +9,7 @@ function main(): void {
   const files = projects(pkg);
   const issues = migrationIssues(pkg, files);
   const graph = object(resolve(pkg, "knip.json"));
-  if (JSON.stringify(graph.project) !== JSON.stringify(files.map((file) => relative(pkg, file))))
+  if (JSON.stringify(graph.project) !== JSON.stringify([...new Set(files.map((file) => relative(pkg, file)))].sort()))
     throw new GateError(
       "knip.json",
       "project must cover every admitted file",
