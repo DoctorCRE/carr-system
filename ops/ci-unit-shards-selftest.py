@@ -143,7 +143,7 @@ class ShardCoverage(unittest.TestCase):
             timing.parent.mkdir(parents=True)
             timing.write_text(json.dumps({'suites': {'retired.test.mjs': {'milliseconds': planner.WATCHDOG_MS * 100, 'serial': False}}}))
             records, _ = planner.durations(root)
-            self.assertEqual(records['new.test.mjs'], {'milliseconds': planner.DEFAULT_SUITE_MS, 'serial': True})
+            self.assertEqual(records['new.test.mjs'], {'milliseconds': planner.DEFAULT_SUITE_MS, 'serial': True, 'unmeasured': True})
             self.assertEqual(planner.plan(root), [['new.test.mjs']])
 
     def test_unknown_work_cannot_consume_measured_headroom(self):
@@ -155,10 +155,10 @@ class ShardCoverage(unittest.TestCase):
             timing.parent.mkdir(parents=True)
             measured = 'known-browser.test.mjs'
             (tests / measured).touch()
-            timing.write_text(json.dumps({'suites': {
+            timing.write_text(json.dumps({'snapshot_template_ms': 167478, 'suites': {
                 measured: {'milliseconds': 310000, 'serial': True}}}))
             self.inventory(root, 1)
-            for count in (1, 10):
+            for count in (1, 10, 20):
                 unknown = [f'new-{index}-browser.test.mjs' for index in range(count)]
                 for file in unknown:
                     (tests / file).touch()
@@ -171,7 +171,7 @@ class ShardCoverage(unittest.TestCase):
                 records[unknown[0]]['milliseconds'] = 300000
                 assigned = next(shard for shard in shards if unknown[0] in shard)
                 self.assertLessEqual(planner.estimate(assigned, records, setup), planner.WATCHDOG_MS)
-            for index in range(100):
+            for index in range(200):
                 (tests / f'overflow-{index}.test.mjs').touch()
             with self.assertRaisesRegex(ValueError, '16-shard cap'):
                 planner.plan(root)
