@@ -4,15 +4,20 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import tempfile
 import threading
 import unittest
+import hxprobe_test_binary as decoder
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 REAL_RUN = subprocess.run
+
+
+def publish(path):
+    path.write_text('#!/bin/sh\nprintf "%s\\n" "$1"\n')
+    path.chmod(0o700)
 
 
 def load_fixture():
@@ -23,13 +28,55 @@ def load_fixture():
 
 
 class BuildRace(unittest.TestCase):
+    def setUp(self):
+        decoder.test_binary.cache_clear()
+        self.addCleanup(decoder.test_binary.cache_clear)
+
+    def test_parent_artifact_is_reused_without_cargo(self):
+        with tempfile.TemporaryDirectory() as temp:
+            binary = Path(temp) / 'hxprobe'
+            publish(binary)
+            with patch.dict(os.environ, {'CARR_HXPROBE_TEST_BINARY': str(binary)}), patch('subprocess.run') as build:
+                self.assertEqual(decoder.test_binary(), binary)
+                build.assert_not_called()
+            binary.unlink()
+            decoder.test_binary.cache_clear()
+            with patch.dict(os.environ, {'CARR_HXPROBE_TEST_BINARY': str(binary)}), self.assertRaises(FileNotFoundError):
+                decoder.test_binary()
+
+    def test_standalone_build_is_cached_and_cleaned_by_owner(self):
+        with patch.dict(os.environ), patch('atexit.register') as cleanup:
+            os.environ.pop('CARR_HXPROBE_TEST_BINARY', None)
+            def build(command, **kwargs):
+                target = Path(command[command.index('--target-dir') + 1]) / 'debug/hxprobe'
+                target.parent.mkdir()
+                publish(target)
+            with patch('subprocess.run', side_effect=build) as cargo:
+                binary = decoder.test_binary()
+                self.assertEqual(decoder.test_binary(), binary)
+                self.assertTrue(binary.is_file())
+                self.assertEqual(cargo.call_count, 1)
+            cleanup.call_args.args[0]()
+            self.assertFalse(binary.parent.parent.exists())
+
+    def test_failed_build_cleans_target_and_refuses_reader(self):
+        targets = []
+        def fail(command, **kwargs):
+            targets.append(Path(command[command.index('--target-dir') + 1]))
+            raise subprocess.CalledProcessError(17, command)
+        with patch.dict(os.environ), patch('subprocess.run', side_effect=fail):
+            os.environ.pop('CARR_HXPROBE_TEST_BINARY', None)
+            with self.assertRaises(subprocess.CalledProcessError):
+                decoder.test_binary()
+        self.assertFalse(targets[0].exists())
+
     def test_completed_decoder_survives_competing_build_publication(self):
         fixture = load_fixture()
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             shared = root / 'vendor/hxprobe/target/debug/hxprobe'
             shared.parent.mkdir(parents=True)
-            shutil.copy('/bin/echo', shared)
+            publish(shared)
             built, gap, resume = threading.Event(), threading.Event(), threading.Event()
 
             def build(command, **kwargs):
@@ -37,7 +84,7 @@ class BuildRace(unittest.TestCase):
                 target = (Path(command[command.index('--target-dir') + 1]) / 'debug/hxprobe'
                           if '--target-dir' in command else shared)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy('/bin/echo', target)
+                publish(target)
                 built.set()
                 return subprocess.CompletedProcess(command, 0)
 
@@ -48,7 +95,7 @@ class BuildRace(unittest.TestCase):
                 gap.set()
                 if not resume.wait(10):
                     raise AssertionError('reader did not release competing build')
-                shutil.copy('/bin/echo', shared)
+                publish(shared)
 
             def read(binary, _fixture, _directory):
                 self.assertTrue(gap.wait(10), 'competing build never reached unlink/link gap')
