@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from hxprobe_test_binary import test_binary
 import uuid
 from urllib.parse import quote
 from unittest.mock import patch
@@ -288,6 +289,10 @@ class Fake:
 
 
 class IntakeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        test_binary()
+
     def setUp(self):
         scope = patch('lib.outlook_settings.OutlookSettings.verify_helper')
         scope.start()
@@ -2263,14 +2268,13 @@ class IntakeTest(unittest.TestCase):
 
     def cli_mail_fixture(self, records, folder_name='Drafts', extra_folders=b''):
         helpers = runpy.run_path(str(ROOT / 'ops/hxstore-local-key-selftest.py'))
-        crate = ROOT / 'vendor/hxprobe'
-        REAL_RUN(['cargo', 'build', '--locked'], cwd=crate, check=True, capture_output=True)
+        binary = test_binary()
         folders = helpers['folder'](50, folder_name) + helpers['folder'](51, 'Sent Items') + extra_folders
         binding = helpers['message'](0x9999, sender=OWNER, sent=ts(-timedelta(days=60)), folder=51)
         self.store.write_bytes(helpers['STORE'](folders + b''.join(records) + binding))
 
         def decode(source, files, target):
-            result = REAL_RUN([str(crate / 'target/debug/hxprobe'), 'db', str(source), str(target)],
+            result = REAL_RUN([str(binary), 'db', str(source), str(target)],
                               capture_output=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stderr)
         ports = self.fake.ports()

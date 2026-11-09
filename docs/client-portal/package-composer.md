@@ -76,7 +76,7 @@ only. A production caller must obtain authenticated evidence as described above.
 ```js
 const { readFileSync } = await import('node:fs');
 const { composeMarketStudyPackage } = await import('./mcp-server/src/market-study-composer.js');
-const { RECORD_LAYER_GROUPS } = await import('./mcp-server/src/market-study-package.js');
+const { RECORD_LAYER_GROUPS } = await import('./mcp-server/src/market-study-package.ts');
 const fixture = JSON.parse(readFileSync('client-portal/fixtures/example-health.market-study.json', 'utf8'));
 const target = { deal_id: 'synthetic-deal', client_id: 'synthetic-client' };
 const envelope = data => ({ ...target, data: structuredClone(data) });

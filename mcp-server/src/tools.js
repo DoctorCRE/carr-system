@@ -69,7 +69,7 @@ import { workShapeTools } from "./work-shape.ts";
 import { workQueueTools } from "./work-queue.js";
 import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
-import { leaseTermComparisonTools } from "./lease-term-comparison.js";
+import { leaseTermComparisonTools } from "./lease-term-comparison.ts";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.js";
 import { clientPortalTools } from "./client-portal.ts";
@@ -9367,7 +9367,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "work-shape": "mcp-server/src/work-shape.ts",
   "work-queue": "mcp-server/src/work-queue.js",
   "work-request-intake": "mcp-server/src/work-request-intake.js",
-  "lease-term-comparison": "mcp-server/src/lease-term-comparison.js",
+  "lease-term-comparison": "mcp-server/src/lease-term-comparison.ts",
   "fact-review": "mcp-server/src/fact-review.ts",
   "market-terms": "mcp-server/src/market-terms.ts",
   "fact-generation": "mcp-server/src/fact-generation.ts",
