@@ -396,7 +396,7 @@
     "salesforce-browser-read-rw02-mutants.v5.test.mjs": {"milliseconds": 400, "serial": false},
     "salesforce-browser-read-rw02.v5.test.mjs": {"milliseconds": 218, "serial": false},
     "salesforce-deal-sync-read.test.mjs": {"milliseconds": 317, "serial": false},
-    "salesforce-list-capture-browser.test.mjs": {"milliseconds": 12554, "serial": true},
+    "salesforce-list-capture-browser.test.ts": {"milliseconds": 18284, "serial": true},
     "salesforce-read-run-store-rw02-postgres.test.mjs": {"milliseconds": 3150, "serial": true},
     "salesforce-read-run-store-rw02.v5.test.mjs": {"milliseconds": 460, "serial": false},
     "salesforce-reconciliation-rw02-postgres.test.mjs": {"milliseconds": 2583, "serial": true},

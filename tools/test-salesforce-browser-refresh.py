@@ -127,8 +127,19 @@ class RefreshTests(unittest.TestCase):
                                subprocess.CompletedProcess([], 0, '', '')])
         result = refresh.capture_chrome(URL, run=run, wait=lambda _: None)
         self.assertEqual(result['reason'], 'Salesforce sign-in needed')
+        expression = run.call_args_list[1].args[0][-1]
+        self.assertIn('window.__carrSalesforceRefresh', expression)
+        self.assertNotIn('interface Window', expression)
+        self.assertNotIn('declare global', expression)
         self.assertEqual(run.call_args_list[0].args[0][-2:], ['open', URL])
         self.assertEqual(run.call_args_list[-1].args[0][-2:], ['close', '123'])
+
+    def test_typescript_strip_failure_refuses_before_opening_chrome(self):
+        run = Mock()
+        with patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, ['node'])):
+            with self.assertRaisesRegex(ValueError, 'Salesforce Chrome bridge unavailable'):
+                refresh.capture_chrome(URL, run=run)
+        run.assert_not_called()
 
     def test_installer_preview_renders_a_quiet_chicago_schedule_without_installing(self):
         script = Path(__file__).with_name('install-salesforce-browser-refresh.py')

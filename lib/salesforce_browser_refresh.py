@@ -189,14 +189,20 @@ def capture_chrome(url: str, *, run: Callable[..., Any] | None = None,
     run = run or subprocess.run
     wait = wait or time.sleep
     bridge = ['/usr/bin/osascript', str(ROOT / 'pipelines/read-salesforce-list.applescript')]
-    script = (ROOT / 'pipelines/capture-salesforce-list.js').read_text()
-    start = ('(() => { if (document.readyState !== "complete" || '
-             '(!document.querySelector("table[role=grid], table[role=treegrid], input[type=password], #username"))) '
-             'return JSON.stringify({state:"loading"}); '
-             'if (!window.__carrSalesforceRefresh) { ' + script + ' } '
-             'return JSON.stringify(window.__carrSalesforceRefresh); })()')
     tab = ''
     try:
+        script = subprocess.run([
+            'node', '--input-type=module', '-e',
+            'import {readFileSync} from "node:fs"; '
+            'import {stripTypeScriptTypes} from "node:module"; '
+            'process.stdout.write(stripTypeScriptTypes(readFileSync(process.argv[1], "utf8")))',
+            str(ROOT / 'pipelines/capture-salesforce-list.ts'),
+        ], capture_output=True, text=True, timeout=15, check=True).stdout
+        start = ('(() => { if (document.readyState !== "complete" || '
+                 '(!document.querySelector("table[role=grid], table[role=treegrid], input[type=password], #username"))) '
+                 'return JSON.stringify({state:"loading"}); '
+                 'if (!window.__carrSalesforceRefresh) { ' + script + ' } '
+                 'return JSON.stringify(window.__carrSalesforceRefresh); })()')
         opened = run([*bridge, 'open', url], capture_output=True, text=True, timeout=15, check=True)
         tab = opened.stdout.strip()
         if not tab.isdecimal():
