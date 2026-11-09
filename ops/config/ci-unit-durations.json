@@ -48,6 +48,8 @@
   "quiet_owner_proof_measurement": {"card": "WR647.S15.J4", "suite": "tools/test_prove_quiet_follow_up_owner_filter.py", "command": "python3 -m unittest discover -s tools -p test_prove_quiet_follow_up_owner_filter.py", "local_samples_ms": [674], "basis": "Five passing tests replay the committed real registered responses. No network or history dependency."},
   "watch_delivery_suite_measurement": {"real_driver_regression_ms":7461,"real_driver_regression_card":"WR617.S1.J232","card":"WR617.S1.J139","command":"CARR_CI_UNIT_SUITES selected watch suites via mcp-server/run-tests.mjs","canonical_samples_ms":{"subject-watch-v2-postgres.test.mjs":[11344],"subject-watch-v2.test.mjs":[1851],"subject-watches-postgres.test.mjs":[2675]},"snapshot_setup_ms":17612,"basis":"Delivery, scheduler and proof cases share the existing watch suites and one database fixture. This removes additional serial snapshot startup while preserving the existing watchdog and headroom. Existing PostgreSQL weight remains above the measured consolidated suite; parser/unit weight rounds above its measured 12 tests. Synthetic loads check exact counts, not production capacity."},
   "suites": {
+    "web-push-outbox-postgres.test.ts": {"milliseconds": 60000, "serial": true, "local_samples_ms": [55395, 51507], "card": "WR617.S1.J269"},
+    "web-push-sender.test.ts": {"milliseconds": 300, "serial": false, "local_samples_ms": [150], "card": "WR617.S1.J269"},
     "web-push-registry-postgres.test.ts": {"milliseconds": 10000, "serial": true, "local_samples_ms": [2987], "card": "WR617.S1.J96"},
     "review-call-outcome-postgres.test.ts": {"milliseconds": 20610, "serial": true},
     "action-card-targets.test.mjs": {"milliseconds": 1501, "serial": false},
