@@ -20,7 +20,9 @@
     "portal-parity/probes.ts",
     "portal-parity/rows.ts",
     "test/portal-parity-probes.test.ts",
-    "test/portal-parity.test.ts"
+    "test/portal-parity.test.ts",
+    "test/web-push-sender.test.ts",
+    "test/web-push-outbox-postgres.test.ts"
   ],
   "compilerOptions": {
     "allowJs": true,
