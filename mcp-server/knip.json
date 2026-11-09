@@ -10,7 +10,9 @@
     "test/models/subject-watch-delivery/Queue.map.ts",
     "src/subject-watch-scheduler.ts",
     "test/web-push-registry-postgres.test.ts",
-    "../docs/models/web-push-registry/PushRegistry.map.ts"
+    "../docs/models/web-push-registry/PushRegistry.map.ts",
+    "src/calendar-scheduling.ts",
+    "src/call-auto-apply.ts"
   ],
   "project": [
     "typescript/check.ts",
@@ -29,6 +31,16 @@
     "../ops/ci-node-file.mts",
     "test/web-push-registry-postgres.test.ts",
     "test/web-push-config.test.ts",
+    "src/agent-profiles.ts",
+    "src/calendar-scheduling.ts",
+    "src/call-auto-apply.ts",
+    "src/correlation.ts",
+    "src/email-identity.ts",
+    "test/agent-profiles.test.ts",
+    "test/call-auto-apply.test.ts",
+    "test/correlation.test.ts",
+    "test/vendor-meetings-calendar-scheduling.test.ts",
+    "test/email-identity.test.ts",
     "src/web-push-subscriptions.ts",
     "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts",
