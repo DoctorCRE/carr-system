@@ -702,7 +702,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "compare-lease-terms": {
     "ingress_key": "mcp-tool:compare-lease-terms",
-    "source_locator": "mcp-server/src/lease-term-comparison.js",
+    "source_locator": "mcp-server/src/lease-term-comparison.ts",
     "schema_digest": "cc47fb836e95150ee40ff57076eec5b4ee2efe4a68aaf25d148420ecef0e7fe2",
     "write": false,
     "human_only": false,

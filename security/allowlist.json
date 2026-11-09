@@ -865,6 +865,12 @@
       "sha256": "72a1a975b101e278ba02d28f79b71dfbe7b6af742919e6d64dd9d6cfa87f2803",
       "rule": "pii-phone",
       "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
+    },
+    {
+      "path": "audits/decoder-build-ownership.md",
+      "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
+      "rule": "pii-phone",
+      "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
     }
   ]
 }
