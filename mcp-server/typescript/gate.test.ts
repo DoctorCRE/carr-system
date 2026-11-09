@@ -67,6 +67,22 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     writeFileSync(scopePath, "{");
     refusal(run(), /migration.json.*valid JSON/);
     writeFileSync(scopePath, JSON.stringify(baseline));
+    const migrationPath = join(pkg, "typescript/migration.ts");
+    const originalMigration = readFileSync(migrationPath, "utf8");
+    writeFileSync(
+      migrationPath,
+      originalMigration.replace(
+        'const root = resolve(pkg, "..");',
+        'throw new TypeError("internal bug");\n  const root = resolve(pkg, "..");',
+      ),
+    );
+    const internal = run();
+    writeFileSync(migrationPath, originalMigration);
+    const internalOutput = internal.stdout + internal.stderr;
+    assert.equal(internal.status, 1, internalOutput);
+    assert.match(internalOutput, /TypeError: internal bug/);
+    assert.match(internalOutput, /\n\s+at migrationIssues .*migration\.ts:/);
+    assert.doesNotMatch(internalOutput, /Remedy:/);
     const baselineFailures: string[] = [];
     for (const extension of ["js", "ts"]) {
       const path = `mcp-server/new.${extension}`;
