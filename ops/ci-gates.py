@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 
 
 PROGRAM_PATTERNS = (
@@ -107,6 +108,8 @@ class Gates:
         log = self.logdir / (name + '.log')
         start = time.time()
         env = os.environ.copy()
+        if isolated and hasattr(self, 'decoder_target'):
+            env['CARR_HXPROBE_TEST_BINARY'] = str(self.decoder_target / 'debug/hxprobe')
         temporary = self.logdir / ('tmp-' + name.removeprefix('gate-'))
         if isolated:
             temporary.mkdir(parents=True, exist_ok=True)
@@ -160,6 +163,11 @@ class Gates:
             "timeout_seconds", self.args.timeout * self.args.jobs)
 
     def check(self):
+        with tempfile.TemporaryDirectory(prefix='gates-hxprobe-') as directory:
+            self.decoder_target = Path(directory)
+            return self.check_prepared()
+
+    def check_prepared(self):
         os.environ['CARR_HOOK_FIXTURE'] = '1'
         try:
             clocks_ok = check_clocks()
@@ -171,7 +179,10 @@ class Gates:
             self.failures.append('codemap')
             self.tail('codemap')
         if Path('vendor/hxprobe/Cargo.toml').is_file():
-            if self.execute('hxprobe-prepare', 'bash', '-c', 'cd vendor/hxprobe && cargo build --locked'):
+            if self.execute('hxprobe-prepare', self.args.python, self.args.timeout_helper,
+                            '180', 'bash', '-c',
+                            'cd vendor/hxprobe && cargo build --locked --target-dir "$1"',
+                            '_', str(self.decoder_target)):
                 self.tail('hxprobe-prepare')
                 return 1, 'HxStore worker preparation failed'
         before = tree_fingerprint()
