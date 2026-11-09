@@ -9,7 +9,7 @@ const parsed: unknown = JSON.parse(
   readFileSync(new URL("./fixtures/tour-operations-foundation.v1.json", import.meta.url), "utf8"),
 );
 assert.ok(parsed && typeof parsed === "object" && !Array.isArray(parsed));
-const fixture = Object.fromEntries(Object.entries(parsed));
+const fixture: Record<string, unknown> = Object.fromEntries(Object.entries(parsed));
 function result(run: () => unknown) {
   try {
     return { value: run() };
@@ -42,7 +42,7 @@ function outputs() {
       throw new Error("GETTER_INVOKED");
     },
   });
-  values.push(getter, new Array(1), new Date("2026-08-25T00:00:00Z"));
+  values.push(getter, new Array<unknown>(1), new Date("2026-08-25T00:00:00Z"));
   const cycle: Record<string, unknown> = {};
   cycle.self = cycle;
   values.push(cycle);
@@ -104,7 +104,7 @@ test("tour contract exported allowlists and timestamp grammar remain exact", () 
 });
 
 test("public metrics retain validation when the array iterator is replaced", () => {
-  const original = Array.prototype[Symbol.iterator];
+  const original: () => ArrayIterator<unknown> = Array.prototype[Symbol.iterator];
   let safe: unknown;
   try {
     Array.prototype[Symbol.iterator] = function* () {

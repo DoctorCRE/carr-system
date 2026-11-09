@@ -161,7 +161,7 @@ function canonicalJsonSnapshot(
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : UNSAFE_SNAPSHOT;
   if (typeof value !== "object" || seen.has(value)) return UNSAFE_SNAPSHOT;
-  const prototype = Object.getPrototypeOf(value);
+  const prototype: unknown = Object.getPrototypeOf(value);
   if (
     (Array.isArray(value) && prototype !== Array.prototype) ||
     (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null)
@@ -269,7 +269,7 @@ function nonemptyStringArrayIsSafe(values: unknown[] | null): values is string[]
 }
 
 const plainRecordEnvelopeIsSafe = (record: object) => {
-  const prototype = Object.getPrototypeOf(record);
+  const prototype: unknown = Object.getPrototypeOf(record);
   if (prototype !== Object.prototype && prototype !== null) return false;
   for (let cursor = record; cursor; cursor = Object.getPrototypeOf(cursor)) {
     const descriptor = Object.getOwnPropertyDescriptor(cursor, "toJSON");
@@ -1361,7 +1361,7 @@ export function validateProjectionFact(
 }
 
 const mapById = (values: DataRecord[]) => {
-  const mapped = new Map();
+  const mapped = new Map<unknown, DataRecord>();
   for (let index = 0; index < values.length; index++) {
     const value = rowAt(values, index);
     mapped.set(value.id, value);
@@ -1487,7 +1487,7 @@ export function validateProjectionComplete({
     !requiredFields
   )
     throw new Error("PROJECTION_INCOMPLETE");
-  const selected = [];
+  const selected: DataRecord[] = [];
   for (let index = 0; index < membershipRows.length; index++) {
     const item = rowAt(membershipRows, index);
     if (
@@ -1530,12 +1530,12 @@ export function validateProjectionComplete({
     )
       throw new Error("PROJECTION_INCOMPLETE");
   }
-  const selectedPropertyCounts = new Map();
+  const selectedPropertyCounts = new Map<unknown, number>();
   for (let index = 0; index < selected.length; index++) {
     const propertyId = rowAt(selected, index).property_id;
     selectedPropertyCounts.set(propertyId, (selectedPropertyCounts.get(propertyId) || 0) + 1);
   }
-  const factKeys = new Set();
+  const factKeys = new Set<string>();
   for (let index = 0; index < factRows.length; index++) {
     const fact = rowAt(factRows, index);
     if (selectedPropertyCounts.get(fact.property_id) !== 1) throw new Error("PROJECTION_INCOMPLETE");
@@ -1548,7 +1548,7 @@ export function validateProjectionComplete({
   const rightsById = mapById(rightsRows);
   for (let index = 0; index < selected.length; index++) {
     const membership = rowAt(selected, index);
-    const propertyFacts = [];
+    const propertyFacts: DataRecord[] = [];
     for (let factIndex = 0; factIndex < factRows.length; factIndex++)
       if (rowAt(factRows, factIndex).property_id === membership.property_id)
         propertyFacts.push(rowAt(factRows, factIndex));
