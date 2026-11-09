@@ -566,6 +566,7 @@ test('quiet lease clocks and pending delivery', async t => {
    const free=watches[50].w;
    const receipt=async id=>(await c.query('select disposition,notification_id from ops.subject_watch_change where watch_generation_id=$1',[id])).rows;
    assert.equal((await receipt(free))[0].disposition,'pending');
+   await c.query('begin');
    for(let i=0;i<4;i++) {
     const result=await sweep('2030-01-01T12:00:00Z');
     assert.ok(result.scanned<=50,'each transaction scans at most fifty candidates');

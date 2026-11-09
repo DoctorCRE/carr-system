@@ -26,6 +26,7 @@ create table ops.subject_watch_delivery (
 create index subject_watch_delivery_due on ops.subject_watch_delivery(next_evaluation_at,watch_id) where failure_count<2;
 create table ops.subject_watch_sweep (
  singleton boolean primary key default true check(singleton),
+ after_watch_id uuid,
  scheduled_at timestamptz not null, completed_at timestamptz not null,
  event_id uuid not null, scanned integer not null, emitted integer not null
 );
@@ -89,9 +90,15 @@ insert into ops.subject_watch_delivery(watch_id,next_evaluation_at,clock_seen)
 create function ops.sweep_subject_watches(p_now timestamptz,p_limit integer default 50)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
 declare w record; st ops.subject_watch_delivery; pol jsonb; keys jsonb; fresh jsonb; ids uuid[];
- event_id uuid; minted jsonb; nid uuid; n integer:=0; emits integer:=0; slug_value text; target jsonb; link text;
+ cursor_id uuid; candidate_count integer:=0; last_candidate uuid;
+ event_id uuid; minted jsonb; nid uuid; emits integer:=0; slug_value text; target jsonb; link text;
 begin
  if p_now is null or p_limit is null or p_limit not between 1 and 50 then raise exception 'watch_batch_limit'; end if;
+ -- Serialize cursor progress without waiting behind another sweep.
+ if not pg_try_advisory_xact_lock(hashtextextended('subject-watch-sweep-cursor',0)) then
+   return jsonb_build_object('scanned',0,'emitted',0);
+ end if;
+ select after_watch_id into cursor_id from ops.subject_watch_sweep where singleton;
  insert into public.event(occurred_at,actor_id,verb,subject_type,subject_id,cause,new_value)
  select p_now,id,'subject-watch-scheduled-sweep','system',gen_random_uuid(),'automation_job','{}'
  from public.actor where slug='system' and active returning id into event_id;
@@ -102,14 +109,16 @@ begin
        '{"change_kinds":["reply_arrived","lease_threshold_crossed"],"lease_threshold_days":[90,30,7,0],"lease_threshold_months":[24,12,6],"include_self_changes":true}'::jsonb policy from ops.subject_watch
      union all select id,actor_id,subject_type,subject_id,lifecycle_version,state,policy from ops.subject_watch_v2_subscription
    ) s join ops.subject_watch_delivery q on q.watch_id=s.id
-   where s.state='watching' and q.failure_count<2 and (q.next_evaluation_at<=p_now or exists(select 1 from ops.subject_watch_change c
+   where s.state='watching' and q.failure_count<2 and (q.last_evaluated_at is null or q.last_evaluated_at<=p_now)
+     and (cursor_id is null or s.id>cursor_id) and (q.next_evaluation_at<=p_now or exists(select 1 from ops.subject_watch_change c
      where c.watch_generation_id=s.id and c.disposition='pending' and c.eligible_at<=p_now and c.failure_count<2))
-   order by q.next_evaluation_at,s.id limit p_limit
+   order by s.id limit p_limit
  loop
+   candidate_count:=candidate_count+1;
+   last_candidate:=w.id;
    if not pg_try_advisory_xact_lock(hashtextextended(w.actor_id::text||':'||w.subject_type||':'||w.subject_id::text,0)) then continue; end if;
    select * into st from ops.subject_watch_delivery where watch_id=w.id for update skip locked;
    if not found or st.failure_count>=2 or st.last_evaluated_at>p_now then continue; end if;
-   n:=n+1;
    -- Refresh lifecycle and policy after acquiring the same lock as unwatch.
    if exists(select 1 from ops.subject_watch_v2_subscription where id=w.id) then
      select state,policy,lifecycle_version into w.state,w.policy,w.policy_version from ops.subject_watch_v2_subscription where id=w.id;
@@ -195,11 +204,11 @@ begin
        next_evaluation_at=p_now+interval '5 minutes' where watch_id=w.id;
    end;
  end loop;
- insert into ops.subject_watch_sweep(singleton,scheduled_at,completed_at,event_id,scanned,emitted)
- values(true,p_now,clock_timestamp(),event_id,n,emits) on conflict(singleton) do update set
- scheduled_at=excluded.scheduled_at,completed_at=excluded.completed_at,event_id=excluded.event_id,scanned=excluded.scanned,emitted=excluded.emitted
+ insert into ops.subject_watch_sweep(singleton,after_watch_id,scheduled_at,completed_at,event_id,scanned,emitted)
+ values(true,case when candidate_count=p_limit then last_candidate else null end,p_now,clock_timestamp(),event_id,candidate_count,emits) on conflict(singleton) do update set
+ after_watch_id=excluded.after_watch_id,scheduled_at=excluded.scheduled_at,completed_at=excluded.completed_at,event_id=excluded.event_id,scanned=excluded.scanned,emitted=excluded.emitted
  where excluded.scheduled_at>=ops.subject_watch_sweep.scheduled_at;
- return jsonb_build_object('scanned',n,'emitted',emits,'event_id',event_id);
+ return jsonb_build_object('scanned',candidate_count,'emitted',emits,'event_id',event_id);
 end $$;
 revoke all on function ops.subject_watch_clock_keys(text,uuid,jsonb,timestamptz),ops.subject_watch_delivery_start(),ops.sweep_subject_watches(timestamptz,integer)
  from public,carr_reader,carr_writer,carr_authority,carr_jobs,dot_reader;
