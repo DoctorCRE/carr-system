@@ -340,7 +340,7 @@
     "unused-file:test/work-request-triage.test.mjs",
     "unused-file:test/work-request-withdrawal.test.mjs",
     "unused-file:test/work-shape.test.mjs",
-    "unused-file:test/worker-types.test.mjs",
+    "unused-file:test/worker-types.test.ts",
     "unused-file:test/workflow-cutover.v5.test.mjs",
     "unused-file:test/workflow-effect-envelope.v5.test.mjs",
     "unused-file:test/workspace-business-read.test.mjs",
