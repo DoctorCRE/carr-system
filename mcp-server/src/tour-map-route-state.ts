@@ -978,16 +978,17 @@ export function resolveReturn(
     (item) => item.route_stop_id === stopId && item.property_id === marker.property_id,
   );
   if (!stop) return refuse(note ? "return_stop_removed" : "return_marker_mismatch");
+  const restoredState: RouteState = {
+    ...structuredClone(state),
+    mode: "tour",
+    current_route_stop_id: stop.route_stop_id,
+    selected_property_id: stop.property_id,
+  };
   return {
     ok: true as const,
     route_stop_id: stop.route_stop_id,
     note,
-    state: {
-      ...structuredClone(state),
-      mode: "tour",
-      current_route_stop_id: stop.route_stop_id,
-      selected_property_id: stop.property_id,
-    },
+    state: restoredState,
   };
 }
 

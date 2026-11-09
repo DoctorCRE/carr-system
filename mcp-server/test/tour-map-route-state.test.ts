@@ -893,6 +893,21 @@ test("return after native navigation lands on the exact stop that was handed off
   assert.equal(result.state.mode, "tour");
 });
 
+test("restored navigation state composes with projection and map events", () => {
+  const state = tourState();
+  const result = back(state, buildReturnState(nav(state, "rs-c")));
+  assert.equal(result.ok, true);
+  const projection = projectRoute(result.state);
+  assert.equal(projection.mode, "tour");
+  const changed = reduceMapEvent(result.state, {
+    type: "mode_change",
+    mode: "search",
+    route_version: state.route_version,
+  });
+  assert.equal(changed.state.mode, "search");
+  assert.equal(changed.state.current_route_stop_id, "rs-c");
+});
+
 test("return follows the recorded version mapping across several revisions", () => {
   const v3 = tourState();
   const marker = buildReturnState(nav(v3, "rs-c"));
