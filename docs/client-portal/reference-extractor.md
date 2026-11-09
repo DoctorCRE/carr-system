@@ -146,7 +146,7 @@ renderable client media. The fixtures expand ordinal arrays to exercise the
 existing inventory without asserting correspondence to the private sources.
 
 Verification commands are `python3 tools/test_portal_reference_extract.py`,
-`node --test mcp-server/test/market-study-package.test.mjs`, and
+`node --test mcp-server/test/market-study-package.test.ts`, and
 `./ops/ci.sh --only gates`. The Python tests invoke the real CLI, which calls the
 existing validator. No second package schema is implemented in Python.
 
