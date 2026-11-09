@@ -104,8 +104,8 @@ for (const table of ['capture_candidate','capture_session']) {
 }
 
 async function waitForLock(holder, waiter) {
-  const deadline = Date.now()+5000;
-  while (Date.now()<deadline) {
+  const deadline = performance.now()+5000;
+  while (performance.now()<deadline) {
     if ((await db.query('select $1::int=any(pg_blocking_pids($2)) blocked',
       [holder.processID,waiter.processID])).rows[0].blocked) return;
     await new Promise(resolve=>setTimeout(resolve,10));
