@@ -30,8 +30,15 @@ On an unchanged complete rerun, missing and all production counts are zero and
 skipped equals scanned. In dry run no bytes are fetched and no writes occur.
 Each invocation scans at most 10000 attachments serially. If scanned reaches the
 cap, continue with `--after` set to the reported last_document_ref. Restarting
-from the beginning is safe. Infrastructure failures stop the invocation with
-exit 1; already persisted derivatives remain safe to replay.
+from the beginning is safe. Scan failures stop the invocation with exit 1; already persisted derivatives remain safe to replay.
+
+A real run checks Wrangler and R2 access before scanning. Install a missing reader
+with `npm --prefix mcp-server ci`; check Cloudflare authentication and bucket
+access if the reader fails. A document failure appears in `errors` with its
+`document_ref` and a stable code. The run continues and exits nonzero if any
+document failed. Rerun without `--after` to retry failures; retained documents
+are skipped.
+
 
 Non-PDF attachments and originals outside the existing 1-byte to 25-MB parser
 budget receive unavailable without parsing. Every undeleted deal attachment is
@@ -94,10 +101,3 @@ and source scan remain automation-only. The page-text.v1 whitespace set is fixed
 to U+0009..000D, U+001C..0020, U+0085, U+00A0, U+1680, U+2000..200A,
 U+2028..2029, U+202F, U+205F and U+3000 in both producer and SQL validation.
 Text itself is retained unchanged, including these characters.
-
-A real run checks Wrangler and R2 access before scanning. Install a missing reader
-with `npm --prefix mcp-server ci`; check Cloudflare authentication and bucket
-access if the reader fails. A document failure appears in `errors` with its
-`document_ref` and a stable code. The run continues and exits nonzero if any
-document failed. Rerun without `--after` to retry failures; retained documents
-are skipped.
