@@ -33,6 +33,9 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       (file: unknown) => typeof file === "string" && file.startsWith("typescript/"),
     );
     writeFileSync(join(pkg, "tsconfig.node.json"), JSON.stringify(nodeConfig));
+    const workerConfig = object(join(pkg, "tsconfig.worker.json"));
+    workerConfig.files = [];
+    writeFileSync(join(pkg, "tsconfig.worker.json"), JSON.stringify(workerConfig));
     const graph = object(join(pkg, "knip.json"));
     graph.project = nodeConfig.files;
     graph.entry = ["typescript/*.test.ts"];

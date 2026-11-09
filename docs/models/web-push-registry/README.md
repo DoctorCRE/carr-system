@@ -22,7 +22,7 @@ The unguarded chart compiled before code and found logout followed by registrati
 
 Run the statechart skill's from-spec command against PushRegistry.tla with Java 21 and TLC. The initial chart was compiled with from-chart. The guarded model intentionally removes post-logout registration transitions from the initial chart. Generated output and logs remain in the worker report paths.
 
-| Transition | Test in web-push-registry-postgres.test.mjs |
+| Transition | Test in web-push-registry-postgres.test.ts |
 | --- | --- |
 | Off to Active, Register | Register and duplicate request preserve one confirmed generation |
 | Active to Active, Replace | Replace and concurrent replacement versus revocation fence stale generation |
@@ -45,7 +45,7 @@ Run `python3 ops/web-push-registry-proof.py --merge-sha <expected-merge-commit> 
 
 The recording contains `provenance` with `release_sha`, `actor_slug` (joe or dell), `transport` (`signed-in-app-origin/mcp`), `app_origin` (`https://app.doctorcre.com`), and `queries` in this order: `list-verbs` with `{ "filter": "web-push" }`, then `read-web-push-subscriptions-v1` with `{}`. Store their decoded registered responses as `catalog` and `registry`. Capture these reads through an existing authenticated browser session. The CLI consumes this evidence rather than acquiring session credentials or claiming that a local machine token is a browser partner. The registry response passes the same versioned JSON schema used by the registry suite. Listing may be empty; this proves the deployed read surface, not controlled registration or revocation.
 
-Run `node --test mcp-server/test/web-push-registry-postgres.test.mjs` for offline CLI pass, failure and insufficient-evidence executions. That suite captures the real registered catalog and a real PostgreSQL registry response, builds a temporary git DAG without historical repository objects, and supplies `--fixture --repository` to exercise the same release gate and response parser. Fixture mode takes `release` from the evidence file and reports mode fixture; it is never production proof. All temporary evidence and git objects are removed after execution.
+Run `node --test mcp-server/test/web-push-registry-postgres.test.ts` for offline CLI pass, failure and insufficient-evidence executions. That suite captures the real registered catalog and a real PostgreSQL registry response, builds a temporary git DAG without historical repository objects, and supplies `--fixture --repository` to exercise the same release gate and response parser. Fixture mode takes `release` from the evidence file and reports mode fixture; it is never production proof. All temporary evidence and git objects are removed after execution.
 
 Controlled registration, owner-only listing and revocation writes remain a later authorized write-proof unit. No production observation is claimed by the fixture runs.
 

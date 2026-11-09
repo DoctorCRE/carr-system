@@ -5,8 +5,12 @@
     "moduleResolution": "Bundler",
     "types": [],
     "lib": [
-      "esnext"
+      "esnext",
+      "dom"
     ]
   },
-  "files": []
+  "files": [
+    "src/web-push-subscriptions.ts",
+    "../docs/models/web-push-registry/PushRegistry.map.ts"
+  ]
 }

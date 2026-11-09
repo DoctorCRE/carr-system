@@ -46,7 +46,7 @@
   "quiet_owner_filter_measurement": {"card": "WR647.S15.J4", "command": "node --test mcp-server/test/quiet-follow-up-owner-filter-postgres.test.mjs", "local_samples_ms": [19832, 20731], "basis": "Six passing tests including cold disposable PostgreSQL setup and teardown and recorded-response proof replay. No speedup claim."},
   "quiet_owner_proof_measurement": {"card": "WR647.S15.J4", "suite": "tools/test_prove_quiet_follow_up_owner_filter.py", "command": "python3 -m unittest discover -s tools -p test_prove_quiet_follow_up_owner_filter.py", "local_samples_ms": [674], "basis": "Five passing tests replay the committed real registered responses. No network or history dependency."},
   "suites": {
-    "web-push-registry-postgres.test.mjs": {"milliseconds": 10000, "serial": true, "local_samples_ms": [2987], "card": "WR617.S1.J96"},
+    "web-push-registry-postgres.test.ts": {"milliseconds": 10000, "serial": true, "local_samples_ms": [2987], "card": "WR617.S1.J96"},
     "action-card-targets.test.mjs": {"milliseconds": 1501, "serial": false},
     "action-card-targets-postgres.test.mjs": {"milliseconds": 10000, "serial": true},
     "snapshot-callers-2-postgres.test.mjs": {"milliseconds": 210000, "serial": true},

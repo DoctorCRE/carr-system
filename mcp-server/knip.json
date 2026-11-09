@@ -1,13 +1,18 @@
 {
   "entry": [
     "typescript/*.test.ts",
-    "suite-discovery.ts"
+    "suite-discovery.ts",
+    "test/web-push-registry-postgres.test.ts",
+    "../docs/models/web-push-registry/PushRegistry.map.ts"
   ],
   "project": [
     "typescript/check.ts",
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "suite-discovery.ts",
-    "test/suite-discovery.test.ts"
+    "test/suite-discovery.test.ts",
+    "test/web-push-registry-postgres.test.ts",
+    "src/web-push-subscriptions.ts",
+    "../docs/models/web-push-registry/PushRegistry.map.ts"
   ]
 }

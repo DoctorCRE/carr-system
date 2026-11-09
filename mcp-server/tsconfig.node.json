@@ -5,6 +5,7 @@
     "typescript/migration.ts",
     "typescript/gate.test.ts",
     "suite-discovery.ts",
-    "test/suite-discovery.test.ts"
+    "test/suite-discovery.test.ts",
+    "test/web-push-registry-postgres.test.ts"
   ]
 }
