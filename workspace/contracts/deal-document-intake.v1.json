@@ -1,0 +1,217 @@
+{
+  "schema_version": "deal-document-intake.v1",
+  "compatibility": "Additive opt-in to deal-deliverables.v1. Existing calls default to deliverables; list-deal-documents remains deal-documents.v1. Breaking changes require a new major contract.",
+  "reservation": {
+    "verb": "start-deal-deliverable",
+    "target_collection": "documents",
+    "required": [
+      "deal_id",
+      "filename",
+      "mime",
+      "bytes",
+      "sha256",
+      "idempotency_key"
+    ],
+    "response": "deliverable.id is the reservation UUID, upload_path is server-issued. Never construct an object key."
+  },
+  "finalize": {
+    "verb": "finalize-deal-deliverable",
+    "required": [
+      "deal_id",
+      "deliverable_id",
+      "idempotency_key"
+    ],
+    "response": "attachment is the canonical attachment receipt; deliverable.id equals attachment.attachment_id."
+  },
+  "lookup": {
+    "verb": "read-deal-deliverable",
+    "required": [
+      "deal_id",
+      "deliverable_id"
+    ],
+    "lost_reserve": "Replay the exact start arguments and original idempotency_key; the envelope returns the original reservation.",
+    "lost_finalize": "Replay finalize or GET receipt. Attachment is null until finalized."
+  },
+  "abandon": {
+    "verb": "abandon-deal-deliverable",
+    "required": [
+      "deal_id",
+      "deliverable_id",
+      "idempotency_key"
+    ],
+    "response": "persists the terminal expired state and releases file and byte quota once; receipt reports expired. Verified bytes remain private."
+  },
+  "browser": {
+    "base_path": "/api/v1/deal-deliverables/{deal_id}",
+    "reserve": "POST base_path with target_collection documents",
+    "upload": "PUT server-issued upload_path, Content-Type application/octet-stream",
+    "finalize": "POST base_path/{deliverable_id}/finalize",
+    "receipt": "GET base_path/{deliverable_id}/receipt",
+    "abandon": "POST base_path/{deliverable_id}/abandon",
+    "auth": "HttpOnly partner session; mutations require same Origin, Sec-Fetch-Site same-origin, X-Carr-CSRF from /auth/session. All responses no-store.",
+    "json_body": "Verb args excluding path-bound IDs."
+  },
+  "policy": {
+    "max_bytes": 26214400,
+    "max_deal_bytes": 524288000,
+    "max_deal_files": 100,
+    "expiry_hours": 24,
+    "mime_source": "mcp-server/src/deal-deliverables.js and verifyDeliverableBytes; photos JPEG, PNG, WebP and HEIC. Office and PDF also admitted."
+  },
+  "response_schemas": {
+    "reserve": {
+      "type": "object",
+      "required": [
+        "ok",
+        "schema_version",
+        "deliverable",
+        "upload_path"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "schema_version": {
+          "const": "deal-document-intake.v1"
+        },
+        "deliverable": {
+          "type": "object",
+          "required": [
+            "id",
+            "deal_id",
+            "state"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deal_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "const": "started"
+            }
+          }
+        },
+        "upload_path": {
+          "type": "string",
+          "pattern": "^/api/v1/deal-deliverables/[0-9a-f-]+/[0-9a-f-]+/bytes$"
+        }
+      }
+    },
+    "upload": {
+      "type": "object",
+      "required": [
+        "ok",
+        "state",
+        "deliverable_id",
+        "sha256",
+        "mime",
+        "bytes"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "state": {
+          "const": "verified"
+        },
+        "deliverable_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "mime": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 26214400
+        }
+      }
+    },
+    "finalize": {
+      "type": "object",
+      "required": [
+        "ok",
+        "schema_version",
+        "deliverable",
+        "attachment"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "schema_version": {
+          "const": "deal-document-intake.v1"
+        },
+        "attachment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attachment_id",
+            "deal_id",
+            "sha256",
+            "filename",
+            "mime",
+            "bytes"
+          ],
+          "properties": {
+            "attachment_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deal_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "filename": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "mime": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 26214400
+            }
+          }
+        },
+        "deliverable": {
+          "type": "object",
+          "required": [
+            "id",
+            "deal_id",
+            "state"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "deal_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "state": {
+              "const": "finalized"
+            }
+          }
+        }
+      }
+    }
+  }
+}
