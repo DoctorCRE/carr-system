@@ -75,6 +75,7 @@ async function login(handler, environment, email, { host = environment.DEALROOM_
 
 function identityOverrides(email, clock) {
   return {
+    invalidatePushSession: async () => ({ ok: true }),
     slugForEmailFn: value => value === TEST_PARTNER_EMAIL ? "joe" : slugForEmail(value),
     exchangeGoogleCodeFn: async () => ({ id_token: "stub-id-token" }),
     verifyGoogleIdTokenFn: async () => ({ email, email_verified: true, sub: `sub:${email}` }),
@@ -89,6 +90,36 @@ function identityOverrides(email, clock) {
 function identityHandler(email, clock) {
   return createDealroomHandler(identityOverrides(email, clock));
 }
+
+test("signout fences its authenticated push session and preserves login when revocation fails", async () => {
+  const environment = env();
+  const invalidated = [];
+  let unavailable = true;
+  const handler = createDealroomHandler({ ...identityOverrides(TEST_PARTNER_EMAIL),
+    invalidatePushSession: async (_env, actor) => {
+      assert.equal(actor.slug, 'joe');
+      assert.match(actor.web_push_session, /^[a-f0-9]{64}$/);
+      invalidated.push(actor.web_push_session);
+      if (unavailable) throw new Error('private database detail');
+    },
+  });
+  const cookie = namedCookie(await login(handler, environment, TEST_PARTNER_EMAIL), '__Host-dealroom_session');
+  const origin = 'https://' + PRODUCTION_HOST;
+  const read = () => handler.fetch(new Request(origin + '/auth/session', { headers: {cookie} }), environment, {});
+  const csrf = (await (await read()).json()).csrf_token;
+  const signout = () => handler.fetch(new Request(origin + '/auth/signout', {
+    method: 'POST', headers: {cookie,origin,'sec-fetch-site':'same-origin','x-carr-csrf':csrf},
+  }), environment, {});
+  const failure = await signout();
+  assert.equal(failure.status,503);
+  assert.deepEqual(await failure.json(), {error:'push_revocation_unavailable'});
+  assert.equal((await read()).status,200);
+  unavailable = false;
+  assert.equal((await signout()).status,302);
+  assert.equal(invalidated.length,2);
+  assert.equal(invalidated[0],invalidated[1]);
+  assert.equal((await read()).status,401);
+});
 
 test("comparison app routes require authentication and CSRF and name a blocked field", async () => {
   const environment = env();

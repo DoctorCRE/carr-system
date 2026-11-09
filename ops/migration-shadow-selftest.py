@@ -248,6 +248,36 @@ with tempfile.TemporaryDirectory() as tmp:
             shadow.write_snapshot(repo / 'db/schema.sql', committed)
             check(name, shadow.main(['--base', 'synthetic']) == expected)
 
+print("grant contract multiset")
+import json
+
+def grant_dump(contract, function="ops.scac_current_grant_contract", attributes="IMMUTABLE", suffix=""):
+    literal = json.dumps(contract).replace("'", "''")
+    return ("-- Name: scac_current_grant_contract(); Type: FUNCTION; Schema: ops; Owner: -\n"
+            f"CREATE FUNCTION {function}() RETURNS jsonb\n    LANGUAGE sql {attributes}\n"
+            f"    SET search_path TO 'pg_catalog'\n    AS $function$select '{literal}'::jsonb{suffix}$function$;\n")
+
+grant_a = {"signature": "ops.a()", "config": ["x", "y"], "grantable": False}
+grant_b = {"signature": "ops.b()", "config": ["y", "x"], "grantable": False}
+contract = {"secdef_execute": [grant_a, grant_b, grant_a], "retired_secdef_execute": [grant_b]}
+reordered = {**contract, "secdef_execute": [grant_b, grant_a, grant_a]}
+check("grant order is semantic", not shadow.schema_difference(grant_dump(contract), grant_dump(reordered)))
+for label, changed in (
+    ("duplicate counts", {**contract, "secdef_execute": [grant_a, grant_b]}),
+    ("grant metadata", {**contract, "secdef_execute": [grant_a, {**grant_b, "grantable": True}, grant_a]}),
+    ("nested array order", {**contract, "secdef_execute": [grant_a, {**grant_b, "config": ["x", "y"]}, grant_a]}),
+    ("retirement metadata", {**contract, "retired_secdef_execute": [grant_a]}),
+):
+    check(label + " remains significant", bool(shadow.schema_difference(grant_dump(contract), grant_dump(changed))))
+check("other functions remain byte-exact", bool(shadow.schema_difference(
+    grant_dump(contract, function="ops.unrelated"), grant_dump(reordered, function="ops.unrelated"))))
+check("function attributes remain significant", bool(shadow.schema_difference(
+    grant_dump(contract), grant_dump(reordered, attributes="STABLE"))))
+check("executable suffix remains significant", bool(shadow.schema_difference(
+    grant_dump(contract), grant_dump(reordered, suffix=" || '{}'::jsonb"))))
+check("unrecognized bodies remain byte-exact", bool(shadow.schema_difference(
+    grant_dump({"secdef_execute": "invalid"}), grant_dump({"secdef_execute": []}))))
+
 print("applied set")
 check("newly applied migrations are the after-ledger minus the before-ledger, in order",
       shadow.newly_applied(snapshot(T, R1[:1]), snapshot(T, R1)) == ["0002_b.sql"])

@@ -7,7 +7,9 @@
     "../ops/ci-node-file.mts",
     "test/models/subject-watch-delivery/Delivery.map.ts",
     "test/models/subject-watch-delivery/Queue.map.ts",
-    "src/subject-watch-scheduler.ts"
+    "src/subject-watch-scheduler.ts",
+    "test/web-push-registry-postgres.test.ts",
+    "../docs/models/web-push-registry/PushRegistry.map.ts"
   ],
   "project": [
     "typescript/check.ts",
@@ -22,6 +24,9 @@
     "run-tests.ts",
     "test/run-node-suites.test.ts",
     "../ops/ci-node-file.mts",
+    "test/web-push-registry-postgres.test.ts",
+    "src/web-push-subscriptions.ts",
+    "../docs/models/web-push-registry/PushRegistry.map.ts",
     "src/subject-watch-scheduler.ts"
   ]
 }
