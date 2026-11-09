@@ -1,7 +1,16 @@
 // Tests retired complete-set review verbs are unavailable through MCP.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TOOLS, executeRegisteredTool } from "../src/tools.js";
+
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+
+// The legacy registry is parsed at its runtime seam until its own conversion.
+const registry = object(await import(new URL("../src/tools.js", import.meta.url).href));
+const TOOLS = object(registry.TOOLS);
+const executeRegisteredTool = registry.executeRegisteredTool;
 
 test("retired record-layer verbs are unavailable through MCP dispatch", async () => {
   for (const name of [
@@ -40,10 +49,13 @@ test("retired record-layer verbs are unavailable through MCP dispatch", async ()
     "set-current-model-role-revision",
     "start-capability-project",
     "transition-evaluation-case",
-    "transition-execution-environment-provider"
-]) {
+    "transition-execution-environment-provider",
+  ]) {
     assert.equal(Object.hasOwn(TOOLS, name), false, name);
-    await assert.rejects(executeRegisteredTool({}, { slug: "joe" }, name, {}),
-      error => error.payload?.error === "unknown_tool");
+    assert.ok(typeof executeRegisteredTool === "function");
+    await assert.rejects(
+      executeRegisteredTool({}, { slug: "joe" }, name, {}),
+      (error) => object(object(error).payload).error === "unknown_tool",
+    );
   }
 });
