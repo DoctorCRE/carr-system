@@ -2,6 +2,12 @@
   "schema": "leak-guard-allowlist.v1",
   "entries": [
     {
+      "path": "db/migration-history.zip",
+      "sha256": "82efe62f515483caecc3f66a25e6166df532d49d3ad42367edcc3b6316a486df",
+      "rule": "opaque-binary",
+      "reason": "WR622.S1.J706 deterministic historical SQL archive. All 26 members are byte-identical to blobs in upstream ancestor 3639d54c418841ba15414f1ab1c9d91d57c999c3. The immutable migration manifest verifies all 559 identities and the raw historical snapshot hash; complete archive verification and exact-path/hash leak-guard qualification run in CI. This admits only these reviewed bytes and this path, not changed archives or new data."
+    },
+    {
       "path": "security/fixtures/synthetic-contact.json",
       "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
       "rule": "pii-phone",
@@ -895,6 +901,12 @@
       "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
       "rule": "pii-phone",
       "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
+    },
+    {
+      "path": "mcp-server/test/error-unmasking.test.ts",
+      "sha256": "5e2b7fa8838b4eab72867587c87cb5e3237942d5f79f0e7753bbb085d0c1c935",
+      "rule": "credential-url",
+      "reason": "Synthetic redaction-test URL with an invented password, never a live credential. Exact renamed TypeScript fixture blob only."
     }
   ]
 }

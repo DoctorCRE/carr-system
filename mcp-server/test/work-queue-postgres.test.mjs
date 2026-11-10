@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { publicError } from '../src/public-errors.ts';
 import { queueCardId } from '../src/work-queue.js';
 import { mcpInventory, assertCurrentContracts } from '../../ops/scac-mutation-inventory.mjs';

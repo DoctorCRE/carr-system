@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { executeRegisteredTool } from '../src/tools.js';
 import { createRequirementUploadHandler, MAX_UPLOAD_BYTES } from '../src/requirement-upload.js';
 import { readDealChecklist, CHECKLIST_SOURCES } from '../src/deal-checklist.ts';

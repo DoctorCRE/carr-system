@@ -1,6 +1,6 @@
 // Manage tour sharing and client packet access.
 import { organizationTenantForActor } from "./identity.js";
-import { CLIENT_TOUR_FIELD_KEYS, CLIENT_TOUR_PACKET_COLUMNS, requiredTimestamp, PUBLIC_ASSET_REFERENCE_RE } from "./tour-operations-contract.js";
+import { CLIENT_TOUR_FIELD_KEYS, CLIENT_TOUR_PACKET_COLUMNS, requiredTimestamp, PUBLIC_ASSET_REFERENCE_RE } from "./tour-operations-contract.ts";
 import { clientSafeMetric, isClientRouteLabel, isClientSafeText, normalizeClientText } from "./tour-client-value-safety.ts";
 
 const PROPERTY_REF=v=>typeof v==="string"&&/^property:public:[A-Za-z0-9_-]{16,128}$/.test(v);

@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // V5-A03 against real disposable PostgreSQL. The unit suite proves the JS
 // boundary; this proves the append-only relations and transition locks.
