@@ -129,15 +129,15 @@ def known_verbs(repo: Path) -> set[str]:
     mcp-server/src/tools.js assembles its verbs from many modules, several of
     which build entries programmatically, so no regex over tools.js finds them
     all. Every served verb must instead be registered, and
-    mcp-server/src/mutation-registry.js imports exactly one generated registry
+    mcp-server/src/mutation-registry.ts imports exactly one generated registry
     whose `mcp-tool:<verb>` ingress keys are that set (reads included). This
     reads the generated file that import names, so a new registry successor is
     picked up without editing this file."""
     src = Path(repo) / "mcp-server/src"
-    importer = (src / "mutation-registry.js").read_text(encoding="utf-8")
+    importer = (src / "mutation-registry.ts").read_text(encoding="utf-8")
     names = REGISTRY_IMPORT.findall(importer)
     if len(set(names)) != 1:
-        raise ValueError("mutation-registry.js does not import exactly one generated registry")
+        raise ValueError("mutation-registry.ts does not import exactly one generated registry")
     text = (src / names[0]).read_text(encoding="utf-8")
     found = set(REGISTRY_VERB.findall(text))
     if not found:

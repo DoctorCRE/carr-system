@@ -17,7 +17,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { TOOLS, executeRegisteredTool, UNATTENDED_AUTHORITY_VERBS } from "../src/tools.js";
-import { registeredOperation } from "../src/mutation-registry.js";
+import { registeredOperation } from "../src/mutation-registry.ts";
 
 const LITERAL_HUMAN_VERBS = Object.freeze({
   // Records Joe's answer AS Joe (work-request-intake.js human check).
@@ -90,7 +90,7 @@ for (const [verb, { authorityOnly }] of Object.entries(LITERAL_HUMAN_VERBS)) {
 }
 
 test("registry parity attests humanCallerOnly, so a dropped flag is a contract mismatch", async () => {
-  const { assertRegisteredOperation } = await import("../src/mutation-registry.js");
+  const { assertRegisteredOperation } = await import("../src/mutation-registry.ts");
   const verb = "answer-work-request-for-joe";
   const { humanCallerOnly: _dropped, ...weakened } = TOOLS[verb];
   await assert.rejects(assertRegisteredOperation(verb, weakened, {}),

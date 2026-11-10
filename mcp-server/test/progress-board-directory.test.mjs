@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
 import { progressBoardSummary } from "../src/board-answers.js";
-import { assertRegisteredOperation, mutationManifestIdentity } from "../src/mutation-registry.js";
+import { assertRegisteredOperation, mutationManifestIdentity } from "../src/mutation-registry.ts";
 
 const actor = { id: "10000000-0000-0000-0000-000000000009", slug: "codex",
   human: false, native_agent_verified: true, sponsoring_human_slug: "joe" };

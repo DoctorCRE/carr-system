@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 
 const actor = { id: '00000000-0000-4000-8000-000000000001' };

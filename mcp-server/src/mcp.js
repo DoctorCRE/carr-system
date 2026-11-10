@@ -13,7 +13,7 @@
 
 import { installTourDealAccess } from './tour-deal-access.js';
 import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
-import { neon, Pool } from "./postgres.js";
+import { neon, Pool } from "./postgres.ts";
 import { budgetedAi } from "./ai-budget.js";
 import { coerceArgsToSchema } from "./input-validation.ts";
 import { publicError } from "./public-errors.ts";

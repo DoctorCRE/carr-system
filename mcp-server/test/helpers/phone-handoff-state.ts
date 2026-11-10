@@ -1,5 +1,5 @@
 type HandoffStorage = {
-  get(key: string): Promise<unknown>;
+  get<T = unknown>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
   delete(keys: string | string[]): Promise<void>;
   list(options: { prefix: string }): Promise<Map<string, unknown>>;
@@ -14,8 +14,9 @@ export function handoffState() {
   const values = new Map<string, unknown>();
   let alarm: number | null = null;
   const storage: HandoffStorage = {
-    async get(key) {
-      return structuredClone(values.get(key));
+    async get<T = unknown>(key: string) {
+      // Mirror Durable Object storage, where callers select the stored value type.
+      return structuredClone(values.get(key)) as T | undefined;
     },
     async put(key, value) {
       values.set(key, structuredClone(value));

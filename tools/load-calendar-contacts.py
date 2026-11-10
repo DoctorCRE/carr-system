@@ -130,7 +130,7 @@ def _names_conflict(display: str | None, name: str) -> bool:
 def check_names(names: list) -> list[bool]:
     """Use the local registered add-party verb in validation-only mode; no writes or network."""
     try:
-        done = subprocess.run(["node", str(ROOT / "mcp-server/check-party-names.mjs")],
+        done = subprocess.run(["node", str(ROOT / "mcp-server/check-party-names.ts")],
                               input=json.dumps(names), capture_output=True, text=True,
                               cwd=ROOT, timeout=CALL_TIMEOUT)
         results = json.loads(done.stdout) if done.returncode == 0 else None

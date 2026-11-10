@@ -1,6 +1,6 @@
 // Assess overdue deal actions against a recorded update and retain reversible evidence.
 import { TypeSafeClient } from '@typesafe-ai/sdk';
-import { automaticEvidenceHold } from './call-auto-apply.js';
+import { automaticEvidenceHold } from './call-auto-apply.ts';
 import { DATA_SENTENCE } from './jev-deal-reading.ts';
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
 import { partnerAuthoritySlugForActor } from './partner-authority.js';

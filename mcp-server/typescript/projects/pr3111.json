@@ -1,0 +1,11 @@
+{
+  "node": [
+    "test/subject-watch-v2-contract.test.ts"
+  ],
+  "worker": [
+    "contracts/subject-watch.v2.ts"
+  ],
+  "entry": [
+    "test/subject-watch-v2-contract.test.ts"
+  ]
+}

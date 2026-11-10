@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
-import { registeredOperation } from '../src/mutation-registry.js';
+import { registeredOperation } from '../src/mutation-registry.ts';
 
 const id = '10000000-0000-4000-8000-000000000001';
 const key = '10000000-0000-4000-8000-000000000002';

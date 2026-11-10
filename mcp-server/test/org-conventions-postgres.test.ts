@@ -12,7 +12,7 @@ import pg from "pg";
 import { ToolError } from "../src/tool-error.ts";
 import type { Actor } from "../src/verb-contract.ts";
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
-import { migrationNames } from "./migration-source.testhelper.mjs";
+import { migrationNames } from "./migration-source.testhelper.ts";
 
 type Proposal = {
   section_id: string;

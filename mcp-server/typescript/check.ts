@@ -85,6 +85,7 @@ function main(): void {
       );
   }
 
+  run("tsc", ["--build", "tsconfig.node-compat.json"]);
   for (const path of projectPaths) {
     const config = object(resolve(pkg, path));
     if (Array.isArray(config.files) && config.files.length > 0) run("tsc", ["-p", path]);

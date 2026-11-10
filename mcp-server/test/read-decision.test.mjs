@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { TOOLS } from '../src/tools.js';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 
 const decisionId = '4825f2a3-0000-4000-8000-000000000001';
 const eventId = '10000000-0000-4000-8000-000000000001';

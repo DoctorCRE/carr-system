@@ -13,7 +13,7 @@ finished and deliver nothing, so this check refuses them structurally:
      mentions. Either is a rule no session is ever shown at its moment.
   2. A TRIGGER NAMING A VERB OR TOOL THAT DOES NOT EXIST — a verb the server
      does not serve (read from the generated registry that
-     mcp-server/src/mutation-registry.js imports, which every verb in
+     mcp-server/src/mutation-registry.ts imports, which every verb in
      mcp-server/src/tools.js and the modules it spreads must appear in),
      a tool Claude Code does not have, or a tool the delivering hook
      (hooks/rule-pack-preuse-reselection.py) is never invoked for, because its
