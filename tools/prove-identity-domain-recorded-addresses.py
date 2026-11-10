@@ -23,6 +23,7 @@ from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.proof_deadline import proof_deadline
 from lib import release_reader
 
 MAX_BYTES = 65536
@@ -97,61 +98,54 @@ def observe(args):
             raise Unavailable('read_unavailable')
         return value
 
-    def expired(_signal, _frame):
-        raise Unavailable('total_deadline')
-
-    previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
     try:
-        with args.receipt.open('rb') as stream:
-            raw = stream.read(MAX_BYTES + 1)
-        if len(raw) > MAX_BYTES:
-            raise Unavailable('receipt_size')
-        receipt = json.loads(raw)
-        required = {'schema', 'event_id', 'party_ref', 'party_id', 'correction_release_git_sha',
-                    'field', 'corrected_value', 'evidence_domain', 'stored_before_email'}
-        if (not isinstance(receipt, dict) or set(receipt) != required
-                or any(not isinstance(v, str) or not v.strip() for v in receipt.values())
-                or receipt['schema'] != 'identity-domain-recorded-addresses-receipt.v1'
-                or not re.fullmatch(r'P-\d+', receipt['party_ref'])
-                or not re.fullmatch('[a-f0-9]{40}', receipt['correction_release_git_sha'])
-                or receipt['field'] not in ('name', 'org', 'state')):
-            raise Unavailable('receipt_contract')
-        UUID(receipt['event_id'])
-        UUID(receipt['party_id'])
-        for key in ('event_id', 'party_ref', 'party_id', 'corrected_value', 'evidence_domain', 'stored_before_email'):
-            output[key + '_sha256'] = digest(receipt[key])
-        sha = release()
-        output['release_sha'] = sha
-        change = process(['git', 'log', '-1', '--format=%H', '--', 'mcp-server/src/party-identity.ts']).strip()
-        process(['git', 'merge-base', '--is-ancestor', change, receipt['correction_release_git_sha']])
-        process(['git', 'merge-base', '--is-ancestor', receipt['correction_release_git_sha'], sha])
-        research = call('prospect-research', {'subject': receipt['party_ref']})
-        history = call('catch-me-up', {'ref': receipt['party_ref'], 'limit': 100})
-        if (research.get('schema_version') != 'prospect-research.v1' or research.get('sent') is not False
-                or not isinstance(research.get('research', {}).get('evidence'), list)
-                or research.get('research', {}).get('coverage') != 'recorded_findings_only'
-                or not isinstance(history.get('timeline'), list) or not isinstance(history.get('subject'), dict)):
-            raise Unavailable('registered_read_contract_unavailable')
-        if research.get('id') != receipt['party_id'] or research.get('ref') != receipt['party_ref']:
-            raise Contradiction('research_party_differs')
-        if history['subject'].get('type') != 'party' or history['subject'].get('id') != receipt['party_id']:
-            raise Unavailable('timeline_does_not_resolve_exact_party')
-        if release() != sha:
-            raise Unavailable('release_changed')
-        field = receipt['field']
-        if field in ('name', 'state') and field in research and research[field] != receipt['corrected_value']:
-            raise Contradiction('stored_corrected_value_differs')
-        raise Unavailable('read_contract_omits_event_id_correction_evidence_and_stored_before_addresses')
+        with proof_deadline(args.timeout_seconds, Unavailable, 'total_deadline'):
+            with args.receipt.open('rb') as stream:
+                raw = stream.read(MAX_BYTES + 1)
+            if len(raw) > MAX_BYTES:
+                raise Unavailable('receipt_size')
+            receipt = json.loads(raw)
+            required = {'schema', 'event_id', 'party_ref', 'party_id', 'correction_release_git_sha',
+                        'field', 'corrected_value', 'evidence_domain', 'stored_before_email'}
+            if (not isinstance(receipt, dict) or set(receipt) != required
+                    or any(not isinstance(v, str) or not v.strip() for v in receipt.values())
+                    or receipt['schema'] != 'identity-domain-recorded-addresses-receipt.v1'
+                    or not re.fullmatch(r'P-\d+', receipt['party_ref'])
+                    or not re.fullmatch('[a-f0-9]{40}', receipt['correction_release_git_sha'])
+                    or receipt['field'] not in ('name', 'org', 'state')):
+                raise Unavailable('receipt_contract')
+            UUID(receipt['event_id'])
+            UUID(receipt['party_id'])
+            for key in ('event_id', 'party_ref', 'party_id', 'corrected_value', 'evidence_domain', 'stored_before_email'):
+                output[key + '_sha256'] = digest(receipt[key])
+            sha = release()
+            output['release_sha'] = sha
+            change = process(['git', 'log', '-1', '--format=%H', '--', 'mcp-server/src/party-identity.ts']).strip()
+            process(['git', 'merge-base', '--is-ancestor', change, receipt['correction_release_git_sha']])
+            process(['git', 'merge-base', '--is-ancestor', receipt['correction_release_git_sha'], sha])
+            research = call('prospect-research', {'subject': receipt['party_ref']})
+            history = call('catch-me-up', {'ref': receipt['party_ref'], 'limit': 100})
+            if (research.get('schema_version') != 'prospect-research.v1' or research.get('sent') is not False
+                    or not isinstance(research.get('research', {}).get('evidence'), list)
+                    or research.get('research', {}).get('coverage') != 'recorded_findings_only'
+                    or not isinstance(history.get('timeline'), list) or not isinstance(history.get('subject'), dict)):
+                raise Unavailable('registered_read_contract_unavailable')
+            if research.get('id') != receipt['party_id'] or research.get('ref') != receipt['party_ref']:
+                raise Contradiction('research_party_differs')
+            if history['subject'].get('type') != 'party' or history['subject'].get('id') != receipt['party_id']:
+                raise Unavailable('timeline_does_not_resolve_exact_party')
+            if release() != sha:
+                raise Unavailable('release_changed')
+            field = receipt['field']
+            if field in ('name', 'state') and field in research and research[field] != receipt['corrected_value']:
+                raise Contradiction('stored_corrected_value_differs')
+            raise Unavailable('read_contract_omits_event_id_correction_evidence_and_stored_before_addresses')
     except Contradiction as error:
         return 1, {**output, 'status': 'contradiction', 'reason': str(error)}
     except Unavailable as error:
         return 78, {**output, 'status': 'insufficient_evidence', 'reason': str(error)}
     except (OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError):
         return 78, {**output, 'status': 'insufficient_evidence', 'reason': 'receipt_or_source_unavailable'}
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
 
 
 def main():
