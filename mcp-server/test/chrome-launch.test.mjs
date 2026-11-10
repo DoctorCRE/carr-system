@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { CHROME_STOP_TIMEOUT_MS, launchChrome, launchTestChrome, processTreeStopsWithin } from "./helpers/chrome-launch.mjs";
 
-const fixture = new URL("./fixtures/chrome-launch-fixture.mjs", import.meta.url);
+const fixture = new URL("./fixtures/chrome-launch-fixture.ts", import.meta.url);
 const nativeKill = process.kill.bind(process);
 const realChrome = [
   process.env.CHROME_PATH,
