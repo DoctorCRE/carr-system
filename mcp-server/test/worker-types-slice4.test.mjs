@@ -13,8 +13,10 @@ test('invoice receipt handler rejects a string commission version before deploym
   try {
     const file = path.join(dir, 'receipt.ts');
     const config = path.join(dir, 'tsconfig.json');
+    const base = JSON.parse(readFileSync(root + 'tsconfig.json', 'utf8'));
     writeFileSync(config, JSON.stringify({ extends: root + 'tsconfig.json',
-      include: [root + '.generated/**/*.d.ts', file] }));
+      include: [...base.include.filter(entry => entry.startsWith('.generated/')).map(entry => root + entry), file],
+      references: base.references.map(reference => ({ path: path.resolve(root, reference.path) })) }));
     writeFileSync(file, `import { invoiceTrackerTools } from ${JSON.stringify(root + 'src/invoice-tracker.ts')};
 declare const tools: ReturnType<typeof invoiceTrackerTools>;
 declare const db: Parameters<typeof tools['record-commission-receipt']['handler']>[0];
