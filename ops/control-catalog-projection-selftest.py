@@ -82,7 +82,8 @@ class ProjectionDatabaseTests(unittest.TestCase):
             for key in legacy:
                 conn.execute("insert into ops.enforcement_control_catalog "
                              "(control_key, implementation_ref, test_ref, enforcement_class, installed) "
-                             "values (%s, 'deleted-hook.py', 'deleted-test.py', 'surfacing', false)", (key,))
+                             "values (%s, 'deleted-hook.py', 'deleted-test.py', 'surfacing', false) "
+                             "on conflict (control_key) do nothing", (key,))
             conn.commit()
             try:
                 conn.execute((ROOT / 'migrations/1171_retire_stale_deploy_controls.sql').read_text())
@@ -93,7 +94,7 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn('control-catalog-projection:', result.stdout)
                 self.assertEqual(conn.execute("select control_key from ops.enforcement_control_catalog "
-                    "where control_key = any(%s)", (list(legacy),)).fetchall(), [])
+                    "where control_key = any(%s) and installed", (list(legacy),)).fetchall(), [])
                 conn.commit()
                 conn.execute("insert into ops.enforcement_control_catalog "
                              "(control_key, implementation_ref, test_ref, enforcement_class, installed) "
@@ -112,6 +113,12 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 conn.commit()
 
     def test_full_apply_preserves_bound_retired_controls_as_unavailable(self):
+        self._assert_historical_controls_preserved(False)
+
+    def test_full_apply_preserves_active_approval_receipts(self):
+        self._assert_historical_controls_preserved(True)
+
+    def _assert_historical_controls_preserved(self, approval):
         import psycopg
         from migration_baseline import MigrationBaseline, repository_ledger
         dsn = os.environ['CARR_LOCAL_PG_DSN']
@@ -127,10 +134,22 @@ class ProjectionDatabaseTests(unittest.TestCase):
                     "values ('j775-probe','automation','Synthetic probe') returning id").fetchone()[0]
                 rule = conn.execute("insert into rule(statement,taught_by) "
                     "values ('Synthetic historical binding',%s) returning id", (actor,)).fetchone()[0]
-                for key in legacy:
+                if approval:
+                    conn.execute("set local session_replication_role=replica")
+                    conn.execute("update rule set status='active',activated_by=%s where id=%s", (actor, rule))
+                    conn.execute("set local session_replication_role=origin")
+                    conn.execute("insert into ops.rule_approval_receipt "
+                        "(idempotency_key,rule_id,rule_version,statement_hash,actor_id,policy_kind,"
+                        "enforcement_status,requested_control_keys,installed_control_keys,reason,"
+                        "normalized_contract,contract_hash,evidence_refs) "
+                        "values ('j775',%s,1,%s,%s,'machine_enforceable','hard_enforced',"
+                        "%s,%s,'Synthetic history','{}',encode(digest('{}','sha256'),'hex'),array['synthetic'])",
+                        (rule, 'a'*64, actor, list(legacy), list(legacy)))
+                for key in (() if approval else legacy):
                     conn.execute("insert into ops.rule_control_binding "
                         "(rule_id,control_key,statement_hash,binding_contract) "
                         "values (%s,%s,%s,'{}')", (rule, key, 'a' * 64))
+                receipts = conn.execute("select * from ops.rule_approval_receipt where rule_id=%s", (rule,)).fetchall()
                 before = conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall()
                 conn.execute("delete from schema_migrations where filename='1171_retire_stale_deploy_controls.sql'")
                 conn.commit()
@@ -141,6 +160,7 @@ class ProjectionDatabaseTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     if attempt == 0:
                         self.assertIn('discharged (precondition absent)', result.stdout)
+                    self.assertEqual(conn.execute("select * from ops.rule_approval_receipt where rule_id=%s", (rule,)).fetchall(), receipts)
                     self.assertEqual(conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall(), before)
                     self.assertEqual(conn.execute("select control_key,installed,verified_at from ops.enforcement_control_catalog where control_key=any(%s) order by control_key", (list(legacy),)).fetchall(), [(k, False, None) for k in legacy])
                     self.assertEqual(dict(conn.execute("select filename,sha256 from schema_migrations").fetchall()), repository_ledger(ROOT, MigrationBaseline.load(ROOT)))
@@ -152,6 +172,7 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 conn.rollback()
                 if 'rule' in locals():
                     conn.execute("delete from ops.rule_control_binding where rule_id=%s", (rule,))
+                    conn.execute("delete from ops.rule_approval_receipt where rule_id=%s", (rule,))
                     conn.execute("delete from rule where id=%s", (rule,))
                     conn.execute("delete from actor where id=%s", (actor,))
                 conn.commit()
@@ -164,7 +185,8 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 for key in legacy:
                     conn.execute("insert into ops.enforcement_control_catalog "
                         "(control_key, implementation_ref, test_ref, enforcement_class, installed) "
-                        "values (%s, 'deleted.py', 'deleted-test.py', 'surfacing', false)", (key,))
+                        "values (%s, 'deleted.py', 'deleted-test.py', 'surfacing', false) "
+                        "on conflict (control_key) do nothing", (key,))
                 actor = conn.execute("insert into actor(slug,kind,display_name) "
                     "values ('j718-probe','automation','Synthetic probe') returning id").fetchone()[0]
                 rule = conn.execute("insert into rule(statement,taught_by) "
