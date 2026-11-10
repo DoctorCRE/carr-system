@@ -55,10 +55,17 @@ or authorize replaying history from empty.
 
 Tests and tools that inspect historical definitions use
 `migration_source.read_migration(repository, filename)`. It reads a retained
-file or retrieves an absent covered file from the baseline's pinned Git commit,
-then checks the covered source against its original checksum. The pinned commit
-must be available locally. `python3 tools/migration_source.py names` lists
-both retained and covered filenames. Git history still contains removed source.
+file or reads absent covered SQL from `db/migration-history.zip`, checking its
+original manifest checksum. `read_baseline_snapshot` verifies the archived
+historical snapshot's raw checksum. No historical Git object is needed.
+`python3 tools/migration_source.py names` lists retained and covered filenames.
+`python3 tools/generate_migration_archive.py` verifies all 559 baseline identities
+and the exact historical ledger offline. Its explicit `--generate` audit mode
+requires the pinned provenance commit and produces a deterministic minimal ZIP.
+When removing more covered SQL, regenerate the archive in the same PR.
+`python3 ops/migration-depth1.py` creates a depth-1 clone, installs locked
+dependencies, and requires the eight affected Node suites plus reconstruction
+to pass without skips. The canonical migration CI class owns this acceptance.
 
 ## Rules
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Logical migration identities survive removal of baseline-covered files."""
 from __future__ import annotations
+import zipfile
 import hashlib
 import importlib.util
 import json
@@ -50,6 +51,10 @@ class LogicalConsumers(unittest.TestCase):
                     "cutoff": "0888_history.sql", "migrations": [
                         {"filename": n, "sha256": runner_sha256(t)} for n, t in self.history.items()]}
         (self.repo / "db/migration-baseline.json").write_text(json.dumps(document))
+        with zipfile.ZipFile(self.repo / "db/migration-history.zip", "w") as archive:
+            archive.write(self.repo / "db/schema.sql", "db/schema.sql")
+            for name in self.history:
+                archive.write(self.repo / "migrations" / name, "migrations/" + name)
         for name in self.history:
             (self.repo / "migrations" / name).unlink()
         self.base = self.commit()
