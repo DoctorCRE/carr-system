@@ -1,0 +1,13 @@
+{
+  "node": [
+    "src/org-conventions.ts",
+    "src/party-duplicate-candidates.ts",
+    "test/org-conventions-postgres.test.ts",
+    "test/party-duplicate-candidates.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/org-conventions-postgres.test.ts",
+    "test/party-duplicate-candidates.test.ts"
+  ]
+}

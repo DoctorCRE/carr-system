@@ -105,7 +105,7 @@ test("Codex installer copies its reviewed checkout and preserves unrelated confi
   const { execFileSync } = await import("node:child_process");
   const script = new URL("../../ops/config-as-code.py", import.meta.url).pathname;
   const proof = execFileSync("python3", ["-c", `
-import copy, importlib.util, json, sys, tempfile
+import copy, importlib.util, json, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('config_fixture', sys.argv[1])
@@ -133,9 +133,13 @@ with tempfile.TemporaryDirectory() as home, patch.object(Path, 'home', return_va
     installed = Path(home) / '.config/carr/codex-continuity/codex-continuity-stdio-proxy.mjs'
     reviewed = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/codex-continuity-stdio-proxy.mjs'
     assert installed.read_bytes() == reviewed.read_bytes()
-    installed_manifest = Path(home) / '.config/carr/codex-continuity/continuity-reference-manifest.mjs'
-    reviewed_manifest = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/continuity-reference-manifest.mjs'
+    installed_manifest = Path(home) / '.config/carr/codex-continuity/continuity-reference-manifest.ts'
+    reviewed_manifest = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/continuity-reference-manifest.ts'
     assert installed_manifest.read_bytes() == reviewed_manifest.read_bytes()
+    subprocess.run([shutil.which('node'),
+                    '--input-type=module', '-e',
+                    "const m = await import(process.argv[1]); if (m.splitReferenceManifest({acceptance:[{refs:['ref']}]}).reference_count !== 1) process.exit(1)",
+                    str(installed_manifest)], check=True, capture_output=True)
     assert current['unrelated'] == original['unrelated']
     assert current['mcp_servers']['carr']['url'] == original['mcp_servers']['carr']['url']
     assert current['mcp_servers']['carr']['disabled_tools'] == ['prior', 'codex-checkpoint', 'codex-read-recovery']

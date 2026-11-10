@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { codexContinuityTools } from "../src/codex-continuity.js";
 import { TOOLS } from "../src/tools.js";
 import { digest } from "../src/artifact-trust.js";
-import { splitReferenceManifest, storedJsonBytes } from "../continuity-reference-manifest.mjs";
+import { splitReferenceManifest, storedJsonBytes } from "../continuity-reference-manifest.ts";
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps } from "../src/identity.js";
 const actorFromProps = (props, bindings = null) =>
   authenticatedIdentity.connectionForGrant(props, bindings);
