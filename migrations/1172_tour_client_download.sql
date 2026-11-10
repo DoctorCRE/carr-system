@@ -50,3 +50,16 @@ returns jsonb language sql stable security definer set search_path=pg_catalog,op
 $$;
 revoke all on function ops.read_tour_share_download(text) from public,carr_reader,carr_writer,carr_jobs,carr_authority;
 grant execute on function ops.read_tour_share_download(text) to carr_writer;
+
+do $download_grant_contract$
+declare contract jsonb:=ops.scac_current_grant_contract(); entry jsonb;
+begin
+ entry:=jsonb_build_object('grantee','carr_writer','signature','ops.read_tour_share_download(p_session_digest text)',
+  'grantable',false,'privilege','execute',
+  'ingress_key','db-function-acl:ops.read_tour_share_download(p_session_digest text):carr_writer:execute',
+  'ingress_kind','db_function_acl','function_kind','f','security_definer',true,'volatility','s','parallel','u',
+  'config',jsonb_build_array('search_path=pg_catalog, ops, public, pg_temp'));
+ contract:=jsonb_set(contract,'{secdef_execute}',(contract->'secdef_execute')||jsonb_build_array(entry));
+ execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
+  'select '||quote_literal(contract::text)||'::jsonb');
+end $download_grant_contract$;

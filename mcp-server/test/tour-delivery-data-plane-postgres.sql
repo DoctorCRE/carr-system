@@ -2,6 +2,12 @@
 -- Disposable least-privilege proof for 0430. All rows are rolled back.
 begin;
 
+do $download_catalog$ begin
+ if ops.scac_mutation_catalog_v118_current() is not true then
+  raise exception 'download grant catalog is stale';
+ end if;
+end $download_catalog$;
+
 insert into ops.tour_property(id,organization_tenant_id,property_status,created_at) values
 ('a1000000-0000-4000-8000-000000000001','tour-delivery-proof','active',now()-interval '30 days'),
 ('a1000000-0000-4000-8000-000000000002','tour-delivery-proof','active',now()-interval '30 days');
