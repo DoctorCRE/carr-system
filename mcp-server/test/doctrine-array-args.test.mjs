@@ -15,7 +15,7 @@
 // handler would pass while every other verb taking an array stayed broken.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { coerceArgsToSchema } from "../src/tools.js";
+import { coerceArgsToSchema } from "../src/input-validation.ts";
 
 const schema = { type: "object", properties: {
   section_ids: { type: "array", items: { type: "string" } } } };

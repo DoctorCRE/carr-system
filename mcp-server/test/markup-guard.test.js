@@ -25,7 +25,7 @@
 
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { looksLikeToolCallMarkup } from "../src/tools.js";
+import { looksLikeToolCallMarkup } from "../src/input-validation.ts";
 
 test("the exact 2026-08-14 corruption is refused", () => {
   // What actually landed: source_note swallowed </source_note> and ate the

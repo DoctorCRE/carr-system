@@ -1,0 +1,4 @@
+{
+  "node": ["src/input-validation.ts"],
+  "worker": ["src/input-validation.ts"]
+}

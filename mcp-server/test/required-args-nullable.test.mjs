@@ -1,7 +1,7 @@
 // Test validation of nullable required arguments.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { assertRequiredArgs } from "../src/tools.js";
+import { assertRequiredArgs } from "../src/input-validation.ts";
 
 const schema = {
   type: "object",
