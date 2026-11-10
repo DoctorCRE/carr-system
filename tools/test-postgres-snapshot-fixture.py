@@ -145,14 +145,14 @@ class SnapshotIsolation(unittest.TestCase):
 
     def test_supervised_snapshot_connects_and_cleans_up_under_long_root(self):
         binaries = postgres_bin_dir()
-        with postgres_fixture_group(), tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, postgres_fixture_group(lock_path=Path(directory) / "budget") as lease:
             parent = Path(directory) / ('long-ci-root-' * 10)
             parent.mkdir()
             environment = {key: value for key, value in os.environ.items()
                            if key != 'CARR_CI_DATABASE_URL'}
             command = [sys.executable, '-u', str(ROOT / 'lib/disposable_pg_fixture.py'),
-                       '--supervise', '--snapshot', '--snapshot-baseline',
-                       '--directory', str(parent), '--prefix', 'snapshot-long-']
+                       '--protocol', 'carr-pg-admission/v2', '--supervise', '--snapshot', '--snapshot-baseline',
+                       '--directory', str(parent), '--prefix', 'snapshot-long-', '--reservation-ticket', lease.ticket]
             with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, env=environment) as process:
                 try:
@@ -176,7 +176,9 @@ class SnapshotIsolation(unittest.TestCase):
 
     def test_copies_have_independent_roles_memberships_grants_and_data(self):
         binaries = postgres_bin_dir()
-        with postgres_fixture_group(), tempfile.TemporaryDirectory(prefix='pg-', dir='/tmp') as sockets, \
+        budget = tempfile.TemporaryDirectory()
+        self.addCleanup(budget.cleanup)
+        with postgres_fixture_group(lock_path=Path(budget.name) / 'budget'), tempfile.TemporaryDirectory(prefix='pg-', dir='/tmp') as sockets, \
                 DisposablePostgres('snapshot-proof-', binaries / 'pg_ctl') as template:
             schema = template.root / 'seed.sql'
             schema.write_text('create role snapshot_reader; create role snapshot_group; '

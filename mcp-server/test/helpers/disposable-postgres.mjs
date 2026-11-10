@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 
+const protocol = 'carr-pg-admission/v2';
+const groups = [];
 const supervisors = new Set();
 const endSupervisors = () => { for (const child of supervisors) child.stdin.end(); };
 const interrupt = () => process.exit(130);
@@ -29,7 +31,7 @@ function unregister(child) {
 async function supervisor(args, response) {
   const frozenPython = fileURLToPath(new URL('../../../.venv/bin/python', import.meta.url));
   const python = process.env.CARR_CI_PYTHON || (existsSync(frozenPython) ? frozenPython : 'python3');
-  const child = spawn(python, ['-u', fileURLToPath(new URL('../../../lib/disposable_pg_fixture.py', import.meta.url)), ...args],
+  const child = spawn(python, ['-u', fileURLToPath(new URL('../../../lib/disposable_pg_fixture.py', import.meta.url)), '--protocol', protocol, ...args],
     { stdio: ['pipe', 'pipe', 'pipe'] });
   register(child);
   // An early supervisor failure can close stdin before teardown writes to it.
@@ -88,16 +90,26 @@ async function supervisor(args, response) {
 }
 
 // Use the same kernel-owned lease as Python proofs, across all worktrees.
-export async function acquirePostgresFixtureGroup() {
-  const lease = await supervisor([], line => {
-    if (line !== 'ready') throw new Error('invalid PostgreSQL fixture lease response');
+export async function acquirePostgresFixtureGroup({ demand = 2, timeout = 30 } = {}) {
+  const lease = await supervisor(['--demand', String(demand), '--admission-timeout', String(timeout)], line => {
+    const receipt = JSON.parse(line);
+    if (receipt.protocol !== protocol || receipt.state !== 'admitted' || !receipt.ticket)
+      throw new Error('invalid PostgreSQL fixture lease response');
+    return receipt;
   });
-  return lease.close;
+  groups.push(lease);
+  return async () => {
+    const index = groups.indexOf(lease);
+    if (index >= 0) groups.splice(index, 1);
+    await lease.close();
+  };
 }
 
 // The supervisor owns the cluster before initdb/start and survives abrupt Node exit.
 export async function acquireDisposablePostgres({ prefix, pgCtl, dataName = 'data', snapshot = false, template = false, baseline = false, sourceTemplate, service = false }) {
   const args = ['--supervise', '--prefix', prefix, '--data-name', dataName, '--directory', tmpdir()];
+  if (groups.length > 1) throw new Error('a fixture cannot choose between overlapping Node proof groups');
+  if (groups.length) args.push('--reservation-ticket', groups.at(-1).value.ticket);
   if (service) {
     if (!process.env.CARR_CI_DATABASE_URL) throw new Error('a provided CI service URL is required');
     args.push('--service-database');
