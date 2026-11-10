@@ -1,3 +1,4 @@
+-- rollback: forward-only; restore the prior page-count guard in a new migration if template 2.0.0 is retired.
 -- Packet template 2.0.0 has one overview followed by the ordered property sheets.
 create or replace function ops.record_tour_pdf_render_result(p_tenant text,p_render_job_id uuid,p_status text,p_artifact_ref text,p_artifact_digest text,p_storage_ref text,p_content_length integer,p_page_count integer,p_blocking_finding_count integer,p_qc_run_digest text,p_actor_id text)
 returns uuid language plpgsql security definer set search_path=pg_catalog,ops,public,pg_temp as $$
