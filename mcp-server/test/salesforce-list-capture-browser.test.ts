@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { createInterface } from "node:readline";
 import test from "node:test";
-import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
+import { findDisposableChromium } from "./helpers/chromium-binary.ts";
 
 function object(value: unknown): Record<string, unknown> {
   assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));

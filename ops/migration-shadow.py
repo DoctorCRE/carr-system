@@ -304,7 +304,8 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
             env, "create neondb_owner", log)
         run([bindir / "psql", dsn, "-v", "ON_ERROR_STOP=1", "-q", "-f", work / "base.sql"],
             {**env, "PGOPTIONS": "--client-min-messages=warning"}, f"load {base[:12]}:{SNAPSHOT}", log)
-        run([python, base_runner, "--apply", "--yes"], {**env, "DATABASE_URL": dsn},
+        run([python, base_runner, "--apply", "--yes", "--through",
+             sorted(p.name for p in (base_runner.parent.parent / "migrations").glob("*.sql"))[-1]], {**env, "DATABASE_URL": dsn},
             "base migrations before HEAD", log)
         run([python, REPO / "tools/migrate.py", "--apply", "--yes"], {**env, "DATABASE_URL": dsn},
             "tools/migrate.py --apply", log)

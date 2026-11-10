@@ -37,6 +37,7 @@ const reply = (body: unknown, status = 200) =>
 const chunkKeys = (id: string, entry: Entry) => Array.from({ length: entry.chunks || 0 }, (_, i) => `audio:${id}:${i}`);
 
 export class PhoneAudioHandoff {
+  declare __DURABLE_OBJECT_BRAND: never;
   private storage: Storage;
   constructor(ctx: { storage: Storage }) {
     this.storage = ctx.storage;

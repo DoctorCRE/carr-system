@@ -31,7 +31,7 @@ import {
   BUSINESS_ASSET_PATH, CLIENTS_ROUTE, VENDORS_ROUTE,
   createWorkspaceBusinessReader, isBusinessApiPath,
 } from "./workspace-business-read.js";
-import { isTourInternalRequest } from "./tour-internal-web.js";
+import { isTourInternalRequest } from "./tour-internal-web.ts";
 import { executeRegisteredTool } from "./tools.js";
 import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
 import { readDealWithJev } from "./jev-deal-reading.ts";
