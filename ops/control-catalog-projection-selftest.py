@@ -9,10 +9,11 @@ import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
+from contextlib import ExitStack
 from git_env import fixture_env
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / 'tools'))
+sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'lib')]
 spec = importlib.util.spec_from_file_location('catalog', ROOT / 'ops/sync_control_catalog.py')
 assert spec is not None and spec.loader is not None
 catalog = importlib.util.module_from_spec(spec)
@@ -113,87 +114,89 @@ class ProjectionDatabaseTests(unittest.TestCase):
                              (list(legacy) + ['unknown-probe'],))
                 conn.commit()
 
+    @classmethod
+    def setUpClass(cls):
+        from postgres_service_fixture import service_database
+        cls.fixtures = ExitStack()
+        cls.addClassCleanup(cls.fixtures.close)
+        cls.baseline = cls.fixtures.enter_context(service_database(
+            os.environ['CARR_LOCAL_PG_DSN'], 'mcp_snapshot',
+            ROOT / 'db/schema.sql', template=True))
+        predecessor = max(path.name for path in (ROOT / 'migrations').glob('*.sql')
+                          if path.name < '1171_')
+        result = subprocess.run(
+            [sys.executable, 'tools/migrate.py', '--apply', '--yes', '--through', predecessor],
+            cwd=ROOT, env={**os.environ, 'DATABASE_URL': cls.baseline['dsn']},
+            capture_output=True, text=True, timeout=180)
+        if result.returncode:
+            raise RuntimeError(result.stdout + result.stderr)
+
     def test_full_apply_preserves_bound_retired_controls_as_unavailable(self):
         self._assert_historical_controls_preserved(False)
 
     def test_full_apply_preserves_active_approval_receipts(self):
-        import psycopg
-        from psycopg.conninfo import conninfo_to_dict, make_conninfo
-        params = conninfo_to_dict(os.environ['CARR_LOCAL_PG_DSN'])
-        template = params['dbname']
-        admin = make_conninfo(**{**params, 'dbname': 'postgres'})
-        isolated = make_conninfo(**{**params, 'dbname': 'j775_approval'})
-        with psycopg.connect(admin, autocommit=True) as conn:
-            conn.execute(psycopg.sql.SQL('create database j775_approval template {}').format(psycopg.sql.Identifier(template)))
-            try:
-                self._assert_historical_controls_preserved(True, isolated)
-            finally:
-                conn.execute('drop database j775_approval with (force)')
+        self._assert_historical_controls_preserved(True)
 
-    def _assert_historical_controls_preserved(self, approval, dsn=None):
+    def _assert_historical_controls_preserved(self, approval):
         import psycopg
         from migration_baseline import MigrationBaseline, repository_ledger
-        dsn = dsn or os.environ['CARR_LOCAL_PG_DSN']
+        from postgres_service_fixture import service_database
         legacy = ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier')
-        with psycopg.connect(dsn) as conn:
-            try:
-                for key in legacy:
-                    conn.execute("insert into ops.enforcement_control_catalog "
-                        "(control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at) "
-                        "values (%s,'deleted.py','deleted-test.py','stop_gate',true,now()) "
-                        "on conflict (control_key) do update set installed=true,verified_at=now()", (key,))
-                actor = conn.execute("insert into actor(slug,kind,display_name) "
-                    "values ('j775-probe','automation','Synthetic probe') returning id").fetchone()[0]
-                if approval:
-                    conn.execute("set local session_replication_role=replica")
-                rule = conn.execute("insert into rule(statement,taught_by) "
-                    "values ('Synthetic historical binding',%s) returning id", (actor,)).fetchone()[0]
-                if approval:
-                    conn.execute("update rule set status='active',activated_by=%s where id=%s", (actor, rule))
-                    conn.execute("insert into ops.rule_pack(pack,title,description,triggers,source) "
-                        "values ('j775','Synthetic','Synthetic history',array['synthetic'],'fixture')")
-                    conn.execute("insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,source,map_digest) "
-                        "values (%s,'J775','pack',array['j775'],'shared','fixture',%s)", (rule, 'a'*64))
-                    conn.execute("set local session_replication_role=origin")
-                    conn.execute("insert into ops.rule_approval_receipt "
-                        "(idempotency_key,rule_id,rule_version,statement_hash,actor_id,policy_kind,"
-                        "enforcement_status,requested_control_keys,installed_control_keys,reason,"
-                        "normalized_contract,contract_hash,evidence_refs) "
-                        "values ('j775',%s,1,%s,%s,'machine_enforceable','hard_enforced',"
-                        "%s,%s,'Synthetic history','{}',encode(digest('{}','sha256'),'hex'),array['synthetic'])",
-                        (rule, 'a'*64, actor, list(legacy), list(legacy)))
-                for key in (() if approval else legacy):
-                    conn.execute("insert into ops.rule_control_binding "
-                        "(rule_id,control_key,statement_hash,binding_contract) "
-                        "values (%s,%s,%s,'{}')", (rule, key, 'a' * 64))
-                receipts = conn.execute("select * from ops.rule_approval_receipt where rule_id=%s", (rule,)).fetchall()
-                before = conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall()
-                conn.execute("delete from schema_migrations where filename='1171_retire_stale_deploy_controls.sql'")
-                conn.commit()
-                for attempt in range(2):
-                    result = subprocess.run([sys.executable, 'tools/migrate.py', '--apply', '--yes'],
-                        cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
-                        capture_output=True, text=True, timeout=180)
-                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    if attempt == 0:
-                        self.assertIn('discharged (precondition absent)', result.stdout)
-                    self.assertEqual(conn.execute("select * from ops.rule_approval_receipt where rule_id=%s", (rule,)).fetchall(), receipts)
-                    self.assertEqual(conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall(), before)
-                    self.assertEqual(conn.execute("select control_key,installed,verified_at from ops.enforcement_control_catalog where control_key=any(%s) order by control_key", (list(legacy),)).fetchall(), [(k, False, None) for k in legacy])
-                    self.assertEqual(dict(conn.execute("select filename,sha256 from schema_migrations").fetchall()), repository_ledger(ROOT, MigrationBaseline.load(ROOT)))
-                    conn.commit()
-                result = subprocess.run([sys.executable, 'ops/control-catalog-parity-gate.py'], cwd=ROOT,
-                    env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True)
+        with service_database(os.environ['CARR_LOCAL_PG_DSN'], 'catalog_history',
+                              source=self.baseline['snapshot']) as fixture, \
+                psycopg.connect(fixture['dsn']) as conn:
+            dsn = fixture['dsn']
+            self.assertIsNone(conn.execute(
+                "select 1 from schema_migrations where filename='1171_retire_stale_deploy_controls.sql'"
+            ).fetchone())
+            conn.commit()
+            for key in legacy:
+                conn.execute("insert into ops.enforcement_control_catalog "
+                    "(control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at) "
+                    "values (%s,'deleted.py','deleted-test.py','stop_gate',true,now()) "
+                    "on conflict (control_key) do update set installed=true,verified_at=now()", (key,))
+            actor = conn.execute("insert into actor(slug,kind,display_name) "
+                "values ('j775-probe','automation','Synthetic probe') returning id").fetchone()[0]
+            if approval:
+                conn.execute("set local session_replication_role=replica")
+            rule = conn.execute("insert into rule(statement,taught_by) "
+                "values ('Synthetic historical binding',%s) returning id", (actor,)).fetchone()[0]
+            if approval:
+                conn.execute("update rule set status='active',activated_by=%s where id=%s", (actor, rule))
+                conn.execute("insert into ops.rule_pack(pack,title,description,triggers,source) "
+                    "values ('j775','Synthetic','Synthetic history',array['synthetic'],'fixture')")
+                conn.execute("insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,source,map_digest) "
+                    "values (%s,'J775','pack',array['j775'],'shared','fixture',%s)", (rule, 'a'*64))
+                conn.execute("set local session_replication_role=origin")
+                conn.execute("insert into ops.rule_approval_receipt "
+                    "(idempotency_key,rule_id,rule_version,statement_hash,actor_id,policy_kind,"
+                    "enforcement_status,requested_control_keys,installed_control_keys,reason,"
+                    "normalized_contract,contract_hash,evidence_refs) "
+                    "values ('j775',%s,1,%s,%s,'machine_enforceable','hard_enforced',"
+                    "%s,%s,'Synthetic history','{}',encode(digest('{}','sha256'),'hex'),array['synthetic'])",
+                    (rule, 'a'*64, actor, list(legacy), list(legacy)))
+            for key in (() if approval else legacy):
+                conn.execute("insert into ops.rule_control_binding "
+                    "(rule_id,control_key,statement_hash,binding_contract) "
+                    "values (%s,%s,%s,'{}')", (rule, key, 'a' * 64))
+            receipts = conn.execute("select * from ops.rule_approval_receipt where rule_id=%s", (rule,)).fetchall()
+            before = conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall()
+            conn.commit()
+            for attempt in range(2):
+                result = subprocess.run([sys.executable, 'tools/migrate.py', '--apply', '--yes'],
+                    cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
+                    capture_output=True, text=True, timeout=180)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            finally:
-                conn.rollback()
-                if not approval and 'rule' in locals():
-                    conn.execute("delete from ops.rule_control_binding where rule_id=%s", (rule,))
-                    conn.execute("delete from ops.rule_load_layer where rule_id=%s", (rule,))
-                    conn.execute("delete from ops.rule_pack where pack='j775'")
-                    conn.execute("delete from rule where id=%s", (rule,))
-                    conn.execute("delete from actor where id=%s", (actor,))
+                if attempt == 0:
+                    self.assertIn('discharged (precondition absent)', result.stdout)
+                self.assertEqual(conn.execute("select * from ops.rule_approval_receipt where rule_id=%s", (rule,)).fetchall(), receipts)
+                self.assertEqual(conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall(), before)
+                self.assertEqual(conn.execute("select control_key,installed,verified_at from ops.enforcement_control_catalog where control_key=any(%s) order by control_key", (list(legacy),)).fetchall(), [(k, False, None) for k in legacy])
+                self.assertEqual(dict(conn.execute("select filename,sha256 from schema_migrations").fetchall()), repository_ledger(ROOT, MigrationBaseline.load(ROOT)))
                 conn.commit()
+            result = subprocess.run([sys.executable, 'ops/control-catalog-parity-gate.py'], cwd=ROOT,
+                env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_retirement_refuses_bound_control_atomically(self):
         import psycopg
