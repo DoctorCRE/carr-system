@@ -399,7 +399,7 @@ class ConversionProof(unittest.TestCase):
         self.health = json.loads((self.fixtures / 'health.json').read_text())
         self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
         self.merge = self.commit['oid']
-        self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.workflow = (self.fixtures / 'workflow.yml').read_text()
         self.commands = []
 
     def run_proof(self, ancestry=0, timeout=2, cli=False):
@@ -427,6 +427,32 @@ class ConversionProof(unittest.TestCase):
                                                 '--pr', '3114', '--timeout', str(timeout)]):
                     return evidence.main()
             return evidence.prove_conversion(pr=3114, timeout=timeout)
+
+    def test_bundled_coverage_requires_the_strict_aggregate_and_every_full_job(self):
+        self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
+        jobs = suite['checkRuns']['nodes']
+        jobs[:] = [job for job in jobs if job['name'] != 'unit-coverage']
+        short = next(job for job in jobs if job['name'] ==
+                     'ops/ci.sh --strict --only lint pushfloor types secret binding artifact')
+        short['name'] += ' hxprobe dependency'
+        self.assertEqual(self.run_proof(), 0)
+        original = copy.deepcopy(jobs)
+        required = {'ops/ci.sh --strict', 'unit / plan', 'launchd-python39',
+                    'Gates selftests shard 2 of 2',
+                    *('ops/ci.sh --strict --only ' + group
+                      for group in evidence.workflow_groups(self.workflow)),
+                    *(f'unit / MCP unit shard {n} of 8' for n in range(1, 9))}
+        for name in sorted(required):
+            for state in ('missing', 'FAILURE', 'CANCELLED', 'SKIPPED'):
+                suite['checkRuns']['nodes'] = copy.deepcopy(original)
+                current = suite['checkRuns']['nodes']
+                if state == 'missing':
+                    current[:] = [job for job in current if job['name'] != name]
+                else:
+                    next(job for job in current if job['name'] == name)['conclusion'] = state
+                with self.subTest(name=name, state=state):
+                    self.assertEqual(self.run_proof(), 78 if state == 'missing' else 1)
 
     def test_recorded_equal_and_descendant_release(self):
         self.assertEqual(self.run_proof(), 0)
