@@ -97,7 +97,9 @@ of Market Deal Type and State of Transaction. The original grouped report is unt
 one Joe reads by eye.
 
 **2. Capture the rows. Do NOT hand-roll this.** Paste
-`~/carr-system/pipelines/capture-salesforce-report.js` into the javascript tool. It runs the whole
+the stripped JavaScript into the javascript tool. Generate it locally with
+`node --input-type=module -e 'import {readFileSync} from "node:fs"; import {stripTypeScriptTypes} from "node:module"; process.stdout.write(stripTypeScriptTypes(readFileSync(process.argv[1], "utf8")))' ~/carr-system/pipelines/capture-salesforce-report.ts`.
+Paste that command's output, since browsers cannot execute TypeScript. It runs the whole
 scroll-and-accumulate pass unattended in about 90 seconds for 40 deals. Then:
 
 ```
