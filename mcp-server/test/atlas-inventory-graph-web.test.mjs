@@ -31,7 +31,7 @@ const PAYLOAD = {
     layer: "declared", status: "write", retired_at: null,
     source_ref: "mcp-server/src/tools.js", evidence: "declared", unlinked: false }],
   edges: [{ from: "verb:add-loop", to: "mutation:add-loop", type: "mutates_through",
-    evidence: "declared", source_ref: "mcp-server/src/mutation-registry.js", observed_at: null }],
+    evidence: "declared", source_ref: "mcp-server/src/mutation-registry.ts", observed_at: null }],
   index: { declared: { verb: ["verb:add-loop"] } },
   coverage: [{ source_ref: "ops.service", evidence_class: "installed", node_count: 3,
     edge_count: 0, complete: true, missing_reason: null }],

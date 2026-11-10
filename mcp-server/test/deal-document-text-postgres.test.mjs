@@ -1,6 +1,6 @@
 import test from 'node:test';
 import { callTool } from '../src/mcp.js';
-import { neonConfig } from '../src/postgres.js';
+import { neonConfig } from '../src/postgres.ts';
 import { execFileSync } from 'node:child_process';
 import { unattendedActorForToken } from '../src/identity.js';
 import { createHash } from 'node:crypto';

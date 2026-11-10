@@ -167,10 +167,10 @@ check("a Stop-only class-d rule with a written no_trigger_reason passes",
 with tempfile.TemporaryDirectory() as tmp:
     src = Path(tmp) / 'mcp-server/src'
     src.mkdir(parents=True)
-    (src / 'mutation-registry.js').write_text('export {SCAC_MUTATION_OPERATIONS} from "./scac-mutation-registry.current.generated.ts";\n')
+    (src / 'mutation-registry.ts').write_text('export {SCAC_MUTATION_OPERATIONS} from "./scac-mutation-registry.current.generated.ts";\n')
     (src / 'scac-mutation-registry.current.generated.ts').write_text('{ingress_key: "mcp-tool:example"}\n')
     check("verb reader follows the current projection", routes_lib.known_verbs(Path(tmp)) == {'example'})
-    (src / 'mutation-registry.js').write_text('export {SCAC_MUTATION_OPERATIONS} from "./scac-mutation-registry.v27.generated.js";\n')
+    (src / 'mutation-registry.ts').write_text('export {SCAC_MUTATION_OPERATIONS} from "./scac-mutation-registry.v27.generated.js";\n')
     (src / 'scac-mutation-registry.v27.generated.js').write_text('{"ingress_key":"mcp-tool:legacy-example"}\n')
     check("verb reader retains quoted legacy fixture support", routes_lib.known_verbs(Path(tmp)) == {'legacy-example'})
 

@@ -8,6 +8,22 @@
 
 import { APP_STAGING_HOST, CARR_STAGING_HOST, isStagingBrowserEnvironment } from "./staging-browser.ts";
 
+type ReportsEnv = NonNullable<Parameters<typeof isStagingBrowserEnvironment>[0]> & {
+  ASSETS?: { fetch(request: Request): Promise<Response> };
+};
+type DependencyInput = { env: ReportsEnv | undefined; ctx?: unknown } & Record<string, unknown>;
+type Dependency = (input: DependencyInput) => Promise<unknown>;
+type Dependencies = {
+  now: () => number;
+  exchangeShareTokenFn?: Dependency;
+  readShareFn?: Dependency;
+  readMapFn?: Dependency;
+  readFeedbackFn?: Dependency;
+  shortlistFn?: Dependency;
+  commentFn?: Dependency;
+};
+type ReadDependency = "readShareFn" | "readMapFn" | "readFeedbackFn";
+
 export const REPORTS_ORIGIN = "https://reports.doctorcre.com";
 
 const SESSION_COOKIE = "__Host-tour_share_session";
@@ -47,24 +63,28 @@ const REPORTS_CSP = [
   "manifest-src 'none'",
 ].join("; ");
 
-function json(body, status = 200, additions = {}) {
+function json(body: unknown, status = 200, additions: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...additions },
   });
 }
 
-function reportsOrigin(request, env) {
+function reportsOrigin(request: Request, env?: ReportsEnv) {
   try {
     const origin = new URL(request.url).origin;
     if (origin === REPORTS_ORIGIN) return origin;
-    if (isStagingBrowserEnvironment(env) && (origin === `https://${CARR_STAGING_HOST}` ||
-      env.DOCTORCRE_APP_HOST === APP_STAGING_HOST && origin === `https://${APP_STAGING_HOST}`)) return origin;
+    if (
+      isStagingBrowserEnvironment(env) &&
+      (origin === `https://${CARR_STAGING_HOST}` ||
+        (env?.DOCTORCRE_APP_HOST === APP_STAGING_HOST && origin === `https://${APP_STAGING_HOST}`))
+    )
+      return origin;
   } catch {}
   return null;
 }
 
-function cookieValue(request, name) {
+function cookieValue(request: Request, name: string) {
   const header = request.headers.get("cookie") || "";
   for (const part of header.split(";")) {
     const index = part.indexOf("=");
@@ -73,16 +93,21 @@ function cookieValue(request, name) {
   return null;
 }
 
-function sessionCookie(session) {
+function sessionCookie(session: string) {
   return `${SESSION_COOKIE}=${session}; Path=/; Secure; HttpOnly; SameSite=Lax`;
 }
 
-async function sha256Digest(value) {
-  const bytes = typeof value === "string" ? new TextEncoder().encode(value)
-    : value instanceof ArrayBuffer ? new Uint8Array(value)
-      : ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : null;
+async function sha256Digest(value: unknown) {
+  const bytes =
+    typeof value === "string"
+      ? new TextEncoder().encode(value)
+      : value instanceof ArrayBuffer
+        ? new Uint8Array(value)
+        : ArrayBuffer.isView(value)
+          ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+          : null;
   if (!bytes) throw new TypeError("SHA-256 input must be text or bytes");
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes)));
   return `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
@@ -94,11 +119,14 @@ function newSessionToken() {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-function sameOriginPost(request, env) {
-  return request.headers.get("origin") === reportsOrigin(request, env) && request.headers.get("sec-fetch-site") === "same-origin";
+function sameOriginPost(request: Request, env: ReportsEnv | undefined) {
+  return (
+    request.headers.get("origin") === reportsOrigin(request, env) &&
+    request.headers.get("sec-fetch-site") === "same-origin"
+  );
 }
 
-function isJsonContentType(value) {
+function isJsonContentType(value: string | null) {
   return /^application\/json(?:\s*;|$)/i.test(value || "");
 }
 
@@ -106,40 +134,65 @@ const SHARE_BEARER = /^[A-Za-z0-9_-]{43}$/;
 const PUBLIC_REF = /^(?:property|projection):public:[A-Za-z0-9_-]{16,128}$/;
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function isPlainRecord(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
 }
 
-async function jsonBody(request) {
-  if (!isJsonContentType(request.headers.get("content-type"))) return { error: json({ error: "unsupported_media_type" }, 415) };
+async function jsonBody(
+  request: Request,
+): Promise<{ value: Record<string, unknown>; error?: never } | { error: Response; value?: never }> {
+  if (!isJsonContentType(request.headers.get("content-type")))
+    return { error: json({ error: "unsupported_media_type" }, 415) };
   const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && (declaredLength < 0 || declaredLength > MAX_BODY_BYTES)) return { error: json({ error: "payload_too_large" }, 413) };
+  if (Number.isFinite(declaredLength) && (declaredLength < 0 || declaredLength > MAX_BODY_BYTES))
+    return { error: json({ error: "payload_too_large" }, 413) };
   const raw = await request.clone().text();
-  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) return { error: json({ error: "payload_too_large" }, 413) };
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES)
+    return { error: json({ error: "payload_too_large" }, 413) };
   try {
-    const value = JSON.parse(raw);
+    const value: unknown = JSON.parse(raw);
     return isPlainRecord(value) ? { value } : { error: json({ error: "invalid_request" }, 400) };
   } catch {
     return { error: json({ error: "invalid_json" }, 400) };
   }
 }
 
-function methodNotAllowed(allow) {
+function methodNotAllowed(allow: string) {
   return json({ error: "method_not_allowed" }, 405, { allow });
 }
 
-function dependencyFailure(result) {
-  const status = result?.status === 401 || result?.status === 403 || result?.status === 404 ? result.status : 503;
-  return json({ error: status === 401 ? "unauthorized" : status === 403 ? "forbidden" : status === 404 ? "not_found" : "share_unavailable" }, status);
+function dependencyFailure(result: unknown) {
+  const status =
+    isPlainRecord(result) && (result.status === 401 || result.status === 403 || result.status === 404)
+      ? result.status
+      : 503;
+  return json(
+    {
+      error:
+        status === 401
+          ? "unauthorized"
+          : status === 403
+            ? "forbidden"
+            : status === 404
+              ? "not_found"
+              : "share_unavailable",
+    },
+    status,
+  );
 }
 
-function publicResponse(result) {
+function publicResponse(result: Record<string, unknown>) {
   // Dependencies return the already-redacted projection only in `data`; the
   // session and the original share bearer are never a response shape here.
   return json({ data: result.data });
 }
 
-async function staticAsset(env, request, pathname) {
+async function staticAsset(env: ReportsEnv | undefined, request: Request, pathname: string) {
   if (!env?.ASSETS?.fetch) return json({ error: "not_found" }, 404);
   const url = new URL(request.url);
   url.pathname = pathname;
@@ -155,11 +208,15 @@ async function staticAsset(env, request, pathname) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-async function exchange(request, env, ctx, dependencies) {
+async function exchange(request: Request, env: ReportsEnv | undefined, ctx: unknown, dependencies: Dependencies) {
   if (!sameOriginPost(request, env)) return json({ error: "forbidden" }, 403);
   const body = await jsonBody(request);
   if (body.error) return body.error;
-  if (Object.keys(body.value).length !== 1 || typeof body.value.token !== "string" || !SHARE_BEARER.test(body.value.token)) {
+  if (
+    Object.keys(body.value).length !== 1 ||
+    typeof body.value.token !== "string" ||
+    !SHARE_BEARER.test(body.value.token)
+  ) {
     return json({ error: "invalid_share" }, 400);
   }
   if (typeof dependencies.exchangeShareTokenFn !== "function") return json({ error: "not_found" }, 404);
@@ -169,28 +226,56 @@ async function exchange(request, env, ctx, dependencies) {
   const now = Number(dependencies.now());
   const sessionExpiresAt = new Date((Number.isFinite(now) ? now : Date.now()) + SESSION_TTL_MS).toISOString();
   const auditDigest = await sha256Digest(`tour-share-exchange\n${tokenDigest}\n${sessionDigest}\n${sessionExpiresAt}`);
-  let result;
+  let result: unknown;
   try {
-    result = await dependencies.exchangeShareTokenFn({ env, ...(ctx ? { ctx } : {}), tokenDigest, sessionDigest, sessionExpiresAt, auditDigest });
-  } catch { return json({ error: "share_unavailable" }, 503); }
-  if (!result?.ok) return dependencyFailure(result);
+    result = await dependencies.exchangeShareTokenFn({
+      env,
+      ...(ctx ? { ctx } : {}),
+      tokenDigest,
+      sessionDigest,
+      sessionExpiresAt,
+      auditDigest,
+    });
+  } catch {
+    return json({ error: "share_unavailable" }, 503);
+  }
+  if (!isPlainRecord(result) || !result.ok) return dependencyFailure(result);
   // Deliberately acknowledge only the exchange.  Never return or log the
   // bearer, session, grant, or the dependency's internal result.
   return json({ ok: true }, 200, { "set-cookie": sessionCookie(session) });
 }
 
-async function read(request, env, ctx, dependencies, dependencyName) {
+async function read(
+  request: Request,
+  env: ReportsEnv | undefined,
+  ctx: unknown,
+  dependencies: Dependencies,
+  dependencyName: ReadDependency,
+) {
   const session = cookieValue(request, SESSION_COOKIE);
   if (!session) return json({ error: "unauthorized" }, 401);
   if (typeof dependencies[dependencyName] !== "function") return json({ error: "not_found" }, 404);
-  let result;
-  try { result = await dependencies[dependencyName]({ env, ...(ctx ? { ctx } : {}), sessionDigest: await sha256Digest(session) }); }
-  catch { return json({ error: "share_unavailable" }, 503); }
-  if (!result?.ok || !isPlainRecord(result.data)) return dependencyFailure(result);
+  let result: unknown;
+  try {
+    result = await dependencies[dependencyName]({
+      env,
+      ...(ctx ? { ctx } : {}),
+      sessionDigest: await sha256Digest(session),
+    });
+  } catch {
+    return json({ error: "share_unavailable" }, 503);
+  }
+  if (!isPlainRecord(result) || !result.ok || !isPlainRecord(result.data)) return dependencyFailure(result);
   return publicResponse(result);
 }
 
-async function writeFeedback(request, env, ctx, dependencies, pathname) {
+async function writeFeedback(
+  request: Request,
+  env: ReportsEnv | undefined,
+  ctx: unknown,
+  dependencies: Dependencies,
+  pathname: string,
+) {
   if (!sameOriginPost(request, env)) return json({ error: "forbidden" }, 403);
   const session = cookieValue(request, SESSION_COOKIE);
   if (!session) return json({ error: "unauthorized" }, 401);
@@ -198,25 +283,46 @@ async function writeFeedback(request, env, ctx, dependencies, pathname) {
   if (parsed.error) return parsed.error;
   const value = parsed.value;
   const kind = pathname === "/api/share/shortlist" ? "shortlist" : "comment";
-  const expected = kind === "shortlist" ? ["projection_ref", "property_ref", "shortlisted", "idempotency_key"] : ["projection_ref", "property_ref", "comment", "idempotency_key"];
-  if (Object.keys(value).sort().join(",") !== expected.sort().join(",") ||
-      !PUBLIC_REF.test(value.projection_ref) || !value.projection_ref.startsWith("projection:public:") ||
-      !PUBLIC_REF.test(value.property_ref) || !value.property_ref.startsWith("property:public:") ||
-      !REQUEST_ID.test(value.idempotency_key) ||
-      (kind === "shortlist" ? typeof value.shortlisted !== "boolean" :
-        typeof value.comment !== "string" || !value.comment.trim() || value.comment.length > 1000 || /[\u0000-\u001f\u007f]/.test(value.comment)))
+  const expected =
+    kind === "shortlist"
+      ? ["projection_ref", "property_ref", "shortlisted", "idempotency_key"]
+      : ["projection_ref", "property_ref", "comment", "idempotency_key"];
+  if (
+    Object.keys(value).sort().join(",") !== expected.sort().join(",") ||
+    typeof value.projection_ref !== "string" ||
+    !PUBLIC_REF.test(value.projection_ref) ||
+    !value.projection_ref.startsWith("projection:public:") ||
+    typeof value.property_ref !== "string" ||
+    !PUBLIC_REF.test(value.property_ref) ||
+    !value.property_ref.startsWith("property:public:") ||
+    typeof value.idempotency_key !== "string" ||
+    !REQUEST_ID.test(value.idempotency_key) ||
+    (kind === "shortlist"
+      ? typeof value.shortlisted !== "boolean"
+      : typeof value.comment !== "string" ||
+        !value.comment.trim() ||
+        value.comment.length > 1000 ||
+        Array.from(value.comment).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))
+  )
     return json({ error: "invalid_request" }, 400);
   const dependencyName = kind === "shortlist" ? "shortlistFn" : "commentFn";
   if (typeof dependencies[dependencyName] !== "function") return json({ error: "not_found" }, 404);
-  let result;
+  let result: unknown;
   try {
-    result = await dependencies[dependencyName]({ env, ...(ctx ? { ctx } : {}), sessionDigest: await sha256Digest(session), ...value });
-  } catch { return json({ error: "share_unavailable" }, 503); }
-  if (!result?.ok || !isPlainRecord(result.data)) return dependencyFailure(result);
+    result = await dependencies[dependencyName]({
+      env,
+      ...(ctx ? { ctx } : {}),
+      sessionDigest: await sha256Digest(session),
+      ...value,
+    });
+  } catch {
+    return json({ error: "share_unavailable" }, 503);
+  }
+  if (!isPlainRecord(result) || !result.ok || !isPlainRecord(result.data)) return dependencyFailure(result);
   return publicResponse(result);
 }
 
-function withSecurityHeaders(response) {
+function withSecurityHeaders(response: Response) {
   const headers = new Headers(response.headers);
   // An injected asset implementation must not accidentally widen this public
   // surface. No CORS is emitted, including on errors and method refusals.
@@ -233,7 +339,7 @@ function withSecurityHeaders(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-async function handleRequest(request, env, ctx, dependencies) {
+async function handleRequest(request: Request, env: ReportsEnv | undefined, ctx: unknown, dependencies: Dependencies) {
   if (!reportsOrigin(request, env)) return json({ error: "not_found" }, 404);
   const pathname = new URL(request.url).pathname;
   const asset = STATIC_ASSETS.get(pathname);
@@ -242,23 +348,33 @@ async function handleRequest(request, env, ctx, dependencies) {
   if (!method) return json({ error: "not_found" }, 404);
   if (request.method !== method) return methodNotAllowed(method);
   if (pathname === "/api/share/exchange") return exchange(request, env, ctx, dependencies);
-  if (pathname === "/api/share/shortlist" || pathname === "/api/share/comment") return writeFeedback(request, env, ctx, dependencies, pathname);
-  return read(request, env, ctx, dependencies, pathname === "/api/share/map" ? "readMapFn" : pathname === "/api/share/feedback" ? "readFeedbackFn" : "readShareFn");
+  if (pathname === "/api/share/shortlist" || pathname === "/api/share/comment")
+    return writeFeedback(request, env, ctx, dependencies, pathname);
+  return read(
+    request,
+    env,
+    ctx,
+    dependencies,
+    pathname === "/api/share/map" ? "readMapFn" : pathname === "/api/share/feedback" ? "readFeedbackFn" : "readShareFn",
+  );
 }
 
 /** Injectable seams keep this browser gate independent from Worker, DB, and MCP wiring. */
-export function createReportsWebHandler(overrides = {}) {
+export function createReportsWebHandler(overrides: Partial<Dependencies> = {}) {
   const dependencies = { now: () => Date.now(), ...overrides };
-  return { fetch: async (request, env, ctx) => withSecurityHeaders(await handleRequest(request, env, ctx, dependencies)) };
+  return {
+    fetch: async (request: Request, env?: ReportsEnv, ctx?: unknown) =>
+      withSecurityHeaders(await handleRequest(request, env, ctx, dependencies)),
+  };
 }
 
-export function isReportsRequest(request, env) {
+export function isReportsRequest(request: Request, env?: ReportsEnv) {
   if (!reportsOrigin(request, env)) return false;
   const pathname = new URL(request.url).pathname;
   return STATIC_ASSETS.has(pathname) || API_METHODS.has(pathname);
 }
 
-export function isReportsHostRequest(request, env) {
+export function isReportsHostRequest(request: Request, env?: ReportsEnv) {
   const origin = reportsOrigin(request, env);
-  return origin === REPORTS_ORIGIN || origin !== null && isReportsRequest(request, env);
+  return origin === REPORTS_ORIGIN || (origin !== null && isReportsRequest(request, env));
 }

@@ -175,7 +175,7 @@ function fakeReaderClientEnv({ readerRows = [] } = {}) {
 }
 
 test("callTool read branch: never throws when DATABASE_URL_WRITER is absent, and the read itself still succeeds normally", async t => {
-  const { neonConfig } = await import('../src/postgres.js');
+  const { neonConfig } = await import('../src/postgres.ts');
   const previous = neonConfig.fetchFunction;
   t.after(() => { neonConfig.fetchFunction = previous; });
   neonConfig.fetchFunction = async (_url, options) => {

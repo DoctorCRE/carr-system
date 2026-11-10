@@ -111,7 +111,7 @@ class RegistryMergeTests(unittest.TestCase):
         result = self.command('node', '--input-type=module', '-e', '''
 import assert from 'node:assert/strict';
 import {TOOLS} from './mcp-server/src/tools.js';
-import {assertRegisteredOperation} from './mcp-server/src/mutation-registry.js';
+import {assertRegisteredOperation} from './mcp-server/src/mutation-registry.ts';
 import {SCAC_MUTATION_OPERATIONS as operations} from './mcp-server/src/scac-mutation-registry.current.generated.ts';
 for (const name of ['aaa-wr622-a', 'zzz-wr622-b']) {
   assert.ok(TOOLS[name]); assert.ok(operations[name]);

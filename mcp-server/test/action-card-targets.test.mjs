@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
-import { registeredOperation } from '../src/mutation-registry.js';
+import { registeredOperation } from '../src/mutation-registry.ts';
 import { buildActionCardRef } from '../src/action-card-targets.ts';
 import { readFile } from 'node:fs/promises';
 test('exact-card v2 is registered separately from v1', () => {
