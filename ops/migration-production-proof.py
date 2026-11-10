@@ -236,7 +236,9 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                 with conn.cursor() as cursor:
                     cursor.executemany('insert into schema_migrations(filename, sha256) values (%s,%s)',
                                        sorted(production_ledger.items()))
-            checked([sys.executable, repo / 'tools/migrate.py', '--apply', '--yes'],
+            through = max([*production_ledger,
+                           *(path.name for path in (repo / 'migrations').glob('*.sql'))])
+            checked([sys.executable, repo / 'tools/migrate.py', '--apply', '--yes', '--through', through],
                     dict(env, DATABASE_URL=make_conninfo(
                         dsn, user=(grants or {}).get('migration_role', 'carr_ci'))),
                     'apply pending migrations to disposable production schema')

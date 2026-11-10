@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Production handlers and real competing transactions, synthetic loopback DB only.
 import test from 'node:test';
 import assert from 'node:assert/strict';

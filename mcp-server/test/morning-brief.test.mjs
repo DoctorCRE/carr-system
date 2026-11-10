@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // morning-brief.test.mjs — safe record-native morning delivery.
 //
 // This is deliberately a fake-client suite.  It proves the handler's source

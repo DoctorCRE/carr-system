@@ -2,15 +2,13 @@
 from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
-from urllib.parse import urlsplit
 
 MARKER = json.loads((Path(__file__).resolve().parents[1] / 'lib/release-reader-marker.json').read_text())
 
 
 class ReleaseFixtureHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if (urlsplit(self.path).path == '/release'
-                and self.headers.get_all(MARKER['header']) != [MARKER['value']]):
+        if self.headers.get_all(MARKER['header']) != [MARKER['value']]:
             self.send_response(403)
             self.end_headers()
             self.wfile.write(MARKER['refusal'].encode())

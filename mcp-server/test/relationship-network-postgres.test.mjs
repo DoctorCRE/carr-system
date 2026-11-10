@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Tests relationship network concurrency and attribution on PostgreSQL.
 import test from 'node:test';

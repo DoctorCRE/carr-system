@@ -1,0 +1,11 @@
+{
+  "node": [
+    "generate-worker-types.ts"
+  ],
+  "worker": [
+    "src/oauth-consent-state.ts"
+  ],
+  "entry": [
+    "generate-worker-types.ts"
+  ]
+}
