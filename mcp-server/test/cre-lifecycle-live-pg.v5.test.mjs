@@ -3,7 +3,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
-import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 import { readMigration } from "./migration-source.testhelper.mjs";
 
 import { digest } from "../src/artifact-trust.js";

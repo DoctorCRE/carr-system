@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000113 — the R03 notification acceptance proofs.
 //
 // EVERY MINT CASE RUNS THROUGH record-signal, not through SQL. The mint has ONE
@@ -627,7 +627,7 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
   const { join } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { spawn, execFileSync } = await import('node:child_process');
-  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { createServer } = await import('./helpers/proof-release-fixture.ts');
   const root = await mkdtemp(join(tmpdir(), 'notification-proof-contract-'));
   const repo = fileURLToPath(new URL('../../', import.meta.url));
   let server;
@@ -726,7 +726,7 @@ print(json.dumps(value['feed' if sys.argv[2] == 'notification-feed' else 'prefer
 
 
 test('proof release fixture refuses unmarked reads and admits the Python reader', async () => {
-  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { createServer } = await import('./helpers/proof-release-fixture.ts');
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const { fileURLToPath } = await import('node:url');
