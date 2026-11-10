@@ -268,6 +268,19 @@ class ShardCoverage(unittest.TestCase):
             result = subprocess.run(command, text=True, capture_output=True, check=True)
             self.assertEqual(sorted(file for shard in json.loads(result.stdout) for file in shard), sorted([*records, 'new.test.mjs']))
             self.assertEqual((root / 'mcp-server/suite-inventory.json').read_bytes(), original_floor)
+            self.assertNotIn('new.test.mjs', json.loads(timing_file.read_text())['suites'])
+            automatic = planner.plan(root)
+            self.assertEqual(sorted(file for shard in automatic for file in shard),
+                             sorted([*records, 'new.test.mjs']))
+            receipts = []
+            for index, suites in enumerate(automatic, 1):
+                receipt = root / f'receipt-{index}.json'
+                receipt.write_text(json.dumps({'shard': index, 'suites': suites}))
+                receipts.append(str(receipt))
+            verified = subprocess.run([sys.executable, str(ROOT / 'ops/ci_unit_shards.py'),
+                                       '--root', str(root), 'verify', *receipts],
+                                      text=True, capture_output=True)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
             log = root / 'incomplete.log'
             log.write_text('suite-timing: 0.test.mjs 90ms\n')
             result = subprocess.run([sys.executable, str(ROOT / 'ops/ci_unit_shards.py'), '--root', str(root),
