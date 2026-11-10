@@ -1,0 +1,21 @@
+{
+  "node": [
+    "test/retired-markdown-guidance.test.ts",
+    "test/rule-boot-digest.test.ts",
+    "test/rule-boot.test.ts",
+    "test/rule-delivery-layers.test.ts",
+    "test/rule-scope-catalog.test.ts",
+    "test/rule-scope.test.ts",
+    "test/salesforce-deal-sync-read.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/retired-markdown-guidance.test.ts",
+    "test/rule-boot-digest.test.ts",
+    "test/rule-boot.test.ts",
+    "test/rule-delivery-layers.test.ts",
+    "test/rule-scope-catalog.test.ts",
+    "test/rule-scope.test.ts",
+    "test/salesforce-deal-sync-read.test.ts"
+  ]
+}

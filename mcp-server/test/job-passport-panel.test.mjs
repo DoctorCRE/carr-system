@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 import crypto from "node:crypto";
-import { deriveJobPassports, jobPassportStatusLabel, parseJobPassportReceipt } from "../../dealroom/js/job-passport.js";
+import { deriveJobPassports, jobPassportStatusLabel, parseJobPassportReceipt } from "../../dealroom/js/job-passport.ts";
 import { activationReliabilityWire } from "../src/evidence-activation.js";
 import { requirePlan } from "../src/engineering-runtime.js";
 

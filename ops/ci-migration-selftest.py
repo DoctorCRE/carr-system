@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "ops"))
 from git_env import fixture_env
 
 PROOFS = [
-    "mcp-server/test/tour-deal-access.test.mjs",
+    "mcp-server/test/tour-deal-access.test.ts",
     "mcp-server/test/assurance-health-store-postgres.sql",
     "mcp-server/test/catch-me-up-writer-route.test.mjs",
     "mcp-server/test/codex-continuity-postgres.sql",
@@ -266,11 +266,11 @@ BASELINES = {
     "equivalence": "b09903454648438b634b50e5d500f37151daa0f3a0a01d6f94f9aa485d00e29f",
     "shadow": "e152e1e9ff1e9f217bb289391326d3608a9a6296a39fc1c68c1177b79a3f3971",
     "fixtures": "cc6996dc077062e8bc3edcf3fb613c556c140d75eef7d27a61c90845678249e8",
-    "proofs": "1964777b528287ca467ce306ae3693c12dbb31dae9ad47fda83342f7e7f13ecd",
+    "proofs": "7c222316b63eb12a96ca6b8f2ff6e8b41e0299ce54331fbb080924c58be7c80b",
     "gates": "b56db7dc88a6190a2817d79c4c07e0fac9ca964a615adefb9346f1e6c749665e",
     "acceptance": "f1f0bc65eb63af0eb97d47de87885c239df12bd7c35d6f6edec4ba76c9044cf0",
-    "core": "25d57447587bea40616fb5c7a930eab089bbad16bc1d7c6c3a92ef1a0abe889c",
-    "all": "3ef6a63237105fa1a8d775752330d653aea013c6ef12a1133763b87465b771d0",
+    "core": "872730cafe3c4bf1b1595bb0633cea28a89dc5afafc8ac3143d63be381b744b8",
+    "all": "a4a072464557765aa47ca242e880f6e1bec0bc8a61145af78c37703c1be5188c",
 }
 
 if __name__ == "__main__":

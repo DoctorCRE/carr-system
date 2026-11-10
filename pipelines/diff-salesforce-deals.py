@@ -77,7 +77,7 @@ def money(s):
 if not os.path.exists(TSV):
     sys.exit(f"No capture found at {TSV}\nRun the browser capture first — see DNA/Deal Management/salesforce-read-sop.md")
 
-# The capture step (pipelines/capture-salesforce-report.js) emits Salesforce's own column
+# The capture step (pipelines/capture-salesforce-report.ts) emits Salesforce's own column
 # headers; a hand-built TSV uses the short names. Accept either, so the two halves of this
 # workflow actually plug together no matter which produced the file.
 ALIAS = {
