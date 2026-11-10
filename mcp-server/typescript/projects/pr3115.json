@@ -1,0 +1,11 @@
+{
+  "node": [
+    "src/repository-identity.ts",
+    "src/review-gate-comments.ts",
+    "test/review-gate-comments.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/review-gate-comments.test.ts"
+  ]
+}

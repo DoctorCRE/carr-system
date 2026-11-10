@@ -873,6 +873,18 @@
       "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
     },
     {
+      "path": "mcp-server/test/research-sites.test.ts",
+      "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
+      "rule": "pii-email",
+      "reason": "WR622.S1.J590. The four inherited synthetic invalid-host and credential-refusal fixtures use generic usernames and reserved example domains, not contact identities. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
+      "path": "mcp-server/test/research-sites.test.ts",
+      "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
+      "rule": "credential-url",
+      "reason": "WR622.S1.J590. The inherited rejected credential URL uses an explicitly synthetic password on a reserved example domain, not a live credential. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
       "path": "mcp-server/src/tour-client-value-safety.ts",
       "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
       "rule": "pii-phone",

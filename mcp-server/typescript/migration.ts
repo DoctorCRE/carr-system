@@ -39,7 +39,7 @@ function strings(value: unknown, file: string, field: string): string[] {
   return value;
 }
 
-export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json"];
+export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json", "tsconfig.node-compat.json"];
 
 function compilerOptions(pkg: string, path: string): Record<string, unknown> {
   let parsed: unknown;
@@ -96,7 +96,6 @@ function compilerOptions(pkg: string, path: string): Record<string, unknown> {
       `Set ${flag}=true in the effective config, including inherited overrides.`,
     );
   for (const flag of [
-    "noEmit",
     "allowImportingTsExtensions",
     "erasableSyntaxOnly",
     "verbatimModuleSyntax",
@@ -118,6 +117,14 @@ function compilerOptions(pkg: string, path: string): Record<string, unknown> {
       `${flag} suppresses diagnostics`,
       `Remove ${flag}=true from the effective config, including inherited overrides.`,
     );
+  requireRule(
+    path === "tsconfig.node-compat.json"
+      ? options.noEmit === false && options.emitDeclarationOnly === true && options.composite === true
+      : options.noEmit === true,
+    path,
+    "noEmit may be false only for composite node-compat emitDeclarationOnly",
+    "Keep normal projects noEmit and node-compat composite with emitDeclarationOnly.",
+  );
   return options;
 }
 
@@ -143,7 +150,9 @@ export function projects(pkg: string): string[] {
   return projectPaths.flatMap((path) => {
     const config = object(resolve(pkg, path));
     compilerOptions(pkg, path);
-    return strings(config.files, path, "files").map((file) => resolve(pkg, file));
+    return strings(config.files, path, "files")
+      .filter((file) => !file.startsWith(".generated/"))
+      .map((file) => resolve(pkg, file));
   });
 }
 
@@ -178,11 +187,32 @@ function baselineScope(
         throw new Error("Checkout does not match event candidate");
       if (mode === "pull_request") {
         const parents = git(["rev-list", "--parents", "-n", "1", candidate]).split(" ");
-        if (parents.length !== 3 || parents[1] !== base)
-          throw new Error("Event base is not the synthetic merge's first parent");
+        const prHead = fields.head;
+        if (
+          parents.length !== 3 ||
+          typeof prHead !== "object" ||
+          prHead === null ||
+          !("sha" in prHead) ||
+          prHead.sha !== parents[2]
+        )
+          throw new Error("Synthetic merge does not match event PR head");
+        const parent = parents[1];
+        if (!parent || !git(["rev-list", "--first-parent", parent]).split("\n").includes(base))
+          throw new Error("Event base is not on the synthetic merge's first-parent history");
+        base = parent;
       } else if (!git(["rev-list", "--first-parent", candidate]).split("\n").includes(base)) {
         throw new Error("Event base is not on the merge group's first-parent history");
       }
+    } else if (mode === "push") {
+      const event = object(env.GITHUB_EVENT_PATH ?? "");
+      if (env.GITHUB_SHA !== candidate || event.after !== candidate)
+        throw new Error("Checkout does not match event candidate");
+      if (typeof event.before !== "string" || !/^[0-9a-f]{40}$/.test(event.before))
+        throw new Error("Missing immutable push base SHA");
+      base =
+        event.before === "0".repeat(40) ? git(["merge-base", candidate, "refs/remotes/origin/main"]) : event.before;
+      if (base === candidate) throw new Error("Push baseline cannot be the candidate itself");
+      git(["merge-base", "--is-ancestor", base, candidate]);
     } else {
       base = git(["merge-base", candidate, "refs/remotes/origin/main"]);
     }
