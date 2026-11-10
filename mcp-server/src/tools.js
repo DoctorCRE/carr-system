@@ -130,7 +130,7 @@ import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
-import { partyIdentityTools } from "./party-identity.js";
+import { partyIdentityTools } from "./party-identity.ts";
 import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.ts";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
@@ -9413,7 +9413,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "board-answers": "mcp-server/src/board-answers.js",
   "org-conventions": "mcp-server/src/org-conventions.ts",
   "research-sites": "mcp-server/src/research-sites.ts",
-  "party-identity": "mcp-server/src/party-identity.js",
+  "party-identity": "mcp-server/src/party-identity.ts",
   "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.ts",
   "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
