@@ -33,6 +33,10 @@ test("canonicalization preserves existing non-JSON edge behavior", () => {
 test("digest preserves raw strings and buffers and canonicalizes other values", () => {
   assert.equal(digest("abc"), "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   assert.equal(digest(Buffer.from("abc")), digest("abc"));
+  assert.equal(
+    digest(Buffer.from([0xff, 0x00, 0x80])),
+    "sha256:ef192b7af54e943f206ab27075ec1805384c972c9959fc5820f1fa7d5268fcef",
+  );
   const bytes = '{"a":1,"z":[false,null]}';
   assert.equal(digest({ z: [false, null], a: 1 }), `sha256:${createHash("sha256").update(bytes).digest("hex")}`);
   assert.equal(digest({ a: 1, z: [false, null] }), digest({ z: [false, null], a: 1 }));
