@@ -78,6 +78,8 @@ class ProjectionDatabaseTests(unittest.TestCase):
                              "values (%s, 'deleted-hook.py', 'deleted-test.py', 'surfacing', false)", (key,))
             conn.commit()
             try:
+                conn.execute((ROOT / 'migrations/1171_retire_stale_deploy_controls.sql').read_text())
+                conn.commit()
                 result = subprocess.run([sys.executable, 'tools/migrate.py', '--apply', '--yes'],
                     cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
                     capture_output=True, text=True, timeout=180)
