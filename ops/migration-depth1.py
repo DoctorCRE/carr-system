@@ -83,6 +83,8 @@ def main() -> int:
         env['PATH'] = str(python.parent) + os.pathsep + env['PATH']
         subprocess.run(['npm', '--prefix', 'mcp-server', 'ci', '--no-audit'], cwd=repo,
                        env=env, check=True, timeout=600)
+        subprocess.run([str(python), 'tools/generate_migration_archive.py'], cwd=repo,
+                       env=env, check=True, timeout=180)
         receipt = run_acceptance(repo, env)
         if receipt['sha'] != sha:
             raise ValueError('checkout changed during acceptance')

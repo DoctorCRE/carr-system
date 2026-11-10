@@ -151,7 +151,7 @@ class HistoricalMigrationSourceTests(unittest.TestCase):
         self.assertEqual(read_baseline_snapshot(self.repo, ref), snapshot)
 
     def test_generator_is_deterministic_and_byte_identical(self):
-        from generate_migration_archive import generate
+        from generate_migration_archive import generate, verify
         self.baseline()
         raw = b"select 1;\r\n"
         snapshot = ("COPY public.schema_migrations (filename, sha256) FROM stdin;\n"
@@ -171,6 +171,14 @@ class HistoricalMigrationSourceTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(first)) as archive:
             self.assertEqual(archive.read("migrations/0001_first.sql"), raw)
             self.assertEqual(archive.read("db/schema.sql"), snapshot)
+        (self.repo / "db/migration-history.zip").write_bytes(first)
+        verify(self.repo)
+        (self.repo / "migrations/0001_first.sql").write_bytes(raw)
+        with zipfile.ZipFile(self.repo / "db/migration-history.zip", "w") as archive:
+            archive.writestr("db/schema.sql", snapshot)
+            archive.writestr("migrations/0001_first.sql", b"select 999;")
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            verify(self.repo)
 
     def test_foreign_git_environment_cannot_redirect_source(self):
         self.baseline()
