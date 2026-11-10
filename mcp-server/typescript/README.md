@@ -62,3 +62,9 @@ under `node_compat`. Its public digest takes `unknown` and returns a string,
 so Worker consumers do not load Node's Buffer or crypto globals. Deployment
 still uses the existing `nodejs_compat` flag. This compiler split does not
 promise that every Node builtin is implemented by Workers.
+
+Miniflare's own declarations are a separate frontier. The pinned
+`5.20261006.1-alpha` package references an unshipped `./shared` declaration and
+missing dependency declarations. Platform isolation does not fix those imports.
+Strict Miniflare-based test conversions still need a complete upstream package;
+see [upstream issue 15377](https://github.com/cloudflare/workers-sdk/issues/15377).
