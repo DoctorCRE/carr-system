@@ -14,9 +14,19 @@ test("invoice receipt handler rejects a string commission version before deploym
   try {
     const file = path.join(dir, "receipt.ts");
     const config = path.join(dir, "tsconfig.json");
+    const base: { include: string[]; references: { path: string }[] } = JSON.parse(
+      readFileSync(root + "tsconfig.json", "utf8"),
+    );
     writeFileSync(
       config,
-      JSON.stringify({ extends: root + "tsconfig.json", include: [root + ".generated/**/*.d.ts", file] }),
+      JSON.stringify({
+        extends: root + "tsconfig.json",
+        include: [
+          ...base.include.filter((entry) => entry.startsWith(".generated/")).map((entry) => root + entry),
+          file,
+        ],
+        references: base.references.map((reference) => ({ path: path.resolve(root, reference.path) })),
+      }),
     );
     writeFileSync(
       file,

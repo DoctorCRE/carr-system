@@ -2619,7 +2619,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "read-profiles": {
     ingress_key: "mcp-tool:read-profiles",
-    source_locator: "mcp-server/src/agent-profiles.js",
+    source_locator: "mcp-server/src/agent-profiles.ts",
     schema_digest: "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     write: false,
     human_only: false,

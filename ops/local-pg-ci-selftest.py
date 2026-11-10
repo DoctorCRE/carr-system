@@ -32,6 +32,7 @@ failed: list[str] = []
 
 import pathlib, sys  # noqa: E401
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root, for lib/
+from lib.disposable_pg_fixture import fixture_root_from_line
 from lib.gate_check import Check  # noqa: E402
 
 check = Check(
@@ -467,7 +468,7 @@ m.run_local_ci(repo=Path(sys.argv[2]), ci_class='migration', port=int(sys.argv[3
     root = None
     pid = None
     try:
-        root = Path(stdout.readline().strip())
+        root = fixture_root_from_line(stdout.readline(), 'carr-local-pg-ci.')
         deadline = time.monotonic() + 20
         pidfile = root / 'data/postmaster.pid'
         while not (repo / 'ready').exists() and child.poll() is None and time.monotonic() < deadline:
