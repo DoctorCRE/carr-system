@@ -1,0 +1,11 @@
+{
+  "node": [
+    "check-party-names.ts",
+    "test/check-party-names.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "check-party-names.ts",
+    "test/check-party-names.test.ts"
+  ]
+}

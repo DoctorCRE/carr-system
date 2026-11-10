@@ -63,7 +63,30 @@ def capability(name):
     return None
 
 
-PROCESSES = json.loads((ROOT / 'ops/config/proof-process-allowlist.json').read_text())
+MANIFEST = ROOT / 'ops/config/proof-process-allowlist.json'
+PROCESSES = json.loads(MANIFEST.read_text())
+
+
+def helper_path(name):
+    if name == 'lib.proof_deadline.proof_deadline':
+        return ROOT / 'lib/proof_deadline.py'
+    return ROOT / 'tools' / f"{name.split('.')[0]}.py"
+
+
+def refresh_scripts(paths):
+    """Refresh only explicitly selected, already-audited runner declarations."""
+    declarations = json.loads(MANIFEST.read_text())
+    for path in paths:
+        if path not in declarations:
+            raise ValueError(f'Runner has no audited command declaration: {path}')
+    for path in paths:
+        source = (ROOT / path).read_bytes()
+        declaration = declarations[path]
+        declaration['sha256'] = hashlib.sha256(source).hexdigest()
+        if b'from lib.proof_deadline import proof_deadline' in source:
+            declaration.setdefault('helpers', {})['lib.proof_deadline.proof_deadline'] = hashlib.sha256(
+                helper_path('lib.proof_deadline.proof_deadline').read_bytes()).hexdigest()
+    MANIFEST.write_text(json.dumps(declarations, indent=2) + '\n')
 
 
 def violations(source, path=None):
@@ -75,8 +98,7 @@ def violations(source, path=None):
     helpers = set()
     if process_allowed:
         for name, digest in declaration.get('helpers', {}).items():
-            module = name.split('.')[0]
-            helper = ROOT / 'tools' / f'{module}.py'
+            helper = helper_path(name)
             if helper.is_file() and hashlib.sha256(helper.read_bytes()).hexdigest() == digest:
                 helpers.add(name)
     bindings = {}
@@ -138,7 +160,11 @@ def check(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=ROOT)
+    parser.add_argument('--refresh-scripts', nargs='+', metavar='PATH')
     args = parser.parse_args()
+    if args.refresh_scripts:
+        refresh_scripts(args.refresh_scripts)
+        return 0
     failures = check(args.root)
     print('\n'.join(failures) if failures else 'Proof HTTP transport uses lib.release_reader')
     return bool(failures)

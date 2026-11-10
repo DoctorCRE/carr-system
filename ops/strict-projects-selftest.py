@@ -66,6 +66,84 @@ class StrictProjects(unittest.TestCase):
             module.generate(pkg)
             self.assertEqual(json.loads((pkg / 'knip.json').read_text())['project'], ['b.ts'])
 
+    def test_node_compat_emits_declarations_for_worker_without_node_globals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pkg = Path(directory)
+            admissions = pkg / 'typescript/projects'
+            admissions.mkdir(parents=True)
+            for name in ('hash.ts', 'consumer.ts'):
+                (pkg / name).touch()
+            (admissions / 'compat.json').write_text(json.dumps({
+                'node_compat': ['hash.ts'], 'worker': ['consumer.ts'], 'entry': ['consumer.ts']}))
+            module.generate(pkg)
+            compat = json.loads((pkg / 'tsconfig.node-compat.json').read_text())
+            worker = json.loads((pkg / 'tsconfig.worker.json').read_text())
+            self.assertEqual(compat['files'], ['hash.ts'])
+            self.assertTrue(compat['compilerOptions']['emitDeclarationOnly'])
+            self.assertFalse(compat['compilerOptions']['noEmit'])
+            self.assertEqual(compat['compilerOptions']['lib'], ['esnext'])
+            self.assertEqual(worker['compilerOptions']['types'], ['./.generated/worker-runtime'])
+            self.assertEqual(worker['compilerOptions']['lib'], ['esnext'])
+            self.assertEqual(worker['references'], [{'path': './tsconfig.node-compat.json'}])
+            self.assertEqual(json.loads((pkg / 'knip.json').read_text())['project'], ['consumer.ts', 'hash.ts'])
+
+    def test_one_runtime_owner_per_admission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pkg = Path(directory)
+            admissions = pkg / 'typescript/projects'
+            admissions.mkdir(parents=True)
+            (pkg / 'hash.ts').touch()
+            (admissions / 'bad.json').write_text(json.dumps({
+                'node_compat': ['hash.ts'], 'worker': ['hash.ts']}))
+            with self.assertRaisesRegex(ValueError, 'multiple runtime'):
+                module.generate(pkg)
+
+    def test_official_declarations_compile_and_refuse_cross_runtime_globals(self):
+        pkg = Path(__file__).resolve().parents[1] / 'mcp-server'
+        compiler = pkg / 'node_modules/.bin/tsc'
+        runtime = pkg / '.generated/worker-runtime.d.ts'
+        if not compiler.exists() or not runtime.exists():
+            self.skipTest('npm ci and npm run generate:types are required for compiler probes')
+        with tempfile.TemporaryDirectory(dir=pkg / '.generated') as directory:
+            root = Path(directory)
+            (root / 'hash.ts').write_text(
+                'import {createHash} from "node:crypto";\n'
+                'export function digest(value: string): string {\n'
+                'return createHash("sha256").update(value).digest("hex"); }\n')
+            node = {'extends': str(pkg / 'tsconfig.base.json'), 'compilerOptions': {
+                'lib': ['esnext'], 'noEmit': False, 'declaration': True,
+                'emitDeclarationOnly': True, 'composite': True, 'outDir': './declarations'},
+                'files': ['hash.ts']}
+            worker = {'extends': str(pkg / 'tsconfig.base.json'), 'compilerOptions': {
+                'module': 'ESNext', 'moduleResolution': 'Bundler', 'lib': ['esnext'],
+                'types': [str(runtime)], 'disableSourceOfProjectReferenceRedirect': True},
+                'files': ['consumer.ts'], 'references': [{'path': './node.json'}]}
+            for name, config in [('node', node), ('worker', worker)]:
+                (root / f'{name}.json').write_text(json.dumps(config))
+            consumer = root / 'consumer.ts'
+            valid = ('import {digest} from "./hash.js";\n'
+                     'export const response = new Response(digest("synthetic"));\n'
+                     'export function storage(state: DurableObjectState) { return state.storage; }\n')
+            consumer.write_text(valid)
+            def check(name):
+                return subprocess.run([str(compiler), '-p', str(root / f'{name}.json')],
+                                      capture_output=True, text=True, timeout=60)
+            for name in ('node', 'worker'):
+                result = check(name)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            consumer.write_text(valid + 'import {createHash} from "node:crypto";\n'
+                                'process.cwd(); Buffer.from("wrong"); digest(7); createHash("sha256");\n')
+            result = check('worker')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("'process'", result.stdout)
+            self.assertIn("'Buffer'", result.stdout)
+            self.assertIn("'node:crypto'", result.stdout)
+            self.assertIn('TS2345', result.stdout)
+            with (root / 'hash.ts').open('a') as stream:
+                stream.write('export function leak(state: DurableObjectState) { return state; }\n')
+            result = check('node')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("'DurableObjectState'", result.stdout)
     def test_sibling_workspace_keeps_consumers_as_entries_and_libraries_as_projects(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
