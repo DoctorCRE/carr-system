@@ -119,6 +119,7 @@
     "catch-me-up-writer-route.test.mjs": {"milliseconds": 791, "serial": false},
     "census-inventory-postgres.test.mjs": {"milliseconds": 21176, "serial": true},
     "change-doctrine-sections-validation.test.mjs": {"milliseconds": 460, "serial": false},
+    "chromium-safety-args.test.ts": {"milliseconds": 166, "serial": false},
     "chrome-launch.test.mjs": {"milliseconds": 39545, "serial": true},
     "chromium-binary.test.mjs": {"milliseconds": 81, "serial": true},
     "clear-the-deck-postgres.test.mjs": {"milliseconds": 2108, "serial": true},
