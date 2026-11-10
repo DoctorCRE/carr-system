@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import scrubbed_env
 
-REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
+REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.ts'
 SCHEMA = 'db/schema.sql'
 OPERATIONS = re.compile(rb'export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);')
 
@@ -37,8 +37,8 @@ def regenerate():
             raise ValueError('registry has edits outside operations; preserve those before regeneration')
         target.write_bytes(ours)
     try:
-        subprocess.run(['node', 'ops/scac-mutation-inventory.mjs', '--write-current'], cwd=ROOT, env=scrubbed_env(), check=True)
-        subprocess.run(['node', 'ops/scac-mutation-inventory.mjs'], cwd=ROOT, env=scrubbed_env(), check=True)
+        subprocess.run(['node', 'ops/scac-mutation-inventory.ts', '--write-current'], cwd=ROOT, env=scrubbed_env(), check=True)
+        subprocess.run(['node', 'ops/scac-mutation-inventory.ts'], cwd=ROOT, env=scrubbed_env(), check=True)
         if resolving:
             git('add', '--', REGISTRY)
     except BaseException:

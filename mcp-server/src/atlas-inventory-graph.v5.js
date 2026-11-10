@@ -17,7 +17,7 @@
 //
 import { organizationTenantForActor } from "./identity.js";
 import { TOOLS } from "./tools.js";
-import { SCAC_MUTATION_OPERATIONS } from "./scac-mutation-registry.current.generated.js";
+import { SCAC_MUTATION_OPERATIONS } from "./scac-mutation-registry.current.generated.ts";
 import { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION } from "./mutation-registry.js";
 import { AUTHENTICATED_SURFACES, WORKSPACE_ROUTES } from "./workspace-surface-inventory.js";
 

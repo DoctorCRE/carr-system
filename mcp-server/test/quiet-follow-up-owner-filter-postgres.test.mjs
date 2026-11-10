@@ -8,9 +8,9 @@ import { types, neon, neonConfig } from '../src/postgres.js';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { assertRecordingProducer, recordingProvenance } from './helpers/recording-provenance.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
-import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.js';
+import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.ts';
 
-const registrySource = readFileSync(new URL('../src/scac-mutation-registry.current.generated.js', import.meta.url), 'utf8');
+const registrySource = readFileSync(new URL('../src/scac-mutation-registry.current.generated.ts', import.meta.url), 'utf8');
 function registryPin(registry = SCAC_MUTATION_OPERATIONS) {
   return createHash('sha256').update(JSON.stringify(registry['quiet-follow-ups'])).digest('hex');
 }

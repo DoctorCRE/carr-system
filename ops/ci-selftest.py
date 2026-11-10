@@ -66,7 +66,7 @@ def ci_fixture():
             (root / name).mkdir()
             if name not in {"migrations", "mcp-server"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
-        (root / "ops/scac-mutation-inventory.mjs").write_text("// Check the synthetic registry.\n")
+        (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         requirements = "synthetic-package>=1\n"
         (root / "requirements.txt").write_text(requirements)
@@ -495,7 +495,7 @@ def test_gates_build_hxprobe_before_parallel_selftests():
                      "ci-secret-scan.py", "pii_guard.py"):
             shutil.copy2(REPO / "ops" / name, root / "ops" / name)
         shutil.copy2(REPO / "bin/with-timeout.py", root / "bin/with-timeout.py")
-        (root / "ops/scac-mutation-inventory.mjs").write_text("// Check the synthetic registry.\n")
+        (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         (root / "vendor/hxprobe/Cargo.toml").touch()
         (root / "ops/probe-selftest.py").write_text(
@@ -1378,7 +1378,7 @@ def test_push_floor_reports_missing_atlas_packages_without_blaming_registry():
         source = "import 'atlas-fixture-dependency';\nthrow new Error('Atlas contract fixture failure');\n"
         for path in paths:
             path.write_text(source)
-        changed = ["mcp-server/src/scac-mutation-registry.current.generated.js"]
+        changed = ["mcp-server/src/scac-mutation-registry.current.generated.ts"]
         with _stub_git_answering_the_floor(changed) as stub_env:
             rc, out = run(["--only", "pushfloor"],
                           env={"CARR_CI_RANGE": FIXTURE_RANGE, **stub_env}, root=root)

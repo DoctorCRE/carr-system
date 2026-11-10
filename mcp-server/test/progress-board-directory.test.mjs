@@ -1,5 +1,5 @@
 // Tests scoped progress board directory projections.
-import { CURRENT_REGISTRY_VERSION } from "../../ops/scac-mutation-inventory.mjs";
+import { CURRENT_REGISTRY_VERSION } from "../../ops/scac-mutation-inventory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";

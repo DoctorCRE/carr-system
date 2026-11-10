@@ -9,7 +9,7 @@ import unittest
 from git_env import fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
-REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
+REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.ts'
 
 
 class RegistryMergeTests(unittest.TestCase):
@@ -23,9 +23,9 @@ class RegistryMergeTests(unittest.TestCase):
             (self.repo / directory).mkdir(parents=True, exist_ok=True)
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
         shutil.copytree(ROOT / 'mcp-server/contracts', self.repo / 'mcp-server/contracts')
-        for path in ('lib/deal_schedule.schema.json', 'mcp-server/package.json',
+        for path in ('lib/deal_schedule.schema.json', 'mcp-server/package.json', 'mcp-server/biome.json',
                      'mcp-server/run-tests.ts', 'mcp-server/suite-discovery.ts',
-                     'ops/scac-mutation-inventory.mjs',
+                     'ops/scac-mutation-inventory.ts',
                      'ops/git_env.py', 'tools/regen.py', '.gitignore'):
             shutil.copy(ROOT / path, self.repo / path)
         (self.repo / 'mcp-server/suite-inventory.json').write_text('{"expected": 1}\n')
@@ -40,7 +40,7 @@ class RegistryMergeTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'jbookout')
         self.git('config', 'user.email', 'jbookout@users.noreply.github.com')
-        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/run-tests.ts',
+        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/biome.json', 'mcp-server/run-tests.ts',
                  'mcp-server/suite-discovery.ts', 'mcp-server/suite-inventory.json',
                  'ops', 'tools', 'lib/deal_schedule.schema.json', '.gitignore')
         self.commit('main plus WR622 implementation')
@@ -107,12 +107,12 @@ class RegistryMergeTests(unittest.TestCase):
         self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout, '')
         self.assertEqual(self.git('ls-files', REGISTRY).stdout.strip(), REGISTRY)
         self.regen()
-        self.command('node', 'ops/scac-mutation-inventory.mjs')
+        self.command('node', 'ops/scac-mutation-inventory.ts')
         result = self.command('node', '--input-type=module', '-e', '''
 import assert from 'node:assert/strict';
 import {TOOLS} from './mcp-server/src/tools.js';
 import {assertRegisteredOperation} from './mcp-server/src/mutation-registry.js';
-import {SCAC_MUTATION_OPERATIONS as operations} from './mcp-server/src/scac-mutation-registry.current.generated.js';
+import {SCAC_MUTATION_OPERATIONS as operations} from './mcp-server/src/scac-mutation-registry.current.generated.ts';
 for (const name of ['aaa-wr622-a', 'zzz-wr622-b']) {
   assert.ok(TOOLS[name]); assert.ok(operations[name]);
   await assertRegisteredOperation(name, TOOLS[name], {});
@@ -144,7 +144,7 @@ console.log('both verbs assembled and present in the sole generated registry');
         target = self.repo / REGISTRY
         target.write_text(target.read_text().replace('mcp-tool:today-triage', 'mcp-tool:stale-fixture'))
         before = target.read_bytes()
-        result = self.command('node', 'ops/scac-mutation-inventory.mjs', check=False)
+        result = self.command('node', 'ops/scac-mutation-inventory.ts', check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(target.read_bytes(), before)
 
@@ -173,8 +173,9 @@ class RegistryConflictTests(unittest.TestCase):
         shutil.copytree(ROOT / 'mcp-server/src', self.repo / 'mcp-server/src')
         shutil.copytree(ROOT / 'mcp-server/contracts', self.repo / 'mcp-server/contracts')
         shutil.copy(ROOT / 'mcp-server/package.json', self.repo / 'mcp-server/package.json')
+        shutil.copy(ROOT / 'mcp-server/biome.json', self.repo / 'mcp-server/biome.json')
         (self.repo / 'mcp-server/node_modules').symlink_to(ROOT / 'mcp-server/node_modules')
-        shutil.copy(ROOT / 'ops/scac-mutation-inventory.mjs', self.repo / 'ops')
+        shutil.copy(ROOT / 'ops/scac-mutation-inventory.ts', self.repo / 'ops')
         shutil.copy(ROOT / 'ops/git_env.py', self.repo / 'ops')
         shutil.copy(ROOT / 'run.sh', self.repo)
         if (ROOT / 'tools/regen.py').exists():
@@ -188,14 +189,14 @@ class RegistryConflictTests(unittest.TestCase):
         self.git('init', '-b', 'main')
         self.git('config', 'user.name', 'Synthetic fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')
-        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'ops', 'tools', 'run.sh')
+        self.git('add', 'mcp-server/src', 'mcp-server/contracts', 'mcp-server/package.json', 'mcp-server/biome.json', 'ops', 'tools', 'run.sh')
         self.commit('base')
         for name in ('a', 'b'):
             self.git('checkout', '-b', name, 'main')
             (self.repo / f'mcp-server/src/fixture-{name}.js').write_text(
                 f'export default {{"wr491-{name}": {{registrySource: "mcp-server/src/fixture-{name}.js", '
                 'inputSchema: {type: "object"}, write: false}};\n')
-            self.command('node', 'ops/scac-mutation-inventory.mjs', '--write-current')
+            self.command('node', 'ops/scac-mutation-inventory.ts', '--write-current')
             self.git('add', f'mcp-server/src/fixture-{name}.js', REGISTRY)
             self.commit(name)
         self.git('checkout', 'a')
@@ -231,9 +232,9 @@ class RegistryConflictTests(unittest.TestCase):
         start = 'export const SCAC_MUTATION_OPERATIONS'
         self.assertEqual(output.split(start)[0], ours.split(start)[0])
         self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout, '')
-        self.command('node', 'ops/scac-mutation-inventory.mjs')
+        self.command('node', 'ops/scac-mutation-inventory.ts')
         (self.repo / 'mcp-server/src/fixture-b.js').write_text('export default {};\n')
-        self.assertNotEqual(self.command('node', 'ops/scac-mutation-inventory.mjs', check=False).returncode, 0)
+        self.assertNotEqual(self.command('node', 'ops/scac-mutation-inventory.ts', check=False).returncode, 0)
 
     def test_failed_generator_restores_conflict_and_index(self):
         (self.repo / 'mcp-server/src/fixture-b.js').write_text('invalid javascript !\n')

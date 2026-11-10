@@ -40,7 +40,7 @@
 // two Worker vars.
 //
 // IT IS A LIBRARY, NOT AN ENTRYPOINT, and that is a registry fact rather than a
-// style choice. ops/scac-mutation-inventory.mjs enumerates every TRACKED file
+// style choice. ops/scac-mutation-inventory.ts enumerates every TRACKED file
 // that carries a shebang or a command-line main as a script entrypoint, and an
 // entrypoint is an INGRESS: admitting one moves the frozen source inventory,
 // which only a sealed registry successor and its migration may do. This module

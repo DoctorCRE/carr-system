@@ -8,12 +8,12 @@ There is no generated family index or install-time registration step. A normal
 
 ## SCAC registry is a separate decision
 
-`src/scac-mutation-registry.current.generated.js` is committed and remains the
+`src/scac-mutation-registry.current.generated.ts` is committed and remains the
 single registry consumed by production and gates. It contains the reviewed
 seal/grant expectations and generated operation contracts. There is no separate
 input registry. Runtime imports never run a generator.
 
-`node ops/scac-mutation-inventory.mjs`, from the repository root, checks the
+`node ops/scac-mutation-inventory.ts`, from the repository root, checks the
 committed operation contracts and exact regenerated text without writing.
 The gates class, npm type/test entry points and Wrangler build run that check.
 An added or changed verb must explicitly run `./run.sh regen registry` and commit
@@ -65,7 +65,7 @@ No workflow needs a generation step to make a runtime import resolve.
   lifecycle and release surfaces through that static graph.
 - `src/atlas-inventory-graph.v5.js` imports operation rows directly, alongside
   tools and mutation-registry identity.
-- `ops/scac-mutation-inventory.mjs` imports the same committed file for checks
+- `ops/scac-mutation-inventory.ts` imports the same committed file for checks
   and explicit regeneration; `tools/regen.py` preserves its seal.
 - `lib/rule_routes.py` follows the import in mutation-registry and reads the same
   file for `ops/rule-route-coverage.py` and its selftest.

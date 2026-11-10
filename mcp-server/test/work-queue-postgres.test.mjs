@@ -9,7 +9,7 @@ import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { publicError } from '../src/public-errors.ts';
 import { queueCardId } from '../src/work-queue.js';
-import { mcpInventory, assertCurrentContracts } from '../../ops/scac-mutation-inventory.mjs';
+import { mcpInventory, assertCurrentContracts } from '../../ops/scac-mutation-inventory.ts';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
 let fixture, c, actor, connection;

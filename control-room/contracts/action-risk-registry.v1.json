@@ -1878,5 +1878,5 @@
   "original_classification_revision": null,
   "note": "The commit identifies the last artifact change before historical labeling, not the original classification date. Verb and disposition payloads are preserved."
  },
- "current_handler_inventory": "mcp-server/src/scac-mutation-registry.current.generated.js"
+ "current_handler_inventory": "mcp-server/src/scac-mutation-registry.current.generated.ts"
 }

@@ -41,7 +41,7 @@
 //
 // This module is deliberately a library, not a program: it takes nothing from a
 // process and carries no self-execution construct. The sealed frontier
-// predicate in ops/scac-mutation-inventory.mjs matches on PLAIN TEXT, so even
+// predicate in ops/scac-mutation-inventory.ts matches on PLAIN TEXT, so even
 // naming those constructs in a comment here would move the frontier and cost a
 // registry successor.
 

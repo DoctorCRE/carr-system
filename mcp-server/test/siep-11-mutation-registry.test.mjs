@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { assertCurrentContracts, sha256 } from "../../ops/scac-mutation-inventory.mjs";
+import { assertCurrentContracts, sha256 } from "../../ops/scac-mutation-inventory.ts";
 import { assertClosedTopLevel, assertRegisteredOperation, MutationRegistryRefusal, registeredOperation } from "../src/mutation-registry.js";
 import { assertAdmits } from "./helpers/registry-admission.mjs";
 import { TOOLS } from "../src/tools.js";

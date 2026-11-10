@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 import { BOARD_ANSWER_WRITE_VERBS } from "../src/board-answers.js";
-import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
+import { mcpInventory } from "../../ops/scac-mutation-inventory.ts";
 import { derivedIdempotencyKey } from "../src/derived-key.ts";
 
 const joe = {

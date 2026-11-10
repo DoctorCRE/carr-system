@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const inventory: unknown = await import(new URL("../../ops/scac-mutation-inventory.mjs", import.meta.url).href);
+const inventory: unknown = await import(new URL("../../ops/scac-mutation-inventory.ts", import.meta.url).href);
 assert.ok(
   typeof inventory === "object" &&
     inventory !== null &&
@@ -28,7 +28,7 @@ const TOOLS = registered.TOOLS;
 record(TOOLS);
 assert.ok(typeof TOOLS === "object" && TOOLS !== null);
 
-const current = readFileSync(new URL("../src/scac-mutation-registry.current.generated.js", import.meta.url), "utf8");
+const current = readFileSync(new URL("../src/scac-mutation-registry.current.generated.ts", import.meta.url), "utf8");
 
 test("current contract generation is reproducible from the assembled tools", () => {
   assert.equal(renderCurrentContracts(TOOLS, current), current);
@@ -59,4 +59,29 @@ test("current contract generation removes a retired operation and preserves the 
     output.slice(0, output.indexOf("export const SCAC_MUTATION_OPERATIONS")),
     current.slice(0, current.indexOf("export const SCAC_MUTATION_OPERATIONS")),
   );
+});
+
+test("generation is idempotent and independent of tool insertion order", () => {
+  const reversed = Object.fromEntries(Object.entries(TOOLS).reverse());
+  const first = renderCurrentContracts(reversed, current);
+  assert.equal(first, current);
+  assert.equal(renderCurrentContracts(TOOLS, first), first);
+});
+
+test("schema changes update only the operation projection and keep sealed metadata", () => {
+  const tools = {
+    example: { registrySource: "ops/scac-mutation-inventory.ts", inputSchema: { type: "object" }, write: false },
+  };
+  const first = renderCurrentContracts(tools, current);
+  const second = renderCurrentContracts({ example: { ...tools.example, inputSchema: { type: "string" } } }, current);
+  assert.notEqual(first, second);
+  const prefix = current.slice(0, current.indexOf("export const SCAC_MUTATION_OPERATIONS"));
+  assert.ok(first.startsWith(prefix));
+  assert.ok(second.startsWith(prefix));
+});
+
+test("the renamed TypeScript generator remains a discovered script entrypoint", async () => {
+  const { isScriptEntrypoint } = await import("../../ops/scac-mutation-inventory.ts");
+  assert.equal(isScriptEntrypoint("ops/scac-mutation-inventory.ts", false, "#!/usr/bin/env node\n"), true);
+  assert.equal(isScriptEntrypoint("ops/test-fixture.ts", false, "#!/usr/bin/env node\n"), false);
 });
