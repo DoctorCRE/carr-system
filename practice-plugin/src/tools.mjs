@@ -2,8 +2,8 @@
 import { z } from 'zod';
 import rates from '../data/rates.json' with { type: 'json' };
 import { NOTICE, envelope, envelopeShape, publicSource, allowanceSource, PlanningInputError } from './evidence.ts';
-import { practiceSchema as practice, spaceInput, spaceResults, planSpace, checklistInput, checklistResults, getChecklist } from './verticals.mjs';
-import { runwayInput, runwayResults, calculateRunway } from './runway.mjs';
+import { practiceSchema as practice, spaceInput, spaceResults, planSpace, checklistInput, checklistResults, getChecklist } from './verticals.ts';
+import { runwayInput, runwayResults, calculateRunway } from './runway.ts';
 import { conversionInput, conversionResults, screenConversion } from './conversion.mjs';
 import { saleInput, saleResults, checkSale } from './sale-readiness.mjs';
 
