@@ -104,6 +104,30 @@ class ProjectionDatabaseTests(unittest.TestCase):
                              (list(legacy) + ['unknown-probe'],))
                 conn.commit()
 
+    def test_retirement_refuses_bound_control_atomically(self):
+        import psycopg
+        legacy = ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier')
+        with psycopg.connect(os.environ['CARR_LOCAL_PG_DSN']) as conn:
+            try:
+                for key in legacy:
+                    conn.execute("insert into ops.enforcement_control_catalog "
+                        "(control_key, implementation_ref, test_ref, enforcement_class, installed) "
+                        "values (%s, 'deleted.py', 'deleted-test.py', 'surfacing', false)", (key,))
+                actor = conn.execute("insert into actor(slug,kind,display_name) "
+                    "values ('j718-probe','automation','Synthetic probe') returning id").fetchone()[0]
+                rule = conn.execute("insert into rule(statement,taught_by) "
+                    "values ('Synthetic retirement probe',%s) returning id", (actor,)).fetchone()[0]
+                conn.execute("insert into ops.rule_control_binding "
+                    "(rule_id,control_key,statement_hash,binding_contract) "
+                    "values (%s,'executor_tier',%s,'{}')", (rule, 'a' * 64))
+                with self.assertRaisesRegex(psycopg.errors.RaiseException, 'executor_tier still has rule bindings'):
+                    with conn.transaction():
+                        conn.execute((ROOT / 'migrations/1171_retire_stale_deploy_controls.sql').read_text())
+                self.assertEqual(len(conn.execute("select control_key from ops.enforcement_control_catalog "
+                    "where control_key=any(%s)", (list(legacy),)).fetchall()), 4)
+            finally:
+                conn.rollback()
+
     def test_atomic_install_idempotence_and_readonly_refusals(self):
         import psycopg
         dsn = os.environ['CARR_LOCAL_PG_DSN']
