@@ -11,6 +11,11 @@ export function array(value: unknown): unknown[] {
   return value;
 }
 
+export function string(value: unknown): string {
+  if (typeof value !== "string") throw new TypeError("Expected a registry string");
+  return value;
+}
+
 export function required<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw new TypeError("Missing fixture value");
   return value;
@@ -26,7 +31,7 @@ export function tool(name: string) {
   if (typeof handler !== "function") throw new TypeError(`Missing handler ${name}`);
   return {
     write: entry.write,
-    description: String(entry.description),
+    description: string(entry.description),
     handler: async (...args: unknown[]) => object(await handler(...args)),
   };
 }
