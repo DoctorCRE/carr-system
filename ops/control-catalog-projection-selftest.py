@@ -78,7 +78,19 @@ class SuiteClassificationTests(unittest.TestCase):
 class ProjectionDatabaseTests(unittest.TestCase):
     def test_full_apply_retires_legacy_controls_before_projection(self):
         import psycopg
-        dsn = os.environ['CARR_LOCAL_PG_DSN']
+        from postgres_service_fixture import service_database
+        parent = os.environ['CARR_LOCAL_PG_DSN']
+        with psycopg.connect(parent) as conn:
+            before = conn.execute('select * from ops.enforcement_control_catalog order by control_key').fetchall()
+        with service_database(parent, 'catalog_retirement',
+                              source=self.baseline['snapshot']) as fixture:
+            self._assert_legacy_retirement(fixture['dsn'])
+        with psycopg.connect(parent) as conn:
+            self.assertEqual(conn.execute(
+                'select * from ops.enforcement_control_catalog order by control_key').fetchall(), before)
+
+    def _assert_legacy_retirement(self, dsn):
+        import psycopg
         legacy = ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier')
         with psycopg.connect(dsn) as conn:
             for key in legacy:
