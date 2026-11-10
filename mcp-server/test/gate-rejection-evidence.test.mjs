@@ -10,7 +10,7 @@ import { Pool, neonConfig } from '@neondatabase/serverless';
 import { callTool } from '../src/mcp.js';
 import { ToolError } from '../src/tools.js';
 import { authenticatedIdentity } from '../src/identity.js';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 
 const ACTOR = '10000000-0000-4000-8000-000000000001';
 const args = () => ({ idempotency_key: crypto.randomUUID(), document: 'synthetic-doc',

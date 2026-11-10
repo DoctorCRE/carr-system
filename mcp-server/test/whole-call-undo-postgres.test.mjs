@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import { createCaptureHandler } from '../src/capture.js';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createDealroomHandler } from '../src/dealroom-web.js';
 import { allowedIn, profileForActor } from '../src/mcp.js';

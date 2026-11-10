@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Synthetic fixtures only. Run against the disposable migration database.
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';

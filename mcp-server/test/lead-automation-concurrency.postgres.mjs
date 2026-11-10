@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Real handler/transaction regressions; synthetic data on disposable PG only.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
