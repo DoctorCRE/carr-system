@@ -1,7 +1,7 @@
-import { tourCheatHistoryQuery } from "./tour-cheat-history.ts";
 // Production adapters for the authenticated internal Tour leaf and the public
 // reports leaf. Identity remains owned by Deal Room; writes remain owned by the
 // registered tool envelope; public reads accept digests only.
+import { tourCheatHistoryQuery } from "./tour-cheat-history.ts";
 import { Pool } from "./postgres.ts";
 import { installTourDealAccess } from './tour-deal-access.js';
 import { callTool } from "./mcp.js";

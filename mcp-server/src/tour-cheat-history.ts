@@ -1,3 +1,4 @@
+// Read bounded immutable cheat-sheet revisions after current Tour access checks.
 export const tourCheatHistoryQuery = `
 with authorized as materialized (
   select ops.read_tour_internal_detail($1::text,$2::uuid,$3::text) as detail
