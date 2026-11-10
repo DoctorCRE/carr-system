@@ -1,0 +1,10 @@
+{
+  "node": [
+    "continuity-reference-manifest.ts",
+    "test/continuity-reference-manifest.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/continuity-reference-manifest.test.ts"
+  ]
+}

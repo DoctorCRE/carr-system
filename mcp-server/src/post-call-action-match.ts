@@ -1,3 +1,4 @@
+// Exact merge eligibility is shared by review reads and locked acceptance.
 import type { Db } from "./verb-contract.ts";
 
 type Candidate = { deal_id: string; action_description: string };

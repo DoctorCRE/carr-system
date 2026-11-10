@@ -1,3 +1,4 @@
+// Keep queued phone audio in transactional object storage until acknowledgement or alarm expiry.
 type Metadata = { byte_count: number; [key: string]: unknown };
 type Entry = {
   metadata: Metadata;
