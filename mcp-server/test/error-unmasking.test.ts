@@ -1,4 +1,4 @@
-// error-unmasking.test.mjs — a verb failure must name its own cause.
+// error-unmasking.test.ts — a verb failure must name its own cause.
 //
 // WHAT THIS COSTS WHEN IT IS MISSING, measured on 2026-08-21 in one session:
 //
@@ -23,42 +23,65 @@
 // field, which MCP clients drop. The only thing missing was putting it where
 // the caller reads.
 //
-// Run with: node --test mcp-server/test/error-unmasking.test.mjs
+// Run with: node --test mcp-server/test/error-unmasking.test.ts
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pgConstraintError, ToolError } from "../src/tools.js";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+const legacy = object(await import(new URL("../src/tools.js", import.meta.url).href));
 
 // A Postgres driver error carries `code` as the SQLSTATE string; the rest is
 // optional and varies by fault class.
-const pgError = (fields) => Object.assign(new Error(fields.message || "db"), fields);
+const translate = legacy.pgConstraintError;
+assert.ok(typeof translate === "function");
+const pgConstraintError = (error: unknown): unknown => translate(error);
+const pgError = (fields: { code: string; message?: string; table?: string; constraint?: string }) =>
+  Object.assign(new Error(fields.message || "db"), fields);
 
 test("permission denied is translated, not swallowed — the 0-of-51 defect", () => {
-  const translated = pgConstraintError(pgError({
-    code: "42501",
-    message: 'permission denied for table capability_verification',
-    table: "capability_verification",
-  }));
+  const translated = pgConstraintError(
+    pgError({
+      code: "42501",
+      message: "permission denied for table capability_verification",
+      table: "capability_verification",
+    }),
+  );
   assert.ok(translated instanceof ToolError, "42501 must produce a named ToolError, not fall through");
   const p = translated.payload;
   assert.equal(p.error, "database_refused_the_statement");
   assert.equal(p.fault, "insufficient_privilege");
   assert.equal(p.sqlstate, "42501");
-  assert.match(p.message, /permission denied for table capability_verification/,
-    "the caller must be told WHICH table refused; that is the whole diagnosis");
-  assert.match(p.hint, /row lock/i,
-    "the hint must name the row-lock cause, which is how this defect actually arose");
+  assert.ok(typeof p.message === "string");
+  assert.match(
+    p.message,
+    /permission denied for table capability_verification/,
+    "the caller must be told WHICH table refused; that is the whole diagnosis",
+  );
+  assert.ok(typeof p.hint === "string");
+  assert.match(p.hint, /row lock/i, "the hint must name the row-lock cause, which is how this defect actually arose");
 });
 
 test("a bad uuid is translated — the short-id class, hit twice in one day", () => {
-  const translated = pgConstraintError(pgError({
-    code: "22P02",
-    message: 'invalid input syntax for type uuid: "#213"',
-  }));
+  const translated = pgConstraintError(
+    pgError({
+      code: "22P02",
+      message: 'invalid input syntax for type uuid: "#213"',
+    }),
+  );
   assert.ok(translated instanceof ToolError);
   assert.equal(translated.payload.fault, "invalid_text_representation");
-  assert.match(translated.payload.message, /#213/,
-    "the offending value must survive into the message, or the caller cannot see which argument was wrong");
+  assert.ok(typeof translated.payload.message === "string");
+  assert.match(
+    translated.payload.message,
+    /#213/,
+    "the offending value must survive into the message, or the caller cannot see which argument was wrong",
+  );
+  assert.ok(typeof translated.payload.hint === "string");
   assert.match(translated.payload.hint, /short id|uuid/i);
 });
 
@@ -67,7 +90,7 @@ test("schema-drift faults are named rather than left bare", () => {
     ["42703", "undefined_column"],
     ["42P01", "undefined_table"],
     ["42883", "undefined_function"],
-  ]) {
+  ] satisfies [string, string][]) {
     const translated = pgConstraintError(pgError({ code, message: `${fault} somewhere` }));
     assert.ok(translated instanceof ToolError, `${code} must translate`);
     assert.equal(translated.payload.fault, fault);
@@ -77,30 +100,53 @@ test("schema-drift faults are named rather than left bare", () => {
 test("constraint violations keep their existing, more specific shape", () => {
   // The pre-existing translation is better than the generic one for these —
   // it names the constraint. Widening the function must not flatten it.
-  const translated = pgConstraintError(pgError({
-    code: "23505", message: "duplicate key", constraint: "work_request_ref_key", table: "work_request",
-  }));
-  assert.equal(translated.payload.error, "invalid_field_value",
-    "a constraint violation must not be reclassified as a database fault");
+  const translated = pgConstraintError(
+    pgError({
+      code: "23505",
+      message: "duplicate key",
+      constraint: "work_request_ref_key",
+      table: "work_request",
+    }),
+  );
+  assert.ok(translated instanceof ToolError);
+  assert.equal(
+    translated.payload.error,
+    "invalid_field_value",
+    "a constraint violation must not be reclassified as a database fault",
+  );
   assert.equal(translated.payload.violation, "unique_violation");
   assert.equal(translated.payload.constraint, "work_request_ref_key");
 });
 
 test("an unrelated error is still left alone for the caller above to handle", () => {
   assert.equal(pgConstraintError(new Error("something else entirely")), null);
-  assert.equal(pgConstraintError(pgError({ code: "08006", message: "connection failure" })), null,
-    "codes with no translation must return null rather than a misleading name");
+  assert.equal(
+    pgConstraintError(pgError({ code: "08006", message: "connection failure" })),
+    null,
+    "codes with no translation must return null rather than a misleading name",
+  );
   assert.equal(pgConstraintError(null), null);
-  assert.equal(pgConstraintError({ code: 42501 }), null,
-    "SQLSTATE is a string; a numeric code is not a Postgres error and must not be guessed at");
+  assert.equal(
+    pgConstraintError({ code: 42501 }),
+    null,
+    "SQLSTATE is a string; a numeric code is not a Postgres error and must not be guessed at",
+  );
 });
 
 test("connection strings are redacted out of anything surfaced", () => {
-  const translated = pgConstraintError(pgError({
-    code: "42501",
-    message: "permission denied; connecting as postgresql://carr_writer:hunter2@db.example/carr", // ci-secret-scan: allow — invented fixture; the whole point of this case is that it must NOT survive into the payload
-  }));
-  assert.doesNotMatch(translated.payload.message, /hunter2/,
-    "a credential must never ride out on an error, however useful the rest of the string is");
+  const translated = pgConstraintError(
+    pgError({
+      code: "42501",
+      message: "permission denied; connecting as postgresql://carr_writer:hunter2@db.example/carr", // ci-secret-scan: allow — invented fixture; the whole point of this case is that it must NOT survive into the payload
+    }),
+  );
+  assert.ok(translated instanceof ToolError);
+  assert.ok(typeof translated.payload.message === "string");
+  assert.doesNotMatch(
+    translated.payload.message,
+    /hunter2/,
+    "a credential must never ride out on an error, however useful the rest of the string is",
+  );
+  assert.ok(typeof translated.payload.message === "string");
   assert.match(translated.payload.message, /\[redacted\]/);
 });
