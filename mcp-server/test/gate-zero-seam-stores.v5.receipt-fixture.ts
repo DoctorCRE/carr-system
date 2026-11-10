@@ -43,7 +43,7 @@ const REGISTERED_STORE_TOKENS = Object.freeze([
   "a-store-this-file-does-not-serve",
 ]);
 
-function own(target, key, value, enumerable) {
+function own(target: object, key: PropertyKey, value: unknown, enumerable: boolean) {
   Object.defineProperty(target, key, { value, writable: false, enumerable, configurable: false });
 }
 
@@ -54,7 +54,7 @@ function own(target, key, value, enumerable) {
  * whose getters throw, and a plain `query?.canaryRunKey` answers those with the
  * CALLER'S own text out of an exported callable.
  */
-function cell(holder, key) {
+function cell(holder: unknown, key: PropertyKey): unknown {
   try {
     return holder === null || holder === undefined ? undefined : Reflect.get(Object(holder), key);
   } catch {
@@ -68,7 +68,7 @@ function cell(holder, key) {
  * readily as it reaches a canary name, and coerces an object key through a
  * `toString` the caller wrote. Neither is a row this fixture holds.
  */
-function rowsFor(table, key) {
+function rowsFor<T extends Readonly<Record<string, readonly unknown[]>>>(table: T, key: unknown) {
   return typeof key === "string" && Object.hasOwn(table, key) ? table[key] : [];
 }
 
@@ -89,15 +89,18 @@ function rowsFor(table, key) {
  * not a constructor and still has no `prototype`; the refusal names
  * `function () { [native code] }` and nothing of this file.
  */
-function closedCallable(callable) {
+function closedCallable<A extends unknown[], R>(callable: (...args: A) => R) {
   const closed = callable.bind(null);
   Object.defineProperty(closed, Symbol.hasInstance, {
-    value: () => false, writable: false, enumerable: false, configurable: false,
+    value: () => false,
+    writable: false,
+    enumerable: false,
+    configurable: false,
   });
   return closed;
 }
 
-function causeKind(cause) {
+function causeKind(cause: unknown) {
   try {
     if (cause === undefined || cause === null) return "none";
     if (seamStoreInstance(cause)) return "a-seam-store-that-was-unreachable";
@@ -114,11 +117,11 @@ function causeKind(cause) {
 // `instanceof`. The substituted reader imports `isSeamStoreUnreachable` from
 // whichever module file is in place, so this file owes both names.
 class SeamStoreUnreachableType extends Error {
-  constructor(storeRef, because, cause) {
-    const store = REGISTERED_STORE_TOKENS.includes(storeRef)
-      ? storeRef : "a-store-this-file-does-not-serve";
+  constructor(storeRef: string, because: string, cause: unknown) {
+    const store = REGISTERED_STORE_TOKENS.includes(storeRef) ? storeRef : "a-store-this-file-does-not-serve";
     const reason = REGISTERED_REASONS.includes(because)
-      ? because : "the reason this store was unreachable is not a registered one";
+      ? because
+      : "the reason this store was unreachable is not a registered one";
     const message = `${store}: ${reason}`;
     super(message);
     own(this, "name", "SeamStoreUnreachable", false);
@@ -132,7 +135,8 @@ class SeamStoreUnreachableType extends Error {
 }
 
 export const seamStoreUnreachable = closedCallable(
-  (storeRef, because, cause) => new SeamStoreUnreachableType(storeRef, because, cause));
+  (storeRef: string, because: string, cause?: unknown) => new SeamStoreUnreachableType(storeRef, because, cause),
+);
 
 /**
  * AND THE WALK IS BOUNDED, which the intrinsic `instanceof` is not: a Proxy
@@ -142,7 +146,7 @@ export const seamStoreUnreachable = closedCallable(
  */
 const PROTOTYPE_WALK_LIMIT = 100;
 
-function seamStoreInstance(value) {
+function seamStoreInstance(value: unknown) {
   try {
     if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
     let walked = Reflect.getPrototypeOf(value);
@@ -157,7 +161,7 @@ function seamStoreInstance(value) {
   }
 }
 
-export const isSeamStoreUnreachable = closedCallable(value => seamStoreInstance(value));
+export const isSeamStoreUnreachable = closedCallable((value: unknown) => seamStoreInstance(value));
 
 /**
  * AND AN INSTANCE IS NOT A ROUTE BACK TO THE CLASS EITHER. Every class installs
@@ -170,10 +174,16 @@ export const isSeamStoreUnreachable = closedCallable(value => seamStoreInstance(
  * walking a hostile operand's chain with the intrinsic.
  */
 Object.defineProperty(SeamStoreUnreachableType.prototype, "constructor", {
-  value: seamStoreUnreachable, writable: false, enumerable: false, configurable: false,
+  value: seamStoreUnreachable,
+  writable: false,
+  enumerable: false,
+  configurable: false,
 });
 Object.defineProperty(SeamStoreUnreachableType, Symbol.hasInstance, {
-  value: seamStoreInstance, writable: false, enumerable: false, configurable: false,
+  value: seamStoreInstance,
+  writable: false,
+  enumerable: false,
+  configurable: false,
 });
 Object.freeze(SeamStoreUnreachableType.prototype);
 
@@ -201,33 +211,42 @@ const FIXTURE_OLDEST_PROPOSAL_HASH = `sha256:${"5".repeat(64)}`;
  *            accepted one with a null outcome.
  */
 const PREDECESSOR_ROWS = Object.freeze({
-  "WR-000046": Object.freeze([Object.freeze({
-    status: "accepted", detail_row_count: 1,
-    accepted_feedback_hash: FIXTURE_ASKED_HASH,
-    feedback_hash: FIXTURE_OTHER_HASH,
-  })]),
+  "WR-000046": Object.freeze([
+    Object.freeze({
+      status: "accepted",
+      detail_row_count: 1,
+      accepted_feedback_hash: FIXTURE_ASKED_HASH,
+      feedback_hash: FIXTURE_OTHER_HASH,
+    }),
+  ]),
   "WR-000040": Object.freeze([
     Object.freeze({
-      status: "accepted", detail_row_count: 1,
+      status: "accepted",
+      detail_row_count: 1,
       accepted_feedback_hash: FIXTURE_OTHER_HASH,
       feedback_hash: FIXTURE_OTHER_HASH,
     }),
     Object.freeze({
-      status: "accepted", detail_row_count: 1,
+      status: "accepted",
+      detail_row_count: 1,
       accepted_feedback_hash: FIXTURE_OLDER_HASH,
       feedback_hash: FIXTURE_PROPOSAL_ONLY_HASH,
     }),
     Object.freeze({
-      status: "accepted", detail_row_count: 1,
+      status: "accepted",
+      detail_row_count: 1,
       accepted_feedback_hash: FIXTURE_OLDEST_HASH,
       feedback_hash: FIXTURE_OLDEST_PROPOSAL_HASH,
     }),
   ]),
-  "WR-000054": Object.freeze([Object.freeze({
-    status: "accepted", detail_row_count: 0,
-    accepted_feedback_hash: FIXTURE_ASKED_HASH,
-    feedback_hash: null,
-  })]),
+  "WR-000054": Object.freeze([
+    Object.freeze({
+      status: "accepted",
+      detail_row_count: 0,
+      accepted_feedback_hash: FIXTURE_ASKED_HASH,
+      feedback_hash: null,
+    }),
+  ]),
 });
 
 // ---------------------------------------------------------------------------
@@ -245,18 +264,21 @@ const PREDECESSOR_ROWS = Object.freeze({
 // construction rather than reached by an address a caller can hold.
 // ---------------------------------------------------------------------------
 
-export const fetchPredecessorOutcomeRows = closedCallable(async query => ({
+export const fetchPredecessorOutcomeRows = closedCallable(async (query: unknown) => ({
   store_ref: "record-layer:work-request-outcome-feedback",
   rows: rowsFor(PREDECESSOR_ROWS, cell(query, "workRequestRef")),
 }));
 
 /** Card 12 and card 13 are proved by the other fixture; here they hold nothing. */
-export const fetchSchedulerLedgerRows = closedCallable(
-  async () => ({ store_ref: "control-plane:ops.service+ops.run", rows: [] }));
+export const fetchSchedulerLedgerRows = closedCallable(async () => ({
+  store_ref: "control-plane:ops.service+ops.run",
+  rows: [],
+}));
 
-export const fetchCheckConclusionRows = closedCallable(
-  async () => ({ store_ref: "github:checks", rows: [] }));
+export const fetchCheckConclusionRows = closedCallable(async () => ({ store_ref: "github:checks", rows: [] }));
 
 /** And the candidate-build record store, which this fixture also holds nothing for. */
-export const fetchCandidateBuildRecordRows = closedCallable(
-  async () => ({ store_ref: "control-plane:ops.candidate-build-record", rows: [] }));
+export const fetchCandidateBuildRecordRows = closedCallable(async () => ({
+  store_ref: "control-plane:ops.candidate-build-record",
+  rows: [],
+}));
