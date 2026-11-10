@@ -1,7 +1,7 @@
 # Recorded conversion proof evidence
 
-`github.json` is the unmodified GraphQL response read for merged PR 3114
-using the query emitted by `conversion_query`. It includes merge-group run
+`github.json` selects the non-Actions and merge-group suites from the GraphQL response for merged PR 3114
+without changing their fields, using the query emitted by `conversion_query`. It includes merge-group run
 42736888524 and its actual required job names, statuses and conclusions.
 
 `release.json` selects the unmodified `ok`, `env` and `git_sha` fields from
