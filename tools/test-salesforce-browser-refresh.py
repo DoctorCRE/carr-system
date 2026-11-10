@@ -4,12 +4,14 @@ import io
 import datetime as dt
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 import subprocess
 import plistlib
+import shutil
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -125,10 +127,43 @@ class RefreshTests(unittest.TestCase):
         run = Mock(side_effect=[subprocess.CompletedProcess([], 0, '123', ''),
                                subprocess.CompletedProcess([], 0, json.dumps({'state': 'failed', 'reason': 'Salesforce sign-in needed'}), ''),
                                subprocess.CompletedProcess([], 0, '', '')])
-        result = refresh.capture_chrome(URL, run=run, wait=lambda _: None)
+        node = shutil.which('node')
+        self.assertIsNotNone(node, 'Node is required to compile the browser capture')
+        assert node is not None
+        restricted_path = os.pathsep.join([os.defpath, str(Path(node).parent)])
+        with patch.dict(os.environ, {'PATH': restricted_path}):
+            result = refresh.capture_chrome(URL, run=run, wait=lambda _: None)
         self.assertEqual(result['reason'], 'Salesforce sign-in needed')
+        expression = run.call_args_list[1].args[0][-1]
+        self.assertIn('window.__carrSalesforceRefresh', expression)
+        proof = subprocess.run([node, '--input-type=module', '-e', '''
+import { Script, createContext } from "node:vm";
+let expression = "";
+for await (const chunk of process.stdin) expression += chunk;
+const script = new Script(expression);
+for (const [signedOut, ready] of [[true, true], [false, false], [false, true]]) {
+    const context = createContext({
+        window: {}, location: {href: "https://example.lightning.force.com/"},
+        document: {readyState: "complete", querySelector: selector => (selector.startsWith("table") ? ready : signedOut) ? {} : null,
+                   querySelectorAll: () => []},
+    });
+    script.runInContext(context);
+    await new Promise(resolve => setImmediate(resolve));
+    console.log(JSON.stringify(context.window.__carrSalesforceRefresh ?? {state: "loading"}));
+}
+'''], input=expression, capture_output=True, text=True, timeout=15, check=True)
+        self.assertEqual([json.loads(line) for line in proof.stdout.splitlines()], [
+            {'state': 'failed', 'reason': 'Salesforce sign-in needed'}, {'state': 'loading'},
+            {'state': 'failed', 'reason': 'Salesforce page shape changed'}])
         self.assertEqual(run.call_args_list[0].args[0][-2:], ['open', URL])
         self.assertEqual(run.call_args_list[-1].args[0][-2:], ['close', '123'])
+
+    def test_typescript_strip_failure_refuses_before_opening_chrome(self):
+        run = Mock()
+        with patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, ['node'])):
+            with self.assertRaisesRegex(ValueError, 'Salesforce Chrome bridge unavailable'):
+                refresh.capture_chrome(URL, run=run)
+        run.assert_not_called()
 
     def test_installer_preview_renders_a_quiet_chicago_schedule_without_installing(self):
         script = Path(__file__).with_name('install-salesforce-browser-refresh.py')

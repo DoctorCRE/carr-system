@@ -1,0 +1,204 @@
+// Test bounded find and catch-up resolution and refusal paths.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { ToolError } from "../src/tool-error.ts";
+
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+assert.ok(typeof registered === "object" && registered !== null && "TOOLS" in registered);
+assert.ok(typeof registered.TOOLS === "object" && registered.TOOLS !== null);
+const TOOLS = registered.TOOLS;
+assert.ok("find-and-catch-up" in TOOLS);
+const tool = TOOLS["find-and-catch-up"];
+assert.ok(typeof tool === "object" && tool !== null && "handler" in tool && typeof tool.handler === "function");
+assert.ok("executeRegisteredTool" in registered && typeof registered.executeRegisteredTool === "function");
+const executeRegisteredTool = registered.executeRegisteredTool;
+
+const JOE = { id: "actor-joe", slug: "joe", human: true };
+
+type Row = Record<string, unknown>;
+type Fixture = { parties?: Row[]; organizations?: Row[]; deals?: Row[]; dealResolutionRows?: Row[]; timeline?: Row[] };
+class FindCatchUpFake {
+  parties: Row[];
+  organizations: Row[];
+  deals: Row[];
+  dealResolutionRows: Row[] | undefined;
+  timeline: Row[];
+  queries: string[];
+  calls: { sql: string; params: unknown[] }[];
+  constructor({ parties = [], organizations = [], deals = [], dealResolutionRows, timeline = [] }: Fixture = {}) {
+    this.parties = parties;
+    this.organizations = organizations;
+    this.deals = deals;
+    this.dealResolutionRows = dealResolutionRows;
+    this.timeline = timeline;
+    this.queries = [];
+    this.calls = [];
+  }
+
+  async query(text: string, params: unknown[] = []) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    this.queries.push(sql);
+    this.calls.push({ sql, params });
+
+    if (
+      sql.includes("from v_ref_index") &&
+      sql.includes("subject_type in ('lead','client','vendor')") &&
+      sql.includes("similarity(display_name,$1)")
+    )
+      return { rows: this.parties };
+    if (sql.includes("count(*) filter") && sql.includes("group by display_name")) return { rows: this.organizations };
+    if (sql.includes("from v_deal_board where name ilike")) return { rows: this.deals };
+    if (sql.includes("from v_party_graph")) return { rows: [] };
+    if (sql.includes("from v_lead_client_best")) return { rows: [] };
+    if (sql.includes("from v_deal_board where client_ref = any")) return { rows: [] };
+
+    if (sql.includes("select subject_id from v_ref_index where subject_type='lead'"))
+      return { rows: [{ subject_id: "lead-uuid" }] };
+    if (sql.includes("select subject_id from v_ref_index where subject_type='client'"))
+      return { rows: [{ subject_id: "client-uuid" }] };
+    if (sql.includes("select subject_id from v_ref_index where subject_type='vendor'"))
+      return { rows: [{ subject_id: "vendor-uuid" }] };
+    if (sql.includes("select subject_id from v_ref_index where subject_type='party'"))
+      return { rows: [{ subject_id: "party-uuid" }] };
+    if (sql.includes("subject_type='deal' and display_name ilike"))
+      return {
+        rows:
+          this.dealResolutionRows ??
+          (this.deals.length === 1 ? [{ subject_id: "deal-uuid", display_name: this.deals[0]?.name }] : []),
+      };
+    if (sql.includes("from v_subject_timeline")) return { rows: this.timeline };
+    if (sql.includes("from tool_call t join activity a")) return { rows: [] };
+
+    throw new Error(`unexpected query: ${sql}`);
+  }
+
+  timelineReads() {
+    return this.queries.filter((sql) => sql.includes("from v_subject_timeline")).length;
+  }
+}
+
+function party(ref: string, name: string, merged = false, kind = "lead") {
+  return { ref, name, merged, kind, city: "Mobile", specialty: null, org_name: null };
+}
+
+function rejectedPayload(fn: () => Promise<unknown>) {
+  return assert.rejects(fn, (error) => {
+    assert.ok(error instanceof ToolError);
+    assert.ok(error.payload?.error);
+    assert.doesNotMatch(JSON.stringify(error.payload), /CARR-SECRET-CANARY-7F4A/);
+    return true;
+  });
+}
+
+test("the pilot is one exact read-only tool contract", () => {
+  assert.ok(tool);
+  assert.equal("write" in tool && tool.write, false);
+  assert.equal(Boolean("fullOnly" in tool && tool.fullOnly), false);
+  assert.ok("inputSchema" in tool && typeof tool.inputSchema === "object" && tool.inputSchema !== null);
+  const schema = tool.inputSchema;
+  assert.ok(
+    "required" in schema &&
+      "additionalProperties" in schema &&
+      "properties" in schema &&
+      typeof schema.properties === "object" &&
+      schema.properties !== null,
+  );
+  assert.deepEqual(schema.required, ["query"]);
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["limit", "query"]);
+});
+
+test("one live find result proceeds to one bounded catch-up", async () => {
+  const db = new FindCatchUpFake({
+    parties: [party("L-204", "Dr. Example")],
+    timeline: [{ entry_kind: "activity", summary: "Called practice" }],
+  });
+
+  const out = await executeRegisteredTool(db, JOE, "find-and-catch-up", {
+    query: "Dr. Example",
+    limit: "7",
+  });
+
+  assert.equal(out.state, "completed");
+  assert.deepEqual(out.match, { kind: "lead", name: "Dr. Example", target: "L-204" });
+  assert.deepEqual(out.catch_up.subject, { type: "lead", id: "lead-uuid" });
+  assert.equal(out.catch_up.timeline.length, 1);
+  assert.equal(db.timelineReads(), 1);
+  const timelineCall = db.calls.find(({ sql }) => sql.includes("from v_subject_timeline"));
+  assert.ok(timelineCall);
+  assert.equal(timelineCall.sql.includes("limit $3"), true);
+  assert.equal(timelineCall.params[2], 7);
+});
+
+test("multiple live refs stop for disambiguation and never read a timeline", async () => {
+  const db = new FindCatchUpFake({
+    parties: [party("L-204", "Alex Example"), party("C-127", "Alex Example", false, "client")],
+  });
+
+  const out = await executeRegisteredTool(db, JOE, "find-and-catch-up", { query: "Alex Example" });
+
+  assert.equal(out.state, "needs_disambiguation");
+  assert.deepEqual(
+    out.candidates.map((row: { target: string }) => row.target),
+    ["C-127", "L-204"],
+  );
+  assert.equal(Object.hasOwn(out, "catch_up"), false);
+  assert.equal(db.timelineReads(), 0);
+});
+
+test("retired tombstones are never selected as a catch-up target", async () => {
+  const db = new FindCatchUpFake({ parties: [party("L-099", "Retired Example", true)] });
+  const out = await executeRegisteredTool(db, JOE, "find-and-catch-up", { query: "Retired Example" });
+  assert.equal(out.state, "not_found");
+  assert.deepEqual(out.candidates, []);
+  assert.equal(db.timelineReads(), 0);
+});
+
+test("one deal-name match may proceed, while catch-me-up remains the final resolver", async () => {
+  const db = new FindCatchUpFake({
+    deals: [{ name: "Example Dental Expansion", phase: "tour", owner: "joe", client_ref: "C-127" }],
+    timeline: [{ entry_kind: "event", summary: "Deal created" }],
+  });
+  const out = await executeRegisteredTool(db, JOE, "find-and-catch-up", {
+    query: "Example Dental Expansion",
+  });
+  assert.equal(out.state, "completed");
+  assert.deepEqual(out.match, {
+    kind: "deal",
+    name: "Example Dental Expansion",
+    target: "Example Dental Expansion",
+  });
+  assert.equal(out.catch_up.subject.type, "deal");
+  assert.equal(db.timelineReads(), 1);
+});
+
+test("catch-me-up may still refuse a deal name that resolves ambiguously", async () => {
+  const db = new FindCatchUpFake({
+    deals: [{ name: "Example Expansion", phase: "tour", owner: "joe", client_ref: "C-127" }],
+    dealResolutionRows: [
+      { subject_id: "deal-a", display_name: "Example Expansion - East" },
+      { subject_id: "deal-b", display_name: "Example Expansion - West" },
+    ],
+  });
+  await assert.rejects(
+    () => executeRegisteredTool(db, JOE, "find-and-catch-up", { query: "Example Expansion" }),
+    (error) => error instanceof ToolError && error.payload?.error === "needs_disambiguation",
+  );
+  assert.equal(db.timelineReads(), 0);
+});
+
+test("unknown, authority-bearing, empty, and over-budget inputs fail before any read", async () => {
+  for (const args of [
+    { query: "Example", provider: "CARR-SECRET-CANARY-7F4A" },
+    { query: "Example", profile: "CARR-SECRET-CANARY-7F4A" },
+    { query: ["Example"] },
+    { query: "   " },
+    { query: "Example", limit: 51 },
+  ]) {
+    const db = new FindCatchUpFake();
+    await rejectedPayload(() => executeRegisteredTool(db, JOE, "find-and-catch-up", args));
+    assert.equal(db.queries.length, 0);
+  }
+});

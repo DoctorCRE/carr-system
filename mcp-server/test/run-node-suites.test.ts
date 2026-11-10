@@ -39,7 +39,7 @@ test("private PostgreSQL clusters run alone without dropping or duplicating suit
     "clear-the-deck-postgres.test.mjs",
     "decision-about-work-request-postgres.test.mjs",
     "complete-work-request-postgres.test.mjs",
-    "org-conventions-postgres.test.mjs",
+    "org-conventions-postgres.test.ts",
     "team-memory-postgres.test.mjs",
     "doc-request-notify-postgres.test.mjs",
     "journey-one-clock-input-store.v5.test.mjs",

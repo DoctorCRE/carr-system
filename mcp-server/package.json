@@ -6,13 +6,13 @@
   "main": "index.js",
   "scripts": {
     "test": "npm run generate:types && node run-tests.ts",
-    "generate:types": "npm run check:registry && node generate-verb-types.ts && node generate-worker-types.mjs",
+    "generate:types": "npm run check:registry && node generate-verb-types.ts && node generate-worker-types.ts",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json",
     "test:routing-replay": "node test/doctrine-routing-replay.mjs",
     "portal-parity": "node portal-parity/cli.mjs",
     "generate:registry": "python3 ../tools/regen.py registry",
     "check:registry": "node ../ops/scac-mutation-inventory.mjs",
-    "check:staged": "node typescript/check.ts && node --test typescript/*.test.ts",
+    "check:staged": "python3 ../ops/strict-projects.py && node typescript/check.ts && node --test typescript/*.test.ts",
     "check": "npm run typecheck && npm run check:staged && node run-tests.ts",
     "fix": "biome check --write ."
   },
@@ -21,7 +21,9 @@
   "license": "ISC",
   "devDependencies": {
     "@babel/parser": "7.28.5",
+    "@babel/types": "7.29.11",
     "@biomejs/biome": "2.6.6",
+    "@cloudflare/workers-types": "5.20261109.1",
     "@types/node": "26.6.6",
     "@types/pg": "8.23.1",
     "esbuild": "0.28.1",

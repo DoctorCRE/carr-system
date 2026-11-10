@@ -1,0 +1,5 @@
+{
+  "worker": [
+    "src/web-push-subscriptions.ts"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "node": [
+    "../practice-plugin/test/evidence.test.ts"
+  ],
+  "worker": [
+    "../practice-plugin/src/evidence.ts"
+  ],
+  "entry": [
+    "../practice-plugin/src/evidence.ts",
+    "../practice-plugin/test/evidence.test.ts"
+  ]
+}

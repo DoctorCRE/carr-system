@@ -318,8 +318,8 @@
       "reason": "Historical research-helper README at 2b1643b8 names the operator-designated TEST mailbox, not a client contact or credential. The literal is removed from the current README; this exception binds only these exact historical documentation bytes."
     },
     {
-      "path": "mcp-server/test/party-duplicate-candidates.test.mjs",
-      "sha256": "eced5c16210169cc35c67ec55753bfb08447bb978a18296898156653766cc8f2",
+      "path": "mcp-server/test/party-duplicate-candidates.test.ts",
+      "sha256": "b200266be1f33f085e7588952bd00f938f80e2c6adfe18ff34dab3e277aaffd0",
       "rule": "pii-phone",
       "reason": "Synthetic duplicate-candidate reader tests use invented 202-555-01xx phone values to prove normalization, nonmatches and paging. No record-layer data or live contact is used. Qualification binds only these exact fixture bytes and the phone detector, including the preserved original PR commit."
     },
@@ -865,6 +865,36 @@
       "sha256": "72a1a975b101e278ba02d28f79b71dfbe7b6af742919e6d64dd9d6cfa87f2803",
       "rule": "pii-phone",
       "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
+    },
+    {
+      "path": "mcp-server/src/tour-client-value-safety.ts",
+      "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
+      "rule": "pii-phone",
+      "reason": "Pre-existing validator comment examples of reserved NANP exchange 555 subscriber 0100 digits, including spaced and country-code forms, renamed from .js to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/src/tour-client-value-safety.ts",
+      "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
+      "rule": "pii-address",
+      "reason": "Pre-existing validator comment examples of synthetic gate, key and compass-word street-address phrases illustrate refusal grammar, not property records; renamed from .js to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
+      "rule": "pii-phone",
+      "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
+      "rule": "pii-address",
+      "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
+      "path": "audits/decoder-build-ownership.md",
+      "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
+      "rule": "pii-phone",
+      "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
     }
   ]
 }
