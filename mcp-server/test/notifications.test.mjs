@@ -634,6 +634,7 @@ test("proof CLI validates release-pinned live contracts, refusals, contradiction
   try {
     await mkdir(join(root, 'lib'), { recursive: true });
     await copyFile(join(repo, 'lib/release_reader.py'), join(root, 'lib/release_reader.py'));
+    await copyFile(join(repo, 'lib/proof_deadline.py'), join(root, 'lib/proof_deadline.py'));
     await copyFile(join(repo, 'lib/release-reader-marker.json'), join(root, 'lib/release-reader-marker.json'));
     await mkdir(join(root, 'tools'), { recursive: true });
     await mkdir(join(root, 'mcp-server/src'), { recursive: true });
@@ -702,7 +703,8 @@ print(json.dumps(value['feed' if sys.argv[2] == 'notification-feed' else 'prefer
     }
     assert.equal((await run({ exit:true })).code, 78);
     assert.equal((await run({ type_error:true })).code, 1);
-    assert.equal((await run({ ...valid, sleep:true }, ['--timeout-seconds', '0.1'])).code, 78);
+    const deadline = await run({ ...valid, sleep:true }, ['--timeout-seconds', '0.1']);
+    assert.equal(deadline.code, 78, deadline.stdout + deadline.stderr);
     assert.equal((await run(valid, ['--timeout-seconds', '0'])).code, 2);
     assert.equal((await run(valid, ['--unknown'])).code, 2);
     const { readFile } = await import('node:fs/promises');

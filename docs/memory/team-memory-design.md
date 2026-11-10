@@ -622,7 +622,7 @@ in S1.
 | `mcp-server/src/evidence-activation.js` (calls the second function, L87) and `ops/evidence-activation-db-gate.py` (L212, L240) | Re-run their tests against the replaced functions; drop any memory-row expectations |
 | `mcp-server/src/memory.js` (`memoryTools`) and its import in `mcp-server/src/tools.js` | Delete |
 | `mcp-server/src/doc-profile.ts` verb list; `mcp-server/src/mcp.js` mentions | Remove `recall-memory` |
-| `mcp-server/test/memory-kernel.test.mjs`, `mcp-server/test/memory-rls-connection.test.mjs` | Delete |
+| `mcp-server/test/memory-kernel.test.mjs`, `mcp-server/test/memory-rls-connection.test.ts` | Delete |
 | `mcp-server/test/situation-retrieval-integration.test.mjs`, `mcp-server/test/doc-profile.test.mjs`, `mcp-server/test/tool-advertisement.test.mjs`, `mcp-server/test/bigint-version-responses.test.mjs`, `mcp-server/test/dot-security-definers-postgres.sql` | Remove their memory cases |
 | `control-room/contracts/memory-evaluation-s0.v1.schema.json`, `control-room/contracts/fixtures/memory-evaluation-s0.synthetic.v1.json`, and `control-room/test/contracts.test.mjs` (L240–258) | Retire the contract, its fixture and its assertions together |
 | `ops/private-row-sponsor-rls-gate.py` (fails "enumeration is vacuous" without `memory_item`) | Run the behaviour proof over every fenced personal table the enumeration finds, and pass explicitly with "no fenced personal tables" when there are none. The enumeration still fails a new unfenced personal-scope table |

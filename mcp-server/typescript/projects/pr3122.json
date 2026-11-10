@@ -1,0 +1,19 @@
+{
+  "node": [
+    "../docs/models/email-contact-review/canonical-view.ts",
+    "../docs/models/email-contact-review/competition-view.ts",
+    "../docs/models/email-contact-review/view.ts",
+    "../docs/models/email-lifecycle/view.ts",
+    "../docs/models/reply-action-links/ReplyLinks.map.ts",
+    "test/model-view-adapters.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "../docs/models/email-contact-review/canonical-view.ts",
+    "../docs/models/email-contact-review/competition-view.ts",
+    "../docs/models/email-contact-review/view.ts",
+    "../docs/models/email-lifecycle/view.ts",
+    "../docs/models/reply-action-links/ReplyLinks.map.ts",
+    "test/model-view-adapters.test.ts"
+  ]
+}

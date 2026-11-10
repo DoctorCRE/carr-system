@@ -112,7 +112,7 @@ test("legacy Durable Object constructors do not add a runtime brand property", a
   for (const [file, className] of [
     ["ai-budget.js", "AiNeuronBudget"],
     ["verb-request-budget.js", "VerbRequestBudget"],
-    ["phone-audio-handoff.js", "PhoneAudioHandoff"],
+    ["phone-audio-handoff.ts", "PhoneAudioHandoff"],
   ]) {
     await t.test(className, () => {
       const result = spawnSync(process.execPath, ["--input-type=module", "-"], {

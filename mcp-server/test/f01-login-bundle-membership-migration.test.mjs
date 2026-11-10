@@ -1,5 +1,5 @@
 // Test login bundle membership classification and migration safeguards.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 // Static shape of 0732. The behaviour is proved on a real database by
 // mcp-server/test/f01-login-bundle-membership-postgres.sql in the migration
 // class; this pins the parts a later edit could quietly loosen.

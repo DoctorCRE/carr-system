@@ -8,7 +8,7 @@ import { createInterface } from 'node:readline';
 import { createHash, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
-import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
+import { migrationNames, readMigration } from './migration-source.testhelper.ts';
 import { executeRegisteredTool } from '../src/tools.js';
 
 test('dream applies a synthetic memory consolidation in one doctrine change set', async () => {

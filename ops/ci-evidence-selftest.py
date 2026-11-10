@@ -14,6 +14,7 @@ from unittest.mock import patch
 from git_env import fixture_env
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 spec = importlib.util.spec_from_file_location('ci_evidence', ROOT / 'ops/ci-evidence.py')
 assert spec is not None and spec.loader is not None
 evidence = importlib.util.module_from_spec(spec)
@@ -387,6 +388,224 @@ class ProgramRecords(unittest.TestCase):
             # The timeout stops the shell suites, so test-c.sh has no row: a
             # program that did not run is a missing record, never a pass.
             self.assertNotIn('gate-test-c.sh', rows)
+
+
+class ConversionProof(unittest.TestCase):
+    fixtures = ROOT / 'ops/fixtures/conversion-proof'
+
+    def setUp(self):
+        self.snapshot = json.loads((self.fixtures / 'github.json').read_text())
+        self.release = json.loads((self.fixtures / 'release.json').read_text())
+        self.health = json.loads((self.fixtures / 'health.json').read_text())
+        self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
+        self.merge = self.commit['oid']
+        self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.commands = []
+
+    def run_proof(self, ancestry=0, timeout=2, cli=False):
+        from lib.release_reader import Reply
+        def command(argv, **kwargs):
+            self.commands.append(argv)
+            self.assertGreater(kwargs['timeout'], 0)
+            if argv[0] == 'gh':
+                return subprocess.CompletedProcess(argv, 0, json.dumps(self.snapshot), '')
+            if 'merge-base' in argv:
+                return subprocess.CompletedProcess(argv, ancestry, '', '')
+            if '--is-shallow-repository' in argv:
+                return subprocess.CompletedProcess(argv, 0, 'false', '')
+            if 'show' in argv:
+                return subprocess.CompletedProcess(argv, 0, self.workflow, '')
+            return subprocess.CompletedProcess(argv, 0, self.merge, '')
+        def http(url, **kwargs):
+            self.assertGreater(kwargs['timeout'], 0)
+            payload = self.release if url.endswith('/release') else self.health
+            return Reply(200, {}, json.dumps(payload).encode())
+        with patch.object(evidence.subprocess, 'run', side_effect=command), \
+                patch('lib.release_reader.read', side_effect=http):
+            if cli:
+                with patch.object(sys, 'argv', ['ci-evidence.py', 'prove-conversion',
+                                                '--pr', '3114', '--timeout', str(timeout)]):
+                    return evidence.main()
+            return evidence.prove_conversion(pr=3114, timeout=timeout)
+
+    def test_recorded_equal_and_descendant_release(self):
+        self.assertEqual(self.run_proof(), 0)
+        self.release['git_sha']['value'] = 'a' * 40
+        self.assertEqual(self.run_proof(), 0)
+        self.assertEqual(len([x for x in self.commands if x[0] == 'gh']), 2)
+
+    def test_older_unrelated_unknown_releases_are_insufficient(self):
+        for result in (1, 128):
+            with self.subTest(result=result):
+                self.assertEqual(self.run_proof(ancestry=result), 78)
+        for value in (None, {}, 'unknown', 'abc', {'value': 'a' * 40}):
+            with self.subTest(value=value):
+                self.release['git_sha']['value'] = value
+                self.assertEqual(self.run_proof(), 78)
+
+    def test_red_ci_and_health_only_fail_containing_release(self):
+        suites = self.commit['checkSuites']['nodes']
+        suite = next(s for s in suites if s['workflowRun'])
+        strict = next(j for j in suite['checkRuns']['nodes'] if j['name'] == 'ops/ci.sh --strict')
+        strict['conclusion'] = 'FAILURE'
+        suite['conclusion'] = 'FAILURE'
+        self.assertEqual(self.run_proof(), 1)
+        self.assertEqual(self.run_proof(ancestry=1), 78)
+        strict['conclusion'] = suite['conclusion'] = 'SUCCESS'
+        self.health['ok'] = False
+        self.assertEqual(self.run_proof(), 1)
+
+    def test_missing_pending_paginated_and_wrong_event_evidence_refuses(self):
+        original = copy.deepcopy(self.snapshot)
+        for mode in ('missing', 'pending', 'pagination', 'event', 'shard', 'graphql'):
+            self.snapshot = copy.deepcopy(original)
+            self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
+            suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
+            if mode == 'missing':
+                suite['checkRuns']['nodes'] = []
+            elif mode == 'pending':
+                suite['status'] = 'IN_PROGRESS'
+            elif mode == 'pagination':
+                suite['checkRuns']['pageInfo']['hasNextPage'] = True
+            elif mode == 'event':
+                suite['workflowRun']['event'] = 'pull_request'
+            elif mode == 'shard':
+                suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
+                    if j['name'] != 'unit / MCP unit shard 8 of 8']
+            else:
+                self.snapshot['errors'] = [{'message': 'unavailable'}]
+            with self.subTest(mode=mode):
+                self.assertEqual(self.run_proof(), 78)
+
+    def test_merge_commit_input_uses_one_snapshot(self):
+        self.snapshot['data']['repository']['object'] = self.commit
+        result = subprocess.CompletedProcess([], 0, json.dumps(self.snapshot), '')
+        with patch.object(evidence.subprocess, 'run', return_value=result) as command, \
+                patch('lib.release_reader.read', side_effect=OSError('offline')):
+            self.assertEqual(evidence.prove_conversion(merge_sha=self.merge), 78)
+        self.assertEqual(command.call_count, 1)
+        self.assertIn('object(expression:', command.call_args.args[0][-1])
+
+    def test_real_git_equal_descendant_older_unrelated_and_unknown(self):
+        from lib.release_reader import Reply
+        run = subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            env = fixture_env()
+            def git(*args):
+                result = run(['git', *args], cwd=root, env=env, capture_output=True, text=True, check=True)
+                return result.stdout.strip()
+            git('init', '-q')
+            git('config', 'user.email', 'proof@example.test')
+            git('config', 'user.name', 'Proof fixture')
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/ci.yml').write_text(self.workflow)
+            git('add', '.github/workflows/ci.yml')
+            git('commit', '-qm', 'older')
+            older = git('rev-parse', 'HEAD')
+            git('commit', '--allow-empty', '-qm', 'merge')
+            merge = git('rev-parse', 'HEAD')
+            git('commit', '--allow-empty', '-qm', 'descendant')
+            descendant = git('rev-parse', 'HEAD')
+            git('checkout', '--orphan', 'unrelated')
+            git('commit', '-qm', 'unrelated')
+            unrelated = git('rev-parse', 'HEAD')
+            self.commit['oid'] = merge
+            self.commit['tree']['oid'] = git('rev-parse', merge + '^{tree}')
+            def command(argv, **kwargs):
+                if argv[0] == 'gh':
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(self.snapshot), '')
+                if argv[:2] == ['git', 'fetch']:
+                    raise subprocess.CalledProcessError(128, argv)
+                return run(argv, **kwargs)
+            def http(url, **kwargs):
+                return Reply(200, {}, json.dumps(self.release if url.endswith('/release') else self.health).encode())
+            for observed, expected in ((merge, 0), (descendant, 0), (older, 78),
+                                       (unrelated, 78), ('f' * 40, 78)):
+                self.release['git_sha']['value'] = observed
+                with self.subTest(observed=observed), \
+                        patch.object(evidence.subprocess, 'run', side_effect=command), \
+                        patch('lib.release_reader.read', side_effect=http):
+                    self.assertEqual(evidence.prove_conversion(pr=3114, root=root), expected)
+
+    def test_cli_deadline_lifecycle(self):
+        child_source = r"""
+import json
+import runpy
+import pathlib
+import signal
+import sys
+from unittest.mock import patch
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
+suite = runpy.run_path(sys.argv[1])
+case = suite['ConversionProof']()
+case.setUp()
+phase, outcome = sys.argv[2:]
+if outcome == 'assertion':
+    case.health['ok'] = False
+elif outcome == 'unavailable':
+    case.release['git_sha']['value'] = 'unknown'
+previous = signal.getsignal(signal.SIGALRM)
+real_timer = signal.setitimer
+real_signal = signal.signal
+injected = False
+def expire():
+    global injected
+    injected = True
+    signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+def timer(which, seconds, *args):
+    result = real_timer(which, seconds, *args)
+    if not injected and ((phase == 'setup' and seconds > 0)
+                         or (phase == 'teardown' and seconds == 0)):
+        expire()
+    return result
+def install(which, handler):
+    result = real_signal(which, handler)
+    if phase == 'install' and not injected:
+        expire()
+    return result
+try:
+    with patch.object(signal, 'setitimer', timer), patch.object(signal, 'signal', install):
+        if phase == 'observation':
+            from lib import release_reader
+            def reply(*args, **kwargs):
+                expire()
+            with patch.object(release_reader, 'Reply', reply):
+                code = case.run_proof(cli=True)
+        else:
+            code = case.run_proof(cli=True)
+    raise SystemExit(code)
+finally:
+    print(json.dumps({'handler_restored': signal.getsignal(signal.SIGALRM) == previous,
+                      'timer_disarmed': signal.getitimer(signal.ITIMER_REAL)[0] == 0}), file=sys.stderr)
+    real_timer(signal.ITIMER_REAL, 0)
+    real_signal(signal.SIGALRM, previous)
+"""
+        for phase in ('none', 'install', 'setup', 'observation', 'teardown'):
+            for outcome, normal in (('pass', 0), ('assertion', 1), ('unavailable', 78)):
+                with self.subTest(phase=phase, outcome=outcome):
+                    child = subprocess.run([sys.executable, '-c', child_source, str(pathlib.Path(__file__).resolve()),
+                                            phase, outcome], capture_output=True, text=True, timeout=10)
+                    expected = normal if phase == 'none' else 78
+                    self.assertEqual(child.returncode, expected, child.stdout + child.stderr)
+                    self.assertEqual(len(child.stdout.splitlines()), 1, child.stdout)
+                    receipt = json.loads(child.stdout)
+                    if expected == 78:
+                        self.assertEqual(receipt['classification'], 'insufficient_evidence')
+                    self.assertEqual(json.loads(child.stderr),
+                                     {'handler_restored': True, 'timer_disarmed': True})
+
+    def test_one_wall_clock_deadline_interrupts_stalled_transport(self):
+        import time
+        with patch.object(evidence.subprocess, 'run', side_effect=lambda *a, **k: time.sleep(2)):
+            start = time.monotonic()
+            self.assertEqual(evidence.prove_conversion(pr=3114, timeout=0.05), 78)
+            self.assertLess(time.monotonic() - start, 1)
+
+    def test_deadline_and_unreadable_evidence_refuse(self):
+        self.assertEqual(self.run_proof(timeout=0), 78)
+        with patch.object(evidence.subprocess, 'run', side_effect=subprocess.TimeoutExpired('gh', 1)):
+            self.assertEqual(evidence.prove_conversion(pr=3114), 78)
 
 
 if __name__=='__main__':

@@ -84,14 +84,14 @@ Set TLA2TOOLS to that jar and JAVA to Java. From repository root:
 ```sh
 model="$PWD/docs/models/email-contact-review"
 runner=/Users/booko/.claude/plugins/marketplaces/cursor-plugins/pstack/skills/statechart/scripts/statechart.mjs
-node "$runner" from-spec "$model/Canonical.tla" --config "$model/Canonical.cfg" --map "$model/canonical-view.mjs" --out /tmp/email-canonical --png
-node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalRekey.cfg" --map "$model/canonical-view.mjs" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-rekey --png
-node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalHolder.cfg" --map "$model/canonical-view.mjs" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-holder --png
-node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalAmbiguity.cfg" --map "$model/canonical-view.mjs" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-ambiguity --png
-node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalUnsafeProof.cfg" --map "$model/canonical-view.mjs" --expect-broken UniqueProof --out /tmp/email-unsafe-proof --png
-node "$runner" from-spec "$model/Competition.tla" --config "$model/Competition.cfg" --map "$model/competition-view.mjs" --out /tmp/email-competition --png
-node "$runner" from-spec "$model/Competition.tla" --config "$model/CompetitionForget.cfg" --map "$model/competition-view.mjs" --expect-broken CompetingEvidenceMonotone,UniqueProof,AtMostOne,ChangedPartySourceHold --out /tmp/email-forget --png
-node "$runner" from-spec "$model/Review.tla" --config "$model/Review.cfg" --map "$model/view.mjs" --out /tmp/email-review --png
+node "$runner" from-spec "$model/Canonical.tla" --config "$model/Canonical.cfg" --map "$model/canonical-view.ts" --out /tmp/email-canonical --png
+node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalRekey.cfg" --map "$model/canonical-view.ts" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-rekey --png
+node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalHolder.cfg" --map "$model/canonical-view.ts" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-holder --png
+node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalAmbiguity.cfg" --map "$model/canonical-view.ts" --expect-broken AtMostOne,ChangedPartySourceHold --out /tmp/email-ambiguity --png
+node "$runner" from-spec "$model/Canonical.tla" --config "$model/CanonicalUnsafeProof.cfg" --map "$model/canonical-view.ts" --expect-broken UniqueProof --out /tmp/email-unsafe-proof --png
+node "$runner" from-spec "$model/Competition.tla" --config "$model/Competition.cfg" --map "$model/competition-view.ts" --out /tmp/email-competition --png
+node "$runner" from-spec "$model/Competition.tla" --config "$model/CompetitionForget.cfg" --map "$model/competition-view.ts" --expect-broken CompetingEvidenceMonotone,UniqueProof,AtMostOne,ChangedPartySourceHold --out /tmp/email-forget --png
+node "$runner" from-spec "$model/Review.tla" --config "$model/Review.cfg" --map "$model/view.ts" --out /tmp/email-review --png
 .venv/bin/python ops/outlook-intake-selftest.py
 .venv/bin/python ops/email-contact-review-selftest.py
 ```

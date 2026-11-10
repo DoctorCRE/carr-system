@@ -1,7 +1,7 @@
 // Tests the human-only admission contract for identity merges.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {registeredOperation} from '../src/mutation-registry.js';
+import {registeredOperation} from '../src/mutation-registry.ts';
 import {assertAdmits} from './helpers/registry-admission.mjs';
 
 test('identity merge retains its human-only admission contract', async () => {

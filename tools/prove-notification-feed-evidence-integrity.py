@@ -14,6 +14,7 @@ import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.proof_deadline import proof_deadline
 from lib.release_reader import read as read_http
 SOURCE = 'mcp-server/src/notifications.ts'
 MAX_BYTES = 1048576
@@ -156,44 +157,37 @@ def observe(origin, wrapper, seconds):
             raise Unavailable('release_identity_unavailable')
         return sha
 
-    def expired(_signal, _frame):
-        raise Unavailable('deadline_exhausted')
-
-    previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
     try:
-        sha = release()
-        change = command(['git', 'log', '-1', '--format=%H', '--', SOURCE]).decode().strip()
-        if not re.fullmatch('[a-f0-9]{40}', change):
-            raise Unavailable('change_identity_unavailable')
-        command(['git', '--no-replace-objects', 'merge-base', '--is-ancestor', change, sha])
-        source = command(['git', '--no-replace-objects', 'show', f'{sha}:{SOURCE}'])
-        raw_feed = command([str(wrapper), 'call', 'notification-feed', '{"limit":20}'], allow_refusal=True)
-        raw_preferences = command([str(wrapper), 'call', 'read-notification-preferences', '{}'], allow_refusal=True)
-        try:
-            feed, preferences = json.loads(raw_feed), json.loads(raw_preferences)
-        except ValueError:
-            raise Contradiction('malformed_live_json') from None
-        with tempfile.TemporaryDirectory(prefix='notification-feed-replay-') as directory:
-            path = Path(directory) / 'notifications.ts'
-            path.write_bytes(source)
-            raw = command(['node', '--experimental-strip-types', '--input-type=module', '-e', REPLAY, str(path)],
-                          json.dumps({'feed': feed, 'preferences': preferences}).encode(), contradiction=True)
-            counts = json.loads(raw)
-        if release() != sha:
-            raise Contradiction('release_changed')
-        remaining()
-        return 0, {'result': 'PASS', 'git_sha': sha, **counts,
-                   'live_evidence': 'deployed_read_only_operation',
-                   'replay_evidence': 'synthetic_release_pinned_source_no_database',
-                   'release_reads': 2, 'wrapper_calls': 2, 'source_dependencies': 1}
+        with proof_deadline(seconds, Unavailable):
+            sha = release()
+            change = command(['git', 'log', '-1', '--format=%H', '--', SOURCE]).decode().strip()
+            if not re.fullmatch('[a-f0-9]{40}', change):
+                raise Unavailable('change_identity_unavailable')
+            command(['git', '--no-replace-objects', 'merge-base', '--is-ancestor', change, sha])
+            source = command(['git', '--no-replace-objects', 'show', f'{sha}:{SOURCE}'])
+            raw_feed = command([str(wrapper), 'call', 'notification-feed', '{"limit":20}'], allow_refusal=True)
+            raw_preferences = command([str(wrapper), 'call', 'read-notification-preferences', '{}'], allow_refusal=True)
+            try:
+                feed, preferences = json.loads(raw_feed), json.loads(raw_preferences)
+            except ValueError:
+                raise Contradiction('malformed_live_json') from None
+            with tempfile.TemporaryDirectory(prefix='notification-feed-replay-') as directory:
+                path = Path(directory) / 'notifications.ts'
+                path.write_bytes(source)
+                raw = command(['node', '--experimental-strip-types', '--input-type=module', '-e', REPLAY, str(path)],
+                              json.dumps({'feed': feed, 'preferences': preferences}).encode(), contradiction=True)
+                counts = json.loads(raw)
+            if release() != sha:
+                raise Contradiction('release_changed')
+            remaining()
+            return 0, {'result': 'PASS', 'git_sha': sha, **counts,
+                       'live_evidence': 'deployed_read_only_operation',
+                       'replay_evidence': 'synthetic_release_pinned_source_no_database',
+                       'release_reads': 2, 'wrapper_calls': 2, 'source_dependencies': 1}
     except Contradiction as error:
         return 1, {'result': 'FAIL', 'reason': str(error)}
     except (Unavailable, OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
         return 78, {'result': 'UNAVAILABLE', 'reason': 'release_source_or_wrapper_inaccessible'}
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
 
 
 def main():

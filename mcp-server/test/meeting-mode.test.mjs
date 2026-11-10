@@ -1,6 +1,6 @@
 import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Tests meeting mode contracts, privacy safeguards, and persistence.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 // V5-UX-B11 — non-recording shared Meeting Mode acceptance proofs.
 //
 // UX05  double click, two-client acceptance, reconnect and rejoin yield one
