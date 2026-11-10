@@ -1,6 +1,6 @@
 {
   "schema_version": "subject-watch.v2",
-  "producer_parser": "mcp-server/contracts/subject-watch.v2.js#parseSubjectWatchV2",
+  "producer_parser": "mcp-server/contracts/subject-watch.v2.ts#parseSubjectWatchV2",
   "verbs": ["watch-subject-v2", "pause-subject-watch-v2", "resume-subject-watch-v2", "replace-subject-watch-policy-v2", "unwatch-subject-v2", "read-subject-watch-v2", "list-subject-watches-v2"],
   "actor": "Server-derived authenticated Joe or Dell. No actor arguments accepted.",
   "generation": "watch.id identifies one subscription. Repeated watch preserves its baseline, policy and state. Removed then watched creates a new id and baseline.",
