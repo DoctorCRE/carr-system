@@ -1,0 +1,11 @@
+{
+  "node": [
+    "../pipelines/capture-salesforce-report.ts",
+    "test/salesforce-report-capture.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "../pipelines/capture-salesforce-report.ts",
+    "test/salesforce-report-capture.test.ts"
+  ]
+}
