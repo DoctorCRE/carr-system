@@ -21,6 +21,36 @@ test('invalid address sets refuse before reading records', async () => {
   }
 });
 
+test('proof fixture admits only marked traffic and preserves marked request paths', async () => {
+  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const marker = JSON.parse(await (await import('node:fs/promises')).readFile(
+    new URL('../../lib/release-reader-marker.json', import.meta.url), 'utf8'));
+  const paths = [];
+  const server = createServer((request, response) => {
+    paths.push(request.url);
+    response.end('fixture');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const pathname of ['/', '/release', '/unexpected']) {
+      for (const headers of [{}, {[marker.header]: 'wrong'}]) {
+        const response = await fetch(origin + pathname, {headers, signal: AbortSignal.timeout(2000)});
+        assert.equal(response.status, 403);
+        assert.equal(await response.text(), marker.refusal);
+      }
+      const response = await fetch(origin + pathname, {
+        headers: {[marker.header]: marker.value}, signal: AbortSignal.timeout(2000),
+      });
+      assert.equal(await response.text(), 'fixture');
+    }
+    assert.deepEqual(paths, ['/', '/release', '/unexpected']);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('existing party and lead instructions block exact email matches in PostgreSQL', async () => {
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
@@ -251,6 +281,10 @@ test('proof CLI consumes registered read replies and refuses contradictions and 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
+    const probe = await fetch(origin, {headers: {'user-agent': 'BlitzClean/31'}, signal: AbortSignal.timeout(2000)});
+    assert.equal(probe.status, 403);
+    assert.equal(await probe.text(), 'proof_release_reader_required');
+    assert.equal(releaseReads, 0);
     await writeFile(wrapper, `#!/usr/bin/env python3
 import json, os, pathlib, sys, time
 pathlib.Path(__file__).with_name("pid").write_text(str(os.getpid()))

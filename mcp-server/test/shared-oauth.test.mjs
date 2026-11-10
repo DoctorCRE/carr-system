@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { launchTestChrome } from "./helpers/chrome-launch.mjs";
-import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
+import { findDisposableChromium } from "./helpers/chromium-binary.ts";
 import { handleAuthorize, s256 } from "../src/google-oidc.js";
 import * as policy from "../src/oauth-policy.ts";
 import { OAuthConsentState } from "../src/oauth-consent-state.ts";
