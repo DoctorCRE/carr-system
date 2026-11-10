@@ -265,10 +265,10 @@ function walk(node, visit, ancestors = []) {
   }
 }
 
-// This inventories tools.js only. It passes ToolError to other modules whose codes
-// are not inventoried, and an aliased constructor (const E = ToolError) is missed.
+// Inventory tools.js and its extracted input helpers. Other modules and aliased
+// constructors (const E = ToolError) remain outside this inventory.
 function codesIn(source) {
-  const tree = parse(source, { sourceType: "module" });
+  const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const codes = new Set();
   const unresolved = [];
   const dynamicFunctions = [];
@@ -293,7 +293,11 @@ function codesIn(source) {
 
 test("every tools.js ToolError code is classified", t => {
   t.mock.method(console, "error", () => {});
-  const { codes, unresolved, fingerprints } = codesIn(readFileSync(new URL("../src/tools.js", import.meta.url), "utf8"));
+  const inventories = ["tools.js", "input-validation.ts"].map(file =>
+    codesIn(readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8")));
+  const codes = new Set(inventories.flatMap(result => [...result.codes]));
+  const unresolved = inventories.flatMap(result => result.unresolved);
+  const fingerprints = inventories.flatMap(result => result.fingerprints).sort();
   // Dynamic producers need review when their enclosing functions change.
   assert.deepEqual(fingerprints, [
     "090b814f8e6237373e71306c7e3f5493252cf7c730241328ad3bc254b3170a8e",
@@ -302,7 +306,7 @@ test("every tools.js ToolError code is classified", t => {
     "59ca89a7c09faa9d51104039816f63ec7c2f7a251f953cc016b32a2140338f17",
     "a2b254f60a6c0186b71b352bd2f4d483268dadfc918b415d0c9a5a6154a6653e",
     "a51a7e48501621ccd17585ed3b6fc0364e758a8ae05371b31fdc8acbcc0947e7",
-    "aee5b46a1bbeed53b669b4e5b6f6f17d5b38fafd2821b81789b0041e0fb7b81e",
+    "664b48eeeb15342c4e282d5b050783c79dff9b02b01463b5b5f367cc914e8bfd",
     "bcb27572be7ffd1bca3645633c3f2921c9245477006ffa970c165fb9786a30d0",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
     "c313a94c9354e3f838359c0e457cadbbebd3d4246bcf5a1b765dae46a142c1d5",
@@ -310,7 +314,7 @@ test("every tools.js ToolError code is classified", t => {
     "f0c59a4c6353861e533f47f0703df24595962488550ae6460fdf6ca45144ef6c",
     "f63a0f2a5645ee4947efb2591ff71cead89f796204ec510bc9e682a4e66c6c1f",
     "f9dde66e80d9054fb24315138b160492e95f21ea42f98ee20018448d728f0bd9",
-  ], "review changed dynamic code producers");
+  ].sort(), "review changed dynamic code producers");
   // Existing adapters forward codes from other modules; their source is outside this inventory.
   // Counts make new forwarding sites fail until reviewed.
   assert.deepEqual(unresolved.sort(), [
@@ -320,7 +324,7 @@ test("every tools.js ToolError code is classified", t => {
   ].sort(), "review dynamic ToolError sources");
   for (const code of ["missing_required", "inner_write_failed", "unknown_deal_type", "unknown_lane", "unknown_phase", "unknown_stage"]) codes.add(code);
   const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
-  const refusalSet = parse(source, { sourceType: "module" }).program.body.find(node =>
+  const refusalSet = parse(source, { sourceType: "module", plugins: ["typescript"] }).program.body.find(node =>
     node.type === "VariableDeclaration" && node.declarations.some(d => d.id.name === "RULE_ENFORCEMENT_FALLBACK_REFUSALS"));
   walk(refusalSet, node => { if (node.type === "StringLiteral") codes.add(node.value); });
   const publicInternal = [...INTERNAL_ONLY].filter(code =>
@@ -336,20 +340,23 @@ test("every tools.js ToolError code is classified", t => {
 test("shared argument layer errors reach callers", t => {
   t.mock.method(console, "error", () => {});
   const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
-  const tree = parse(source, { sourceType: "module" });
+  const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
+  const inputSource = readFileSync(new URL("../src/input-validation.ts", import.meta.url), "utf8");
   const names = ["assertRequiredArgs", "coerceArgsToSchema", "versionGuard", "assertDeclaredVocabularies", "pgConstraintError"];
   for (const name of names) {
     let fn;
-    walk(tree, node => { if (node.type === "FunctionDeclaration" && node.id?.name === name) fn = node; });
+    const functionSource = ["assertRequiredArgs", "coerceArgsToSchema"].includes(name) ? inputSource : source;
+    const functionTree = parse(functionSource, { sourceType: "module", plugins: ["typescript"] });
+    walk(functionTree, node => { if (node.type === "FunctionDeclaration" && node.id?.name === name) fn = node; });
     assert.ok(fn, `missing shared function ${name}`);
-    const body = source.slice(fn.start, fn.end);
+    const body = functionSource.slice(fn.start, fn.end);
     const { codes, unresolved } = codesIn(body);
     if (name === "assertRequiredArgs") {
       assert.deepEqual(unresolved, ["payload"]);
       const payload = fn.body.body.find(node => node.type === "VariableDeclaration" && node.declarations.some(d => d.id.name === "payload"));
       assert.ok(payload, "missing required-argument payload");
-      const declaration = source.slice(payload.start, payload.end);
-      const extracted = codesIn(`new ToolError(${declaration.replace(/^const payload = /, "").replace(/;$/, "")})`);
+      const declaration = functionSource.slice(payload.start, payload.end);
+      const extracted = codesIn(`new ToolError(${declaration.replace(/^const payload(?:: ToolErrorPayload)? = /, "").replace(/;$/, "")})`);
       for (const code of extracted.codes) codes.add(code);
     } else assert.deepEqual(unresolved, [], `review dynamic codes in ${name}`);
     assert.ok(codes.size, `no ToolError codes found in ${name}`);
