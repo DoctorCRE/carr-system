@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,7 +25,7 @@ class CleanupSafety(unittest.TestCase):
             link = base / 'killed-parent-link'
             link.symlink_to(Path.home(), target_is_directory=True)
             ancestor = base / 'alias'
-            ancestor.symlink_to(Path.home(), target_is_directory=True)
+            ancestor.symlink_to(Path('/'), target_is_directory=True)
             invalid = ['', ' ', '.', 'relative', str(Path.home()), str(ROOT),
                        str(base), str(base / 'killed-parent-missing'), str(file),
                        str(link), str(ancestor / 'killed-parent-escape')]
@@ -32,6 +33,14 @@ class CleanupSafety(unittest.TestCase):
                 with self.subTest(line=line), self.assertRaises(ValueError):
                     pg.fixture_root_from_line(line, 'killed-parent-')
             self.assertEqual(pg.fixture_root_from_line(str(valid) + '\n', 'killed-parent-'), valid.resolve())
+            with self.assertRaises(ValueError):
+                pg.fixture_root_from_line(str(ancestor / 'usr'), 'usr')
+            for protected in (Path.home(), ROOT):
+                with self.subTest(protected=protected), self.assertRaises(ValueError):
+                    pg.fixture_root_from_line(str(protected), protected.name)
+            with patch('lib.disposable_pg_fixture.os.getuid', return_value=-1):
+                with self.assertRaises(ValueError):
+                    pg.fixture_root_from_line(str(valid), 'killed-parent-')
             with self.assertRaises(ValueError):
                 pg.fixture_root_from_line(str(valid), '')
 
@@ -55,9 +64,11 @@ class CleanupSafety(unittest.TestCase):
 import runpy, subprocess, sys
 from unittest.mock import patch
 real_popen = subprocess.Popen
+empty_children = []
 def empty_child(args, *positional, **kwargs):
     if '-c' in args and ('killed-parent-' in args[args.index('-c') + 1]
                          or 'local_pg_ci_child' in args[args.index('-c') + 1]):
+        empty_children.append(args)
         args = [sys.executable, '-c', 'pass']
     return real_popen(args, *positional, **kwargs)
 with patch('subprocess.Popen', side_effect=empty_child):
@@ -68,6 +79,7 @@ with patch('subprocess.Popen', side_effect=empty_child):
         else:
             runpy.run_path('ops/local-pg-ci-selftest.py', run_name='__main__')
     except ValueError:
+        assert len(empty_children) == 1, 'consumer failed before reading empty child output'
         print('REFUSED EMPTY FIXTURE ROOT')
     else:
         raise AssertionError('empty child output was accepted')
