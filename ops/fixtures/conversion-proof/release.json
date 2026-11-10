@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "env": {
+    "value": "production",
+    "reason": null
+  },
+  "git_sha": {
+    "value": "5db975d80815e396b1186379c324603353bf9c41",
+    "reason": null
+  }
+}
