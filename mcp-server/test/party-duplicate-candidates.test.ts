@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import type { partyDuplicateCandidateTools } from "../src/party-duplicate-candidates.ts";
 import { ToolError } from "../src/tool-error.ts";
-import { createServer } from "./helpers/proof-release-fixture.mjs";
+import { createServer } from "./helpers/proof-release-fixture.ts";
 
 const registryPath = "../src/tools.js";
 const registry: unknown = await import(registryPath);

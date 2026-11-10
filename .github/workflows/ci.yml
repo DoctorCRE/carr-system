@@ -306,7 +306,7 @@ jobs:
           echo "$RUNNER_TEMP/ci-venv/bin" >> "$GITHUB_PATH"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Migration identity and historical snapshot proofs read pinned commits.
+          # PR ancestry checks need history; historical SQL comes from the archive.
           fetch-depth: 0
 
       - name: Decide database proof applicability

@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000110 — F02-LEASE-ROW and T-WRITER-DENIED, on a real connection role.
 //
 // WHY THIS CANNOT BE A MOCK. Two of this Work Request's properties are

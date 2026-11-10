@@ -1,0 +1,637 @@
+// A Work Request captured in error could only ever move FORWARD. Migration 0426
+// adds the terminal half; these tests cover the verb half of it and the card that
+// has to keep reading a withdrawn record afterwards.
+//
+// THE FAILURE THIS EXISTS TO CATCH is not "the write did not happen". It is the
+// card quietly reporting a closed record as queued and asking a human to triage
+// it, which is the queue pollution the two verbs were written to end.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { QueryCall, Replay } from "./helpers/registered-tool.ts";
+import { executeRegisteredTool, parseJson, record, ToolError, text, tool } from "./helpers/registered-tool.ts";
+
+const JOE = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", human: true, via: "test" };
+const BOT = { ...JOE, human: false, slug: "claude", sponsoring_human_slug: "joe" };
+const LOCAL = { ...BOT, slug: "joe-local", via: "local-token", native_agent_verified: true };
+const KEY = "10000000-0000-0000-0000-000000000099";
+const DECLINE = {
+  idempotency_key: KEY,
+  human_ref: "WR-000032",
+  base_version: 1,
+  exit_reason: "captured by mistake from a schema probe; nothing to build",
+};
+const SUPERSEDE = { ...DECLINE, superseded_by: "WR-000034" };
+const ID = "20000000-0000-0000-0000-000000000032";
+
+async function rejected(fn: () => Promise<unknown>) {
+  try {
+    await fn();
+    assert.fail("expected refusal");
+  } catch (e) {
+    assert.ok(e instanceof ToolError);
+    return e.payload;
+  }
+}
+
+class WithdrawFake {
+  calls: QueryCall[];
+  toolCalls: Map<unknown, Replay>;
+  state: string;
+  version: number;
+  from: string;
+  refusal: string | null;
+  hidden: boolean;
+  constructor({
+    from = "captured",
+    refusal = null,
+    hidden = false,
+  }: { from?: string; refusal?: string | null; hidden?: boolean } = {}) {
+    this.calls = [];
+    this.toolCalls = new Map();
+    this.state = from;
+    this.version = from === "triaged" ? 2 : 1;
+    this.from = from;
+    this.refusal = refusal;
+    this.hidden = hidden;
+  }
+  async query(text: string, params: unknown[] = []) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    this.calls.push({ sql, params });
+    if (sql.startsWith("select pg_advisory_xact_lock")) return { rows: [] };
+    if (sql.startsWith("select request_hash, response")) {
+      const row = this.toolCalls.get(params[0]);
+      return { rows: row ? [row] : [] };
+    }
+    if (sql.includes("decline_sourced_work_request")) {
+      if (this.refusal) throw new Error(this.refusal);
+      if (params[1] !== this.version)
+        throw new Error(`work_request_version_conflict: ${params[0]} is ${this.state} at version ${this.version}`);
+      this.state = "declined";
+      this.version += 1;
+      return {
+        rows: [
+          {
+            ref: "WR-000032",
+            state: this.state,
+            version: this.version,
+            exit_reason: params[2],
+            closed_at: "2026-08-28T00:00:00Z",
+          },
+        ],
+      };
+    }
+    // 0883's supersede function raises a named refusal; it never returns zero rows.
+    if (sql.includes("supersede_sourced_work_request")) {
+      if (this.refusal) throw new Error(this.refusal);
+      if (params[1] !== this.version)
+        throw new Error(
+          `work_request_not_supersedable: no captured or triaged sourced Work Request ${params[0]} at version ${params[1]}`,
+        );
+      this.state = "superseded";
+      this.version += 1;
+      return {
+        rows: [
+          {
+            ref: "WR-000032",
+            state: this.state,
+            version: this.version,
+            exit_reason: params[2],
+            closed_at: "2026-08-28T00:00:00Z",
+            superseded_by_ref: params[3],
+          },
+        ],
+      };
+    }
+    if (sql.includes("work-request-intake:withdrawn-subject") && this.hidden) return { rows: [] };
+    if (sql.includes("work-request-intake:withdrawn-subject"))
+      return { rows: [{ id: ID, state: this.state, was_triaged: this.from === "triaged" }] };
+    if (sql.startsWith("insert into event")) return { rows: [] };
+    if (sql.startsWith("insert into tool_call")) {
+      this.toolCalls.set(params[0], {
+        request_hash: params[3],
+        response: parseJson(params[4]),
+        actor_id: params[2],
+        organization_tenant_id: params[7] ?? null,
+        application_session_id: params[12] ?? null,
+      });
+      return { rows: [] };
+    }
+    throw new Error(`unexpected query: ${sql}`);
+  }
+}
+
+test("withdrawal is TWO closed versioned writes, never one with an optional successor", () => {
+  // state-machines.v1.json is phase0_frozen and declares "* -> declined" and
+  // "* -> superseded" as separate transitions with different guards. A single
+  // verb inferring the state from whether a successor was passed would turn a
+  // forgotten argument into a silent decline.
+  for (const name of ["decline-work-request", "supersede-work-request"]) {
+    const entry = tool(name);
+    assert.equal(entry.write, true);
+    assert.equal(entry.inputSchema.additionalProperties, false);
+    assert.equal(record(record(entry.inputSchema.properties).base_version).minimum, 1);
+  }
+  assert.deepEqual(tool("decline-work-request").inputSchema.required, [
+    "idempotency_key",
+    "human_ref",
+    "base_version",
+    "exit_reason",
+  ]);
+  assert.deepEqual(tool("supersede-work-request").inputSchema.required, [
+    "idempotency_key",
+    "human_ref",
+    "base_version",
+    "exit_reason",
+    "superseded_by",
+  ]);
+  // A decline cannot NAME a successor and a supersession cannot omit one; that
+  // separation is the whole reason there are two verbs.
+  assert.equal(record(tool("decline-work-request").inputSchema.properties).superseded_by, undefined);
+  // NOT authorityOnly: 0426 grants execute to carr_writer only, and an authority
+  // principal holding carr_writer is refused by the runtime preflight, so routing
+  // these down the authority DSN would be a permission-denied on every call.
+  for (const name of ["decline-work-request", "supersede-work-request"])
+    assert.notEqual(tool(name).authorityOnly, true);
+});
+
+test("decline records the reason, the closing time and one audit event", async () => {
+  const db = new WithdrawFake();
+  const out = await executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE));
+  assert.deepEqual(out, {
+    ok: true,
+    human_ref: "WR-000032",
+    state: "declined",
+    version: 2,
+    exit_reason: DECLINE.exit_reason,
+    closed_at: "2026-08-28T00:00:00Z",
+  });
+  const call = db.calls.find((x) => x.sql.includes("decline_sourced_work_request"));
+  assert.ok(call);
+  assert.equal(call.params[2], DECLINE.exit_reason);
+  const event = db.calls.find((x) => x.sql.startsWith("insert into event"));
+  assert.ok(event);
+  assert.equal(event.params[1], JOE.id, "audit actor is server-derived");
+  assert.equal(event.params[4], ID, "the event names the withdrawn row, not a null subject");
+  assert.equal(record(parseJson(event.params[7])).state, "declined");
+  assert.equal(record(parseJson(event.params[6])).state, "captured");
+});
+
+for (const exit_reason of [
+  "Done",
+  "  shipped to production",
+  "FIXED without a PR",
+  "Already done in #2488",
+  "Implemented by merged app#123",
+  "#2488 shipped the fix",
+  "The issue was fixed in #2488",
+  "Implementation landed in app#123",
+])
+  test(`decline refuses completion claim: ${exit_reason}`, async () => {
+    const db = new WithdrawFake();
+    await assert.rejects(
+      () => executeRegisteredTool(db, JOE, "decline-work-request", { ...DECLINE, exit_reason }),
+      (error) => {
+        assert.ok(error instanceof ToolError);
+        assert.equal(error.payload.error, "decline_claims_completion");
+        assert.match(text(error.payload.hint), /complete-work-request/);
+        return true;
+      },
+    );
+    assert.equal(db.calls.length, 0);
+    assert.equal(db.state, "captured");
+  });
+
+for (const exit_reason of [
+  "won't do",
+  "superseded by WR-000034",
+  "retired by audit",
+  "See #2488 for the proposed alternative",
+  "No work landed; retired by audit",
+  "Donegal example was captured in error",
+  "The fixtures are fixed-size; won't do",
+])
+  test(`decline accepts genuine withdrawal: ${exit_reason}`, async () => {
+    const out = await executeRegisteredTool(new WithdrawFake(), JOE, "decline-work-request", {
+      ...DECLINE,
+      exit_reason,
+    });
+    assert.equal(out.state, "declined");
+    assert.equal(out.exit_reason, exit_reason);
+  });
+
+for (const from of ["captured", "triaged"]) {
+  test(`an unsponsored agent cannot decline a ${from} request`, async () => {
+    const db = new WithdrawFake({ from });
+    const actor = { ...BOT, slug: "codex", sponsoring_human_slug: null };
+    const out = await rejected(() =>
+      executeRegisteredTool(db, actor, "decline-work-request", { ...DECLINE, base_version: db.version }),
+    );
+    assert.equal(out.error, "sponsored_actor_required");
+    assert.equal(out.authorization_class, "unsponsored_agent");
+    assert.equal(db.calls.length, 0);
+    assert.equal(db.state, from);
+  });
+
+  test(`Joe's sponsored local actor can decline a ${from} request`, async () => {
+    const db = new WithdrawFake({ from });
+    const out = await executeRegisteredTool(db, LOCAL, "decline-work-request", {
+      ...DECLINE,
+      base_version: db.version,
+    });
+    assert.equal(out.state, "declined");
+    const call = db.calls.find((x) => x.sql.includes("decline_sourced_work_request"));
+    assert.ok(call);
+    assert.equal(call.params[3], "joe-local");
+  });
+
+  test(`the database sponsorship refusal stays named for a ${from} request`, async () => {
+    const detail =
+      "sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent";
+    const db = new WithdrawFake({ from, refusal: detail });
+    const out = await rejected(() =>
+      executeRegisteredTool(db, LOCAL, "decline-work-request", { ...DECLINE, base_version: db.version }),
+    );
+    assert.deepEqual(out, { error: "sponsored_actor_required", human_ref: DECLINE.human_ref, detail });
+  });
+}
+
+test("decline preserves the triaged origin in its audit event", async () => {
+  const db = new WithdrawFake({ from: "triaged" });
+  const out = await executeRegisteredTool(db, BOT, "decline-work-request", { ...DECLINE, base_version: 2 });
+  assert.deepEqual([out.state, out.version, out.exit_reason], ["declined", 3, DECLINE.exit_reason]);
+  const event = db.calls.find((x) => x.sql.startsWith("insert into event"));
+  assert.ok(event);
+  assert.deepEqual(parseJson(event.params[6]), { state: "triaged", version: 2 });
+  assert.equal(event.params[1], BOT.id);
+});
+
+test("ready decline records ready as the prior audit state", async () => {
+  const db = new WithdrawFake({ from: "ready" });
+  const out = await executeRegisteredTool(db, JOE, "decline-work-request", DECLINE);
+  assert.equal(out.state, "declined");
+  const event = db.calls.find((x) => x.sql.startsWith("insert into event"));
+  assert.ok(event);
+  assert.deepEqual(parseJson(event.params[6]), { state: "ready", version: 1 });
+});
+
+test("decline returns a clean refusal naming each disallowed state", async () => {
+  for (const state of ["in_progress", "confirmed_closed", "declined", "superseded"]) {
+    const detail = `work_request_not_declinable: WR-000032 is in state ${state}; only captured or triaged requests may be declined`;
+    const db = new WithdrawFake({ from: state, refusal: detail });
+    const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request", DECLINE));
+    assert.deepEqual(out, { error: "work_request_not_declinable", human_ref: "WR-000032", detail });
+    assert.equal(
+      db.calls.some((x) => x.sql.startsWith("insert into event")),
+      false,
+    );
+  }
+});
+
+test("decline reads its subject without a row lock and refuses by name when it is unseen", async () => {
+  // carr_writer's RLS update policy hides SIEP program rows from FOR UPDATE
+  // reads; the lock returned no row and the verb threw a TypeError.
+  const db = new WithdrawFake({ from: "ready" });
+  await executeRegisteredTool(db, LOCAL, "decline-work-request", { ...DECLINE, human_ref: "WR-SIEP-00" });
+  const read = db.calls.find((x) => x.sql.includes("work-request-intake:withdrawn-subject"));
+  assert.ok(read);
+  assert.equal(/for update/i.test(read.sql), false);
+  const hidden = new WithdrawFake({ from: "ready", hidden: true });
+  const out = await rejected(() =>
+    executeRegisteredTool(hidden, LOCAL, "decline-work-request", {
+      ...DECLINE,
+      idempotency_key: "10000000-0000-0000-0000-000000000098",
+      human_ref: "WR-SIEP-00",
+    }),
+  );
+  assert.deepEqual(out, { error: "work_request_not_found", human_ref: "WR-SIEP-00" });
+  assert.equal(
+    hidden.calls.some((x) => x.sql.includes("decline_sourced_work_request")),
+    false,
+  );
+});
+
+test("decline leaves unexpected database failures visible", async () => {
+  const db = new WithdrawFake({ refusal: "connection terminated unexpectedly" });
+  await assert.rejects(
+    () => executeRegisteredTool(db, JOE, "decline-work-request", DECLINE),
+    (error) => error instanceof Error && !(error instanceof ToolError) && /connection terminated/.test(error.message),
+  );
+});
+
+test("supersede carries the successor through to the result and the event", async () => {
+  const db = new WithdrawFake();
+  const out = await executeRegisteredTool(db, JOE, "supersede-work-request", structuredClone(SUPERSEDE));
+  assert.equal(out.state, "superseded");
+  assert.equal(out.superseded_by_ref, "WR-000034");
+  const call = db.calls.find((x) => x.sql.includes("supersede_sourced_work_request"));
+  assert.ok(call);
+  assert.equal(call.params[3], "WR-000034");
+  const event = db.calls.find((x) => x.sql.startsWith("insert into event"));
+  assert.ok(event);
+  assert.equal(record(parseJson(event.params[7])).superseded_by_ref, "WR-000034");
+});
+
+test("the acting actor's own slug is passed, not a flattened partner name", async () => {
+  // ops.authority_actor_slug() can only ever answer 'joe' or 'dell', which is why
+  // every other receipt in this family stamps a human whoever acted. These
+  // functions take the slug instead, so an agent's act is recorded as the agent's.
+  const db = new WithdrawFake();
+  await executeRegisteredTool(db, BOT, "decline-work-request", structuredClone(DECLINE));
+  const call = db.calls.find((x) => x.sql.includes("decline_sourced_work_request"));
+  assert.ok(call);
+  assert.equal(call.params[3], "claude");
+});
+
+test("a stale version is a question for a human, never a silent second withdrawal", async () => {
+  for (const [verb, args] of [
+    ["decline-work-request", DECLINE],
+    ["supersede-work-request", SUPERSEDE],
+  ] as const) {
+    const out = await rejected(() =>
+      executeRegisteredTool(new WithdrawFake(), JOE, verb, { ...structuredClone(args), base_version: 99 }),
+    );
+    assert.equal(out.error, "version_conflict");
+    assert.equal(out.human_ref, "WR-000032");
+  }
+});
+
+test("an empty reason, an unknown field and a self-supersession refuse before any query", async () => {
+  const cases: [string, Record<string, unknown>, string][] = [
+    ["decline-work-request", { ...DECLINE, exit_reason: "   " }, "invalid_decline_work_request"],
+    ["decline-work-request", { ...DECLINE, idempotency_key: "not-a-uuid" }, "invalid_decline_work_request"],
+    // SIEP's reviewed operation contract rejects undeclared top-level fields at
+    // the shared dispatch choke point, before the verb-specific validator.
+    ["decline-work-request", { ...DECLINE, superseded_by: "WR-000034" }, "unregistered_operation_fields"],
+    // A literally empty reason never reaches the validator: assertRequiredArgs
+    // counts "" as missing at the shared choke point. Whitespace does reach it,
+    // and is where "a withdrawal must record why" is actually enforced twice —
+    // here and in the function.
+    ["supersede-work-request", { ...SUPERSEDE, exit_reason: "" }, "missing_required"],
+    ["supersede-work-request", { ...SUPERSEDE, exit_reason: " \t " }, "invalid_supersede_work_request"],
+    ["supersede-work-request", { ...SUPERSEDE, superseded_by: "WR-000032" }, "invalid_supersede_work_request"],
+    ["supersede-work-request", { ...SUPERSEDE, superseded_by: "not-a-ref" }, "invalid_supersede_work_request"],
+  ];
+  for (const [verb, args, error] of cases) {
+    const db = new WithdrawFake();
+    const out = await rejected(() => executeRegisteredTool(db, JOE, verb, args));
+    assert.equal(out.error, error, `${verb} ${JSON.stringify(args)}`);
+    assert.equal(db.calls.length, 0, "an invalid withdrawal never reaches the database");
+  }
+});
+
+test("a receipt-key conflict reaches the caller by name and writes no event", async () => {
+  const detail = `withdrawal_receipt_conflict: idempotency key ${KEY} already holds a withdrawal receipt; nothing was declined`;
+  const db = new WithdrawFake({ refusal: detail });
+  const out = await rejected(() => executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE)));
+  assert.deepEqual(out, { error: "withdrawal_receipt_conflict", human_ref: DECLINE.human_ref, detail });
+  assert.equal(
+    db.calls.some((x) => x.sql.startsWith("insert into event")),
+    false,
+  );
+});
+
+test("decline passes the old program catalogs' refs to the database and refuses other shapes", async () => {
+  // 0982 lets the database decline unstarted WR-AI-* and WR-SIEP-* program rows.
+  for (const human_ref of ["WR-AI-002", "WR-SIEP-06A", "WR-SIEP-B0"]) {
+    const db = new WithdrawFake();
+    await executeRegisteredTool(db, JOE, "decline-work-request", { ...structuredClone(DECLINE), human_ref });
+    const call = db.calls.find((x) => x.sql.includes("decline_sourced_work_request"));
+    assert.ok(call);
+    assert.equal(call.params[0], human_ref);
+  }
+  for (const human_ref of ["WR-XYZ-002", "WR-AI-02", "WR-SIEP-1234", "wr-ai-002"]) {
+    const db = new WithdrawFake();
+    const out = await rejected(() =>
+      executeRegisteredTool(db, JOE, "decline-work-request", { ...structuredClone(DECLINE), human_ref }),
+    );
+    assert.equal(out.error, "invalid_decline_work_request", human_ref);
+    assert.equal(db.calls.length, 0);
+  }
+});
+
+test("a replayed key returns the stored withdrawal and makes no second transition", async () => {
+  const db = new WithdrawFake();
+  const first = await executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE));
+  const replay = await executeRegisteredTool(db, JOE, "decline-work-request", structuredClone(DECLINE));
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.human_ref, first.human_ref);
+  assert.equal(db.calls.filter((x) => x.sql.includes("decline_sourced_work_request")).length, 1);
+});
+
+test("a triaged request superseded through the verb is recorded as leaving triaged", async () => {
+  const db = new WithdrawFake({ from: "triaged" });
+  const out = await executeRegisteredTool(db, JOE, "supersede-work-request", {
+    ...structuredClone(SUPERSEDE),
+    base_version: 2,
+  });
+  assert.deepEqual([out.state, out.version, out.superseded_by_ref], ["superseded", 3, "WR-000034"]);
+  const event = db.calls.find((x) => x.sql.startsWith("insert into event"));
+  assert.ok(event);
+  assert.deepEqual(parseJson(event.params[6]), { state: "triaged", version: 2 });
+});
+
+test("every refusal the supersede function names reaches the caller by that name", async () => {
+  const names = [
+    "withdrawal_reason_missing",
+    "unknown_actor",
+    "successor_not_found",
+    "successor_is_self",
+    "successor_withdrawn",
+    "successor_not_sourced",
+    "supersession_cycle",
+    "triaged_work_request_has_downstream_evidence",
+    "triaged_work_request_requires_read_committed",
+  ];
+  for (const name of names) {
+    const detail = `${name}: WR-000032 is named by ops.sourced_work_request_plan.work_request_id`;
+    const out = await rejected(() =>
+      executeRegisteredTool(new WithdrawFake({ from: "triaged", refusal: detail }), JOE, "supersede-work-request", {
+        ...structuredClone(SUPERSEDE),
+        base_version: 2,
+      }),
+    );
+    assert.deepEqual(out, { error: name, human_ref: "WR-000032", superseded_by: "WR-000034", detail });
+  }
+});
+
+test("an unnamed database failure is not dressed up as a refusal", async () => {
+  const db = new WithdrawFake({ refusal: "connection terminated unexpectedly" });
+  await assert.rejects(
+    () => executeRegisteredTool(db, JOE, "supersede-work-request", structuredClone(SUPERSEDE)),
+    (error) => error instanceof Error && !(error instanceof ToolError) && /connection terminated/.test(error.message),
+  );
+});
+
+// ------------------------------------------------------------------- the card
+// A card fake, separate from the write fake: the read path answers a different
+// set of queries and nothing about it should depend on a write having happened
+// in the same object.
+class CardFake {
+  row: Record<string, unknown> | null;
+  calls: string[];
+  constructor(row: Record<string, unknown> | null) {
+    this.row = row;
+    this.calls = [];
+  }
+  async query(text: string) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    this.calls.push(sql);
+    if (sql.includes("work_request_card")) return { rows: this.row ? [this.row] : [] };
+    if (sql.includes("work-request-intake:readable-card")) return { rows: [] };
+    if (sql.includes("work-request-intake:slices")) return { rows: [] };
+    if (sql.includes("acting-identity")) return { rows: [] };
+    throw new Error(`unexpected query: ${sql}`);
+  }
+}
+
+const BASE = {
+  ref: "WR-000032",
+  title: "Junk",
+  desired_outcome: "nothing",
+  acceptance_criteria: [],
+  version: 2,
+  source_current: true,
+  doctrine_source_label: "control-room#evidence",
+  doctrine_section_id: "30000000-0000-0000-0000-000000000001",
+  doctrine_revision_id: "40000000-0000-0000-0000-000000000001",
+  exit_reason: "duplicate of the record that replaced it",
+  closed_at: "2026-08-28T00:00:00Z",
+};
+
+test("a superseded request is still readable, projects as declined, and names its successor", async () => {
+  const db = new CardFake({ ...BASE, state: "superseded", superseded_by_ref: "WR-000034" });
+  const card = await executeRegisteredTool(db, JOE, "work-request-card", { work_request: "WR-000032" });
+  assert.equal(card.state, "superseded");
+  // NOT queued. The crosswalk maps both terminals onto declined; a closed record
+  // reported as queued tells a requester their withdrawn request is in line.
+  assert.equal(card.projection_state, "declined");
+  assert.deepEqual(card.withdrawal, {
+    exit_reason: BASE.exit_reason,
+    closed_at: BASE.closed_at,
+    superseded_by_ref: "WR-000034",
+  });
+  // And it asks nothing of anybody.
+  assert.deepEqual(card.next_human_action, { label: "Superseded", effect: "none" });
+  assert.deepEqual(card.actions, []);
+  // Superseded from captured, so there is no triage, plan or shape to report
+  // and the card must not invent one.
+  assert.equal(card.triage, null);
+  assert.equal(card.plan, null);
+  assert.equal(card.shape, null);
+  // A terminal row is never asked for pending outcome feedback: that read is
+  // scoped to 'ready', and CardFake would throw if it were attempted.
+  assert.equal(card.pending_outcome_feedback, null);
+});
+
+test("a request superseded from triaged still shows who triaged it", async () => {
+  const db = new CardFake({
+    ...BASE,
+    state: "superseded",
+    version: 3,
+    superseded_by_ref: "WR-000034",
+    triage_classification: "operational",
+    triaged_by_actor_slug: "joe",
+    triaged_at: "2026-10-01T00:00:00Z",
+  });
+  const card = await executeRegisteredTool(db, JOE, "work-request-card", { work_request: "WR-000032" });
+  assert.deepEqual(card.triage, {
+    classification: "operational",
+    human_actor_slug: "joe",
+    triaged_at: "2026-10-01T00:00:00Z",
+  });
+  assert.equal(record(card.withdrawal).superseded_by_ref, "WR-000034");
+  assert.deepEqual(card.next_human_action, { label: "Superseded", effect: "none" });
+});
+
+test("a declined request reads the same way and carries no successor", async () => {
+  const db = new CardFake({ ...BASE, state: "declined", superseded_by_ref: null });
+  const card = await executeRegisteredTool(db, JOE, "work-request-card", { work_request: "WR-000032" });
+  assert.equal(card.projection_state, "declined");
+  assert.deepEqual(card.next_human_action, { label: "Declined", effect: "none" });
+  assert.equal(record(card.withdrawal).superseded_by_ref, null);
+  assert.ok(record(card.withdrawal).exit_reason, "a withdrawal without a reason is not a record");
+});
+
+test("a live request keeps every one of its previous answers", async () => {
+  const db = new CardFake({ ...BASE, state: "captured", version: 1, exit_reason: null, closed_at: null });
+  const card = await executeRegisteredTool(db, JOE, "work-request-card", { work_request: "WR-000032" });
+  assert.equal(card.projection_state, "queued");
+  assert.equal(card.withdrawal, null);
+  assert.deepEqual(card.next_human_action, { label: "Review and triage", effect: "none" });
+});
+
+test("a missing request or unknown lifecycle state is still not found", async () => {
+  for (const row of [null, { ...BASE, state: "unknown" }]) {
+    const out = await rejected(() =>
+      executeRegisteredTool(new CardFake(row), JOE, "work-request-card", { work_request: "WR-000032" }),
+    );
+    assert.equal(out.error, "work_request_not_found");
+  }
+});
+
+// A needs_joe row is a GENERAL row (ops.work_request_sourced_capture_shape's
+// general branch requires doctrine_section_id, doctrine_revision_id and
+// organization_tenant_id all null), never a sourced one -- see 0575's own
+// header. So its fixture, unlike BASE above, carries no doctrine linkage.
+const NEEDS_JOE = {
+  ref: "WR-000067",
+  title: "Decide the routing",
+  desired_outcome: "A named human decision",
+  acceptance_criteria: [{ id: "JOE-ANSWER", text: "A human decision is recorded" }],
+  version: 3,
+  state: "needs_joe",
+  source_current: null,
+  doctrine_source_label: null,
+  doctrine_section_id: null,
+  doctrine_revision_id: null,
+  exit_reason: null,
+  closed_at: null,
+  superseded_by_ref: null,
+};
+
+test("a needs_joe request is readable and carries exactly what answer-work-request-for-joe needs to revalidate", async () => {
+  const db = new CardFake({ ...NEEDS_JOE });
+  const card = await executeRegisteredTool(db, JOE, "work-request-card", { work_request: "WR-000067" });
+  assert.equal(card.state, "needs_joe");
+  // The 0575 verb's base_version compare-and-swap and its acceptance_criteria
+  // digest are both taken from exactly these two fields.
+  assert.equal(card.version, 3);
+  assert.deepEqual(card.acceptance_criteria, NEEDS_JOE.acceptance_criteria);
+  // work-request-projection.v1.json's crosswalk, not invented: needs_joe maps
+  // to needs_answer ("a named human decision is outstanding").
+  assert.equal(card.projection_state, "needs_answer");
+  assert.deepEqual(card.next_human_action, { label: "Answer for Joe", effect: "none" });
+  assert.deepEqual(card.actions, []);
+  // A general row was never sourced, triaged, planned, or shaped, and it is
+  // not a withdrawal -- every one of those blocks must read null rather than
+  // invent a value or leak a sourced-row's INNER-JOIN assumption.
+  assert.equal(card.triage, null);
+  assert.equal(card.plan, null);
+  assert.equal(card.shape, null);
+  assert.equal(card.withdrawal, null);
+  assert.equal(card.source, null);
+  assert.equal(card.pending_outcome_feedback, null);
+});
+
+test("the other card states this function returns are unchanged by admitting needs_joe", async () => {
+  // captured/triaged/ready/declined/superseded keep exactly the projections
+  // asserted above and in the earlier tests in this file; this is a targeted
+  // re-check that adding needs_joe touched none of them.
+  const captured = await executeRegisteredTool(
+    new CardFake({ ...BASE, state: "captured", version: 1, exit_reason: null, closed_at: null }),
+    JOE,
+    "work-request-card",
+    { work_request: "WR-000032" },
+  );
+  assert.equal(captured.projection_state, "queued");
+  assert.deepEqual(captured.next_human_action, { label: "Review and triage", effect: "none" });
+  const declined = await executeRegisteredTool(
+    new CardFake({ ...BASE, state: "declined", superseded_by_ref: null }),
+    JOE,
+    "work-request-card",
+    { work_request: "WR-000032" },
+  );
+  assert.equal(declined.projection_state, "declined");
+  assert.deepEqual(declined.next_human_action, { label: "Declined", effect: "none" });
+});

@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { types, neon, neonConfig } from '../src/postgres.js';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { assertRecordingProducer, recordingProvenance } from './helpers/recording-provenance.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.ts';
