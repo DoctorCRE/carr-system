@@ -1,4 +1,5 @@
 {
+  "conversion_proof_measurement": {"card": "WR622.S1.J879", "suite": "ops/ci-evidence-selftest.py", "class": "gates", "command": ["python3", "ops/ci-evidence-selftest.py"], "local_samples_ms": [3147, 3633, 2657], "basis": "Existing CI evidence suite expanded to 32 tests, including 15 isolated CLI deadline lifecycle cases. Recorded public release and GraphQL parser cases, disposable Git ancestry graph and wall-clock interruption. No network in tests."},
   "proof_cli_deadline_lifecycle_measurement": {"card": "WR622.S1.J745", "suite": "tools/test_proof_cli_deadline_lifecycle.py", "class": "gates", "command": ["python3", "tools/test_proof_cli_deadline_lifecycle.py"], "local_samples_ms": [5290], "basis": "Eight real CLI classifiers exercised in isolated children with deterministic setup, observation and queued teardown expiry; shared helper pass, assertion and programming-error cleanup. No database or network."},
   "migration_depth1_measurement": {"card": "WR622.S1.J706", "suite": "ops/migration-depth1-selftest.py", "class": "gates", "local_samples_ms": [3711], "basis": "Real depth-1 synthetic clone runs eight Node fixtures; historical-read and skip mutations refuse, local fixtures pass. Full real database acceptance remains in migration class."},
   "control_catalog_projection_suite_measurement": {"card": "WR622.S1.J628", "suite": "ops/control-catalog-projection-selftest.py", "class": "gates", "command": ["python3", "ops/control-catalog-projection-selftest.py"], "local_samples_ms": [873], "basis": "Four tests cover actual Node suite renames, excluded bindings, and a real fixture Git revision change. The database test is skipped in gates and runs in disposable-PG acceptance; its four-test fixture run passed in 4857ms separately."},
@@ -54,6 +55,7 @@
   "deliverables_model_view_measurement": {"card": "WR622.S1.J743", "suite": "deliverables-model-view.test.ts", "command": ["node", "--test", "mcp-server/test/deliverables-model-view.test.ts"], "local_samples_ms": [125, 138], "basis": "Four formatter characterization tests on original main module and typed replacement; includes process startup. No speed comparison."},
   "suites": {
     "deliverables-model-view.test.ts": {"milliseconds": 1380, "serial": false},
+    "model-view-adapters.test.ts": {"milliseconds": 500, "serial": false, "local_samples_ms": [409], "card": "WR622.S1.J549"},
     "artifact-trust-characterization.test.ts": {"milliseconds": 166, "serial": false},
     "unread-fix-map.test.ts": {"milliseconds": 510, "serial": false, "local_samples_ms": [126.365166, 254], "card": "WR622.S1.J705"},
     "web-push-outbox-postgres.test.ts": {"milliseconds": 60000, "serial": true, "local_samples_ms": [55395, 51507], "card": "WR617.S1.J269"},
@@ -133,6 +135,7 @@
     "client-portal-register-postgres.test.mjs": {"milliseconds": 3075, "serial": true},
     "client-portal-session-postgres.test.mjs": {"milliseconds": 16754, "serial": true},
     "codex-continuity-migration.test.mjs": {"milliseconds": 330, "serial": false},
+    "codex-continuity-proxy-transitions.test.ts": {"milliseconds": 63000, "serial": false},
     "codex-continuity-stdio-proxy.test.mjs": {"milliseconds": 1119, "serial": false},
     "codex-continuity.test.mjs": {"milliseconds": 701, "serial": false},
     "complete-set-review-a03-migration.v5.test.mjs": {"milliseconds": 264, "serial": false},
