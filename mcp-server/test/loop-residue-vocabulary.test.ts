@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { derivedIdempotencyKey } from "../src/derived-key.ts";
 import { ToolError } from "../src/tool-error.ts";
+import { parseDerivedKeyModule } from "./m028-module-boundary.ts";
+
+const derivedModule: unknown = await import(new URL("../src/derived-key.ts", import.meta.url).href);
+const derivedIdempotencyKey = parseDerivedKeyModule(derivedModule);
 
 const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
 assert.ok(registered && typeof registered === "object" && "TOOLS" in registered);

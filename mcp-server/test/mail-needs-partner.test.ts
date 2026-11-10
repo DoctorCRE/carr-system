@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  parseMailNeedsPartnerQuery,
-  parseMailNeedsPartnerResponse,
-  readMailNeedsPartner,
-} from "../src/mail-needs-partner.ts";
+import { parseDerivedKeyModule, parseMailModule } from "./m028-module-boundary.ts";
+
+const mailModule: unknown = await import(new URL("../src/mail-needs-partner.ts", import.meta.url).href);
+const { parseMailNeedsPartnerQuery, parseMailNeedsPartnerResponse, readMailNeedsPartner } = parseMailModule(mailModule);
 
 const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
 assert.ok(registered && typeof registered === "object" && "TOOLS" in registered);
@@ -25,6 +24,19 @@ const readMailHandler = async (client: object, actor: object, args: Record<strin
 };
 
 test("empty mailbox differs from source unavailable", async () => {
+  assert.throws(() => parseMailModule({}));
+  assert.throws(() =>
+    parseMailModule({ readMailNeedsPartner: 1, parseMailNeedsPartnerQuery: 1, parseMailNeedsPartnerResponse: 1 }),
+  );
+  assert.throws(() => parseDerivedKeyModule({ derivedIdempotencyKey: () => 42 })("test", "value"));
+  const invalid = parseMailModule({
+    readMailNeedsPartner: async () => 42,
+    parseMailNeedsPartnerQuery: () => 42,
+    parseMailNeedsPartnerResponse: () => 42,
+  });
+  assert.throws(() => invalid.parseMailNeedsPartnerQuery({}));
+  assert.throws(() => invalid.parseMailNeedsPartnerResponse({}));
+  await assert.rejects(invalid.readMailNeedsPartner({ query: async () => ({ rows: [] }) }, {}, {}));
   const actor = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: true };
   assert.equal((await readMailNeedsPartner({ query: async () => ({ rows: [] }) }, actor, {})).state, "empty");
   assert.equal(

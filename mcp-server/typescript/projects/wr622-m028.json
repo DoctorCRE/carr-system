@@ -6,6 +6,7 @@
     "test/loop-residue-vocabulary.test.ts",
     "test/loop-successor-ref.test.ts",
     "test/loop-writer-surface.test.ts",
+    "test/m028-module-boundary.ts",
     "test/mail-needs-partner.test.ts",
     "test/market-research-territory.test.ts"
   ],
