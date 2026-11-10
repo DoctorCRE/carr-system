@@ -1,7 +1,7 @@
 // Validate and screen practice space conversion requirements.
 import { z } from 'zod';
 import { envelope, rangeSchema } from './evidence.ts';
-import { D, dollars, id, usd } from './runway.mjs';
+import { D, dollars, id, usd } from './runway.ts';
 
 export const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => {
   const d = new Date(`${s}T00:00:00Z`); return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s;

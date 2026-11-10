@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import Ajv from 'ajv';
-import { VERTICALS } from '../src/verticals.mjs';
+import { VERTICALS } from '../src/verticals.ts';
 import { callTool, TOOLS } from '../src/tools.mjs';
 import { runwayFixture, conversionFixture, saleFixture } from './fixtures.mjs';
 

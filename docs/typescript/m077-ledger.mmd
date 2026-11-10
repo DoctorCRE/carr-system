@@ -1,0 +1,16 @@
+stateDiagram-v2
+    [*] --> OpeningCash: Owner supplies initial cash
+    OpeningCash --> Refused: Incompatible declared inputs
+    OpeningCash --> ReserveBreach: Initial cash is below reserve
+    OpeningCash --> MonthlyLedger: Schedule injections and expenses
+    MonthlyLedger --> MonthlyLedger: Delay opening shifts relative costs and receipts
+    MonthlyLedger --> MonthlyLedger: Apply cash receipts or collected billings
+    MonthlyLedger --> MonthlyLedger: Apply equity and loan funding
+    MonthlyLedger --> MonthlyLedger: Pay fixed and relative expenses
+    MonthlyLedger --> ReserveBreach: Closing cash falls below reserve
+    ReserveBreach --> Exhausted: Closing cash falls below zero
+    ReserveBreach --> MonthlyLedger: Later receipts restore cash
+    MonthlyLedger --> Complete: Reach horizon with all costs modeled
+    MonthlyLedger --> Incomplete: Missing costs or omitted schedule
+    ReserveBreach --> Complete: Reach horizon with all costs modeled
+    Exhausted --> Complete: Reach horizon with all costs modeled
