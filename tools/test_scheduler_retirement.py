@@ -30,7 +30,7 @@ EVIDENCE_TABLES = (
 )
 
 
-REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
+REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.ts'
 GRANTS = re.compile(r'\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = Object\.freeze\(([\s\S]*)\);\n$')
 
 

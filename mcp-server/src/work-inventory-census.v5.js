@@ -16,7 +16,7 @@
 //
 // This module is deliberately NOT a script: it has no shebang, reads no CLI
 // arguments and carries no main-module guard, so the sealed script-entrypoint
-// frontier does not move. The predicate in ops/scac-mutation-inventory.mjs
+// frontier does not move. The predicate in ops/scac-mutation-inventory.ts
 // matches on PLAIN TEXT, so even naming those constructs in a comment here
 // would turn this library into an ingress. That cost one verdict to learn.
 

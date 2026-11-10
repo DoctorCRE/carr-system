@@ -130,13 +130,13 @@ class PushFloorTests(RepositoryFixture):
         self.write("hooks/example.py", "# Fixture hook.\n")
         self.write("ops/example-selftest.py", "from pathlib import Path\n"
                    "with Path('calls').open('a') as log:\n    log.write('paired\\n')\n")
-        self.write("mcp-server/src/scac-mutation-registry.current.generated.js", "// baseline\n")
+        self.write("mcp-server/src/scac-mutation-registry.current.generated.ts", "// baseline\n")
         self.write("mcp-server/src/tool-families/fixture.js", "// reviewed family\n")
         self.commit("ops/ci.sh", "ops/ci.py", "ops/ci-pushfloor.py", "ops/node_test_summary.py",
                     "ops/no-client-deliverables-gate.py",
                     "ops/hook-deletion-check.py", "ops/ci-selftest.py", "bin/type-check.sh",
                     "bin/node", "hooks/example.py", "ops/example-selftest.py",
-                    "mcp-server/src/scac-mutation-registry.current.generated.js",
+                    "mcp-server/src/scac-mutation-registry.current.generated.ts",
                     "mcp-server/src/tool-families/fixture.js")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
@@ -151,7 +151,7 @@ class PushFloorTests(RepositoryFixture):
                               capture_output=True, timeout=30)
 
     def test_current_scac_registry_selects_atlas_and_propagates_failure(self):
-        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.js")
+        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.ts")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.calls(), ["--test mcp-server/test/atlas-inventory-graph-read.test.mjs "
                                        "mcp-server/test/atlas-inventory-graph-web.test.mjs"])
@@ -266,7 +266,7 @@ class PushFloorTests(RepositoryFixture):
     def test_missing_atlas_packages_route_to_npm_ci(self):
         self.write("bin/node", "#!/bin/sh\nprintf '%s\\n' \"Error [ERR_MODULE_NOT_FOUND]: "
                    "Cannot find package 'atlas-dependency'\"\nexit 1\n").chmod(0o755)
-        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.js")
+        result = self.run_floor("mcp-server/src/scac-mutation-registry.current.generated.ts")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("Cannot find package 'atlas-dependency'", result.stderr)
         self.assertIn("missing Node packages; run npm ci --prefix mcp-server", result.stderr)

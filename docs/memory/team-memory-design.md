@@ -627,7 +627,7 @@ in S1.
 | `control-room/contracts/memory-evaluation-s0.v1.schema.json`, `control-room/contracts/fixtures/memory-evaluation-s0.synthetic.v1.json`, and `control-room/test/contracts.test.mjs` (L240–258) | Retire the contract, its fixture and its assertions together |
 | `ops/private-row-sponsor-rls-gate.py` (fails "enumeration is vacuous" without `memory_item`) | Run the behaviour proof over every fenced personal table the enumeration finds, and pass explicitly with "no fenced personal tables" when there are none. The enumeration still fails a new unfenced personal-scope table |
 | `ops/definer-hardening-selftest.py`, `ops/migration-production-proof-selftest.py`, `tools/test-schema-snapshot-roles.py`, `ops/fixtures/mcp-catalog/before-2026-10-05.json` | Remove the expectations; mark the historical catalog fixture as frozen |
-| `db/schema.sql`, `db/migration-baseline.json`, `bin/schema-snapshot.sh` output, `mcp-server/src/scac-mutation-registry.current.generated.js` | Regenerate after the drop |
+| `db/schema.sql`, `db/migration-baseline.json`, `bin/schema-snapshot.sh` output, `mcp-server/src/scac-mutation-registry.current.generated.ts` | Regenerate after the drop |
 
 **The S10 drop fails closed.** The drop migration starts with a preflight
 `do` block. It raises an exception, so nothing is dropped, when this query

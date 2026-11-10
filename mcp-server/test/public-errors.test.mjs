@@ -2,7 +2,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch } from "./helpers/budgeted-dispatch.mjs";
-import { ToolError, coerceArgsToSchema, TOOLS } from "../src/tools.js";
+import { coerceArgsToSchema } from "../src/input-validation.ts";
+import { ToolError, TOOLS } from "../src/tools.js";
 import { pgConstraintError } from "../src/constraint-errors.ts";
 import { publicError } from "../src/public-errors.ts";
 import { Pool } from "@neondatabase/serverless";

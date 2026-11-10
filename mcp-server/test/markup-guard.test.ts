@@ -25,11 +25,7 @@
 
 import { strict as assert } from "node:assert";
 import test from "node:test";
-
-const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
-assert.ok(typeof registered === "object" && registered !== null && "looksLikeToolCallMarkup" in registered);
-const looksLikeToolCallMarkup = registered.looksLikeToolCallMarkup;
-assert.ok(typeof looksLikeToolCallMarkup === "function");
+import { looksLikeToolCallMarkup } from "../src/input-validation.ts";
 
 test("the exact 2026-08-14 corruption is refused", () => {
   // What actually landed: source_note swallowed </source_note> and ate the

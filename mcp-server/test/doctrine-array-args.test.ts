@@ -13,18 +13,9 @@
 // coercion in one schema-driven place rather than in seventeen handlers, so that
 // is where the fix lives and where it has to be proven. Testing it through one
 // handler would pass while every other verb taking an array stayed broken.
-
 import assert from "node:assert/strict";
 import test from "node:test";
-
-function object(value: unknown): Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
-  return Object.fromEntries(Object.entries(value));
-}
-const legacy = object(await import(new URL("../src/tools.js", import.meta.url).href));
-
-const coerceArgsToSchema = legacy.coerceArgsToSchema;
-assert.ok(typeof coerceArgsToSchema === "function");
+import { coerceArgsToSchema } from "../src/input-validation.ts";
 
 const schema = {
   type: "object",

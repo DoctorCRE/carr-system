@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { parse } from '@babel/parser';
 import { TOOLS } from '../../src/tools.js';
-import { SCAC_MUTATION_OPERATIONS } from '../../src/scac-mutation-registry.current.generated.js';
+import { SCAC_MUTATION_OPERATIONS } from '../../src/scac-mutation-registry.current.generated.ts';
 
 const scheme = 'registered-handler-contract/v1';
 

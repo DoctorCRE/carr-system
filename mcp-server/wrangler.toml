@@ -362,7 +362,7 @@ tag = "phone-audio-handoff-v1"
 new_sqlite_classes = ["PhoneAudioHandoff"]
 
 [build]
-command = "node ../ops/scac-mutation-inventory.mjs"
+command = "node ../ops/scac-mutation-inventory.ts"
 
 [triggers]
 crons = ["* * * * *"]
