@@ -26,7 +26,7 @@ MIGRATION_STRUCTURE = re.compile(
     r"|ops/migration-order-gate\.py$)")
 TEST_COLLECTION = re.compile(r"(^ops/ci\.(sh|py)$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)")
 SCAC_ATLAS = re.compile(
-    r"^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.js|mcp-server/src/tool-families/[^/]+\.js|tools/regen\.py"
+    r"^(migrations/[0-9]+_.*scac.*\.sql|mcp-server/src/scac-mutation-registry\.current\.generated\.ts|mcp-server/src/tool-families/[^/]+\.js|tools/regen\.py"
     r"|ops/config/scac-registry-.*\.json)$")
 GATE_SURFACE = re.compile(
     r"^(hooks/[^/]+\.py|ops/ci\.(sh|py)|ops/githooks/|ops/config/codex-hooks\.json|ops/[^/]+-selftest\.py)")
