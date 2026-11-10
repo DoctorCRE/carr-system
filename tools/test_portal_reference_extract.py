@@ -23,8 +23,17 @@ class ExtractTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.source = self.base / 'source'
-        shutil.copytree(FIXTURES / 'ref-a', self.source)
+        self.copy_source('ref-a')
         self.output = self.base / 'output'
+
+    def copy_source(self, site):
+        shutil.copytree(FIXTURES / site, self.source)
+        result = subprocess.run(['node', str(FIXTURES / 'emit.ts'), site], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        sources = json.loads(result.stdout)
+        for name in ('app.js', 'data.js'):
+            self.assertIsInstance(sources[name], str)
+            (self.source / name).write_bytes(sources[name].encode('utf-8'))
 
     def run_cli(self, *args, ok=True):
         result = subprocess.run([sys.executable, str(CLI), '--source', str(self.source),
@@ -54,6 +63,30 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(first, self.run_cli())
         self.assertEqual(before, {str(p.relative_to(self.output)): p.read_bytes() for p in self.output.rglob('*') if p.is_file()})
         self.assertEqual(self.output.stat().st_mode & 0o777, 0o700)
+
+    def test_original_javascript_packages_remain_byte_identical(self):
+        source_hashes = {'ref-a': {'app.js': '7da33d54122efa0d51294241a302fd1f354332db05f18beab05fb1049f739aac', 'data.js': '6dce69a88320de8569a1b1c2eb7ffb26479fed574e6963911d01104da6e6139c'}, 'ref-v': {'app.js': '7da33d54122efa0d51294241a302fd1f354332db05f18beab05fb1049f739aac', 'data.js': '648d6a12d856736fcee384382c9605025329c181767a9593c172b571294d47e6'}}
+        package_hashes = {
+            'ref-a': '58b20573d0a3d0c42833a69718826882828cad390bc8ec1e9a9a1f42531378d4',
+            'ref-v': '1974ab25837a3793f66bd9222d413c283adc8a0ebdd3144fa61745e719872064',
+        }
+        for site in source_hashes:
+            with self.subTest(site=site):
+                shutil.rmtree(self.source)
+                self.copy_source(site)
+                self.output = self.base / site
+                self.run_cli()
+                self.assertEqual(hashlib.sha256((self.output / 'market-study.json').read_bytes()).hexdigest(), package_hashes[site])
+                manifest = json.loads((self.output / 'manifest.json').read_text())
+                for name, digest in source_hashes[site].items():
+                    self.assertEqual(hashlib.sha256((self.source / name).read_bytes()).hexdigest(), digest)
+                    self.assertEqual(manifest['inputs'][name], digest)
+
+    def test_source_producer_refuses_unknown_site(self):
+        result = subprocess.run(['node', str(FIXTURES / 'emit.ts'), 'unknown'],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
 
     def test_numeric_leaf_mappings_build_center_array(self):
         def change(mapping):
@@ -200,7 +233,7 @@ class ExtractTest(unittest.TestCase):
 
     def test_optional_ownership_absent(self):
         shutil.rmtree(self.source)
-        shutil.copytree(FIXTURES / 'ref-v', self.source)
+        self.copy_source('ref-v')
         self.run_cli()
         self.assertNotIn('ownership', json.loads((self.output / 'market-study.json').read_text()))
 
