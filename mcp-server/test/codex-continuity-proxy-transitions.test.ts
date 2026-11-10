@@ -128,3 +128,48 @@ for (const missing of [false, true]) {
     assert.match(result.stderr, missing ? /missing .* in secure token file/ : /refusing MCP token file/);
   });
 }
+
+test("proxy refuses checkpoints above both physical budgets without forwarding", async () => {
+  const states = [
+    { objective: "é".repeat(12_000) },
+    {
+      latest_corrections: [
+        { text: "evidence", refs: Array.from({ length: 300 }, (_, index) => `ref:${index}:${"x".repeat(480)}`) },
+      ],
+    },
+  ];
+  const result = await run(
+    states.map((state, index) =>
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: index + 71,
+        method: "tools/call",
+        params: { name: "codex-checkpoint", arguments: { state } },
+      }),
+    ),
+  );
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.seen, []);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(
+    result.stdout
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)),
+    [
+      { jsonrpc: "2.0", id: 71, error: { code: -32602, message: "codex_continuity_payload_too_large" } },
+      { jsonrpc: "2.0", id: 72, error: { code: -32602, message: "codex_reference_manifest_too_large" } },
+    ],
+  );
+});
+
+test("proxy retains local stdout refusals for disallowed notifications", async () => {
+  const result = await run([JSON.stringify({ jsonrpc: "2.0", method: "tools/call", params: { name: "other" } })]);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.seen, []);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    jsonrpc: "2.0",
+    error: { code: -32601, message: "not_in_codex_continuity_profile" },
+  });
+});
