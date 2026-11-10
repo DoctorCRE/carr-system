@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.proof_deadline import proof_deadline
 from lib.release_reader import read
 
 MAX_BYTES = 1048576
@@ -206,22 +207,15 @@ def main():
     receipt = {'schema': 'post-call-exact-edge-whitespace-proof.v1', 'status': 'unavailable',
                'record_reads': 0, 'inspected_cards': 0, 'eligible_cohorts': 0, 'assertions': {}}
 
-    def expired(signum, frame):
-        raise Unavailable('timeout')
-
-    previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, args.timeout_seconds)
     try:
-        code = observe(args, receipt)
+        with proof_deadline(args.timeout_seconds, Unavailable):
+            code = observe(args, receipt)
     except Unavailable as error:
         receipt['status'] = error.status
         code = 78
     except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
         receipt['status'] = 'unavailable_transport_or_contract'
         code = 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
     print(json.dumps(receipt, sort_keys=True))
     return code
 
