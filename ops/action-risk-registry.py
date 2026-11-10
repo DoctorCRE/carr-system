@@ -6,7 +6,7 @@ its last artifact change, not the original classification date. Delegated handle
 SQL was not traced by the old classifier, so rerunning that heuristic could label
 writes append-only with zero SQL counts. It is retired rather than presented as
 current risk coverage. Current handler existence belongs to
-mcp-server/src/scac-mutation-registry.current.generated.js.
+mcp-server/src/scac-mutation-registry.current.generated.ts.
 
 Run: python3 ops/action-risk-registry.py
 """

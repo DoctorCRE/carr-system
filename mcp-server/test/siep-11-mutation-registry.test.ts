@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const inventory: unknown = await import(new URL("../../ops/scac-mutation-inventory.mjs", import.meta.url).href);
+const inventory: unknown = await import(new URL("../../ops/scac-mutation-inventory.ts", import.meta.url).href);
 const assertCurrentContracts = record(inventory).assertCurrentContracts;
 assert.ok(typeof assertCurrentContracts === "function");
 

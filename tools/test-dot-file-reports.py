@@ -310,7 +310,7 @@ runpy.run_path(str(filer), run_name="__main__")
 class StdinTransportTests(unittest.TestCase):
     def test_required_source_frontier_remains_sealed(self):
         proc = subprocess.run(
-            ["node", "ops/scac-mutation-inventory.mjs", "--check-source-inventory-frontier"],
+            ["node", "ops/scac-mutation-inventory.ts", "--check-source-inventory-frontier"],
             cwd=ROOT, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)

@@ -303,7 +303,7 @@ class Controller:
             self.verdict('bad', 'mypy found shape mistakes — see the errors above')
 
     def check_gates(self):
-        if self.run_quiet('registry-check', ['node', 'ops/scac-mutation-inventory.mjs']):
+        if self.run_quiet('registry-check', ['node', 'ops/scac-mutation-inventory.ts']):
             self.fail_tail('registry-check')
             self.verdict('bad', 'committed registry differs from source; run ./run.sh regen registry')
             return

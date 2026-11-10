@@ -1,0 +1,5 @@
+{
+  "node": ["../ops/scac-mutation-inventory.ts", "test/current-mutation-registry-generation.test.ts"],
+  "worker": ["src/scac-mutation-registry.current.generated.ts"],
+  "entry": ["../ops/scac-mutation-inventory.ts"]
+}

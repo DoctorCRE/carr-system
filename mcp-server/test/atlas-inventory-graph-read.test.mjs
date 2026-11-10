@@ -1,11 +1,11 @@
 // Test atlas inventory graph reads, filtering, coverage, and access.
-import { CURRENT_REGISTRY_VERSION } from "../../ops/scac-mutation-inventory.mjs";
+import { CURRENT_REGISTRY_VERSION } from "../../ops/scac-mutation-inventory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { TOOLS } from "../src/tools.js";
-import { SCAC_MUTATION_OPERATIONS } from "../src/scac-mutation-registry.current.generated.js";
+import { SCAC_MUTATION_OPERATIONS } from "../src/scac-mutation-registry.current.generated.ts";
 import { AUTHENTICATED_SURFACES } from "../src/workspace-surface-inventory.js";
 import {
   assertReadOnly, ATLAS_GRAPH_PATH, ATLAS_KNOWN_GAPS, ATLAS_LEGS, ATLAS_LIMIT_MAX,

@@ -26,7 +26,7 @@ import {
 import { partnerAuthoritySlugForActor } from "../src/partner-authority.js";
 import { PROFILES, allowedIn, authorityDsnForActor, profileForActor, readCallCountSQL } from "../src/mcp.js";
 import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.ts";
-import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
+import { mcpInventory } from "../../ops/scac-mutation-inventory.ts";
 
 const SECRET = "unattended-secret-fixture";
 const RUNNER = "nightly-mac";
