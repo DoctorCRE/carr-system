@@ -44,7 +44,7 @@ test("Codex continuity stdio proxy keeps the bearer out of config and exposes tw
     });
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const child = spawn(process.execPath, [new URL("../codex-continuity-stdio-proxy.mjs", import.meta.url).pathname], {
+  const child = spawn(process.execPath, [new URL("../codex-continuity-stdio-proxy.ts", import.meta.url).pathname], {
     env: { ...process.env, CARR_MCP_ENV: tokenFile,
       CARR_MCP_URL: `http://127.0.0.1:${server.address().port}${endpoint}` },
     stdio: ["pipe", "pipe", "pipe"],
@@ -130,8 +130,8 @@ m._write_codex_config_edits = write
 with tempfile.TemporaryDirectory() as home, patch.object(Path, 'home', return_value=Path(home)):
     assert m.cmd_install_codex_continuity_mcp(True) == 0
     assert m.cmd_install_codex_continuity_mcp(False) == 0
-    installed = Path(home) / '.config/carr/codex-continuity/codex-continuity-stdio-proxy.mjs'
-    reviewed = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/codex-continuity-stdio-proxy.mjs'
+    installed = Path(home) / '.config/carr/codex-continuity/codex-continuity-stdio-proxy.ts'
+    reviewed = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/codex-continuity-stdio-proxy.ts'
     assert installed.read_bytes() == reviewed.read_bytes()
     installed_manifest = Path(home) / '.config/carr/codex-continuity/continuity-reference-manifest.ts'
     reviewed_manifest = Path(sys.argv[1]).resolve().parents[1] / 'mcp-server/continuity-reference-manifest.ts'

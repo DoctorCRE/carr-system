@@ -126,6 +126,7 @@
     "client-portal-register-postgres.test.mjs": {"milliseconds": 3075, "serial": true},
     "client-portal-session-postgres.test.mjs": {"milliseconds": 16754, "serial": true},
     "codex-continuity-migration.test.mjs": {"milliseconds": 330, "serial": false},
+    "codex-continuity-proxy-transitions.test.ts": {"milliseconds": 63000, "serial": false},
     "codex-continuity-stdio-proxy.test.mjs": {"milliseconds": 1119, "serial": false},
     "codex-continuity.test.mjs": {"milliseconds": 701, "serial": false},
     "complete-set-review-a03-migration.v5.test.mjs": {"milliseconds": 264, "serial": false},
