@@ -23,8 +23,8 @@ import { isolatePullRequests, isolateProduction } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { toolCallContent } from "./untrusted-text.ts";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
-  auditIdentity, assertNoCallerAuthorityFields,
-  pgConstraintError, describeConstraint } from "./tools.js";
+  auditIdentity, assertNoCallerAuthorityFields } from "./tools.js";
+import { pgConstraintError, describeConstraint } from "./constraint-errors.ts";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, organizationTenantForActor,
   personalScopeForActor, verifiedAgentSlugForClient } from "./identity.js";

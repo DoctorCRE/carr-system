@@ -265,8 +265,8 @@ function walk(node, visit, ancestors = []) {
   }
 }
 
-// Inventory tools.js and its extracted input helpers. Other modules and aliased
-// constructors (const E = ToolError) remain outside this inventory.
+// Inventory tools.js and its extracted input and constraint helpers. Other modules
+// and aliased constructors (const E = ToolError) remain outside this inventory.
 function codesIn(source) {
   const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const codes = new Set();
@@ -293,7 +293,7 @@ function codesIn(source) {
 
 test("every tools.js ToolError code is classified", t => {
   t.mock.method(console, "error", () => {});
-  const inventories = ["tools.js", "input-validation.ts"].map(file =>
+  const inventories = ["tools.js", "input-validation.ts", "constraint-errors.ts"].map(file =>
     codesIn(readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8")));
   const codes = new Set(inventories.flatMap(result => [...result.codes]));
   const unresolved = inventories.flatMap(result => result.unresolved);
@@ -339,7 +339,8 @@ test("every tools.js ToolError code is classified", t => {
 
 test("shared argument layer errors reach callers", t => {
   t.mock.method(console, "error", () => {});
-  const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8") + "\n" +
+    readFileSync(new URL("../src/constraint-errors.ts", import.meta.url), "utf8");
   const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const inputSource = readFileSync(new URL("../src/input-validation.ts", import.meta.url), "utf8");
   const names = ["assertRequiredArgs", "coerceArgsToSchema", "versionGuard", "assertDeclaredVocabularies", "pgConstraintError"];

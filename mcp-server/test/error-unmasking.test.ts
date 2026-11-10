@@ -27,19 +27,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { pgConstraintError } from "../src/constraint-errors.ts";
 import { ToolError } from "../src/tool-error.ts";
-
-function object(value: unknown): Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
-  return Object.fromEntries(Object.entries(value));
-}
-const legacy = object(await import(new URL("../src/tools.js", import.meta.url).href));
 
 // A Postgres driver error carries `code` as the SQLSTATE string; the rest is
 // optional and varies by fault class.
-const translate = legacy.pgConstraintError;
-assert.ok(typeof translate === "function");
-const pgConstraintError = (error: unknown): unknown => translate(error);
 const pgError = (fields: { code: string; message?: string; table?: string; constraint?: string }) =>
   Object.assign(new Error(fields.message || "db"), fields);
 

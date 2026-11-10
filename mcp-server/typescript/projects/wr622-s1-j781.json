@@ -1,0 +1,4 @@
+{
+  "node": ["src/constraint-errors.ts"],
+  "entry": []
+}
