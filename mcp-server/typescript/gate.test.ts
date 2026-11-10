@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -9,7 +9,7 @@ import { migrationIssues, object } from "./migration.ts";
 
 const source = resolve(import.meta.dirname, "..");
 const fixtureEnv = Object.fromEntries(
-  Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && name !== "GITHUB_BASE_REF"),
+  Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && !name.startsWith("GITHUB_")),
 );
 
 test("staged gate accepts clean code and refuses each negative seed", () => {
@@ -120,6 +120,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       ["typescript/migration.json", null, /migration.json.*readable valid JSON/],
       ["typescript/migration.json", '{"legacyJavaScript":null,"legacyTypeScript":[]}', /legacyJavaScript.*array/],
       ["knip.json", '{"project":[]}', /knip.json.*cover every admitted file/],
+      ["knip.json", '{"workspaces":{".":{"project":[]}}}', /knip.json.*cover every admitted file/],
       ["tsconfig.node.json", "{", /tsconfig.node.json.*readable valid JSON/],
       ["tsconfig.base.json", null, /tsconfig.base.json.*configuration must resolve/],
     ];
@@ -163,9 +164,12 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     assert.match(unavailable.stdout + unavailable.stderr, /Cannot read legacy migration baseline/);
     git("branch", "-M", "main");
     git("remote", "add", "origin", root);
-    const fetched = run();
-    assert.equal(fetched.status, 0, fetched.stdout + fetched.stderr);
-    assert.equal(git("rev-parse", "refs/remotes/origin/main").toString().trim(), baselineHead);
+    refusal(run(), /Cannot read legacy migration baseline/);
+    assert.notEqual(
+      spawnSync("git", ["rev-parse", "--verify", "refs/remotes/origin/main"], { cwd: root, env: fixtureEnv }).status,
+      0,
+    );
+    git("update-ref", "refs/remotes/origin/main", baselineHead);
     const emptyTree = execFileSync("git", ["mktree"], { cwd: root, env: fixtureEnv, input: "" }).toString().trim();
     const initial = git(
       "-c",
@@ -181,8 +185,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       .trim();
     git("update-ref", "refs/remotes/origin/main", initial);
     const bootstrap = run();
-    assert.equal(bootstrap.status, 0, bootstrap.stdout + bootstrap.stderr);
-    assert.match(bootstrap.stdout, /allowing initial gate introduction/);
+    refusal(bootstrap, /Cannot read legacy migration baseline/);
     git("update-ref", "refs/remotes/origin/main", baselineHead);
     const clean = run();
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
@@ -375,20 +378,20 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
     const save = () => writeFileSync(join(pkg, "typescript/migration.json"), JSON.stringify(scope));
     save();
     const gated = ["check.ts", "migration.ts", "gate.test.ts"].map((path) => join(pkg, "typescript", path));
-    assert.deepEqual(migrationIssues(pkg, gated), []);
+    assert.deepEqual(migrationIssues(pkg, gated, fixtureEnv), []);
     writeFileSync(join(root, js), "export const edited = 2;\n");
-    assert.deepEqual(migrationIssues(pkg, gated), []);
+    assert.deepEqual(migrationIssues(pkg, gated, fixtureEnv), []);
     writeFileSync(join(root, legacy), `${text}export const explicitAny: any = 1;\n`);
-    assert.match(migrationIssues(pkg, gated).join("\n"), /legacy.ts.*convert.*strict project/);
+    assert.match(migrationIssues(pkg, gated, fixtureEnv).join("\n"), /legacy.ts.*convert.*strict project/);
     for (const edited of [`${text}\n`, text.replaceAll("\n", "\r\n"), text.repeat(100)]) {
       writeFileSync(join(root, legacy), edited);
-      assert.match(migrationIssues(pkg, gated).join("\n"), /legacy.ts.*strict project/);
+      assert.match(migrationIssues(pkg, gated, fixtureEnv).join("\n"), /legacy.ts.*strict project/);
     }
     writeFileSync(join(root, legacy), text);
     renameSync(join(root, legacy), join(pkg, "Legacy.ts"));
     scope.legacyTypeScript[0] = "mcp-server/Legacy.ts";
     save();
-    assert.match(migrationIssues(pkg, gated).join("\n"), /only shrink/);
+    assert.match(migrationIssues(pkg, gated, fixtureEnv).join("\n"), /only shrink/);
     renameSync(join(pkg, "Legacy.ts"), join(root, legacy));
     scope.legacyTypeScript[0] = legacy;
     save();
@@ -398,7 +401,7 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
       const list = extension === "js" ? scope.legacyJavaScript : scope.legacyTypeScript;
       list.push(path);
       save();
-      assert.match(migrationIssues(pkg, gated).join("\n"), /only shrink.*convert.*strict project/);
+      assert.match(migrationIssues(pkg, gated, fixtureEnv).join("\n"), /only shrink.*convert.*strict project/);
       list.pop();
       rmSync(join(root, path));
     }
@@ -409,11 +412,135 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "converted");
     git("update-ref", "refs/remotes/origin/main", "HEAD");
     writeFileSync(join(root, js), text);
-    assert.match(migrationIssues(pkg, gated).join("\n"), /New first-party JavaScript/);
+    assert.match(migrationIssues(pkg, gated, fixtureEnv).join("\n"), /New first-party JavaScript/);
     rmSync(join(root, js));
     scope.legacyTypeScript.pop();
     save();
-    assert.match(migrationIssues(pkg, gated).join("\n"), /main-only.ts.*pre-existing main file, list it/);
+    assert.match(migrationIssues(pkg, gated, fixtureEnv).join("\n"), /main-only.ts.*pre-existing main file, list it/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("migration admission binds PR, queue and local checks to their own base", () => {
+  const root = mkdtempSync(join(tmpdir(), "carr-migration-event-"));
+  try {
+    const pkg = join(root, "mcp-server");
+    mkdirSync(join(pkg, "typescript"), { recursive: true });
+    const js = "mcp-server/legacy.js";
+    const scope = join(pkg, "typescript/migration.json");
+    writeFileSync(scope, JSON.stringify({ legacyJavaScript: [js], legacyTypeScript: [] }));
+    writeFileSync(join(root, js), "export const legacy = 1;\n");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: root, env: fixtureEnv, encoding: "utf8" }).trim();
+    const commit = (message: string) => {
+      git(
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-qm",
+        message,
+      );
+      return git("rev-parse", "HEAD");
+    };
+    git("init", "-q");
+    git("add", js, "mcp-server/typescript/migration.json");
+    const base = commit("base with legacy JavaScript");
+    git("checkout", "-qb", "topic");
+    const topic = commit("unrelated PR change");
+    git("checkout", "-q", "--detach", base);
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "merge",
+      "--no-ff",
+      "-qm",
+      "candidate",
+      topic,
+    );
+    const candidate = git("rev-parse", "HEAD");
+    git("update-ref", "refs/remotes/origin/main", base);
+    const eventPath = join(root, "event.json");
+    const run = (
+      mode: string,
+      declaredBase: string = base,
+      sha: string = candidate,
+      overrides: NodeJS.ProcessEnv = {},
+    ) => {
+      writeFileSync(
+        eventPath,
+        JSON.stringify(
+          mode === "pull_request"
+            ? { pull_request: { base: { sha: declaredBase } } }
+            : { merge_group: { base_sha: declaredBase, head_sha: sha } },
+        ),
+      );
+      return spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { migrationIssues } from ${JSON.stringify(join(source, "typescript/migration.ts"))};
+         const issues = migrationIssues(${JSON.stringify(pkg)}, []);
+         console.log(JSON.stringify(issues)); process.exitCode = issues.length ? 1 : 0;`,
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: {
+            ...fixtureEnv,
+            ...(mode === "local" ? {} : { GITHUB_EVENT_NAME: mode, GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: sha }),
+            ...overrides,
+          },
+        },
+      );
+    };
+    for (const mode of ["pull_request", "merge_group", "local"]) assert.equal(run(mode).status, 0);
+    git("checkout", "-q", "--detach", base);
+    git("rm", "-q", js);
+    const newer = commit("main converts legacy JavaScript");
+    git("update-ref", "refs/remotes/origin/main", newer);
+    git("checkout", "-q", "--detach", candidate);
+    for (const mode of ["pull_request", "merge_group", "local"]) {
+      const result = run(mode);
+      assert.equal(result.status, 0, `${mode} changed after main advanced: ${result.stdout}${result.stderr}`);
+      const repeated = run(mode);
+      assert.equal(repeated.status, 0, repeated.stderr);
+    }
+    writeFileSync(join(pkg, "new.js"), "export const added = 1;\n");
+    assert.match(run("pull_request").stdout, /New first-party JavaScript.*new.js/);
+    rmSync(join(pkg, "new.js"));
+    for (const badBase of ["", "origin/main", "0".repeat(40), topic, newer]) {
+      for (const mode of ["pull_request", "merge_group"]) {
+        const result = run(mode, badBase);
+        assert.notEqual(result.status, 0, `${mode} admitted bad base ${badBase}`);
+        assert.match(result.stderr, /migration baseline/);
+      }
+    }
+    for (const mode of ["pull_request", "merge_group"]) {
+      for (const overrides of [{ GITHUB_EVENT_PATH: join(root, "missing.json") }, { GITHUB_SHA: "" }]) {
+        const result = run(mode, base, candidate, overrides);
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /migration baseline/);
+      }
+      assert.notEqual(run(mode, base, newer).status, 0);
+    }
+    git("checkout", "-q", "--detach", newer);
+    writeFileSync(join(root, js), "export const resurrected = 1;\n");
+    git("add", js);
+    const queueCandidate = commit("queue candidate resurrects converted JavaScript");
+    const resurrection = run("merge_group", newer, queueCandidate);
+    assert.equal(resurrection.status, 1, resurrection.stderr);
+    assert.match(resurrection.stdout, /New first-party JavaScript.*legacy.js/);
+    git("update-ref", "-d", "refs/remotes/origin/main");
+    const absentLocal = run("local");
+    assert.notEqual(absentLocal.status, 0);
+    assert.match(absentLocal.stderr, /migration baseline/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
