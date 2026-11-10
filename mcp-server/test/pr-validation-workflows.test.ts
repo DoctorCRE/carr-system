@@ -229,13 +229,15 @@ test("PR gates retain two parallel partitions and secret scanning runs independe
 });
 
 test("unit fixtures use the job container's disposable PostgreSQL service endpoint", () => {
-  const evaluate = (value: string | undefined, classes: string) =>
-    typeof value === "string" && value.startsWith(`\${{`)
-      ? runInNewContext(value.slice(3, -2), {
-          matrix: { classes },
-          contains: (value: string, needle: string) => value.includes(needle),
-        })
-      : value;
+  const evaluate = (value: string | undefined, classes: string): string | undefined => {
+    if (typeof value !== "string" || !value.startsWith(`\${{`)) return value;
+    const result: unknown = runInNewContext(value.slice(3, -2), {
+      matrix: { classes },
+      contains: (value: string, needle: string) => value.includes(needle),
+    });
+    assert.ok(typeof result === "string");
+    return result;
+  };
   for (const file of ["ci.yml", "main-canary.yml", "unit-shards.yml"]) {
     const job = required(read(file).jobs[file === "unit-shards.yml" ? "unit" : "classes"]);
     const run = required(
