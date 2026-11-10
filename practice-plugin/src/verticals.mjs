@@ -1,6 +1,6 @@
 // Define practice verticals and calculate space plans and checklists.
 import { z } from 'zod';
-import { allowanceSource, envelope, rangeSchema, numberType, evidenceClass, publicSource } from './evidence.mjs';
+import { allowanceSource, envelope, rangeSchema, numberType, evidenceClass, publicSource } from './evidence.ts';
 
 const source = document => ({ id: document, source_class: 'CARR agent training', publisher: 'CARR', document,
   url: null, jurisdiction: 'Industry heuristic; local adoption unverified', publication_date: '2026-07-07',
