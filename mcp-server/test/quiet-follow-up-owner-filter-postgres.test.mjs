@@ -10,7 +10,6 @@ import { assertRecordingProducer, recordingProvenance } from './helpers/recordin
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { SCAC_MUTATION_OPERATIONS } from '../src/scac-mutation-registry.current.generated.ts';
 
-const registrySource = readFileSync(new URL('../src/scac-mutation-registry.current.generated.ts', import.meta.url), 'utf8');
 function registryPin(registry = SCAC_MUTATION_OPERATIONS) {
   return createHash('sha256').update(JSON.stringify(registry['quiet-follow-ups'])).digest('hex');
 }
@@ -18,30 +17,22 @@ function recordingRegistryMatches(registry) {
   const recording = JSON.parse(readFileSync(new URL('../../tools/fixtures/quiet-follow-up-owner-filter.json', import.meta.url)));
   assert.equal(recording.provenance.registry_entry_sha256, registryPin(registry));
 }
-async function registryCopy(source) {
-  const module = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
-  return module.SCAC_MUTATION_OPERATIONS;
-}
-
-test('recording accepts an unrelated registry entry', async () => {
-  const copy = registrySource.replace('Object.freeze({', 'Object.freeze({"synthetic-unrelated-verb": {"write": false},');
-  assert.notEqual(copy, registrySource);
-  recordingRegistryMatches(await registryCopy(copy));
+test('recording accepts an unrelated registry entry', () => {
+  recordingRegistryMatches({ ...SCAC_MUTATION_OPERATIONS,
+    'synthetic-unrelated-verb': { write: false } });
   recordingRegistryMatches({ ...SCAC_MUTATION_OPERATIONS,
     'accept-outcome-feedback': { ...SCAC_MUTATION_OPERATIONS['accept-outcome-feedback'], write: false } });
 });
 
-test('recording rejects a quiet-follow-ups contract change', async () => {
+test('recording rejects a quiet-follow-ups contract change', () => {
   const entry = SCAC_MUTATION_OPERATIONS['quiet-follow-ups'];
   for (const key of Object.keys(entry)) {
     const registry = { ...SCAC_MUTATION_OPERATIONS,
       'quiet-follow-ups': { ...entry, [key]: key === 'delegates_to' ? ['synthetic-verb'] : !entry[key] } };
     assert.throws(() => recordingRegistryMatches(registry), { code: 'ERR_ASSERTION' });
   }
-  const copy = registrySource.replace('"ingress_key": "mcp-tool:quiet-follow-ups"',
-    '"ingress_key": "mcp-tool:quiet-follow-ups-changed"');
-  assert.notEqual(copy, registrySource);
-  const changed = await registryCopy(copy);
+  const changed = { ...SCAC_MUTATION_OPERATIONS,
+    'quiet-follow-ups': { ...entry, ingress_key: 'mcp-tool:quiet-follow-ups-changed' } };
   assert.throws(() => recordingRegistryMatches(changed), { code: 'ERR_ASSERTION' });
 });
 
