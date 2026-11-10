@@ -83,14 +83,14 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     check('main fallback and CI share the MCP shard workflow and coverage gate; both run practice-plugin separately',
           workflow(REPO / '.github/workflows/unit-shards.yml')['jobs']['unit']['strategy']['matrix'] == '${{ fromJSON(needs.plan.outputs.matrix) }}'
           and len(plan()) > 0
-          and pr['jobs']['unit-coverage']['needs'] == ['select', 'unit']
-          and 'unit-coverage' in pr['jobs']['checks']['needs']
+          and 'unit' in pr['jobs']['checks']['needs']
           and any('--unit-part practice' in step.get('run', '') for step in pr['jobs']['classes']['steps'])
           and any('--unit-part practice' in step.get('run', '') for step in classes['steps'])
           and main['jobs']['unit']['uses'] == pr['jobs']['unit']['uses'] == './.github/workflows/unit-shards.yml'
           and main['jobs']['unit']['if'] == classes['if']
           and main['jobs']['unit-coverage']['needs'] == ['evidence', 'unit']
-          and main['jobs']['unit-coverage']['steps'] == pr['jobs']['unit-coverage']['steps'])
+          and all(any(st.get('run') == proof.get('run') for st in pr['jobs']['checks']['steps'])
+                  for proof in main['jobs']['unit-coverage']['steps'] if 'run' in proof))
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
@@ -122,7 +122,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     check('PR migration keeps proofs plus all independent fixture partitions',
           any('--migration-part proofs' in st.get('run', '') for st in pr_steps)
           and set(pr['jobs']['migration-fixtures']['strategy']['matrix']['part'])
-          == {'reconstruction', 'equivalence', 'shadow', 'gates', 'acceptance'})
+          == {'fixtures', 'gates', 'acceptance'})
     check('main retains its service and PR limits the shared fixture to unit checks',
           classes['services']['postgres']['image'] in pr['jobs']['classes']['services']['postgres']['image']
           and "contains(matrix.classes, 'unit')" in pr['jobs']['classes']['services']['postgres']['image'])

@@ -671,7 +671,7 @@ def test_hosted_migration_ownership():
           and "GH_TOKEN" in wf["jobs"]["fast"]["steps"][-1]["env"])
     check("hosted migration partitions cover all independent proof groups",
           set(wf["jobs"]["migration-fixtures"].get("strategy", {}).get("matrix", {}).get("part", []))
-          == {"reconstruction", "equivalence", "shadow", "gates", "acceptance"}
+          == {"fixtures", "gates", "acceptance"}
           and "--migration-part proofs" in runner["run"])
     check("required aggregate waits for independent fixtures", "migration-fixtures" in wf["jobs"]["checks"]["needs"])
     aggregate = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Fail unless every class group succeeded")
@@ -688,7 +688,7 @@ def test_hosted_migration_ownership():
                                     env={**scrubbed_env(), "PATH": str(pathlib.Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
                                          "CI_DRAFT": draft, "GITHUB_STEP_SUMMARY": str(pathlib.Path(directory) / "summary"),
                                          "CI_NEEDS": json.dumps({"scope": {"result": "success", "outputs": {"full": full}},
-                                                                 "unit-coverage": {"result": "success"}, "classes": {"result": classes},
+                                                                 "unit": {"result": "success"}, "classes": {"result": classes},
                                                                  "migration-fixtures": {"result": fixtures}})})
             check(f"aggregate scope={full!r} fixtures={fixtures} classes={classes}", result.returncode == expected)
     record = next(st for st in wf["jobs"]["checks"]["steps"] if st.get("name") == "Record the tested tree and class contract")
@@ -1420,7 +1420,7 @@ def _hosted_workflow(filename="ci.yml"):
 def test_hosted_draft_lifecycle():
     """Keep required event wiring and execute the actual aggregate on bad results."""
     for filename, lanes, verdict_name, command in (
-            ("ci.yml", ("fast", "gates", "secret", "unit-coverage", "scope", "classes", "migration-fixtures"),
+            ("ci.yml", ("fast", "secret", "unit", "scope", "classes", "migration-fixtures"),
              "checks", "verdict"),
             ("doc-drift.yml", ("check",), "verdict", "drift-verdict")):
         wf = _hosted_workflow(filename)
@@ -1456,12 +1456,12 @@ def test_hosted_draft_lifecycle():
         if "scope" in needs:
             needs["scope"]["outputs"] = {"full": "true"}
         if filename == 'ci.yml':
-            from ci_scope import PRODUCT_CLASSES, PR_JOBS
+            from ci_scope import PR_FAST_CLASSES, PR_JOBS
             needs.update({name: {'result': 'success'} for name in ('lint', 'unit', 'launchd-python39')})
             needs['select'] = {'result': 'success', 'outputs': {
-                'classes': json.dumps(sorted(PRODUCT_CLASSES)), 'full': 'false',
+                'classes': json.dumps(sorted(PR_FAST_CLASSES)), 'full': 'false',
                 **{job: 'true' for job in PR_JOBS}}}
-            for name in ('scope', 'classes', 'migration-fixtures'):
+            for name in ('scope', 'classes', 'migration-fixtures', 'unit', 'launchd-python39'):
                 needs[name]['result'] = 'skipped'
         with tempfile.TemporaryDirectory() as directory:
             for draft in (False, True):
@@ -1472,7 +1472,7 @@ def test_hosted_draft_lifecycle():
                     text=True, capture_output=True, timeout=10)
                 check(f"{filename}: draft={draft} verdict is explicit",
                       result.returncode == (1 if draft else 0))
-            for lane in (tuple(n for n in lanes if n not in ("fast", "gates", "secret")) if filename == "ci.yml" else lanes):
+            for lane in (tuple(n for n in lanes if n not in ("fast", "secret")) if filename == "ci.yml" else lanes):
                 for state in ("failure", "cancelled", "skipped", "timed_out", "missing"):
                     broken = {name: dict(value) for name, value in needs.items()}
                     if filename == 'ci.yml':
@@ -1667,12 +1667,65 @@ def test_worktree_python_selection():
                 marker.unlink(missing_ok=True)
 
 
+def test_hosted_queue_demand_contract():
+    import copy
+    from collections import Counter
+    from ci import CLASS_DESCRIPTIONS
+    from ci_scope import PR_FAST_CLASSES
+    wf = _hosted_workflow()
+
+    def full_contract(workflow):
+        jobs = workflow['jobs']
+        matrix = jobs['classes']['strategy']['matrix']
+        counts = Counter(name for group in matrix['classes'] for shard in matrix['gate_shard']
+                         if {'classes': group, 'gate_shard': shard} not in matrix['exclude']
+                         for name in group.split())
+        return (set(counts) == set(CLASS_DESCRIPTIONS)
+                and all(count == (2 if name == 'gates' else 1) for name, count in counts.items())
+                and workflow['concurrency']['cancel-in-progress'] ==
+                "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}"
+                and {'merge_group', 'push'} <= set(workflow['on'])
+                and workflow['on']['push']['branches'] == ['main']
+                and jobs['checks']['name'] == 'ops/ci.sh --strict'
+                and {'select', 'unit', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'} <= set(jobs['checks']['needs'])
+                and any('ci_unit_shards.py verify' in step.get('run', '')
+                        and step.get('if') == "github.event_name != 'pull_request'"
+                        for step in jobs['checks']['steps'])
+                and jobs['classes']['if'] == "${{ !cancelled() && (github.event_name != 'pull_request' || needs.select.outputs.full == 'true') }}"
+                and jobs['migration-fixtures']['strategy']['matrix']['part'] == ['fixtures', 'gates', 'acceptance'])
+
+    check('merge groups retain all classes, shard coverage and uncancelled required result', full_contract(wf))
+    for missing in CLASS_DESCRIPTIONS:
+        broken = copy.deepcopy(wf)
+        matrix = broken['jobs']['classes']['strategy']['matrix']
+        matrix['classes'] = [' '.join(name for name in group.split() if name != missing)
+                             for group in matrix['classes']]
+        check(f'queue contract detects missing {missing}', not full_contract(broken))
+    broken = copy.deepcopy(wf)
+    broken['concurrency']['cancel-in-progress'] = True
+    check('queue contract detects cancellable merge groups', not full_contract(broken))
+    check('superseded runs group by workflow and ref', wf['concurrency']['group'] ==
+          '${{ github.workflow }}-${{ github.head_ref || github.ref }}')
+    with tempfile.TemporaryDirectory() as directory:
+        output = pathlib.Path(directory) / 'outputs'
+        result = subprocess.run([sys.executable, str(REPO / 'ops/ci_scope.py'), '--hosted'],
+                                env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                                     'GITHUB_EVENT_PATH': '/does/not/exist', 'GITHUB_OUTPUT': str(output)},
+                                capture_output=True, text=True, timeout=15)
+        selection = json.loads(result.stdout)
+        check('every PR uses the named fast subset even for unknown diffs', result.returncode == 0
+              and set(selection['classes']) == PR_FAST_CLASSES and not selection['full']
+              and set(selection['jobs']) == {'lint', 'fast', 'secret'})
+        check('selector workflow uses the hosted subset policy', any(
+            step.get('run') == 'python3 ops/ci_scope.py --hosted' for step in wf['jobs']['select']['steps']))
+
+
 def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
         test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_changed_path_selection, test_artifact_requires_native_rule_projection_and_tests,
+    for fn in (test_hosted_queue_demand_contract, test_changed_path_selection, test_artifact_requires_native_rule_projection_and_tests,
                test_controller_selection_and_invalid_arguments,
                test_doc_drift_keeps_its_argument_and_interpreter_handoff,
                test_migration_requires_newline_terminated_verdict,

@@ -22,7 +22,7 @@ type Job = {
   steps: Step[];
   needs: string[];
   env: Record<string, string>;
-  strategy: { matrix: { shard: number[]; classes?: string[] } };
+  strategy: { matrix: { shard: number[]; gate_shard?: number[]; classes?: string[] } };
   container: { image: string };
   services: { postgres: { image: string; env: Record<string, string> } };
 };
@@ -214,18 +214,18 @@ for (const file of files) {
   });
 }
 
-test("PR gates retain two parallel partitions and secret scanning runs independently", () => {
+test("full gates retain two parallel partitions and PR secret scanning runs independently", () => {
   const ci = read("ci.yml");
-  assert.deepEqual(required(ci.jobs.gates).strategy.matrix.shard, [1, 2]);
-  const gates = required(required(ci.jobs.gates).steps.find((step) => step.name === "Gates checks"));
-  assert.equal(gates.run, `ops/ci.sh --strict --only gates --gate-shard "\${{ matrix.shard }}/2"`);
+  assert.deepEqual(required(ci.jobs.classes).strategy.matrix.gate_shard, [1, 2]);
+  assert.ok(required(ci.jobs.classes).strategy.matrix.classes?.includes("gates"));
+  assert.equal(ci.jobs.gates, undefined);
   const fast = required(required(ci.jobs.fast).steps.find((step) => step.name === "Fast checks"));
   assert.doesNotMatch(fast.run, /\b(?:gates|secret)\b/);
   assert.equal(
     required(required(ci.jobs.secret).steps.find((step) => step.name === "Secret checks")).run,
     "ops/ci.sh --strict --only secret",
   );
-  assert.ok(required(ci.jobs.checks).needs.includes("gates") && required(ci.jobs.checks).needs.includes("secret"));
+  assert.ok(required(ci.jobs.checks).needs.includes("classes") && required(ci.jobs.checks).needs.includes("secret"));
 });
 
 test("unit fixtures use the job container's disposable PostgreSQL service endpoint", () => {
@@ -271,20 +271,21 @@ test("strict aggregate runs after failed classes and requires complete successfu
     "select",
     "lint",
     "fast",
-    "gates",
     "secret",
     "unit",
-    "unit-coverage",
     "scope",
     "classes",
     "migration-fixtures",
     "launchd-python39",
   ]);
-  assert.deepEqual(
-    required(ci.jobs["unit-coverage"]).needs,
-    ["select", "unit"],
-    "coverage must wait for the entire shard matrix",
+  assert.equal(ci.jobs["unit-coverage"], undefined);
+  assert.ok(gate.needs.includes("unit"), "coverage must wait for the entire shard matrix");
+  const coverage = required(
+    gate.steps.find((step) => step.name === "Prove exact suite coverage and missing-suite failure"),
   );
+  assert.match(coverage.run, /python3 ops\/ci-unit-shards-selftest.py/);
+  assert.match(coverage.run, /python3 ops\/ci_unit_shards.py verify unit-receipts\/\*.json/);
+  assert.equal(coverage.if, "github.event_name != 'pull_request'");
   const cardinality = spawnSync("python3", ["ci_unit_shards.py", "matrix"], {
     cwd: new URL("../../ops/", import.meta.url),
     encoding: "utf8",
@@ -313,14 +314,17 @@ test("strict aggregate runs after failed classes and requires complete successfu
     assert.equal(step.env.CI_NEEDS, `\${{ toJSON(needs) }}`);
     assert.equal(step.env.CI_EVENT, `\${{ github.event_name }}`);
     for (const [event, active] of [
-      ["pull_request", ["lint", "launchd-python39", "fast", "gates", "secret", "unit", "unit-coverage"]],
-      ["merge_group", ["scope", "classes", "migration-fixtures", "unit-coverage"]],
+      ["pull_request", ["lint", "fast", "secret"]],
+      ["merge_group", ["scope", "classes", "migration-fixtures", "unit"]],
     ] satisfies [string, string[]][]) {
       const needs: Needs = Object.fromEntries(
         gate.needs.map((name) => [name, { result: active.includes(name) ? "success" : "skipped" }]),
       );
       required(needs.scope).outputs = { full: "true" };
       needs.select = selectorNeeds().select;
+      required(needs.select.outputs).classes = JSON.stringify(
+        PRODUCT_CLASSES.filter((name) => !["gates", "unit"].includes(name)),
+      );
       const verdict = (current: Needs) => {
         const output = spawnSync("bash", ["-e", "-c", step.run], {
           cwd: new URL("../../", import.meta.url),

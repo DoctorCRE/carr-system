@@ -37,7 +37,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = pathlib.Path(directory) / 'summary'
             needs = {'scope': {'result': 'success', 'outputs': {'full': 'true'}},
-                     'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'},
+                     'unit': {'result': 'success'}, 'classes': {'result': 'success'},
                      'migration-fixtures': {'result': 'success'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_REPOSITORY='DoctorCRE/carr-system',
@@ -90,7 +90,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for fixtures, expected in (('false', 1), ('true', 1), ('', 1)):
                 needs = {'scope': {'result': 'success', 'outputs': {'full': 'true', 'fixtures': fixtures}},
-                         'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                         'unit': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
                 with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                                 GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                     self.assertEqual(evidence.hosted_verdict(), expected)
@@ -98,7 +98,7 @@ class HostedVerdict(unittest.TestCase):
     def test_failed_scope_cannot_authorize_skipping_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:
             needs = {'scope': {'result': 'failure', 'outputs': {'full': 'false'}},
-                     'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                     'unit': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                 self.assertEqual(evidence.hosted_verdict(), 1)
@@ -119,7 +119,7 @@ class HostedVerdict(unittest.TestCase):
             for full, classes, fixtures, draft, expected in cases:
                 with self.subTest(full=full, classes=classes, fixtures=fixtures, draft=draft):
                     needs = {'scope': {'result': 'success', 'outputs': {'full': full}},
-                             'unit-coverage': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
+                             'unit': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
                     result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
                         env={**os.environ, 'CI_NEEDS': json.dumps(needs), 'CI_DRAFT': str(draft).lower(),
                              'GITHUB_STEP_SUMMARY': str(pathlib.Path(directory) / 'summary')},
@@ -157,7 +157,7 @@ class Reuse(unittest.TestCase):
         self.assertTrue(self.eligible())
 
     def test_reuse_requires_every_mcp_shard_and_coverage(self):
-        proof_jobs = ['unit / plan', 'unit-coverage', *[f'unit / MCP unit shard {n} of {self.shard_count}' for n in range(1, self.shard_count + 1)]]
+        proof_jobs = ['unit / plan', 'ops/ci.sh --strict', *[f'unit / MCP unit shard {n} of {self.shard_count}' for n in range(1, self.shard_count + 1)]]
         self.assertTrue(self.eligible())
         for name in proof_jobs:
             for state in ('failure', 'cancelled', 'skipped', None):
@@ -399,7 +399,7 @@ class ConversionProof(unittest.TestCase):
         self.health = json.loads((self.fixtures / 'health.json').read_text())
         self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
         self.merge = self.commit['oid']
-        self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.workflow = (self.fixtures / 'workflow.yml').read_text()
         self.commands = []
 
     def run_proof(self, ancestry=0, timeout=2, cli=False):
@@ -427,6 +427,32 @@ class ConversionProof(unittest.TestCase):
                                                 '--pr', '3114', '--timeout', str(timeout)]):
                     return evidence.main()
             return evidence.prove_conversion(pr=3114, timeout=timeout)
+
+    def test_bundled_coverage_requires_the_strict_aggregate_and_every_full_job(self):
+        self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
+        suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
+        jobs = suite['checkRuns']['nodes']
+        jobs[:] = [job for job in jobs if job['name'] != 'unit-coverage']
+        short = next(job for job in jobs if job['name'] ==
+                     'ops/ci.sh --strict --only lint pushfloor types secret binding artifact')
+        short['name'] += ' hxprobe dependency'
+        self.assertEqual(self.run_proof(), 0)
+        original = copy.deepcopy(jobs)
+        required = {'ops/ci.sh --strict', 'unit / plan', 'launchd-python39',
+                    'Gates selftests shard 2 of 2',
+                    *('ops/ci.sh --strict --only ' + group
+                      for group in evidence.workflow_groups(self.workflow)),
+                    *(f'unit / MCP unit shard {n} of 8' for n in range(1, 9))}
+        for name in sorted(required):
+            for state in ('missing', 'FAILURE', 'CANCELLED', 'SKIPPED'):
+                suite['checkRuns']['nodes'] = copy.deepcopy(original)
+                current = suite['checkRuns']['nodes']
+                if state == 'missing':
+                    current[:] = [job for job in current if job['name'] != name]
+                else:
+                    next(job for job in current if job['name'] == name)['conclusion'] = state
+                with self.subTest(name=name, state=state):
+                    self.assertEqual(self.run_proof(), 78 if state == 'missing' else 1)
 
     def test_recorded_equal_and_descendant_release(self):
         self.assertEqual(self.run_proof(), 0)
@@ -457,7 +483,7 @@ class ConversionProof(unittest.TestCase):
 
     def test_missing_pending_paginated_and_wrong_event_evidence_refuses(self):
         original = copy.deepcopy(self.snapshot)
-        for mode in ('missing', 'pending', 'pagination', 'event', 'shard', 'graphql'):
+        for mode in ('missing', 'pending', 'pagination', 'event', 'shard', 'coverage', 'graphql'):
             self.snapshot = copy.deepcopy(original)
             self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
             suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
@@ -469,6 +495,9 @@ class ConversionProof(unittest.TestCase):
                 suite['checkRuns']['pageInfo']['hasNextPage'] = True
             elif mode == 'event':
                 suite['workflowRun']['event'] = 'pull_request'
+            elif mode == 'coverage':
+                suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
+                    if j['name'] != 'unit-coverage']
             elif mode == 'shard':
                 suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
                     if j['name'] != 'unit / MCP unit shard 8 of 8']

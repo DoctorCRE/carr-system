@@ -14,3 +14,7 @@ Tests replay these responses through the production parser. Negative cases
 mutate one recorded field. An additional disposable repository supplies real
 equal, descendant, older, unrelated and unknown commit ancestry without
 requiring the checkout's historical Git objects.
+
+`workflow.yml` selects the unmodified coverage job and class matrix through its
+job-name metadata from `.github/workflows/ci.yml` at the recorded merge SHA.
+The proof must evaluate recorded jobs against their own workflow contract.
