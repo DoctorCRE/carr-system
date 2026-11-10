@@ -9,8 +9,22 @@ import {
 
 export { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION };
 
+type RegistryTool = {
+  registrySource?: string;
+  inputSchema?: { properties?: object };
+  write?: boolean;
+  humanOnly?: boolean;
+  humanCallerOnly?: boolean;
+  authorityOnly?: boolean;
+};
+type Operation = (typeof SCAC_MUTATION_OPERATIONS)[keyof typeof SCAC_MUTATION_OPERATIONS];
+const operations: Readonly<Record<string, Operation>> = SCAC_MUTATION_OPERATIONS;
+
 export class MutationRegistryRefusal extends Error {
-  constructor(error, operation) {
+  error: string;
+  operation: unknown;
+  fields?: string[];
+  constructor(error: string, operation: unknown) {
     super(error);
     this.name = "MutationRegistryRefusal";
     this.error = error;
@@ -18,27 +32,33 @@ export class MutationRegistryRefusal extends Error {
   }
 }
 
-function canonicalize(value) {
+function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object")
-    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]));
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(Reflect.get(value, key))]),
+    );
   return value;
 }
 
-async function sha256(value) {
+async function sha256(value: unknown) {
   const bytes = new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(canonicalize(value)));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function registeredOperation(name) {
-  return typeof name === "string" ? SCAC_MUTATION_OPERATIONS[name] || null : null;
+export function registeredOperation(name: unknown) {
+  return typeof name === "string" ? operations[name] || null : null;
 }
 
-export function assertClosedTopLevel(name, tool, args) {
+export function assertClosedTopLevel(name: unknown, tool: RegistryTool | null | undefined, args: unknown) {
   if (!args || typeof args !== "object" || Array.isArray(args)) return;
   const allowed = new Set(Object.keys(tool?.inputSchema?.properties || {}));
-  const extras = Object.keys(args).filter(key => !allowed.has(key)).sort();
+  const extras = Object.keys(args)
+    .filter((key) => !allowed.has(key))
+    .sort();
   if (extras.length) {
     const refusal = new MutationRegistryRefusal("unregistered_operation_fields", name);
     refusal.fields = extras;
@@ -46,7 +66,7 @@ export function assertClosedTopLevel(name, tool, args) {
   }
 }
 
-export async function assertRegisteredOperation(name, tool, args) {
+export async function assertRegisteredOperation(name: unknown, tool: RegistryTool | null | undefined, args: unknown) {
   const row = registeredOperation(name);
   if (!row) throw new MutationRegistryRefusal("unregistered_operation", name);
   const actual = {
@@ -58,7 +78,7 @@ export async function assertRegisteredOperation(name, tool, args) {
     authority_only: tool?.authorityOnly === true,
   };
   for (const [key, value] of Object.entries(actual)) {
-    if (row[key] !== value) throw new MutationRegistryRefusal("mutation_contract_mismatch", name);
+    if (Reflect.get(row, key) !== value) throw new MutationRegistryRefusal("mutation_contract_mismatch", name);
   }
   assertClosedTopLevel(name, tool, args);
   return row;

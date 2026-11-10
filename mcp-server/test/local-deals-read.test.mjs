@@ -3,7 +3,7 @@ import { readMigration } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { assertRegisteredOperation } from '../src/mutation-registry.js';
+import { assertRegisteredOperation } from '../src/mutation-registry.ts';
 import { TOOLS } from '../src/tools.js';
 
 test('deal-board exposes parking fields and excludes invoiced deals in its executed read', async () => {

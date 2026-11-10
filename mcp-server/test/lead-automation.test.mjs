@@ -166,7 +166,7 @@ test("malformed contact metadata cannot break the whole job",()=>{
 });
 
 test("lead automation retains human-only party merges", async () => {
-  const { registeredOperation } = await import("../src/mutation-registry.js");
+  const { registeredOperation } = await import("../src/mutation-registry.ts");
   assert.equal(registeredOperation("confirm-merge").human_only, true);
   for (const name of ["advance-leads", "approve-lead-draft", "approve-lead-move"])
     assert.ok(registeredOperation(name));

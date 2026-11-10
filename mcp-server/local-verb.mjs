@@ -109,7 +109,7 @@ import {
 // normal STORE front door down with it.
 async function loadBreakGlassRuntime() {
   const [{ Pool, neonConfig }, { default: ws }, tools] = await Promise.all([
-    import("./src/postgres.js"),
+    import("./src/postgres.ts"),
     import("ws"),
     import("./src/tools.js"),
   ]);
