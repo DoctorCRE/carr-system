@@ -268,6 +268,14 @@ test('runway ledger: scheduled injections, reserve breach, exhaustion and recove
   assert.deepEqual(r.ledger.map(x => x.injections_usd), [3, 0, 0]);
   assert.equal(r.first_reserve_breach_month, 1); assert.equal(r.first_exhaustion_month, 2);
   assert.equal(r.minimum_cash_month, 2); assert.equal(r.required_initial_cash_usd, 22);
+  for (const [receipts, closing] of [
+    [[0, 15, 10], [3, 8, 8]], [[0, 10, 10], [3, 3, 3]], [[0, 0, 0], [3, -7, -17]],
+  ]) {
+    a.receipts.monthly_usd = receipts;
+    const horizon = runway(a).base;
+    assert.deepEqual(horizon.ledger.map(x => x.closing_cash_usd), closing);
+    assert.equal(horizon.status, 'complete');
+  }
 });
 
 test('runway ledger: initial reserve breach and half-up output rounding', () => {

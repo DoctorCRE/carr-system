@@ -25,8 +25,11 @@ The statechart helper generated a TLA+ skeleton but could not check or render it
 | Pay fixed and opening-relative expenses | runway: exact decimal accumulation, payroll, shifted expense and incomplete horizon |
 | Closing cash falls below reserve | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
 | Closing cash falls below zero | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
-| Later receipts restore cash | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
-| Reach complete horizon, including breached/exhausted paths | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
+| Later receipts restore cash after a reserve breach | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
+| Later receipts restore cash after exhaustion | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
+| Reach complete horizon with cash above reserve | A1 case 1: exact cash ledger and reserve funding |
+| Reach complete horizon below reserve | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
+| Reach complete horizon below zero | runway ledger: scheduled injections, reserve breach, exhaustion and recovery |
 | Reach incomplete horizon with omitted schedule | runway: funded loan stays in the ledger when first payment is beyond the horizon |
 | Reach incomplete horizon with missing costs | runway ledger: missing cost categories suppress funding recommendations |
 | Initial reserve breach and Decimal rounding | runway ledger: initial reserve breach and half-up output rounding |
