@@ -9,7 +9,7 @@ test('every live party address comes back with its record ref, in or out of mark
   const { createServer } = await import('node:net');
   const path = await import('node:path');
   const { default: pg } = await import('pg');
-  const { acquireDisposablePostgres, acquirePostgresFixtureGroup } = await import('./helpers/disposable-postgres.mjs');
+  const { acquireDisposablePostgres, acquirePostgresFixtureGroup } = await import('./helpers/disposable-postgres.ts');
   let bin;
   for (const config of ['pg_config', '/opt/homebrew/opt/postgresql@17/bin/pg_config', '/usr/lib/postgresql/17/bin/pg_config']) {
     try {

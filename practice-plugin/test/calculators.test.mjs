@@ -5,7 +5,7 @@ import Ajv from 'ajv';
 import { callTool, TOOLS } from '../src/tools.mjs';
 import { addMonths } from '../src/sale-readiness.mjs';
 
-import { runwayFixture, conversionFixture, saleFixture, fact } from './fixtures.mjs';
+import { runwayFixture, conversionFixture, saleFixture, fact } from './fixtures.ts';
 const invoke = (name, args) => {
   const response = callTool(name, args); assert.ok(!response.isError, JSON.stringify(response)); return response.structuredContent.results;
 };

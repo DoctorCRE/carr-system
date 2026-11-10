@@ -1,0 +1,24 @@
+{
+  "node": [
+    "test/helpers/legacy-test-registry.ts",
+    "test/journey-one-clock.v5.test.ts",
+    "test/lead-authority-dispatch.test.ts",
+    "test/lead-board.test.ts",
+    "test/lead-history.test.ts",
+    "test/linkedin-activity-urn.test.ts",
+    "test/loop-bookkeeping-sense.test.ts",
+    "test/loop-due-date-persistence.test.ts",
+    "test/loop-header-prose.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/journey-one-clock.v5.test.ts",
+    "test/lead-authority-dispatch.test.ts",
+    "test/lead-board.test.ts",
+    "test/lead-history.test.ts",
+    "test/linkedin-activity-urn.test.ts",
+    "test/loop-bookkeeping-sense.test.ts",
+    "test/loop-due-date-persistence.test.ts",
+    "test/loop-header-prose.test.ts"
+  ]
+}
