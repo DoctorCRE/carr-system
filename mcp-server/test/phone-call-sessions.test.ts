@@ -784,7 +784,7 @@ test("session read returns database state when handoff is unreachable", async ()
   assert.equal(result.body.upload_state_unavailable, true);
 });
 
-test("handoff transactions expose resolved sync and async callback results", () => {
+test("handoff storage preserves typed optional reads and resolved transaction results", () => {
   const dir = mkdtempSync(join(tmpdir(), "handoff-types-"));
   const source = join(dir, "transaction.mts");
   const helper = fileURLToPath(new URL("./helpers/phone-handoff-state.ts", import.meta.url));
@@ -814,6 +814,16 @@ const storage = handoffState().storage;
       source,
       prelude +
         `
+const missing: number | undefined = await storage.get<number>("missing");
+if (missing !== undefined) throw new Error("missing storage key must return undefined");
+const original = { bytes: new Uint8Array([1, 2]) };
+await storage.put("audio", original);
+original.bytes[0] = 9;
+const restored = await storage.get<typeof original>("audio");
+if (restored?.bytes[0] !== 1) throw new Error("put must clone stored values");
+restored.bytes[0] = 8;
+const reread = await storage.transaction(tx => tx.get<typeof original>("audio"));
+if (reread?.bytes[0] !== 1) throw new Error("get must clone stored values");
 await storage.transaction(() => 7).then(value => value.toFixed());
 await storage.transaction(async () => 7).then(value => value.toFixed());
 `,
@@ -827,11 +837,13 @@ await storage.transaction(async () => 7).then(value => value.toFixed());
       prelude +
         `
 await storage.transaction(async () => 7).then(value => value.then(number => number.toFixed()));
+await storage.get<number>("missing").then(value => value.toFixed());
 `,
     );
     const invalid = check();
     assert.notEqual(invalid.status, 0, "resolved transaction values cannot be used as promises");
     assert.match(invalid.stdout + invalid.stderr, /TS2339.*then.*number/);
+    assert.match(invalid.stdout + invalid.stderr, /TS18048.*value.*possibly.*undefined/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
