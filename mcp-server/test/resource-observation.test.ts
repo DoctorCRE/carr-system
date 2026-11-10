@@ -1,13 +1,49 @@
 // Test resource observations and dashboard reporting.
-import test from "node:test";
+
 import assert from "node:assert/strict";
-import { ToolError, executeRegisteredTool } from "../src/tools.js";
+import test from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+import type { VerbInputs } from "../src/verb-contract.ts";
+
+// Keep the legacy registry at its runtime seam until its separate conversion.
+const registryPath = "../src/tools.js";
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+function providers(value: unknown): Record<string, unknown>[] {
+  assert.ok(Array.isArray(value));
+  return value.map((item: unknown) => object(item));
+}
+function findProvider(value: unknown, name: string) {
+  const found = providers(value).find((item) => item.provider === name);
+  assert.ok(found);
+  return found;
+}
+function string(value: unknown): string {
+  assert.ok(typeof value === "string");
+  return value;
+}
+const legacy = object(registry);
+const invoke = legacy.executeRegisteredTool;
+assert.ok(typeof invoke === "function");
+async function executeRegisteredTool(client: object, actor: object, verb: keyof VerbInputs, args: object) {
+  assert.ok(typeof invoke === "function");
+  const result: unknown = await invoke(client, actor, verb, args);
+  return object(result);
+}
 
 const AGENT = { id: "10000000-0000-0000-0000-000000000021", slug: "codex", human: false, via: "test" };
 
-async function rejected(fn) {
-  try { await fn(); assert.fail("expected refusal"); }
-  catch (e) { assert.ok(e instanceof ToolError, `expected ToolError, got ${e}`); return e.payload; }
+async function rejected(fn: () => Promise<unknown>) {
+  try {
+    await fn();
+    assert.fail("expected refusal");
+  } catch (e) {
+    assert.ok(e instanceof ToolError, `expected ToolError, got ${e}`);
+    return e.payload;
+  }
 }
 
 // Mirrors ops.record_resource_observation (migration 0580): idempotent
@@ -20,12 +56,37 @@ async function rejected(fn) {
 const STALE_AFTER_MS = 15 * 60 * 1000;
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
+type Observation = {
+  id: string;
+  provider: string;
+  state: string;
+  observed_at: string;
+  reason: unknown;
+  policy: unknown;
+  measured_capacity: unknown;
+  configured_capacity: unknown;
+  model_route: unknown;
+  [field: string]: unknown;
+};
+type Receipt = Pick<Observation, "id" | "provider" | "state" | "reason" | "observed_at"> & { digest: string };
+function stringParam(value: unknown): string {
+  if (typeof value !== "string") throw new Error("expected string query parameter");
+  return value;
+}
 class ResourceObservationFake {
+  calls: { sql: string; params: unknown[] }[];
+  toolCalls: Map<unknown, { request_hash: unknown; response: unknown }>;
+  receipts: Map<unknown, Receipt>;
+  rows: Observation[];
+  now: () => Date;
   constructor(now = () => new Date("2026-09-24T12:00:00Z")) {
-    this.calls = []; this.toolCalls = new Map(); this.receipts = new Map(); this.rows = [];
+    this.calls = [];
+    this.toolCalls = new Map();
+    this.receipts = new Map();
+    this.rows = [];
     this.now = now;
   }
-  async query(text, params = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     this.calls.push({ sql, params });
     if (sql.startsWith("select request_hash, response")) {
@@ -33,7 +94,7 @@ class ResourceObservationFake {
       return { rows: row ? [row] : [] };
     }
     if (sql.startsWith("select ops.read_resource_dashboard")) {
-      const parseJsonField = (value) => (typeof value === "string" ? JSON.parse(value) : value);
+      const parseJsonField = (value: unknown): unknown => (typeof value === "string" ? JSON.parse(value) : value);
       const nowMs = this.now().getTime();
       const providers = ["neon", "github", "cloudflare", "local_compute", "model_route"].map((provider) => {
         const latest = [...this.rows].reverse().find((r) => r.provider === provider);
@@ -53,28 +114,77 @@ class ResourceObservationFake {
           };
         }
         return {
-          provider, account: null, project: null, product: null, period: null, as_of: null,
-          quantity: null, quantity_unit: null, allowance: null, policy: null, estimate: null, charge: null,
-          measured_capacity: null, configured_capacity: null, model_route: null,
+          provider,
+          account: null,
+          project: null,
+          product: null,
+          period: null,
+          as_of: null,
+          quantity: null,
+          quantity_unit: null,
+          allowance: null,
+          policy: null,
+          estimate: null,
+          charge: null,
+          measured_capacity: null,
+          configured_capacity: null,
+          model_route: null,
           state: ["neon", "github", "cloudflare"].includes(provider) ? "unconfigured" : "collector_absent",
           reason: ["neon", "github", "cloudflare"].includes(provider)
             ? "no collector configured for this provider yet (V5-UX-C03/C04/C05 not built)"
             : "no collector observation received yet",
-          source: null, observed_at: null,
+          source: null,
+          observed_at: null,
         };
       });
-      return { rows: [{ dashboard: { schema: "doctorcre-resource-dashboard.v1", generated_at: "2026-09-24T00:00:00Z", providers } }] };
+      return {
+        rows: [
+          { dashboard: { schema: "doctorcre-resource-dashboard.v1", generated_at: "2026-09-24T00:00:00Z", providers } },
+        ],
+      };
     }
     if (sql.includes("ops.record_resource_observation")) {
-      const [provider, account, project, product, period, asOf, quantity, quantityUnit, allowance,
-        policy, estimate, charge, measuredCapacity, configuredCapacity, modelRoute, state, reason,
-        source, observedAt, idempotencyKey] = params;
+      const [
+        providerValue,
+        account,
+        project,
+        product,
+        period,
+        asOf,
+        quantity,
+        quantityUnit,
+        allowance,
+        policy,
+        estimate,
+        charge,
+        measuredCapacity,
+        configuredCapacity,
+        modelRoute,
+        stateValue,
+        reason,
+        source,
+        observedAtValue,
+        idempotencyKey,
+      ] = params;
+      const provider = stringParam(providerValue);
+      const state = stringParam(stateValue);
+      const observedAt = stringParam(observedAtValue);
       const existing = this.receipts.get(idempotencyKey);
       const digest = JSON.stringify(params.slice(0, 19));
       if (existing) {
         if (existing.digest !== digest) throw new Error("resource_observation_key_reuse");
-        return { rows: [{ id: existing.id, provider: existing.provider, state: existing.state,
-          reason: existing.reason, observed_at: existing.observed_at, replayed: true }] };
+        return {
+          rows: [
+            {
+              id: existing.id,
+              provider: existing.provider,
+              state: existing.state,
+              reason: existing.reason,
+              observed_at: existing.observed_at,
+              replayed: true,
+            },
+          ],
+        };
       }
       if (!["neon", "github", "cloudflare", "local_compute", "model_route"].includes(provider))
         throw new Error("resource_observation_provider_invalid");
@@ -88,15 +198,34 @@ class ResourceObservationFake {
       if (new Date(observedAt).getTime() > this.now().getTime() + FUTURE_SKEW_MS)
         throw new Error("resource_observation_observed_at_in_future");
       const id = `30000000-0000-0000-0000-${String(this.rows.length + 1).padStart(12, "0")}`;
-      const row = { id, provider, account, project, product, period, as_of: asOf, quantity, quantity_unit: quantityUnit,
-        allowance, policy, estimate, charge, measured_capacity: measuredCapacity, configured_capacity: configuredCapacity,
-        model_route: modelRoute, state, reason, source, observed_at: observedAt };
+      const row = {
+        id,
+        provider,
+        account,
+        project,
+        product,
+        period,
+        as_of: asOf,
+        quantity,
+        quantity_unit: quantityUnit,
+        allowance,
+        policy,
+        estimate,
+        charge,
+        measured_capacity: measuredCapacity,
+        configured_capacity: configuredCapacity,
+        model_route: modelRoute,
+        state,
+        reason,
+        source,
+        observed_at: observedAt,
+      };
       this.rows.push(row);
       this.receipts.set(idempotencyKey, { id, provider, state, reason, observed_at: observedAt, digest });
       return { rows: [{ id, provider, state, reason, observed_at: observedAt, replayed: false }] };
     }
     if (sql.startsWith("insert into tool_call")) {
-      this.toolCalls.set(params[0], { request_hash: params[3], response: JSON.parse(params[4]) });
+      this.toolCalls.set(params[0], { request_hash: params[3], response: JSON.parse(stringParam(params[4])) });
       return { rows: [] };
     }
     throw new Error(`ResourceObservationFake: unhandled query: ${sql}`);
@@ -107,16 +236,16 @@ test("read-resource-dashboard always returns all five providers, none fabricated
   const client = new ResourceObservationFake();
   const result = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
   assert.equal(result.ok, true);
-  assert.equal(result.providers.length, 5);
-  const byProvider = Object.fromEntries(result.providers.map((p) => [p.provider, p]));
+  assert.equal(providers(result.providers).length, 5);
+  const byProvider = Object.fromEntries(providers(result.providers).map((p) => [p.provider, p]));
   for (const provider of ["neon", "github", "cloudflare"]) {
-    assert.equal(byProvider[provider].state, "unconfigured");
-    assert.match(byProvider[provider].reason, /C03\/C04\/C05 not built/);
-    assert.equal(byProvider[provider].quantity, null);
+    assert.equal(object(byProvider[provider]).state, "unconfigured");
+    assert.match(string(object(byProvider[provider]).reason), /C03\/C04\/C05 not built/);
+    assert.equal(object(byProvider[provider]).quantity, null);
   }
   for (const provider of ["local_compute", "model_route"]) {
-    assert.equal(byProvider[provider].state, "collector_absent");
-    assert.match(byProvider[provider].reason, /no collector observation received yet/);
+    assert.equal(object(byProvider[provider]).state, "collector_absent");
+    assert.match(string(object(byProvider[provider]).reason), /no collector observation received yet/);
   }
 });
 
@@ -137,7 +266,7 @@ test("record-resource-observation writes a local_compute row with measured and c
   assert.equal(result.state, "ok");
   assert.equal(result.replayed, undefined);
   const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-  const localCompute = dashboard.providers.find((p) => p.provider === "local_compute");
+  const localCompute = findProvider(dashboard.providers, "local_compute");
   assert.deepEqual(localCompute.measured_capacity, args.measured_capacity);
   assert.deepEqual(localCompute.configured_capacity, args.configured_capacity);
   assert.notDeepEqual(localCompute.measured_capacity, localCompute.configured_capacity);
@@ -166,11 +295,15 @@ test("record-resource-observation replays on the same idempotency_key without a 
 
 test("record-resource-observation refuses an unknown provider before it reaches the database", async () => {
   const client = new ResourceObservationFake();
-  const payload = await rejected(() => executeRegisteredTool(client, AGENT, "record-resource-observation", {
-    idempotency_key: "40000000-0000-0000-0000-000000000003",
-    provider: "aws",
-    state: "ok", source: "manual", observed_at: "2026-09-24T12:00:00Z",
-  }));
+  const payload = await rejected(() =>
+    executeRegisteredTool(client, AGENT, "record-resource-observation", {
+      idempotency_key: "40000000-0000-0000-0000-000000000003",
+      provider: "aws",
+      state: "ok",
+      source: "manual",
+      observed_at: "2026-09-24T12:00:00Z",
+    }),
+  );
   assert.equal(payload.error, "value_not_in_declared_vocabulary");
 });
 
@@ -187,7 +320,7 @@ test("record-resource-observation host_offline observation carries a reason, nev
   };
   const result = await executeRegisteredTool(client, AGENT, "record-resource-observation", args);
   assert.equal(result.state, "host_offline");
-  assert.match(result.reason, /did not answer/);
+  assert.match(string(result.reason), /did not answer/);
 });
 
 // C03-C05 are not built: neon, github and cloudflare pass JSON-schema
@@ -202,16 +335,20 @@ for (const [index, provider] of NOT_YET_COLLECTIBLE_PROVIDERS.entries()) {
   test(`record-resource-observation refuses ${provider}: C03-C05 have no collector yet`, async () => {
     const client = new ResourceObservationFake();
     await assert.rejects(
-      () => executeRegisteredTool(client, AGENT, "record-resource-observation", {
-        idempotency_key: `40000000-0000-0000-0000-00000000001${index}`,
-        provider, state: "ok", source: "manual", observed_at: "2026-09-24T12:00:00Z",
-      }),
+      () =>
+        executeRegisteredTool(client, AGENT, "record-resource-observation", {
+          idempotency_key: `40000000-0000-0000-0000-00000000001${index}`,
+          provider,
+          state: "ok",
+          source: "manual",
+          observed_at: "2026-09-24T12:00:00Z",
+        }),
       /resource_observation_provider_not_yet_collectible/,
     );
     // And the read door still shows it unconfigured -- the refused write
     // left no trace for this test's own fake to leak either.
     const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-    assert.equal(dashboard.providers.find((p) => p.provider === provider).state, "unconfigured");
+    assert.equal(findProvider(dashboard.providers, provider).state, "unconfigured");
   });
 }
 
@@ -228,9 +365,9 @@ test("read-resource-dashboard reports a dead collector as stale, not ok forever"
     observed_at: "2026-09-24T11:40:00Z",
   });
   const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-  const modelRoute = dashboard.providers.find((p) => p.provider === "model_route");
+  const modelRoute = findProvider(dashboard.providers, "model_route");
   assert.equal(modelRoute.state, "stale");
-  assert.match(modelRoute.reason, /20 minute\(s\) old/);
+  assert.match(string(modelRoute.reason), /20 minute\(s\) old/);
 });
 
 test("read-resource-dashboard keeps a fresh observation as its own state, not stale", async () => {
@@ -246,21 +383,22 @@ test("read-resource-dashboard keeps a fresh observation as its own state, not st
     observed_at: "2026-09-24T11:55:00Z",
   });
   const dashboard = await executeRegisteredTool(client, AGENT, "read-resource-dashboard", {});
-  assert.equal(dashboard.providers.find((p) => p.provider === "local_compute").state, "ok");
+  assert.equal(findProvider(dashboard.providers, "local_compute").state, "ok");
 });
 
 test("record-resource-observation refuses an observed_at more than 5 minutes in the future", async () => {
   const client = new ResourceObservationFake(() => new Date("2026-09-24T12:00:00Z"));
   await assert.rejects(
-    () => executeRegisteredTool(client, AGENT, "record-resource-observation", {
-      idempotency_key: "40000000-0000-0000-0000-000000000007",
-      provider: "local_compute",
-      state: "ok",
-      source: "tools/resource-collector.py",
-      // One hour past the fake's fixed "now": a fabricated future timestamp
-      // must not buy this row permanent front-of-queue ordering.
-      observed_at: "2026-09-24T13:00:00Z",
-    }),
+    () =>
+      executeRegisteredTool(client, AGENT, "record-resource-observation", {
+        idempotency_key: "40000000-0000-0000-0000-000000000007",
+        provider: "local_compute",
+        state: "ok",
+        source: "tools/resource-collector.py",
+        // One hour past the fake's fixed "now": a fabricated future timestamp
+        // must not buy this row permanent front-of-queue ordering.
+        observed_at: "2026-09-24T13:00:00Z",
+      }),
     /resource_observation_observed_at_in_future/,
   );
 });
@@ -280,5 +418,5 @@ test("record-resource-observation accepts a local_compute observation reporting 
   };
   const result = await executeRegisteredTool(client, AGENT, "record-resource-observation", args);
   assert.equal(result.state, "partial");
-  assert.match(result.reason, /memory_total_gb/);
+  assert.match(string(result.reason), /memory_total_gb/);
 });
