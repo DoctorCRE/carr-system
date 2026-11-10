@@ -1,0 +1,25 @@
+{
+  "node": [
+    "src/deal-checklist.ts",
+    "src/deal-items.ts",
+    "test/constraint-refusal-legibility.test.ts",
+    "test/core-rule-delivery.test.ts",
+    "test/current-mutation-registry-generation.test.ts",
+    "test/deal-checklist.test.ts",
+    "test/deal-items.test.ts",
+    "test/decision-short-id.test.ts",
+    "test/doc-oauth.test.ts",
+    "test/doc-suggestions.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/constraint-refusal-legibility.test.ts",
+    "test/core-rule-delivery.test.ts",
+    "test/current-mutation-registry-generation.test.ts",
+    "test/deal-checklist.test.ts",
+    "test/deal-items.test.ts",
+    "test/decision-short-id.test.ts",
+    "test/doc-oauth.test.ts",
+    "test/doc-suggestions.test.ts"
+  ]
+}
