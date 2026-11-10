@@ -12,6 +12,7 @@ from unittest.mock import patch
 from git_env import fixture_env
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / 'tools'))
 spec = importlib.util.spec_from_file_location('catalog', ROOT / 'ops/sync_control_catalog.py')
 assert spec is not None and spec.loader is not None
 catalog = importlib.util.module_from_spec(spec)
@@ -116,12 +117,23 @@ class ProjectionDatabaseTests(unittest.TestCase):
         self._assert_historical_controls_preserved(False)
 
     def test_full_apply_preserves_active_approval_receipts(self):
-        self._assert_historical_controls_preserved(True)
+        import psycopg
+        from psycopg.conninfo import conninfo_to_dict, make_conninfo
+        params = conninfo_to_dict(os.environ['CARR_LOCAL_PG_DSN'])
+        template = params['dbname']
+        admin = make_conninfo(**{**params, 'dbname': 'postgres'})
+        isolated = make_conninfo(**{**params, 'dbname': 'j775_approval'})
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute(psycopg.sql.SQL('create database j775_approval template {}').format(psycopg.sql.Identifier(template)))
+            try:
+                self._assert_historical_controls_preserved(True, isolated)
+            finally:
+                conn.execute('drop database j775_approval with (force)')
 
-    def _assert_historical_controls_preserved(self, approval):
+    def _assert_historical_controls_preserved(self, approval, dsn=None):
         import psycopg
         from migration_baseline import MigrationBaseline, repository_ledger
-        dsn = os.environ['CARR_LOCAL_PG_DSN']
+        dsn = dsn or os.environ['CARR_LOCAL_PG_DSN']
         legacy = ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier')
         with psycopg.connect(dsn) as conn:
             try:
@@ -175,14 +187,10 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             finally:
                 conn.rollback()
-                if 'rule' in locals():
+                if not approval and 'rule' in locals():
                     conn.execute("delete from ops.rule_control_binding where rule_id=%s", (rule,))
                     conn.execute("delete from ops.rule_load_layer where rule_id=%s", (rule,))
                     conn.execute("delete from ops.rule_pack where pack='j775'")
-                    # Only the disposable fixture may remove its immutable synthetic receipt.
-                    conn.execute("set local session_replication_role=replica")
-                    conn.execute("delete from ops.rule_approval_receipt where rule_id=%s", (rule,))
-                    conn.execute("set local session_replication_role=origin")
                     conn.execute("delete from rule where id=%s", (rule,))
                     conn.execute("delete from actor where id=%s", (actor,))
                 conn.commit()
