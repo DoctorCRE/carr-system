@@ -15,10 +15,35 @@ strict, Worker globals remain separate, and Knip checks all admitted files,
 exports, types and duplicates. Biome and syntax refusals cover the same graph.
 
 `migration.json` is a frozen historical ceiling. Do not prune it during a
-conversion. Its lists may never grow against main. JavaScript is allowed only
-if both the ceiling and main's actual tree contain its path. A deleted path
-cannot return. Legacy TypeScript must match main's bytes unless admitted to
-a strict project. New JavaScript fails throughout the repository.
+conversion. Its lists may never grow against the tested candidate's base. JavaScript is
+allowed only if both the ceiling and that base's actual tree contain its path.
+A path deleted on that base cannot return. Legacy TypeScript must match the
+base's bytes unless admitted to a strict project. New JavaScript fails
+throughout the repository.
+
+The baseline is resolved once to an immutable commit and printed with the
+candidate SHA. Pull-request runs use the checked-out synthetic merge's first
+parent. The event's PR head must equal its second parent, and the declared
+`pull_request.base.sha` must be on the first parent's first-parent history.
+This accepts a merge refreshed after the event without grandfathering paths
+removed on its actual base. Merge-group runs use `merge_group.base_sha`, require
+the event head to match the checkout, and require the base on its first-parent
+history. Both modes require `GITHUB_SHA` to match HEAD.
+Push runs require `after` and `GITHUB_SHA` to match HEAD and use `before`, which
+must be an ancestor distinct from the candidate. A new-branch push with a zero
+`before` uses HEAD's merge-base with `refs/remotes/origin/main` and refuses a
+baseline equal to HEAD. Local checks use that merge-base without the push guard.
+Missing event
+data, absent commit objects, unrelated bases and unreadable migration lists
+refuse the check. The checker never fetches or substitutes a later branch tip.
+Actions checkout already supplies full history with `fetch-depth: 0`.
+
+A PR result covers its checked-out integration base. The full `classes` job in
+`.github/workflows/ci.yml` runs types on every merge group against the declared
+queue base, covering newer main and preceding queue entries. The real-Git
+regression in `gate.test.ts` proves an unchanged candidate survives an advancing
+main while a queue candidate resurrecting a path deleted on its newer base is
+refused. Frozen ceilings and generated project admissions remain unchanged.
 
 Suite discovery remains authoritative. Duration measurements are advisory.
 Extension-only TypeScript renames reuse the old JavaScript timing; genuinely

@@ -1,7 +1,7 @@
 // Test rule lookup database URL safety and local execution.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const probe = `
   import { readFileSync } from 'node:fs';
   import vm from 'node:vm';
-  import { assertDisposableDatabase } from ${JSON.stringify(new URL('./helpers/disposable-database-url.mjs', import.meta.url).href)};
+  import { assertDisposableDatabase } from ${JSON.stringify(new URL('./helpers/disposable-database-url.ts', import.meta.url).href)};
   import assert from 'node:assert/strict';
   import { randomUUID } from 'node:crypto';
   const source = readFileSync(process.argv[1], 'utf8');
@@ -25,7 +25,7 @@ const probe = `
       for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
     }, { context });
     const imports = {
-      './helpers/disposable-database-url.mjs': moduleFor({ assertDisposableDatabase: dsn => assertDisposableDatabase(dsn, { env: JSON.parse(process.argv[3]) }) }),
+      './helpers/disposable-database-url.ts': moduleFor({ assertDisposableDatabase: dsn => assertDisposableDatabase(dsn, { env: JSON.parse(process.argv[3]) }) }),
       'node:test': moduleFor({ default: (...args) => cases.push(args) }),
       'node:assert/strict': moduleFor({ default: assert }),
       'node:crypto': moduleFor({ randomUUID }),

@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CHROMIUM_SAFETY_ARGS } from "./chromium-safety-args.mjs";
+import { CHROMIUM_SAFETY_ARGS } from "./chromium-safety-args.ts";
 
 export const CARD_HOST = "card.test";
 

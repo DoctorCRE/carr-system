@@ -1,0 +1,23 @@
+{
+  "node": [
+    "test/calendar-date.test.ts",
+    "test/client-anniversary-read.test.ts",
+    "test/codex-continuity-stdio-proxy.test.ts",
+    "test/complete-set-review-a03-store.v5.test.ts",
+    "test/confirm-merge-human-only.test.ts",
+    "test/confirm-merge-lead-client.test.ts",
+    "test/conflict-tiering.test.ts",
+    "test/connections.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/calendar-date.test.ts",
+    "test/client-anniversary-read.test.ts",
+    "test/codex-continuity-stdio-proxy.test.ts",
+    "test/complete-set-review-a03-store.v5.test.ts",
+    "test/confirm-merge-human-only.test.ts",
+    "test/confirm-merge-lead-client.test.ts",
+    "test/conflict-tiering.test.ts",
+    "test/connections.test.ts"
+  ]
+}

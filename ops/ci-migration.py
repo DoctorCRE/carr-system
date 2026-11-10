@@ -531,6 +531,11 @@ class Migration:
         )
         if self.part in ("all", "core", "proofs"):
             self.py(
+                "migration-depth1",
+                "ops/migration-depth1.py",
+                "fresh depth-1 migration acceptance failed",
+            )
+            self.py(
                 "migration-baseline",
                 "-m",
                 "migration baseline identity or historical source checks failed before database work",
