@@ -60,6 +60,30 @@ assert.equal(aborted, true);
         self.assertIsNotNone(owned[0].poll())
         connection.close.assert_called_once()
 
+    def test_transport_acquired_after_deadline_is_reaped(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 200
+        connection.getresponse.return_value.read.return_value = json.dumps([
+            {'type':'page', 'url':'https://app.doctorcre.com/',
+             'webSocketDebuggerUrl':'ws://127.0.0.1:9333/devtools/page/ABC'}]).encode()
+        real_popen, owned = subprocess.Popen, []
+        def launch(*args, **kwargs):
+            time.sleep(.15)
+            child = real_popen(*args, **kwargs)
+            owned.append(child)
+            return child
+        with patch.dict(READER['collect'].__globals__, TOTAL_SECONDS=.1,
+                        TRANSPORT='setInterval(() => {}, 1000);'), patch(
+            'http.client.HTTPConnection', return_value=connection
+        ), patch('subprocess.Popen', side_effect=launch):
+            with self.assertRaises(TimeoutError):
+                READER['collect'](['text'])
+        self.assertEqual(len(owned), 1)
+        self.assertIsNotNone(owned[0].poll())
+        self.assertTrue(owned[0].stdin.closed)
+        self.assertTrue(owned[0].stdout.closed)
+        self.assertTrue(owned[0].stderr.closed)
+
     def test_browser_caps_text_mcp_and_combined_utf8_output(self):
         script = r'''
 import assert from 'node:assert/strict';
@@ -130,13 +154,16 @@ globalThis.WebSocket = class {
             return json.dumps([{'type':'page', 'url':'https://app.doctorcre.com/',
                                 'webSocketDebuggerUrl':'ws://127.0.0.1:9333/devtools/page/ABC'}]).encode()
         connection.getresponse.return_value.read.side_effect = body
-        result = subprocess.CompletedProcess([], 0, stdout=json.dumps({'result':{'result':{'value':{'text':'home'}}}}), stderr='')
+        result = Mock(returncode=0)
+        result.poll.return_value = 0
+        result.communicate.return_value = (json.dumps({'result':{'result':{'value':{'text':'home'}}}}), '')
         with patch.dict(READER['collect'].__globals__, TOTAL_SECONDS=.3), patch(
             'http.client.HTTPConnection', return_value=connection
-        ), patch('subprocess.run', return_value=result) as child:
+        ), patch('subprocess.Popen', return_value=result):
             self.assertEqual(READER['collect'](['text']), {'text':'home'})
-        self.assertLess(child.call_args.kwargs['timeout'], .25)
-        self.assertLess(json.loads(child.call_args.kwargs['input'])['timeout'], 250)
+        call = result.communicate.call_args_list[0]
+        self.assertLess(call.kwargs['timeout'], .25)
+        self.assertLess(json.loads(call.args[0])['timeout'], 250)
         connection.close.assert_called_once()
 
     def test_continuous_discovery_data_cannot_extend_deadline(self):
@@ -202,7 +229,7 @@ globalThis.WebSocket = class {
             connection.getresponse.return_value.status = status
             connection.getresponse.return_value.read.return_value = body
             connection.request.side_effect = error
-            with self.subTest(status=status, error=error), patch('http.client.HTTPConnection', return_value=connection), patch('subprocess.run') as launch:
+            with self.subTest(status=status, error=error), patch('http.client.HTTPConnection', return_value=connection), patch('subprocess.Popen') as launch:
                 with self.assertRaises((ValueError, TimeoutError)):
                     READER['collect'](['config'])
                 connection.close.assert_called_once()

@@ -162,19 +162,25 @@ def collect(reads):
         connection.close()
     command = request(reads, (time.time() + remaining(deadline)) * 1000)
     command['params']['timeout'] = min(12000, remaining(deadline) * 1000)
-    result = subprocess.run(
-        ['node', '--input-type=module', '-e', TRANSPORT],
-        input=json.dumps({'url': target(tabs), 'request': command,
-                          'timeout': remaining(deadline) * 1000, 'maxBytes': MAX_BYTES + 4096}),
-        text=True, capture_output=True, timeout=remaining(deadline), check=False)
+    payload = json.dumps({'url': target(tabs), 'request': command,
+                          'timeout': remaining(deadline) * 1000, 'maxBytes': MAX_BYTES + 4096})
+    child = subprocess.Popen(['node', '--input-type=module', '-e', TRANSPORT],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True)
+    try:
+        stdout, stderr = child.communicate(payload, timeout=remaining(deadline))
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate()
     remaining(deadline)
-    if result.returncode:
-        raise ValueError(TRUNCATED if 'TRUNCATED' in result.stderr else 'Proof transport unavailable')
-    if len(result.stdout.encode('utf-8')) > MAX_BYTES + 4096:
+    if child.returncode:
+        raise ValueError(TRUNCATED if 'TRUNCATED' in stderr else 'Proof transport unavailable')
+    if len(stdout.encode('utf-8')) > MAX_BYTES + 4096:
         raise ValueError(TRUNCATED)
-    reply = json.loads(result.stdout)
+    reply = json.loads(stdout)
     if reply.get('error') or reply.get('result', {}).get('exceptionDetails'):
-        raise ValueError(TRUNCATED if 'TRUNCATED' in result.stdout else 'Proof read refused by the browser')
+        raise ValueError(TRUNCATED if 'TRUNCATED' in stdout else 'Proof read refused by the browser')
     value = reply['result']['result']['value']
     if len(json.dumps(value, ensure_ascii=False).encode('utf-8')) + 1 > MAX_BYTES:
         raise ValueError(TRUNCATED)
