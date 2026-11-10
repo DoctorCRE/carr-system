@@ -150,12 +150,12 @@ class Controls(unittest.TestCase):
                     self.assertEqual([c.args[0] for c in sleep.call_args_list],
                                      [2, 4] if mode == 'exhausted' else [2] if mode == 'transient' else [])
 
-    def test_pr_gates_install_the_shared_pinned_scanner_before_checks(self):
+    def test_full_gates_install_the_shared_pinned_scanner_before_checks(self):
         jobs = workflow()['jobs']
         install = next(step for step in jobs['secret']['steps']
                        if step.get('run') == 'python3 ops/gitleaks.py --install')
-        steps = jobs['gates']['steps']
-        checks = next(step for step in steps if step.get('name') == 'Gates checks')
+        steps = jobs['classes']['steps']
+        checks = next(step for step in steps if step.get('name') == "Run this group's check classes")
         self.assertIn(install, steps[:steps.index(checks)])
 
     def test_node_install_reuses_downloads_without_duplicating_dependency_audit(self):
@@ -191,7 +191,7 @@ class Controls(unittest.TestCase):
         commands = install['run'].splitlines()
         self.assertEqual(commands, ['npm --prefix mcp-server ci --no-audit',
                                     'npm --prefix practice-plugin ci --no-audit'])
-        self.assertIn('dependency', wf['jobs']['classes']['strategy']['matrix']['classes'])
+        self.assertIn('dependency', ' '.join(wf['jobs']['classes']['strategy']['matrix']['classes']).split())
         # The strict class, rather than install's informational audit, retains
         # the existing vulnerability policy and fails on unavailable reports.
         self.assertIn('["npm", "audit", "--omit=dev", "--audit-level=high", "--json"]',
@@ -212,7 +212,7 @@ class Controls(unittest.TestCase):
         from ci_unit_shards import POSTGRES_PROFILE, MAX_COUNT
         self.assertEqual(POSTGRES_PROFILE, 'both')
         self.assertEqual(MAX_COUNT, 16)
-        lanes = {'ci.yml': ('fast', 'gates', 'classes', 'migration-fixtures'),
+        lanes = {'ci.yml': ('fast', 'classes', 'migration-fixtures'),
                  'main-canary.yml': ('classes',), 'unit-shards.yml': ('unit',)}
         images = set()
         for filename, names in lanes.items():
@@ -260,10 +260,9 @@ class Controls(unittest.TestCase):
         self.assertEqual(wf['on']['pull_request']['types'],
                          ['opened', 'edited', 'synchronize', 'reopened',
                           'converted_to_draft', 'ready_for_review'])
-        metadata = "github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null"
         self.assertEqual(wf['concurrency'], {
-            'group': "${{ github.workflow }}-${{ github.event_name }}-${{ (" + metadata + ") && format('metadata-{0}', github.run_id) || github.event.pull_request.number || github.ref }}",
-            'cancel-in-progress': "${{ github.event_name == 'pull_request' && !(" + metadata + ") }}"})
+            'group': '${{ github.workflow }}-${{ github.head_ref || github.ref }}',
+            'cancel-in-progress': "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}"})
         self.assertEqual(wf['jobs']['select']['if'],
                          "${{ !cancelled() && !github.event.pull_request.draft }}")
         self.assertEqual(wf['jobs']['checks']['if'], "${{ always() }}")
@@ -284,7 +283,7 @@ class Controls(unittest.TestCase):
         self.assertEqual(wf['jobs']['checks']['name'], "ops/ci.sh --strict")
         self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertIn('!cancelled()', wf['jobs']['classes']['if'])
-        self.assertEqual(set(wf['jobs']['checks']['needs']), {'select', 'lint', 'unit', 'fast', 'gates', 'secret', 'unit-coverage', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'})
+        self.assertEqual(set(wf['jobs']['checks']['needs']), {'select', 'lint', 'unit', 'fast', 'secret', 'scope', 'classes', 'migration-fixtures', 'launchd-python39'})
         steps = wf['jobs']['checks']['steps']
         verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
         self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
