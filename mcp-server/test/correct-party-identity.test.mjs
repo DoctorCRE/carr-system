@@ -749,7 +749,7 @@ test("identity proof CLI consumes registered read replies and refuses missing ev
   const { tmpdir } = await import("node:os");
   const { join, resolve } = await import("node:path");
   const { spawn, execFileSync } = await import("node:child_process");
-  const { createServer } = await import("./helpers/proof-release-fixture.mjs");
+  const { createServer } = await import("./helpers/proof-release-fixture.ts");
   const root = resolve(import.meta.dirname, "../..");
   const dir = await mkdtemp(join(tmpdir(), "WR647-S11-J1-"));
   const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();

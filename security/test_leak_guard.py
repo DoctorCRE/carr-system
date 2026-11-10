@@ -409,6 +409,37 @@ class LeakGuardTest(unittest.TestCase):
         result = self.run_guard('--staged', '--corpus', str(self.root / 'missing.json'))
         self.assertEqual(result.returncode, 2, result.stderr)
 
+    def test_migration_archive_admission_binds_verified_bytes_and_exact_path(self):
+        import sys
+        import shutil
+        self.addCleanup(shutil.rmtree, self.root)
+        repository = SCRIPT.parents[1]
+        with patch.object(sys, 'path', [str(repository / 'tools'), *sys.path]):
+            from generate_migration_archive import verify
+            with contextlib.redirect_stdout(io.StringIO()):
+                verify(repository)
+        archive = 'db/migration-history.zip'
+        raw = (repository / archive).read_bytes()
+        target = self.root / archive
+        target.parent.mkdir()
+        target.write_bytes(raw)
+        self.git('add', archive)
+        options = ('--staged', '--generic-only', '--allowlist', str(repository / 'security/allowlist.json'))
+        result = self.run_guard(*options)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        target.write_bytes(raw + b'\n')
+        self.git('add', archive)
+        result = self.run_guard(*options)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, archive + ':1 opaque-binary\n')
+        target.write_bytes(raw)
+        other = 'db/unreviewed-history.zip'
+        (self.root / other).write_bytes(raw)
+        self.git('add', archive, other)
+        result = self.run_guard(*options)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, other + ':1 opaque-binary\n')
+
     def test_private_history_report_contains_counts_and_paths_only(self):
         (self.root / '.gitignore').write_text('out/\n')
         (self.root / 'sample.txt').write_text('contact@' + 'fictional-mail.com\n')

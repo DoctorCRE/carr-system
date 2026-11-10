@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 // Verify canonical Tour deal decisions and installed HTTP access boundaries.
 import test from "node:test";
-import { assertDisposableDatabase } from "./helpers/disposable-database-url.mjs";
+import { assertDisposableDatabase } from "./helpers/disposable-database-url.ts";
 
 const installTourDealAccess = await legacyExport("../src/tour-deal-access.js", "installTourDealAccess");
 const evaluateActorAuthority = await legacyExport("../src/global-boundaries.v5.js", "evaluateActorAuthority");
@@ -63,6 +63,7 @@ const databaseUrl = process.env.CARR_TOUR_DEAL_TEST_DATABASE_URL;
 test("installed HTTP create, detail, cart and cross-deal library enforce canonical deal access", {
   skip: !databaseUrl,
 }, async () => {
+  assert.ok(databaseUrl);
   assertDisposableDatabase(databaseUrl);
   const { default: pg } = await import("pg");
   const { Client } = pg;

@@ -1,0 +1,11 @@
+{
+  "node": [
+    "src/sha256.ts",
+    "src/tour-operations-contract.ts",
+    "test/tour-operations-characterization.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/tour-operations-characterization.test.ts"
+  ]
+}

@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000117 — the session-identity read pair's acceptance proofs.
 //
 // EVERY IDENTITY CASE MINTS TWO ACTORS. Both verbs derive the acting actor

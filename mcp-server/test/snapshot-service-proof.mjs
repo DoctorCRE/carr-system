@@ -1,7 +1,7 @@
 // Verify snapshot fixtures use isolated database clones on the provided CI service.
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import './helpers/postgres-connection-observer.mjs';
+import './helpers/postgres-connection-observer.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, writeFile, rm, readFile, readdir } from 'node:fs/promises';
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 
 async function snapshotService(prefix) {
   if (!process.env.CARR_CI_DATABASE_URL) {
@@ -145,7 +145,7 @@ pg.Client.prototype.query = async function(sql, ...args) {
   }
 }
 
-const observer = new URL('./helpers/postgres-connection-observer.mjs', import.meta.url).href;
+const observer = new URL('./helpers/postgres-connection-observer.ts', import.meta.url).href;
 async function childSuite(file, directory, env, probe = {}) {
   const record = path.join(directory, randomUUID() + '.jsonl');
   const childEnv = { ...env, ...probe, WR623_PG_RECORD: record,
