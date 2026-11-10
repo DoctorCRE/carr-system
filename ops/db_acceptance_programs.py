@@ -15,6 +15,7 @@ PROGRAMS = (
     Program("rule-delivery", "ops/rule-delivery-local-pg-acceptance.py"),
     Program("renewal-ingress", "ops/renewal-signed-ingress-local-pg-acceptance.py"),
     Program("incident", "ops/incident-recovery-local-pg-acceptance.py"),
+    Program("control-catalog-projection", "ops/control-catalog-projection-selftest.py"),
     Program("snapshot", "bin/schema-snapshot.sh", "snapshot"),
     Program("dream", "mcp-server/test/dream-postgres.test.mjs", "node"),
 )
