@@ -8,7 +8,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';
 import { Validator } from '@cfworker/json-schema';
 import { subjectWatchV2Tools, parseSubjectWatchV2 } from '../src/subject-watches.js';
-import { subjectWatchPolicySchema, validSubjectWatchPolicy } from '../contracts/subject-watch.v2.js';
+import { subjectWatchPolicySchema, validSubjectWatchPolicy } from '../contracts/subject-watch.v2.ts';
 
 test('recorded registered response passes the production parser; malformed policies refuse',()=>{
   const fixture=JSON.parse(readFileSync(new URL('../contracts/subject-watch.v2.fixture.json',import.meta.url)));

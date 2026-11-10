@@ -17,11 +17,15 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
   try {
     const pkg = join(root, "mcp-server");
     cpSync(join(source, "typescript"), join(pkg, "typescript"), { recursive: true });
+    mkdirSync(join(pkg, ".generated"), { recursive: true });
     for (const file of [
       "package.json",
       "tsconfig.base.json",
       "tsconfig.node.json",
       "tsconfig.worker.json",
+      "tsconfig.node-compat.json",
+      ".generated/node-compat-empty.d.ts",
+      ".generated/worker-runtime.d.ts",
       "biome.json",
       "knip.json",
     ]) {
@@ -51,7 +55,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       JSON.stringify({ legacyJavaScript: [], legacyTypeScript: [] }),
     );
     execFileSync("git", ["init", "-q", root], { env: fixtureEnv });
-    writeFileSync(join(root, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(root, ".gitignore"), "node_modules/\n.generated/\n");
     const run = () =>
       spawnSync("npm", ["--prefix", pkg, "run", "check:staged"], {
         cwd: root,
@@ -272,7 +276,12 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
     rmSync(legacyFile);
     writeFileSync(scopePath, JSON.stringify(baseline));
     const failures: string[] = [];
-    for (const path of ["tsconfig.base.json", "tsconfig.node.json", "tsconfig.worker.json"]) {
+    for (const path of [
+      "tsconfig.base.json",
+      "tsconfig.node.json",
+      "tsconfig.worker.json",
+      "tsconfig.node-compat.json",
+    ]) {
       const configPath = join(pkg, path);
       const original = readFileSync(configPath, "utf8");
       const overrides: [string, boolean][] = [
@@ -290,7 +299,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
         ["noUnusedLocals", false],
         ["noUnusedParameters", false],
         ["exactOptionalPropertyTypes", false],
-        ["noEmit", false],
+        ["noEmit", path === "tsconfig.node-compat.json"],
         ["allowImportingTsExtensions", false],
         ["erasableSyntaxOnly", false],
         ["verbatimModuleSyntax", false],
@@ -300,6 +309,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
         ["allowUnreachableCode", true],
         ["allowUnusedLabels", true],
       ];
+      if (path === "tsconfig.node-compat.json") overrides.push(["emitDeclarationOnly", false], ["composite", false]);
       for (const [flag, value] of overrides) {
         const config = object(configPath);
         config.compilerOptions ??= {};

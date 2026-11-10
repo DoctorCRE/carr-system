@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/tour-operations-foundation.test.ts"
+  ],
+  "entry": [
+    "test/tour-operations-foundation.test.ts"
+  ]
+}

@@ -915,6 +915,32 @@
       "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
     },
     {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "c6b1b5e785e7be1532f19d67b9aad326aa2ecba6a5a73a4843087d8df5b83333"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-address",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-phone",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
       "path": "mcp-server/test/error-unmasking.test.ts",
       "sha256": "5e2b7fa8838b4eab72867587c87cb5e3237942d5f79f0e7753bbb085d0c1c935",
       "rule": "credential-url",

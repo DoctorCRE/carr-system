@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
 import pg from 'pg';
 import { execFileSync } from 'node:child_process';
-import { acceptsConfirmVerb } from './fixtures/email-followups-app-confirm-verb.mjs';
+import { acceptsConfirmVerb } from './fixtures/email-followups-app-confirm-verb.ts';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { executeRegisteredTool } from '../src/tools.js';
 import { buildRelease } from '../src/release.js';

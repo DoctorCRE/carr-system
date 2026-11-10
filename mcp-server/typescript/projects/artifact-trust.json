@@ -1,0 +1,5 @@
+{
+  "node": ["test/artifact-trust-characterization.test.ts"],
+  "worker": [],
+  "entry": ["test/artifact-trust-characterization.test.ts"]
+}

@@ -41,6 +41,25 @@ def postgres_bin_dir(names=('initdb', 'pg_ctl', 'createdb', 'psql', 'postgres'))
             return directory
     raise FileNotFoundError('PostgreSQL client/server binaries were not found')
 
+
+def fixture_root_from_line(line: str, prefix: str) -> Path:
+    """Reject child output that cannot name an owned temporary fixture root."""
+    root = Path(line.strip())
+    if not prefix or not root.is_absolute() or root.is_symlink():
+        raise ValueError('fixture child returned an unsafe root')
+    try:
+        resolved = root.resolve(strict=True)
+        temporary_roots = (Path(tempfile.gettempdir()).resolve(), Path('/tmp').resolve())
+        if (not resolved.name.startswith(prefix) or not resolved.is_dir()
+                or resolved.stat().st_uid != os.getuid()
+                or not any(resolved != temporary and resolved.is_relative_to(temporary)
+                           for temporary in temporary_roots)):
+            raise ValueError('fixture child returned an unsafe root')
+    except (OSError, RuntimeError) as error:
+        raise ValueError('fixture child returned an unsafe root') from error
+    return resolved
+
+
 LOCK_PATH = Path('/tmp') / f'carr-disposable-postgres-{os.getuid()}.lock'
 _thread_lock = threading.RLock()
 _depth = 0

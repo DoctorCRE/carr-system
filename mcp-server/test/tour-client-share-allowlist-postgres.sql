@@ -800,7 +800,7 @@ begin
   end loop;
 end $client_allowlist$;
 
--- The GENERATED adversarial corpus (test/fixtures/tour-client-text-adversarial.mjs):
+-- The GENERATED adversarial corpus (test/fixtures/tour-client-text-adversarial.ts):
 -- every access-code trigger against every ASCII punctuation mark and the
 -- allowlisted Unicode dashes, quotes and bullets as the connector, the same
 -- characters as phone separators, and the reviewer's link forms. Each

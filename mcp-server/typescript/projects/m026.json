@@ -1,0 +1,18 @@
+{
+  "node": [
+    "test/helpers/relink-source-imports.ts",
+    "test/idempotency-key-uuid.test.ts",
+    "test/industry-events.test.ts",
+    "test/ingest-body-limit.test.ts",
+    "test/intake-research-gates.test.ts",
+    "test/invoice-authority-dispatch.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/idempotency-key-uuid.test.ts",
+    "test/industry-events.test.ts",
+    "test/ingest-body-limit.test.ts",
+    "test/intake-research-gates.test.ts",
+    "test/invoice-authority-dispatch.test.ts"
+  ]
+}
