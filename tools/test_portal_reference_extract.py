@@ -23,21 +23,23 @@ class ExtractTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         self.source = self.base / 'source'
-        shutil.copytree(FIXTURES / 'ref-a', self.source)
+        self.copy_source('ref-a')
         self.output = self.base / 'output'
+
+    def copy_source(self, site):
+        shutil.copytree(FIXTURES / site, self.source)
+        result = subprocess.run(['node', str(FIXTURES / 'emit.ts'), site], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        sources = json.loads(result.stdout)
+        for name in ('app.js', 'data.js'):
+            self.assertIsInstance(sources[name], str)
+            (self.source / name).write_bytes(sources[name].encode('utf-8'))
 
     def run_cli(self, *args, ok=True):
         result = subprocess.run([sys.executable, str(CLI), '--source', str(self.source),
                                  '--output', str(self.output), *args], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0 if ok else 2, result.stdout + result.stderr)
         return json.loads(result.stdout)
-
-    def read_data(self):
-        spec = importlib.util.spec_from_file_location('extractor', CLI)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        program = module.node_call({'action': 'parse', 'text': (self.source / 'data.ts').read_text()})
-        return module.literal(module.collect_bindings(program)['window.referenceData'][0], 'data.ts')
 
     def change_mapping(self, change):
         path = self.source / 'extract.json'
@@ -63,16 +65,28 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(self.output.stat().st_mode & 0o777, 0o700)
 
     def test_original_javascript_packages_remain_byte_identical(self):
-        expected = {
+        source_hashes = {'ref-a': {'app.js': '7da33d54122efa0d51294241a302fd1f354332db05f18beab05fb1049f739aac', 'data.js': '6dce69a88320de8569a1b1c2eb7ffb26479fed574e6963911d01104da6e6139c'}, 'ref-v': {'app.js': '7da33d54122efa0d51294241a302fd1f354332db05f18beab05fb1049f739aac', 'data.js': '648d6a12d856736fcee384382c9605025329c181767a9593c172b571294d47e6'}}
+        package_hashes = {
             'ref-a': '58b20573d0a3d0c42833a69718826882828cad390bc8ec1e9a9a1f42531378d4',
             'ref-v': '1974ab25837a3793f66bd9222d413c283adc8a0ebdd3144fa61745e719872064',
         }
-        for site, digest in expected.items():
+        for site in source_hashes:
             with self.subTest(site=site):
-                self.source = FIXTURES / site
+                shutil.rmtree(self.source)
+                self.copy_source(site)
                 self.output = self.base / site
                 self.run_cli()
-                self.assertEqual(hashlib.sha256((self.output / 'market-study.json').read_bytes()).hexdigest(), digest)
+                self.assertEqual(hashlib.sha256((self.output / 'market-study.json').read_bytes()).hexdigest(), package_hashes[site])
+                manifest = json.loads((self.output / 'manifest.json').read_text())
+                for name, digest in source_hashes[site].items():
+                    self.assertEqual(hashlib.sha256((self.source / name).read_bytes()).hexdigest(), digest)
+                    self.assertEqual(manifest['inputs'][name], digest)
+
+    def test_source_producer_refuses_unknown_site(self):
+        result = subprocess.run(['node', str(FIXTURES / 'emit.ts'), 'unknown'],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
 
     def test_numeric_leaf_mappings_build_center_array(self):
         def change(mapping):
@@ -87,7 +101,8 @@ class ExtractTest(unittest.TestCase):
         self.assert_provenance()
 
     def test_nested_property_leaves_build_arrays(self):
-        data = self.read_data()
+        data = json.loads((self.source / 'data.js').read_text().removeprefix(
+            'window.referenceData = ').removesuffix(';\n'))
         def change(mapping):
             original = mapping['fields'].pop('/properties')
             for index in reversed(range(len(data['properties']))):
@@ -123,7 +138,8 @@ class ExtractTest(unittest.TestCase):
         self.assert_provenance()
 
     def test_reconstruct_numeric_objects_from_leaves(self):
-        data = self.read_data()
+        data = json.loads((self.source / 'data.js').read_text().removeprefix(
+            'window.referenceData = ').removesuffix(';\n'))
         def leaves(value, path):
             if isinstance(value, dict) and value:
                 for key, child in value.items():
@@ -152,7 +168,8 @@ class ExtractTest(unittest.TestCase):
         origins = center if isinstance(center, list) else [center]
         self.assertTrue(all(entry.get('binding') == 'MAP_CENTER' for entry in origins), origins)
         package = json.loads((self.output / 'market-study.json').read_text())
-        data = self.read_data()
+        data = json.loads((self.source / 'data.js').read_text().removeprefix(
+            'window.referenceData = ').removesuffix(';\n'))
         def select(value, pointer):
             for key in pointer[1:].split('/') if pointer else []:
                 key = key.replace('~1', '/').replace('~0', '~')
@@ -216,7 +233,7 @@ class ExtractTest(unittest.TestCase):
 
     def test_optional_ownership_absent(self):
         shutil.rmtree(self.source)
-        shutil.copytree(FIXTURES / 'ref-v', self.source)
+        self.copy_source('ref-v')
         self.run_cli()
         self.assertNotIn('ownership', json.loads((self.output / 'market-study.json').read_text()))
 
@@ -238,7 +255,7 @@ class ExtractTest(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
     def test_unsafe_rich_text_uses_package_validator(self):
-        path = self.source / 'data.ts'
+        path = self.source / 'data.js'
         path.write_text(path.read_text().replace('Synthetic methodology.', '<script>bad()</script>'))
         self.assertIn('/demographics/methodology', str(self.run_cli(ok=False)))
 
@@ -251,7 +268,7 @@ class ExtractTest(unittest.TestCase):
         self.assertIn('path', str(self.run_cli(ok=False)))
 
     def test_ambiguous_and_unmapped_constants(self):
-        path = self.source / 'app.ts'
+        path = self.source / 'app.js'
         original = path.read_text()
         path.write_text(original + '\nfunction second() { const MAP_ZOOM = 4; }')
         self.assertIn('ambiguous', str(self.run_cli(ok=False)))
@@ -259,7 +276,7 @@ class ExtractTest(unittest.TestCase):
         self.assertIn('UNKNOWN_DEAL_VALUE', str(self.run_cli(ok=False)))
 
     def test_no_execution_of_javascript(self):
-        path = self.source / 'app.ts'
+        path = self.source / 'app.js'
         path.write_text(path.read_text().replace('const MAP_ZOOM = 11;', 'const MAP_ZOOM = (() => { throw Error("executed"); })();'))
         result = self.run_cli(ok=False)
         self.assertIn('nonliteral', str(result))
@@ -271,7 +288,8 @@ class ExtractTest(unittest.TestCase):
 
 
     def test_json_source_and_missing_asset_mapping(self):
-        (self.source / 'data.json').write_text(json.dumps(self.read_data()))
+        data = (self.source / 'data.js').read_text()
+        (self.source / 'data.json').write_text(data.removeprefix('window.referenceData = ').removesuffix(';\n'))
         self.change_mapping(lambda m: m['sources'].update({'data': {'file': 'data.json'}}))
         self.run_cli()
         self.output = self.base / 'without-asset'
@@ -279,24 +297,23 @@ class ExtractTest(unittest.TestCase):
         self.assertIn('asset has no source mapping', str(self.run_cli(ok=False)))
 
     def test_arbitrary_source_code_is_never_executed(self):
-        path = self.source / 'app.ts'
+        path = self.source / 'app.js'
         path.write_text(path.read_text() + '\nthrow Error("must not execute");')
         self.run_cli()
         self.assertTrue((self.output / 'market-study.json').exists())
 
     def test_explicit_inline_literal_ast_mapping(self):
-        path = self.source / 'app.ts'
+        path = self.source / 'app.js'
         path.write_text(path.read_text().replace('const MAP_CENTER = [-100.5, 40.25];',
-                                               'initializeMap({center: [-100.5, 40.25]});').replace(
-            'export { MAP_CENTER, MAP_ZOOM };', 'export { MAP_ZOOM };'))
+                                               'initializeMap({center: [-100.5, 40.25]});'))
         self.change_mapping(lambda m: m['sources'].update({'center': {
-            'file': 'app.ts', 'ast_pointer': '/body/0/expression/arguments/0/properties/0/value'}}))
+            'file': 'app.js', 'ast_pointer': '/body/0/expression/arguments/0/properties/0/value'}}))
         self.run_cli()
         package = json.loads((self.output / 'market-study.json').read_text())
         self.assertEqual(package['map']['center'], [-100.5, 40.25])
 
     def test_source_symlink_and_relative_source_refused(self):
-        original = self.source / 'data.ts'
+        original = self.source / 'data.js'
         destination = self.base / 'outside.js'
         original.rename(destination)
         original.symlink_to(destination)
@@ -305,14 +322,14 @@ class ExtractTest(unittest.TestCase):
         self.assertIn('absolute', str(self.run_cli(ok=False)))
 
     def test_ignore_template_binding_requires_a_reason(self):
-        path = self.source / 'app.ts'
+        path = self.source / 'app.js'
         path.write_text(path.read_text() + '\nconst TEMPLATE_LABEL = "Template only";')
         self.assertIn('unmapped constant', str(self.run_cli(ok=False)))
-        self.change_mapping(lambda m: m['ignore'].update({'app.ts:TEMPLATE_LABEL': 'Shared template label, no deal value'}))
+        self.change_mapping(lambda m: m['ignore'].update({'app.js:TEMPLATE_LABEL': 'Shared template label, no deal value'}))
         self.run_cli()
 
     def test_duplicate_keys_and_computed_properties_fail(self):
-        path = self.source / 'app.ts'
+        path = self.source / 'app.js'
         original = path.read_text()
         for expression in ('{a: 1, a: 2}', '{["a"]: 1}', '[...other]'):
             path.write_text(original.replace('const MAP_ZOOM = 11;', 'const MAP_ZOOM = ' + expression + ';'))
