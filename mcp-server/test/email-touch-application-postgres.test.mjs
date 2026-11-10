@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
 import { ToolError } from '../src/tool-error.ts';

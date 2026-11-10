@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Test automation undo, archive, and invoice behavior in disposable PostgreSQL.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';

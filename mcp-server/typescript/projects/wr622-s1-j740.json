@@ -1,0 +1,10 @@
+{
+  "node": [
+    "../tools/chromium-safety-args.ts",
+    "test/chromium-safety-args.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/chromium-safety-args.test.ts"
+  ]
+}
