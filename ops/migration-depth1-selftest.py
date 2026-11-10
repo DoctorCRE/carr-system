@@ -12,6 +12,7 @@ import unittest
 from git_env import fixture_env
 
 spec = importlib.util.spec_from_file_location('depth1', Path(__file__).with_name('migration-depth1.py'))
+assert spec is not None and spec.loader is not None
 depth1 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(depth1)
 
