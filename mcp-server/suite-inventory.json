@@ -1,4 +1,7 @@
 {
   "expected": 410,
-  "external": ["invoice-review-regressions.postgres.mjs"]
+  "external": [
+    "invoice-review-regressions.postgres.mjs"
+  ],
+  "unitPattern": "^[^/]+\\.test\\.(?:mjs|js|ts)$"
 }
