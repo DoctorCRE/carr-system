@@ -85,3 +85,19 @@ test("the renamed TypeScript generator remains a discovered script entrypoint", 
   assert.equal(isScriptEntrypoint("ops/scac-mutation-inventory.ts", false, "#!/usr/bin/env node\n"), true);
   assert.equal(isScriptEntrypoint("ops/test-fixture.ts", false, "#!/usr/bin/env node\n"), false);
 });
+
+test("plist parsing preserves values across comments and XML declarations", async () => {
+  const { parsePlistXml } = await import("../../ops/scac-mutation-inventory.ts");
+  assert.deepEqual(
+    parsePlistXml(
+      '<?xml version="1.0"?><!DOCTYPE plist><plist><!-- outer --><dict><key>Label</key><string>before<!-- inner -->after &amp; safe</string><key>RunAtLoad</key><false/></dict></plist>',
+    ),
+    { Label: "beforeafter & safe", RunAtLoad: false },
+  );
+});
+
+test("plist parsing refuses malformed comment boundaries", async () => {
+  const { parsePlistXml } = await import("../../ops/scac-mutation-inventory.ts");
+  assert.throws(() => parsePlistXml("<<!-- removed -->!--<plist><dict/></plist>"));
+  assert.throws(() => parsePlistXml("<!-- unclosed"));
+});

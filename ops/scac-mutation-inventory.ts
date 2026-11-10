@@ -384,11 +384,9 @@ function decodeXmlText(value: string) {
 }
 
 export function parsePlistXml(source: string): Json {
-  const clean = source
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<\?xml[\s\S]*?\?>/g, "")
-    .replace(/<!DOCTYPE[\s\S]*?>/g, "");
-  const tokens = clean.match(/<[^>]+>|[^<]+/g) || [];
+  const tokens = (source.match(/<!--[\s\S]*?-->|<\?xml[\s\S]*?\?>|<!DOCTYPE[\s\S]*?>|<[^>]+>|[^<]+/g) || []).filter(
+    (token) => !token.startsWith("<!--") && !token.startsWith("<?xml") && !token.startsWith("<!DOCTYPE"),
+  );
   let cursor = 0;
   const skipWhitespace = () => {
     while (cursor < tokens.length && !tokens[cursor]?.startsWith("<") && !tokens[cursor]?.trim()) cursor += 1;
