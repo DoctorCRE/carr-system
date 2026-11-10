@@ -1,0 +1,26 @@
+{
+  "node": [
+    "test/models/subject-watch-v2/Watch.map.ts",
+    "test/models/watch-alert-consumption/WatchInbox.map.ts",
+    "test/national-account-correction-delivery.test.ts",
+    "test/national-contact-research-gate.test.ts",
+    "test/new-deal-error-mapping.test.ts",
+    "test/payload-budgets.test.ts",
+    "test/pr-validation-workflows.test.ts",
+    "test/practice-origination.test.ts",
+    "test/watch-model-maps.test.ts",
+    "test/helpers/legacy-test-registry.ts",
+    "src/sha256.ts"
+  ],
+  "entry": [
+    "test/models/subject-watch-v2/Watch.map.ts",
+    "test/models/watch-alert-consumption/WatchInbox.map.ts",
+    "test/national-account-correction-delivery.test.ts",
+    "test/national-contact-research-gate.test.ts",
+    "test/new-deal-error-mapping.test.ts",
+    "test/payload-budgets.test.ts",
+    "test/pr-validation-workflows.test.ts",
+    "test/practice-origination.test.ts",
+    "test/watch-model-maps.test.ts"
+  ]
+}
