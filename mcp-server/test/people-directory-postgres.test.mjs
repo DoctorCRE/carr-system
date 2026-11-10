@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
 import { Validator } from '@cfworker/json-schema';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 
 test('party_search_pages_by_name_without_email', async t => {

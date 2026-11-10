@@ -1,7 +1,7 @@
 // Test shared budget acquisition and teardown for PostgreSQL fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.ts';
 
 test('Node PostgreSQL fixtures hold the shared budget through teardown', async () => {
   const first = await acquirePostgresFixtureGroup();

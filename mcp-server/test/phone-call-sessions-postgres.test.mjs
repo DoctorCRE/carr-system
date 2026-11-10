@@ -9,9 +9,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { handoffState } from './helpers/phone-handoff-state.mjs';
+import { handoffState } from './helpers/phone-handoff-state.ts';
 import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
 
 let fixture, pool, actor, handler;

@@ -1,0 +1,22 @@
+{
+  "node": [
+    "test/helpers/disposable-database-url.ts",
+    "test/helpers/disposable-postgres.ts",
+    "test/helpers/fixed-clock.ts",
+    "test/helpers/focused-future-work-store.ts",
+    "test/helpers/phone-handoff-state.ts",
+    "test/helpers/postgres-connection-observer.ts",
+    "test/helpers/proof-release-fixture.ts",
+    "test/helpers/rehearsal-verb.ts"
+  ],
+  "entry": [
+    "test/helpers/disposable-database-url.ts",
+    "test/helpers/disposable-postgres.ts",
+    "test/helpers/fixed-clock.ts",
+    "test/helpers/focused-future-work-store.ts",
+    "test/helpers/phone-handoff-state.ts",
+    "test/helpers/postgres-connection-observer.ts",
+    "test/helpers/proof-release-fixture.ts",
+    "test/helpers/rehearsal-verb.ts"
+  ]
+}
