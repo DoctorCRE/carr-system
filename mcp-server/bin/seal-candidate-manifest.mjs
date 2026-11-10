@@ -60,8 +60,8 @@ const ENVIRONMENT_MANIFEST_PATH = "ops/config/environments.json";
 /** The sealed fixture set `evidence_scope: candidate-and-test` covers by name. */
 const SEALED_FIXTURE_SET_PATHS = Object.freeze([
   "mcp-server/test/gate-zero-producer-stores.v5.fixture.ts",
-  "mcp-server/test/gate-zero-seam-stores.v5.fixture.mjs",
-  "mcp-server/test/gate-zero-seam-stores.v5.receipt-fixture.mjs",
+  "mcp-server/test/gate-zero-seam-stores.v5.fixture.ts",
+  "mcp-server/test/gate-zero-seam-stores.v5.receipt-fixture.ts",
 ]);
 
 const REVISION = /^[0-9a-f]{40}$/;

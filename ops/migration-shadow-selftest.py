@@ -160,6 +160,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
 with tempfile.TemporaryDirectory() as tmp:
     work = pathlib.Path(tmp)
+    (work / "base-source/migrations").mkdir(parents=True)
+    (work / "base-source/migrations/0002_b.sql").write_text("select 1;")
     labels: list[str] = []
     different_order = False
     fail_shutdown = True

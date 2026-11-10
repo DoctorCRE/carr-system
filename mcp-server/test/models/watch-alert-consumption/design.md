@@ -6,4 +6,4 @@ The model isolates notification visibility, Home placement and canonical subject
 
 The model excludes domain completion, concurrent source edits, snooze expiry, delivery, tenant isolation and CAS conflicts. Existing Home and watch suites cover those mechanisms. This change adds no transitions to those mechanisms.
 
-Regenerate the checked chart from the model with the installed statechart skill's `from-spec WatchInbox.tla`. TLC checks TypeOK, ReadCompletesWork, SettlementCompletesWork and SnoozeCompletesWork. The initial hand chart's unreachable Completed state is retained in the model's domain to state the three never rules; the checked chart contains only reachable states.
+Regenerate the checked chart from the model with the installed statechart skill's `from-spec WatchInbox.tla --map WatchInbox.map.ts`. TLC checks TypeOK, ReadCompletesWork, SettlementCompletesWork and SnoozeCompletesWork. The initial hand chart's unreachable Completed state is retained in the model's domain to state the three never rules; the checked chart contains only reachable states.

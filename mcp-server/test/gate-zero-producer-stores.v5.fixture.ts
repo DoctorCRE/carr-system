@@ -1,5 +1,5 @@
 // THE THREE SEAM STORES, SERVED FROM ROWS A GATE ZERO RUN COULD ACTUALLY STAND
-// ON — the producer's counterpart to gate-zero-seam-stores.v5.fixture.mjs.
+// ON — the producer's counterpart to gate-zero-seam-stores.v5.fixture.ts.
 //
 // WHY A SECOND FIXTURE AND NOT THE FIRST ONE. The reader fixture exists to prove
 // the CLAUSE TABLE: it holds one negative row per field, and exactly one of its
