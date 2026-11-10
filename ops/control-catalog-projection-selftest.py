@@ -137,7 +137,6 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 rule = conn.execute("insert into rule(statement,taught_by) "
                     "values ('Synthetic historical binding',%s) returning id", (actor,)).fetchone()[0]
                 if approval:
-                    conn.execute("set local session_replication_role=replica")
                     conn.execute("update rule set status='active',activated_by=%s where id=%s", (actor, rule))
                     conn.execute("insert into ops.rule_pack(pack,title,description,triggers,source) "
                         "values ('j775','Synthetic','Synthetic history',array['synthetic'],'fixture')")
@@ -180,7 +179,10 @@ class ProjectionDatabaseTests(unittest.TestCase):
                     conn.execute("delete from ops.rule_control_binding where rule_id=%s", (rule,))
                     conn.execute("delete from ops.rule_load_layer where rule_id=%s", (rule,))
                     conn.execute("delete from ops.rule_pack where pack='j775'")
+                    # Only the disposable fixture may remove its immutable synthetic receipt.
+                    conn.execute("set local session_replication_role=replica")
                     conn.execute("delete from ops.rule_approval_receipt where rule_id=%s", (rule,))
+                    conn.execute("set local session_replication_role=origin")
                     conn.execute("delete from rule where id=%s", (rule,))
                     conn.execute("delete from actor where id=%s", (actor,))
                 conn.commit()
