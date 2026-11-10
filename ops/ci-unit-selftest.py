@@ -159,44 +159,104 @@ class UnitClassTests(unittest.TestCase):
             if expected == 0:
                 self.assertIn('practice-plugin: 1 tests, 1 passed', result.stdout)
 
-    def test_runner_caps_parallel_children_and_serializes_browser_batches(self):
+    def runner_observation(self, mutation=None):
         self.package('mcp-server')
         mcp = self.root / 'mcp-server'
         for name in ('run-tests.ts', 'suite-discovery.ts'):
             shutil.copy2(ROOT / 'mcp-server' / name, mcp / name)
         (mcp / 'package.json').write_text(json.dumps({'type': 'module', 'scripts': {'test': 'node run-tests.ts'}}))
+        runner = mcp / 'run-tests.ts'
+        source = runner.read_text()
+        if mutation in ('one worker', 'three workers'):
+            source = source.replace('Number(process.env.CARR_CI_NODE_JOBS || 4)',
+                                    '1' if mutation == 'one worker' else '3')
+        if mutation == 'browser overlap':
+            source = source.replace('...browsers.map((file) => [file]),', '')
+            source = source.replace('![LAUNCH_REGRESSIONS, ...browsers, ...postgres]',
+                                    '![LAUNCH_REGRESSIONS, ...postgres]')
+        runner.write_text(source)
         (mcp / 'suite-inventory.json').write_text(json.dumps({'expected': 6}))
         events = self.root / 'events.jsonl'
+        observer = self.root / 'observer.cjs'
+        observer.write_text("""
+const cp = require('node:child_process');
+const {appendFileSync} = require('node:fs');
+const {syncBuiltinESMExports} = require('node:module');
+const {basename} = require('node:path');
+const owner = process.pid;
+const spawn = cp.spawn;
+cp.spawn = function (...args) {
+  const child = spawn.apply(this, args);
+  if (process.pid === owner && args[1]?.includes('--test')) {
+    const file = basename(args[1].at(-1));
+    const record = state => appendFileSync(process.env.RUNNER_EVENTS,
+      JSON.stringify({file, pid: child.pid, state}) + '\\n');
+    record('spawn');
+    child.once('close', () => record('close'));
+  }
+  return child;
+};
+syncBuiltinESMExports();
+""")
         for name in ('suite.test.mjs', 'a.test.mjs', 'b.test.mjs', 'c.test.mjs', 'd.test.mjs', 'browser.test.mjs'):
-            body = ("import test from 'node:test'; import {appendFileSync} from 'node:fs'; "
-                    f"const destination = {json.dumps(str(events))}; "
-                    f"const record = state => appendFileSync(destination, JSON.stringify({{file: {json.dumps(name)}, state}}) + '\\n'); "
-                    "test('bounded child', async () => { record('start'); await new Promise(resolve => setTimeout(resolve, 80)); record('end'); });")
+            body = "import test from 'node:test'; "
+            if name == 'a.test.mjs':
+                body += "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); "
+            body += "test('bounded child', () => {});"
             if name == 'browser.test.mjs':
                 body += "\n// chrome-launch.mjs\n"
             (mcp / 'test' / name).write_text(body)
-        result = subprocess.run(['node', 'run-tests.ts'], cwd=mcp,
-                                env={**self.env, 'CARR_CI_NODE_JOBS': '2'}, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(['node', '--require', str(observer), 'run-tests.ts'], cwd=mcp,
+                                env={**self.env, 'CARR_CI_NODE_JOBS': '2',
+                                     'RUNNER_EVENTS': str(events)},
+                                capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        active = set()
+        return result, list(map(json.loads, events.read_text().splitlines()))
+
+    def assert_runner_observation(self, result, events):
+        active = {}
+        spawned, closed = [], []
         peak = 0
-        for event in map(json.loads, events.read_text().splitlines()):
-            if event['state'] == 'start':
-                active.add(event['file'])
+        for event in events:
+            if event['state'] == 'spawn':
+                self.assertNotIn(event['pid'], active)
+                active[event['pid']] = event['file']
+                spawned.append(event['file'])
             else:
-                active.remove(event['file'])
+                self.assertEqual(active.pop(event['pid']), event['file'])
+                closed.append(event['file'])
             peak = max(peak, len(active))
-            self.assertLessEqual(len(active), 2)
-            if 'browser.test.mjs' in active:
-                self.assertEqual(active, {'browser.test.mjs'})
-        self.assertEqual(peak, 2)
+            self.assertLessEqual(len(active), 2, 'child cap exceeded')
+            if 'browser.test.mjs' in active.values():
+                self.assertEqual(list(active.values()), ['browser.test.mjs'], 'browser overlap')
+        self.assertEqual(peak, 2, 'required child peak')
         self.assertFalse(active)
-        self.assertEqual(result.stdout.count('suite-result: '), 6)
+        expected = ['suite.test.mjs', 'a.test.mjs', 'b.test.mjs', 'c.test.mjs', 'd.test.mjs', 'browser.test.mjs']
+        self.assertCountEqual(spawned, expected)
+        self.assertCountEqual(closed, expected)
+        receipts = [json.loads(line.removeprefix('suite-result: ')) for line in result.stdout.splitlines()
+                    if line.startswith('suite-result: ')]
+        self.assertCountEqual([receipt['file'] for receipt in receipts], expected)
+        self.assertTrue(all(receipt['code'] == 0 for receipt in receipts))
+
+    def test_runner_caps_parallel_children_and_serializes_browser_batches(self):
+        self.assert_runner_observation(*self.runner_observation())
+        mcp = self.root / 'mcp-server'
         for jobs in ('0', '-1', '1.5', 'NaN'):
             refused = subprocess.run(['node', 'run-tests.ts'], cwd=mcp,
                                     env={**self.env, 'CARR_CI_NODE_JOBS': jobs}, capture_output=True, text=True, timeout=30)
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn('invalid CARR_CI_NODE_JOBS', refused.stderr)
+
+    def test_runner_observer_rejects_broken_scheduling(self):
+        for mutation, message in (('one worker', 'required child peak'), ('three workers', 'child cap exceeded'),
+                                  ('browser overlap', 'browser overlap')):
+            with self.subTest(mutation=mutation):
+                result, events = self.runner_observation(mutation)
+                with self.assertRaisesRegex(AssertionError, message):
+                    self.assert_runner_observation(result, events)
+                shutil.rmtree(self.root / 'mcp-server')
+                (self.root / 'events.jsonl').unlink()
 
     def test_mcp_failed_suite_survives_later_passing_suites(self):
         self.all_packages()
