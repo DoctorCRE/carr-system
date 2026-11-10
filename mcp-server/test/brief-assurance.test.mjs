@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import { readBriefAssurance } from '../src/brief-assurance.ts';
 import { executeRegisteredTool, ToolError, TOOLS } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';

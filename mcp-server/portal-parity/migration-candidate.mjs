@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { clientPortalTools } from '../src/client-portal.ts';
 import { postgresDatabase } from '../test/helpers/postgres-database.mjs';
-import { readMigration } from '../test/migration-source.testhelper.mjs';
+import { readMigration } from '../test/migration-source.testhelper.ts';
 
 export const pendingSteps = {
   'client-view-publication': { status: 'pending', reason: 'explicit client-view publication is not on main', dependency: 'wr586-s4-j1 at 541e47ff; separate from market-study publication' },

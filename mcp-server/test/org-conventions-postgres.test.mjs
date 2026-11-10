@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { migrationNames } from './migration-source.testhelper.mjs';
+import { migrationNames } from './migration-source.testhelper.ts';
 import { executeRegisteredTool } from '../src/tools.js';
 import { publicError } from '../src/public-errors.ts';
 

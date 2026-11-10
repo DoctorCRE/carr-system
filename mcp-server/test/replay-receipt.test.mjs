@@ -1,7 +1,7 @@
 // Tests what the tool_call replay ledger stores for a write's response.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readMigration, migrationNames } from "./migration-source.testhelper.mjs";
+import { readMigration, migrationNames } from "./migration-source.testhelper.ts";
 import { REPLAY_RESPONSE_LIMIT, REPLAY_WINDOW, durableReceipt, replayReceipt } from "../src/replay-receipt.ts";
 
 test("a response under the limit is stored whole", () => {

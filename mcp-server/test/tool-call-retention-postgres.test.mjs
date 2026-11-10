@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
-import { migrationNames, readMigration } from './migration-source.testhelper.mjs';
+import { migrationNames, readMigration } from './migration-source.testhelper.ts';
 import { executeRegisteredTool } from '../src/tools.js';
 import { durableReceipt } from '../src/replay-receipt.ts';
 
