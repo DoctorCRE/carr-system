@@ -318,8 +318,8 @@
       "reason": "Historical research-helper README at 2b1643b8 names the operator-designated TEST mailbox, not a client contact or credential. The literal is removed from the current README; this exception binds only these exact historical documentation bytes."
     },
     {
-      "path": "mcp-server/test/party-duplicate-candidates.test.mjs",
-      "sha256": "eced5c16210169cc35c67ec55753bfb08447bb978a18296898156653766cc8f2",
+      "path": "mcp-server/test/party-duplicate-candidates.test.ts",
+      "sha256": "b200266be1f33f085e7588952bd00f938f80e2c6adfe18ff34dab3e277aaffd0",
       "rule": "pii-phone",
       "reason": "Synthetic duplicate-candidate reader tests use invented 202-555-01xx phone values to prove normalization, nonmatches and paging. No record-layer data or live contact is used. Qualification binds only these exact fixture bytes and the phone detector, including the preserved original PR commit."
     },
