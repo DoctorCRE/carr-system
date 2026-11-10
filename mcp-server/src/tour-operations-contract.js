@@ -852,6 +852,7 @@ function normalizeProjectionOptions(receiptLineage, evidence, revocations) {
   return { lineage: [], evidence, revocations };
 }
 
+/** @param {unknown} receiptLineage */
 export function validateProjectionFact(fact, assertion, membership, projection, rightsReceipt,
   receiptLineage = [], evidence = null, revocations = []) {
   const factSnapshot = snapshotRecord(fact, PROJECTION_FACT_AUTHORITY_FIELDS,
