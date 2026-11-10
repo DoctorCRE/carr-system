@@ -2,11 +2,17 @@
 
 A proof may need two clusters to demonstrate role isolation. Hold the host-wide
 budget before initializing its first cluster and through final shutdown. Nested
-fixtures in that proof reuse the lease; unrelated processes wait for teardown.
-The primary CI database is outside this lease because its child proofs need it.
+fixtures reuse declared capacity; overload refuses by a monotonic deadline.
+Primary clusters also reserve capacity when created through this constructor.
 """
 from contextlib import contextmanager
 import atexit
+import array
+import math
+import socket
+import select
+import time
+from uuid import uuid4
 import fcntl
 import json
 import os
@@ -168,6 +174,13 @@ if threading.current_thread() is threading.main_thread():
 
 class DisposablePostgres:
     def __init__(self, prefix, pg_ctl, env=None, runner=None, directory='/tmp'):
+        self._admission = None
+        self._borrowed = None
+        if not _supervising and runner is None and os.access(pg_ctl, os.X_OK):
+            if _reservation:
+                self._borrowed = _borrow(_reservation.ticket)
+            else:
+                self._admission = Reservation(1, ADMISSION_TIMEOUT, LOCK_PATH)
         self._prefix = prefix
         self.pg_ctl = Path(pg_ctl)
         self.env = dict(env or os.environ, LC_ALL='C')
@@ -178,15 +191,21 @@ class DisposablePostgres:
         # stub pg_ctl path (selftest seams) keeps the in-process path.
         self._supervisor = None
         if runner is None and not _supervising and os.access(pg_ctl, os.X_OK):
+            descriptors = (self._borrowed[1] + [self._borrowed[0].fileno()] if self._borrowed
+                           else [h.fileno() for h in self._admission.handles])
+            receipt = self._borrowed[2] if self._borrowed else self._admission.receipt
             self._supervisor = subprocess.Popen(
-                [sys.executable, '-u', __file__, '--supervise', '--prefix', prefix,
-                 '--pg-ctl', str(pg_ctl), '--directory', str(directory)],
+                [sys.executable, '-u', __file__, '--protocol', PROTOCOL, '--supervise', '--prefix', prefix,
+                 '--pg-ctl', str(pg_ctl), '--directory', str(directory),
+                 '--reservation-fds', ','.join(map(str, descriptors)),
+                 '--reservation-receipt', json.dumps(receipt)],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=self.env,
-                start_new_session=True)  # terminal signals reach only this process
+                pass_fds=descriptors, start_new_session=True)  # terminal signals reach only this process
             line = self._supervisor.stdout.readline().strip()
             if not line.startswith('/'):
                 self._supervisor.stdin.close()
                 self._supervisor.wait()
+                self._release_admission()
                 raise RuntimeError('disposable PostgreSQL supervisor failed to start')
             self.root = Path(line)
         else:
@@ -250,7 +269,15 @@ class DisposablePostgres:
             args.append('--encoding=UTF8')
         launch = Path(args[0]).name == 'initdb' or (Path(args[0]).name == 'pg_ctl' and 'start' in args)
         if launch:
-            self.register(args[args.index('-D') + 1])
+            data = Path(args[args.index('-D') + 1]).resolve()
+            if _supervising:
+                for other in self._data:
+                    if other != data and (other / 'PG_VERSION').exists():
+                        status = subprocess.run([str(self.pg_ctl), '-D', str(other), 'status'],
+                            env=self.env, capture_output=True, timeout=5)
+                        if status.returncode != 3:
+                            raise RuntimeError('one active cluster per supervisor; reserve another fixture before launch')
+            self.register(data)
         main_launch = launch and threading.current_thread() is threading.main_thread()
         with self._lock:
             if self._closed:
@@ -318,12 +345,27 @@ class DisposablePostgres:
             except Exception as exc:
                 if self in _fixtures:
                     _fixtures.remove(self)
+                if _inherited:
+                    _retain(_inherited, f'{exc}; root {self.root}')
+                elif _supervising and _reservation:
+                    _retain(_reservation.receipt, f'{exc}; root {self.root}')
                 message = f'disposable PostgreSQL cleanup failed; retained {self.root}; log: {self.root / "postgres.log"}: {exc}'
                 print(message, file=sys.stderr)
                 raise RuntimeError(message) from exc
+            self._release_admission()
             self._closed = True
             if self in _fixtures:
                 _fixtures.remove(self)
+
+    def _release_admission(self):
+        if self._borrowed:
+            self._borrowed[0].close()
+            for fd in self._borrowed[1]:
+                os.close(fd)
+            self._borrowed = None
+        if self._admission:
+            self._admission.close()
+            self._admission = None
 
     def _close_supervisor(self, remove_root):
         supervisor = self._supervisor
@@ -336,6 +378,9 @@ class DisposablePostgres:
         code = supervisor.wait(timeout=180)
         supervisor.stdout.close()
         if code:
+            receipt = self._borrowed[2] if self._borrowed else self._admission.receipt
+            _retain(receipt, f'supervisor exited {code}; root {self.root}')
+            self._release_admission()
             raise RuntimeError(f'supervisor exited {code}')
 
     def __enter__(self):
@@ -345,32 +390,202 @@ class DisposablePostgres:
         self.close()
 
 
+PROTOCOL = 'carr-pg-admission/v2'
+CAPACITY = 4
+ADMISSION_TIMEOUT = 30.0
+_reservation = None
+_inherited = None
+
+
+class CapacityUnavailable(RuntimeError):
+    def __init__(self, receipt):
+        self.receipt = receipt
+        super().__init__(json.dumps(receipt, sort_keys=True))
+
+
+class Reservation:
+    """Reserve the whole demand, then lend kernel handles to owned supervisors."""
+    def __init__(self, demand, timeout, lock_path):
+        if type(demand) is not int or demand < 1 or not math.isfinite(timeout) or timeout < 0:
+            raise ValueError('positive integer demand and finite nonnegative timeout required')
+        self.handles = []
+        self.directory = lock_path.with_suffix('.admission-v2')
+        self.receipt = {'protocol': PROTOCOL, 'state': 'waiting', 'demand': demand,
+            'capacity': CAPACITY, 'slots': [], 'pid': os.getpid(), 'worktree': os.getcwd(),
+            'run': uuid4().hex, 'directory': str(self.directory),
+            'deadline_seconds': timeout, 'wait_seconds': 0.0}
+        start = time.monotonic()
+        deadline = start + timeout
+        policy = {'protocol': PROTOCOL, 'capacity': CAPACITY}
+        self.directory.mkdir(mode=0o700, exist_ok=True)
+        while True:
+            handles = []
+            reason = 'capacity held'
+            try:
+                if demand > CAPACITY:
+                    raise ValueError('demand exceeds capacity')
+                legacy = lock_path.open('a+')
+                handles.append(legacy)
+                fcntl.flock(legacy, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                with (self.directory / 'allocator').open('a+') as allocator:
+                    fcntl.flock(allocator, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    policy_path = self.directory / 'policy.json'
+                    if not policy_path.exists():
+                        policy_path.write_text(json.dumps(policy))
+                    if json.loads(policy_path.read_text()) != policy:
+                        raise ValueError('incompatible slot policy')
+                    slots = []
+                    for slot in range(CAPACITY):
+                        if (self.directory / f'{slot}.retained').exists():
+                            continue
+                        handle = (self.directory / f'{slot}.lock').open('a+')
+                        try:
+                            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            handle.close()
+                            continue
+                        handles.append(handle)
+                        slots.append(slot)
+                        if len(slots) == demand:
+                            break
+                    if len(slots) == demand:
+                        self.handles = handles
+                        self.receipt.update(state='admitted', slots=slots,
+                                            wait_seconds=time.monotonic() - start)
+                        return
+            except BlockingIOError:
+                pass
+            except ValueError as exc:
+                reason = str(exc)
+            for handle in handles:
+                handle.close()
+            now = time.monotonic()
+            if now >= deadline or reason != 'capacity held':
+                self.receipt.update(state='capacity_unavailable', reason=reason, wait_seconds=now - start)
+                raise CapacityUnavailable(self.receipt)
+            time.sleep(min(.02, deadline - now))
+
+    def serve(self):
+        self.ticket_directory = tempfile.TemporaryDirectory(prefix='pg-lease-', dir='/tmp')
+        self.ticket = str(Path(self.ticket_directory.name) / 'lease')
+        self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.listener.bind(self.ticket)
+        self.listener.listen(CAPACITY)
+        self.listener.settimeout(.1)
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self):
+        clients = []
+        try:
+            while not self.stopped.is_set():
+                ready, _, _ = select.select([self.listener, *clients], [], [], .05)
+                for client in list(clients):
+                    if client in ready and not client.recv(1):
+                        clients.remove(client)
+                        client.close()
+                if self.listener not in ready:
+                    continue
+                client, _ = self.listener.accept()
+                if len(clients) >= self.receipt['demand']:
+                    client.send(json.dumps({**self.receipt, 'state': 'capacity_unavailable',
+                        'reason': 'nested fixture demand exhausted'}).encode())
+                    client.close()
+                    continue
+                descriptors = array.array('i', [h.fileno() for h in self.handles])
+                try:
+                    client.sendmsg([json.dumps(self.receipt).encode()],
+                        [(socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)])
+                    clients.append(client)
+                except OSError:
+                    client.close()
+        finally:
+            for client in clients:
+                client.close()
+
+    def close(self):
+        if hasattr(self, 'listener'):
+            self.stopped.set()
+            self.thread.join()
+            self.listener.close()
+            self.ticket_directory.cleanup()
+        # LOCK_UN would unlock duplicated supervisor descriptors too.
+        for handle in self.handles:
+            handle.close()
+        self.handles = []
+
+
+def _borrow(ticket):
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(5)
+    descriptors = array.array('i')
+    try:
+        client.connect(ticket)
+        data, ancillary, flags, _ = client.recvmsg(8192, socket.CMSG_SPACE(16 * descriptors.itemsize))
+        for level, kind, raw in ancillary:
+            if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                descriptors.frombytes(raw[:len(raw) - len(raw) % descriptors.itemsize])
+        receipt = json.loads(data)
+        if receipt['state'] == 'capacity_unavailable':
+            raise CapacityUnavailable(receipt)
+        if flags & socket.MSG_CTRUNC or receipt['protocol'] != PROTOCOL or len(descriptors) != receipt['demand'] + 1:
+            raise RuntimeError('incompatible reservation protocol')
+        return client, list(descriptors), receipt
+    except Exception:
+        for fd in descriptors:
+            os.close(fd)
+        client.close()
+        raise
+
+
+def _retain(receipt, reason):
+    for slot in receipt['slots']:
+        (Path(receipt['directory']) / f'{slot}.retained').write_text(json.dumps({**receipt,
+            'state': 'retained', 'reason': str(reason)}))
+
+
 @contextmanager
-def postgres_fixture_group():
-    global _depth
-    with _thread_lock:
+def postgres_fixture_group(demand=2, timeout=ADMISSION_TIMEOUT, *, lock_path=None):
+    global _depth, _reservation
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError('finite nonnegative timeout required')
+    start = time.monotonic()
+    if not _thread_lock.acquire(timeout=timeout):
+        raise CapacityUnavailable({'protocol': PROTOCOL, 'state': 'capacity_unavailable',
+            'reason': 'in-process reservation held', 'demand': demand, 'slots': [],
+            'wait_seconds': time.monotonic() - start, 'deadline_seconds': timeout})
+    try:
         if _depth:
+            if demand > _reservation.receipt['demand']:
+                raise ValueError('nested demand exceeds outer reservation')
             _depth += 1
             try:
-                yield
+                yield _reservation
             finally:
                 _depth -= 1
             return
-        # Never unlink: waiters must continue to lock the same inode. Kernel
-        # ownership releases on exit/crash, so no stale PID cleanup is needed.
-        with LOCK_PATH.open('a') as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            _depth = 1
-            try:
-                yield
-            finally:
-                _depth = 0
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        reservation = Reservation(demand, max(0, timeout - (time.monotonic() - start)), lock_path or LOCK_PATH)
+        try:
+            reservation.serve()
+            _reservation, _depth = reservation, 1
+            yield reservation
+        finally:
+            _depth, _reservation = 0, None
+            reservation.close()
+    finally:
+        _thread_lock.release()
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('--protocol', required=True, choices=[PROTOCOL])
+    parser.add_argument('--demand', type=int, default=2)
+    parser.add_argument('--admission-timeout', type=float, default=ADMISSION_TIMEOUT)
+    parser.add_argument('--reservation-ticket')
+    parser.add_argument('--reservation-fds')
+    parser.add_argument('--reservation-receipt')
     parser.add_argument('--supervise', action='store_true')
     parser.add_argument('--prefix', default='carr-local-pg-ci.node-')
     parser.add_argument('--pg-ctl')
@@ -408,6 +623,19 @@ if __name__ == '__main__':
                                   'stderr': 'CI-service snapshots support SQL connections only'}), flush=True)
         sys.exit(0)
     if args.supervise:
+        if args.reservation_fds:
+            descriptors = [int(fd) for fd in args.reservation_fds.split(',')]
+            _inherited = json.loads(args.reservation_receipt)
+            if _inherited['protocol'] != PROTOCOL:
+                raise RuntimeError('incompatible inherited reservation')
+        elif args.reservation_ticket:
+            client, descriptors, _inherited = _borrow(args.reservation_ticket)
+        else:
+            try:
+                _reservation = Reservation(1, args.admission_timeout, LOCK_PATH)
+            except CapacityUnavailable as exc:
+                print(str(exc), file=sys.stderr, flush=True)
+                sys.exit(75)
         # Callers hold stdin open. EOF (caller closed or died) stops every
         # cluster this process launched; a close request lets the caller retain
         # the root as evidence.
@@ -423,6 +651,15 @@ if __name__ == '__main__':
                 from postgres_snapshot_fixture import start_snapshot
                 start_snapshot(fixture, binaries, snapshot_schema, args.snapshot_copy,
                                socket_directory=socket_directory, template=args.snapshot_template, migrate=migrate)
+            if args.snapshot_template:
+                if _reservation:
+                    _reservation.close()
+                if _inherited:
+                    for fd in descriptors:
+                        os.close(fd)
+                    if args.reservation_ticket:
+                        client.close()
+                    _inherited = None
             if binaries:
                 from urllib.parse import quote
                 print(json.dumps({'root': str(fixture.root),
@@ -448,8 +685,10 @@ if __name__ == '__main__':
                 except BrokenPipeError:
                     break  # caller died mid-launch; stop what it started
         sys.exit(0)
-    # Node fixtures hold this subprocess's stdin open until their PostgreSQL
-    # teardown completes. EOF also releases the lease if the caller exits.
-    with postgres_fixture_group():
-        print('ready', flush=True)
-        sys.stdin.read()
+    try:
+        with postgres_fixture_group(args.demand, args.admission_timeout) as lease:
+            print(json.dumps({**lease.receipt, 'ticket': lease.ticket}), flush=True)
+            sys.stdin.read()
+    except CapacityUnavailable as exc:
+        print(str(exc), file=sys.stderr, flush=True)
+        sys.exit(75)

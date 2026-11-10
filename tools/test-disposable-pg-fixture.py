@@ -27,7 +27,7 @@ from pathlib import Path
 from lib import disposable_pg_fixture as fixture
 fixture.LOCK_PATH = Path(sys.argv[1])
 print('ready', flush=True)
-with fixture.postgres_fixture_group():
+with fixture.postgres_fixture_group(demand=4):
     with fixture.postgres_fixture_group():
         print('entered', flush=True)
     print('nested-exited', flush=True)
@@ -75,6 +75,8 @@ class KilledParent(unittest.TestCase):
 import sys
 from pathlib import Path
 from lib.disposable_pg_fixture import DisposablePostgres
+from lib import disposable_pg_fixture as pg
+pg.LOCK_PATH = Path(sys.argv[3])
 bins, during_start = Path(sys.argv[1]), sys.argv[2] == 'True'
 f = DisposablePostgres('killed-parent-', bins / 'pg_ctl')
 data = f.root / 'data'
@@ -85,7 +87,9 @@ f.run([bins / 'pg_ctl', '-D', data, '-l', f.root / 'log', '-o', f"-k {f.root} -h
 print(f.root, flush=True)
 sys.stdin.read()
 """
-        child = subprocess.Popen([sys.executable, '-u', '-c', script, str(bins), str(during_start)], cwd=ROOT,
+        budget = tempfile.TemporaryDirectory()
+        self.addCleanup(budget.cleanup)
+        child = subprocess.Popen([sys.executable, '-u', '-c', script, str(bins), str(during_start), str(Path(budget.name) / 'budget')], cwd=ROOT,
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         root = None
         try:
