@@ -1,4 +1,4 @@
-// new-deal-error-mapping.test.mjs — the friendly constraint errors must survive
+// new-deal-error-mapping.test.ts — the friendly constraint errors must survive
 // the transaction they are raised in.
 //
 // THE LATENT BUG (found 2026-08-14 while fixing the add-party self-collision,
@@ -17,37 +17,44 @@
 // once the insert throws, every query except "rollback to savepoint" fails —
 // so a regression to querying the poisoned transaction fails these tests.
 //
-// Run with: node --test mcp-server/test/new-deal-error-mapping.test.mjs
-// (also picked up by `npm test`'s test/*.test.mjs glob.)
+// Run with: node --test mcp-server/test/new-deal-error-mapping.test.ts
+// Also picked up by npm test's test-suite discovery.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS } from "../src/tools.js";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+import { handler } from "./helpers/legacy-test-registry.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
   client: "60000000-0000-0000-0000-000000000001",
   deal: "60000000-0000-0000-0000-000000000002",
 };
-const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true,
-  via: "mcp", client_id: "claude" };
+const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true, via: "mcp", client_id: "claude" };
 
 const PHASES = ["prospect", "loi", "lease_signed", "closed"];
 
+type InsertError = { code: string; constraint: string | null };
 class Fake {
-  constructor({ insertError = null } = {}) {
-    this.insertError = insertError;   // {code, constraint} the deal insert should raise
-    this.aborted = false;             // 25P02 discipline
+  insertError: InsertError | null;
+  aborted: boolean;
+  rollbacks: number;
+  events: unknown[][];
+  constructor({ insertError = null }: { insertError?: InsertError | null } = {}) {
+    this.insertError = insertError; // {code, constraint} the deal insert should raise
+    this.aborted = false; // 25P02 discipline
     this.rollbacks = 0;
     this.events = [];
   }
 
-  async query(text, params = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
 
     if (this.aborted && !/^rollback to savepoint/i.test(sql)) {
-      const e = new Error("current transaction is aborted, commands ignored until end of transaction block");
-      e.code = "25P02";
+      const e = Object.assign(
+        new Error("current transaction is aborted, commands ignored until end of transaction block"),
+        { code: "25P02" },
+      );
       throw e;
     }
 
@@ -58,15 +65,15 @@ class Fake {
 
     if (/^savepoint\s/i.test(sql)) return { rows: [] };
     if (/^rollback to savepoint\s/i.test(sql)) {
-      this.rollbacks++; this.aborted = false; return { rows: [] };
+      this.rollbacks++;
+      this.aborted = false;
+      return { rows: [] };
     }
 
     if (sql.startsWith("insert into deal")) {
       if (this.insertError) {
         this.aborted = true;
-        const e = new Error("constraint violation");
-        e.code = this.insertError.code;
-        e.constraint = this.insertError.constraint;
+        const e = Object.assign(new Error("constraint violation"), this.insertError);
         throw e;
       }
       return { rows: [{ id: ids.deal }] };
@@ -74,36 +81,52 @@ class Fake {
 
     if (sql.startsWith("select name from deal where salesforce_id="))
       return { rows: [{ name: "Dr. Example — 4301 Spanish Trail lease" }] };
-    if (sql.startsWith("select slug from deal_phase"))
-      return { rows: PHASES.map(slug => ({ slug })) };
+    if (sql.startsWith("select slug from deal_phase")) return { rows: PHASES.map((slug) => ({ slug })) };
     if (sql.startsWith("select slug from deal_type_ref") || sql.startsWith("select slug from deal_lane"))
       return { rows: [] };
 
-    if (sql.startsWith("insert into event")) { this.events.push(params); return { rows: [] }; }
+    if (sql.startsWith("insert into event")) {
+      this.events.push(params);
+      return { rows: [] };
+    }
     if (sql.startsWith("insert into tool_call")) return { rows: [] };
 
-    throw new Error("fake received unexpected SQL: " + sql);
+    throw new Error(`fake received unexpected SQL: ${sql}`);
   }
 }
 
-const newDeal = (c, extra = {}) => TOOLS["new-deal"].handler(c, joe, {
-  idempotency_key: "44444444-4444-4444-4444-444444444444",
-  client: "C-001", name: "Test Deal", deal_type: "lease", phase: "prospect", ...extra });
+const newDeal = (c: Fake, extra: Record<string, unknown> = {}) =>
+  handler("new-deal", c, joe, {
+    idempotency_key: "44444444-4444-4444-4444-444444444444",
+    client: "C-001",
+    name: "Test Deal",
+    deal_type: "lease",
+    phase: "prospect",
+    ...extra,
+  });
 
 test("duplicate salesforce_id surfaces salesforce_id_in_use WITH the holder's name", async () => {
   const c = new Fake({ insertError: { code: "23505", constraint: "deal_salesforce_id_uniq" } });
-  await assert.rejects(newDeal(c, { salesforce_id: "006XX0000012345" }), (e) =>
-    e.payload?.error === "salesforce_id_in_use" &&
-    e.payload.held_by === "Dr. Example — 4301 Spanish Trail lease");
+  await assert.rejects(
+    newDeal(c, { salesforce_id: "006XX0000012345" }),
+    (e) =>
+      e instanceof ToolError &&
+      e.payload.error === "salesforce_id_in_use" &&
+      e.payload.held_by === "Dr. Example — 4301 Spanish Trail lease",
+  );
   assert.equal(c.rollbacks, 1, "the mapper rolled back to the savepoint before its lookup");
 });
 
 test("unknown phase surfaces unknown_phase with the valid slugs", async () => {
   const c = new Fake({ insertError: { code: "23503", constraint: "deal_phase_fkey" } });
-  await assert.rejects(newDeal(c, { phase: "negotiating" }), (e) =>
-    e.payload?.error === "unknown_phase" &&
-    e.payload.given === "negotiating" &&
-    assert.deepEqual(e.payload.valid, PHASES) === undefined);
+  await assert.rejects(
+    newDeal(c, { phase: "negotiating" }),
+    (e) =>
+      e instanceof ToolError &&
+      e.payload.error === "unknown_phase" &&
+      e.payload.given === "negotiating" &&
+      assert.deepEqual(e.payload.valid, PHASES) === undefined,
+  );
   assert.equal(c.rollbacks, 1);
 });
 
@@ -117,5 +140,5 @@ test("a clean insert takes the happy path untouched", async () => {
 
 test("an error outside the mapped classes still propagates raw", async () => {
   const c = new Fake({ insertError: { code: "22P02", constraint: null } });
-  await assert.rejects(newDeal(c), (e) => e.code === "22P02");
+  await assert.rejects(newDeal(c), (e) => e instanceof Error && "code" in e && e.code === "22P02");
 });

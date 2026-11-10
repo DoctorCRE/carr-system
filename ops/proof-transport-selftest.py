@@ -292,6 +292,53 @@ class ProofTransportTest(unittest.TestCase):
             thread.join()
             server.server_close()
 
+    def test_fixture_requires_marker_on_every_path_before_scenario_dispatch(self):
+        from http.client import HTTPConnection
+        from tools.proof_release_fixture import MARKER
+
+        seen = []
+
+        class Handler(ReleaseFixtureHandler):
+            def release_GET(self):
+                seen.append(self.path)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(self.path.encode())
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            for path in ['/', '/release', '/unexpected', '/release?probe=1']:
+                for values in [[], ['wrong'], [MARKER['value'], MARKER['value']], [MARKER['value']]]:
+                    with self.subTest(path=path, values=values):
+                        before = seen.copy()
+                        connection = HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+                        try:
+                            connection.putrequest('GET', path)
+                            for value in values:
+                                connection.putheader(MARKER['header'], value)
+                            connection.endheaders()
+                            response = connection.getresponse()
+                            body = response.read()
+                            if values == [MARKER['value']]:
+                                self.assertEqual(response.status, 200)
+                                self.assertEqual(body, path.encode())
+                                self.assertEqual(seen, before + [path])
+                            else:
+                                self.assertEqual(response.status, 403)
+                                self.assertEqual(body, MARKER['refusal'].encode())
+                                self.assertEqual(seen, before)
+                        finally:
+                            connection.close()
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()
+
     def test_named_runners_send_shared_user_agent(self):
         from lib.release_reader import USER_AGENT
         for name in ['duplicate-candidates-address-membership', 'notification-feed-evidence-integrity']:

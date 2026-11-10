@@ -5,7 +5,7 @@ import path from "node:path";
 import { readdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { launchTestChrome } from "./helpers/chrome-launch.mjs";
-import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
+import { findDisposableChromium } from "./helpers/chromium-binary.ts";
 
 const SYSTEM_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 

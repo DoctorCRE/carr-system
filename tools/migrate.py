@@ -638,6 +638,27 @@ def validate_ledger_identities(current: dict[str, str], applied: dict[str, str])
             )
 
 
+def load_control_catalog():
+    import importlib.util
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("catalog_projection", root / "ops/sync_control_catalog.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def install_control_catalog(conn, revision: str) -> None:
+    import json
+
+    module = load_control_catalog()
+    conn.commit()
+    receipt = module.install_projection(conn, revision)
+    conn.commit()
+    print("control-catalog-projection: " + json.dumps(receipt, sort_keys=True))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true", help="apply pending migrations")
@@ -645,7 +666,7 @@ def main() -> None:
     ap.add_argument(
         "--through",
         metavar="FILENAME",
-        help="consider only the forward migration prefix through this exact checked-in filename",
+        help="apply only this migration prefix, without installing the full revision catalog",
     )
     args = ap.parse_args()
 
@@ -658,6 +679,7 @@ def main() -> None:
     except ImportError:
         fail("psycopg not installed: pip install 'psycopg[binary]'")
 
+    revision = load_control_catalog().source_revision() if args.apply and not args.through else ""
     migrations = load_migrations()
     baseline = load_baseline()
 
@@ -702,6 +724,8 @@ def main() -> None:
             print(f"  held back: {name}")
         if not pending:
             print("nothing to do in authorized prefix")
+            if args.apply and not args.through:
+                install_control_catalog(conn, revision)
             return
         if not args.apply:
             print("dry run — pass --apply to run these")
@@ -808,6 +832,8 @@ def main() -> None:
             if len(batch) > 1:
                 print("atomic migration group committed: "
                       + ", ".join(name for name, _sql, _digest in batch))
+        if not args.through:
+            install_control_catalog(conn, revision)
         print("done")
 
 

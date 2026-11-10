@@ -69,7 +69,7 @@ const REGISTERED_STORE_TOKENS = Object.freeze([
   "a-store-this-file-does-not-serve",
 ]);
 
-function own(target, key, value, enumerable) {
+function own(target: object, key: PropertyKey, value: unknown, enumerable: boolean) {
   Object.defineProperty(target, key, { value, writable: false, enumerable, configurable: false });
 }
 
@@ -80,7 +80,7 @@ function own(target, key, value, enumerable) {
  * whose getters throw, and a plain `query?.canaryRunKey` answers those with the
  * CALLER'S own text out of an exported callable.
  */
-function cell(holder, key) {
+function cell(holder: unknown, key: PropertyKey): unknown {
   try {
     return holder === null || holder === undefined ? undefined : Reflect.get(Object(holder), key);
   } catch {
@@ -94,7 +94,7 @@ function cell(holder, key) {
  * readily as it reaches a canary name, and coerces an object key through a
  * `toString` the caller wrote. Neither is a row this fixture holds.
  */
-function rowsFor(table, key) {
+function rowsFor<T extends Readonly<Record<string, readonly unknown[]>>>(table: T, key: unknown) {
   return typeof key === "string" && Object.hasOwn(table, key) ? table[key] : [];
 }
 
@@ -115,15 +115,18 @@ function rowsFor(table, key) {
  * not a constructor and still has no `prototype`; the refusal names
  * `function () { [native code] }` and nothing of this file.
  */
-function closedCallable(callable) {
+function closedCallable<A extends unknown[], R>(callable: (...args: A) => R) {
   const closed = callable.bind(null);
   Object.defineProperty(closed, Symbol.hasInstance, {
-    value: () => false, writable: false, enumerable: false, configurable: false,
+    value: () => false,
+    writable: false,
+    enumerable: false,
+    configurable: false,
   });
   return closed;
 }
 
-function causeKind(cause) {
+function causeKind(cause: unknown) {
   try {
     if (cause === undefined || cause === null) return "none";
     if (seamStoreInstance(cause)) return "a-seam-store-that-was-unreachable";
@@ -140,11 +143,11 @@ function causeKind(cause) {
 // `instanceof`. The substituted reader imports `isSeamStoreUnreachable` from
 // whichever module file is in place, so this file owes both names.
 class SeamStoreUnreachableType extends Error {
-  constructor(storeRef, because, cause) {
-    const store = REGISTERED_STORE_TOKENS.includes(storeRef)
-      ? storeRef : "a-store-this-file-does-not-serve";
+  constructor(storeRef: string, because: string, cause: unknown) {
+    const store = REGISTERED_STORE_TOKENS.includes(storeRef) ? storeRef : "a-store-this-file-does-not-serve";
     const reason = REGISTERED_REASONS.includes(because)
-      ? because : "the reason this store was unreachable is not a registered one";
+      ? because
+      : "the reason this store was unreachable is not a registered one";
     const message = `${store}: ${reason}`;
     super(message);
     own(this, "name", "SeamStoreUnreachable", false);
@@ -158,7 +161,8 @@ class SeamStoreUnreachableType extends Error {
 }
 
 export const seamStoreUnreachable = closedCallable(
-  (storeRef, because, cause) => new SeamStoreUnreachableType(storeRef, because, cause));
+  (storeRef: string, because: string, cause?: unknown) => new SeamStoreUnreachableType(storeRef, because, cause),
+);
 
 /**
  * AND THE WALK IS BOUNDED, which the intrinsic `instanceof` is not: a Proxy
@@ -168,7 +172,7 @@ export const seamStoreUnreachable = closedCallable(
  */
 const PROTOTYPE_WALK_LIMIT = 100;
 
-function seamStoreInstance(value) {
+function seamStoreInstance(value: unknown) {
   try {
     if (value === null || (typeof value !== "object" && typeof value !== "function")) return false;
     let walked = Reflect.getPrototypeOf(value);
@@ -183,7 +187,7 @@ function seamStoreInstance(value) {
   }
 }
 
-export const isSeamStoreUnreachable = closedCallable(value => seamStoreInstance(value));
+export const isSeamStoreUnreachable = closedCallable((value: unknown) => seamStoreInstance(value));
 
 /**
  * AND AN INSTANCE IS NOT A ROUTE BACK TO THE CLASS EITHER. Every class installs
@@ -196,10 +200,16 @@ export const isSeamStoreUnreachable = closedCallable(value => seamStoreInstance(
  * walking a hostile operand's chain with the intrinsic.
  */
 Object.defineProperty(SeamStoreUnreachableType.prototype, "constructor", {
-  value: seamStoreUnreachable, writable: false, enumerable: false, configurable: false,
+  value: seamStoreUnreachable,
+  writable: false,
+  enumerable: false,
+  configurable: false,
 });
 Object.defineProperty(SeamStoreUnreachableType, Symbol.hasInstance, {
-  value: seamStoreInstance, writable: false, enumerable: false, configurable: false,
+  value: seamStoreInstance,
+  writable: false,
+  enumerable: false,
+  configurable: false,
 });
 Object.freeze(SeamStoreUnreachableType.prototype);
 
@@ -211,15 +221,15 @@ Object.freeze(SeamStoreUnreachableType.prototype);
  * artifact-trust.js's, because the reader compares against digests it computes
  * with that function.
  */
-function digest(value) {
+function digest(value: string) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-function opaque(value) {
+function opaque(value: unknown) {
   return typeof value === "string" && value.length > 0 ? digest(value) : null;
 }
 
-function instantText(value) {
+function instantText(value: unknown) {
   const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
@@ -250,19 +260,23 @@ const T2 = "2026-09-11T17:00:31.000Z";
 const PREDECESSOR_ROWS = Object.freeze({
   // Accepted, complete, with a receipt whose hash is FIXTURE_ACCEPTED_HASH. In
   // production the proposal hash equals the receipt hash, and it does here.
-  "WR-000046": Object.freeze([Object.freeze({
-    status: "accepted",
-    detail_row_count: 1,
-    accepted_feedback_hash: FIXTURE_ACCEPTED_HASH,
-    feedback_hash: FIXTURE_ACCEPTED_HASH,
-  })]),
+  "WR-000046": Object.freeze([
+    Object.freeze({
+      status: "accepted",
+      detail_row_count: 1,
+      accepted_feedback_hash: FIXTURE_ACCEPTED_HASH,
+      feedback_hash: FIXTURE_ACCEPTED_HASH,
+    }),
+  ]),
   // Proposed and never signed. The near miss that must not pass.
-  "WR-000040": Object.freeze([Object.freeze({
-    status: "pending_human_acceptance",
-    detail_row_count: 1,
-    accepted_feedback_hash: null,
-    feedback_hash: `sha256:${"5".repeat(64)}`,
-  })]),
+  "WR-000040": Object.freeze([
+    Object.freeze({
+      status: "pending_human_acceptance",
+      detail_row_count: 1,
+      accepted_feedback_hash: null,
+      feedback_hash: `sha256:${"5".repeat(64)}`,
+    }),
+  ]),
   // No outcome rows at all.
   "WR-000054": Object.freeze([]),
 });
@@ -283,8 +297,11 @@ const PREDECESSOR_ROWS = Object.freeze({
  */
 const RUN = Object.freeze({
   service_key: "carr-fleet-sync",
-  started_at: T0, ended_at: T1, observed_at: T2,
-  source_kind: "wrapper", source_ref: "bin/run-scheduled.sh",
+  started_at: T0,
+  ended_at: T1,
+  observed_at: T2,
+  source_kind: "wrapper",
+  source_ref: "bin/run-scheduled.sh",
 });
 
 /**
@@ -298,9 +315,16 @@ const RUN = Object.freeze({
  * negative cases below need a receipt minted for a DIFFERENT job, and a helper
  * that derived the hash from the row could not express one.
  */
-function receipt({ forRunKey, mintedAt, nonce = "0123456789abcdef" }) {
-  const stamp = new Date(Date.parse(mintedAt)).toISOString()
-    .replace(/-/g, "").replace(/:/g, "");
+function receipt({
+  forRunKey,
+  mintedAt,
+  nonce = "0123456789abcdef",
+}: {
+  forRunKey: string;
+  mintedAt: string;
+  nonce?: string;
+}) {
+  const stamp = new Date(Date.parse(mintedAt)).toISOString().replace(/-/g, "").replace(/:/g, "");
   const runKeyHash = createHash("sha256").update(forRunKey).digest("hex").slice(0, 32);
   return `carr-run-receipt:v1:${stamp}:${nonce}:${runKeyHash}`;
 }
@@ -308,7 +332,7 @@ function receipt({ forRunKey, mintedAt, nonce = "0123456789abcdef" }) {
 /** The store's receipt parse, mirrored. An unparseable ref is two absences. */
 const SCHEDULED_RECEIPT =
   /^carr-run-receipt:v1:(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})\.(\d{3})Z:[0-9a-f]{16}:([0-9a-f]{32})$/;
-function receiptFields(value) {
+function receiptFields(value: unknown) {
   const parsed = typeof value === "string" ? SCHEDULED_RECEIPT.exec(value) : null;
   if (parsed === null) return { runKeyHash: null, mintedAt: null };
   const [, year, month, day, hour, minute, second, millis, runKeyHash] = parsed;
@@ -317,13 +341,14 @@ function receiptFields(value) {
     mintedAt: instantText(`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`),
   };
 }
-function runKeyReceiptHash(value) {
+function runKeyReceiptHash(value: unknown) {
   return typeof value === "string" && value.length > 0
-    ? createHash("sha256").update(value).digest("hex").slice(0, 32) : null;
+    ? createHash("sha256").update(value).digest("hex").slice(0, 32)
+    : null;
 }
 
 /** The real store's card 12 mapping, applied to a raw ledger row. */
-function ledgerRow(raw) {
+function ledgerRow(raw: Record<string, unknown>) {
   const parsed = receiptFields(raw.evidence_ref);
   return Object.freeze({
     service_key_digest: opaque(raw.service_key),
@@ -343,16 +368,15 @@ function ledgerRow(raw) {
 const SCHEDULER_ROWS = Object.freeze({
   // All three clauses hold: the wrapper's own row, carrying a receipt the
   // wrapper minted for THIS run key, after this run's dispatch.
-  "canary-join": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-join",
-    evidence_ref: receipt({ forRunKey: "canary-join", mintedAt: T1 }) })]),
+  "canary-join": Object.freeze([
+    ledgerRow({ ...RUN, run_key: "canary-join", evidence_ref: receipt({ forRunKey: "canary-join", mintedAt: T1 }) }),
+  ]),
 
   // NEGATIVE, evidence_ref — and this is not a hypothetical. It is the row
   // bin/run-scheduled.sh wrote for 21,894 runs, because it passed no
   // --evidence-ref and had no way to be given one. Every scheduled run in the
   // ledger's history looks like this, and this is the answer they get.
-  "canary-today": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-today", evidence_ref: null })]),
+  "canary-today": Object.freeze([ledgerRow({ ...RUN, run_key: "canary-today", evidence_ref: null })]),
 
   // NEGATIVE, THE PRE-EXISTING RECEIPT — the mutation control for the whole
   // change. A well-formed receipt for the right run key, minted BEFORE this
@@ -360,81 +384,142 @@ const SCHEDULER_ROWS = Object.freeze({
   // child never refreshed. Under the old clause ("evidence_ref is not null")
   // this row bound as readily as a real one, which is why the wrapper no longer
   // reads a receipt from anywhere a previous run could have left one.
-  "canary-stale-receipt": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-stale-receipt",
-    evidence_ref: receipt({ forRunKey: "canary-stale-receipt",
-      mintedAt: "2026-09-10T17:00:00.000Z", nonce: "fedcba9876543210" }) })]),
+  "canary-stale-receipt": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-stale-receipt",
+      evidence_ref: receipt({
+        forRunKey: "canary-stale-receipt",
+        mintedAt: "2026-09-10T17:00:00.000Z",
+        nonce: "fedcba9876543210",
+      }),
+    }),
+  ]),
 
   // NEGATIVE, THE RECEIPT MINTED AT THE DISPATCH INSTANT. Equal is not after:
   // a receipt stamped the same instant as the row's started_at proves no
   // ordering, and the clause is strict for the same reason the observation
   // clause is.
-  "canary-instant-receipt": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-instant-receipt",
-    evidence_ref: receipt({ forRunKey: "canary-instant-receipt", mintedAt: T0 }) })]),
+  "canary-instant-receipt": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-instant-receipt",
+      evidence_ref: receipt({ forRunKey: "canary-instant-receipt", mintedAt: T0 }),
+    }),
+  ]),
 
   // NEGATIVE, ANOTHER JOB'S RECEIPT — well-formed, minted after this dispatch,
   // and minted for a different run key. The receipt carries the hash of the run
   // it was minted for, so it names another run and binds nothing here.
-  "canary-foreign-receipt": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-foreign-receipt",
-    evidence_ref: receipt({ forRunKey: "some-other-run", mintedAt: T1 }) })]),
+  "canary-foreign-receipt": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-foreign-receipt",
+      evidence_ref: receipt({ forRunKey: "some-other-run", mintedAt: T1 }),
+    }),
+  ]),
 
   // NEGATIVE, FREE-FORM TEXT IN evidence_ref — the shape 121 rows in production
   // actually carry. It is not null, and under the old clause that was the whole
   // question. It is not a receipt this wrapper minted, so it parses to nothing.
-  "canary-freeform-receipt": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-freeform-receipt",
-    evidence_ref: "ops.run:carr-fleet-sync.canary-freeform-receipt" })]),
+  "canary-freeform-receipt": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-freeform-receipt",
+      evidence_ref: "ops.run:carr-fleet-sync.canary-freeform-receipt",
+    }),
+  ]),
 
   // NEGATIVE, source_kind — an `operator` row is a hand-run, not a dispatch.
-  "canary-hand-run": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-hand-run", source_kind: "operator",
-    evidence_ref: receipt({ forRunKey: "canary-hand-run", mintedAt: T1 }) })]),
+  "canary-hand-run": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-hand-run",
+      source_kind: "operator",
+      evidence_ref: receipt({ forRunKey: "canary-hand-run", mintedAt: T1 }),
+    }),
+  ]),
 
   // NEGATIVE, source_kind — a `collector` row is a probe writing about a job,
   // not the wrapper that dispatched it.
-  "canary-probe": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-probe", source_kind: "collector",
-    source_ref: "bin/probe-keepalive.py",
-    evidence_ref: receipt({ forRunKey: "canary-probe", mintedAt: T1 }) })]),
+  "canary-probe": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-probe",
+      source_kind: "collector",
+      source_ref: "bin/probe-keepalive.py",
+      evidence_ref: receipt({ forRunKey: "canary-probe", mintedAt: T1 }),
+    }),
+  ]),
 
   // NEGATIVE, source_ref — the right kind, written by a different wrapper.
-  "canary-foreign-wrapper": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-foreign-wrapper", source_ref: "bin/deploy-worker.sh",
-    evidence_ref: receipt({ forRunKey: "canary-foreign-wrapper", mintedAt: T1 }) })]),
+  "canary-foreign-wrapper": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-foreign-wrapper",
+      source_ref: "bin/deploy-worker.sh",
+      evidence_ref: receipt({ forRunKey: "canary-foreign-wrapper", mintedAt: T1 }),
+    }),
+  ]),
 
   // Dispatch and observation share one instant — rows written in one
   // transaction. The receipt is minted after the dispatch, so the binding holds
   // and this case still isolates the observation clause it was written for.
-  "canary-same-instant": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-same-instant", ended_at: T0, observed_at: T0,
-    evidence_ref: receipt({ forRunKey: "canary-same-instant", mintedAt: T1 }) })]),
+  "canary-same-instant": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-same-instant",
+      ended_at: T0,
+      observed_at: T0,
+      evidence_ref: receipt({ forRunKey: "canary-same-instant", mintedAt: T1 }),
+    }),
+  ]),
 
   // The observation is of a different receipt than the dispatch named: same run
   // key, same shape, a different nonce — which is what two runs of one job under
   // one key actually look like.
   "canary-mismatch": Object.freeze([
-    ledgerRow({ ...RUN,
-      run_key: "canary-mismatch", ended_at: null, observed_at: T0,
-      evidence_ref: receipt({ forRunKey: "canary-mismatch", mintedAt: T1 }) }),
-    ledgerRow({ ...RUN,
-      run_key: "canary-mismatch", started_at: T0, ended_at: T1, observed_at: T1,
-      evidence_ref: receipt({ forRunKey: "canary-mismatch", mintedAt: T1,
-        nonce: "abcdef9876543210" }) }),
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-mismatch",
+      ended_at: null,
+      observed_at: T0,
+      evidence_ref: receipt({ forRunKey: "canary-mismatch", mintedAt: T1 }),
+    }),
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-mismatch",
+      started_at: T0,
+      ended_at: T1,
+      observed_at: T1,
+      evidence_ref: receipt({ forRunKey: "canary-mismatch", mintedAt: T1, nonce: "abcdef9876543210" }),
+    }),
   ]),
 
   // Dispatched and still in flight: nothing has ended, so nothing is observed.
-  "canary-inflight": Object.freeze([ledgerRow({ ...RUN,
-    run_key: "canary-inflight", ended_at: null, observed_at: T0,
-    evidence_ref: receipt({ forRunKey: "canary-inflight", mintedAt: T1 }) })]),
+  "canary-inflight": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      run_key: "canary-inflight",
+      ended_at: null,
+      observed_at: T0,
+      evidence_ref: receipt({ forRunKey: "canary-inflight", mintedAt: T1 }),
+    }),
+  ]),
 
   // The left join found the service and no run: the canary never ran.
-  "canary-never-ran": Object.freeze([ledgerRow({
-    service_key: "carr-fleet-sync",
-    run_key: null, started_at: null, ended_at: null, observed_at: null,
-    evidence_ref: null, source_kind: null, source_ref: null,
-  })]),
+  "canary-never-ran": Object.freeze([
+    ledgerRow({
+      service_key: "carr-fleet-sync",
+      run_key: null,
+      started_at: null,
+      ended_at: null,
+      observed_at: null,
+      evidence_ref: null,
+      source_kind: null,
+      source_ref: null,
+    }),
+  ]),
 
   // A LEDGER FULL OF PRIVILEGED WORDS, and every clause still holds. Nothing
   // here is a hypothetical either: a service someone names `release-canary`
@@ -443,17 +528,22 @@ const SCHEDULER_ROWS = Object.freeze({
   // answer. The finding this case produces must be the joining one, and the
   // answer must still carry no privileged word. The receipt carries the HASH of
   // that run key rather than the key, which is why the ref itself is hex.
-  "canary-green-names": Object.freeze([ledgerRow({ ...RUN,
-    service_key: "release-canary",
-    run_key: "allow-commit-green",
-    evidence_ref: receipt({ forRunKey: "allow-commit-green", mintedAt: T1 }),
-    source_kind: "wrapper", source_ref: "bin/run-scheduled.sh" })]),
+  "canary-green-names": Object.freeze([
+    ledgerRow({
+      ...RUN,
+      service_key: "release-canary",
+      run_key: "allow-commit-green",
+      evidence_ref: receipt({ forRunKey: "allow-commit-green", mintedAt: T1 }),
+      source_kind: "wrapper",
+      source_ref: "bin/run-scheduled.sh",
+    }),
+  ]),
 });
 
 /** The real store's card 13 mapping, applied to a raw check run off the wire. */
-function checkRow(raw) {
+function checkRow(raw: Record<string, unknown>) {
   return Object.freeze({
-    head_sha: /^[0-9a-f]{40}$/.test(raw.head_sha ?? "") ? raw.head_sha : null,
+    head_sha: typeof raw.head_sha === "string" && /^[0-9a-f]{40}$/.test(raw.head_sha) ? raw.head_sha : null,
     status_digest: opaque(raw.status),
     conclusion_digest: opaque(raw.conclusion),
     ended_at: instantText(raw.completed_at),
@@ -461,38 +551,70 @@ function checkRow(raw) {
 }
 
 const CHECK_ROWS = Object.freeze({
-  "main canary": Object.freeze([checkRow({
-    name: "main canary", head_sha: FIXTURE_COMMIT_SHA, status: "completed",
-    conclusion: "success", completed_at: T1, html_url: "https://github.test/run/1",
-  })]),
+  "main canary": Object.freeze([
+    checkRow({
+      name: "main canary",
+      head_sha: FIXTURE_COMMIT_SHA,
+      status: "completed",
+      conclusion: "success",
+      completed_at: T1,
+      html_url: "https://github.test/run/1",
+    }),
+  ]),
   // A re-run: two completed runs, and the later one is what the merge gate acts on.
   "ops/ci.sh --strict": Object.freeze([
     checkRow({
-      name: "ops/ci.sh --strict", head_sha: FIXTURE_COMMIT_SHA, status: "completed",
-      conclusion: "success", completed_at: T0, html_url: "https://github.test/run/2",
+      name: "ops/ci.sh --strict",
+      head_sha: FIXTURE_COMMIT_SHA,
+      status: "completed",
+      conclusion: "success",
+      completed_at: T0,
+      html_url: "https://github.test/run/2",
     }),
     checkRow({
-      name: "ops/ci.sh --strict", head_sha: FIXTURE_COMMIT_SHA, status: "completed",
-      conclusion: "failure", completed_at: T1, html_url: "https://github.test/run/3",
+      name: "ops/ci.sh --strict",
+      head_sha: FIXTURE_COMMIT_SHA,
+      status: "completed",
+      conclusion: "failure",
+      completed_at: T1,
+      html_url: "https://github.test/run/3",
     }),
   ]),
   // Still queued: no conclusion exists, so none is reported.
-  "local-db-ci --class migration": Object.freeze([checkRow({
-    name: "local-db-ci --class migration", head_sha: FIXTURE_COMMIT_SHA, status: "queued",
-    conclusion: null, completed_at: null, html_url: "https://github.test/run/4",
-  })]),
+  "local-db-ci --class migration": Object.freeze([
+    checkRow({
+      name: "local-db-ci --class migration",
+      head_sha: FIXTURE_COMMIT_SHA,
+      status: "queued",
+      conclusion: null,
+      completed_at: null,
+      html_url: "https://github.test/run/4",
+    }),
+  ]),
   // A completed run that belongs to a DIFFERENT commit than the one asked about.
-  "Backup artifact": Object.freeze([checkRow({
-    name: "Backup artifact", head_sha: FIXTURE_OTHER_COMMIT_SHA, status: "completed",
-    conclusion: "success", completed_at: T1, html_url: "https://github.test/run/5",
-  })]),
+  "Backup artifact": Object.freeze([
+    checkRow({
+      name: "Backup artifact",
+      head_sha: FIXTURE_OTHER_COMMIT_SHA,
+      status: "completed",
+      conclusion: "success",
+      completed_at: T1,
+      html_url: "https://github.test/run/5",
+    }),
+  ]),
   // A word GitHub's API does not document. Not passed through: reported as
   // unrecognized, so the only conclusion strings a consumer ever sees are the
   // constants in the reader module.
-  "pg_dump -> age-encrypt -> artifact": Object.freeze([checkRow({
-    name: "pg_dump -> age-encrypt -> artifact", head_sha: FIXTURE_COMMIT_SHA, status: "completed",
-    conclusion: "everything is fine", completed_at: T1, html_url: "https://github.test/run/6",
-  })]),
+  "pg_dump -> age-encrypt -> artifact": Object.freeze([
+    checkRow({
+      name: "pg_dump -> age-encrypt -> artifact",
+      head_sha: FIXTURE_COMMIT_SHA,
+      status: "completed",
+      conclusion: "everything is fine",
+      completed_at: T1,
+      html_url: "https://github.test/run/6",
+    }),
+  ]),
 });
 
 // ---------------------------------------------------------------------------
@@ -516,20 +638,19 @@ const CHECK_ROWS = Object.freeze({
 // answers a label — this file's own constants included.
 // ---------------------------------------------------------------------------
 
-export const fetchPredecessorOutcomeRows = closedCallable(async query => ({
+export const fetchPredecessorOutcomeRows = closedCallable(async (query: unknown) => ({
   store_ref: "record-layer:work-request-outcome-feedback",
   rows: rowsFor(PREDECESSOR_ROWS, cell(query, "workRequestRef")),
 }));
 
-export const fetchSchedulerLedgerRows = closedCallable(async query => {
+export const fetchSchedulerLedgerRows = closedCallable(async (query: unknown) => {
   const serviceKey = cell(query, "serviceKey");
   const storeRef = "control-plane:ops.service+ops.run";
-  if (serviceKey !== "carr-fleet-sync" && serviceKey !== "release-canary")
-    return { store_ref: storeRef, rows: [] };
+  if (serviceKey !== "carr-fleet-sync" && serviceKey !== "release-canary") return { store_ref: storeRef, rows: [] };
   return { store_ref: storeRef, rows: rowsFor(SCHEDULER_ROWS, cell(query, "canaryRunKey")) };
 });
 
-export const fetchCheckConclusionRows = closedCallable(async query => ({
+export const fetchCheckConclusionRows = closedCallable(async (query: unknown) => ({
   store_ref: "github:checks",
   rows: rowsFor(CHECK_ROWS, cell(query, "checkName")),
 }));
@@ -542,5 +663,7 @@ export const fetchCheckConclusionRows = closedCallable(async query => ({
  * every export the real module has: a fixture missing one would leave a path
  * that the substituted module never exercises.
  */
-export const fetchCandidateBuildRecordRows = closedCallable(
-  async () => ({ store_ref: "control-plane:ops.candidate-build-record", rows: [] }));
+export const fetchCandidateBuildRecordRows = closedCallable(async () => ({
+  store_ref: "control-plane:ops.candidate-build-record",
+  rows: [],
+}));
