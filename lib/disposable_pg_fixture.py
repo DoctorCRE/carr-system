@@ -545,6 +545,40 @@ def _retain(receipt, reason):
             'state': 'retained', 'reason': str(reason)}))
 
 
+class _GroupLease:
+    def __init__(self, demand, timeout, lock_path):
+        self.process = subprocess.Popen([sys.executable, '-u', __file__, '--protocol', PROTOCOL,
+            '--demand', str(demand), '--admission-deadline', str(time.monotonic() + timeout),
+            '--lock-path', str(lock_path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True)
+        line = self.process.stdout.readline()
+        if not line:
+            self.process.stdin.close()
+            code = self.process.wait(timeout=5)
+            diagnostic = self.process.stderr.read()
+            self.process.stdout.close()
+            self.process.stderr.close()
+            if code == 75:
+                raise CapacityUnavailable(json.loads(diagnostic))
+            raise RuntimeError(f'fixture reservation helper exited {code}: {diagnostic}')
+        self.receipt = json.loads(line)
+        self.ticket = self.receipt['ticket']
+        self.directory = Path(self.receipt['directory'])
+        self.closed = False
+
+    def close(self):
+        if self.closed:
+            return
+        self.process.stdin.close()
+        code = self.process.wait(timeout=5)
+        diagnostic = self.process.stderr.read()
+        self.process.stdout.close()
+        self.process.stderr.close()
+        self.closed = True
+        if code:
+            raise RuntimeError(f'fixture reservation helper exited {code}: {diagnostic}')
+
+
 @contextmanager
 def postgres_fixture_group(demand=2, timeout=ADMISSION_TIMEOUT, *, lock_path=None):
     global _depth, _reservation
@@ -565,9 +599,8 @@ def postgres_fixture_group(demand=2, timeout=ADMISSION_TIMEOUT, *, lock_path=Non
             finally:
                 _depth -= 1
             return
-        reservation = Reservation(demand, max(0, timeout - (time.monotonic() - start)), lock_path or LOCK_PATH)
+        reservation = _GroupLease(demand, max(0, timeout - (time.monotonic() - start)), lock_path or LOCK_PATH)
         try:
-            reservation.serve()
             _reservation, _depth = reservation, 1
             yield reservation
         finally:
@@ -581,6 +614,8 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--protocol', required=True, choices=[PROTOCOL])
+    parser.add_argument('--lock-path', type=Path, default=LOCK_PATH)
+    parser.add_argument('--admission-deadline', type=float)
     parser.add_argument('--demand', type=int, default=2)
     parser.add_argument('--admission-timeout', type=float, default=ADMISSION_TIMEOUT)
     parser.add_argument('--reservation-ticket')
@@ -598,6 +633,9 @@ if __name__ == '__main__':
     parser.add_argument('--snapshot-baseline', action='store_true')
     parser.add_argument('--service-database', action='store_true')
     args = parser.parse_args()
+    LOCK_PATH = args.lock_path
+    if args.admission_deadline is not None:
+        args.admission_timeout = max(0, args.admission_deadline - time.monotonic())
     snapshot_schema = Path(__file__).resolve().parents[1] / 'db/schema.sql'
     if args.snapshot or args.snapshot_template:
         from postgres_snapshot_fixture import snapshot_key
@@ -654,6 +692,7 @@ if __name__ == '__main__':
             if args.snapshot_template:
                 if _reservation:
                     _reservation.close()
+                    _reservation = None
                 if _inherited:
                     for fd in descriptors:
                         os.close(fd)
@@ -686,9 +725,13 @@ if __name__ == '__main__':
                     break  # caller died mid-launch; stop what it started
         sys.exit(0)
     try:
-        with postgres_fixture_group(args.demand, args.admission_timeout) as lease:
+        lease = Reservation(args.demand, args.admission_timeout, LOCK_PATH)
+        try:
+            lease.serve()
             print(json.dumps({**lease.receipt, 'ticket': lease.ticket}), flush=True)
             sys.stdin.read()
+        finally:
+            lease.close()
     except CapacityUnavailable as exc:
         print(str(exc), file=sys.stderr, flush=True)
         sys.exit(75)

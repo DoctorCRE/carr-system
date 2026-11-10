@@ -101,6 +101,43 @@ class Admission(unittest.TestCase):
             self.assertEqual(self.receipt(child)['state'], 'capacity_unavailable')
             self.assertEqual(child.wait(timeout=2), 75)
 
+    def test_admitted_real_holders_remain_queryable_after_overload(self):
+        bins = pg.postgres_bin_dir()
+        script = '''
+import json, sys
+from pathlib import Path
+from lib import disposable_pg_fixture as pg
+pg.LOCK_PATH = Path(sys.argv[1])
+bins = Path(sys.argv[2])
+with pg.postgres_fixture_group() as lease, pg.DisposablePostgres('admission-health-', bins / 'pg_ctl') as fixture:
+    data = fixture.root / 'data'
+    fixture.run([bins / 'initdb', '-D', data, '-U', 'fixture', '-A', 'trust'], check=True, capture_output=True)
+    fixture.run([bins / 'pg_ctl', '-D', data, '-l', fixture.root / 'log', '-o', f"-k {fixture.root} -h ''", '-w', 'start'], check=True, capture_output=True)
+    print(json.dumps(lease.receipt), flush=True)
+    for line in sys.stdin:
+        value = fixture.run([bins / 'psql', '-h', fixture.root, '-U', 'fixture', '-d', 'postgres', '-XAt', '-c', 'select 42'], check=True, capture_output=True, text=True).stdout.strip()
+        print(value, flush=True)
+'''
+        holders = []
+        for _ in range(2):
+            child = subprocess.Popen([sys.executable, '-u', '-c', script, str(self.lock), str(bins)],
+                cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.children.append(child)
+            holders.append(child)
+        for child in holders:
+            self.assertEqual(self.receipt(child)['state'], 'admitted')
+        extra = self.claimant()
+        self.assertEqual(self.receipt(extra)['state'], 'capacity_unavailable')
+        self.assertEqual(extra.wait(timeout=2), 75)
+        for child in holders:
+            child.stdin.write('health\n')
+            child.stdin.flush()
+            self.assertTrue(select.select([child.stdout], [], [], 3)[0], 'admitted server stopped responding')
+            self.assertEqual(child.stdout.readline().strip(), '42')
+        holders[0].stdin.close()
+        self.assertEqual(holders[0].wait(timeout=5), 0)
+        self.assertEqual(self.receipt(self.claimant())['state'], 'admitted')
+
     def test_nested_fixture_demand_is_enforced(self):
         stub = Path(self.directory.name) / 'pg_ctl'
         stub.write_text('#!' + sys.executable + '\nimport sys\nsys.exit(3)\n')
@@ -116,13 +153,14 @@ import json, sys
 from pathlib import Path
 from lib import disposable_pg_fixture as pg
 pg.LOCK_PATH = Path(sys.argv[1])
-with pg.postgres_fixture_group(demand=4):
+with pg.postgres_fixture_group(demand=4) as lease:
     f = pg.DisposablePostgres('owned-', sys.argv[2], directory=sys.argv[3])
     data = f.root / 'data'
     data.mkdir()
     (data / 'PG_VERSION').write_text('17')
     f.run([sys.argv[2], '-D', str(data), 'start'], check=True, capture_output=True)
     print(f.root, flush=True)
+    print(lease.ticket, flush=True)
     sys.stdin.read()
 '''
         stub = Path(self.directory.name) / 'pg_ctl'
@@ -148,6 +186,10 @@ sys.exit(3 if 'status' in sys.argv else 0)
             line = child.stdout.readline().strip()
             self.assertTrue(line.startswith('/'), 'supervisor returned no owned absolute root')
             root = Path(line)
+            ticket = Path(child.stdout.readline().strip())
+            self.assertTrue(ticket.is_absolute())
+            import shutil
+            self.addCleanup(shutil.rmtree, ticket.parent, ignore_errors=True)
             observed = subprocess.run(['lsof', '-a', '-p', str(child.pid), '-d', 'cwd', '-Fn'],
                 capture_output=True, text=True, check=True)
             self.assertIn(str(ROOT), observed.stdout)
@@ -165,6 +207,7 @@ sys.exit(3 if 'status' in sys.argv else 0)
             while root.exists() and time.monotonic() < deadline:
                 time.sleep(.01)
             self.assertFalse(root.exists(), 'successful supervisor cleanup retained its root')
+            self.assertFalse(ticket.parent.exists(), 'group ticket survived killed parent')
             self.assertEqual(self.receipt(self.claimant(4))['state'], 'admitted')
         finally:
             release.touch()
