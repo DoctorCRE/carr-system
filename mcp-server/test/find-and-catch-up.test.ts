@@ -1,13 +1,33 @@
 // Test bounded find and catch-up resolution and refusal paths.
-import { test } from "node:test";
-import assert from "node:assert/strict";
 
-import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { ToolError } from "../src/tool-error.ts";
+
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+assert.ok(typeof registered === "object" && registered !== null && "TOOLS" in registered);
+assert.ok(typeof registered.TOOLS === "object" && registered.TOOLS !== null);
+const TOOLS = registered.TOOLS;
+assert.ok("find-and-catch-up" in TOOLS);
+const tool = TOOLS["find-and-catch-up"];
+assert.ok(typeof tool === "object" && tool !== null && "handler" in tool && typeof tool.handler === "function");
+assert.ok("executeRegisteredTool" in registered && typeof registered.executeRegisteredTool === "function");
+const executeRegisteredTool = registered.executeRegisteredTool;
 
 const JOE = { id: "actor-joe", slug: "joe", human: true };
 
+type Row = Record<string, unknown>;
+type Fixture = { parties?: Row[]; organizations?: Row[]; deals?: Row[]; dealResolutionRows?: Row[]; timeline?: Row[] };
 class FindCatchUpFake {
-  constructor({ parties = [], organizations = [], deals = [], dealResolutionRows, timeline = [] } = {}) {
+  parties: Row[];
+  organizations: Row[];
+  deals: Row[];
+  dealResolutionRows: Row[] | undefined;
+  timeline: Row[];
+  queries: string[];
+  calls: { sql: string; params: unknown[] }[];
+  constructor({ parties = [], organizations = [], deals = [], dealResolutionRows, timeline = [] }: Fixture = {}) {
     this.parties = parties;
     this.organizations = organizations;
     this.deals = deals;
@@ -17,15 +37,18 @@ class FindCatchUpFake {
     this.calls = [];
   }
 
-  async query(text, params = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     this.queries.push(sql);
     this.calls.push({ sql, params });
 
-    if (sql.includes("from v_ref_index") && sql.includes("subject_type in ('lead','client','vendor')") &&
-        sql.includes("similarity(display_name,$1)")) return { rows: this.parties };
-    if (sql.includes("count(*) filter") && sql.includes("group by display_name"))
-      return { rows: this.organizations };
+    if (
+      sql.includes("from v_ref_index") &&
+      sql.includes("subject_type in ('lead','client','vendor')") &&
+      sql.includes("similarity(display_name,$1)")
+    )
+      return { rows: this.parties };
+    if (sql.includes("count(*) filter") && sql.includes("group by display_name")) return { rows: this.organizations };
     if (sql.includes("from v_deal_board where name ilike")) return { rows: this.deals };
     if (sql.includes("from v_party_graph")) return { rows: [] };
     if (sql.includes("from v_lead_client_best")) return { rows: [] };
@@ -40,9 +63,11 @@ class FindCatchUpFake {
     if (sql.includes("select subject_id from v_ref_index where subject_type='party'"))
       return { rows: [{ subject_id: "party-uuid" }] };
     if (sql.includes("subject_type='deal' and display_name ilike"))
-      return { rows: this.dealResolutionRows ?? (this.deals.length === 1
-        ? [{ subject_id: "deal-uuid", display_name: this.deals[0].name }]
-        : []) };
+      return {
+        rows:
+          this.dealResolutionRows ??
+          (this.deals.length === 1 ? [{ subject_id: "deal-uuid", display_name: this.deals[0]?.name }] : []),
+      };
     if (sql.includes("from v_subject_timeline")) return { rows: this.timeline };
     if (sql.includes("from tool_call t join activity a")) return { rows: [] };
 
@@ -54,11 +79,11 @@ class FindCatchUpFake {
   }
 }
 
-function party(ref, name, merged = false, kind = "lead") {
+function party(ref: string, name: string, merged = false, kind = "lead") {
   return { ref, name, merged, kind, city: "Mobile", specialty: null, org_name: null };
 }
 
-function rejectedPayload(fn) {
+function rejectedPayload(fn: () => Promise<unknown>) {
   return assert.rejects(fn, (error) => {
     assert.ok(error instanceof ToolError);
     assert.ok(error.payload?.error);
@@ -68,13 +93,21 @@ function rejectedPayload(fn) {
 }
 
 test("the pilot is one exact read-only tool contract", () => {
-  const tool = TOOLS["find-and-catch-up"];
   assert.ok(tool);
-  assert.equal(tool.write, false);
-  assert.equal(Boolean(tool.fullOnly), false);
-  assert.deepEqual(tool.inputSchema.required, ["query"]);
-  assert.equal(tool.inputSchema.additionalProperties, false);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), ["limit", "query"]);
+  assert.equal("write" in tool && tool.write, false);
+  assert.equal(Boolean("fullOnly" in tool && tool.fullOnly), false);
+  assert.ok("inputSchema" in tool && typeof tool.inputSchema === "object" && tool.inputSchema !== null);
+  const schema = tool.inputSchema;
+  assert.ok(
+    "required" in schema &&
+      "additionalProperties" in schema &&
+      "properties" in schema &&
+      typeof schema.properties === "object" &&
+      schema.properties !== null,
+  );
+  assert.deepEqual(schema.required, ["query"]);
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["limit", "query"]);
 });
 
 test("one live find result proceeds to one bounded catch-up", async () => {
@@ -94,6 +127,7 @@ test("one live find result proceeds to one bounded catch-up", async () => {
   assert.equal(out.catch_up.timeline.length, 1);
   assert.equal(db.timelineReads(), 1);
   const timelineCall = db.calls.find(({ sql }) => sql.includes("from v_subject_timeline"));
+  assert.ok(timelineCall);
   assert.equal(timelineCall.sql.includes("limit $3"), true);
   assert.equal(timelineCall.params[2], 7);
 });
@@ -106,7 +140,10 @@ test("multiple live refs stop for disambiguation and never read a timeline", asy
   const out = await executeRegisteredTool(db, JOE, "find-and-catch-up", { query: "Alex Example" });
 
   assert.equal(out.state, "needs_disambiguation");
-  assert.deepEqual(out.candidates.map((row) => row.target), ["C-127", "L-204"]);
+  assert.deepEqual(
+    out.candidates.map((row: { target: string }) => row.target),
+    ["C-127", "L-204"],
+  );
   assert.equal(Object.hasOwn(out, "catch_up"), false);
   assert.equal(db.timelineReads(), 0);
 });

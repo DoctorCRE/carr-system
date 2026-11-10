@@ -13,7 +13,7 @@ import {
   snapshotCanonicalJsonValue,
   snapshotPublicValue,
 } from "./tour-operations-contract.ts";
-import { clientSafeMetric, isClientSafeText } from "./tour-client-value-safety.js";
+import { clientSafeMetric, isClientSafeText } from "./tour-client-value-safety.ts";
 
 function clientValueSafe(fieldKey, value) {
   if (fieldKey === "size" || fieldKey === "asking_economics") return clientSafeMetric(value) !== undefined;

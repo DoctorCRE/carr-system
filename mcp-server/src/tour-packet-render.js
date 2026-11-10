@@ -5,7 +5,7 @@
  */
 
 import { CLIENT_TOUR_PACKET_COLUMNS, CLIENT_TOUR_STOP_ENVELOPE_KEYS } from "./tour-operations-contract.ts";
-import { CLIENT_TEXT_MAX_CHARS, isClientRouteLabel, isClientSafeText, normalizeClientText } from "./tour-client-value-safety.js";
+import { CLIENT_TEXT_MAX_CHARS, isClientRouteLabel, isClientSafeText, normalizeClientText } from "./tour-client-value-safety.ts";
 
 // 1.3.0 (V5-J303): fields are CLIENT_TOUR_FIELD_KEYS only (no per-property
 // caveat), every value passes the shared client value-safety rule, and the
