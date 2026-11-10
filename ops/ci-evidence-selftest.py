@@ -402,7 +402,7 @@ class ConversionProof(unittest.TestCase):
         self.workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         self.commands = []
 
-    def run_proof(self, ancestry=0, timeout=2):
+    def run_proof(self, ancestry=0, timeout=2, cli=False):
         from lib.release_reader import Reply
         def command(argv, **kwargs):
             self.commands.append(argv)
@@ -422,6 +422,10 @@ class ConversionProof(unittest.TestCase):
             return Reply(200, {}, json.dumps(payload).encode())
         with patch.object(evidence.subprocess, 'run', side_effect=command), \
                 patch('lib.release_reader.read', side_effect=http):
+            if cli:
+                with patch.object(sys, 'argv', ['ci-evidence.py', 'prove-conversion',
+                                                '--pr', '3114', '--timeout', str(timeout)]):
+                    return evidence.main()
             return evidence.prove_conversion(pr=3114, timeout=timeout)
 
     def test_recorded_equal_and_descendant_release(self):
@@ -523,6 +527,72 @@ class ConversionProof(unittest.TestCase):
                         patch.object(evidence.subprocess, 'run', side_effect=command), \
                         patch('lib.release_reader.read', side_effect=http):
                     self.assertEqual(evidence.prove_conversion(pr=3114, root=root), expected)
+
+    def test_cli_deadline_lifecycle(self):
+        child_source = r"""
+import json
+import runpy
+import signal
+import sys
+from unittest.mock import patch
+sys.path.insert(0, str(__import__('pathlib').Path(sys.argv[1]).parent))
+suite = runpy.run_path(sys.argv[1])
+case = suite['ConversionProof']()
+case.setUp()
+phase, outcome = sys.argv[2:]
+if outcome == 'assertion':
+    case.health['ok'] = False
+elif outcome == 'unavailable':
+    case.release['git_sha']['value'] = 'unknown'
+previous = signal.getsignal(signal.SIGALRM)
+real_timer = signal.setitimer
+real_signal = signal.signal
+injected = False
+def expire():
+    global injected
+    injected = True
+    signal.getsignal(signal.SIGALRM)(signal.SIGALRM, None)
+def timer(which, seconds, *args):
+    result = real_timer(which, seconds, *args)
+    if not injected and ((phase == 'setup' and seconds > 0)
+                         or (phase == 'teardown' and seconds == 0)):
+        expire()
+    return result
+def install(which, handler):
+    result = real_signal(which, handler)
+    if phase == 'install' and not injected:
+        expire()
+    return result
+try:
+    with patch.object(signal, 'setitimer', timer), patch.object(signal, 'signal', install):
+        if phase == 'observation':
+            from lib import release_reader
+            def reply(*args, **kwargs):
+                expire()
+            with patch.object(release_reader, 'Reply', reply):
+                code = case.run_proof(cli=True)
+        else:
+            code = case.run_proof(cli=True)
+    raise SystemExit(code)
+finally:
+    print(json.dumps({'handler_restored': signal.getsignal(signal.SIGALRM) == previous,
+                      'timer_disarmed': signal.getitimer(signal.ITIMER_REAL)[0] == 0}), file=sys.stderr)
+    real_timer(signal.ITIMER_REAL, 0)
+    real_signal(signal.SIGALRM, previous)
+"""
+        for phase in ('none', 'install', 'setup', 'observation', 'teardown'):
+            for outcome, normal in (('pass', 0), ('assertion', 1), ('unavailable', 78)):
+                with self.subTest(phase=phase, outcome=outcome):
+                    child = subprocess.run([sys.executable, '-c', child_source, str(pathlib.Path(__file__).resolve()),
+                                            phase, outcome], capture_output=True, text=True, timeout=10)
+                    expected = normal if phase == 'none' else 78
+                    self.assertEqual(child.returncode, expected, child.stdout + child.stderr)
+                    self.assertEqual(len(child.stdout.splitlines()), 1, child.stdout)
+                    receipt = json.loads(child.stdout)
+                    if expected == 78:
+                        self.assertEqual(receipt['classification'], 'insufficient_evidence')
+                    self.assertEqual(json.loads(child.stderr),
+                                     {'handler_restored': True, 'timer_disarmed': True})
 
     def test_one_wall_clock_deadline_interrupts_stalled_transport(self):
         import time
