@@ -1,7 +1,7 @@
 // Manage tour sharing and client packet access.
 import { organizationTenantForActor } from "./identity.js";
 import { CLIENT_TOUR_FIELD_KEYS, CLIENT_TOUR_PACKET_COLUMNS, requiredTimestamp, PUBLIC_ASSET_REFERENCE_RE } from "./tour-operations-contract.js";
-import { clientSafeMetric, isClientRouteLabel, isClientSafeText, normalizeClientText } from "./tour-client-value-safety.js";
+import { clientSafeMetric, isClientRouteLabel, isClientSafeText, normalizeClientText } from "./tour-client-value-safety.ts";
 
 const PROPERTY_REF=v=>typeof v==="string"&&/^property:public:[A-Za-z0-9_-]{16,128}$/.test(v);
 const PROJECTION_REF=v=>typeof v==="string"&&/^projection:public:[A-Za-z0-9_-]{16,128}$/.test(v);
@@ -27,7 +27,7 @@ const schema=(properties,required)=>({type:"object",additionalProperties:false,p
 // column the database adds later is dropped here until someone allowlists it:
 // the envelope (opaque property ref, stop order and a short stop marker) plus
 // the columns of CLIENT_TOUR_FIELD_KEYS. Every value then passes the shared
-// client value-safety rule (tour-client-value-safety.js, the same rule the
+// client value-safety rule (tour-client-value-safety.ts, the same rule the
 // database seal and the PDF renderer apply). All or nothing, like the database
 // (ops.tour_public_projection_client_safe) and the PDF renderer: one unsafe
 // value, one stop without a safe name/address, or one stop label that is not
