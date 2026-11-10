@@ -1,6 +1,6 @@
 // Validate and calculate practice financial runway scenarios.
 
-import Decimal from "decimal.js";
+import { Decimal } from "decimal.js";
 import { z } from "zod";
 import { envelope, PlanningInputError } from "./evidence.ts";
 
