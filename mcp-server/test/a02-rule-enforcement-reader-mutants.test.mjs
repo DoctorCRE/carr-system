@@ -11,7 +11,7 @@
 // check can mask a surviving mutant.
 
 import test from "node:test";
-import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
+import { relinkSourceImports } from "./helpers/relink-source-imports.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

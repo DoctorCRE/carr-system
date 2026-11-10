@@ -839,7 +839,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "correct-party-identity": {
     ingress_key: "mcp-tool:correct-party-identity",
-    source_locator: "mcp-server/src/party-identity.js",
+    source_locator: "mcp-server/src/party-identity.ts",
     schema_digest: "769638bc199554ce71d14c20b9188b7e4566b9f40513fca37efc57bb26e8d673",
     write: true,
     human_only: false,

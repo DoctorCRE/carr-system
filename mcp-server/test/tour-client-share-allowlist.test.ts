@@ -74,7 +74,7 @@ import {
   GULF_FEATURE_LIST,
   REVIEWER_FEATURE_LIST,
   UNICODE_PUNCTUATION,
-} from "./fixtures/tour-client-text-adversarial.mjs";
+} from "./fixtures/tour-client-text-adversarial.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 

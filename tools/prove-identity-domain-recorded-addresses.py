@@ -120,7 +120,7 @@ def observe(args):
                 output[key + '_sha256'] = digest(receipt[key])
             sha = release()
             output['release_sha'] = sha
-            change = process(['git', 'log', '-1', '--format=%H', '--', 'mcp-server/src/party-identity.js']).strip()
+            change = process(['git', 'log', '-1', '--format=%H', '--', 'mcp-server/src/party-identity.ts']).strip()
             process(['git', 'merge-base', '--is-ancestor', change, receipt['correction_release_git_sha']])
             process(['git', 'merge-base', '--is-ancestor', receipt['correction_release_git_sha'], sha])
             research = call('prospect-research', {'subject': receipt['party_ref']})
