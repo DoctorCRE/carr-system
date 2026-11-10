@@ -7,22 +7,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { assertRequiredArgs } from "../src/input-validation.ts";
 import { ToolError } from "../src/tool-error.ts";
-
-// Keep the legacy registry at its runtime seam until its separate conversion.
-const registryPath = "../src/tools.js";
-const registry: unknown = await import(registryPath);
-function object(value: unknown): Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
-  return Object.fromEntries(Object.entries(value));
-}
-const legacy = object(registry);
-const validate = legacy.assertRequiredArgs;
-assert.ok(typeof validate === "function");
-function assertRequiredArgs(schema: object, args: object): void {
-  assert.ok(typeof validate === "function");
-  validate(schema, args);
-}
 
 const schema = {
   type: "object",

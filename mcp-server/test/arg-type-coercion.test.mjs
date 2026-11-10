@@ -2,7 +2,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS, ToolError, executeRegisteredTool, coerceArgsToSchema, assertRequiredArgs } from "../src/tools.js";
+import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+
+import { coerceArgsToSchema, assertRequiredArgs } from "../src/input-validation.ts";
 
 const S = (properties) => ({ type: "object", properties });
 
