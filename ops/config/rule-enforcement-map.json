@@ -412,7 +412,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/confirm-merge-lead-client.test.mjs"
+        "mcp-server/test/confirm-merge-lead-client.test.ts"
       ]
     },
     "loop_guard": {
@@ -440,7 +440,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/confirm-merge-lead-client.test.mjs"
+        "mcp-server/test/confirm-merge-lead-client.test.ts"
       ]
     },
     "no_send_worker": {

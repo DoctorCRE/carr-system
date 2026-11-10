@@ -1,0 +1,12 @@
+{
+  "node": [
+    "../practice-plugin/test/fixtures.ts",
+    "../practice-plugin/test/calculators.test.mjs",
+    "../practice-plugin/test/verticals.test.mjs"
+  ],
+  "worker": [],
+  "entry": [
+    "../practice-plugin/test/calculators.test.mjs",
+    "../practice-plugin/test/verticals.test.mjs"
+  ]
+}

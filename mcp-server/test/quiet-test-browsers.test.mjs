@@ -58,7 +58,7 @@ test("tests and tools use the shared browser launchers", async () => {
 });
 
 test("every approved Chrome launcher supplies the shared keychain safety args", async () => {
-  const { CHROMIUM_SAFETY_ARGS } = await import("../../tools/chromium-safety-args.mjs");
+  const { CHROMIUM_SAFETY_ARGS } = await import("../../tools/chromium-safety-args.ts");
   assert.deepEqual(CHROMIUM_SAFETY_ARGS, ["--use-mock-keychain", "--password-store=basic"]);
   for (const name of launchers) {
     const source = await readFile(new URL(name, root), "utf8");

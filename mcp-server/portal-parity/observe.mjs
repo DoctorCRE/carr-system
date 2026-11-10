@@ -1,6 +1,6 @@
 // Observe one browser probe on one side. Observations carry digests, never values.
 import { createHash } from 'node:crypto';
-import { neutralize } from './probes.mjs';
+import { neutralize } from './probes.ts';
 
 const SCREENSHOT_WIDTHS = Object.freeze([1440, 820, 390]);
 const HEIGHT = 900;

@@ -47,8 +47,9 @@ class HarnessRetirement(unittest.TestCase):
         catalog = runpy.run_path(str(ROOT / 'ops/sync_control_catalog.py'))
         controls = {row['control_key']: row for row in catalog['compile_catalog']()}
         self.assertNotIn('delegation_guidance', controls)
-        self.assertNotIn('delegation_tripwire', controls)
-        self.assertNotIn('executor_tier', controls)
+        for key in ('delegation_tripwire', 'executor_tier'):
+            self.assertFalse(controls[key]['installed'])
+            self.assertIn('no implementation file', controls[key]['not_installed_reason'])
         retired = {'canonical_edit', 'costar_lane', 'weekend_quiet',
                    'control-plane-workflow-manifest', 'draft_export_read',
                    'github-burst-guard', 'model_floor', 'one_repo',

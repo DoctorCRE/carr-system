@@ -21,6 +21,7 @@ temporary directory. It never reads production, never reads db/schema.sql, and
 never writes inside the repository.
 """
 
+import zipfile
 import importlib.util
 import hashlib
 import subprocess
@@ -147,6 +148,8 @@ def main():
                 "sha256": hashlib.sha256(b"insert into ops.widget values ('seed');\n").hexdigest()}],
         }
         (root / "db/migration-baseline.json").write_text(json.dumps(manifest))
+        with zipfile.ZipFile(root / "db/migration-history.zip", "w") as archive:
+            archive.write(root / "migrations/0001_seed.sql", "migrations/0001_seed.sql")
         (root / "migrations/0001_seed.sql").unlink()
         case("covered seeds retain exactly their full-file classification result",
              before == [] and module.check(str(root), artifact(["0001_seed.sql"])) == before)
