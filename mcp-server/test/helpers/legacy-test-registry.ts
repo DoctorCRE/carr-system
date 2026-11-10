@@ -1,14 +1,29 @@
+import assert from "node:assert/strict";
+
+export function record(value: unknown): Record<string, unknown> {
+  assert.ok(typeof value === "object" && value !== null && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+export function array(value: unknown): unknown[] {
+  assert.ok(Array.isArray(value));
+  return value;
+}
+const registered = record(await import(new URL("../../src/tools.js", import.meta.url).href));
+export const registry = record(registered.TOOLS);
+export async function handler(name: string, ...args: unknown[]): Promise<Record<string, unknown>> {
+  const fn = record(registry[name]).handler;
+  assert.equal(typeof fn, "function");
+  if (typeof fn !== "function") throw new TypeError(`Missing handler ${name}`);
+  const result: unknown = await fn(...args);
+  return record(result);
+}
+
 import { ToolError } from "../../src/tool-error.ts";
 
 export function object(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new TypeError("Expected a registry object");
   return Object.fromEntries(Object.entries(value));
-}
-
-export function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new TypeError("Expected a registry array");
-  return value;
 }
 
 export function string(value: unknown): string {
@@ -21,10 +36,7 @@ export function required<T>(value: T | null | undefined): T {
   return value;
 }
 
-// Keep the legacy registry outside the strict graph until its own conversion.
-const registryPath = "../../src/tools.js";
-const legacy = object(await import(registryPath));
-const registry = object(legacy.TOOLS);
+const legacy = registered;
 export function tool(name: string) {
   const entry = object(registry[name]);
   const handler = entry.handler;
