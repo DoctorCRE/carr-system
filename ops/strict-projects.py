@@ -19,24 +19,38 @@ class KnipWorkspace(TypedDict):
 
 def generate(pkg: Path) -> None:
     pkg = pkg.resolve()
-    groups: dict[str, set[str]] = {name: set() for name in ('node', 'worker', 'entry')}
+    groups: dict[str, set[str]] = {name: set() for name in ('node', 'worker', 'node_compat', 'entry')}
     for path in sorted((pkg / 'typescript/projects').glob('*.json')):
         record = json.loads(path.read_text())
         if not isinstance(record, dict) or record.keys() - groups.keys():
-            raise ValueError(f'{path}: expected node, worker and entry path arrays')
+            raise ValueError(f'{path}: expected node, worker, node_compat and entry path arrays')
         for key, values in record.items():
             if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
                 raise ValueError(f'{path}: {key} must be a path array')
             for value in values:
                 matches = pkg.glob(value) if key == 'entry' and '*' in value else [pkg / value]
                 groups[key].update(str(path.relative_to(pkg)) for path in matches if path.is_file())
-    projects = groups['node'] | groups['worker']
+    projects = groups['node'] | groups['worker'] | groups['node_compat']
+    if any(groups[a] & groups[b] for a, b in [('node', 'worker'), ('node', 'node_compat'), ('worker', 'node_compat')]):
+        raise ValueError('a source cannot have multiple runtime owners')
+    generated = pkg / '.generated'
+    generated.mkdir(exist_ok=True)
+    (generated / 'node-compat-empty.d.ts').write_text('export {};\n')
+    compat = {'extends': './tsconfig.base.json', 'compilerOptions': {
+        'lib': ['esnext'], 'noEmit': False, 'declaration': True, 'emitDeclarationOnly': True,
+        'composite': True, 'rootDir': '.', 'outDir': '.generated/node-compat',
+        'tsBuildInfoFile': '.generated/node-compat.tsbuildinfo'},
+        'files': sorted(groups['node_compat']) or ['.generated/node-compat-empty.d.ts']}
+    (pkg / 'tsconfig.node-compat.json').write_text(json.dumps(compat, indent=2) + '\n')
     if groups['entry'] - projects:
         raise ValueError('Knip entries must belong to a strict project')
     for name in ('node', 'worker'):
         options = {'allowJs': True, 'checkJs': False} if name == 'node' else {
-            'module': 'ESNext', 'moduleResolution': 'Bundler', 'types': [], 'lib': ['esnext', 'dom']}
-        config = {'extends': './tsconfig.base.json', 'compilerOptions': options, 'files': sorted(groups[name])}
+            'module': 'ESNext', 'moduleResolution': 'Bundler', 'types': ['./.generated/worker-runtime'], 'lib': ['esnext'],
+            'disableSourceOfProjectReferenceRedirect': True}
+        config: dict[str, object] = {'extends': './tsconfig.base.json', 'compilerOptions': options, 'files': sorted(groups[name])}
+        if name == 'worker':
+            config['references'] = [{'path': './tsconfig.node-compat.json'}]
         (pkg / f'tsconfig.{name}.json').write_text(json.dumps(config, indent=2) + '\n')
     baseline = pkg / 'fallow-baselines/dead-code.legacy.json'
     if baseline.exists():

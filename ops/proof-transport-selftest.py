@@ -87,6 +87,41 @@ class ProofTransportTest(unittest.TestCase):
                     self.assertEqual(guard.violations(source, path), [])
                     self.assertTrue(guard.violations(source + '\n# changed', path))
 
+    def test_deadline_helper_requires_matching_runner_and_helper_pins(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        source = 'from lib.proof_deadline import proof_deadline'
+        path = 'tools/prove-synthetic.py'
+        declaration = {'sha256': hashlib.sha256(source.encode()).hexdigest(),
+                       'commands': ['audited read'], 'helpers': {
+                           'lib.proof_deadline.proof_deadline': hashlib.sha256(
+                               (ROOT / 'lib/proof_deadline.py').read_bytes()).hexdigest()}}
+        with patch.dict(guard.PROCESSES, {path: declaration}):
+            self.assertEqual(guard.violations(source, path), [])
+            self.assertTrue(guard.violations(source + '\n', path))
+            declaration['helpers']['lib.proof_deadline.proof_deadline'] = 'changed'
+            self.assertTrue(guard.violations(source, path))
+
+    def test_refresh_changes_only_selected_audited_runner(self):
+        guard = load(ROOT / 'ops/proof-transport-check.py')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'tools').mkdir()
+            selected = 'tools/prove-selected.py'
+            (root / selected).write_text('pass\n')
+            manifest = root / 'manifest.json'
+            import json
+            manifest.write_text(json.dumps({selected: {'sha256': 'old', 'commands': ['audited']},
+                                            'other': {'sha256': 'unchanged'}}))
+            with patch.object(guard, 'ROOT', root), patch.object(guard, 'MANIFEST', manifest):
+                guard.refresh_scripts([selected])
+                value = json.loads(manifest.read_text())
+                self.assertEqual(value['other'], {'sha256': 'unchanged'})
+                self.assertEqual(value[selected]['sha256'], hashlib.sha256(b'pass\n').hexdigest())
+                before = manifest.read_bytes()
+                with self.assertRaises(ValueError):
+                    guard.refresh_scripts(['tools/prove-unknown.py'])
+                self.assertEqual(manifest.read_bytes(), before)
+
     def test_record_call_requires_pinned_process_declaration(self):
         guard = load(ROOT / 'ops/proof-transport-check.py')
         import hashlib
@@ -194,6 +229,8 @@ class ProofTransportTest(unittest.TestCase):
                     (root / 'tools').mkdir()
                     helper = root / 'tools/proof_release.py'
                     original = (ROOT / 'tools/proof_release.py').read_text()
+                    (root / 'lib').mkdir()
+                    (root / 'lib/proof_deadline.py').write_bytes((ROOT / 'lib/proof_deadline.py').read_bytes())
                     with patch.object(guard, 'ROOT', root):
                         self.assertTrue(guard.violations(source, path))
                         helper.write_text(original)

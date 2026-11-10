@@ -1,0 +1,19 @@
+{
+  "node": [
+    "src/post-call-action-match.ts",
+    "test/helpers/phone-call-handler.ts",
+    "test/phone-call-sessions-postgres.test.ts",
+    "test/phone-call-sessions.test.ts",
+    "test/post-call-action-pairs.test.ts"
+  ],
+  "worker": [
+    "src/phone-audio-handoff.ts"
+  ],
+  "entry": [
+    "src/phone-audio-handoff.ts",
+    "src/post-call-action-match.ts",
+    "test/phone-call-sessions-postgres.test.ts",
+    "test/phone-call-sessions.test.ts",
+    "test/post-call-action-pairs.test.ts"
+  ]
+}

@@ -1,12 +1,12 @@
 // Store lean Work Request slice and job facts with stable IDs and priority order.
-import { repositoryNames, acceptedRepositories, canonicalRepository, repositoryAliases, repositoryLookupName } from './repository-identity.js';
+import { repositoryNames, acceptedRepositories, canonicalRepository, repositoryAliases, repositoryLookupName } from './repository-identity.ts';
 import cardVerbs from './job-card-verbs.v1.json' with { type: 'json' };
 import jobTypes from './job-types.v1.json' with { type: 'json' };
 import addressFormat from './progress-address.v1.json' with { type: 'json' };
 import { organizationTenantForActor } from './identity.js';
 import { derivedIdempotencyKey } from './derived-key.ts';
 import { readableWorkRequestSql } from './work-request-read.ts';
-import { independentApproval } from './review-gate-comments.js';
+import { independentApproval } from './review-gate-comments.ts';
 
 const text = (max = 100) => ({ type: 'string', minLength: 1, maxLength: max });
 const positive = { type: 'integer', minimum: 1, maximum: 0x7fffffff };

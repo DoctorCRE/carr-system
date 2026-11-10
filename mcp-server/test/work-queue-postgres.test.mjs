@@ -724,7 +724,7 @@ test('repository CHECK upgrade is idempotent and matches registry identities', a
   const migration = readFileSync(new URL('../../migrations/1160_app_repository_identity.sql', import.meta.url), 'utf8');
   await c.query(migration);
   await c.query(migration);
-  const { acceptedRepositories } = await import('../src/repository-identity.js');
+  const { acceptedRepositories } = await import('../src/repository-identity.ts');
   const definition = (await c.query("select pg_get_constraintdef(oid) as definition from pg_constraint where conrelid='ops.work_request_job'::regclass and conname='work_request_job_repository_check'")).rows[0].definition;
   assert.deepEqual([...definition.matchAll(/'([^']+)'::text/g)].map(match => match[1]).sort(), [...acceptedRepositories].sort());
 });

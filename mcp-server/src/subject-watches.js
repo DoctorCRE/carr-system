@@ -1,6 +1,6 @@
 // Partner subscriptions preserve each actor's initial canonical subject baseline.
-import { parseSubjectWatchV2, subjectWatchPolicySchema, validSubjectWatchPolicy } from '../contracts/subject-watch.v2.js';
-export { parseSubjectWatchV2 } from '../contracts/subject-watch.v2.js';
+import { parseSubjectWatchV2, subjectWatchPolicySchema, validSubjectWatchPolicy } from '../contracts/subject-watch.v2.ts';
+export { parseSubjectWatchV2 } from '../contracts/subject-watch.v2.ts';
 const VERSION = 'subject-watch.v1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const targetProperties = {

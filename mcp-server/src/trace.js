@@ -77,7 +77,7 @@
 // an unhandled anything).
 
 import { neon } from "./postgres.ts";
-import { logLine } from "./correlation.js";
+import { logLine } from "./correlation.ts";
 
 const SERVICE_KEY = "carr-mcp";
 const DEFAULT_SEVERITY = "SEV-3"; // contained: one request failed, not the whole service —

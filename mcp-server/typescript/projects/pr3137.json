@@ -1,0 +1,17 @@
+{
+  "node": [
+    "test/fixtures/email-followups-app-confirm-verb.ts",
+    "test/fixtures/tour-client-text-adversarial.ts",
+    "test/fixtures/vendor-directory-app-keys.ts",
+    "test/gate-zero-producer-stores.v5.fixture.ts",
+    "test/m023-fixture-contracts.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/fixtures/email-followups-app-confirm-verb.ts",
+    "test/fixtures/tour-client-text-adversarial.ts",
+    "test/fixtures/vendor-directory-app-keys.ts",
+    "test/gate-zero-producer-stores.v5.fixture.ts",
+    "test/m023-fixture-contracts.test.ts"
+  ]
+}

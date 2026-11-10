@@ -88,7 +88,7 @@ import { scheduledPushOutbox } from "./web-push-outbox.ts";
 import { scheduledSubjectWatches } from "./subject-watch-scheduler.ts";
 import { mcpApiHandler, dispatch } from "./mcp.js";
 import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
-export { PhoneAudioHandoff } from './phone-audio-handoff.js';
+export { PhoneAudioHandoff } from './phone-audio-handoff.ts';
 export { OAuthConsentState } from "./oauth-consent-state.ts";
 export { VerbRequestBudget } from "./verb-request-budget.js";
 export { AiNeuronBudget } from "./ai-budget.js";
@@ -107,7 +107,7 @@ import { createPhoneCallHandler, PHONE_STUDIO_PREFIX } from "./phone-call-sessio
 import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
-import { wrapWithCorrelation } from "./correlation.js";
+import { wrapWithCorrelation } from "./correlation.ts";
 import { publicError } from "./public-errors.ts";
 import { bearerCredential } from "./bearer.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";

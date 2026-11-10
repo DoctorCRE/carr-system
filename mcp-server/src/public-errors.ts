@@ -1,6 +1,6 @@
 // Convert internal errors into closed public error responses.
 
-import { isValidCorrelationId, logLine } from "./correlation.js";
+import { isValidCorrelationId, logLine } from "./correlation.ts";
 import { ToolError } from "./tool-error.ts";
 
 /** The public JSON-RPC/HTTP refusal shape. Every optional field is opt-in per code. */
