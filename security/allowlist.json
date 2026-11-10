@@ -873,6 +873,42 @@
       "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
     },
     {
+      "path": "mcp-server/src/party-identity.ts",
+      "sha256": "b6e0b94866100e8893a95e26bb5c6a28d7b4fa007604a1dcff72e87731596f07",
+      "rule": "pii-phone",
+      "reason": "rule 54e2bcb9 firm placeholder line"
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-phone",
+      "reason": "Historical pre-correction test blob only. Covers ten phone findings in that immutable blob; no exception applies to the current fixture. Retained for no-rebase history scanning."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-address",
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-address",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-email",
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-email",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
+    },
+    {
       "path": "mcp-server/test/research-sites.test.ts",
       "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
       "rule": "pii-email",
