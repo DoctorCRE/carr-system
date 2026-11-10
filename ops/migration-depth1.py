@@ -59,19 +59,21 @@ def run_acceptance(repo: Path, env: dict[str, str], *, reconstruction: bool = Tr
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[1])
+    root = Path(__file__).resolve().parents[1]
+    parser.add_argument('--source', default=str(root))
     parser.add_argument('--branch')
     parser.add_argument('--receipt', type=Path)
     args = parser.parse_args()
     env = scrubbed_env()
     env['GIT_NO_LAZY_FETCH'] = '1'
-    (args.source / 'out').mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='migration-depth1-', dir=args.source / 'out') as temp:
+    (root / 'out').mkdir(exist_ok=True)
+    source = args.source if args.source.startswith(('https://', 'file://')) else Path(args.source).resolve().as_uri()
+    with tempfile.TemporaryDirectory(prefix='migration-depth1-', dir=root / 'out') as temp:
         repo = Path(temp) / 'repo'
         command = ['git', 'clone', '--depth', '1', '--no-hardlinks']
         if args.branch:
             command += ['--branch', args.branch]
-        subprocess.run([*command, args.source.resolve().as_uri(), str(repo)], env=env, check=True, timeout=180)
+        subprocess.run([*command, source, str(repo)], env=env, check=True, timeout=180)
         sha = assert_checkout(repo, env)
         subprocess.run([sys.executable, '-m', 'venv', str(Path(temp) / 'venv')], check=True, timeout=120)
         python = Path(temp) / 'venv/bin/python'

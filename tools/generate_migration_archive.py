@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 from pathlib import Path
 import runpy
 import zipfile
 
 from migration_baseline import MigrationBaseline, runner_sha256
-from migration_source import ARCHIVE, _git, read_baseline_snapshot, read_migration
+from migration_source import ARCHIVE, _archive_member, _git, read_baseline_snapshot, read_migration
 
 
 def generate(repo: Path) -> bytes:
@@ -32,7 +33,6 @@ def generate(repo: Path) -> bytes:
                 raise ValueError(f'retained migration checksum mismatch: {name}')
         else:
             members[f'migrations/{name}'] = original
-    import io
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for name, raw in sorted(members.items()):
@@ -54,7 +54,6 @@ def verify(repo: Path) -> None:
     with zipfile.ZipFile(repo / ARCHIVE) as archive:
         for name in archive.namelist():
             if name != 'db/schema.sql':
-                from migration_source import _archive_member
                 _archive_member(repo, name, baseline, None)
     print(f'{len(baseline.migrations)} migration hashes and exact historical snapshot ledger verified')
 
