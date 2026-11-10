@@ -1,8 +1,14 @@
 // Test Chicago calendar time calculations across daylight saving transitions.
-import test from "node:test";
+
 import assert from "node:assert/strict";
-import { chicagoThirtyDayDeadline, DEADLINE_PLAIN, DEADLINE_GAP_SHIFTED,
-  DEADLINE_OVERLAP_ORIGIN_OFFSET } from "../src/journey-one-clock.v5.ts";
+import test from "node:test";
+import {
+  chicagoThirtyDayDeadline,
+  DEADLINE_GAP_SHIFTED,
+  DEADLINE_OVERLAP_ORIGIN_OFFSET,
+  DEADLINE_PLAIN,
+} from "./helpers/legacy-test-registry.ts";
+
 const HOUR = 3600000;
 const ORIGIN = "2026-09-09T15:00:00.000Z";
 for (const [origin, due, hours] of [
@@ -11,12 +17,13 @@ for (const [origin, due, hours] of [
   ["2026-02-20T16:15:00.000Z", "2026-03-22T15:15:00.000Z", 719],
   ["2026-10-10T15:15:00.000Z", "2026-11-09T16:15:00.000Z", 721],
   [ORIGIN, "2026-10-09T15:00:00.000Z", 720],
-]) test(`thirty Chicago dates from ${origin} is ${hours} elapsed hours`, () => {
-  const result = chicagoThirtyDayDeadline(origin);
-  assert.equal(result.due_at, due);
-  assert.equal(result.reason_id, DEADLINE_PLAIN);
-  assert.equal((Date.parse(due) - Date.parse(origin)) / HOUR, hours);
-});
+] satisfies [string, string, number][])
+  test(`thirty Chicago dates from ${origin} is ${hours} elapsed hours`, () => {
+    const result = chicagoThirtyDayDeadline(origin);
+    assert.equal(result.due_at, due);
+    assert.equal(result.reason_id, DEADLINE_PLAIN);
+    assert.equal((Date.parse(due) - Date.parse(origin)) / HOUR, hours);
+  });
 
 test("a spring-gap target shifts forward by the gap length rather than snapping to the transition", () => {
   // 02:30 Chicago on 6 February 2026 is CST. Thirty dates later is 8 March, the
