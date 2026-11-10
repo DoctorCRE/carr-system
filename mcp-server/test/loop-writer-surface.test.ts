@@ -15,7 +15,11 @@ assert.ok(
     "handler" in addLoopTool &&
     typeof addLoopTool.handler === "function",
 );
-const addLoopHandler = addLoopTool.handler;
+const addLoopHandlerLegacy = addLoopTool.handler;
+const addLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await addLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 assert.ok("loop-board" in registry);
 const loopBoardTool = registry["loop-board"];
 assert.ok(
@@ -24,7 +28,11 @@ assert.ok(
     "handler" in loopBoardTool &&
     typeof loopBoardTool.handler === "function",
 );
-const loopBoardHandler = loopBoardTool.handler;
+const loopBoardHandlerLegacy = loopBoardTool.handler;
+const loopBoardHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await loopBoardHandlerLegacy(client, actor, args);
+  return result;
+};
 assert.ok("read-loop" in registry);
 const readLoopTool = registry["read-loop"];
 assert.ok(
@@ -33,7 +41,11 @@ assert.ok(
     "handler" in readLoopTool &&
     typeof readLoopTool.handler === "function",
 );
-const readLoopHandler = readLoopTool.handler;
+const readLoopHandlerLegacy = readLoopTool.handler;
+const readLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await readLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 assert.ok("update-loop" in registry);
 const updateLoopTool = registry["update-loop"];
 assert.ok(
@@ -42,7 +54,11 @@ assert.ok(
     "handler" in updateLoopTool &&
     typeof updateLoopTool.handler === "function",
 );
-const updateLoopHandler = updateLoopTool.handler;
+const updateLoopHandlerLegacy = updateLoopTool.handler;
+const updateLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await updateLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 
 // Audit 3 F7: owner=claude is the autonomous drain queue, so a narrow profile
 // may not fill it, and every loop read names the surface that wrote the row.
@@ -119,8 +135,11 @@ test("add-loop still files owner=claude and owner=joe from a narrow profile, and
   ]) {
     const db = new Recorder();
     const out = await addLoopHandler(db, actor(profile), { ...claudeLoop, owner });
+    assert.ok(out && typeof out === "object" && "ok" in out);
     assert.equal(out.ok, true, `${profile} ${owner}`);
-    assert.equal(JSON.parse(String(db.params.at(-1))).writer_surface, profile ?? "local");
+    const cells: unknown = JSON.parse(String(db.params.at(-1)));
+    assert.ok(cells && typeof cells === "object" && "writer_surface" in cells);
+    assert.equal(cells.writer_surface, profile ?? "local");
   }
 });
 
@@ -147,8 +166,16 @@ test("read-loop and loop-board select the writer surface, defaulting to unrecord
   const board = new Recorder([{ number: "1", writer_surface: "capture" }]);
   const full = await loopBoardHandler(board, actor("full"), {});
   const summary = await loopBoardHandler(board, actor("full"), { summary: true });
-  assert.equal(full.loops?.[0]?.writer_surface ?? full.rows?.[0]?.writer_surface, "capture");
-  assert.equal(summary.loops[0].writer_surface, "capture");
+  assert.ok(full && typeof full === "object");
+  const fullRows: unknown = "loops" in full ? full.loops : "rows" in full ? full.rows : undefined;
+  assert.ok(Array.isArray(fullRows));
+  const fullRow: unknown = fullRows[0];
+  assert.ok(fullRow && typeof fullRow === "object" && "writer_surface" in fullRow);
+  assert.equal(fullRow.writer_surface, "capture");
+  assert.ok(summary && typeof summary === "object" && "loops" in summary && Array.isArray(summary.loops));
+  const summaryRow: unknown = summary.loops[0];
+  assert.ok(summaryRow && typeof summaryRow === "object" && "writer_surface" in summaryRow);
+  assert.equal(summaryRow.writer_surface, "capture");
   const read = new Recorder([{ loop_id: "x", writer_surface: "unrecorded" }]);
   await readLoopHandler(read, actor("full"), { number: "1" });
   assert.equal(board.sql.length + read.sql.length, 4);

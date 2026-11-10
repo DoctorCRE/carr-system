@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 import { ToolError } from "../src/tool-error.ts";
 
 const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -14,7 +15,11 @@ assert.ok(
     "handler" in updateLoopTool &&
     typeof updateLoopTool.handler === "function",
 );
-const updateLoopHandler = updateLoopTool.handler;
+const updateLoopHandlerLegacy = updateLoopTool.handler;
+const updateLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await updateLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 
 // loop-renumber.test.ts — update-loop's `number` field, the verb half of
 // loop #306 (2026-08-13). Migration 0112 is the database half.
@@ -42,11 +47,6 @@ const updateLoopHandler = updateLoopTool.handler;
 //   6. the event carries the old number, so the change is traceable.
 //
 // Run with: node --test mcp-server/test/loop-renumber.test.ts
-
-const derivedModule: unknown = await import(new URL("../src/derived-key.ts", import.meta.url).href);
-assert.ok(derivedModule && typeof derivedModule === "object" && "derivedIdempotencyKey" in derivedModule);
-const derivedIdempotencyKey = derivedModule.derivedIdempotencyKey;
-assert.ok(typeof derivedIdempotencyKey === "function");
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -156,8 +156,16 @@ test("update-loop: a renumber writes the column and reports from/to", async () =
     number: "363",
     renumber_reason: "RENUMBERED, NOT ABANDONED — #95 now names the newsletter row only.",
   });
+  assert.ok(res && typeof res === "object" && "ok" in res && "number" in res);
   assert.equal(res.ok, true);
   assert.equal(res.number, "363");
+  assert.ok(
+    "renumbered" in res &&
+      res.renumbered &&
+      typeof res.renumbered === "object" &&
+      "from" in res.renumbered &&
+      "to" in res.renumbered,
+  );
   assert.deepEqual(res.renumbered.from, "95");
   assert.deepEqual(res.renumbered.to, "363");
   assert.equal(db.updates.length, 1);
@@ -241,6 +249,7 @@ test("update-loop: the same number on a DIFFERENT kind is not a collision", asyn
     number: "363",
     renumber_reason: "RENUMBERED, NOT ABANDONED — idea #363 is a different series.",
   });
+  assert.ok(res && typeof res === "object" && "number" in res);
   assert.equal(res.number, "363");
 });
 
@@ -275,6 +284,7 @@ test("update-loop: a leading # is tolerated, because that is how a human writes 
     number: "#363",
     renumber_reason: "RENUMBERED, NOT ABANDONED — hash form.",
   });
+  assert.ok(res && typeof res === "object" && "number" in res);
   assert.equal(res.number, "363");
 });
 

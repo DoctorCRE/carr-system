@@ -14,7 +14,11 @@ assert.ok(
     "handler" in addLoopTool &&
     typeof addLoopTool.handler === "function",
 );
-const addLoopHandler = addLoopTool.handler;
+const addLoopHandlerLegacy = addLoopTool.handler;
+const addLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await addLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 
 // loop-kind-validation.test.ts — coverage for the add-loop `kind` defect
 // found live 2026-08-14:
@@ -157,6 +161,7 @@ test("add-loop: a legal kind still reaches a genuine ok:true (the validation doe
     residue_kind: "provider_login",
     residue_host: "github.com",
   });
+  assert.ok(result && typeof result === "object" && "ok" in result && "kind" in result && "section" in result);
   assert.equal(result.ok, true);
   assert.equal(result.kind, "open_loop");
   assert.equal(result.section, "backlog");

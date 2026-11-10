@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  parseMailNeedsPartnerQuery,
+  parseMailNeedsPartnerResponse,
+  readMailNeedsPartner,
+} from "../src/mail-needs-partner.ts";
 
 const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
 assert.ok(registered && typeof registered === "object" && "TOOLS" in registered);
@@ -13,18 +18,12 @@ assert.ok(
     "handler" in readMailTool &&
     typeof readMailTool.handler === "function",
 );
-const readMailHandler = readMailTool.handler;
+const readMailHandlerLegacy = readMailTool.handler;
+const readMailHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await readMailHandlerLegacy(client, actor, args);
+  return result;
+};
 
-const mailModule: unknown = await import(new URL("../src/mail-needs-partner.ts", import.meta.url).href);
-assert.ok(
-  mailModule &&
-    typeof mailModule === "object" &&
-    "readMailNeedsPartner" in mailModule &&
-    "parseMailNeedsPartnerQuery" in mailModule &&
-    "parseMailNeedsPartnerResponse" in mailModule,
-);
-const readMailNeedsPartner = mailModule.readMailNeedsPartner;
-assert.ok(typeof readMailNeedsPartner === "function");
 test("empty mailbox differs from source unavailable", async () => {
   const actor = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: true };
   assert.equal((await readMailNeedsPartner({ query: async () => ({ rows: [] }) }, actor, {})).state, "empty");
@@ -43,10 +42,6 @@ test("empty mailbox differs from source unavailable", async () => {
     "unavailable",
   );
 });
-const parseMailNeedsPartnerQuery = mailModule.parseMailNeedsPartnerQuery;
-assert.ok(typeof parseMailNeedsPartnerQuery === "function");
-const parseMailNeedsPartnerResponse = mailModule.parseMailNeedsPartnerResponse;
-assert.ok(typeof parseMailNeedsPartnerResponse === "function");
 
 const joe = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: true };
 const row = {
@@ -88,20 +83,26 @@ test("ready preserves versions, reasons, exact command and unknowns with bounded
       return { rows: [row, { ...row, id: "44444444-4444-4444-8444-444444444444" }] };
     },
   };
-  const first = await readMailHandler(c, joe, { limit: 1 });
+  const first = parseMailNeedsPartnerResponse(await readMailHandler(c, joe, { limit: 1 }));
   assert.ok("write" in readMailTool);
   assert.equal(readMailTool.write, false);
   assert.equal(first.state, "ready");
   assert.equal(values[4], 2);
   assert.equal(values[0], "joe");
-  assert.equal(first.items[0].source.instant_status, "unknown");
-  assert.equal(first.items[0].action.verb, "confirm-email-next-step");
-  assert.equal(first.items[0].action.args.base_version, 3);
-  assert.deepEqual(first.items[0].reason_codes, ["decision_date_unknown"]);
+  assert.ok(Array.isArray(first.items));
+  const item: unknown = first.items[0];
+  assert.ok(item && typeof item === "object" && "source" in item && "action" in item && "reason_codes" in item);
+  assert.ok(item.source && typeof item.source === "object" && "instant_status" in item.source);
+  assert.ok(item.action && typeof item.action === "object" && "verb" in item.action && "args" in item.action);
+  assert.ok(item.action.args && typeof item.action.args === "object" && "base_version" in item.action.args);
+  assert.equal(item.source.instant_status, "unknown");
+  assert.equal(item.action.verb, "confirm-email-next-step");
+  assert.equal(item.action.args.base_version, 3);
+  assert.deepEqual(item.reason_codes, ["decision_date_unknown"]);
   await readMailNeedsPartner(c, joe, { limit: 1, cursor: first.next_cursor });
   assert.equal(values[3], row.id);
   await readMailNeedsPartner(c, { ...joe, slug: "dell" }, {});
   assert.equal(values[0], "dell");
-  assert.throws(() => parseMailNeedsPartnerResponse({ ...first, items: [{ ...first.items[0], status: "sent" }] }));
-  assert.throws(() => parseMailNeedsPartnerResponse({ ...first, items: [{ ...first.items[0], source: {} }] }));
+  assert.throws(() => parseMailNeedsPartnerResponse({ ...first, items: [{ ...item, status: "sent" }] }));
+  assert.throws(() => parseMailNeedsPartnerResponse({ ...first, items: [{ ...item, source: {} }] }));
 });

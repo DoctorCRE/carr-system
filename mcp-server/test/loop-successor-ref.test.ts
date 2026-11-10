@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 import { ToolError } from "../src/tool-error.ts";
 
 const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -14,7 +15,11 @@ assert.ok(
     "handler" in closeLoopTool &&
     typeof closeLoopTool.handler === "function",
 );
-const closeLoopHandler = closeLoopTool.handler;
+const closeLoopHandlerLegacy = closeLoopTool.handler;
+const closeLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await closeLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 
 // loop-successor-ref.test.ts — close-loop's successor_loop must accept the
 // form a partner actually says.
@@ -36,11 +41,6 @@ const closeLoopHandler = closeLoopTool.handler;
 //
 // Run with: node --test mcp-server/test/loop-successor-ref.test.ts
 // Also discovered by the canonical test runner.
-
-const derivedModule: unknown = await import(new URL("../src/derived-key.ts", import.meta.url).href);
-assert.ok(derivedModule && typeof derivedModule === "object" && "derivedIdempotencyKey" in derivedModule);
-const derivedIdempotencyKey = derivedModule.derivedIdempotencyKey;
-assert.ok(typeof derivedIdempotencyKey === "function");
 
 const joe = {
   id: "10000000-0000-0000-0000-000000000002",

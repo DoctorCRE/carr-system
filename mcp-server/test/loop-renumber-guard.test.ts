@@ -14,7 +14,11 @@ assert.ok(
     "handler" in updateLoopTool &&
     typeof updateLoopTool.handler === "function",
 );
-const updateLoopHandler = updateLoopTool.handler;
+const updateLoopHandlerLegacy = updateLoopTool.handler;
+const updateLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await updateLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 
 // loop-renumber-guard.test.ts — coverage for the update-loop renumber guard,
 // which fired on the wrong condition.

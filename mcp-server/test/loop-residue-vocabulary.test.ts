@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { derivedIdempotencyKey } from "../src/derived-key.ts";
 import { ToolError } from "../src/tool-error.ts";
 
 const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -14,7 +15,11 @@ assert.ok(
     "handler" in addLoopHandlerTool &&
     typeof addLoopHandlerTool.handler === "function",
 );
-const addLoopHandler = addLoopHandlerTool.handler;
+const addLoopHandlerLegacy = addLoopHandlerTool.handler;
+const addLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await addLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 assert.ok("update-loop" in registry);
 const updateLoopHandlerTool = registry["update-loop"];
 assert.ok(
@@ -23,7 +28,11 @@ assert.ok(
     "handler" in updateLoopHandlerTool &&
     typeof updateLoopHandlerTool.handler === "function",
 );
-const updateLoopHandler = updateLoopHandlerTool.handler;
+const updateLoopHandlerLegacy = updateLoopHandlerTool.handler;
+const updateLoopHandler = async (client: object, actor: object, args: Record<string, unknown>): Promise<unknown> => {
+  const result: unknown = await updateLoopHandlerLegacy(client, actor, args);
+  return result;
+};
 
 // loop-residue-vocabulary.test.ts — the residue gate on add-loop and
 // update-loop (Joe 2026-10-12, decision cbe91287).
@@ -37,11 +46,6 @@ const updateLoopHandler = updateLoopHandlerTool.handler;
 // reason that points internal work at system_decides.
 //
 // Run with: node --test mcp-server/test/loop-residue-vocabulary.test.ts
-
-const derivedModule: unknown = await import(new URL("../src/derived-key.ts", import.meta.url).href);
-assert.ok(derivedModule && typeof derivedModule === "object" && "derivedIdempotencyKey" in derivedModule);
-const derivedIdempotencyKey = derivedModule.derivedIdempotencyKey;
-assert.ok(typeof derivedIdempotencyKey === "function");
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -122,7 +126,9 @@ const storedExtraCells = (db: AddLoopFake) => {
   assert.ok(insert);
   const { sql, params } = insert;
   assert.ok(sql.includes("extra_cells"), "the insert must write extra_cells");
-  return JSON.parse(String(params.at(-1)));
+  const cells: unknown = JSON.parse(String(params.at(-1)));
+  assert.ok(cells && typeof cells === "object" && !Array.isArray(cells));
+  return cells;
 };
 
 const refusedAs =
@@ -147,7 +153,9 @@ for (const blocker of ["human_only", "ruling", "capability"]) {
         residue_kind: kind,
         residue_host: "  github.com  ",
       });
+      assert.ok(r && typeof r === "object" && "ok" in r);
       assert.equal(r.ok, true);
+      assert.ok("residue" in r);
       assert.deepEqual(r.residue, { kind, host: "github.com" });
       assert.deepEqual(storedExtraCells(db), {
         writer_surface: "local",
@@ -163,8 +171,9 @@ for (const blocker of ["counterparty", "external_event", "other_lane"]) {
   test(`add-loop: ${blocker} needs no residue and stores none`, async () => {
     const db = new AddLoopFake();
     const r = await addLoop(db, { blocker, blocker_detail: "Sanders, the listing broker on C-112" });
+    assert.ok(r && typeof r === "object" && "ok" in r);
     assert.equal(r.ok, true);
-    assert.equal(r.residue, undefined);
+    assert.equal("residue" in r ? r.residue : undefined, undefined);
     assert.deepEqual(storedExtraCells(db), { writer_surface: "local" });
   });
 }
@@ -186,6 +195,7 @@ test("add-loop: a kind without a blocker (idea) is untouched by the gate", async
     owner: "joe",
     body: "a parked idea",
   });
+  assert.ok(r && typeof r === "object" && "ok" in r);
   assert.equal(r.ok, true);
   assert.deepEqual(storedExtraCells(db), { writer_surface: "local" });
 });
