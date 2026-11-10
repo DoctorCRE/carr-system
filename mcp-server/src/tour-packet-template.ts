@@ -1,3 +1,4 @@
+// Define the versioned client packet sections, facts and display values.
 export const TOUR_PACKET_TEMPLATE_VERSION = "2.0.0";
 export const TOUR_PACKET_TEMPLATE = Object.freeze({
   version: TOUR_PACKET_TEMPLATE_VERSION,

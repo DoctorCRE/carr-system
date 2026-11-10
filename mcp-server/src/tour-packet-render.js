@@ -12,15 +12,14 @@ import { CLIENT_TEXT_MAX_CHARS, isClientRouteLabel, isClientSafeText, normalizeC
 // 1.3.0 (V5-J303): fields are CLIENT_TOUR_FIELD_KEYS only (no per-property
 // caveat), every value passes the shared client value-safety rule, and the
 // stop marker is 1-3 letters or digits.
-export const TOUR_PACKET_RENDER_VERSION = "1.3.0";
+export const TOUR_PACKET_RENDER_VERSION = "2.0.0";
 export { TOUR_PACKET_TEMPLATE_VERSION };
 export const TOUR_PACKET_BRAND = "CARR";
 
 // `caveat` stays a recognised top-level key only because the database packet
 // carries it as an explicit null (0586); any non-null caveat is refused.
 const TOP_LEVEL_FIELDS = new Set(["as_of", "caveat", "properties"]);
-// The client allowlist and its envelope, plus the per-property as-of stamp
-// the PDF prints. Nothing else -- a caveat included -- is renderable.
+// The client allowlist, identity envelope and internal as-of stamp.
 const PROPERTY_FIELDS = new Set([
   ...CLIENT_TOUR_STOP_ENVELOPE_KEYS, ...Object.values(CLIENT_TOUR_PACKET_COLUMNS), "as_of",
 ]);

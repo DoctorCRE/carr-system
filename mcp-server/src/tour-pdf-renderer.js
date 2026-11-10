@@ -57,7 +57,7 @@ async function sha256(value) {
   return `sha256:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Generate a fixed Letter packet with exactly one polished page per property. */
+/** Render one overview followed by one complete Letter page per property. */
 export async function renderTourPacketPdf(input, fonts, proof = {}) {
   const packet = renderTourPacket(input);
   const regularBytes = bytes(fonts?.regular, "regular");

@@ -150,3 +150,23 @@ test("runtime projections preserve deal bindings across deals and legacy tours",
     assert.equal(detail.deal_name,raw.deal_name);
   }
 });
+
+test("PDF orchestration records the overview-inclusive page count separately from property count", async () => {
+  const digest = character => `sha256:${character.repeat(64)}`;
+  const calls = [];
+  const result = await runTourPdfRender({ env: {}, actor: { slug: "codex" }, input: {
+    projection_id: "10000000-0000-4000-8000-000000000001", idempotency_key: "40000000-0000-4000-8000-000000000001",
+  } }, {
+    tenantFn: () => "carr-internal",
+    internalReadFn: async () => ({ packet: {}, projection_digest: digest("1") }),
+    prepareTourPdfArtifactFn: async () => ({ packetDigest: digest("2"), templateDigest: digest("3"), rendererDigest: digest("4"), qcRulesetVersion: "2.0.0", qcRulesetDigest: digest("5"), markersDigest: digest("6"), rendered: { templateVersion: "2.0.0", rendererVersion: "2.0.0", propertyCount: 3, pageCount: 4, fontDigests: [digest("7")], artifactDigest: digest("8") } }),
+    storeAndVerifyTourPdfFn: async () => ({ storageRef: "tour-pdf/synthetic/packet.pdf", contentLength: 1000, qc: { blocked: false, findings: [] }, qcRunDigest: digest("9") }),
+    invokeFn: async (_context, verb, args) => {
+      calls.push({ verb, args });
+      return { ok: true, data: verb === "request-tour-pdf-render" ? { render_job_id: "20000000-0000-4000-8000-000000000001" } : { status: args.status } };
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls[0].args.expected_property_count, 3);
+  assert.equal(calls[1].args.page_count, 4);
+});
