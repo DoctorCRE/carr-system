@@ -89,7 +89,9 @@ sys.stdin.read()
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         root = None
         try:
-            root = Path(child.stdout.readline().strip())
+            line = child.stdout.readline().strip()
+            self.assertTrue(line.startswith('/'), 'fixture child returned no absolute owned root')
+            root = Path(line)
             if not during_start:
                 self.assertTrue((root / 'data' / 'postmaster.pid').exists())
             child.kill()  # mid-start, the supervisor finishes the launch, then stops it
