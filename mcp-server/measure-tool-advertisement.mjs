@@ -51,7 +51,7 @@ async function continuityCost() {
     const env = { ...process.env, CARR_MCP_ENV: tokenFile,
       CARR_MCP_URL: `http://127.0.0.1:${server.address().port}/mcp` };
     delete env.CARR_CODEX_CONTINUITY_MCP_TOKEN;
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./codex-continuity-stdio-proxy.mjs", import.meta.url))], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./codex-continuity-stdio-proxy.ts", import.meta.url))], { env, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
     child.stderr.resume();

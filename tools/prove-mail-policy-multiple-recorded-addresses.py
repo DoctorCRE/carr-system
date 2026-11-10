@@ -4,13 +4,13 @@ import argparse
 import json
 from pathlib import Path
 import re
-import signal
 import subprocess
 import time
 import urllib.parse
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.proof_deadline import proof_deadline
 from lib import release_reader
 
 
@@ -61,72 +61,66 @@ def observe(origin, wrapper, seconds):
             raise Unavailable('read_unavailable')
         return value
 
-    def expired(_signal, _frame):
-        raise Unavailable('deadline_exhausted')
-
-    previous = signal.signal(signal.SIGALRM, expired)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
     try:
-        receipt['release_sha'] = release()
-        matched = call('email-match-contacts', {})
-        contacts = matched.get('contacts')
-        if matched.get('schema_version') != 'email-match-contacts.v1' or not isinstance(contacts, list):
-            raise Unavailable('contact_contract_unavailable')
-        if len(contacts) > 1000:
-            raise Unavailable('contact_row_limit')
-        receipt['examined_rows'] = len(contacts)
-        candidates = {}
-        for contact in contacts:
-            ref = contact.get('ref')
-            snapshot = contact.get('contact_snapshot')
-            if (isinstance(ref, str) and re.fullmatch(r'[PLCV]-[A-Za-z0-9-]+', ref)
-                    and isinstance(snapshot, dict) and contact.get('exact') is True):
-                candidates.setdefault(snapshot['party_id'], (ref, snapshot))
-        for party_id, (ref, snapshot) in candidates.items():
-            addresses = sorted({c['address'] for c in contacts if c.get('ref') == ref})
-            if len(addresses) < 2:
-                continue
-            if len(addresses) > 50 or any(not re.fullmatch(r'[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}', a) for a in addresses):
-                raise Unavailable('stored_addresses_outside_recipient_contract')
-            raw = snapshot.get('values', {}).get('email')
-            if not isinstance(raw, str) or not set(addresses).issubset(re.split(r'[\s,;<>]+', raw.lower())):
-                raise Unavailable('snapshot_address_evidence_unavailable')
-            record = call('prospect-research', {'subject': ref})
-            if (record.get('schema_version') != 'prospect-research.v1' or record.get('id') != party_id
-                    or record.get('sent') is not False):
-                raise Unavailable('restriction_identity_unavailable')
-            if record.get('contact_state') != 'do_not_contact':
-                continue
-            policy = call('mail-contact-policy', {'emails': addresses})
-            recipients = policy.get('recipients')
-            if (not isinstance(recipients, list) or len(recipients) != len(addresses)
-                    or [r.get('email') for r in recipients] != addresses
-                    or any(type(r.get('blocked')) is not bool for r in recipients)):
-                raise Unavailable('policy_contract_unavailable')
-            if any(not r['blocked'] for r in recipients):
-                raise Contradiction('recorded_restriction_not_blocked')
-            receipt['witnesses'] += 1
-            receipt['addresses'] += len(addresses)
-            break
-        if release() != receipt['release_sha']:
-            raise Unavailable('release_changed')
-        if not receipt['witnesses']:
-            raise Unavailable('no_natural_multi_address_restricted_witness')
-        return 0, {**receipt, 'status': 'pass'}
-    except Contradiction as error:
-        try:
-            if release() != receipt['release_sha']:
-                raise Unavailable('release_changed')
-        except (Unavailable, OSError, ValueError, TypeError, AttributeError):
-            return 78, {**receipt, 'status': 'insufficient_evidence', 'reason': 'release_unavailable_or_changed'}
-        return 1, {**receipt, 'status': 'contradiction', 'reason': str(error)}
+        with proof_deadline(seconds, Unavailable):
+            try:
+                receipt['release_sha'] = release()
+                matched = call('email-match-contacts', {})
+                contacts = matched.get('contacts')
+                if matched.get('schema_version') != 'email-match-contacts.v1' or not isinstance(contacts, list):
+                    raise Unavailable('contact_contract_unavailable')
+                if len(contacts) > 1000:
+                    raise Unavailable('contact_row_limit')
+                receipt['examined_rows'] = len(contacts)
+                candidates = {}
+                for contact in contacts:
+                    ref = contact.get('ref')
+                    snapshot = contact.get('contact_snapshot')
+                    if (isinstance(ref, str) and re.fullmatch(r'[PLCV]-[A-Za-z0-9-]+', ref)
+                            and isinstance(snapshot, dict) and contact.get('exact') is True):
+                        candidates.setdefault(snapshot['party_id'], (ref, snapshot))
+                for party_id, (ref, snapshot) in candidates.items():
+                    addresses = sorted({c['address'] for c in contacts if c.get('ref') == ref})
+                    if len(addresses) < 2:
+                        continue
+                    if len(addresses) > 50 or any(not re.fullmatch(r'[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}', a) for a in addresses):
+                        raise Unavailable('stored_addresses_outside_recipient_contract')
+                    raw = snapshot.get('values', {}).get('email')
+                    if not isinstance(raw, str) or not set(addresses).issubset(re.split(r'[\s,;<>]+', raw.lower())):
+                        raise Unavailable('snapshot_address_evidence_unavailable')
+                    record = call('prospect-research', {'subject': ref})
+                    if (record.get('schema_version') != 'prospect-research.v1' or record.get('id') != party_id
+                            or record.get('sent') is not False):
+                        raise Unavailable('restriction_identity_unavailable')
+                    if record.get('contact_state') != 'do_not_contact':
+                        continue
+                    policy = call('mail-contact-policy', {'emails': addresses})
+                    recipients = policy.get('recipients')
+                    if (not isinstance(recipients, list) or len(recipients) != len(addresses)
+                            or [r.get('email') for r in recipients] != addresses
+                            or any(type(r.get('blocked')) is not bool for r in recipients)):
+                        raise Unavailable('policy_contract_unavailable')
+                    if any(not r['blocked'] for r in recipients):
+                        raise Contradiction('recorded_restriction_not_blocked')
+                    receipt['witnesses'] += 1
+                    receipt['addresses'] += len(addresses)
+                    break
+                if release() != receipt['release_sha']:
+                    raise Unavailable('release_changed')
+                if not receipt['witnesses']:
+                    raise Unavailable('no_natural_multi_address_restricted_witness')
+                return 0, {**receipt, 'status': 'pass'}
+            except Contradiction as error:
+                try:
+                    if release() != receipt['release_sha']:
+                        raise Unavailable('release_changed')
+                except (Unavailable, OSError, ValueError, TypeError, AttributeError):
+                    return 78, {**receipt, 'status': 'insufficient_evidence', 'reason': 'release_unavailable_or_changed'}
+                return 1, {**receipt, 'status': 'contradiction', 'reason': str(error)}
     except Unavailable as error:
         return 78, {**receipt, 'status': 'insufficient_evidence', 'reason': str(error)}
     except (OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.TimeoutExpired):
         return 78, {**receipt, 'status': 'insufficient_evidence', 'reason': 'source_unavailable'}
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
 
 
 def main():

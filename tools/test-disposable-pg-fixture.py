@@ -14,7 +14,7 @@ import shutil
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir, fixture_root_from_line
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -89,7 +89,7 @@ sys.stdin.read()
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         root = None
         try:
-            root = Path(child.stdout.readline().strip())
+            root = fixture_root_from_line(child.stdout.readline(), 'killed-parent-')
             if not during_start:
                 self.assertTrue((root / 'data' / 'postmaster.pid').exists())
             child.kill()  # mid-start, the supervisor finishes the launch, then stops it

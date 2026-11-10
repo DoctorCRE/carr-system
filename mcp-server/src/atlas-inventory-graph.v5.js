@@ -18,7 +18,7 @@
 import { organizationTenantForActor } from "./identity.js";
 import { TOOLS } from "./tools.js";
 import { SCAC_MUTATION_OPERATIONS } from "./scac-mutation-registry.current.generated.js";
-import { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION } from "./mutation-registry.js";
+import { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION } from "./mutation-registry.ts";
 import { AUTHENTICATED_SURFACES, WORKSPACE_ROUTES } from "./workspace-surface-inventory.js";
 
 export const ATLAS_GRAPH_PATH = "/api/v1/atlas-graph";
@@ -122,7 +122,7 @@ function edge({ from, to, type, evidence, sourceRef, observedAt = null }) {
 // -----------------------------------------------------------------------------
 
 const DECLARED_TOOLS_SOURCE = "mcp-server/src/tools.js";
-const DECLARED_MUTATION_SOURCE = "mcp-server/src/mutation-registry.js";
+const DECLARED_MUTATION_SOURCE = "mcp-server/src/mutation-registry.ts";
 const DECLARED_SURFACE_SOURCE = "mcp-server/src/workspace-surface-inventory.js";
 
 export function buildDeclaredLayer(tools = TOOLS, operations = SCAC_MUTATION_OPERATIONS,

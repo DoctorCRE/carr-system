@@ -1,5 +1,5 @@
 // Test engineering runtime migration constraints and authority boundaries.
-import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";

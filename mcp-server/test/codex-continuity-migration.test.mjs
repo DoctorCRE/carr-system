@@ -1,5 +1,5 @@
 // Tests the bounded, append-only Codex continuity migration.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -412,7 +412,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/confirm-merge-lead-client.test.mjs"
+        "mcp-server/test/confirm-merge-lead-client.test.ts"
       ]
     },
     "loop_guard": {
@@ -440,7 +440,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/confirm-merge-lead-client.test.mjs"
+        "mcp-server/test/confirm-merge-lead-client.test.ts"
       ]
     },
     "no_send_worker": {
@@ -510,7 +510,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/intake-research-gates.test.mjs"
+        "mcp-server/test/intake-research-gates.test.ts"
       ]
     },
     "scheduled_run_record": {
@@ -540,7 +540,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/shared-row-rename-registry.test.mjs"
+        "mcp-server/test/shared-row-rename-registry.test.ts"
       ]
     },
     "stale_count": {

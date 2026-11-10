@@ -1,0 +1,238 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "merged": true,
+        "mergeCommit": {
+          "oid": "5db975d80815e396b1186379c324603353bf9c41",
+          "tree": {
+            "oid": "117862e251b75924f93c7e527faf218665f5b645"
+          },
+          "checkSuites": {
+            "pageInfo": {
+              "hasNextPage": false
+            },
+            "nodes": [
+              {
+                "app": {
+                  "slug": "claude"
+                },
+                "status": "QUEUED",
+                "conclusion": null,
+                "workflowRun": null,
+                "checkRuns": {
+                  "pageInfo": {
+                    "hasNextPage": false
+                  },
+                  "nodes": []
+                }
+              },
+              {
+                "app": {
+                  "slug": "github-actions"
+                },
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "workflowRun": {
+                  "event": "merge_group",
+                  "url": "https://github.com/DoctorCRE/carr-system/actions/runs/42736888524",
+                  "workflow": {
+                    "name": "CI"
+                  }
+                },
+                "checkRuns": {
+                  "pageInfo": {
+                    "hasNextPage": false
+                  },
+                  "nodes": [
+                    {
+                      "name": "select",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "launchd-python39",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "scope",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict --only lint pushfloor types secret binding artifact",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict --only hxprobe",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict --only dependency",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict --only gates",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict --only migration",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "Gates selftests shard 2 of 2",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict --only unit",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / plan",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "fast",
+                      "status": "COMPLETED",
+                      "conclusion": "SKIPPED"
+                    },
+                    {
+                      "name": "secret",
+                      "status": "COMPLETED",
+                      "conclusion": "SKIPPED"
+                    },
+                    {
+                      "name": "PR gates shard ${{ matrix.shard }} of 2",
+                      "status": "COMPLETED",
+                      "conclusion": "SKIPPED"
+                    },
+                    {
+                      "name": "lint",
+                      "status": "COMPLETED",
+                      "conclusion": "SKIPPED"
+                    },
+                    {
+                      "name": "Migration reconstruction",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "Migration shadow",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "Migration gates",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "Migration equivalence",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "Migration acceptance",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 6 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 8 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 5 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 3 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 4 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 1 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 2 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit / MCP unit shard 7 of 8",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "unit-coverage",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "ops/ci.sh --strict",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    }
+                  ]
+                }
+              },
+              {
+                "app": {
+                  "slug": "github-actions"
+                },
+                "status": "COMPLETED",
+                "conclusion": "SUCCESS",
+                "workflowRun": {
+                  "event": "merge_group",
+                  "url": "https://github.com/DoctorCRE/carr-system/actions/runs/42736888593",
+                  "workflow": {
+                    "name": "Instruction drift"
+                  }
+                },
+                "checkRuns": {
+                  "pageInfo": {
+                    "hasNextPage": false
+                  },
+                  "nodes": [
+                    {
+                      "name": "check",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    },
+                    {
+                      "name": "Instruction drift verdict",
+                      "status": "COMPLETED",
+                      "conclusion": "SUCCESS"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

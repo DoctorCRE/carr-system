@@ -1,0 +1,259 @@
+// Test batched standing-context reads and payloads.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+function record(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), "Expected object");
+  return Object.fromEntries(Object.entries(value));
+}
+
+const registry = record(await import(new URL("../src/tools.js", import.meta.url).href));
+async function executeRegisteredTool(...args: unknown[]) {
+  const invoke = registry.executeRegisteredTool;
+  if (typeof invoke !== "function") throw new TypeError("Expected registered executor");
+  return record(await invoke(...args));
+}
+
+function text(value: unknown): string {
+  assert.equal(typeof value, "string");
+  if (typeof value !== "string") throw new TypeError("Expected text");
+  return value;
+}
+function array(value: unknown): unknown[] {
+  assert.ok(Array.isArray(value));
+  return value;
+}
+
+const ACTOR = {
+  id: "11111111-1111-4111-8111-111111111111",
+  slug: "joe",
+  human: true,
+  via: "oauth-google",
+};
+
+const RULES = [
+  {
+    id: "1fddcffb-0000-4000-8000-000000000001",
+    statement: "A shared standing rule with enough words to produce a stable gist for this regression test.",
+    human_quote: "shared quote",
+    taught_by: "Joe Bookout",
+    personal_to: null,
+    scope: {},
+  },
+  {
+    id: "7e9739f2-0000-4000-8000-000000000002",
+    statement: "A personal standing rule with enough words to produce a stable gist for this regression test.",
+    human_quote: "personal quote",
+    taught_by: "Joe Bookout",
+    personal_to: "joe",
+    scope: {},
+  },
+];
+
+function client() {
+  const calls: string[] = [];
+  return {
+    calls,
+    query: async (sql: string, _params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> => {
+      calls.push(sql);
+      if (/standing-context:baseline-batch/.test(sql)) {
+        assert.doesNotMatch(
+          sql,
+          /from rule\b/,
+          "the mandatory batch must not absorb the intentionally fail-soft proposed-rule read",
+        );
+        return {
+          rows: [
+            {
+              all_rules: RULES,
+              action_required: [{ number: 9, title: "Act", body: "Do it", owner: "joe" }],
+              doctrine_generation: 1165,
+            },
+          ],
+        };
+      }
+      if (/from rule\s+where status = 'proposed'/.test(sql)) {
+        assert.match(
+          sql,
+          /personal_to =\s*retrieval_visibility_actor_id\(\$1\)/,
+          "the sponsor slug must resolve through the read-safe UUID function",
+        );
+        throw Object.assign(new Error("permission denied for table rule"), { code: "42501" });
+      }
+      if (/v_guidance_registry_state/.test(sql)) return { rows: [] };
+      if (/with registry as/.test(sql)) {
+        return {
+          rows: [
+            {
+              mode: "shadow",
+              map_versions: 1,
+              map_digest: "d".repeat(64),
+              tagged_rules: 1,
+              delivery_plan: [
+                {
+                  short_id: "1fddcffb",
+                  load_layer: "layer0",
+                  packs: [],
+                  scope: "shared",
+                  selected: true,
+                },
+              ],
+              pack_index: [],
+            },
+          ],
+        };
+      }
+      if (/from v_defect_class/.test(sql)) return { rows: [] };
+      throw new Error(`unexpected standalone standing-context query: ${sql}`);
+    },
+  };
+}
+
+test("standing-context batches stable baseline reads without changing its payload", async () => {
+  const c = client();
+  const out = await executeRegisteredTool(c, ACTOR, "standing-context", {});
+
+  assert.match(text(out.recite), /1 shared, 1 joe-personal/);
+  assert.equal(array(out.action_required).length, 1);
+  assert.equal(
+    out.awaiting_activation,
+    undefined,
+    "a denied proposed-rule read stays fail-soft instead of killing standing-context",
+  );
+  assert.equal(record(out.doctrine).generation, 1165);
+  assert.equal(c.calls.filter((sql) => /standing-context:baseline-batch/.test(sql)).length, 1);
+  assert.equal(
+    c.calls.some((sql) => /from loop_item/.test(sql) && !/standing-context:baseline-batch/.test(sql)),
+    false,
+  );
+  assert.equal(
+    c.calls.filter(
+      (sql) => /from rule\s+where status = 'proposed'/.test(sql) && !/standing-context:baseline-batch/.test(sql),
+    ).length,
+    1,
+  );
+  assert.equal(
+    c.calls.some((sql) => /from doctrine_meta/.test(sql) && !/standing-context:baseline-batch/.test(sql)),
+    false,
+  );
+  assert.equal(
+    c.calls.length,
+    3,
+    "baseline, fail-soft proposals, and the optional guidance/delivery snapshot are the inactive path",
+  );
+});
+
+test("standing-context launches independent snapshot reads concurrently", async () => {
+  let release: () => void = () => {
+    throw new Error("Gate not initialized");
+  };
+  let timedOut = false;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Set();
+  const timer = setTimeout(() => {
+    timedOut = true;
+    release();
+  }, 100);
+  const c = {
+    query: async (sql: string, _params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> => {
+      const marker = /standing-context:baseline-batch/.test(sql)
+        ? "baseline"
+        : /v_guidance_registry_state/.test(sql)
+          ? "registry"
+          : /from rule\s+where status = 'proposed'/.test(sql)
+            ? "proposed"
+            : "unexpected";
+      started.add(marker);
+      if (started.size === 3) release();
+      await gate;
+      if (marker === "baseline")
+        return {
+          rows: [
+            {
+              all_rules: RULES,
+              action_required: [],
+              doctrine_generation: 1165,
+            },
+          ],
+        };
+      if (marker === "registry") return { rows: [] };
+      if (marker === "proposed") {
+        throw Object.assign(new Error("permission denied for table rule"), { code: "42501" });
+      }
+      throw new Error(`unexpected standing-context query: ${sql}`);
+    },
+  };
+
+  const out = await executeRegisteredTool(c, { ...ACTOR }, "standing-context", {});
+  clearTimeout(timer);
+  assert.equal(timedOut, false, "independent reads must all start before any one network round trip completes");
+  assert.deepEqual([...started].sort(), ["baseline", "proposed", "registry"]);
+  assert.match(text(out.recite), /1 shared, 1 joe-personal/);
+});
+
+test("standing-context distinguishes scoped retired rules from truly missing requested IDs", async () => {
+  const c = client();
+  const baselineQuery = c.query;
+  const lookups: unknown[][] = [];
+  c.query = async (sql, params = []) => {
+    if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
+    lookups.push(params);
+    assert.match(sql, /status = 'retired'/);
+    assert.match(sql, /from v_rule_lookup\b/);
+    assert.doesNotMatch(sql, /from rule\b/);
+    assert.match(sql, /personal_to is null or \(\$1::text is not null and personal_to = \$1\)/);
+    return { rows: [{ short_id: "0f38532e" }] };
+  };
+
+  const out = await executeRegisteredTool(c, ACTOR, "standing-context", {
+    rule_ids: ["1fddcffb", "0f38532e", "deadbeef"],
+  });
+
+  assert.deepEqual(lookups, [["joe", ["0f38532e", "deadbeef"]]]);
+  assert.deepEqual(out.rule_ids_retired, ["0f38532e"]);
+  assert.deepEqual(out.rule_ids_not_found, ["deadbeef"]);
+  assert.equal(
+    array(out.shared_rules).some((rule) => record(rule).id === "1fddcffb"),
+    true,
+  );
+});
+
+test("standing-context does not inspect retired rows when requested rules are active", async () => {
+  const c = client();
+  const out = await executeRegisteredTool(c, ACTOR, "standing-context", {
+    rule_ids: ["1fddcffb"],
+  });
+  assert.equal(c.calls.length, 3);
+  assert.equal(out.rule_ids_retired, undefined);
+  assert.equal(out.rule_ids_not_found, undefined);
+});
+
+test("standing-context retirement lookups cannot select a personal sponsor for an unsponsored runtime", async () => {
+  const c = client();
+  const baselineQuery = c.query;
+  c.query = async (sql, params = []) => {
+    if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
+    assert.equal(params[0], null);
+    return { rows: [] };
+  };
+  const bare = { ...ACTOR, slug: "smoke-probe", human: false, probe: true, via: "probe-token" };
+  const out = await executeRegisteredTool(c, bare, "standing-context", { rule_ids: ["0f38532e"] });
+  assert.equal(out.rule_ids_retired, undefined);
+  assert.deepEqual(out.rule_ids_not_found, ["0f38532e"]);
+});
+
+test("standing-context fails closed when requested retirement status cannot be read", async () => {
+  const c = client();
+  const baselineQuery = c.query;
+  c.query = async (sql, params = []) => {
+    if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
+    throw Object.assign(new Error("permission denied for table rule"), { code: "42501" });
+  };
+  await assert.rejects(
+    executeRegisteredTool(c, ACTOR, "standing-context", { rule_ids: ["0f38532e"] }),
+    /database_refused_the_statement/,
+  );
+});

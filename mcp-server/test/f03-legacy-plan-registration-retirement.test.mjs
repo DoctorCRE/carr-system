@@ -1,5 +1,5 @@
 // Test retirement of legacy plan registration while preserving reads.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 // V5-F03: new engineering-slice-plan.v1 registrations are retired at the
 // registration doors only (migration 0616 and the register-engineering-slice-plan
 // handler).  Stored v1 plans keep the read path requirePlan has always given them.
