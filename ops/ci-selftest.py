@@ -1330,7 +1330,7 @@ def test_push_floor_defers_the_gates_class_instead_of_running_it():
     check("naming a deferred gate is not itself a failure", rc == 0, f"rc={rc}")
 
 def test_push_floor_distinguishes_imported_main_paths_from_branch_changes():
-    inherited_name = "mcp-server/test/doctorcre-v5-review.test.mjs"
+    inherited_name = "mcp-server/test/doctorcre-frozen-review.test.ts"
     inherited_gate = "hooks/zz-ci-fixture-inherited-gate.py"
     with _stub_git_answering_the_floor(
             [inherited_name, inherited_gate, FIXTURE_GATE],
