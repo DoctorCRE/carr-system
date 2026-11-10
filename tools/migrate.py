@@ -87,6 +87,17 @@ from migration_number_contract import (
 # must be the same code, and an environment nobody can rebuild is not the same
 # code).
 DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
+    "1171_retire_stale_deploy_controls.sql": (
+        "select 1 where not exists (select 1 from ops.rule_control_binding "
+        "where control_key = any(array['completion_evidence','conduct_stop',"
+        "'delegation_tripwire','executor_tier'])) "
+        "and not exists (select 1 from ops.rule_approval_receipt ar "
+        "join rule r on r.id=ar.rule_id and r.status='active' "
+        "where ar.requested_control_keys && array['completion_evidence','conduct_stop',"
+        "'delegation_tripwire','executor_tier'])",
+        "retired control identities still have historical dependencies; the reviewed "
+        "catalog declares them unavailable and preserves bindings and approval receipts",
+    ),
     "0248_register_conduct_stop_control.sql": (
         "select 1 from rule where id = '3fa422b7-7c99-49fc-8e22-1e551a975c6f'",
         "0272 registers the conduct-stop control from ops/config/rule-enforcement-map.json "

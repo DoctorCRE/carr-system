@@ -1,7 +1,7 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
-import { installFocusedFutureWorkStore } from './helpers/focused-future-work-store.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
+import { installFocusedFutureWorkStore } from './helpers/focused-future-work-store.ts';
 // Test feature switch reads and scheduled health on PostgreSQL.
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';

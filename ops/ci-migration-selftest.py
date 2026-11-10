@@ -116,9 +116,21 @@ class MigrationTests(unittest.TestCase):
             with self.subTest(part=part):
                 result, trace = self.run_ci(part)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                digest = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
+                closure = [row for row in trace if 'ops/migration-depth1.py' in row['argv']]
+                self.assertEqual(len(closure), int(part in ('all', 'core', 'proofs')))
+                if closure:
+                    self.assertEqual(closure[0]['argv'], ['python3', 'ops/migration-depth1.py'])
+                preserved = [row for row in trace if row not in closure]
+                digest = hashlib.sha256(json.dumps(preserved, sort_keys=True).encode()).hexdigest()
                 self.assertEqual(digest, expected, json.dumps(trace))
                 self.assertIn("CI passed — every class green", result.stdout)
+
+    def test_depth_one_failure_refuses_before_baseline_and_database_work(self):
+        result, trace = self.run_ci('proofs', FAIL_PROGRAM='migration-depth1.py')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('fresh depth-1 migration acceptance failed', result.stdout)
+        self.assertEqual(len(trace), 2)
+        self.assertEqual(trace[-1]['argv'], ['python3', 'ops/migration-depth1.py'])
 
     def test_core_and_fixtures_run_all_exactly_once(self):
         # The main canary runs these two halves in parallel in place of all.
@@ -165,6 +177,7 @@ class MigrationTests(unittest.TestCase):
     def test_empty_shard_setting_keeps_three_shards(self):
         result, trace = self.run_ci("proofs", CARR_DOT_PROOF_SHARDS="")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        trace = [row for row in trace if 'ops/migration-depth1.py' not in row['argv']]
         digest = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
         self.assertEqual(digest, BASELINES["proofs"])
 
