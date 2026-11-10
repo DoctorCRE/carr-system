@@ -222,6 +222,66 @@ class RegistryConflictTests(unittest.TestCase):
     def regen(self):
         return self.command('zsh', 'run.sh', 'regen', 'registry', check=False)
 
+    def retired_conflict(self, *, current_conflict=False, deleted_stage=2):
+        retired = str(Path(REGISTRY).with_suffix('.js'))
+        if not current_conflict:
+            current = self.git('show', f':2:{REGISTRY}').stdout
+            (self.repo / REGISTRY).write_text(current)
+            self.git('add', REGISTRY)
+        content = 'export const retired = "generated fixture";\n'
+        (self.repo / retired).write_text(content)
+        blob = self.command('git', 'hash-object', '-w', '--stdin', input=content).stdout.strip()
+        entries = ''.join(f'100644 {blob} {stage}\t{retired}\n'
+                          for stage in (1, 3 if deleted_stage == 2 else 2))
+        self.command('git', 'update-index', '--index-info', input=entries)
+        return retired
+
+    def test_retired_modify_delete_conflict_regenerates_current_registry(self):
+        retired = self.retired_conflict()
+        result = self.regen()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.repo / retired).exists())
+        self.assertEqual(self.git('ls-files', retired).stdout, '')
+        self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout, '')
+        output = (self.repo / REGISTRY).read_text()
+        for name in ('wr491-a', 'wr491-b'):
+            self.assertIn(f'"{name}"', output)
+        self.command('node', 'ops/scac-mutation-inventory.ts')
+
+    def test_retired_conflict_resolves_with_current_registry_conflict(self):
+        retired = self.retired_conflict(current_conflict=True, deleted_stage=3)
+        result = self.regen()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.repo / retired).exists())
+        self.assertEqual(self.git('diff', '--name-only', '--diff-filter=U').stdout, '')
+
+    def test_retired_conflict_is_preserved_when_generation_fails(self):
+        retired = self.retired_conflict()
+        original = (self.repo / REGISTRY).read_bytes()
+        old = (self.repo / retired).read_bytes()
+        before = self.git('ls-files', '--stage').stdout
+        (self.repo / 'mcp-server/src/fixture-b.js').write_text('invalid javascript !\n')
+        result = self.regen()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SyntaxError', result.stderr)
+        self.assertEqual((self.repo / REGISTRY).read_bytes(), original)
+        self.assertEqual((self.repo / retired).read_bytes(), old)
+        self.assertEqual(self.git('ls-files', '--stage').stdout, before)
+
+    def test_retired_conflict_does_not_allow_source_conflict(self):
+        retired = self.retired_conflict()
+        source = 'mcp-server/src/fixture-b.js'
+        blob = self.git('rev-parse', f'HEAD:{source}').stdout.strip()
+        entries = f'0 {"0" * 40}\t{source}\n'
+        entries += ''.join(f'100644 {blob} {stage}\t{source}\n' for stage in (1, 2, 3))
+        self.command('git', 'update-index', '--index-info', input=entries)
+        before = self.git('ls-files', '--stage').stdout
+        result = self.regen()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('resolve source conflicts', result.stderr)
+        self.assertTrue((self.repo / retired).exists())
+        self.assertEqual(self.git('ls-files', '--stage').stdout, before)
+
     def test_merge_regenerates_both_verbs_and_preserves_sealed_metadata(self):
         ours = self.git('show', f':2:{REGISTRY}').stdout
         result = self.regen()
