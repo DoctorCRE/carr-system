@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // salesforce-read-run-store-rw02-postgres.test.mjs — migration 0733 on REAL
 // PostgreSQL: the attended-run ledger and its reset, the clean-after-stop

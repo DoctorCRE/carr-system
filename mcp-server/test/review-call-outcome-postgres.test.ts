@@ -25,7 +25,7 @@ async function executeRegisteredTool(client: pg.Client, identity: Actor, verb: s
 const TOOLS = object(legacy.TOOLS);
 
 import { publicError } from "../src/public-errors.ts";
-import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
 let fixture: Awaited<ReturnType<typeof acquireDisposablePostgres>>, db: pg.Client, actor: Actor;
 before(async () => {

@@ -74,7 +74,7 @@ class RunnerBaselineTests(unittest.TestCase):
         self.assertEqual(selected, [])
         self.assertEqual(held, [self.suffix])
 
-    def test_complete_production_shape_is_a_read_only_no_op(self):
+    def test_complete_ledger_installs_projection_even_without_pending_sql(self):
         class Connection:
             def __init__(self, applied):
                 self.info = types.SimpleNamespace(host='localhost')
@@ -92,6 +92,9 @@ class RunnerBaselineTests(unittest.TestCase):
             with patch.dict(sys.modules, psycopg=types.SimpleNamespace(connect=lambda url: conn)), \
                     patch.dict(os.environ, DATABASE_URL='postgresql://localhost/carr_test'), \
                     patch.object(sys, 'argv', ['migrate.py', '--apply', '--yes']), \
+                    patch.object(migrate, 'install_control_catalog') as install, \
+                    patch.object(migrate, 'load_control_catalog', return_value=types.SimpleNamespace(
+                        source_revision=lambda: 'a' * 40)), \
                     patch.object(migrate, 'load_migrations', return_value=[]), \
                     patch.object(migrate, 'load_baseline', return_value=self.baseline), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -99,6 +102,9 @@ class RunnerBaselineTests(unittest.TestCase):
                     with self.assertRaises(SystemExit): migrate.main()
                 else:
                     migrate.main()
+            self.assertEqual(install.call_count, 0 if refuses else 1)
+            if not refuses:
+                install.assert_called_once_with(conn, 'a' * 40)
             self.assertEqual(conn.statements, ["select to_regclass('schema_migrations')",
                                                'select filename, sha256 from schema_migrations'])
 

@@ -1,0 +1,12 @@
+{
+  "node": [
+    "bin/measure-tour-map-route.ts",
+    "src/tour-map-route-state.ts",
+    "test/tour-map-route-state.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "bin/measure-tour-map-route.ts",
+    "test/tour-map-route-state.test.ts"
+  ]
+}
