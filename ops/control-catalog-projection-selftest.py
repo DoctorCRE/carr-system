@@ -67,6 +67,41 @@ class SuiteClassificationTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get('CARR_LOCAL_PG_DSN'), 'requires disposable PostgreSQL fixture')
 class ProjectionDatabaseTests(unittest.TestCase):
+    def test_full_apply_retires_legacy_controls_before_projection(self):
+        import psycopg
+        dsn = os.environ['CARR_LOCAL_PG_DSN']
+        legacy = ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier')
+        with psycopg.connect(dsn) as conn:
+            for key in legacy:
+                conn.execute("insert into ops.enforcement_control_catalog "
+                             "(control_key, implementation_ref, test_ref, enforcement_class, installed) "
+                             "values (%s, 'deleted-hook.py', 'deleted-test.py', 'surfacing', false)", (key,))
+            conn.commit()
+            try:
+                result = subprocess.run([sys.executable, 'tools/migrate.py', '--apply', '--yes'],
+                    cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
+                    capture_output=True, text=True, timeout=180)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('control-catalog-projection:', result.stdout)
+                self.assertEqual(conn.execute("select control_key from ops.enforcement_control_catalog "
+                    "where control_key = any(%s)", (list(legacy),)).fetchall(), [])
+                conn.commit()
+                conn.execute("insert into ops.enforcement_control_catalog "
+                             "(control_key, implementation_ref, test_ref, enforcement_class, installed) "
+                             "values ('unknown-probe', 'unknown.py', 'unknown-test.py', 'surfacing', false)")
+                conn.commit()
+                with patch.object(catalog, 'source_revision', return_value='fixture'):
+                    with self.assertRaisesRegex(catalog.CatalogError, 'unknown-probe'):
+                        catalog.install_projection(conn, 'fixture')
+                conn.rollback()
+                self.assertIsNotNone(conn.execute("select 1 from ops.enforcement_control_catalog "
+                                                 "where control_key='unknown-probe'").fetchone())
+            finally:
+                conn.rollback()
+                conn.execute("delete from ops.enforcement_control_catalog where control_key = any(%s)",
+                             (list(legacy) + ['unknown-probe'],))
+                conn.commit()
+
     def test_atomic_install_idempotence_and_readonly_refusals(self):
         import psycopg
         dsn = os.environ['CARR_LOCAL_PG_DSN']
