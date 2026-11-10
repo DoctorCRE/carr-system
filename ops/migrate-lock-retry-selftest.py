@@ -86,6 +86,7 @@ class LockRetryTests(unittest.TestCase):
         with patch.dict(sys.modules, psycopg=driver), \
                 patch.dict('os.environ', DATABASE_URL='postgresql://localhost/synthetic'), \
                 patch.object(sys, 'argv', ['migrate.py', '--apply', '--yes']), \
+                patch.object(migrate, 'install_control_catalog'), \
                 patch.object(migrate, 'load_migrations', return_value=migrations), \
                 patch.object(migrate, 'load_baseline', return_value=BASELINE), \
                 patch.object(migrate, 'ATOMIC_MIGRATION_GROUPS', ((MIGRATIONS[1][0], MIGRATIONS[2][0]),)), \

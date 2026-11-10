@@ -52,7 +52,7 @@ No workflow needs a generation step to make a runtime import resolve.
 | `backup-nightly.yml` | Backup/status Python and shell entry points; no local tools import identified. No backup, restore, send or production operation was executed. |
 | Worker runtime | `src/index.js`, `src/mcp.js`, `src/release.js`, `src/dealroom-web.js`, `src/atlas-inventory-graph.v5.js` import tools directly. Wrangler bundles their static graph. |
 | Studio/MacBook local CLI | `run.sh` -> `tools/call-verb.py` -> `mcp-server/local-verb.mjs`. Its normal HTTPS path is zero-install; its explicit break-glass loader imports tools. Both retain their existing authority checks. Fresh-clone schema read was exercised on this host; no remote machine execution is claimed. |
-| Local tests and types | `mcp-server/run-tests.mjs`, all MCP test modules/helpers, `generate-verb-types.ts`, npm test/typecheck; no prepare hook rewrites source. |
+| Local tests and types | `mcp-server/run-tests.mjs`, all MCP test modules/helpers, `generate-verb-types.ts`, `generate-worker-types.ts`, npm test/typecheck; no prepare hook rewrites source. |
 | Verb count and archived checkout comparison | `ops/verb-count.sh`, `ops/verb-loss-vs-base.sh`, `ops/verb-loss-guard-selftest.py`; committed source is imported with the established dependency symlink topology. No scratch regeneration helper remains. |
 | Release verification | `ops/release-smoke.py` imports the exact candidate `src/tools.js` for its expected tool inventory. |
 | Other direct import selftests | `ops/catchup-writer-selftest.py`, `ops/routine-leads-selftest.py`, `ops/schema-reconstruction-selftest.py`. |

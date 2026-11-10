@@ -20,7 +20,7 @@ const { header, value, refusal } = marker;
 
 export function createServer(listener: RequestListener) {
   return httpServer((req, res) => {
-    if (new URL(req.url ?? "/", "http://fixture.invalid").pathname === "/release" && req.headers[header] !== value) {
+    if (req.headers[header] !== value) {
       res.writeHead(403, { "content-type": "text/plain" });
       res.end(refusal);
       return;
