@@ -666,7 +666,6 @@
     "mcp-server/test/workspace-command-center-web.test.mjs",
     "mcp-server/test/workspace-surface-inventory.test.mjs",
     "mcp-server/test/write-reconciliation.test.mjs",
-    "mcp-server/type-tests/verb-requests.js",
     "mcp-server/uptime-worker.js",
     "ops/runtime-error-watch.mjs",
     "ops/scac-mutation-inventory.mjs",
