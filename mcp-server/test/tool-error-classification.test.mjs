@@ -265,8 +265,8 @@ function walk(node, visit, ancestors = []) {
   }
 }
 
-// This inventories tools.js only. It passes ToolError to other modules whose codes
-// are not inventoried, and an aliased constructor (const E = ToolError) is missed.
+// Inventory tools.js and its extracted input helpers. Other modules and aliased
+// constructors (const E = ToolError) remain outside this inventory.
 function codesIn(source) {
   const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const codes = new Set();
