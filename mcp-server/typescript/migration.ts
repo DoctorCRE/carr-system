@@ -39,7 +39,7 @@ function strings(value: unknown, file: string, field: string): string[] {
   return value;
 }
 
-export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json"];
+export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json", "tsconfig.node-compat.json"];
 
 function compilerOptions(pkg: string, path: string): Record<string, unknown> {
   let parsed: unknown;
@@ -96,7 +96,6 @@ function compilerOptions(pkg: string, path: string): Record<string, unknown> {
       `Set ${flag}=true in the effective config, including inherited overrides.`,
     );
   for (const flag of [
-    "noEmit",
     "allowImportingTsExtensions",
     "erasableSyntaxOnly",
     "verbatimModuleSyntax",
@@ -118,6 +117,14 @@ function compilerOptions(pkg: string, path: string): Record<string, unknown> {
       `${flag} suppresses diagnostics`,
       `Remove ${flag}=true from the effective config, including inherited overrides.`,
     );
+  requireRule(
+    path === "tsconfig.node-compat.json"
+      ? options.noEmit === false && options.emitDeclarationOnly === true && options.composite === true
+      : options.noEmit === true,
+    path,
+    "noEmit may be false only for composite node-compat emitDeclarationOnly",
+    "Keep normal projects noEmit and node-compat composite with emitDeclarationOnly.",
+  );
   return options;
 }
 
@@ -143,7 +150,9 @@ export function projects(pkg: string): string[] {
   return projectPaths.flatMap((path) => {
     const config = object(resolve(pkg, path));
     compilerOptions(pkg, path);
-    return strings(config.files, path, "files").map((file) => resolve(pkg, file));
+    return strings(config.files, path, "files")
+      .filter((file) => !file.startsWith(".generated/"))
+      .map((file) => resolve(pkg, file));
   });
 }
 

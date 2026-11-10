@@ -40,3 +40,25 @@ into one independent fragment, then regenerates the ignored tool inputs.
 Keep main's migration inventory, duration table and Fallow historical baseline.
 Remove the old tracked generated configs from the index. Resolve actual source
 conflicts individually, then rerun the normal checks before committing.
+
+## Node-compatible libraries in Workers
+
+Admit a library that imports Node builtins under `node_compat`. The generator
+builds a composite declaration-only project with official `@types/node` and
+ES globals. Both Worker compilers reference its emitted public interface,
+with source redirects disabled. Export platform-neutral types such as `unknown`,
+strings and structured values. A public Node type would import Node declarations
+back into Worker consumers and must be removed from the public interface.
+
+Worker admissions use Wrangler's runtime-only declarations, generated beside
+PR 3100's full legacy Env declarations. They have no DOM or Node ambient types.
+The full legacy compiler retains its generated Env and verb contracts. Neither
+output is edited or patched. Run `npm run typecheck` before `check:staged` to
+regenerate declarations. The empty declaration root keeps the composite project
+valid before its first library is admitted.
+
+For example, the artifact-trust conversion can admit `src/artifact-trust.ts`
+under `node_compat`. Its public digest takes `unknown` and returns a string,
+so Worker consumers do not load Node's Buffer or crypto globals. Deployment
+still uses the existing `nodejs_compat` flag. This compiler split does not
+promise that every Node builtin is implemented by Workers.
