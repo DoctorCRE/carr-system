@@ -386,7 +386,7 @@ class ProofTests(unittest.TestCase):
                 program = ("import sys; from pathlib import Path; "
                            "sys.path.insert(0, sys.argv[1]); import migrate; "
                            "migrate.MIGRATIONS_DIR=Path(sys.argv[2])/'migrations'; "
-                           "sys.argv=['migrate.py','--apply','--yes']; migrate.main()")
+                           "sys.argv=['migrate.py','--apply','--yes','--through',migrate.load_baseline().cutoff]; migrate.main()")
                 output = proof.checked([sys.executable, '-c', program, ROOT / 'tools', repo],
                     dict(PATH=os.environ.get('PATH', ''), DATABASE_URL=dsn,
                          PGOPTIONS='-c default_transaction_read_only=on'), 'read-only compacted runner fixture')

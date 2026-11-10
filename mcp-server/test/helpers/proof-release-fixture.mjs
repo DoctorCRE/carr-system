@@ -5,8 +5,7 @@ const marker = JSON.parse(readFileSync(new URL('../../../lib/release-reader-mark
 
 export function createServer(listener) {
   return httpServer((req, res) => {
-    if (new URL(req.url, 'http://fixture.invalid').pathname === '/release'
-      && req.headers[marker.header] !== marker.value) {
+    if (req.headers[marker.header] !== marker.value) {
       res.writeHead(403, { 'content-type': 'text/plain' });
       res.end(marker.refusal);
       return;
