@@ -471,13 +471,16 @@ test("migration admission binds PR, queue and local checks to their own base", (
       declaredBase: string = base,
       sha: string = candidate,
       overrides: NodeJS.ProcessEnv = {},
+      prHead: string = topic,
     ) => {
       writeFileSync(
         eventPath,
         JSON.stringify(
           mode === "pull_request"
-            ? { pull_request: { base: { sha: declaredBase } } }
-            : { merge_group: { base_sha: declaredBase, head_sha: sha } },
+            ? { pull_request: { base: { sha: declaredBase }, head: { sha: prHead } } }
+            : mode === "push"
+              ? { before: declaredBase, after: sha }
+              : { merge_group: { base_sha: declaredBase, head_sha: sha } },
         ),
       );
       return spawnSync(
@@ -531,12 +534,63 @@ test("migration admission binds PR, queue and local checks to their own base", (
       assert.notEqual(run(mode, base, newer).status, 0);
     }
     git("checkout", "-q", "--detach", newer);
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "merge",
+      "--no-ff",
+      "-qm",
+      "merge after event base advanced",
+      topic,
+    );
+    const movedCandidate = git("rev-parse", "HEAD");
+    writeFileSync(join(root, js), "export const resurrected = 1;\n");
+    const moved = run("pull_request", base, movedCandidate);
+    assert.equal(moved.status, 1, moved.stderr);
+    assert.doesNotMatch(moved.stderr, /refusing staged check/);
+    assert.match(moved.stdout, new RegExp(`Legacy migration baseline ${newer}`));
+    assert.match(moved.stdout, /New first-party JavaScript.*legacy.js/);
+    rmSync(join(root, js));
+    const unchanged = run("pull_request", base, movedCandidate);
+    assert.equal(unchanged.status, 0, unchanged.stderr);
+    const wrongHead = run("pull_request", base, movedCandidate, {}, newer);
+    assert.notEqual(wrongHead.status, 0);
+    const shallow = join(root, "shallow");
+    git("clone", "-q", "--depth=1", `file://${root}`, shallow);
+    assert.throws(
+      () =>
+        migrationIssues(join(shallow, "mcp-server"), [], {
+          GITHUB_EVENT_NAME: "pull_request",
+          GITHUB_EVENT_PATH: eventPath,
+          GITHUB_SHA: movedCandidate,
+        }),
+      /refusing staged check/,
+    );
+    rmSync(shallow, { recursive: true, force: true });
+    git("checkout", "-q", "--detach", newer);
     writeFileSync(join(root, js), "export const resurrected = 1;\n");
     git("add", js);
     const queueCandidate = commit("queue candidate resurrects converted JavaScript");
     const resurrection = run("merge_group", newer, queueCandidate);
     assert.equal(resurrection.status, 1, resurrection.stderr);
     assert.match(resurrection.stdout, /New first-party JavaScript.*legacy.js/);
+    const pushed = run("push", newer, queueCandidate);
+    assert.equal(pushed.status, 1, pushed.stderr);
+    assert.match(pushed.stdout, /New first-party JavaScript.*legacy.js/);
+    assert.match(pushed.stdout, new RegExp(`Legacy migration baseline ${newer}`));
+    assert.notEqual(run("push", topic, queueCandidate).status, 0);
+    assert.notEqual(run("push", queueCandidate, queueCandidate).status, 0);
+    for (const badBase of ["", "origin/main", "f".repeat(40)])
+      assert.notEqual(run("push", badBase, queueCandidate).status, 0);
+    assert.notEqual(run("push", newer, topic).status, 0);
+    git("rm", "-q", js);
+    const cleanPush = commit("push converts legacy JavaScript");
+    assert.equal(run("push", newer, cleanPush).status, 0);
+    assert.equal(run("push", "0".repeat(40), cleanPush).status, 0);
+    git("update-ref", "refs/remotes/origin/main", cleanPush);
+    assert.notEqual(run("push", "0".repeat(40), cleanPush).status, 0);
     git("update-ref", "-d", "refs/remotes/origin/main");
     const absentLocal = run("local");
     assert.notEqual(absentLocal.status, 0);
