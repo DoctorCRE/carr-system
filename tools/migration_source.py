@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
+import stat
+import zipfile
 from functools import lru_cache
 import re
 import json
@@ -86,10 +90,7 @@ def read_migration(repo: Path, name: str, ref: str | None = None) -> str:
         elif ref is not None and name in _names(repo, ref):
             raw = _git(repo, 'show', f'{ref}:migrations/{name}')
         elif baseline is not None and name in covered:
-            try:
-                raw = _git(repo, 'show', f'{baseline.source_revision}:migrations/{name}')
-            except ValueError as exc:
-                raise ValueError(f'migration source: missing pinned Git source for {name}: {exc}') from exc
+            raw = _archive_member(repo, f'migrations/{name}', baseline, ref)
         else:
             raise ValueError(f'migration source: {name} is absent and not covered by a baseline')
         text = raw.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
@@ -98,6 +99,51 @@ def read_migration(repo: Path, name: str, ref: str | None = None) -> str:
     if name in covered and runner_sha256(text) != covered[name]:
         raise ValueError(f'migration source: checksum mismatch for {name}')
     return text
+
+
+ARCHIVE = 'db/migration-history.zip'
+MAX_MEMBER_BYTES = 64 * 1024 * 1024
+MAX_TOTAL_BYTES = 256 * 1024 * 1024
+
+
+def _archive_member(repo: Path, name: str, baseline: MigrationBaseline,
+                    ref: str | None) -> bytes:
+    try:
+        source = io.BytesIO(_git(repo, 'show', f'{ref}:{ARCHIVE}')) if ref else repo / ARCHIVE
+        with zipfile.ZipFile(source) as archive:
+            members = archive.infolist()
+            names = [member.filename for member in members]
+            allowed = {'db/schema.sql'} | {f'migrations/{n}' for n, _ in baseline.migrations}
+            if len(names) != len(set(names)) or not set(names) <= allowed:
+                raise ValueError('duplicate or unexpected archive entry')
+            if any(stat.S_ISLNK(member.external_attr >> 16) or
+                   member.file_size > MAX_MEMBER_BYTES for member in members):
+                raise ValueError('archive symlink or member size limit exceeded')
+            if sum(member.file_size for member in members) > MAX_TOTAL_BYTES:
+                raise ValueError('archive total size limit exceeded')
+            if name not in names:
+                raise ValueError(f'missing archive entry {name}')
+            raw = archive.read(name)
+            text = raw.decode('utf-8')
+            digest = (hashlib.sha256(raw).hexdigest() if name == 'db/schema.sql'
+                      else runner_sha256(text))
+            expected = (baseline.snapshot_sha256 if name == 'db/schema.sql'
+                        else dict(baseline.migrations)[Path(name).name])
+            if digest != expected:
+                label = 'snapshot' if name == 'db/schema.sql' else name
+                raise ValueError(f'checksum mismatch for {label}')
+            return raw
+    except (OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, ValueError) as exc:
+        raise ValueError(f'migration source: archive {ARCHIVE}: {exc}') from exc
+
+
+def read_baseline_snapshot(repo: Path, ref: str | None = None) -> bytes:
+    """Read the exact historical snapshot; its raw checksum is immutable."""
+    ref = _pin_ref(repo, ref)
+    baseline = _baseline(repo, ref)
+    if baseline is None:
+        raise ValueError('migration source: baseline manifest is missing')
+    return _archive_member(repo, 'db/schema.sql', baseline, ref)
 
 
 def main() -> int:

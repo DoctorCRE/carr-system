@@ -28,7 +28,7 @@ from typing import Mapping
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from migration_baseline import MANIFEST, MigrationBaseline  # noqa: E402
-from migration_source import migration_names, read_migration  # noqa: E402
+from migration_source import read_baseline_snapshot, migration_names, read_migration  # noqa: E402
 from migrate import validate_ledger_identities  # noqa: E402
 
 MIGRATIONS_DIR = "migrations"
@@ -320,16 +320,12 @@ def baseline_at(repo: pathlib.Path, ref: str) -> MigrationBaseline | None:
 
 
 def validate_baseline(repo: pathlib.Path, baseline: MigrationBaseline | None,
-                      previous: MigrationBaseline | None) -> None:
+                      previous: MigrationBaseline | None, ref: str | None = None) -> None:
     if previous is not None and baseline != previous:
         raise ValueError("migration baseline manifest is immutable once established")
     if baseline is None:
         return
-    if git(repo, "cat-file", "-t", baseline.source_revision).strip() != "commit":
-        raise ValueError("migration baseline source revision must name a commit")
-    source = read_blobs(repo, baseline.source_revision, [SNAPSHOT])[SNAPSHOT]
-    if hashlib.sha256(source.encode()).hexdigest() != baseline.snapshot_sha256:
-        raise ValueError("migration baseline source snapshot checksum differs")
+    source = read_baseline_snapshot(repo, ref).decode('utf-8')
     rows = ledger_rows(source)
     if rows is None:
         raise ValueError("migration baseline source snapshot has no complete ledger")
@@ -359,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
         fork = git(repo, "merge-base", base, head).strip()
         fork_names = migration_names(repo, fork)
         baseline = baseline_at(repo, head)
-        validate_baseline(repo, baseline, baseline_at(repo, base))
+        validate_baseline(repo, baseline, baseline_at(repo, base), head)
         paths = [path for path in git(repo, "ls-tree", "-r", "--name-only", head,
                                      "--", f"{MIGRATIONS_DIR}/").splitlines()
                  if path.count("/") == 1 and path.endswith(".sql")]

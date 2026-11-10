@@ -12,7 +12,7 @@ import {
   requiredTimestamp,
   snapshotCanonicalJsonValue,
   snapshotPublicValue,
-} from "./tour-operations-contract.js";
+} from "./tour-operations-contract.ts";
 import { clientSafeMetric, isClientSafeText } from "./tour-client-value-safety.ts";
 
 function clientValueSafe(fieldKey, value) {
