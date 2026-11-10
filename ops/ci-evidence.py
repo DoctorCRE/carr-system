@@ -55,7 +55,7 @@ def hosted_verdict(*, drift=False):
         return 1
     needs = json.loads(os.environ['CI_NEEDS'])
     fast = not drift and os.environ.get('CI_EVENT') == 'pull_request'
-    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'unit-coverage')
+    lanes = ('check',) if drift else ('scope', 'classes', 'migration-fixtures', 'unit')
     if fast:
         from ci import CLASS_DESCRIPTIONS
         from ci_scope import required_jobs
@@ -69,7 +69,7 @@ def hosted_verdict(*, drift=False):
         lanes = tuple(required_jobs(classes))
         for name in set(('lint', 'fast', 'gates', 'secret', 'unit', 'unit-coverage',
                          'launchd-python39', 'scope', 'classes', 'migration-fixtures')) - set(lanes):
-            if needs[name]['result'] != 'skipped':
+            if needs.get(name, {'result': 'skipped'})['result'] != 'skipped':
                 return 1
     results = {name: needs[name]['result'] for name in lanes}
     allowed = {name: {'success'} for name in lanes}
@@ -117,7 +117,7 @@ def contract_digest(root=ROOT):
 
 
 def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups, shard_count):
-    required = {'ops/ci.sh --strict', 'unit / plan', 'unit-coverage',
+    required = {'ops/ci.sh --strict', 'unit / plan',
                 *(f'unit / MCP unit shard {n} of {shard_count}' for n in range(1, shard_count + 1)),
                 *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}

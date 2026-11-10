@@ -36,7 +36,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             summary = pathlib.Path(directory) / 'summary'
             needs = {'scope': {'result': 'success', 'outputs': {'full': 'true'}},
-                     'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'},
+                     'unit': {'result': 'success'}, 'classes': {'result': 'success'},
                      'migration-fixtures': {'result': 'success'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_REPOSITORY='DoctorCRE/carr-system',
@@ -89,7 +89,7 @@ class HostedVerdict(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for fixtures, expected in (('false', 1), ('true', 1), ('', 1)):
                 needs = {'scope': {'result': 'success', 'outputs': {'full': 'true', 'fixtures': fixtures}},
-                         'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                         'unit': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
                 with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                                 GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                     self.assertEqual(evidence.hosted_verdict(), expected)
@@ -97,7 +97,7 @@ class HostedVerdict(unittest.TestCase):
     def test_failed_scope_cannot_authorize_skipping_fixtures(self):
         with tempfile.TemporaryDirectory() as directory:
             needs = {'scope': {'result': 'failure', 'outputs': {'full': 'false'}},
-                     'unit-coverage': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
+                     'unit': {'result': 'success'}, 'classes': {'result': 'success'}, 'migration-fixtures': {'result': 'skipped'}}
             with patch.dict(os.environ, CI_NEEDS=json.dumps(needs), CI_DRAFT='false',
                             GITHUB_STEP_SUMMARY=str(pathlib.Path(directory) / 'summary')):
                 self.assertEqual(evidence.hosted_verdict(), 1)
@@ -118,7 +118,7 @@ class HostedVerdict(unittest.TestCase):
             for full, classes, fixtures, draft, expected in cases:
                 with self.subTest(full=full, classes=classes, fixtures=fixtures, draft=draft):
                     needs = {'scope': {'result': 'success', 'outputs': {'full': full}},
-                             'unit-coverage': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
+                             'unit': {'result': 'success'}, 'classes': {'result': classes}, 'migration-fixtures': {'result': fixtures}}
                     result = subprocess.run([sys.executable, str(ROOT / 'ops/ci-evidence.py'), 'verdict'],
                         env={**os.environ, 'CI_NEEDS': json.dumps(needs), 'CI_DRAFT': str(draft).lower(),
                              'GITHUB_STEP_SUMMARY': str(pathlib.Path(directory) / 'summary')},
@@ -156,7 +156,7 @@ class Reuse(unittest.TestCase):
         self.assertTrue(self.eligible())
 
     def test_reuse_requires_every_mcp_shard_and_coverage(self):
-        proof_jobs = ['unit / plan', 'unit-coverage', *[f'unit / MCP unit shard {n} of {self.shard_count}' for n in range(1, self.shard_count + 1)]]
+        proof_jobs = ['unit / plan', 'ops/ci.sh --strict', *[f'unit / MCP unit shard {n} of {self.shard_count}' for n in range(1, self.shard_count + 1)]]
         self.assertTrue(self.eligible())
         for name in proof_jobs:
             for state in ('failure', 'cancelled', 'skipped', None):
