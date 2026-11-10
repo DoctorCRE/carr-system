@@ -160,3 +160,5 @@ output/
 /mcp-server/tsconfig.worker.json
 /mcp-server/knip.json
 /mcp-server/fallow-baselines/dead-code.json
+
+/mcp-server/tsconfig.node-compat.json

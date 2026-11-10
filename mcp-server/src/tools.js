@@ -71,7 +71,7 @@ import { workRequestIntakeTools } from "./work-request-intake.js";
 import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.ts";
 import { partnerRoomTools } from "./partner-room.js";
-import { agentProfileTools } from "./agent-profiles.js";
+import { agentProfileTools } from "./agent-profiles.ts";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { sessionCheckpointTools, SESSION_CHECKPOINT_VERBS } from './session-checkpoints.js';
@@ -84,7 +84,7 @@ import { derivedIdempotencyKey } from "./derived-key.ts";
 import { DURABLE_KEY_SHAPES, REPLAY_WINDOW, durableReceipt, replayReceipt } from "./replay-receipt.ts";
 import { emailNextStepTools } from "./email-next-step.ts";
 import { EMAIL_TOUCH_SCHEMA, emailTouchBinding, guardEmailTouch, emailTouchReader } from "./email-touch.js";
-import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.js";
+import { EMAIL_IDENTITY_SCHEMA, lockEmailIdentity, capturedEmail, guardEmailAction } from "./email-identity.ts";
 import { emailProposalTools, resolveEmailProposal } from "./email-proposals.js";
 import { clearTheDeckTools } from "./clear-the-deck.js";
 import { addCalendarMeetingPrep } from "./calendar-meeting-prep.js";
@@ -105,7 +105,7 @@ import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.ts";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
-import { automaticApplyHold } from "./call-auto-apply.js";
+import { automaticApplyHold } from "./call-auto-apply.ts";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { isPersonalRecordOwner } from "./personal-record-ownership.ts";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
@@ -9375,7 +9375,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "deal-document-text": "mcp-server/src/deal-document-text.ts",
   "fact-observations": "mcp-server/src/fact-observations.ts",
   "partner-room": "mcp-server/src/partner-room.js",
-  "agent-profile": "mcp-server/src/agent-profiles.js",
+  "agent-profile": "mcp-server/src/agent-profiles.ts",
   "client-portal": "mcp-server/src/client-portal.ts",
   "resource-observation": "mcp-server/src/resource-observation.v5.ts",
   "lead-automation": "mcp-server/src/lead-automation.js",

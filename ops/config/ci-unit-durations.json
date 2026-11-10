@@ -1,5 +1,6 @@
 {
   "m029_model_views_measurement": {"card": "WR622.S1.J652", "suite": "m029-model-views.test.ts", "local_samples_ms": [444], "basis": "Four characterization tests covering model labels and migration reader name/path/URL cache behavior. 500ms rounds above the standalone observed duration."},
+  "proof_cli_deadline_lifecycle_measurement": {"card": "WR622.S1.J745", "suite": "tools/test_proof_cli_deadline_lifecycle.py", "class": "gates", "command": ["python3", "tools/test_proof_cli_deadline_lifecycle.py"], "local_samples_ms": [5290], "basis": "Eight real CLI classifiers exercised in isolated children with deterministic setup, observation and queued teardown expiry; shared helper pass, assertion and programming-error cleanup. No database or network."},
   "migration_depth1_measurement": {"card": "WR622.S1.J706", "suite": "ops/migration-depth1-selftest.py", "class": "gates", "local_samples_ms": [3711], "basis": "Real depth-1 synthetic clone runs eight Node fixtures; historical-read and skip mutations refuse, local fixtures pass. Full real database acceptance remains in migration class."},
   "control_catalog_projection_suite_measurement": {"card": "WR622.S1.J628", "suite": "ops/control-catalog-projection-selftest.py", "class": "gates", "command": ["python3", "ops/control-catalog-projection-selftest.py"], "local_samples_ms": [873], "basis": "Four tests cover actual Node suite renames, excluded bindings, and a real fixture Git revision change. The database test is skipped in gates and runs in disposable-PG acceptance; its four-test fixture run passed in 4857ms separately."},
   "web_push_delivery_proof_measurement": {"card":"WR617.S1.J280","suite":"ops/web-push-delivery-proof-selftest.py","class":"gates","local_samples_ms":[2759,2878],"basis":"Seven offline CLI tests including contract validation, correlation refusals and self-contained release ancestry; no network."},
@@ -52,6 +53,7 @@
   "quiet_owner_proof_measurement": {"card": "WR647.S15.J4", "suite": "tools/test_prove_quiet_follow_up_owner_filter.py", "command": "python3 -m unittest discover -s tools -p test_prove_quiet_follow_up_owner_filter.py", "local_samples_ms": [674], "basis": "Five passing tests replay the committed real registered responses. No network or history dependency."},
   "watch_delivery_suite_measurement": {"real_driver_regression_ms":7461,"real_driver_regression_card":"WR617.S1.J232","card":"WR617.S1.J139","command":"CARR_CI_UNIT_SUITES selected watch suites via mcp-server/run-tests.mjs","canonical_samples_ms":{"subject-watch-v2-postgres.test.mjs":[11344],"subject-watch-v2.test.mjs":[1851],"subject-watches-postgres.test.mjs":[2675]},"snapshot_setup_ms":17612,"basis":"Delivery, scheduler and proof cases share the existing watch suites and one database fixture. This removes additional serial snapshot startup while preserving the existing watchdog and headroom. Existing PostgreSQL weight remains above the measured consolidated suite; parser/unit weight rounds above its measured 12 tests. Synthetic loads check exact counts, not production capacity."},
   "suites": {
+    "artifact-trust-characterization.test.ts": {"milliseconds": 166, "serial": false},
     "unread-fix-map.test.ts": {"milliseconds": 510, "serial": false, "local_samples_ms": [126.365166, 254], "card": "WR622.S1.J705"},
     "web-push-outbox-postgres.test.ts": {"milliseconds": 60000, "serial": true, "local_samples_ms": [55395, 51507], "card": "WR617.S1.J269"},
     "web-push-sender.test.ts": {"milliseconds": 300, "serial": false, "local_samples_ms": [150], "card": "WR617.S1.J269"},
@@ -346,6 +348,7 @@
     "phone-call-sessions.test.mjs": {"milliseconds": 1419, "serial": false},
     "portal-migration-runtime.test.mjs": {"milliseconds": 12380, "serial": false},
     "portal-parity-browser.test.mjs": {"milliseconds": 52736, "serial": true},
+    "portal-parity-probes.test.ts": {"milliseconds": 220, "serial": false},
     "portal-parity.test.mjs": {"milliseconds": 4830, "serial": false},
     "post-call-action-pairs.test.mjs": {"milliseconds": 20150, "serial": true},
     "post-call-contacts-postgres.test.mjs": {"milliseconds": 17126, "serial": true},

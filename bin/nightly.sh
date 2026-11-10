@@ -66,7 +66,7 @@ step "corpus push" ./.venv/bin/python tools/corpus-sync.py --push
 step "vendor level drift" ./.venv/bin/python ops/vendor-level-drift-check.py
 step "system costs" ./run.sh costs --publish --alerts
 step "health breach response" ./run.sh health --act
-step "runtime error intake" node ops/runtime-error-watch.mjs
+step "runtime error intake" node ops/runtime-error-watch.mts
 portability_root="${CARR_EXPORT_HOME:-$HOME/Library/CloudStorage/OneDrive-CARR,Inc/Joe's Folder/CARR AI}"
 step "portability mirror" env DATABASE_URL="$CARR_DB_EXPORTER_URL" .venv/bin/python pipelines/doctrine_mirror.py \
   --out "$portability_root/Backups/portability-mirror" --also "$HOME/carr-system/out/mirror"

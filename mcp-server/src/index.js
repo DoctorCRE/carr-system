@@ -107,7 +107,7 @@ import { createPhoneCallHandler, PHONE_STUDIO_PREFIX } from "./phone-call-sessio
 import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
 import { readCommandCenterSummary } from "./workspace-command-center.js";
-import { wrapWithCorrelation } from "./correlation.js";
+import { wrapWithCorrelation } from "./correlation.ts";
 import { publicError } from "./public-errors.ts";
 import { bearerCredential } from "./bearer.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";

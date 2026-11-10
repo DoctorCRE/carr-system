@@ -1,0 +1,24 @@
+{
+  "node": [
+    "src/agent-profiles.ts",
+    "src/calendar-scheduling.ts",
+    "src/call-auto-apply.ts",
+    "src/correlation.ts",
+    "src/email-identity.ts",
+    "test/agent-profiles.test.ts",
+    "test/call-auto-apply.test.ts",
+    "test/correlation.test.ts",
+    "test/email-identity.test.ts",
+    "test/vendor-meetings-calendar-scheduling.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "src/calendar-scheduling.ts",
+    "src/call-auto-apply.ts",
+    "test/agent-profiles.test.ts",
+    "test/call-auto-apply.test.ts",
+    "test/correlation.test.ts",
+    "test/email-identity.test.ts",
+    "test/vendor-meetings-calendar-scheduling.test.ts"
+  ]
+}

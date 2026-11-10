@@ -1,0 +1,10 @@
+{
+  "node": [
+    "../ops/runtime-error-watch.mts",
+    "test/runtime-error-watch-unit.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/runtime-error-watch-unit.test.ts"
+  ]
+}
