@@ -5,7 +5,7 @@ import { Validator } from '@cfworker/json-schema';
 import { executeRegisteredTool } from '../src/tools.js';
 import { buildActionCardRef, parseActionCardResponse } from '../src/action-card-targets.ts';
 import { buildActionLink } from '../src/action-links.js';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import pg from 'pg';
 import { publicError } from '../src/public-errors.ts';
 
