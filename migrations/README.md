@@ -63,6 +63,9 @@ historical snapshot's raw checksum. No historical Git object is needed.
 and the exact historical ledger offline. Its explicit `--generate` audit mode
 requires the pinned provenance commit and produces a deterministic minimal ZIP.
 When removing more covered SQL, regenerate the archive in the same PR.
+Publication binds the archive's exact path and SHA-256 in `security/allowlist.json`
+after provenance comparison. The leak-guard qualification rejects changed bytes
+and alternate paths. Regeneration therefore needs a new exact artifact binding.
 `python3 ops/migration-depth1.py` creates a depth-1 clone, installs locked
 dependencies, and requires the eight affected Node suites plus reconstruction
 to pass without skips. The canonical migration CI class owns this acceptance.
