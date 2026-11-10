@@ -44,8 +44,9 @@ ACCEPTANCE_ENV = {
 
 PROOFS = (
     Proof(
-        "mcp-server/test/tour-deal-access.test.mjs",
+        "mcp-server/test/tour-deal-access.test.ts",
         "Tour deal authorization and HTTP PostgreSQL acceptance failed",
+        log="tour-deal-access",
         env={"CARR_TOUR_DEAL_TEST_DATABASE_URL": "{dsn}"},
     ),
     Proof(
