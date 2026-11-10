@@ -1,0 +1,361 @@
+// Test BIGINT version handling in situation retrieval.
+
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function record(value: unknown): Record<string, unknown> {
+  assert.ok(isRecord(value), "Expected object");
+  return value;
+}
+
+const registry = record(await import(new URL("../src/tools.js", import.meta.url).href));
+const tools = record(registry.TOOLS);
+function registeredTool(name: string) {
+  const handler = record(tools[name]).handler;
+  assert.equal(typeof handler, "function");
+  if (typeof handler !== "function") throw new TypeError("Expected handler");
+  return { handler: async (...args: unknown[]) => record(await handler(...args)) };
+}
+const keys = record(await import(new URL("../src/derived-key.ts", import.meta.url).href));
+function derivedIdempotencyKey(namespace: string, value: string): string {
+  const derive = keys.derivedIdempotencyKey;
+  if (typeof derive !== "function") throw new TypeError("Expected key derivation");
+  const key: unknown = derive(namespace, value);
+  assert.equal(typeof key, "string");
+  if (typeof key !== "string") throw new TypeError("Expected key");
+  return key;
+}
+
+const actor = { id: "10000000-0000-4000-8000-000000000002", slug: "joe", human: true };
+const proposalId = "20000000-0000-4000-8000-000000000001";
+const approval = {
+  idempotency_key: "00000571-0000-4000-8000-000000000243",
+  proposal_ids: [proposalId],
+  base_versions: { [proposalId]: 2 },
+  golden_suite_digest: "synthetic-golden-suite",
+};
+
+type Row = Record<string, unknown>;
+type Receipt = { request_hash: unknown; response: Record<string, unknown> };
+class Database {
+  plan: Record<string, Row[] | ((params: string[]) => Row[])>;
+  receipts: Map<string | undefined, Receipt>;
+  promotions: number;
+  sideWrite?: (sql: string, params: unknown[]) => void;
+  constructor(plan: Database["plan"] = {}) {
+    this.plan = plan;
+    this.receipts = new Map();
+    this.promotions = 0;
+  }
+  async query(text: string, params: string[] = []) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.includes("select request_hash, response"))
+      return { rows: this.receipts.has(params[0]) ? [this.receipts.get(params[0])] : [] };
+    if (sql.includes("insert into tool_call")) {
+      this.receipts.set(params[0], { request_hash: params[3], response: record(JSON.parse(params[4] ?? "null")) });
+      return { rows: [] };
+    }
+    if (sql.includes("select promote_retrieval_proposal")) this.promotions++;
+    for (const [fragment, value] of Object.entries(this.plan))
+      if (sql.includes(fragment)) return { rows: typeof value === "function" ? value(params) : structuredClone(value) };
+    return { rows: [] };
+  }
+}
+
+function receipt(db: Database, key: string): Receipt {
+  const value = db.receipts.get(key);
+  assert.ok(value, "Expected recorded tool receipt");
+  return value;
+}
+
+test("retrieval approval refuses rounded BIGINT concurrency tokens without promotion", async () => {
+  const db = new Database({
+    "from retrieval_proposal": [{ id: proposalId, status: "pending", version: "9007199254740993" }],
+  });
+  await assert.rejects(
+    () =>
+      registeredTool("approve-retrieval-proposals").handler(db, actor, {
+        ...approval,
+        base_versions: { [proposalId]: 9007199254740992 },
+      }),
+    (error) => error instanceof ToolError && error.payload.error === "retrieval_base_version_invalid",
+  );
+  assert.equal(db.promotions, 0);
+});
+
+test("retrieval approval refuses unsafe or nonnumeric input versions before database use", async () => {
+  const db = {
+    query: async () => {
+      throw new Error("database must not be queried");
+    },
+  };
+  for (const version of [9007199254740992, "2", 0, -1, 1.5, null, undefined])
+    await assert.rejects(
+      () =>
+        registeredTool("approve-retrieval-proposals").handler(db, actor, {
+          ...approval,
+          base_versions: { [proposalId]: version },
+        }),
+      (error) => error instanceof ToolError && error.payload.error === "retrieval_base_version_invalid",
+    );
+});
+
+test("retrieval proposal versions round-trip through insertion and both replay paths into approval", async () => {
+  const proposals: [string, Record<string, unknown>][] = [
+    ["concept", { concept_key: "synthetic-concept", label: "Synthetic", definition: "Synthetic definition" }],
+    [
+      "phrase",
+      {
+        concept_key: "synthetic-concept",
+        phrase: "synthetic phrase",
+        match_mode: "exact",
+        weight: 1,
+        source: "manual",
+        source_ref: "synthetic",
+      },
+    ],
+    [
+      "mapping",
+      {
+        concept_key: "synthetic-concept",
+        section_address: "synthetic#section",
+        role: "supports",
+        weight: 1,
+        rationale: "Synthetic rationale",
+      },
+    ],
+    ["retirement", { target_type: "concept", target_id: proposalId, base_version: 1 }],
+  ];
+  for (const [version, expected] of [
+    ["2", 2],
+    ["9007199254740991", 9007199254740991],
+  ]) {
+    for (const [type, input] of proposals) {
+      let inserts = 0;
+      assert.ok(version !== undefined);
+      const row = { id: proposalId, proposal_type: type, status: "pending", version };
+      const db = new Database({
+        "insert into retrieval_proposal": () => (++inserts === 1 ? [row] : []),
+        "where idempotency_key=": [row],
+        "where id = any": [row],
+      });
+      const args = {
+        ...input,
+        reason: "Synthetic proposal",
+        idempotency_key: derivedIdempotencyKey("test", `proposal-${type}`),
+      };
+      const tool = registeredTool(`propose-retrieval-${type}`);
+      const inserted = await tool.handler(db, actor, args);
+      assert.equal(record(inserted.proposal).version, expected);
+      record(receipt(db, args.idempotency_key).response.proposal).version = version;
+      const replay = await tool.handler(db, actor, args);
+      assert.equal(replay.replayed, true);
+      assert.equal(record(replay.proposal).version, expected);
+      assert.equal(record(receipt(db, args.idempotency_key).response.proposal).version, version);
+      assert.equal(inserts, 1);
+      const rowReplay = await tool.handler(db, actor, {
+        ...args,
+        idempotency_key: derivedIdempotencyKey("test", `row-replay-${type}`),
+      });
+      assert.equal(rowReplay.replay, true);
+      assert.equal(record(rowReplay.proposal).version, expected);
+      const approved = await registeredTool("approve-retrieval-proposals").handler(db, actor, {
+        ...approval,
+        base_versions: { [proposalId]: record(rowReplay.proposal).version },
+      });
+      assert.equal(approved.ok, true);
+      assert.equal(db.promotions, 1);
+    }
+  }
+});
+
+test("retrieval retirement verbs refuse unsafe or nonnumeric base versions before database use", async () => {
+  const db = {
+    query: async () => {
+      throw new Error("database must not be queried");
+    },
+  };
+  for (const verb of ["propose-retrieval-retirement", "retire-retrieval-curation"])
+    for (const base_version of [9007199254740992, "2", 0, -1, 1.5, null, undefined])
+      await assert.rejects(
+        () =>
+          registeredTool(verb).handler(db, actor, {
+            idempotency_key: "00000571-0000-4000-8000-000000000244",
+            target_type: "concept",
+            target_id: proposalId,
+            reason: "Synthetic retirement",
+            golden_suite_digest: "synthetic",
+            base_version,
+          }),
+        (error) => error instanceof ToolError && error.payload.error === "retrieval_base_version_invalid",
+      );
+});
+
+test("retrieval approval validates every stored version before promoting any proposal", async () => {
+  const secondId = "20000000-0000-4000-8000-000000000002";
+  for (const rows of [
+    [{ id: proposalId, status: "pending", version: "9007199254740993" }],
+    [
+      { id: proposalId, status: "pending", version: "2" },
+      { id: secondId, status: "pending", version: "9007199254740993" },
+    ],
+  ]) {
+    const db = new Database({ "from retrieval_proposal": rows });
+    await assert.rejects(
+      () =>
+        registeredTool("approve-retrieval-proposals").handler(db, actor, {
+          ...approval,
+          proposal_ids: rows.map((row) => row.id),
+          base_versions: { [proposalId]: 2, [secondId]: 2 },
+        }),
+      (error) => error instanceof ToolError && error.payload.error === "retrieval_version_invalid",
+    );
+    assert.equal(db.promotions, 0);
+  }
+});
+
+test("retrieval approval conflicts report the exact safe numeric current version", async () => {
+  const db = new Database({
+    "from retrieval_proposal": [{ id: proposalId, status: "pending", version: "9007199254740991" }],
+  });
+  await assert.rejects(
+    () => registeredTool("approve-retrieval-proposals").handler(db, actor, approval),
+    (error) =>
+      error instanceof ToolError &&
+      error.payload.error === "version_conflict" &&
+      error.payload.current_version === 9007199254740991,
+  );
+  assert.equal(db.promotions, 0);
+});
+
+test("unsafe proposal versions refuse insertion, row replay, and legacy envelope replay", async () => {
+  const args = {
+    idempotency_key: "00000571-0000-4000-8000-000000000245",
+    reason: "Synthetic proposal",
+    concept_key: "synthetic-concept",
+    label: "Synthetic",
+    definition: "Synthetic definition",
+  };
+  for (const version of ["9007199254740993", 9007199254740992]) {
+    for (const rowReplay of [false, true]) {
+      const row = { id: proposalId, status: "pending", version };
+      const db = new Database({
+        "insert into retrieval_proposal": rowReplay ? [] : [row],
+        "where idempotency_key=": [row],
+      });
+      await assert.rejects(
+        () => registeredTool("propose-retrieval-concept").handler(db, actor, args),
+        (error) => error instanceof ToolError && error.payload.error === "retrieval_version_invalid",
+      );
+      assert.equal(db.receipts.size, 0);
+    }
+    let inserts = 0;
+    const db = new Database({
+      "insert into retrieval_proposal": () => {
+        inserts++;
+        return [{ id: proposalId, status: "pending", version: "2" }];
+      },
+    });
+    await registeredTool("propose-retrieval-concept").handler(db, actor, args);
+    record(receipt(db, args.idempotency_key).response.proposal).version = version;
+    await assert.rejects(
+      () => registeredTool("propose-retrieval-concept").handler(db, actor, args),
+      (error) => error instanceof ToolError && error.payload.error === "retrieval_version_invalid",
+    );
+    assert.equal(inserts, 1);
+    assert.equal(record(receipt(db, args.idempotency_key).response.proposal).version, version);
+  }
+});
+
+test("retirement responses normalize safe BIGINT versions and refuse unsafe legacy replay", async () => {
+  const args = {
+    idempotency_key: "00000571-0000-4000-8000-000000000246",
+    target_type: "concept",
+    target_id: proposalId,
+    base_version: 1,
+    reason: "Synthetic retirement",
+    golden_suite_digest: "synthetic",
+  };
+  for (const [version, expected] of [
+    ["2", 2],
+    ["9007199254740991", 9007199254740991],
+  ]) {
+    assert.ok(version !== undefined);
+    let retirements = 0;
+    const db = new Database({
+      "from retire_retrieval_curation": (params) => {
+        assert.equal(params[2], 1);
+        retirements++;
+        return [{ id: proposalId, version, status: "retired" }];
+      },
+    });
+    const result = await registeredTool("retire-retrieval-curation").handler(db, actor, args);
+    assert.equal(record(result.retired).version, expected);
+    record(receipt(db, args.idempotency_key).response.retired).version = version;
+    const replay = await registeredTool("retire-retrieval-curation").handler(db, actor, args);
+    assert.equal(replay.replayed, true);
+    assert.equal(record(replay.retired).version, expected);
+    assert.equal(retirements, 1);
+    for (const unsafe of ["9007199254740993", 9007199254740992]) {
+      record(receipt(db, args.idempotency_key).response.retired).version = unsafe;
+      await assert.rejects(
+        () => registeredTool("retire-retrieval-curation").handler(db, actor, args),
+        (error) => error instanceof ToolError && error.payload.error === "retrieval_version_invalid",
+      );
+      assert.equal(retirements, 1);
+      assert.equal(record(receipt(db, args.idempotency_key).response.retired).version, unsafe);
+    }
+  }
+});
+
+test("doctrine search normalizes only its declared BIGINT policy version before logging", async () => {
+  for (const [policy_version, expected] of [
+    ["2", 2],
+    ["9007199254740991", 9007199254740991],
+  ]) {
+    const row = {
+      section_id: proposalId,
+      final_score: 0.9,
+      provenance: {
+        policy_id: "coequal-normalized-v1",
+        policy_version,
+        contributors: [{ version: "opaque" }],
+      },
+    };
+    const db = new Database({
+      retrieval_visibility_actor_id: [{ id: actor.id }],
+      "from search_doctrine_situations": [row],
+    });
+    let logged: unknown[] = [];
+    db.sideWrite = (_sql, params) => {
+      logged = params;
+    };
+    const result = await registeredTool("search-doctrine").handler(db, actor, { q: "synthetic phrase" });
+    const hits = result.hits;
+    assert.ok(Array.isArray(hits));
+    assert.equal(record(record(hits[0]).provenance).policy_version, expected);
+    assert.equal(logged[5], expected);
+    assert.equal(row.provenance.policy_version, policy_version);
+    assert.deepEqual(record(record(hits[0]).provenance).contributors, [{ version: "opaque" }]);
+  }
+});
+
+test("doctrine search refuses unsafe BIGINT policy versions before logging", async () => {
+  for (const policy_version of ["9007199254740993", 9007199254740992]) {
+    const db = new Database({
+      retrieval_visibility_actor_id: [{ id: actor.id }],
+      "from search_doctrine_situations": [{ section_id: proposalId, provenance: { policy_version } }],
+    });
+    db.sideWrite = () => {
+      throw new Error("unsafe policy version must not be logged");
+    };
+    await assert.rejects(
+      () => registeredTool("search-doctrine").handler(db, actor, { q: "synthetic phrase" }),
+      (error) => error instanceof ToolError && error.payload.error === "retrieval_version_invalid",
+    );
+  }
+});

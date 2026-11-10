@@ -1,0 +1,22 @@
+{
+  "node": [
+    "test/salesforce-reconciliation-store-rw02-mutants.v5.test.ts",
+    "test/salesforce-report-capture.test.ts",
+    "test/shared-oauth-worker.test.ts",
+    "test/shared-row-rename-registry.test.ts",
+    "test/siep-02-trigger-delivery.test.ts",
+    "test/situation-retrieval-bigint.test.ts",
+    "test/standing-context-query-batch.test.ts",
+    "test/tour-pdf-qc.test.ts"
+  ],
+  "entry": [
+    "test/salesforce-reconciliation-store-rw02-mutants.v5.test.ts",
+    "test/salesforce-report-capture.test.ts",
+    "test/shared-oauth-worker.test.ts",
+    "test/shared-row-rename-registry.test.ts",
+    "test/siep-02-trigger-delivery.test.ts",
+    "test/situation-retrieval-bigint.test.ts",
+    "test/standing-context-query-batch.test.ts",
+    "test/tour-pdf-qc.test.ts"
+  ]
+}

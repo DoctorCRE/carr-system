@@ -1,29 +1,35 @@
 // Test rule delivery trigger matching and pack selection.
-import test from "node:test";
+
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import reviewedMap from "../../ops/config/rule-enforcement-map.json" with { type: "json" };
 import {
   deriveRuleDeliverySource,
   literalTriggerMatches,
   ruleDeliverySourceDigest,
 } from "../src/rule-delivery-source.ts";
+import fixture from "./fixtures/siep-02-trigger-delivery.v1.json" with { type: "json" };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, "../..");
-const fixture = JSON.parse(await readFile(join(HERE, "fixtures/siep-02-trigger-delivery.v1.json"), "utf8"));
+
 const reviewedMapBytes = await readFile(join(REPO, "ops/config/rule-enforcement-map.json"));
-const reviewedMap = JSON.parse(reviewedMapBytes);
+
 const packIndex = Object.entries(reviewedMap.rule_packs).map(([pack, value]) => ({
-  pack, title: value.title, triggers: value.triggers, rule_count: 1,
+  pack,
+  title: value.title,
+  triggers: value.triggers,
+  rule_count: 1,
 }));
 const mapDigest = `sha256:${createHash("sha256").update(reviewedMapBytes).digest("hex")}`;
 const HASH_A = `sha256:${"a".repeat(64)}`;
 const HASH_B = `sha256:${"b".repeat(64)}`;
 
-function planFor(value) {
+function planFor(value: { work_request_title: string; desired_outcome: string; scope_summary: string }) {
   return {
     work_request_ref: "WR-123",
     work_request_title: value.work_request_title,
@@ -41,7 +47,7 @@ function planFor(value) {
   };
 }
 
-async function project(value, overrides = {}) {
+async function project(value: Parameters<typeof planFor>[0], overrides: Record<string, unknown> = {}) {
   return deriveRuleDeliverySource({
     plan: planFor(value),
     packIndex,
@@ -60,7 +66,10 @@ test("server-bound Work Request prose deterministically selects sorted packs", a
   for (const value of fixture.cases) {
     const projection = await project(value);
     assert.deepEqual(projection.required_packs, value.expected_packs, value.case_ref);
-    assert.deepEqual(projection.matched.map(item => item.pack), value.expected_packs);
+    assert.deepEqual(
+      projection.matched.map((item) => item.pack),
+      value.expected_packs,
+    );
     assert.equal("build_classifier" in projection, false);
     assert.equal("admission" in projection, false);
     assert.equal(projection.trigger_map.map_digest, mapDigest);
@@ -78,8 +87,9 @@ test("literal matching handles punctuation, phrases, case, and word edges", () =
 
 test("caller labels cannot downgrade or inject packs into the closed projection", async () => {
   const value = fixture.cases[0];
+  assert.ok(value);
   const baseline = await project(value);
-  const spoofed = await deriveRuleDeliverySource({
+  const spoofedInput = {
     plan: { ...planFor(value), tier: "standard", required_packs: ["joe-comms"], actor: "joe" },
     packIndex,
     mapDigest,
@@ -89,54 +99,84 @@ test("caller labels cannot downgrade or inject packs into the closed projection"
     packs: ["joe-comms"],
     actor: "joe",
     tenant: "forged",
-  });
+  };
+  const spoofed = await deriveRuleDeliverySource(spoofedInput);
   assert.deepEqual(spoofed.required_packs, baseline.required_packs);
   assert.equal(spoofed.contract_digest, baseline.contract_digest);
   assert.equal(JSON.stringify(spoofed).includes("joe-comms"), false);
 });
 
 test("the pack index is registry input, never observed-work text", async () => {
-  const value = { ...fixture.cases[0], work_request_title: "Bounded change",
-    desired_outcome: "Apply the reviewed delta.", scope_summary: "Proceed safely.",
-    tier: "forged", reasons: ["signal:new_capability"] };
+  const value = {
+    ...fixture.cases[0],
+    work_request_title: "Bounded change",
+    desired_outcome: "Apply the reviewed delta.",
+    scope_summary: "Proceed safely.",
+    tier: "forged",
+    reasons: ["signal:new_capability"],
+  };
   const projection = await project(value);
   assert.deepEqual(projection.required_packs, []);
   assert.ok(projection.required_packs.length < packIndex.length);
 });
 
 test("typed document field names never masquerade as observed trigger values", async () => {
-  const value = { ...fixture.cases[0], work_request_title: "Bounded change",
-    desired_outcome: "Apply the reviewed delta.", scope_summary: "Proceed safely.",
-    reasons: ["signal:architecture_or_multi_surface"] };
-  const plan = { ...planFor(value), runbook_ref: "safe:runbook:neutral",
-    acceptance_criteria: [{ criterion_id: "BASELINE", text: "Confirm the exact result." }] };
-  const projection = await project(value, { plan,
-    packIndex: [{ pack: "engineering-git", triggers: ["baseline"], rule_count: 1 }] });
+  const value = {
+    ...fixture.cases[0],
+    work_request_title: "Bounded change",
+    desired_outcome: "Apply the reviewed delta.",
+    scope_summary: "Proceed safely.",
+    reasons: ["signal:architecture_or_multi_surface"],
+  };
+  const plan = {
+    ...planFor(value),
+    runbook_ref: "safe:runbook:neutral",
+    acceptance_criteria: [{ criterion_id: "BASELINE", text: "Confirm the exact result." }],
+  };
+  const projection = await project(value, {
+    plan,
+    packIndex: [{ pack: "engineering-git", triggers: ["baseline"], rule_count: 1 }],
+  });
   assert.deepEqual(projection.required_packs, []);
 });
 
 test("refs, ids, hashes, enum labels, and DAG node names never fire work triggers", async () => {
-  const value = { ...fixture.cases[0], work_request_title: "Bounded change",
-    desired_outcome: "Apply the reviewed delta.", scope_summary: "Proceed safely.",
-    tier: "forged", reasons: ["signal:new_capability"] };
-  const plan = { ...planFor(value), runbook_ref: "doctrine:git#client-email-deploy",
-    dependency_refs: ["safe:git:client:deploy"], recovery_ref: "safe:email:rollback",
+  const value = {
+    ...fixture.cases[0],
+    work_request_title: "Bounded change",
+    desired_outcome: "Apply the reviewed delta.",
+    scope_summary: "Proceed safely.",
+    tier: "forged",
+    reasons: ["signal:new_capability"],
+  };
+  const plan = {
+    ...planFor(value),
+    runbook_ref: "doctrine:git#client-email-deploy",
+    dependency_refs: ["safe:git:client:deploy"],
+    recovery_ref: "safe:email:rollback",
     observability_ref: "safe:client:metrics",
-    acceptance_criteria: [{ criterion_id: "SCHEMA-MIGRATION", text: "Confirm the exact result." }] };
+    acceptance_criteria: [{ criterion_id: "SCHEMA-MIGRATION", text: "Confirm the exact result." }],
+  };
   const projection = await project(value, { plan });
   assert.deepEqual(projection.required_packs, []);
 });
 
 test("empty packs and an invalid digest are refused", async () => {
   const value = fixture.cases[0];
-  await assert.rejects(() => project(value, { packIndex: [{ pack: "engineering-git",
-    triggers: ["schema"], rule_count: 0 }] }), /fully deliverable/);
-  await assert.rejects(() => project(value, { mapDigest: "sha256:not-a-digest" }),
-    /coherent installed rule map digest/);
+  assert.ok(value);
+  await assert.rejects(
+    () => project(value, { packIndex: [{ pack: "engineering-git", triggers: ["schema"], rule_count: 0 }] }),
+    /fully deliverable/,
+  );
+  await assert.rejects(
+    () => project(value, { mapDigest: "sha256:not-a-digest" }),
+    /coherent installed rule map digest/,
+  );
 });
 
 test("semantic key order is stable while bound facts change the digest", async () => {
   const value = fixture.cases[0];
+  assert.ok(value);
   const first = await project(value);
   const reordered = await project(value, { plan: Object.fromEntries(Object.entries(planFor(value)).reverse()) });
   assert.equal(first.contract_digest, reordered.contract_digest);

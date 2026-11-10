@@ -624,7 +624,7 @@
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
     },
     {
-      "path": "mcp-server/test/situation-retrieval-bigint.test.mjs",
+      "path": "mcp-server/test/situation-retrieval-bigint.test.ts",
       "sha256": "e90b22671c9e1286da3979d67850fd9c05b554dbf6d690233013feb7b553f210",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
