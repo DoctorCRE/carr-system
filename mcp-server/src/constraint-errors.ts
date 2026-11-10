@@ -1,3 +1,5 @@
+// Translate PostgreSQL refusals and enrich their constraint details.
+
 import { ToolError } from "./tool-error.ts";
 
 // DEFECT 2, HALF (b) (found 2026-08-13, decision 7026246b): a write whose bad
