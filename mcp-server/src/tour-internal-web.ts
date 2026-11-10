@@ -29,7 +29,7 @@ type Dependencies = Partial<Record<(typeof SEAMS)[keyof typeof SEAMS] | "appendT
 const MAX_BODY_BYTES = 32 * 1024;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
-const SHARE_SCOPES = new Set(["view_packet", "view_map", "shortlist", "comment"]);
+const SHARE_SCOPES = new Set(["view_packet", "view_map", "shortlist", "comment", "download"]);
 const AUTHORITY_FIELDS = new Set([
   "actor",
   "actor_id",

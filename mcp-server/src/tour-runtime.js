@@ -346,6 +346,23 @@ async function publicAccess({ env }, transaction, fn) {
 
 export function createReportsRuntimeAdapters() {
   return {
+    downloadFn: async ({ env, sessionDigest }) => {
+      if (!/^sha256:[a-f0-9]{64}$/.test(sessionDigest)) return { ok: false, status: 404 };
+      const artifact = await publicAccess({ env }, "begin read only", async client => {
+        const result = await client.query("select ops.read_tour_share_download($1::text) as data", [sessionDigest]);
+        return result.rows[0]?.data;
+      });
+      if (!artifact?.storage_ref || !env.carr_documents?.get) return { ok: false, status: 404 };
+      const object = await env.carr_documents.get(artifact.storage_ref);
+      if (!object) return { ok: false, status: 404 };
+      const bytes = new Uint8Array(await object.arrayBuffer());
+      if (bytes.byteLength !== artifact.content_length || await sha256Bytes(bytes) !== artifact.artifact_digest)
+        return { ok: false, status: 404 };
+      return { ok: true, response: new Response(bytes, { headers: {
+        "content-type": "application/pdf", "content-disposition": 'attachment; filename="Tour.pdf"',
+        "cache-control": "no-store",
+      } }) };
+    },
     exchangeShareTokenFn: async ({ env, tokenDigest, sessionDigest, sessionExpiresAt, auditDigest }) =>
       publicAccess({ env }, "begin", async client => {
         const result = await sharing.exchange(client, {
