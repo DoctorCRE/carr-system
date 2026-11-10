@@ -1,13 +1,67 @@
 // Tests bounded conversation preparation reads and identity resolution.
-import { test } from "node:test";
-import assert from "node:assert/strict";
 
-import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+import type { VerbInputs } from "../src/verb-contract.ts";
+
+// Keep the legacy registry at its runtime seam until its separate conversion.
+const registryPath = "../src/tools.js";
+const registry: unknown = await import(registryPath);
+function object(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return Object.fromEntries(Object.entries(value));
+}
+function array(value: unknown): unknown[] {
+  assert.ok(Array.isArray(value));
+  return value;
+}
+const legacy = object(registry);
+const invoke = legacy.executeRegisteredTool;
+assert.ok(typeof invoke === "function");
+async function executeRegisteredTool(client: object, actor: object, verb: keyof VerbInputs, args: object) {
+  assert.ok(typeof invoke === "function");
+  const result: unknown = await invoke(client, actor, verb, args);
+  return object(result);
+}
+const tools = object(legacy.TOOLS);
+function tool(name: string) {
+  const entry = object(tools[name]);
+  const schema = object(entry.inputSchema);
+  return {
+    write: entry.write,
+    fullOnly: entry.fullOnly,
+    inputSchema: {
+      ...schema,
+      properties: object(schema.properties),
+      required: schema.required,
+      additionalProperties: schema.additionalProperties,
+    },
+  };
+}
+const TOOLS = {
+  "prepare-conversation": tool("prepare-conversation"),
+};
 
 const JOE = { id: "actor-joe", slug: "joe", human: true };
 
+type Row = Record<string, unknown>;
+type Deal = { name: string; phase: string; owner: string; client_ref: string };
+
 class ConversationFake {
-  constructor({ parties = [], deals = [], timeline = [], graphNodes = [], paths = [] } = {}) {
+  parties: Row[];
+  deals: Deal[];
+  timeline: Row[];
+  graphNodes: Row[];
+  paths: Row[];
+  calls: { sql: string; params: unknown[] }[];
+  constructor({
+    parties = [],
+    deals = [],
+    timeline = [],
+    graphNodes = [],
+    paths = [],
+  }: { parties?: Row[]; deals?: Deal[]; timeline?: Row[]; graphNodes?: Row[]; paths?: Row[] } = {}) {
     this.parties = parties;
     this.deals = deals;
     this.timeline = timeline;
@@ -16,12 +70,16 @@ class ConversationFake {
     this.calls = [];
   }
 
-  async query(text, params = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     this.calls.push({ sql, params });
 
-    if (sql.includes("from v_ref_index") && sql.includes("subject_type in ('lead','client','vendor')") &&
-        sql.includes("similarity(display_name,$1)")) return { rows: this.parties };
+    if (
+      sql.includes("from v_ref_index") &&
+      sql.includes("subject_type in ('lead','client','vendor')") &&
+      sql.includes("similarity(display_name,$1)")
+    )
+      return { rows: this.parties };
     if (sql.includes("count(*) filter") && sql.includes("group by display_name")) return { rows: [] };
     if (sql.includes("from v_deal_board where name ilike")) return { rows: this.deals };
     if (sql.includes("from v_party_graph") && sql.includes("where from_name ilike $1 or to_name ilike $1"))
@@ -34,9 +92,7 @@ class ConversationFake {
     if (sql.includes("select subject_id from v_ref_index where subject_type='client'"))
       return { rows: [{ subject_id: "client-uuid" }] };
     if (sql.includes("subject_type='deal' and display_name ilike"))
-      return { rows: this.deals.length === 1
-        ? [{ subject_id: "deal-uuid", display_name: this.deals[0].name }]
-        : [] };
+      return { rows: this.deals.length === 1 ? [{ subject_id: "deal-uuid", display_name: this.deals[0]?.name }] : [] };
     if (sql.includes("from v_subject_timeline")) return { rows: this.timeline };
     if (sql.includes("from tool_call t join activity a")) return { rows: [] };
 
@@ -48,13 +104,19 @@ class ConversationFake {
     throw new Error(`unexpected query: ${sql}`);
   }
 
-  count(fragment) {
+  count(fragment: string) {
     return this.calls.filter(({ sql }) => sql.includes(fragment)).length;
   }
 }
 
-const party = (ref, name, kind = "client") => ({
-  ref, name, kind, merged: false, city: "Mobile", specialty: null, org_name: null,
+const party = (ref: string, name: string, kind = "client") => ({
+  ref,
+  name,
+  kind,
+  merged: false,
+  city: "Mobile",
+  specialty: null,
+  org_name: null,
 });
 
 test("prepare-conversation is an exact bounded read-only contract", () => {
@@ -64,8 +126,12 @@ test("prepare-conversation is an exact bounded read-only contract", () => {
   assert.equal(Boolean(tool.fullOnly), false);
   assert.equal(tool.inputSchema.additionalProperties, false);
   assert.deepEqual(tool.inputSchema.required, ["query"]);
-  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(),
-    ["max_depth", "path_limit", "query", "timeline_limit"]);
+  assert.deepEqual(Object.keys(tool.inputSchema.properties).sort(), [
+    "max_depth",
+    "path_limit",
+    "query",
+    "timeline_limit",
+  ]);
 });
 
 test("one live record returns its timeline and exact-ref introduction paths", async () => {
@@ -73,14 +139,16 @@ test("one live record returns its timeline and exact-ref introduction paths", as
     parties: [party("C-127", "Dr. Example")],
     timeline: [{ entry_kind: "activity", summary: "Called practice" }],
     graphNodes: [{ ref: "C-127", name: "Dr. Example", merged: false }],
-    paths: [{
-      hops: 2,
-      ask_ref: "V-CPA-006",
-      ask_name: "A. Connector",
-      ref_path: ["V-CPA-006", "L-100", "C-127"],
-      chain: "A. Connector -knows-> B. Referrer -intro-> Dr. Example",
-      first_note: "synthetic relationship evidence",
-    }],
+    paths: [
+      {
+        hops: 2,
+        ask_ref: "V-CPA-006",
+        ask_name: "A. Connector",
+        ref_path: ["V-CPA-006", "L-100", "C-127"],
+        chain: "A. Connector -knows-> B. Referrer -intro-> Dr. Example",
+        first_note: "synthetic relationship evidence",
+      },
+    ],
   });
 
   const out = await executeRegisteredTool(db, JOE, "prepare-conversation", {
@@ -92,13 +160,14 @@ test("one live record returns its timeline and exact-ref introduction paths", as
 
   assert.equal(out.state, "completed");
   assert.deepEqual(out.match, { kind: "client", name: "Dr. Example", target: "C-127" });
-  assert.equal(out.catch_up.timeline.length, 1);
-  assert.equal(out.introduction.status, "evaluated");
-  assert.equal(out.introduction.target, "C-127");
-  assert.equal(out.introduction.paths[0].ask_ref, "V-CPA-006");
+  assert.equal(array(object(out.catch_up).timeline).length, 1);
+  assert.equal(object(out.introduction).status, "evaluated");
+  assert.equal(object(out.introduction).target, "C-127");
+  assert.equal(object(array(object(out.introduction).paths)[0]).ask_ref, "V-CPA-006");
 
   const timeline = db.calls.find(({ sql }) => sql.includes("from v_subject_timeline"));
   const graph = db.calls.find(({ sql }) => sql.startsWith("with recursive e as"));
+  if (!timeline || !graph) throw new Error("missing expected conversation query");
   assert.equal(timeline.params[2], 4);
   assert.deepEqual(graph.params, ["C-127", 2, 6]);
 });
@@ -126,7 +195,7 @@ test("a deal brief returns the timeline without pretending a deal is an intro-gr
     query: "Example Dental Expansion",
   });
   assert.equal(out.state, "completed");
-  assert.equal(out.match.kind, "deal");
+  assert.equal(object(out.match).kind, "deal");
   assert.deepEqual(out.introduction, {
     status: "not_applicable",
     reason: "Deals do not represent people or organizations in the introduction graph.",
