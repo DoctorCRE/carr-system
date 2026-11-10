@@ -15,6 +15,7 @@ import { installTourDealAccess } from './tour-deal-access.js';
 import { verbRequestBudgetRefusal } from "./verb-request-budget.js";
 import { neon, Pool } from "./postgres.js";
 import { budgetedAi } from "./ai-budget.js";
+import { coerceArgsToSchema } from "./input-validation.ts";
 import { publicError } from "./public-errors.ts";
 import { mcpOriginRefusal } from "./oauth-policy.ts";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.ts";
@@ -22,7 +23,7 @@ import { isolatePullRequests, isolateProduction } from "./work-queue.js";
 import { MEMORY_ATTACH_LINE } from "./doctrine.js";
 import { toolCallContent } from "./untrusted-text.ts";
 import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
-  auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
+  auditIdentity, assertNoCallerAuthorityFields,
   pgConstraintError, describeConstraint } from "./tools.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, organizationTenantForActor,

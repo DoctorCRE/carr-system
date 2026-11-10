@@ -142,8 +142,7 @@ export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 // Defined in a leaf module so modules tools.js depends on can throw typed,
 // self-naming failures too; re-exported here so existing imports keep working.
 import { ToolError } from "./tool-error.ts";
-import { assertRequiredArgs, coerceArgsToSchema, looksLikeToolCallMarkup } from "./input-validation.ts";
-export { assertRequiredArgs, coerceArgsToSchema, looksLikeToolCallMarkup };
+import { assertRequiredArgs, coerceArgsToSchema } from "./input-validation.ts";
 export { ToolError };
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
