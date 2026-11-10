@@ -132,11 +132,17 @@ class ProjectionDatabaseTests(unittest.TestCase):
                         "on conflict (control_key) do update set installed=true,verified_at=now()", (key,))
                 actor = conn.execute("insert into actor(slug,kind,display_name) "
                     "values ('j775-probe','automation','Synthetic probe') returning id").fetchone()[0]
+                if approval:
+                    conn.execute("set local session_replication_role=replica")
                 rule = conn.execute("insert into rule(statement,taught_by) "
                     "values ('Synthetic historical binding',%s) returning id", (actor,)).fetchone()[0]
                 if approval:
                     conn.execute("set local session_replication_role=replica")
                     conn.execute("update rule set status='active',activated_by=%s where id=%s", (actor, rule))
+                    conn.execute("insert into ops.rule_pack(pack,title,description,triggers,source) "
+                        "values ('j775','Synthetic','Synthetic history',array['synthetic'],'fixture')")
+                    conn.execute("insert into ops.rule_load_layer(rule_id,short_id,load_layer,packs,scope,source,map_digest) "
+                        "values (%s,'J775','pack',array['j775'],'shared','fixture',%s)", (rule, 'a'*64))
                     conn.execute("set local session_replication_role=origin")
                     conn.execute("insert into ops.rule_approval_receipt "
                         "(idempotency_key,rule_id,rule_version,statement_hash,actor_id,policy_kind,"
@@ -172,6 +178,8 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 conn.rollback()
                 if 'rule' in locals():
                     conn.execute("delete from ops.rule_control_binding where rule_id=%s", (rule,))
+                    conn.execute("delete from ops.rule_load_layer where rule_id=%s", (rule,))
+                    conn.execute("delete from ops.rule_pack where pack='j775'")
                     conn.execute("delete from ops.rule_approval_receipt where rule_id=%s", (rule,))
                     conn.execute("delete from rule where id=%s", (rule,))
                     conn.execute("delete from actor where id=%s", (actor,))
