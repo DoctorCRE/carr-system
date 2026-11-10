@@ -187,7 +187,7 @@
     "doc-request-notify.test.mjs": {"milliseconds": 732, "serial": false},
     "doc-suggestions-successor.test.mjs": {"milliseconds": 984, "serial": false},
     "doc-suggestions.test.mjs": {"milliseconds": 267, "serial": false},
-    "doctorcre-v5-review.test.mjs": {"milliseconds": 200, "serial": false},
+    "doctorcre-frozen-review.test.ts": {"milliseconds": 200, "serial": false},
     "doctrine-array-args.test.mjs": {"milliseconds": 708, "serial": false},
     "doctrine-bigint-versions.test.mjs": {"milliseconds": 591, "serial": false},
     "doctrine-concept-questions.test.mjs": {"milliseconds": 20016, "serial": false},
