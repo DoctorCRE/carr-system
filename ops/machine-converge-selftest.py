@@ -52,7 +52,7 @@ COPIES = [
     "lib/launchd_scope.py",
     "ops/config/services.json",
     "lib/launchd_hold.py",
-    "mcp-server/codex-continuity-stdio-proxy.mjs",
+    "mcp-server/codex-continuity-stdio-proxy.ts",
     "ops/config-as-code.py",
     "tools/flash_install.py",
     "tools/flashlib.py",

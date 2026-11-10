@@ -1,0 +1,26 @@
+stateDiagram-v2
+  state Proxy {
+    state Credential {
+      [*] --> Starting
+      Starting --> Authorized: secure credential accepted
+      Starting --> Refused: insecure or missing credential
+    }
+    --
+    state Stream {
+      [*] --> Waiting
+      Waiting --> Ready: secure credential accepted
+      Waiting --> Closed: insecure or missing credential
+      Ready --> Ready: blank line ignored
+      Ready --> Diagnostic: malformed or oversized line
+      Diagnostic --> Ready: generic stderr only
+      Ready --> Reply: disallowed tool or oversized checkpoint
+      Ready --> Pending: permitted request or notification
+      Pending --> Reply: successful request
+      Pending --> Ready: successful notification
+      Pending --> Reply: request timeout or fetch failure
+      Pending --> Diagnostic: notification failure
+      Reply --> Ready: JSON response written to stdout
+      Ready --> Closed: stdin ends
+    }
+  }
+  %% never NoCredentialForward: Refused & Pending -- refused credentials never reach the network
