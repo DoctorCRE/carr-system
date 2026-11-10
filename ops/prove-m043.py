@@ -9,9 +9,12 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.release_reader import read
+from lib.loadpy import load_module_from_path
 from ops.git_env import scrubbed_env
 from tools.proof_release import release_revision
 
+
+TIMEOUT = load_module_from_path('m043_timeout', str(Path(__file__).resolve().parents[1] / 'bin/with-timeout.py'))
 
 CHECKS = (
     ('python3', 'ops/strict-projects-selftest.py'),
@@ -44,10 +47,12 @@ def main():
             ['git', 'merge-base', '--is-ancestor', args.expected_merge, revision],
             env=scrubbed_env(), capture_output=True, timeout=remaining())
         if ancestry.returncode:
-            raise subprocess.CalledProcessError(ancestry.returncode, ancestry.args)
+            raise ValueError('Release does not prove containment of the expected merge')
         for command in CHECKS:
-            result = subprocess.run(command, timeout=remaining())
-            if result.returncode:
+            status = TIMEOUT.main(['with-timeout.py', str(remaining()), *command])
+            if status in (124, 127):
+                raise ValueError('Assertion evidence unavailable or total deadline expired')
+            if status:
                 print('Containing release assertion failed')
                 return 1
         remaining()

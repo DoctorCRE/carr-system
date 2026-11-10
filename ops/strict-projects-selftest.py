@@ -153,7 +153,8 @@ class M043Proof(unittest.TestCase):
                     ('descendant', descendant, 0, 0), ('equal', merge, 0, 0),
                     ('older', older, 78, 0), ('unrelated', unrelated, 78, 0),
                     ('unknown', 'f' * 40, 78, 0), ('unavailable', None, 78, 0),
-                    ('assertion failure', merge, 1, 1)):
+                    ('assertion failure', merge, 1, 1), ('deadline', merge, 78, 124),
+                    ('missing executable', merge, 78, 127)):
                 with self.subTest(release=name):
                     from lib.release_reader import Reply
                     reply = Reply(200, {}, json.dumps({'ok': True, 'env': {'value': 'production'},
@@ -167,6 +168,7 @@ class M043Proof(unittest.TestCase):
                         return subprocess.CompletedProcess(command, assertion_status)
                     with patch.object(proof, 'read', return_value=reply), \
                             patch.object(proof.subprocess, 'run', side_effect=run), \
+                            patch.object(proof.TIMEOUT, 'main', side_effect=lambda argv: run(argv[2:]).returncode), \
                             patch('sys.argv', ['prove-m043.py', '--expected-merge', merge]), \
                             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                         try:
@@ -174,7 +176,7 @@ class M043Proof(unittest.TestCase):
                         except subprocess.CalledProcessError:
                             status = 1
                     self.assertEqual(status, expected)
-                    self.assertEqual(len(checks), 3 if expected == 0 else 1 if expected == 1 else 0)
+                    self.assertEqual(len(checks), 3 if expected == 0 else 1 if revision == merge else 0)
 
 
 if __name__ == '__main__':
