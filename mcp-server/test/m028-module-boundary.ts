@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
 
-type MailClient = { query: (sql: string, values: unknown[]) => Promise<{ rows: unknown[] }> };
+type MailRow = {
+  id: string;
+  version: number;
+  kind: string;
+  activity_id: string;
+  source_version: number;
+  next_date: string | null;
+  occurred_at: Date | string | null;
+  priority: number;
+};
+type MailClient = { query: (sql: string, values: unknown[]) => Promise<{ rows: MailRow[] }> };
 type MailResponse = { state: "ready" | "empty" | "unavailable"; items: unknown[]; next_cursor: string | null };
 
-type MailActor = { id?: string; slug?: string; human?: boolean; sponsoring_human_slug?: string };
+type MailActor = {
+  id?: string;
+  slug?: string;
+  human?: boolean;
+  sponsoring_human_slug?: string;
+  native_agent_verified?: boolean;
+};
 
 function callable(value: unknown): (...args: unknown[]) => unknown {
   assert.ok(typeof value === "function");
