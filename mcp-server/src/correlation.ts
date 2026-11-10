@@ -70,7 +70,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * the system (tools/ops-record.py's correlation_of(), Postgres's own
  * gen_random_uuid() default) that this Worker has no reason to second-guess
  * as long as the shape is a real UUID. */
-export function isValidCorrelationId(value) {
+export function isValidCorrelationId(value: unknown): value is string {
   return typeof value === "string" && UUID_RE.test(value.trim());
 }
 
@@ -81,7 +81,7 @@ export function isValidCorrelationId(value) {
  * the caller never learns which case it was, which is the point: this
  * function's contract is "you always get a usable id back," not "you get an
  * error telling you your id was bad." */
-export function correlationIdFor(request) {
+export function correlationIdFor(request: Request) {
   const header = request.headers.get("x-correlation-id");
   if (header && isValidCorrelationId(header)) return header.trim().toLowerCase();
   return crypto.randomUUID();
@@ -93,7 +93,7 @@ export function correlationIdFor(request) {
  * severity split the Worker's two pre-existing console calls already used
  * informally (console.warn in google-oidc.js and index.js's OAuth onError).
  * Returns the line for tests; production code does not need the value. */
-export function logLine(level, event, fields = {}) {
+export function logLine(level: string, event: string, fields: Record<string, unknown> = {}) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level, event, ...fields });
   if (level === "warn" || level === "error") console.error(line);
   else console.log(line);
@@ -105,7 +105,7 @@ export function logLine(level, event, fields = {}) {
  * this builds a new one with a cloned Headers object carrying the addition —
  * every other header the wrapped handler set (content-type, and anything
  * else) survives untouched. */
-export function withCorrelationHeader(response, correlationId) {
+export function withCorrelationHeader(response: Response, correlationId: string) {
   const headers = new Headers(response.headers);
   headers.set("x-correlation-id", correlationId);
   return new Response(response.body, {
@@ -115,7 +115,7 @@ export function withCorrelationHeader(response, correlationId) {
   });
 }
 
-function safePath(request) {
+function safePath(request: Request) {
   try {
     return new URL(request.url).pathname;
   } catch {
@@ -130,24 +130,26 @@ function safePath(request) {
  * uncaught throw that becomes a structured log line plus a 500 carrying the
  * id in its body — never an unhandled rejection reaching the Workers
  * runtime's own generic error page, which would have carried no id at all. */
-export function wrapWithCorrelation(handler) {
-  return async function correlatedFetch(request, env, ctx) {
+export function wrapWithCorrelation<E extends { CORRELATION_ID?: string }, C>(
+  handler: (request: Request, env: E, ctx: C) => Response | Promise<Response>,
+) {
+  return async function correlatedFetch(request: Request, env: E, ctx: C) {
     const correlationId = correlationIdFor(request);
     env.CORRELATION_ID = correlationId;
 
-    let response;
+    let response: Response;
     try {
       response = await handler(request, env, ctx);
     } catch (e) {
       logLine("error", "worker_uncaught_error", {
         correlation_id: correlationId,
         path: safePath(request),
-        message: String((e && e.message) || e).slice(0, 300),
+        message: String((e && typeof e === "object" && "message" in e && e.message) || e).slice(0, 300),
       });
-      response = new Response(
-        JSON.stringify({ error: "internal_error", correlation_id: correlationId }),
-        { status: 500, headers: { "content-type": "application/json" } },
-      );
+      response = new Response(JSON.stringify({ error: "internal_error", correlation_id: correlationId }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      });
     }
     return withCorrelationHeader(response, correlationId);
   };

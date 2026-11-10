@@ -16,22 +16,22 @@
 // specifier Node's loader refuses outside the Workers runtime (proven live —
 // see the source-assertion tests at the bottom, same technique
 // tool-read-call.test.mjs uses to prove mcp.js's write-branch wiring without a
-// live database). So this file tests correlation.js directly — a standalone
+// live database). So this file tests correlation.ts directly — a standalone
 // module with no Worker-only import — and proves index.js WIRES it by reading
 // index.js as text, the same technique already established in this repo.
 //
 // Run with: node --test mcp-server/test/correlation.test.mjs
 // (also picked up by `npm test`'s test/*.test.mjs glob).
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
-  isValidCorrelationId,
   correlationIdFor,
+  isValidCorrelationId,
+  logLine,
   withCorrelationHeader,
   wrapWithCorrelation,
-  logLine,
-} from "../src/correlation.js";
+} from "../src/correlation.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const A_REAL_UUID = "9f3b2c1a-4d5e-4f60-8a1b-0123456789ab";
@@ -46,8 +46,18 @@ test("isValidCorrelationId: accepts a well-formed UUID", () => {
 });
 
 test("isValidCorrelationId: refuses garbage — not a UUID at all, wrong shape, empty, non-string", () => {
-  for (const bad of ["not-a-uuid", "12345", "", "  ", null, undefined, 42, {},
-                      "9f3b2c1a-4d5e-4f60-8a1b-0123456789abXYZ", "'; drop table ops.run; --"]) {
+  for (const bad of [
+    "not-a-uuid",
+    "12345",
+    "",
+    "  ",
+    null,
+    undefined,
+    42,
+    {},
+    "9f3b2c1a-4d5e-4f60-8a1b-0123456789abXYZ",
+    "'; drop table ops.run; --",
+  ]) {
     assert.equal(isValidCorrelationId(bad), false, `expected ${JSON.stringify(bad)} to be invalid`);
   }
 });
@@ -116,7 +126,8 @@ test("withCorrelationHeader: sets x-correlation-id and preserves status, body an
 // ────────────────────────────────────────────────────────────────────────
 
 test("wrapWithCorrelation: echoes the caller's own valid id back as the response header", async () => {
-  const handler = async (_req, _env, _ctx) => new Response("ok", { status: 200 });
+  const handler = async (_req: Request, _env: { CORRELATION_ID?: string }, _ctx: object) =>
+    new Response("ok", { status: 200 });
   const wrapped = wrapWithCorrelation(handler);
   const req = new Request("https://api.doctorcre.com/health", {
     headers: { "x-correlation-id": A_REAL_UUID },
@@ -130,12 +141,15 @@ test("wrapWithCorrelation: a request with no header gets a generated UUID back, 
   const handler = async () => new Response("ok");
   const wrapped = wrapWithCorrelation(handler);
   const res = await wrapped(new Request("https://api.doctorcre.com/health"), {}, {});
-  assert.match(res.headers.get("x-correlation-id"), UUID_RE);
+  assert.match(res.headers.get("x-correlation-id") ?? "", UUID_RE);
 });
 
 test("wrapWithCorrelation: hands the resolved id to the wrapped handler via env.CORRELATION_ID", async () => {
-  let seen = null;
-  const handler = async (_req, env) => { seen = env.CORRELATION_ID; return new Response("ok"); };
+  let seen: string | undefined | null = null;
+  const handler = async (_req: Request, env: { CORRELATION_ID?: string }) => {
+    seen = env.CORRELATION_ID;
+    return new Response("ok");
+  };
   const wrapped = wrapWithCorrelation(handler);
   const req = new Request("https://api.doctorcre.com/mcp", {
     headers: { "x-correlation-id": A_REAL_UUID },
@@ -146,7 +160,9 @@ test("wrapWithCorrelation: hands the resolved id to the wrapped handler via env.
 });
 
 test("wrapWithCorrelation: a throwing handler still returns a response carrying the correlation id — never an unhandled rejection", async () => {
-  const handler = async () => { throw new Error("boom"); };
+  const handler = async () => {
+    throw new Error("boom");
+  };
   const wrapped = wrapWithCorrelation(handler);
   const req = new Request("https://api.doctorcre.com/mcp", {
     headers: { "x-correlation-id": A_REAL_UUID },
@@ -161,10 +177,12 @@ test("wrapWithCorrelation: a throwing handler still returns a response carrying 
 
 test("wrapWithCorrelation: a throwing handler emits a structured log line carrying the correlation id (attached to error output)", async () => {
   const originalError = console.error;
-  const lines = [];
+  const lines: string[] = [];
   console.error = (line) => lines.push(line);
   try {
-    const handler = async () => { throw new Error("boom for the log"); };
+    const handler = async () => {
+      throw new Error("boom for the log");
+    };
     const wrapped = wrapWithCorrelation(handler);
     const req = new Request("https://api.doctorcre.com/mcp", {
       headers: { "x-correlation-id": A_REAL_UUID },
@@ -174,14 +192,16 @@ test("wrapWithCorrelation: a throwing handler emits a structured log line carryi
     console.error = originalError;
   }
   assert.equal(lines.length, 1);
-  const parsed = JSON.parse(lines[0]);
+  const parsed = JSON.parse(lines[0] ?? "");
   assert.equal(parsed.correlation_id, A_REAL_UUID.toLowerCase());
   assert.equal(parsed.level, "error");
   assert.match(parsed.message, /boom for the log/);
 });
 
 test("wrapWithCorrelation: never throws itself, even when the inner handler rejects with a non-Error", async () => {
-  const handler = async () => { throw "just a string"; };
+  const handler = async () => {
+    throw "just a string";
+  };
   const wrapped = wrapWithCorrelation(handler);
   await assert.doesNotReject(wrapped(new Request("https://api.doctorcre.com/health"), {}, {}));
 });
@@ -192,7 +212,7 @@ test("wrapWithCorrelation: never throws itself, even when the inner handler reje
 
 test("logLine: produces one JSON-parseable line carrying the fields it was given", () => {
   const originalLog = console.log;
-  const lines = [];
+  const lines: string[] = [];
   console.log = (line) => lines.push(line);
   try {
     logLine("info", "worker_request", { correlation_id: A_REAL_UUID, path: "/health" });
@@ -200,7 +220,7 @@ test("logLine: produces one JSON-parseable line carrying the fields it was given
     console.log = originalLog;
   }
   assert.equal(lines.length, 1);
-  const parsed = JSON.parse(lines[0]);
+  const parsed = JSON.parse(lines[0] ?? "");
   assert.equal(parsed.correlation_id, A_REAL_UUID);
   assert.equal(parsed.event, "worker_request");
   assert.equal(parsed.level, "info");
@@ -209,9 +229,14 @@ test("logLine: produces one JSON-parseable line carrying the fields it was given
 
 test("logLine: routes warn/error to console.error and everything else to console.log", () => {
   const seen = { log: 0, error: 0 };
-  const originalLog = console.log, originalError = console.error;
-  console.log = () => { seen.log++; };
-  console.error = () => { seen.error++; };
+  const originalLog = console.log,
+    originalError = console.error;
+  console.log = () => {
+    seen.log++;
+  };
+  console.error = () => {
+    seen.error++;
+  };
   try {
     logLine("info", "a", {});
     logLine("warn", "b", {});
@@ -235,20 +260,25 @@ test("logLine: routes warn/error to console.error and everything else to console
 // ────────────────────────────────────────────────────────────────────────
 
 test("index.js genuinely cannot be imported outside the Workers runtime (documents why this file cannot exercise it directly)", async () => {
-  await assert.rejects(
-    import("../src/index.js"),
-    (e) => /cloudflare:/.test(String(e && e.message || e)),
+  await assert.rejects(import(new URL("../src/index.js", import.meta.url).href), (e) =>
+    /cloudflare:/.test(String(e instanceof Error ? e.message : e)),
   );
 });
 
 test("index.js: the top-level default export's fetch is wrapped with wrapWithCorrelation", async () => {
   const { readFile } = await import("node:fs/promises");
   const src = await readFile(new URL("../src/index.js", import.meta.url), "utf8");
-  assert.match(src, /import\s*\{\s*wrapWithCorrelation\s*\}\s*from\s*["']\.\/correlation\.js["']/,
-    "index.js must import wrapWithCorrelation from ./correlation.js");
-  assert.match(src, /fetch:\s*wrapWithCorrelation\(/,
+  assert.match(
+    src,
+    /import\s*\{\s*wrapWithCorrelation\s*\}\s*from\s*["']\.\/correlation\.ts["']/,
+    "index.js must import wrapWithCorrelation from ./correlation.ts",
+  );
+  assert.match(
+    src,
+    /fetch:\s*wrapWithCorrelation\(/,
     "the default export's fetch must be wrapWithCorrelation(...) — every route (health, release, " +
-    "ingest, /mcp under every auth door, /pipeline/changes, the Deal Room web handler, capture) " +
-    "flows through this one entry point, so wrapping it here covers all of them without touching " +
-    "any individual route body");
+      "ingest, /mcp under every auth door, /pipeline/changes, the Deal Room web handler, capture) " +
+      "flows through this one entry point, so wrapping it here covers all of them without touching " +
+      "any individual route body",
+  );
 });

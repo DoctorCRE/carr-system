@@ -1,5 +1,5 @@
 // Expose and resolve email-derived proposals.
-import { lockEmailIdentity, capturedEmail } from './email-identity.js';
+import { lockEmailIdentity, capturedEmail } from './email-identity.ts';
 import { sha256 } from './sha256.ts';
 import { mailboxOwnerForActor, partnerAuthoritySlugForActor } from './partner-authority.js';
 import { suspected } from './untrusted-text.ts';

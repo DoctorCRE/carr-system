@@ -12,23 +12,27 @@
 //
 import { integerFields } from "./safe-integer.ts";
 
-function profileRecord(row) {
+type ProfileRow = Record<string, unknown>;
+type ProfileReader = { query(sql: string): Promise<{ rows: ProfileRow[] }> };
+
+function profileRecord(row: ProfileRow) {
   return integerFields(row, ["version"], "profile_version_invalid");
 }
 
 export function agentProfileTools() {
   return {
     "read-profiles": {
-      description: "The named-agent roster: every persistent agent identity (Builder, Designer, Reviewer, Doc) with its charter as a skills list, the model currently staffing it, its desk if any, and its status (active / unstaffed / parked). The NAME is the thing partners learn; the model underneath is interchangeable staffing detail. Read-only and open — a profile is presentation and routing, never authority.",
+      description:
+        "The named-agent roster: every persistent agent identity (Builder, Designer, Reviewer, Doc) with its charter as a skills list, the model currently staffing it, its desk if any, and its status (active / unstaffed / parked). The NAME is the thing partners learn; the model underneath is interchangeable staffing detail. Read-only and open — a profile is presentation and routing, never authority.",
       inputSchema: { type: "object", properties: {} },
-      handler: async (c) => {
+      handler: async (c: ProfileReader) => {
         const r = await c.query(
           `select profile_key, display_name, charter, current_model, current_desk,
                   sponsor_scope, status, version
-             from agent_profile order by profile_key`);
+             from agent_profile order by profile_key`,
+        );
         return { ok: true, profiles: r.rows.map(profileRecord), total: r.rows.length };
       },
     },
-
   };
 }
