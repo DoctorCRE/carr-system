@@ -188,7 +188,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "adopt-rule": {
     "ingress_key": "mcp-tool:adopt-rule",
-    "source_locator": "mcp-server/src/org-conventions.js",
+    "source_locator": "mcp-server/src/org-conventions.ts",
     "schema_digest": "c99415ae17fef7250c52a316ddaa29b78852c47dbd72296c4eb24b3f8a97ee02",
     "write": true,
     "human_only": true,
@@ -1973,7 +1973,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "party-duplicate-candidates": {
     "ingress_key": "mcp-tool:party-duplicate-candidates",
-    "source_locator": "mcp-server/src/party-duplicate-candidates.js",
+    "source_locator": "mcp-server/src/party-duplicate-candidates.ts",
     "schema_digest": "32955ab25ea9e9e83715fb8807d7a2a43f2216819966fcd0835bbf3eb9537ca9",
     "write": false,
     "human_only": false,
@@ -3781,7 +3781,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   },
   "rule-cards": {
     "ingress_key": "mcp-tool:rule-cards",
-    "source_locator": "mcp-server/src/org-conventions.js",
+    "source_locator": "mcp-server/src/org-conventions.ts",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
