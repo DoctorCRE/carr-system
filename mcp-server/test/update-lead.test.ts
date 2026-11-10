@@ -27,9 +27,10 @@
 // (also picked up by `npm test`'s test/*.test.ts glob).
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { QueryCall } from "./helpers/registered-tool.ts";
-import { array, derivedIdempotencyKey, first, parseJson, ToolError, tool } from "./helpers/registered-tool.ts";
+import { array, derivedIdempotencyKey, first, parseJson, record, ToolError, tool } from "./helpers/registered-tool.ts";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -388,5 +389,17 @@ test("archive decisions require a partner, while notes on an archived lead remai
       fields: { notes: "Synthetic reviewed note" },
     }),
     { ok: true, updated: ["notes"] },
+  );
+});
+
+test("historical leak qualification retains its original path after TypeScript conversion", () => {
+  const allowlist = record(parseJson(readFileSync(new URL("../../security/allowlist.json", import.meta.url), "utf8")));
+  const historicalDigest = "177efb335a5ebd0ad057eca2ede1259b997320ca4bba94c879d08164956a9a83";
+  const qualifications = array(allowlist.entries)
+    .map(record)
+    .filter((entry) => entry.sha256 === historicalDigest);
+  assert.deepEqual(
+    qualifications.map(({ path, sha256, rule }) => ({ path, sha256, rule })),
+    [{ path: "mcp-server/test/update-lead.test.mjs", sha256: historicalDigest, rule: "generic-api-key" }],
   );
 });
