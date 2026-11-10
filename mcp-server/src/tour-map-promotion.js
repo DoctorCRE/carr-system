@@ -3,7 +3,7 @@
 // this receipt binds the full mobile/native/offline/component/route doctrine gate.
 
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
-import { requiredTimestamp } from "./tour-operations-contract.js";
+import { requiredTimestamp } from "./tour-operations-contract.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;

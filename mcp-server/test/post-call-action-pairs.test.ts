@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import pg from "pg";
-import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
 const registryPath = "../src/tools.js";
 const registry: unknown = await import(registryPath);

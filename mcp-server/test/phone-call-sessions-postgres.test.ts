@@ -10,9 +10,9 @@ import { join } from "node:path";
 import test, { after, before } from "node:test";
 import pg from "pg";
 import { PhoneAudioHandoff } from "../src/phone-audio-handoff.ts";
-import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 import { createPhoneCallHandler, type Handler } from "./helpers/phone-call-handler.ts";
-import { handoffState } from "./helpers/phone-handoff-state.mjs";
+import { handoffState } from "./helpers/phone-handoff-state.ts";
 
 let fixture: Awaited<ReturnType<typeof acquireDisposablePostgres>>,
   pool: pg.Pool,

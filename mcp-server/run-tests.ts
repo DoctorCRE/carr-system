@@ -70,7 +70,7 @@ async function main() {
     if (source.includes("chrome-launch.mjs")) browserFiles.push(file);
     if (
       /-postgres\.test\.(?:js|mjs|ts)$/.test(file) ||
-      /disposable-postgres\.mjs|postgres-database\.mjs|initdb/.test(source)
+      /disposable-postgres\.ts|postgres-database\.mjs|initdb/.test(source)
     )
       postgresFiles.push(file);
   }
@@ -81,7 +81,7 @@ async function main() {
   try {
     if (postgresFiles.length) {
       const started = performance.now();
-      const { acquireDisposablePostgres } = await import("./test/helpers/disposable-postgres.mjs");
+      const { acquireDisposablePostgres } = await import("./test/helpers/disposable-postgres.ts");
       baselineTemplate = await snapshot(
         await acquireDisposablePostgres({
           prefix: "mcp-snapshot-",

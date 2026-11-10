@@ -458,7 +458,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/document-outbound-format.test.mjs"
+        "mcp-server/test/document-outbound-format.test.ts"
       ]
     },
     "pack_delivery": {
