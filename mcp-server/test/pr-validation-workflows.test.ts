@@ -22,7 +22,7 @@ type Job = {
   steps: Step[];
   needs: string[];
   env: Record<string, string>;
-  strategy: { matrix: { shard: number[]; classes?: string[] } };
+  strategy: { matrix: { shard: number[]; gate_shard?: number[]; classes?: string[] } };
   container: { image: string };
   services: { postgres: { image: string; env: Record<string, string> } };
 };
@@ -280,7 +280,9 @@ test("strict aggregate runs after failed classes and requires complete successfu
   ]);
   assert.equal(ci.jobs["unit-coverage"], undefined);
   assert.ok(gate.needs.includes("unit"), "coverage must wait for the entire shard matrix");
-  const coverage = required(gate.steps.find((step) => step.name === "Prove exact suite coverage and missing-suite failure"));
+  const coverage = required(
+    gate.steps.find((step) => step.name === "Prove exact suite coverage and missing-suite failure"),
+  );
   assert.match(coverage.run, /python3 ops\/ci-unit-shards-selftest.py/);
   assert.match(coverage.run, /python3 ops\/ci_unit_shards.py verify unit-receipts\/\*.json/);
   assert.equal(coverage.if, "github.event_name != 'pull_request'");
@@ -320,7 +322,9 @@ test("strict aggregate runs after failed classes and requires complete successfu
       );
       required(needs.scope).outputs = { full: "true" };
       needs.select = selectorNeeds().select;
-      required(needs.select.outputs).classes = JSON.stringify(PRODUCT_CLASSES.filter((name) => !["gates", "unit"].includes(name)));
+      required(needs.select.outputs).classes = JSON.stringify(
+        PRODUCT_CLASSES.filter((name) => !["gates", "unit"].includes(name)),
+      );
       const verdict = (current: Needs) => {
         const output = spawnSync("bash", ["-e", "-c", step.run], {
           cwd: new URL("../../", import.meta.url),

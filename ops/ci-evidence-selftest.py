@@ -483,7 +483,7 @@ class ConversionProof(unittest.TestCase):
 
     def test_missing_pending_paginated_and_wrong_event_evidence_refuses(self):
         original = copy.deepcopy(self.snapshot)
-        for mode in ('missing', 'pending', 'pagination', 'event', 'shard', 'graphql'):
+        for mode in ('missing', 'pending', 'pagination', 'event', 'shard', 'coverage', 'graphql'):
             self.snapshot = copy.deepcopy(original)
             self.commit = self.snapshot['data']['repository']['pullRequest']['mergeCommit']
             suite = next(s for s in self.commit['checkSuites']['nodes'] if s['workflowRun'])
@@ -495,6 +495,9 @@ class ConversionProof(unittest.TestCase):
                 suite['checkRuns']['pageInfo']['hasNextPage'] = True
             elif mode == 'event':
                 suite['workflowRun']['event'] = 'pull_request'
+            elif mode == 'coverage':
+                suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
+                    if j['name'] != 'unit-coverage']
             elif mode == 'shard':
                 suite['checkRuns']['nodes'] = [j for j in suite['checkRuns']['nodes']
                     if j['name'] != 'unit / MCP unit shard 8 of 8']

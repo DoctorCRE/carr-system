@@ -249,8 +249,10 @@ def conversion_ci(commit, workflow):
     groups = workflow_groups(workflow)
     if not groups:
         raise InsufficientEvidence('workflow_class_contract_unreadable')
-    required = {'ops/ci.sh --strict', 'unit / plan', 'unit-coverage', 'launchd-python39',
+    required = {'ops/ci.sh --strict', 'unit / plan', 'launchd-python39',
                 *('ops/ci.sh --strict --only ' + g for g in groups)}
+    if re.search(r'^  unit-coverage:', workflow, re.M):
+        required.add('unit-coverage')
     if 'Gates selftests shard 2 of 2' in workflow:
         required.add('Gates selftests shard 2 of 2')
     failed = False
