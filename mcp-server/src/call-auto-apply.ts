@@ -1,0 +1,46 @@
+// Server-side bar a pipeline-call change must clear to auto-apply instead of staying a card.
+type EvidenceSource = { speaker?: string; source_sha256?: string; quote_sha256?: string };
+type Payload = {
+  needs_review?: unknown;
+  value?: unknown;
+  next_date?: unknown;
+  text?: unknown;
+  evidence_source?: EvidenceSource;
+  [key: string]: unknown;
+};
+export type AutomaticCandidate = { kind: string; payload?: Payload; evidence_quote?: string | null };
+const words = (text: unknown) =>
+  String(text ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => /[a-z0-9]/i.test(word)).length;
+
+export function automaticEvidenceHold(payload: Payload, quote: unknown) {
+  if (payload.needs_review) return String(payload.needs_review);
+  if (words(quote) < 4) return "The quoted evidence is missing or too short to trust.";
+  return null;
+}
+
+export async function automaticApplyHold(candidate: AutomaticCandidate) {
+  const { kind, payload = {}, evidence_quote: quote } = candidate;
+  if (!["next_step", "phase_move"].includes(kind)) return `A ${kind} change is never applied automatically.`;
+  const evidenceHold = automaticEvidenceHold(payload, quote);
+  if (evidenceHold) return evidenceHold;
+  if (kind === "phase_move" && !String(payload.value ?? "").trim()) return "The call did not state a phase.";
+  if (kind === "next_step") {
+    if (!payload.next_date) return "The call did not state a date for the next step.";
+    if (words(payload.text) < 2) return "The next step is too short to apply without a person reading it.";
+  }
+  // A recorder attestation, not server verification: the recorder (device
+  // token) read its private transcript and named the partner who said this
+  // quote. The server never sees the transcript; the quote hash only stops the
+  // quote being swapped after the recorder attested it.
+  const source = payload.evidence_source;
+  if (!["joe", "dell"].includes(source?.speaker ?? ""))
+    return "The quoted evidence does not resolve to a partner in the stored call.";
+  if (!/^[a-f0-9]{64}$/.test(source?.source_sha256 ?? "")) return "The stored call evidence receipt is missing.";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(quote ?? undefined));
+  const quoteHash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (source?.quote_sha256 !== quoteHash) return "The quoted evidence does not match the stored call evidence receipt.";
+  return null;
+}

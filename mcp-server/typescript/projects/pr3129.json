@@ -1,0 +1,11 @@
+{
+  "node": [
+    "src/party-identity.ts",
+    "test/correct-party-identity.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "src/party-identity.ts",
+    "test/correct-party-identity.test.ts"
+  ]
+}
