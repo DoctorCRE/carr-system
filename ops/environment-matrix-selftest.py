@@ -243,7 +243,7 @@ def main() -> int:
     limit_failures = worker_limit_failures(wrangler) + [f"uptime: {failure}" for failure in worker_limit_failures(uptime)]
     check("6. every Worker has bounded CPU and explicit log sampling", not limit_failures, "; ".join(limit_failures))
     ai_boundary = subprocess.run(
-        ["node", str(REPO / "mcp-server/check-ai-boundary.mjs")],
+        ["node", str(REPO / "mcp-server/check-ai-boundary.ts")],
         capture_output=True, text=True, cwd=REPO)
     check("8. only the daily budget wrapper accesses Workers AI", ai_boundary.returncode == 0,
           ai_boundary.stdout + ai_boundary.stderr)

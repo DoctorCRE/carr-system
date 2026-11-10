@@ -1,6 +1,6 @@
 // Validate and screen practice space conversion requirements.
 import { z } from 'zod';
-import { envelope, rangeSchema } from './evidence.mjs';
+import { envelope, rangeSchema } from './evidence.ts';
 import { D, dollars, id, usd } from './runway.mjs';
 
 export const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => {

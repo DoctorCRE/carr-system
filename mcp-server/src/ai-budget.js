@@ -122,7 +122,9 @@ export function budgetedAi(env) {
   };
 }
 
-export class AiNeuronBudget {
+/** @typedef {DurableObject & { __DURABLE_OBJECT_BRAND: never }} AiNeuronBudget */
+/** @type {new (state: DurableObjectState, env: Env) => AiNeuronBudget} */
+export const AiNeuronBudget = class {
   constructor(state, env) {
     this.storage = state.storage;
     this.env = env;
@@ -154,4 +156,4 @@ export class AiNeuronBudget {
       return Response.json({ day, spent: updated, limit, remaining: limit - updated });
     });
   }
-}
+};
