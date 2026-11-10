@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic fixtures for migration risk headers and snapshot ledger integrity."""
+import zipfile
 import hashlib
 import json
 import importlib.util
@@ -274,8 +275,11 @@ with tempfile.TemporaryDirectory() as tmp:
                         "sha256": digest("alter table deal drop column legacy;\n")}],
     }
     write(repo, "db/migration-baseline.json", json.dumps(manifest))
+    with zipfile.ZipFile(repo / "db/migration-history.zip", "w") as archive:
+        archive.writestr("db/schema.sql", snapshot_text)
+        archive.write(repo / "migrations/0001_legacy.sql", "migrations/0001_legacy.sql")
     (repo / "migrations/0001_legacy.sql").unlink()
-    git(repo, "add", "db/migration-baseline.json", "migrations/0001_legacy.sql")
+    git(repo, "add", "db/migration-baseline.json", "db/migration-history.zip", "migrations/0001_legacy.sql")
     git(repo, "commit", "-q", "-m", "covered history")
     r = run_gate(repo, "--base", source)
     check("covered SQL absent from disk keeps the unchanged historical ledger",

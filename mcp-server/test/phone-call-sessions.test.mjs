@@ -2,8 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
-import { readFileSync } from 'node:fs';
-import { handoffState } from './helpers/phone-handoff-state.mjs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { handoffState } from './helpers/phone-handoff-state.ts';
 
 const joe = { id: '10000000-0000-0000-0000-000000000001', slug: 'joe', human: true };
 const root = 'https://app.example.test/api/v1/call-sessions';
@@ -491,4 +495,36 @@ test('session read returns database state when handoff is unreachable', async ()
   assert.equal(result.status, 200);
   assert.equal(result.body.state, 'pending');
   assert.equal(result.body.upload_state_unavailable, true);
+});
+
+
+test('handoff transactions expose resolved sync and async callback results', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'handoff-types-'));
+  const source = join(dir, 'transaction.mts');
+  const helper = fileURLToPath(new URL('./helpers/phone-handoff-state.ts', import.meta.url));
+  const compiler = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url));
+  const check = () => spawnSync(process.execPath, [compiler, '--ignoreConfig', '--noEmit', '--strict',
+    '--module', 'nodenext', '--target', 'esnext', '--allowImportingTsExtensions', source],
+    { encoding: 'utf8', timeout: 30000 });
+  const prelude = `import { handoffState } from ${JSON.stringify(helper)};
+const storage = handoffState().storage;
+`;
+  try {
+    writeFileSync(source, prelude + `
+await storage.transaction(() => 7).then(value => value.toFixed());
+await storage.transaction(async () => 7).then(value => value.toFixed());
+`);
+    const valid = check();
+    assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+    const runtime = spawnSync(process.execPath, [source], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(runtime.status, 0, runtime.stdout + runtime.stderr);
+    writeFileSync(source, prelude + `
+await storage.transaction(async () => 7).then(value => value.then(number => number.toFixed()));
+`);
+    const invalid = check();
+    assert.notEqual(invalid.status, 0, 'resolved transaction values cannot be used as promises');
+    assert.match(invalid.stdout + invalid.stderr, /TS2339.*then.*number/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -80,6 +80,46 @@
         "mcp-server/test/engineering-runtime.test.mjs",
         "mcp-server/test/work-request-ready-plan.test.mjs"
       ]
+    },
+    "completion_evidence": {
+      "_note": "Retired by PR 1801. Retain the catalog identity for historical bindings and receipts; never claim the removed gate is installed.",
+      "enforcement_class": "stop_gate",
+      "implementation": [
+        "external:retired by PR 1801; no current implementation"
+      ],
+      "test": [
+        "ops/control-catalog-projection-selftest.py"
+      ]
+    },
+    "conduct_stop": {
+      "_note": "Retired by PR 1801. Retain the catalog identity for historical bindings and receipts; never claim the removed gate is installed.",
+      "enforcement_class": "stop_gate",
+      "implementation": [
+        "external:retired by PR 1801; no current implementation"
+      ],
+      "test": [
+        "ops/control-catalog-projection-selftest.py"
+      ]
+    },
+    "delegation_tripwire": {
+      "_note": "Retired by PR 2102. Retain the catalog identity for historical bindings and receipts; never claim the removed gate is installed.",
+      "enforcement_class": "stop_gate",
+      "implementation": [
+        "external:retired by PR 2102; no current implementation"
+      ],
+      "test": [
+        "ops/control-catalog-projection-selftest.py"
+      ]
+    },
+    "executor_tier": {
+      "_note": "Retired by PR 2102. Retain the catalog identity for historical bindings and receipts; never claim the removed gate is installed.",
+      "enforcement_class": "stop_gate",
+      "implementation": [
+        "external:retired by PR 2102; no current implementation"
+      ],
+      "test": [
+        "ops/control-catalog-projection-selftest.py"
+      ]
     }
   },
   "enforcement_class_is_a_property_of_the_control": "Deriving the class from the rules that cite a control was tried first and rejected: deal_guard and loop_guard both fail as 'transaction refusal' yet their rules were tagged differently, because a rule's enforcement_class describes what the RULE does while this describes how the CONTROL fires.",

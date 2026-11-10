@@ -8,7 +8,7 @@ import {
   validateCanonicalFieldAssertion,
   validateFoundationEntityFixture,
   validateProjectionFact,
-} from "../src/tour-operations-contract.js";
+} from "../src/tour-operations-contract.ts";
 import fixture from "./fixtures/tour-operations-foundation.v1.json" with { type: "json" };
 import { readMigration } from "./migration-source.testhelper.mjs";
 
