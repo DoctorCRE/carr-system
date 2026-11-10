@@ -1,24 +1,33 @@
 // One Durable Object per unpredictable consent id. KV cannot provide an
 // atomic read/delete; this transaction is the sole consumption authority.
+import type { DurableObjectId, DurableObjectState, DurableObjectStorage } from "@cloudflare/workers-types";
+
 type ConsentInput = { state: string; browser: string; csrf: string; expiresAt: number; [field: string]: unknown };
+type ConsentNamespace = {
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): { fetch(request: Request): Promise<Response> };
+};
 
 export class OAuthConsentState {
+  declare __DURABLE_OBJECT_BRAND: never;
   declare storage: DurableObjectStorage;
 
-  constructor(state: DurableObjectState) { this.storage = state.storage; }
+  constructor(state: DurableObjectState) {
+    this.storage = state.storage;
+  }
 
   async fetch(request: Request) {
-    const input = await request.json<ConsentInput>();
+    const input = (await request.json()) as ConsentInput;
     if (new URL(request.url).pathname === "/create") {
-      await this.storage.transaction(async tx => {
+      await this.storage.transaction(async (tx) => {
         if (await tx.get<ConsentInput>("pending")) throw new Error("Consent already exists");
         await tx.put("pending", input);
-        if (await tx.getAlarm() === null) await tx.setAlarm(input.expiresAt);
+        if ((await tx.getAlarm()) === null) await tx.setAlarm(input.expiresAt);
       });
       return new Response(null, { status: 204 });
     }
     if (new URL(request.url).pathname !== "/consume") return new Response(null, { status: 404 });
-    return this.storage.transaction(async tx => {
+    return this.storage.transaction(async (tx) => {
       const pending = await tx.get<ConsentInput>("pending");
       if (!pending || pending.expiresAt <= Date.now()) return new Response(null, { status: 400 });
       if (pending.state !== input.state || pending.browser !== input.browser || pending.csrf !== input.csrf)
@@ -30,12 +39,23 @@ export class OAuthConsentState {
     });
   }
 
-  async alarm() { await this.storage.deleteAll(); }
+  async alarm() {
+    await this.storage.deleteAll();
+  }
 }
 
-export async function consentState(env: Pick<Env, "OAUTH_CONSENT_STATE">, id: string, operation: "create" | "consume", input: Partial<ConsentInput>) {
+export async function consentState(
+  env: { OAUTH_CONSENT_STATE: ConsentNamespace },
+  id: string,
+  operation: "create" | "consume",
+  input: Partial<ConsentInput>,
+) {
   const stub = env.OAUTH_CONSENT_STATE.get(env.OAUTH_CONSENT_STATE.idFromName(id));
-  return stub.fetch(new Request(`https://consent.internal/${operation}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
-  }));
+  return stub.fetch(
+    new Request(`https://consent.internal/${operation}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
 }
