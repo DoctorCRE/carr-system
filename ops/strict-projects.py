@@ -6,29 +6,51 @@ import os
 import re
 import subprocess
 from pathlib import Path, PurePath
+from typing import NotRequired, TypedDict
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class KnipWorkspace(TypedDict):
+    entry: list[str]
+    project: list[str]
+    node: NotRequired[bool]
+
+
 def generate(pkg: Path) -> None:
-    groups: dict[str, set[str]] = {name: set() for name in ('node', 'worker', 'entry')}
+    pkg = pkg.resolve()
+    groups: dict[str, set[str]] = {name: set() for name in ('node', 'worker', 'node_compat', 'entry')}
     for path in sorted((pkg / 'typescript/projects').glob('*.json')):
         record = json.loads(path.read_text())
         if not isinstance(record, dict) or record.keys() - groups.keys():
-            raise ValueError(f'{path}: expected node, worker and entry path arrays')
+            raise ValueError(f'{path}: expected node, worker, node_compat and entry path arrays')
         for key, values in record.items():
             if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
                 raise ValueError(f'{path}: {key} must be a path array')
             for value in values:
                 matches = pkg.glob(value) if key == 'entry' and '*' in value else [pkg / value]
                 groups[key].update(str(path.relative_to(pkg)) for path in matches if path.is_file())
-    projects = groups['node'] | groups['worker']
+    projects = groups['node'] | groups['worker'] | groups['node_compat']
+    if any(groups[a] & groups[b] for a, b in [('node', 'worker'), ('node', 'node_compat'), ('worker', 'node_compat')]):
+        raise ValueError('a source cannot have multiple runtime owners')
+    generated = pkg / '.generated'
+    generated.mkdir(exist_ok=True)
+    (generated / 'node-compat-empty.d.ts').write_text('export {};\n')
+    compat = {'extends': './tsconfig.base.json', 'compilerOptions': {
+        'lib': ['esnext'], 'noEmit': False, 'declaration': True, 'emitDeclarationOnly': True,
+        'composite': True, 'rootDir': '.', 'outDir': '.generated/node-compat',
+        'tsBuildInfoFile': '.generated/node-compat.tsbuildinfo'},
+        'files': sorted(groups['node_compat']) or ['.generated/node-compat-empty.d.ts']}
+    (pkg / 'tsconfig.node-compat.json').write_text(json.dumps(compat, indent=2) + '\n')
     if groups['entry'] - projects:
         raise ValueError('Knip entries must belong to a strict project')
     for name in ('node', 'worker'):
         options = {'allowJs': True, 'checkJs': False} if name == 'node' else {
-            'module': 'ESNext', 'moduleResolution': 'Bundler', 'types': [], 'lib': ['esnext', 'dom']}
-        config = {'extends': './tsconfig.base.json', 'compilerOptions': options, 'files': sorted(groups[name])}
+            'module': 'ESNext', 'moduleResolution': 'Bundler', 'types': ['./.generated/worker-runtime'], 'lib': ['esnext'],
+            'disableSourceOfProjectReferenceRedirect': True}
+        config: dict[str, object] = {'extends': './tsconfig.base.json', 'compilerOptions': options, 'files': sorted(groups[name])}
+        if name == 'worker':
+            config['references'] = [{'path': './tsconfig.node-compat.json'}]
         (pkg / f'tsconfig.{name}.json').write_text(json.dumps(config, indent=2) + '\n')
     baseline = pkg / 'fallow-baselines/dead-code.legacy.json'
     if baseline.exists():
@@ -39,7 +61,23 @@ def generate(pkg: Path) -> None:
             return new if not (pkg / old).exists() and (pkg / new).is_file() else old
         text = re.sub(r'[A-Za-z0-9_./-]+\.(?:mjs|js)(?=[:|"\s])', renamed, text)
         (pkg / 'fallow-baselines/dead-code.json').write_text(text)
-    graph = {'entry': sorted(groups['entry']), 'project': sorted(projects)}
+    graph: dict[str, object] = {'entry': sorted(groups['entry']), 'project': sorted(projects)}
+    workspaces: dict[str, KnipWorkspace] = {}
+    for file in sorted(projects):
+        source = (pkg / file).resolve()
+        owner = next((parent for parent in source.parents
+                      if parent == pkg or (parent / 'package.json').is_file()), pkg)
+        name = os.path.relpath(owner, pkg)
+        workspace = workspaces.setdefault(name, {'entry': [], 'project': []})
+        relative = os.path.relpath(source, owner)
+        if name != '.':
+            # Node's inferred test/** entries hide unused exports in imported helpers.
+            workspace['node'] = False
+        workspace['project'].append(relative)
+        if file in groups['entry']:
+            workspace['entry'].append(relative)
+    if workspaces.keys() - {'.'}:
+        graph['workspaces'] = workspaces
     (pkg / 'knip.json').write_text(json.dumps(graph, indent=2) + '\n')
 
 

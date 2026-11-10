@@ -1,0 +1,25 @@
+{
+  "node": [
+    "src/research-sites.ts",
+    "test/prepare-conversation.test.ts",
+    "test/progress-board-cli.test.ts",
+    "test/promote-pool-research-gate.test.ts",
+    "test/quiet-test-browsers-inventory.test.ts",
+    "test/renewal-lease-ledger.test.ts",
+    "test/required-args-nullable.test.ts",
+    "test/research-sites.test.ts",
+    "test/resource-observation.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "src/research-sites.ts",
+    "test/prepare-conversation.test.ts",
+    "test/progress-board-cli.test.ts",
+    "test/promote-pool-research-gate.test.ts",
+    "test/quiet-test-browsers-inventory.test.ts",
+    "test/renewal-lease-ledger.test.ts",
+    "test/required-args-nullable.test.ts",
+    "test/research-sites.test.ts",
+    "test/resource-observation.test.ts"
+  ]
+}
