@@ -1,0 +1,11 @@
+{
+  "node": [
+    "../pipelines/capture-salesforce-list.ts",
+    "test/salesforce-list-capture-browser.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "../pipelines/capture-salesforce-list.ts",
+    "test/salesforce-list-capture-browser.test.ts"
+  ]
+}

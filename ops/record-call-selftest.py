@@ -85,7 +85,7 @@ check("the refusal names its error code", r.error == "unknown_tool", r.error)
 
 guidance = subprocess.run(
     ["node", "--input-type=module", "-e",
-     'import {humanOnlyGuidance} from "./mcp-server/human-only-hint.mjs"; '
+     'import {humanOnlyGuidance} from "./mcp-server/human-only-hint.ts"; '
      'process.stdout.write(humanOnlyGuidance("synthetic-verb"));'],
     cwd=REPO, capture_output=True, text=True, check=True).stdout
 human_only = {"error": "human_only", "name": "synthetic-verb"}

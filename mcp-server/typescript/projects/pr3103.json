@@ -1,0 +1,9 @@
+{
+  "node": [
+    "check-ai-boundary.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "check-ai-boundary.ts"
+  ]
+}
