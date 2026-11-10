@@ -1,0 +1,12 @@
+{
+  "node": [
+    "test/job-passport-characterization.test.ts"
+  ],
+  "worker": [
+    "../dealroom/js/job-passport.ts"
+  ],
+  "entry": [
+    "../dealroom/js/job-passport.ts",
+    "test/job-passport-characterization.test.ts"
+  ]
+}
