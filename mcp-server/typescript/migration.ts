@@ -178,11 +178,32 @@ function baselineScope(
         throw new Error("Checkout does not match event candidate");
       if (mode === "pull_request") {
         const parents = git(["rev-list", "--parents", "-n", "1", candidate]).split(" ");
-        if (parents.length !== 3 || parents[1] !== base)
-          throw new Error("Event base is not the synthetic merge's first parent");
+        const prHead = fields.head;
+        if (
+          parents.length !== 3 ||
+          typeof prHead !== "object" ||
+          prHead === null ||
+          !("sha" in prHead) ||
+          prHead.sha !== parents[2]
+        )
+          throw new Error("Synthetic merge does not match event PR head");
+        const parent = parents[1];
+        if (!parent || !git(["rev-list", "--first-parent", parent]).split("\n").includes(base))
+          throw new Error("Event base is not on the synthetic merge's first-parent history");
+        base = parent;
       } else if (!git(["rev-list", "--first-parent", candidate]).split("\n").includes(base)) {
         throw new Error("Event base is not on the merge group's first-parent history");
       }
+    } else if (mode === "push") {
+      const event = object(env.GITHUB_EVENT_PATH ?? "");
+      if (env.GITHUB_SHA !== candidate || event.after !== candidate)
+        throw new Error("Checkout does not match event candidate");
+      if (typeof event.before !== "string" || !/^[0-9a-f]{40}$/.test(event.before))
+        throw new Error("Missing immutable push base SHA");
+      base =
+        event.before === "0".repeat(40) ? git(["merge-base", candidate, "refs/remotes/origin/main"]) : event.before;
+      if (base === candidate) throw new Error("Push baseline cannot be the candidate itself");
+      git(["merge-base", "--is-ancestor", base, candidate]);
     } else {
       base = git(["merge-base", candidate, "refs/remotes/origin/main"]);
     }
