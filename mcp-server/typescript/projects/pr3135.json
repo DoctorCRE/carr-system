@@ -1,0 +1,14 @@
+{
+  "node": [
+    "test/export-email-domains.test.ts",
+    "test/fact-observations.test.ts",
+    "test/find-and-catch-up.test.ts",
+    "test/fixtures/chrome-launch-fixture.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/export-email-domains.test.ts",
+    "test/fact-observations.test.ts",
+    "test/find-and-catch-up.test.ts"
+  ]
+}
