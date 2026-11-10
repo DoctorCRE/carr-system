@@ -4,10 +4,10 @@ import signal
 
 
 @contextmanager
-def proof_deadline(seconds, unavailable):
+def proof_deadline(seconds, unavailable, reason='deadline_exhausted'):
     """Raise the proof's unavailable error on expiry; always restore its handler."""
     def expired(_signal, _frame):
-        raise unavailable('deadline_exhausted')
+        raise unavailable(reason)
 
     previous = signal.getsignal(signal.SIGALRM)
     try:

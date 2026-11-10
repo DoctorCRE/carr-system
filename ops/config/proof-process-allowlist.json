@@ -27,18 +27,18 @@
       "declared --call-wrapper call email-match-contacts/prospect-research/party-duplicate-candidates"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-identity-domain-recorded-addresses.py": {
-    "sha256": "0cd4cb9a30fe9212ef0086048d5d09083ed4bff76b6cb22f9f6cff110e9e0ce4",
+    "sha256": "6b0981d24cdfb2ce387d031253f2af6df716be82a5678b8dd6f300599c195cf5",
     "commands": [
       "declared --call-wrapper call prospect-research/catch-me-up",
       "git log -1 --format=%H -- mcp-server/src/party-identity.js",
       "git merge-base --is-ancestor"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-lead-contact-address-membership.py": {
@@ -47,7 +47,7 @@
       "declared --call-wrapper call lead-board/lead-stage-preview"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-lease-comparison-tiny-rate-stability.py": {
@@ -57,16 +57,16 @@
     ],
     "helpers": {
       "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76",
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-mail-policy-multiple-recorded-addresses.py": {
-    "sha256": "caa4f877e92bb7c2c5442173dda7dff0ec7df23ae1cd3bf47cb5b2a6c4256ea2",
+    "sha256": "79138a84259759f0110114b6f3efd33490f30ee2b4ecd246ea449ffe234b4c70",
     "commands": [
       "declared --call-wrapper call email-match-contacts/prospect-research/mail-contact-policy"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-notification-feed-evidence-integrity.py": {
@@ -77,16 +77,16 @@
       "node --experimental-strip-types --input-type=module -e REPLAY with registered projection source"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-post-call-exact-edge-whitespace.py": {
-    "sha256": "41598bef1abf9d2b50ffd603927818bb9e0c15d56ca13785bb036081ce59a4f4",
+    "sha256": "d54836129fda3d8c13f41629834bdf3c5d3c750d982f19e3e63bb323b0e79969",
     "commands": [
       "declared --call-wrapper call read-call-outcomes"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-prospect-research-future-evidence.py": {
@@ -133,7 +133,7 @@
       "declared --call-wrapper call deal-room-board/get-deal-room/preview-email-next-step via lib.record_call"
     ],
     "helpers": {
-      "lib.proof_deadline.proof_deadline": "c1eab2e29cd48263f406b5bffcb2b6ba2f83b37b41f66c3938c47c52d1f5cdb9"
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
   },
   "tools/prove-activity-deal-attribution.py": {
@@ -147,11 +147,14 @@
     }
   },
   "tools/prove-client-anniversary-read.py": {
-    "sha256": "7774379a09a41ad88f7e816e4486fd48b7c4db274f13be01f0fdc69ba0ba698d",
+    "sha256": "da316cc54445f6bb031b1b8c1205e90bee5db674352c9c2fe5e29e819b3353da",
     "commands": [
       "node --experimental-strip-types --input-type=module -e PARSER with JSON stdin through parseClientAnniversaryResponse",
       "git merge-base --is-ancestor merged unit SHA deployed release SHA"
-    ]
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   },
   "tools/prove-quiet-follow-up-owner-filter.py": {
     "sha256": "e8df045b07ed4bbdb6a94cf0d1571386b5636d9b7e5ae915e5ad6103b7814290",

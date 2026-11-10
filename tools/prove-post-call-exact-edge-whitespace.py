@@ -208,7 +208,7 @@ def main():
                'record_reads': 0, 'inspected_cards': 0, 'eligible_cohorts': 0, 'assertions': {}}
 
     try:
-        with proof_deadline(args.timeout_seconds, Unavailable):
+        with proof_deadline(args.timeout_seconds, Unavailable, 'timeout'):
             code = observe(args, receipt)
     except Unavailable as error:
         receipt['status'] = error.status

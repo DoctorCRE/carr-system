@@ -99,7 +99,7 @@ def observe(args):
         return value
 
     try:
-        with proof_deadline(args.timeout_seconds, Unavailable):
+        with proof_deadline(args.timeout_seconds, Unavailable, 'total_deadline'):
             with args.receipt.open('rb') as stream:
                 raw = stream.read(MAX_BYTES + 1)
             if len(raw) > MAX_BYTES:
