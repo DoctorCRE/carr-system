@@ -1,4 +1,6 @@
-// linkedin-activity-urn.test.mjs — coverage for the LinkedIn reference gap,
+import { required } from "./helpers/legacy-test-registry.ts";
+
+// linkedin-activity-urn.test.ts — coverage for the LinkedIn reference gap,
 // found live 2026-08-19 by the weekly social-metrics run.
 //
 // THE DEFECT. `measure-placement` resolves a placement by a stored key: the
@@ -37,15 +39,15 @@
 // migration/db classes; what can silently rot here is the parsing — a regex that
 // starts matching the wrong urn type, or a shift that quietly returns 1970.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { linkedInActivityPublishedAt } from "../src/tools.js";
+import { test } from "node:test";
+import { linkedInActivityPublishedAt } from "./helpers/legacy-test-registry.ts";
 
-const iso = (d) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
 
 // The four posts that were actually stranded, with the publish time each id
 // must decode to. These are real ids off Joe's account.
-const REAL = [
+const REAL: [string, string, string][] = [
   ["7491518023099527168", "2026-08-07T15:38:02Z", "Fort Walton Beach comp, 271 impressions"],
   ["7492600148376657920", "2026-08-10T15:18:01Z", "Physicians Advocacy Institute, 162"],
   ["7493338573098622976", "2026-08-12T16:12:15Z", "optometry two businesses, 182"],
@@ -61,8 +63,8 @@ test("decodes the publish time of every stranded post", () => {
 });
 
 test("accepts every shape LinkedIn actually hands a reader", () => {
-  const id = REAL[0][0];
-  const want = REAL[0][1];
+  const id = required(REAL[0])[0];
+  const want = required(REAL[0])[1];
   for (const ref of [
     `urn:li:activity:${id}`,
     `https://www.linkedin.com/feed/update/urn:li:activity:${id}/`,
@@ -85,9 +87,10 @@ test("leaves every non-LinkedIn handle alone, so other resolution is untouched",
     "3029878",
     "921db62b-d8b6-43a8-8f37-829df2d5ceec",
     "",
-    "urn:li:share:7490064185725280256",   // the STORED form resolves by url, not here
+    "urn:li:share:7490064185725280256", // the STORED form resolves by url, not here
     "urn:li:ugcPost:7490800344260841472",
-  ]) assert.equal(linkedInActivityPublishedAt(ref), null, `should not match: ${ref}`);
+  ])
+    assert.equal(linkedInActivityPublishedAt(ref), null, `should not match: ${ref}`);
 });
 
 test("refuses an id that decodes outside plausible range instead of matching 1970", () => {
@@ -98,15 +101,17 @@ test("refuses an id that decodes outside plausible range instead of matching 197
 });
 
 test("a real id decodes to a sane, recent instant", () => {
-  const got = linkedInActivityPublishedAt(`urn:li:activity:${REAL[0][0]}`);
+  const got = required(linkedInActivityPublishedAt(`urn:li:activity:${required(REAL[0])[0]}`));
   assert.ok(got.getUTCFullYear() >= 2010 && got.getUTCFullYear() <= 2100);
 });
 
 test("distinct posts decode to distinct times, so the window can separate them", () => {
-  const times = REAL.map(([id]) => linkedInActivityPublishedAt(`urn:li:activity:${id}`).getTime());
+  const times = REAL.map(([id]) => required(linkedInActivityPublishedAt(`urn:li:activity:${id}`)).getTime());
   assert.equal(new Set(times).size, REAL.length);
   const sorted = [...times].sort((a, b) => a - b);
   for (let i = 1; i < sorted.length; i++)
-    assert.ok((sorted[i] - sorted[i - 1]) / 1000 > 90,
-      "two real posts fell inside the ±90s match window — the window is too wide");
+    assert.ok(
+      (required(sorted[i]) - required(sorted[i - 1])) / 1000 > 90,
+      "two real posts fell inside the ±90s match window — the window is too wide",
+    );
 });
