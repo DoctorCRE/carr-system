@@ -30,7 +30,7 @@ check = Check(ok="  ok   {label}", fail="  FAIL {label}", detail=None, failures=
 
 
 check('transitive continuity manifest runs database proof',
-      scope.needs_full(['mcp-server/continuity-reference-manifest.mjs']))
+      scope.needs_full(['mcp-server/continuity-reference-manifest.ts']))
 
 # A new import outside the declared trees must enter scope automatically.
 with tempfile.TemporaryDirectory() as tmp:

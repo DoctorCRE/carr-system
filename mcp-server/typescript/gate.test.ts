@@ -120,6 +120,7 @@ test("staged gate accepts clean code and refuses each negative seed", () => {
       ["typescript/migration.json", null, /migration.json.*readable valid JSON/],
       ["typescript/migration.json", '{"legacyJavaScript":null,"legacyTypeScript":[]}', /legacyJavaScript.*array/],
       ["knip.json", '{"project":[]}', /knip.json.*cover every admitted file/],
+      ["knip.json", '{"workspaces":{".":{"project":[]}}}', /knip.json.*cover every admitted file/],
       ["tsconfig.node.json", "{", /tsconfig.node.json.*readable valid JSON/],
       ["tsconfig.base.json", null, /tsconfig.base.json.*configuration must resolve/],
     ];
