@@ -85,6 +85,16 @@ class LogicalConsumers(unittest.TestCase):
         self.assertEqual(base, {"migrations/" + n for n in self.history})
         self.assertEqual(order.violations(base, base, base | {"migrations/0887_intruder.sql"}), ["migrations/0887_intruder.sql"])
 
+    def test_integration_compares_identity_when_base_predates_archive(self):
+        archive = self.repo / 'db/migration-history.zip'
+        raw = archive.read_bytes()
+        archive.unlink()
+        base = self.commit()
+        self.git('update-ref', 'refs/remotes/origin/main', base)
+        archive.write_bytes(raw)
+        self.commit()
+        self.assertEqual(integration.validate_candidate(self.repo, base)['pending_migrations'], [])
+
     def test_integration_union_accepts_compacted_history_and_forward_suffix(self):
         (self.repo / "migrations/0889_pending.sql").write_text("select 3;\n")
         self.commit()
