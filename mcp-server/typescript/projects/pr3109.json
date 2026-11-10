@@ -1,0 +1,11 @@
+{
+  "node": [
+    "../evals/lead-dedup/scorecard.ts",
+    "test/lead-dedup-scorecard.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "../evals/lead-dedup/scorecard.ts",
+    "test/lead-dedup-scorecard.test.ts"
+  ]
+}

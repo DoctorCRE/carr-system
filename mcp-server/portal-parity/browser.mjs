@@ -1,7 +1,7 @@
 // Launch the disposable headless Chromium the parity harness drives.
 import { CHROMIUM_SAFETY_ARGS } from "../../tools/chromium-safety-args.mjs";
 import { chromium } from "playwright-core";
-import { findDisposableChromium } from "../test/helpers/chromium-binary.mjs";
+import { findDisposableChromium } from "../test/helpers/chromium-binary.ts";
 
 // Headless unless a partner asks for a window with --headed; the safety args
 // keep the browser off the login keychain either way. The binary stays Chrome
