@@ -1,15 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { vendorMarketTools } from "../src/vendor-market-registry.ts";
 import type { Db } from "../src/verb-contract.ts";
 
-const registryPath = "../src/tools.js";
-const registry: unknown = await import(registryPath);
-assert.ok(typeof registry === "object" && registry !== null && "TOOLS" in registry);
-const tools = registry.TOOLS;
-assert.ok(typeof tools === "object" && tools !== null && "read-vendor-markets-v1" in tools);
-const verb = tools["read-vendor-markets-v1"];
-assert.ok(typeof verb === "object" && verb !== null && "handler" in verb && typeof verb.handler === "function");
-const read = verb.handler;
+const read = vendorMarketTools({
+  canExercisePartnerAuthority: () => false,
+  organizationTenantForActor: () => "carr-internal",
+})["read-vendor-markets-v1"].handler;
 const unused: Db = {
   query: async () => {
     throw new Error("database must not be touched");
