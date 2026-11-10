@@ -33,7 +33,7 @@ class Db {
     this.writes = 0;
     this.digests = [];
   }
-  async query(text: string, params: string[] = []) {
+  async query(text: string, params: unknown[] = []) {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) return { rows: [] };
     if (text.includes("ops.f01_principal()"))
       return {
@@ -53,11 +53,15 @@ class Db {
     if (text.includes("ops.rw02_record(")) {
       this.writes++;
       this.digests.push(params[2]);
+      const payload = params[5];
+      assert.ok(typeof payload === "string", "Expected serialized outcome");
+      const outcome: unknown = JSON.parse(payload);
+      assert.ok(outcome !== null && typeof outcome === "object" && !Array.isArray(outcome));
       return {
         rows: [
           {
             outcome: {
-              ...JSON.parse(params[5] ?? "null"),
+              ...outcome,
               operation: params[0],
               actor_slug: "joe",
               record_digest: `sha256:${"a".repeat(64)}`,

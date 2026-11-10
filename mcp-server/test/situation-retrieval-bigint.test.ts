@@ -12,6 +12,11 @@ function record(value: unknown): Record<string, unknown> {
   return value;
 }
 
+function parsedRecord(value: unknown): Record<string, unknown> {
+  assert.ok(typeof value === "string", "Expected serialized receipt");
+  return record(JSON.parse(value));
+}
+
 const registry = record(await import(new URL("../src/tools.js", import.meta.url).href));
 const tools = record(registry.TOOLS);
 function registeredTool(name: string) {
@@ -42,8 +47,8 @@ const approval = {
 type Row = Record<string, unknown>;
 type Receipt = { request_hash: unknown; response: Record<string, unknown> };
 class Database {
-  plan: Record<string, Row[] | ((params: string[]) => Row[])>;
-  receipts: Map<string | undefined, Receipt>;
+  plan: Record<string, Row[] | ((params: unknown[]) => Row[])>;
+  receipts: Map<unknown, Receipt>;
   promotions: number;
   sideWrite?: (sql: string, params: unknown[]) => void;
   constructor(plan: Database["plan"] = {}) {
@@ -51,12 +56,12 @@ class Database {
     this.receipts = new Map();
     this.promotions = 0;
   }
-  async query(text: string, params: string[] = []) {
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql.includes("select request_hash, response"))
       return { rows: this.receipts.has(params[0]) ? [this.receipts.get(params[0])] : [] };
     if (sql.includes("insert into tool_call")) {
-      this.receipts.set(params[0], { request_hash: params[3], response: record(JSON.parse(params[4] ?? "null")) });
+      this.receipts.set(params[0], { request_hash: params[3], response: parsedRecord(params[4]) });
       return { rows: [] };
     }
     if (sql.includes("select promote_retrieval_proposal")) this.promotions++;
