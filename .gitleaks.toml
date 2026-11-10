@@ -82,6 +82,7 @@ regexTarget = "line"
 paths = ['''(?:^|/)mcp\-server/test/error\-unmasking\.test\.ts$''']
 regexes = [
   '''^\ \ \ \ \ \ message:\ "permission\ denied;\ connecting\ as\ postgresql[:]//carr_writer:hunter2@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ invented\ fixture;\ the\ whole\ point\ of\ this\ case\ is\ that\ it\ must\ NOT\ survive\ into\ the\ payload$''',
+  '''^\n\ \ \ \ \ \ message:\ "permission\ denied;\ connecting\ as\ postgresql[:]//carr_writer:hunter2@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ invented\ fixture;\ the\ whole\ point\ of\ this\ case\ is\ that\ it\ must\ NOT\ survive\ into\ the\ payload$''',
 ]
 
 [[allowlists]]
