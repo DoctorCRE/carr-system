@@ -24,7 +24,7 @@ FIXTURE = ROOT / "control-room/contracts/fixtures/execution-fabric/assurance-com
 def schema_valid(schema: dict, entry: str, value: object) -> bool:
     source = """
 import fs from "node:fs";
-import {compileSchema} from "./workspace/contracts/schema-validator.mjs";
+import {compileSchema} from "./workspace/contracts/schema-validator.ts";
 const payload = JSON.parse(fs.readFileSync(0, "utf8"));
 process.stdout.write(JSON.stringify(compileSchema(payload.schema, payload.schema.$defs[payload.entry])(payload.value)));
 """
@@ -517,7 +517,7 @@ def test_module_has_no_provider_network_git_database_model_or_write_imports():
 
 def test_schema_compiler_enforces_keyed_uniqueness_beyond_unique_items():
     source = """
-import {compileSchema} from "./workspace/contracts/schema-validator.mjs";
+import {compileSchema} from "./workspace/contracts/schema-validator.ts";
 import assert from "node:assert/strict";
 const item = props => ({type: "object", properties: props});
 const validate = compileSchema({type: "array", uniqueItems: true, "x-carr-unique-by": "check_ref", items: item({check_ref: {type: "string"}, failure_condition: {type: "string"}})});

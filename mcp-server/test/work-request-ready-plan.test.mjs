@@ -1,11 +1,11 @@
 // Tests Work Request ready-plan requirements and transitions.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 import { allowedIn, callTool } from "../src/mcp.js";
-import { mutationManifestIdentity } from "../src/mutation-registry.js";
+import { mutationManifestIdentity } from "../src/mutation-registry.ts";
 
 const JOE = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", human: true, via: "test" };
 const BOT = { ...JOE, human: false, slug: "codex" };

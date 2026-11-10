@@ -1,7 +1,7 @@
 // Drain durable push attempts under generation fences and bounded runtime policy.
 import type { PoolClient } from "@neondatabase/serverless";
 import { Pool } from "@neondatabase/serverless";
-import "./postgres.js";
+import "./postgres.ts";
 import type { PushDelivery, PushKeys } from "./web-push-sender.ts";
 import { submitPush } from "./web-push-sender.ts";
 

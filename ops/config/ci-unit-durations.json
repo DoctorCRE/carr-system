@@ -1,4 +1,5 @@
 {
+  "m029_model_views_measurement": {"card": "WR622.S1.J652", "suite": "m029-model-views.test.ts", "local_samples_ms": [444], "basis": "Four characterization tests covering model labels and migration reader name/path/URL cache behavior. 500ms rounds above the standalone observed duration."},
   "conversion_proof_measurement": {"card": "WR622.S1.J879", "suite": "ops/ci-evidence-selftest.py", "class": "gates", "command": ["python3", "ops/ci-evidence-selftest.py"], "local_samples_ms": [3147, 3633, 2657], "basis": "Existing CI evidence suite expanded to 32 tests, including 15 isolated CLI deadline lifecycle cases. Recorded public release and GraphQL parser cases, disposable Git ancestry graph and wall-clock interruption. No network in tests."},
   "proof_cli_deadline_lifecycle_measurement": {"card": "WR622.S1.J745", "suite": "tools/test_proof_cli_deadline_lifecycle.py", "class": "gates", "command": ["python3", "tools/test_proof_cli_deadline_lifecycle.py"], "local_samples_ms": [5290], "basis": "Eight real CLI classifiers exercised in isolated children with deterministic setup, observation and queued teardown expiry; shared helper pass, assertion and programming-error cleanup. No database or network."},
   "migration_depth1_measurement": {"card": "WR622.S1.J706", "suite": "ops/migration-depth1-selftest.py", "class": "gates", "local_samples_ms": [3711], "basis": "Real depth-1 synthetic clone runs eight Node fixtures; historical-read and skip mutations refuse, local fixtures pass. Full real database acceptance remains in migration class."},
@@ -55,6 +56,7 @@
   "deliverables_model_view_measurement": {"card": "WR622.S1.J743", "suite": "deliverables-model-view.test.ts", "command": ["node", "--test", "mcp-server/test/deliverables-model-view.test.ts"], "local_samples_ms": [125, 138], "basis": "Four formatter characterization tests on original main module and typed replacement; includes process startup. No speed comparison."},
   "suites": {
     "deliverables-model-view.test.ts": {"milliseconds": 1380, "serial": false},
+    "schema-validator.test.ts": {"milliseconds": 500, "serial": false, "local_samples_ms": [133, 144, 340], "card": "WR622.S1.J741", "basis": "Direct stateless schema contract suite, Node --test process duration before and after conversion."},
     "model-view-adapters.test.ts": {"milliseconds": 500, "serial": false, "local_samples_ms": [409], "card": "WR622.S1.J549"},
     "artifact-trust-characterization.test.ts": {"milliseconds": 166, "serial": false},
     "unread-fix-map.test.ts": {"milliseconds": 510, "serial": false, "local_samples_ms": [126.365166, 254], "card": "WR622.S1.J705"},
@@ -323,11 +325,12 @@
     "market-study-composer.test.mjs": {"milliseconds": 741, "serial": false},
     "market-study-package.test.ts": {"milliseconds": 291, "serial": false},
     "market-terms-postgres.test.mjs": {"milliseconds": 1668, "serial": true},
-    "markup-guard.test.js": {"milliseconds": 735, "serial": false},
+    "m029-model-views.test.ts": {"milliseconds": 500, "serial": false},
+    "markup-guard.test.ts": {"milliseconds": 735, "serial": false},
     "meeting-call-mode-j201.v5.test.mjs": {"milliseconds": 485, "serial": false},
     "meeting-mode.test.mjs": {"milliseconds": 476, "serial": false},
     "memory-kernel.test.mjs": {"milliseconds": 245, "serial": false},
-    "memory-rls-connection.test.mjs": {"milliseconds": 346, "serial": false},
+    "memory-rls-connection.test.ts": {"milliseconds": 346, "serial": false},
     "metering-web.test.mjs": {"milliseconds": 740, "serial": false},
     "morning-brief.test.mjs": {"milliseconds": 836, "serial": false},
     "national-account-classification-correction.test.mjs": {"milliseconds": 1186, "serial": true},

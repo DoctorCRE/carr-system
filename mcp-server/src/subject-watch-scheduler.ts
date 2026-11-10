@@ -1,7 +1,7 @@
 // Bound scheduled watch work to one connection and four transactional batches.
 import type { PoolClient, PoolConfig } from "@neondatabase/serverless";
 import { Pool } from "@neondatabase/serverless";
-import "./postgres.js";
+import "./postgres.ts";
 
 type Controller = { scheduledTime: number };
 type Environment = { DATABASE_URL_WRITER: string };

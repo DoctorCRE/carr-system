@@ -1,5 +1,5 @@
 // Tests Work Shape decisions, dispositions, and revisions.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

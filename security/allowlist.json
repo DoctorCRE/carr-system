@@ -630,7 +630,7 @@
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
     },
     {
-      "path": "mcp-server/test/situation-retrieval-bigint.test.mjs",
+      "path": "mcp-server/test/situation-retrieval-bigint.test.ts",
       "sha256": "e90b22671c9e1286da3979d67850fd9c05b554dbf6d690233013feb7b553f210",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
@@ -949,6 +949,18 @@
       "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
       "rule": "pii-phone",
       "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
+      "rule": "pii-phone",
+      "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
+      "rule": "pii-address",
+      "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
     },
     {
       "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",

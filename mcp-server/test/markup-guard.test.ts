@@ -1,4 +1,4 @@
-// markup-guard.test.js — the write door refuses tool-call markup in a field value.
+// markup-guard.test.ts — the write door refuses tool-call markup in a field value.
 //
 // WHY. ops/store-markup-scan.py has been finding this damage AFTER the fact for
 // weeks: a session composes several long fields as one block of text, the field
@@ -25,13 +25,18 @@
 
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { looksLikeToolCallMarkup } from "../src/tools.js";
+
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+assert.ok(typeof registered === "object" && registered !== null && "looksLikeToolCallMarkup" in registered);
+const looksLikeToolCallMarkup = registered.looksLikeToolCallMarkup;
+assert.ok(typeof looksLikeToolCallMarkup === "function");
 
 test("the exact 2026-08-14 corruption is refused", () => {
   // What actually landed: source_note swallowed </source_note> and ate the
   // whole unblocks field after it, which was then stored NULL.
-  const v = 'Reported by the peer session; counts verified independently.'
-    + '</source_note>\n<parameter name="unblocks">Makes it safe to push again.';
+  const v =
+    "Reported by the peer session; counts verified independently." +
+    '</source_note>\n<parameter name="unblocks">Makes it safe to push again.';
   assert.equal(looksLikeToolCallMarkup("source_note", v), true);
 });
 
@@ -45,18 +50,21 @@ test("a field that swallowed its own closing tag is refused", () => {
 
 test("a bare parameter marker is refused wherever it appears", () => {
   assert.equal(looksLikeToolCallMarkup("body", 'text <parameter name="x">more'), true);
-  assert.equal(looksLikeToolCallMarkup("title", "<invoke name=\"add-loop\">"), true);
+  assert.equal(looksLikeToolCallMarkup("title", '<invoke name="add-loop">'), true);
 });
 
 test("PROSE ABOUT the defect is allowed — the guard must not gag the system", () => {
   // Quoted in backticks: discussion, not damage. Every one of these is a real
   // shape from the store's own rules and loops.
-  assert.equal(looksLikeToolCallMarkup(
-    "body", "A field swallowed its own `</parameter>` tag and the rest was NULL."), false);
-  assert.equal(looksLikeToolCallMarkup(
-    "body", "Markers to scan for: `<parameter`, `</parameter`, `<invoke`, `</invoke`."), false);
-  assert.equal(looksLikeToolCallMarkup(
-    "close_outcome", "Fixed the `<parameter name=` leak in the loop body."), false);
+  assert.equal(
+    looksLikeToolCallMarkup("body", "A field swallowed its own `</parameter>` tag and the rest was NULL."),
+    false,
+  );
+  assert.equal(
+    looksLikeToolCallMarkup("body", "Markers to scan for: `<parameter`, `</parameter`, `<invoke`, `</invoke`."),
+    false,
+  );
+  assert.equal(looksLikeToolCallMarkup("close_outcome", "Fixed the `<parameter name=` leak in the loop body."), false);
 });
 
 test("ordinary text is untouched", () => {

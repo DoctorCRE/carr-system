@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS } from "../src/tools.js";
 import { buildRelease } from "../src/release.js";
-import { mutationManifestIdentity } from "../src/mutation-registry.js";
+import { mutationManifestIdentity } from "../src/mutation-registry.ts";
 
 const FIXED_NOW = () => new Date("2026-08-13T21:00:00.000Z");
 const SCHEMA_LEDGER_SHA256 = "sha256:" + "7".repeat(64);
@@ -342,7 +342,7 @@ test("buildRelease: env is the ONLY field that separates the environments — th
 
 // --- command-contract identity (V5-F07, Q058) ------------------------------
 // The command-contract axis a caller needs for a compatibility test. It is the
-// SAME identity the runtime dispatches against (mutation-registry.js), read
+// SAME identity the runtime dispatches against (mutation-registry.ts), read
 // here rather than restated, so /release cannot report a command contract this
 // deploy is not running.
 

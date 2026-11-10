@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 
 const contract: unknown = await import(new URL("../src/tour-operations-contract.ts", import.meta.url).href);
 assert.ok(
@@ -169,7 +169,9 @@ test("the JavaScript allowlist and the database allowlist are the same list", ()
   assert.ok(body, "migration defines ops.tour_client_field_keys()");
   const array = body.match(/array\[([^\]]*)\]::text\[\]/i);
   assert.ok(array, "ops.tour_client_field_keys() returns one literal text[]");
-  const sqlKeys = [...array[1].matchAll(/'([^']*)'/g)].map((match) => match[1]);
+  const keys = array[1];
+  assert.ok(keys, "ops.tour_client_field_keys() has a captured key list");
+  const sqlKeys = [...keys.matchAll(/'([^']*)'/g)].map((match) => match[1]);
   assert.deepEqual(sqlKeys, [...CLIENT_TOUR_FIELD_KEYS]);
   // Both share-facing reads name only allowlisted columns: no caveat, access,
   // photo, floor-plan or appointment column is selected for a client.
