@@ -1,0 +1,5 @@
+{
+  "node": ["src/constraint-errors.ts"],
+  "worker": ["src/constraint-errors.ts"],
+  "entry": []
+}

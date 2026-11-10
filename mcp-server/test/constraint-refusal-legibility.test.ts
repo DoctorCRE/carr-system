@@ -2,23 +2,19 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  type ConstraintCatalogClient,
+  describeConstraint as describe,
+  pgConstraintError as translate,
+} from "../src/constraint-errors.ts";
 import { ToolError } from "../src/tool-error.ts";
-
-const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
-assert.ok(typeof registered === "object" && registered !== null);
-assert.ok("pgConstraintError" in registered);
-assert.ok(typeof registered.pgConstraintError === "function");
-const translate = registered.pgConstraintError;
-assert.ok("describeConstraint" in registered);
-assert.ok(typeof registered.describeConstraint === "function");
-const describe = registered.describeConstraint;
 
 function pgConstraintError(error: unknown): ToolError {
   const refusal: unknown = translate(error);
   assert.ok(refusal instanceof ToolError);
   return refusal;
 }
-async function describeConstraint(client: object | null, refusal: ToolError): Promise<ToolError> {
+async function describeConstraint(client: ConstraintCatalogClient | null, refusal: ToolError): Promise<ToolError> {
   const described: unknown = await describe(client, refusal);
   assert.ok(described instanceof ToolError);
   return described;

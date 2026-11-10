@@ -265,10 +265,10 @@ function walk(node, visit, ancestors = []) {
   }
 }
 
-// This inventories tools.js only. It passes ToolError to other modules whose codes
+// This inventories tools.js and its extracted constraint errors. It passes ToolError to other modules whose codes
 // are not inventoried, and an aliased constructor (const E = ToolError) is missed.
 function codesIn(source) {
-  const tree = parse(source, { sourceType: "module" });
+  const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const codes = new Set();
   const unresolved = [];
   const dynamicFunctions = [];
@@ -294,6 +294,7 @@ function codesIn(source) {
 test("every tools.js ToolError code is classified", t => {
   t.mock.method(console, "error", () => {});
   const { codes, unresolved, fingerprints } = codesIn(readFileSync(new URL("../src/tools.js", import.meta.url), "utf8"));
+  for (const code of codesIn(readFileSync(new URL("../src/constraint-errors.ts", import.meta.url), "utf8")).codes) codes.add(code);
   // Dynamic producers need review when their enclosing functions change.
   assert.deepEqual(fingerprints, [
     "090b814f8e6237373e71306c7e3f5493252cf7c730241328ad3bc254b3170a8e",
@@ -335,8 +336,9 @@ test("every tools.js ToolError code is classified", t => {
 
 test("shared argument layer errors reach callers", t => {
   t.mock.method(console, "error", () => {});
-  const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8");
-  const tree = parse(source, { sourceType: "module" });
+  const source = readFileSync(new URL("../src/tools.js", import.meta.url), "utf8") + "\n" +
+    readFileSync(new URL("../src/constraint-errors.ts", import.meta.url), "utf8");
+  const tree = parse(source, { sourceType: "module", plugins: ["typescript"] });
   const names = ["assertRequiredArgs", "coerceArgsToSchema", "versionGuard", "assertDeclaredVocabularies", "pgConstraintError"];
   for (const name of names) {
     let fn;
