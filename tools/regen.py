@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / 'ops'))
 from git_env import scrubbed_env
 
 REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.ts'
+RETIRED_REGISTRY = 'mcp-server/src/scac-mutation-registry.current.generated.js'
 SCHEMA = 'db/schema.sql'
 OPERATIONS = re.compile(rb'export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);')
 
@@ -22,7 +23,7 @@ def git(*args):
 def regenerate():
     unresolved = git('diff', '--name-only', '--diff-filter=U', '-z').split(b'\0')
     unresolved = [path.decode() for path in unresolved if path]
-    if any(path != REGISTRY for path in unresolved):
+    if any(path not in (REGISTRY, RETIRED_REGISTRY) for path in unresolved):
         raise ValueError('resolve source conflicts before regenerating the registry')
     target = ROOT / REGISTRY
     original = target.read_bytes()
@@ -39,12 +40,14 @@ def regenerate():
     try:
         subprocess.run(['node', 'ops/scac-mutation-inventory.ts', '--write-current'], cwd=ROOT, env=scrubbed_env(), check=True)
         subprocess.run(['node', 'ops/scac-mutation-inventory.ts'], cwd=ROOT, env=scrubbed_env(), check=True)
-        if resolving:
+        if RETIRED_REGISTRY in unresolved:
+            git('rm', '--', RETIRED_REGISTRY)
+        if unresolved:
             git('add', '--', REGISTRY)
     except BaseException:
         target.write_bytes(original)
         raise
-    print('Registry regenerated' + (' and its Git conflict resolved.' if resolving else '.'))
+    print('Registry regenerated' + (' and its Git conflict resolved.' if unresolved else '.'))
 
 
 def regenerate_schema():
