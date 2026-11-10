@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Check that independent admissions compose without shared list edits."""
+import contextlib
+import io
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from git_env import fixture_env
 
@@ -141,6 +144,38 @@ class StrictProjects(unittest.TestCase):
             result = check('node')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("'DurableObjectState'", result.stdout)
+    def test_sibling_workspace_keeps_consumers_as_entries_and_libraries_as_projects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pkg = root / 'mcp-server'
+            admissions = pkg / 'typescript/projects'
+            admissions.mkdir(parents=True)
+            plugin = root / 'practice-plugin'
+            (plugin / 'test').mkdir(parents=True)
+            (plugin / 'src').mkdir()
+            (plugin / 'package.json').write_text('{"name":"practice-plugin"}')
+            (pkg / 'local.ts').touch()
+            for file in ('test/calculators.test.mjs', 'test/fixtures.ts', 'src/runway.ts'):
+                (plugin / file).touch()
+            (admissions / 'plugin.json').write_text(json.dumps({
+                'node': ['local.ts', '../practice-plugin/test/calculators.test.mjs',
+                         '../practice-plugin/test/fixtures.ts'],
+                'worker': ['../practice-plugin/src/runway.ts'],
+                'entry': ['local.ts', '../practice-plugin/test/calculators.test.mjs']}))
+            module.generate(pkg)
+            graph = json.loads((pkg / 'knip.json').read_text())
+            self.assertEqual(graph['workspaces'], {
+                '.': {'entry': ['local.ts'], 'project': ['local.ts']},
+                '../practice-plugin': {
+                    'node': False,
+                    'entry': ['test/calculators.test.mjs'],
+                    'project': ['src/runway.ts', 'test/calculators.test.mjs', 'test/fixtures.ts']}})
+            self.assertEqual(graph['project'], sorted([
+                'local.ts', '../practice-plugin/src/runway.ts',
+                '../practice-plugin/test/calculators.test.mjs', '../practice-plugin/test/fixtures.ts']))
+            before = (pkg / 'knip.json').read_bytes()
+            module.generate(pkg)
+            self.assertEqual((pkg / 'knip.json').read_bytes(), before)
 
     def test_fallow_renames_only_existing_identities(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -169,6 +204,57 @@ class StrictProjects(unittest.TestCase):
                 file.write_text(json.dumps(record))
                 with self.assertRaises(ValueError):
                     module.generate(pkg)
+
+
+class M043Proof(unittest.TestCase):
+    def test_release_containment_exit_codes(self):
+        spec = importlib.util.spec_from_file_location('m043_proof', Path(__file__).with_name('prove-m043.py'))
+        proof = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(proof)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = fixture_env()
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, env=env, text=True).strip()
+            git('init', '-q')
+            def commit(message):
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    'commit', '--allow-empty', '-qm', message)
+                return git('rev-parse', 'HEAD')
+            older = commit('older')
+            merge = commit('merge')
+            descendant = commit('descendant')
+            git('checkout', '--orphan', 'unrelated')
+            unrelated = commit('unrelated')
+            real_run = subprocess.run
+            for name, revision, expected, assertion_status in (
+                    ('descendant', descendant, 0, 0), ('equal', merge, 0, 0),
+                    ('older', older, 78, 0), ('unrelated', unrelated, 78, 0),
+                    ('unknown', 'f' * 40, 78, 0), ('unavailable', None, 78, 0),
+                    ('assertion failure', merge, 1, 1), ('deadline', merge, 78, 124),
+                    ('missing executable', merge, 78, 127)):
+                with self.subTest(release=name):
+                    from lib.release_reader import Reply
+                    reply = Reply(200, {}, json.dumps({'ok': True, 'env': {'value': 'production'},
+                                                       'git_sha': {'value': revision}}).encode())
+                    checks = []
+                    def run(command, **kwargs):
+                        if command[0] == 'git':
+                            kwargs.update(cwd=root, env=env)
+                            return real_run(command, **kwargs)
+                        checks.append(command)
+                        return subprocess.CompletedProcess(command, assertion_status)
+                    with patch.object(proof, 'read', return_value=reply), \
+                            patch.object(proof.subprocess, 'run', side_effect=run), \
+                            patch.object(proof.TIMEOUT, 'main', side_effect=lambda argv: run(argv[2:]).returncode), \
+                            patch('sys.argv', ['prove-m043.py', '--expected-merge', merge]), \
+                            contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        try:
+                            status = proof.main()
+                        except subprocess.CalledProcessError:
+                            status = 1
+                    self.assertEqual(status, expected)
+                    self.assertEqual(len(checks), 3 if expected == 0 else 1 if revision == merge else 0)
 
 
 if __name__ == '__main__':

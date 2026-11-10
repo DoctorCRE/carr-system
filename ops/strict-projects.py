@@ -6,11 +6,19 @@ import os
 import re
 import subprocess
 from pathlib import Path, PurePath
+from typing import NotRequired, TypedDict
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class KnipWorkspace(TypedDict):
+    entry: list[str]
+    project: list[str]
+    node: NotRequired[bool]
+
+
 def generate(pkg: Path) -> None:
+    pkg = pkg.resolve()
     groups: dict[str, set[str]] = {name: set() for name in ('node', 'worker', 'node_compat', 'entry')}
     for path in sorted((pkg / 'typescript/projects').glob('*.json')):
         record = json.loads(path.read_text())
@@ -53,7 +61,23 @@ def generate(pkg: Path) -> None:
             return new if not (pkg / old).exists() and (pkg / new).is_file() else old
         text = re.sub(r'[A-Za-z0-9_./-]+\.(?:mjs|js)(?=[:|"\s])', renamed, text)
         (pkg / 'fallow-baselines/dead-code.json').write_text(text)
-    graph = {'entry': sorted(groups['entry']), 'project': sorted(projects)}
+    graph: dict[str, object] = {'entry': sorted(groups['entry']), 'project': sorted(projects)}
+    workspaces: dict[str, KnipWorkspace] = {}
+    for file in sorted(projects):
+        source = (pkg / file).resolve()
+        owner = next((parent for parent in source.parents
+                      if parent == pkg or (parent / 'package.json').is_file()), pkg)
+        name = os.path.relpath(owner, pkg)
+        workspace = workspaces.setdefault(name, {'entry': [], 'project': []})
+        relative = os.path.relpath(source, owner)
+        if name != '.':
+            # Node's inferred test/** entries hide unused exports in imported helpers.
+            workspace['node'] = False
+        workspace['project'].append(relative)
+        if file in groups['entry']:
+            workspace['entry'].append(relative)
+    if workspaces.keys() - {'.'}:
+        graph['workspaces'] = workspaces
     (pkg / 'knip.json').write_text(json.dumps(graph, indent=2) + '\n')
 
 
