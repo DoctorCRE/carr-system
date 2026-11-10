@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -9,7 +9,7 @@ import { migrationIssues, object } from "./migration.ts";
 
 const source = resolve(import.meta.dirname, "..");
 const fixtureEnv = Object.fromEntries(
-  Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && name !== "GITHUB_BASE_REF"),
+  Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && !name.startsWith("GITHUB_")),
 );
 
 test("staged gate accepts clean code and refuses each negative seed", () => {
@@ -415,6 +415,83 @@ test("initial gate admits main files by path but freezes TypeScript bytes", () =
     scope.legacyTypeScript.pop();
     save();
     assert.match(migrationIssues(pkg, gated).join("\n"), /main-only.ts.*pre-existing main file, list it/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("migration admission binds PR, queue and local checks to their own base", () => {
+  const root = mkdtempSync(join(tmpdir(), "carr-migration-event-"));
+  try {
+    const pkg = join(root, "mcp-server");
+    mkdirSync(join(pkg, "typescript"), { recursive: true });
+    const js = "mcp-server/legacy.js";
+    const scope = join(pkg, "typescript/migration.json");
+    writeFileSync(scope, JSON.stringify({ legacyJavaScript: [js], legacyTypeScript: [] }));
+    writeFileSync(join(root, js), "export const legacy = 1;\n");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: root, env: fixtureEnv, encoding: "utf8" }).trim();
+    const commit = (message: string) => {
+      git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", message);
+      return git("rev-parse", "HEAD");
+    };
+    git("init", "-q");
+    git("add", js, "mcp-server/typescript/migration.json");
+    const base = commit("base with legacy JavaScript");
+    git("checkout", "-qb", "topic");
+    const topic = commit("unrelated PR change");
+    git("checkout", "-q", "--detach", base);
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "merge", "--no-ff", "-qm", "candidate", topic);
+    const candidate = git("rev-parse", "HEAD");
+    git("update-ref", "refs/remotes/origin/main", base);
+    const eventPath = join(root, "event.json");
+    const run = (mode: string, declaredBase: string = base, sha: string = candidate) => {
+      writeFileSync(eventPath, JSON.stringify(mode === "pull_request"
+        ? { pull_request: { base: { sha: declaredBase } } }
+        : { merge_group: { base_sha: declaredBase, head_sha: sha } }));
+      return spawnSync(process.execPath, ["--input-type=module", "-e",
+        `import { migrationIssues } from ${JSON.stringify(join(source, "typescript/migration.ts"))};
+         const issues = migrationIssues(${JSON.stringify(pkg)}, []);
+         console.log(JSON.stringify(issues)); process.exitCode = issues.length ? 1 : 0;`], {
+        cwd: root, encoding: "utf8", env: { ...fixtureEnv,
+          ...(mode === "local" ? {} : { GITHUB_EVENT_NAME: mode, GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: sha }) },
+      });
+    };
+    for (const mode of ["pull_request", "merge_group", "local"]) assert.equal(run(mode).status, 0);
+    git("checkout", "-q", "--detach", base);
+    git("rm", "-q", js);
+    const newer = commit("main converts legacy JavaScript");
+    git("update-ref", "refs/remotes/origin/main", newer);
+    git("checkout", "-q", "--detach", candidate);
+    for (const mode of ["pull_request", "merge_group", "local"]) {
+      const result = run(mode);
+      assert.equal(result.status, 0, `${mode} changed after main advanced: ${result.stdout}${result.stderr}`);
+      const repeated = run(mode);
+      assert.equal(repeated.status, 0, repeated.stderr);
+    }
+    writeFileSync(join(pkg, "new.js"), "export const added = 1;\n");
+    assert.match(run("pull_request").stdout, /New first-party JavaScript.*new.js/);
+    rmSync(join(pkg, "new.js"));
+    for (const badBase of ["", "origin/main", "0".repeat(40), topic, newer]) {
+      for (const mode of ["pull_request", "merge_group"]) {
+        const result = run(mode, badBase);
+        assert.notEqual(result.status, 0, `${mode} admitted bad base ${badBase}`);
+        assert.match(result.stderr, /migration baseline/);
+      }
+    }
+    assert.notEqual(run("pull_request", base, newer).status, 0);
+    git("checkout", "-q", "--detach", newer);
+    writeFileSync(join(root, js), "export const resurrected = 1;\n");
+    git("add", js);
+    const queueCandidate = commit("queue candidate resurrects converted JavaScript");
+    const resurrection = run("merge_group", newer, queueCandidate);
+    assert.equal(resurrection.status, 1, resurrection.stderr);
+    assert.match(resurrection.stdout, /New first-party JavaScript.*legacy.js/);
+    git("update-ref", "-d", "refs/remotes/origin/main");
+    const absentLocal = run("local");
+    assert.notEqual(absentLocal.status, 0);
+    assert.match(absentLocal.stderr, /migration baseline/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
