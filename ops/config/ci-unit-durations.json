@@ -454,6 +454,7 @@
     "tour-internal-web.test.mjs": {"milliseconds": 694, "serial": false},
     "tour-map-promotion.test.mjs": {"milliseconds": 204, "serial": false},
     "tour-map-route-state.test.mjs": {"milliseconds": 562, "serial": false},
+    "tour-operations-characterization.test.ts": {"milliseconds": 253, "serial": false},
     "tour-operations-foundation.test.mjs": {"milliseconds": 479, "serial": false},
     "tour-operations-public-projection-slice2.test.mjs": {"milliseconds": 426, "serial": false},
     "tour-operations-rights-slice2.test.mjs": {"milliseconds": 171, "serial": false},
