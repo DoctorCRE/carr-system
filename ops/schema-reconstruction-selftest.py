@@ -13,6 +13,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'tools')]
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group, postgres_bin_dir
+from migration_source import read_baseline_snapshot
 from migration_baseline import MigrationBaseline, repository_ledger
 
 POSTGRES = '--postgres' in sys.argv
@@ -115,8 +116,7 @@ class ReconstructionTests(unittest.TestCase):
                 conn.execute('create database correction_predecessor template template0')
             maintenance_dsn = dsn
             predecessor_dsn = dsn.rsplit('/', 1)[0] + '/correction_predecessor'
-            source = subprocess.check_output(['git', 'show',
-                f'{baseline.source_revision}:db/schema.sql'], cwd=ROOT, text=True)
+            source = read_baseline_snapshot(ROOT).decode('utf-8')
             loaded = subprocess.run([str(bins / 'psql'), '-X', '--single-transaction',
                 '-v', 'ON_ERROR_STOP=1', '-q', '-d', predecessor_dsn], input=source,
                 capture_output=True, text=True, timeout=180)

@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -388,7 +388,7 @@ test("expired sessions retain their explicit authentication error", async () => 
 });
 
 test("Studio claims pass the actor gate after the idempotent device migration", async () => {
-  const { acquireDisposablePostgres } = await import("./helpers/disposable-postgres.mjs");
+  const { acquireDisposablePostgres } = await import("./helpers/disposable-postgres.ts");
   const { existsSync } = await import("node:fs");
   const { default: pg } = await import("pg");
   const { migrationNames } = await import("./migration-source.testhelper.ts");

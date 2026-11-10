@@ -17,7 +17,7 @@ import path from "node:path";
 import test from "node:test";
 import { readMigration } from "./migration-source.testhelper.ts";
 
-const contract: unknown = await import(new URL("../src/tour-operations-contract.js", import.meta.url).href);
+const contract: unknown = await import(new URL("../src/tour-operations-contract.ts", import.meta.url).href);
 assert.ok(
   typeof contract === "object" &&
     contract !== null &&
@@ -30,7 +30,7 @@ assert.ok(typeof contract.CLIENT_TOUR_PACKET_COLUMNS === "object" && contract.CL
 const CLIENT_TOUR_FIELD_KEYS = contract.CLIENT_TOUR_FIELD_KEYS;
 const CLIENT_TOUR_STOP_ENVELOPE_KEYS = contract.CLIENT_TOUR_STOP_ENVELOPE_KEYS;
 const CLIENT_TOUR_PACKET_COLUMNS = contract.CLIENT_TOUR_PACKET_COLUMNS;
-const isClientTourFieldKey = await loadFunction("../src/tour-operations-contract.js", "isClientTourFieldKey");
+const isClientTourFieldKey = await loadFunction("../src/tour-operations-contract.ts", "isClientTourFieldKey");
 
 import {
   CLIENT_METRIC_KEYS,

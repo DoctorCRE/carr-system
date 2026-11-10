@@ -9,7 +9,7 @@ import { readMigration } from './migration-source.testhelper.ts';
 import { readBriefAssurance } from '../src/brief-assurance.ts';
 import { executeRegisteredTool, ToolError, TOOLS } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
-import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.ts';
 
 let bin;
 try { bin = execFileSync('pg_config', ['--bindir'], { encoding: 'utf8' }).trim(); } catch {}

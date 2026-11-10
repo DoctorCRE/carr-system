@@ -11,7 +11,7 @@ import test, { after, before } from "node:test";
 import pg from "pg";
 import { ToolError } from "../src/tool-error.ts";
 import type { Actor } from "../src/verb-contract.ts";
-import { acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 import { migrationNames } from "./migration-source.testhelper.ts";
 
 type Proposal = {
