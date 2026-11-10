@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.ts';
 
 const repo = resolve(import.meta.dirname, '../..');
 const migrations = join(repo, 'migrations');

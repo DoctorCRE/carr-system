@@ -32,7 +32,7 @@ entering the merge queue. No merge driver is required.
 
 Add suites as `test/*.test.js` or `test/*.test.mjs`; the runner discovers them.
 Names ending in `-postgres.test.mjs` or `-postgres.test.js` run alone. Suites that
-import `disposable-postgres.mjs` or `postgres-database.mjs`, or launch `initdb`,
+import `disposable-postgres.ts` or `postgres-database.mjs`, or launch `initdb`,
 also run alone even with other names. Browser isolation remains in place.
 
 ## Consumers checked for checkout safety

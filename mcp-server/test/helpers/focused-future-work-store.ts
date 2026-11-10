@@ -1,7 +1,9 @@
 // A SQL-backed substitute for capture storage in narrow, preexisting fixtures.
 // Full capture, provenance, grants and rollback use the actual migration in
 // future-work-links-postgres.test.mjs, rather than this substitute.
-export async function installFocusedFutureWorkStore(c) {
+import type { ClientBase } from "pg";
+
+export async function installFocusedFutureWorkStore(c: Pick<ClientBase, "query">) {
   await c.query(`create schema if not exists ops;
       create sequence ops.fixture_wr_sequence;
       create table ops.work_request(id uuid primary key default gen_random_uuid(),

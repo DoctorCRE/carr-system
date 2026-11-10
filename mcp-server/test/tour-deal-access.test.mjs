@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Verify canonical Tour deal decisions and installed HTTP access boundaries.
 import test from 'node:test';
 import assert from 'node:assert/strict';

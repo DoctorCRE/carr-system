@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { PhoneAudioHandoff } from '../src/phone-audio-handoff.js';
 import { createPhoneCallHandler } from '../src/phone-call-sessions.js';
 import { readFileSync } from 'node:fs';
-import { handoffState } from './helpers/phone-handoff-state.mjs';
+import { handoffState } from './helpers/phone-handoff-state.ts';
 
 const joe = { id: '10000000-0000-0000-0000-000000000001', slug: 'joe', human: true };
 const root = 'https://app.example.test/api/v1/call-sessions';

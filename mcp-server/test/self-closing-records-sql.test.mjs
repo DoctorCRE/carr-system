@@ -28,7 +28,7 @@ import { readMigration } from "./migration-source.testhelper.mjs";
 //
 // Run with: node --test mcp-server/test/self-closing-records-sql.test.mjs
 
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from "./helpers/disposable-postgres.mjs";
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { neonConfig } from '@neondatabase/serverless';
-import { acquireDisposablePostgres } from './disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './disposable-postgres.ts';
 import { callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './call-rehearsal.mjs';
 import { APP_STAGING_HOST } from '../../src/staging-browser.ts';
 import { TOOLS, executeRegisteredTool } from '../../src/tools.js';
