@@ -1,0 +1,282 @@
+{
+  "schema_version": "vendor-markets.v1",
+  "version": "1.0.0",
+  "verb": "read-vendor-markets-v1",
+  "transport": "Authenticated CARR versioned verb read; partner authority and server-bound carr-internal tenant required.",
+  "request": {
+    "market": "Optional canonical slug or reviewed alias; trimmed and lowercased by producer."
+  },
+  "response": {
+    "state": "empty or ready",
+    "selected_market": "Canonical slug or null. Empty registry always returns null, even with a selector.",
+    "markets": "Ordered by slug. Each has slug, name, kind (market or regional), boundary, source, reviewed_by, reviewed_at, aliases, vendor_count, memberships and regional_references.",
+    "vendors": "Unique live declared vendors ordered by UUID. Each has id, ref, category, name, people and market_slugs. People use vendor-directory.v2 semantics. Named people without channels remain visible."
+  },
+  "membership": "Unique (market_slug, vendor_id). office_presence is a reviewed declaration, not a verified street address. service_coverage is explicit reviewed text or null. Each includes source, reviewed_by and reviewed_at. Office findings remain separate under people[].office.",
+  "regional_references": "Explicit market_slug to regional_slug links with note, source and review provenance. Resolve regional_slug in markets for memberships. Regional vendors never increase the local count.",
+  "counts": "COUNT(DISTINCT vendor_id) per declared market, excluding merged vendors and merged/deleted vendor parties. Multi-market vendors count once per declared market. No alias or person multiplies counts.",
+  "limits": "100 markets, 5000 live memberships; overflow refuses. One statement provides snapshot consistency. No cache, paging or inferred territory memberships.",
+  "errors": [
+    "partner_required",
+    "vendor_market_tenant_refused",
+    "invalid_vendor_market_arguments",
+    "vendor_market_not_found",
+    "vendor_market_capacity_exceeded"
+  ],
+  "data_prerequisite": "Joe or an authorized data job supplies reviewed markets, aliases, exact Sandestin boundary, Florida versus Panhandle scope, explicit vendor UUID memberships, office declarations, service coverage, Regional links and review provenance. No business seeds or registry write verb in this slice.",
+  "response_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "ok",
+      "schema_version",
+      "state",
+      "selected_market",
+      "markets",
+      "vendors"
+    ],
+    "properties": {
+      "ok": {
+        "const": true
+      },
+      "schema_version": {
+        "const": "vendor-markets.v1"
+      },
+      "state": {
+        "enum": [
+          "empty",
+          "ready"
+        ]
+      },
+      "selected_market": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "markets": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug",
+            "name",
+            "kind",
+            "boundary",
+            "source",
+            "reviewed_by",
+            "reviewed_at",
+            "aliases",
+            "vendor_count",
+            "memberships",
+            "regional_references"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "market",
+                "regional"
+              ]
+            },
+            "boundary": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "reviewed_by": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "reviewed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "vendor_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "memberships": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "market_slug",
+                  "vendor_id",
+                  "office_presence",
+                  "service_coverage",
+                  "source",
+                  "reviewed_by",
+                  "reviewed_at"
+                ],
+                "properties": {
+                  "market_slug": {
+                    "type": "string"
+                  },
+                  "vendor_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "office_presence": {
+                    "type": "boolean"
+                  },
+                  "service_coverage": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "reviewed_by": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "reviewed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            },
+            "regional_references": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "market_slug",
+                  "regional_slug",
+                  "note",
+                  "source",
+                  "reviewed_by",
+                  "reviewed_at",
+                  "market_kind",
+                  "regional_kind"
+                ],
+                "properties": {
+                  "market_slug": {
+                    "type": "string"
+                  },
+                  "regional_slug": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "reviewed_by": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "reviewed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "market_kind": {
+                    "const": "market"
+                  },
+                  "regional_kind": {
+                    "const": "regional"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "vendors": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "ref",
+            "category",
+            "name",
+            "people",
+            "market_slugs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "ref": {
+              "type": "string"
+            },
+            "category": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "people": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "company",
+                  "contact",
+                  "office",
+                  "research"
+                ],
+                "properties": {
+                  "company": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "contact": {
+                    "type": "object"
+                  },
+                  "office": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "research": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "market_slugs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
