@@ -111,7 +111,7 @@ import { wrapWithCorrelation } from "./correlation.js";
 import { publicError } from "./public-errors.ts";
 import { bearerCredential } from "./bearer.ts";
 import { withFailureRecording, scheduleFailureRecord, actorUnresolvedFailureClass } from "./trace.js";
-import { createTourInternalWebHandler } from "./tour-internal-web.js";
+import { createTourInternalWebHandler } from "./tour-internal-web.ts";
 import { createReportsWebHandler, isReportsHostRequest } from "./reports-web.ts";
 import { createReportsRuntimeAdapters, createTourRuntimeAdapters } from "./tour-runtime.js";
 

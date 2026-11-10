@@ -1,0 +1,20 @@
+{
+  "node": [
+    "test/tour-client-feedback-flow.test.ts",
+    "test/tour-deal-access.test.ts",
+    "test/tour-internal-web.test.ts",
+    "test/tour-stop-assembly.test.ts",
+    "test/tour-web-session-write.test.ts"
+  ],
+  "worker": [
+    "src/tour-internal-web.ts",
+    "src/tour-route-timestamp.ts"
+  ],
+  "entry": [
+    "test/tour-client-feedback-flow.test.ts",
+    "test/tour-deal-access.test.ts",
+    "test/tour-internal-web.test.ts",
+    "test/tour-stop-assembly.test.ts",
+    "test/tour-web-session-write.test.ts"
+  ]
+}
