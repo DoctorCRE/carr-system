@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000112 — the Doc conversation acceptance proofs.
 //
 // The verb-surface cases are pure. The store cases need a real PostgreSQL and

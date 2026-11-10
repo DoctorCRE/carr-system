@@ -1,0 +1,23 @@
+{
+  "node": [
+    "test/tour-property-evidence.test.ts",
+    "test/typed-guidance-precedent.test.ts",
+    "test/update-lead.test.ts",
+    "test/uptime-monitor-loop.test.ts",
+    "test/whats-new.test.ts",
+    "test/work-request-bound-evidence.test.ts",
+    "test/work-request-intake.test.ts",
+    "test/work-request-withdrawal.test.ts",
+    "test/helpers/registered-tool.ts"
+  ],
+  "entry": [
+    "test/tour-property-evidence.test.ts",
+    "test/typed-guidance-precedent.test.ts",
+    "test/update-lead.test.ts",
+    "test/uptime-monitor-loop.test.ts",
+    "test/whats-new.test.ts",
+    "test/work-request-bound-evidence.test.ts",
+    "test/work-request-intake.test.ts",
+    "test/work-request-withdrawal.test.ts"
+  ]
+}

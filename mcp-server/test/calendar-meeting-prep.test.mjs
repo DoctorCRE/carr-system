@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // Tests the authenticated meeting preparation verb with synthetic calendar and deal records.
 import test from "node:test";
 import assert from "node:assert/strict";

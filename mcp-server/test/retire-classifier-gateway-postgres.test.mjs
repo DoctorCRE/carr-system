@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 
 const bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin']
   .find(candidate => existsSync(path.join(candidate, 'initdb')));

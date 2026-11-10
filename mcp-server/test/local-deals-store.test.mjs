@@ -1,8 +1,8 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Test Local Deals PostgreSQL operations, evidence and regressions.
 import { readMigration } from './migration-source.testhelper.mjs';
 import { restoreEventIdentity, applyPendingDealRoomReads } from './helpers/snapshot-schema.mjs';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

@@ -1,4 +1,4 @@
-import { installFocusedFutureWorkStore } from './focused-future-work-store.mjs';
+import { installFocusedFutureWorkStore } from './focused-future-work-store.ts';
 import { readFileSync } from 'node:fs';
 
 // Restore event identity state after loading a database snapshot.
