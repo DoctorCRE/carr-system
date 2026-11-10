@@ -28,7 +28,7 @@
     "hook_runtime.py": "617416d669ccf046041eac9798551932c63e10d6df5cb7b2c0da8a13b373a422",
     "hooks.json": "b6e17cd1e7778f8d3d585e40e5d49572192ba5d337c6ea0bc62365c0645fd431",
     "codex-hooks.json": "5b0867fffd701e657ee977b5f13bceecbfab87d9b3b1fd5e2b150f26f7a47922",
-    "rule-enforcement-map.json": "2778394fe6251a634b1753019e56fede19a87a11a61c1536b054622201c71d25",
+    "rule-enforcement-map.json": "0e376c72edbbcee7bcce5eaafb5bbf1aaf56522fd93b2fa1b4419e892289d8cc",
     "native_shell.py": "6b2f3b64b1a5f2be1e48383e7979a011fe2f88be91cc27627e9531464105f268",
     "claude-managed-settings.json": "15f4eefef5d8a9362633ad45f44db1b7e946f4539c537e4dc19aff394dd91a11",
     "codex-permissions.toml": "e5d533440b4ef6587293b3596dda46dd8525f9a39107108b75c67b6f2e49aafc",

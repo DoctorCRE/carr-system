@@ -1,17 +1,34 @@
+import assert from "node:assert/strict";
 // Test tenant-scoped industry event contracts, validation and audited writes.
 import { test } from "node:test";
-import assert from "node:assert/strict";
 import pg from "pg";
-import { TOOLS, ToolError } from "../src/tools.js";
+import { ToolError } from "../src/tool-error.ts";
+
+// Load the legacy registry at its runtime seam without admitting its dependency graph.
+const { TOOLS } = await import(new URL("../src/tools.js", import.meta.url).href);
 
 const JOE = {
-  id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe",
-  human: true, via: "oauth-google", client_id: "claude",
+  id: "10000000-0000-0000-0000-000000000002",
+  slug: "joe",
+  display: "Joe",
+  human: true,
+  via: "oauth-google",
+  client_id: "claude",
 };
 
+function present<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Missing recorded synthetic query");
+  return value;
+}
+
 class Fake {
-  constructor(plan = {}) { this.plan = plan; this.sql = []; }
-  async query(text, params = []) {
+  plan: Record<string, Record<string, unknown>[] | ((params: unknown[]) => Record<string, unknown>[])>;
+  sql: [string, unknown[]][];
+  constructor(plan: Fake["plan"] = {}) {
+    this.plan = plan;
+    this.sql = [];
+  }
+  async query(text: string, params: unknown[] = []) {
     const sql = text.replace(/\s+/g, " ").trim();
     this.sql.push([sql, params]);
     for (const [match, rows] of Object.entries(this.plan))
@@ -22,12 +39,21 @@ class Fake {
 
 const EVENT = {
   id: "20000000-0000-0000-0000-000000000001",
-  organization_tenant_id: "carr-internal", title: "ASCO Quality Care Symposium",
-  organizer: "ASCO", kind: "conference", starts_at: "2026-11-05T09:00:00-05:00",
-  ends_at: "2026-11-07T17:00:00-05:00", location: "Chicago, IL", is_virtual: false,
-  url: "https://example.test/asco", relevance_note: "Hospital operator relationships",
-  attendance_intent: "considering", owner_partner: "joe", status: "planned",
-  source: "https://example.test/source", version: 1,
+  organization_tenant_id: "carr-internal",
+  title: "ASCO Quality Care Symposium",
+  organizer: "ASCO",
+  kind: "conference",
+  starts_at: "2026-11-05T09:00:00-05:00",
+  ends_at: "2026-11-07T17:00:00-05:00",
+  location: "Chicago, IL",
+  is_virtual: false,
+  url: "https://example.test/asco",
+  relevance_note: "Hospital operator relationships",
+  attendance_intent: "considering",
+  owner_partner: "joe",
+  status: "planned",
+  source: "https://example.test/source",
+  version: 1,
 };
 
 test("industry event verbs publish a tenant-scoped versioned contract", () => {
@@ -37,9 +63,16 @@ test("industry event verbs publish a tenant-scoped versioned contract", () => {
   assert.equal(TOOLS["list-industry-events"].write, false);
   assert.equal(TOOLS["add-industry-event"].write, true);
   assert.equal(TOOLS["update-industry-event"].write, true);
-  assert.deepEqual(TOOLS["add-industry-event"].inputSchema.required,
-    ["idempotency_key", "title", "organizer", "kind", "starts_at", "ends_at",
-      "owner_partner", "source"]);
+  assert.deepEqual(TOOLS["add-industry-event"].inputSchema.required, [
+    "idempotency_key",
+    "title",
+    "organizer",
+    "kind",
+    "starts_at",
+    "ends_at",
+    "owner_partner",
+    "source",
+  ]);
   assert.ok(TOOLS["update-industry-event"].inputSchema.required.includes("base_version"));
   assert.ok(TOOLS["update-industry-event"].inputSchema.required.includes("idempotency_key"));
   assert.ok(TOOLS["list-industry-events"].inputSchema.properties.limit);
@@ -48,12 +81,18 @@ test("industry event verbs publish a tenant-scoped versioned contract", () => {
 test("add-industry-event rejects a timestamp without an explicit timezone before SQL", async () => {
   const fake = new Fake();
   await assert.rejects(
-    () => TOOLS["add-industry-event"].handler(fake, JOE, {
-      idempotency_key: "00000571-0000-4000-8000-000000000133", title: "A", organizer: "B",
-      kind: "conference", starts_at: "2026-11-05T09:00:00",
-      ends_at: "2026-11-05T10:00:00-05:00", owner_partner: "joe", source: "calendar",
-    }),
-    error => error instanceof ToolError && error.payload.error === "industry_event_timestamp_invalid",
+    () =>
+      TOOLS["add-industry-event"].handler(fake, JOE, {
+        idempotency_key: "00000571-0000-4000-8000-000000000133",
+        title: "A",
+        organizer: "B",
+        kind: "conference",
+        starts_at: "2026-11-05T09:00:00",
+        ends_at: "2026-11-05T10:00:00-05:00",
+        owner_partner: "joe",
+        source: "calendar",
+      }),
+    (error) => error instanceof ToolError && error.payload.error === "industry_event_timestamp_invalid",
   );
   assert.deepEqual(fake.sql, []);
 });
@@ -61,13 +100,21 @@ test("add-industry-event rejects a timestamp without an explicit timezone before
 test("add-industry-event enforces the table's title length before SQL", async () => {
   const fake = new Fake();
   await assert.rejects(
-    () => TOOLS["add-industry-event"].handler(fake, JOE, {
-      idempotency_key: "00000571-0000-4000-8000-000000000134", title: "x".repeat(501), organizer: "ASCO",
-      kind: "conference", starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
-      owner_partner: "joe", source: EVENT.source,
-    }),
-    error => error instanceof ToolError && error.payload.error === "industry_event_text_invalid"
-      && error.payload.field === "title",
+    () =>
+      TOOLS["add-industry-event"].handler(fake, JOE, {
+        idempotency_key: "00000571-0000-4000-8000-000000000134",
+        title: "x".repeat(501),
+        organizer: "ASCO",
+        kind: "conference",
+        starts_at: EVENT.starts_at,
+        ends_at: EVENT.ends_at,
+        owner_partner: "joe",
+        source: EVENT.source,
+      }),
+    (error) =>
+      error instanceof ToolError &&
+      error.payload.error === "industry_event_text_invalid" &&
+      error.payload.field === "title",
   );
   assert.deepEqual(fake.sql, []);
 });
@@ -83,7 +130,7 @@ test("list-industry-events scopes the query to the authenticated tenant and retu
   const result = await TOOLS["list-industry-events"].handler(fake, JOE, { limit: 20 });
   assert.deepEqual(result.events, [EVENT]);
   assert.equal(result.count, 1);
-  const [sql, params] = fake.sql.find(([text]) => text.includes("from industry_event"));
+  const [sql, params] = present(fake.sql.find(([text]) => text.includes("from industry_event")));
   assert.match(sql, /organization_tenant_id=\$1/);
   assert.deepEqual(params, ["carr-internal", 20]);
 });
@@ -95,15 +142,24 @@ test("add-industry-event writes the row and audit event through the envelope", a
     "insert into event": [{ id: "30000000-0000-0000-0000-000000000001" }],
   });
   const result = await TOOLS["add-industry-event"].handler(fake, JOE, {
-    idempotency_key: "00000571-0000-4000-8000-000000000135", title: EVENT.title, organizer: EVENT.organizer,
-    kind: EVENT.kind, starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
-    location: EVENT.location, is_virtual: EVENT.is_virtual, url: EVENT.url,
-    relevance_note: EVENT.relevance_note, attendance_intent: EVENT.attendance_intent,
-    owner_partner: EVENT.owner_partner, status: EVENT.status, source: EVENT.source,
+    idempotency_key: "00000571-0000-4000-8000-000000000135",
+    title: EVENT.title,
+    organizer: EVENT.organizer,
+    kind: EVENT.kind,
+    starts_at: EVENT.starts_at,
+    ends_at: EVENT.ends_at,
+    location: EVENT.location,
+    is_virtual: EVENT.is_virtual,
+    url: EVENT.url,
+    relevance_note: EVENT.relevance_note,
+    attendance_intent: EVENT.attendance_intent,
+    owner_partner: EVENT.owner_partner,
+    status: EVENT.status,
+    source: EVENT.source,
   });
   assert.equal(result.ok, true);
   assert.deepEqual(result.event, EVENT);
-  const [sql, params] = fake.sql.find(([text]) => text.includes("insert into industry_event"));
+  const [sql, params] = present(fake.sql.find(([text]) => text.includes("insert into industry_event")));
   assert.match(sql, /organization_tenant_id/);
   assert.equal(params[0], "carr-internal");
 });
@@ -116,12 +172,14 @@ test("update-industry-event uses base_version and tenant in its optimistic updat
     "insert into event": [{ id: "30000000-0000-0000-0000-000000000002" }],
   });
   const result = await TOOLS["update-industry-event"].handler(fake, JOE, {
-    idempotency_key: "00000571-0000-4000-8000-000000000136", event_id: EVENT.id, base_version: 1,
+    idempotency_key: "00000571-0000-4000-8000-000000000136",
+    event_id: EVENT.id,
+    base_version: 1,
     title: updated.title,
   });
   assert.equal(result.ok, true);
   assert.equal(result.event.version, 2);
-  const [sql, params] = fake.sql.find(([text]) => text.includes("update industry_event"));
+  const [sql, params] = present(fake.sql.find(([text]) => text.includes("update industry_event")));
   assert.match(sql, /organization_tenant_id=\$\d+/);
   assert.match(sql, /version=\$\d+/);
   assert.deepEqual(params.slice(-3), [EVENT.id, "carr-internal", 1]);
@@ -129,20 +187,34 @@ test("update-industry-event uses base_version and tenant in its optimistic updat
 
 const parseBigint = pg.types.getTypeParser(20, "text");
 const addArgs = {
-  idempotency_key: "00000571-0000-4000-8000-000000000137", title: EVENT.title, organizer: EVENT.organizer,
-  kind: EVENT.kind, starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
-  owner_partner: EVENT.owner_partner, source: EVENT.source,
+  idempotency_key: "00000571-0000-4000-8000-000000000137",
+  title: EVENT.title,
+  organizer: EVENT.organizer,
+  kind: EVENT.kind,
+  starts_at: EVENT.starts_at,
+  ends_at: EVENT.ends_at,
+  owner_partner: EVENT.owner_partner,
+  source: EVENT.source,
 };
 
 for (const verb of ["list-industry-events", "add-industry-event", "update-industry-event"]) {
-  const run = version => {
+  const run = (version: string) => {
     const fake = new Fake({
       "from industry_event": [{ ...EVENT, version: parseBigint(version) }],
       "insert into industry_event": [{ ...EVENT, version: parseBigint(version) }],
       "update industry_event": [{ ...EVENT, version: parseBigint(version) }],
     });
-    const args = verb === "list-industry-events" ? {} : verb === "add-industry-event" ? addArgs
-      : { idempotency_key: "00000571-0000-4000-8000-000000000138", event_id: EVENT.id, base_version: 1, title: "Updated event" };
+    const args =
+      verb === "list-industry-events"
+        ? {}
+        : verb === "add-industry-event"
+          ? addArgs
+          : {
+              idempotency_key: "00000571-0000-4000-8000-000000000138",
+              event_id: EVENT.id,
+              base_version: 1,
+              title: "Updated event",
+            };
     return TOOLS[verb].handler(fake, JOE, args);
   };
   test(`${verb} publishes PostgreSQL bigint versions as safe integers`, async () => {
@@ -156,31 +228,46 @@ for (const verb of ["list-industry-events", "add-industry-event", "update-indust
   });
   test(`${verb} refuses versions that cannot be represented safely`, async () => {
     for (const version of ["9007199254740993", "0", "-1"])
-      await assert.rejects(() => run(version), error => error instanceof ToolError
-        && error.payload.error === "industry_event_version_invalid");
+      await assert.rejects(
+        () => run(version),
+        (error) => error instanceof ToolError && error.payload.error === "industry_event_version_invalid",
+      );
   });
 }
 
 test("update-industry-event refuses an unsafe base version before SQL", async () => {
   const fake = new Fake();
-  await assert.rejects(() => TOOLS["update-industry-event"].handler(fake, JOE, {
-    idempotency_key: "00000571-0000-4000-8000-000000000139", event_id: EVENT.id,
-    base_version: Number.MAX_SAFE_INTEGER + 1, title: "Updated event",
-  }), error => error instanceof ToolError && error.payload.error === "industry_event_base_version_invalid");
+  await assert.rejects(
+    () =>
+      TOOLS["update-industry-event"].handler(fake, JOE, {
+        idempotency_key: "00000571-0000-4000-8000-000000000139",
+        event_id: EVENT.id,
+        base_version: Number.MAX_SAFE_INTEGER + 1,
+        title: "Updated event",
+      }),
+    (error) => error instanceof ToolError && error.payload.error === "industry_event_base_version_invalid",
+  );
   assert.deepEqual(fake.sql, []);
 });
 
 for (const verb of ["add-industry-event", "update-industry-event"]) {
-  const args = verb === "add-industry-event" ? addArgs
-    : { idempotency_key: "00000571-0000-4000-8000-000000000140", event_id: EVENT.id, base_version: 1, title: "Updated event" };
-  async function replay(version) {
+  const args =
+    verb === "add-industry-event"
+      ? addArgs
+      : {
+          idempotency_key: "00000571-0000-4000-8000-000000000140",
+          event_id: EVENT.id,
+          base_version: 1,
+          title: "Updated event",
+        };
+  async function replay(version: string) {
     const fake = new Fake({
       "insert into industry_event": [{ ...EVENT, version: 2 }],
       "update industry_event": [{ ...EVENT, version: 2 }],
     });
     await TOOLS[verb].handler(fake, JOE, args);
-    const [, params] = fake.sql.find(([sql]) => sql.startsWith("insert into tool_call"));
-    const response = { ...JSON.parse(params[4]), event: { ...EVENT, version } };
+    const [, params] = present(fake.sql.find(([sql]) => sql.startsWith("insert into tool_call")));
+    const response = { ...JSON.parse(String(params[4])), event: { ...EVENT, version } };
     fake.plan["from tool_call where idempotency_key"] = [{ request_hash: params[3], response }];
     fake.sql = [];
     return { fake, response };
@@ -192,22 +279,29 @@ for (const verb of ["add-industry-event", "update-industry-event"]) {
       assert.deepEqual(result, { replayed: true, ok: true, event: { ...EVENT, version: Number(version) } });
       assert.equal(response.event.version, version);
       assert.equal(fake.sql.length, 1);
-      assert.match(fake.sql[0][0], /^select request_hash, response from tool_call/);
+      assert.match(present(fake.sql[0])[0], /^select request_hash, response from tool_call/);
       const update = new Fake({ "update industry_event": [{ ...EVENT, version: 3 }] });
       await TOOLS["update-industry-event"].handler(update, JOE, {
-        idempotency_key: "00000571-0000-4000-8000-000000000141", event_id: result.event.id,
-        base_version: result.event.version, title: "After replay",
+        idempotency_key: "00000571-0000-4000-8000-000000000141",
+        event_id: result.event.id,
+        base_version: result.event.version,
+        title: "After replay",
       });
-      assert.equal(update.sql.find(([sql]) => sql.startsWith("update industry_event"))[1].at(-1), Number(version));
+      assert.equal(
+        present(update.sql.find(([sql]) => sql.startsWith("update industry_event")))[1].at(-1),
+        Number(version),
+      );
     }
   });
   test(`${verb} refuses unsafe cached versions without another mutation`, async () => {
     for (const version of ["9007199254740993", "0", "-1", "2.5"]) {
       const { fake } = await replay(version);
-      await assert.rejects(() => TOOLS[verb].handler(fake, JOE, args),
-        error => error instanceof ToolError && error.payload.error === "industry_event_version_invalid");
+      await assert.rejects(
+        () => TOOLS[verb].handler(fake, JOE, args),
+        (error) => error instanceof ToolError && error.payload.error === "industry_event_version_invalid",
+      );
       assert.equal(fake.sql.length, 1);
-      assert.match(fake.sql[0][0], /^select request_hash, response from tool_call/);
+      assert.match(present(fake.sql[0])[0], /^select request_hash, response from tool_call/);
     }
   });
 }

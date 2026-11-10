@@ -916,15 +916,41 @@
     },
     {
       "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
-      "sha256": "9e1d4ec64ed01df2571fe95c656d4c491c6b903f24281059e413632c373ee1dc",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
       "rule": "pii-phone",
       "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
     },
     {
       "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
-      "sha256": "9e1d4ec64ed01df2571fe95c656d4c491c6b903f24281059e413632c373ee1dc",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
       "rule": "pii-address",
       "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "c6b1b5e785e7be1532f19d67b9aad326aa2ecba6a5a73a4843087d8df5b83333"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-address",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-phone",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
     },
     {
       "path": "mcp-server/test/error-unmasking.test.ts",

@@ -1,4 +1,4 @@
-// ingest-body-limit.test.mjs — the live /ingest 413 body-limit check.
+// ingest-body-limit.test.ts — the live /ingest 413 body-limit check.
 //
 // This coverage used to ride along inside the canary-ingest sink's regression
 // selftest; retiring the canary sink (#1879) removed it, and nothing else
@@ -12,14 +12,14 @@
 // read index.js as text, lift the real ingest() function out of it, and run
 // that exact source against stubbed `json`, `neon` and transport bindings.
 //
-// Run with: node --test mcp-server/test/ingest-body-limit.test.mjs
+// Run with: node --test mcp-server/test/ingest-body-limit.test.ts
 // (also picked up by `npm test`'s test/*.test.mjs glob).
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { bearerCredential } from "../src/bearer.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -38,7 +38,7 @@ function liftIngest() {
 // oversize path never reaches it.
 function makeIngest() {
   const db = { connects: 0, inserts: 0 };
-  const json = (body, status = 200) => ({ body, status });
+  const json = (body: unknown, status = 200) => ({ body, status });
   const neon = () => {
     db.connects += 1;
     return async () => {
@@ -46,16 +46,29 @@ function makeIngest() {
       return [{ id: "11111111-1111-4111-8111-111111111111", was_duplicate: false }];
     };
   };
-  const factory = new Function("json", "neon", "INGEST_TRANSPORT", "bearerCredential",
-    `${liftIngest()}\nreturn ingest;`);
+  const factory = new Function(
+    "json",
+    "neon",
+    "INGEST_TRANSPORT",
+    "bearerCredential",
+    `${liftIngest()}\nreturn ingest;`,
+  );
   return { ingest: factory(json, neon, TRANSPORT, bearerCredential), db };
 }
 
 const TOKEN = "test-ingest-token";
 const ENV = { INGEST_TOKENS: JSON.stringify({ notes: TOKEN }), DATABASE_URL_WRITER: "stub" };
 
-function post({ token = TOKEN, contentLength, body = "{}" } = {}) {
-  const headers = { "content-type": "application/json" };
+function post({
+  token = TOKEN,
+  contentLength,
+  body = "{}",
+}: {
+  token?: string;
+  contentLength?: number;
+  body?: string;
+} = {}) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
   if (token) headers.authorization = `Bearer ${token}`;
   if (contentLength !== undefined) headers["content-length"] = String(contentLength);
   return new Request("https://worker.invalid/ingest", { method: "POST", headers, body });

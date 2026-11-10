@@ -38,48 +38,60 @@ const REGISTERED_STORE_TOKENS = Object.freeze([
   "a-store-this-file-does-not-serve",
 ]);
 
-function closedCallable(callable) {
+function closedCallable<Args extends unknown[], Result>(callable: (...args: Args) => Result) {
   const closed = callable.bind(null);
   Object.defineProperty(closed, Symbol.hasInstance, {
-    value: () => false, writable: false, enumerable: false, configurable: false,
+    value: () => false,
+    writable: false,
+    enumerable: false,
+    configurable: false,
   });
   return Object.freeze(closed);
 }
 
 class SeamStoreUnreachableType extends Error {}
 
-export const seamStoreUnreachable = closedCallable((storeRef, because) => {
+export const seamStoreUnreachable = closedCallable((storeRef: string, because: string) => {
   const error = new SeamStoreUnreachableType("a seam store was not reachable");
-  const token = REGISTERED_STORE_TOKENS.includes(storeRef)
-    ? storeRef : "a-store-this-file-does-not-serve";
+  const token = REGISTERED_STORE_TOKENS.includes(storeRef) ? storeRef : "a-store-this-file-does-not-serve";
   const reason = REGISTERED_REASONS.includes(because)
-    ? because : "the reason this store was unreachable is not a registered one";
-  for (const [key, value] of [["store_ref", token], ["because", reason]])
+    ? because
+    : "the reason this store was unreachable is not a registered one";
+  for (const [key, value] of [
+    ["store_ref", token],
+    ["because", reason],
+  ] as const)
     Object.defineProperty(error, key, {
-      value, writable: false, enumerable: true, configurable: false,
+      value,
+      writable: false,
+      enumerable: true,
+      configurable: false,
     });
   return error;
 });
 
-const seamStoreInstance = value => value instanceof SeamStoreUnreachableType;
-export const isSeamStoreUnreachable = closedCallable(value => seamStoreInstance(value));
+const seamStoreInstance = (value: unknown) => value instanceof SeamStoreUnreachableType;
+export const isSeamStoreUnreachable = closedCallable((value: unknown) => seamStoreInstance(value));
 Object.defineProperty(SeamStoreUnreachableType, Symbol.hasInstance, {
-  value: seamStoreInstance, writable: false, enumerable: false, configurable: false,
+  value: seamStoreInstance,
+  writable: false,
+  enumerable: false,
+  configurable: false,
 });
 
 /** artifact-trust.js's format, because the reader compares against its digests. */
-function digest(value) {
+function digest(value: string) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
-function opaque(value) {
+function opaque(value: unknown) {
   return typeof value === "string" && value.length > 0 ? digest(value) : null;
 }
-function instantText(value) {
+function instantText(value: unknown) {
   const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 /** One field of a caller's query, safely: a throwing trap is an absent field. */
-function cell(query, key) {
+function cell(query: unknown, key: string) {
   try {
     const value = Reflect.get(Object(query ?? {}), key);
     return typeof value === "string" ? value : null;
@@ -87,8 +99,8 @@ function cell(query, key) {
     return null;
   }
 }
-function rowsFor(table, key) {
-  return key !== null && Object.hasOwn(table, key) ? table[key] : [];
+function rowsFor<Row>(table: Readonly<Record<string, readonly Row[]>>, key: string | null) {
+  return key !== null && Object.hasOwn(table, key) ? (table[key] ?? []) : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +139,12 @@ const T2 = "2026-09-12T09:00:31.000Z";
 
 // --- card 11 ---------------------------------------------------------------
 
-function acceptedRow(hash) {
+function acceptedRow(hash: string) {
   return Object.freeze({
-    status: "accepted", detail_row_count: 1,
-    accepted_feedback_hash: hash, feedback_hash: hash,
+    status: "accepted",
+    detail_row_count: 1,
+    accepted_feedback_hash: hash,
+    feedback_hash: hash,
   });
 }
 
@@ -142,15 +156,22 @@ const PREDECESSOR_ROWS = Object.freeze({
 
 // --- card 12 ---------------------------------------------------------------
 
-function receipt({ forRunKey, mintedAt, nonce = "0123456789abcdef" }) {
-  const stamp = new Date(Date.parse(mintedAt)).toISOString()
-    .replace(/-/g, "").replace(/:/g, "");
+function receipt({
+  forRunKey,
+  mintedAt,
+  nonce = "0123456789abcdef",
+}: {
+  forRunKey: string;
+  mintedAt: string;
+  nonce?: string;
+}) {
+  const stamp = new Date(Date.parse(mintedAt)).toISOString().replace(/-/g, "").replace(/:/g, "");
   const runKeyHash = createHash("sha256").update(forRunKey).digest("hex").slice(0, 32);
   return `carr-run-receipt:v1:${stamp}:${nonce}:${runKeyHash}`;
 }
 const SCHEDULED_RECEIPT =
   /^carr-run-receipt:v1:(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})\.(\d{3})Z:[0-9a-f]{16}:([0-9a-f]{32})$/;
-function receiptFields(value) {
+function receiptFields(value: unknown) {
   const parsed = typeof value === "string" ? SCHEDULED_RECEIPT.exec(value) : null;
   if (parsed === null) return { runKeyHash: null, mintedAt: null };
   const [, year, month, day, hour, minute, second, millis, runKeyHash] = parsed;
@@ -159,11 +180,21 @@ function receiptFields(value) {
     mintedAt: instantText(`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis}Z`),
   };
 }
-function runKeyReceiptHash(value) {
+function runKeyReceiptHash(value: unknown) {
   return typeof value === "string" && value.length > 0
-    ? createHash("sha256").update(value).digest("hex").slice(0, 32) : null;
+    ? createHash("sha256").update(value).digest("hex").slice(0, 32)
+    : null;
 }
-function ledgerRow(raw) {
+function ledgerRow(raw: {
+  evidence_ref: string | null;
+  service_key: string;
+  run_key: string;
+  source_kind: string;
+  source_ref: string;
+  started_at: string;
+  ended_at: string;
+  observed_at: string;
+}) {
   const parsed = receiptFields(raw.evidence_ref);
   return Object.freeze({
     service_key_digest: opaque(raw.service_key),
@@ -182,23 +213,25 @@ function ledgerRow(raw) {
 
 const RUN = Object.freeze({
   service_key: SERVICE_KEY,
-  started_at: T0, ended_at: T1, observed_at: T2,
-  source_kind: "wrapper", source_ref: "bin/run-scheduled.sh",
+  started_at: T0,
+  ended_at: T1,
+  observed_at: T2,
+  source_kind: "wrapper",
+  source_ref: "bin/run-scheduled.sh",
 });
 
 const SCHEDULER_ROWS = Object.freeze({
-  [CANARY_JOINING]: Object.freeze([ledgerRow({ ...RUN,
-    run_key: CANARY_JOINING,
-    evidence_ref: receipt({ forRunKey: CANARY_JOINING, mintedAt: T1 }) })]),
+  [CANARY_JOINING]: Object.freeze([
+    ledgerRow({ ...RUN, run_key: CANARY_JOINING, evidence_ref: receipt({ forRunKey: CANARY_JOINING, mintedAt: T1 }) }),
+  ]),
   // The row the wrapper wrote for every run before it minted receipts at all.
-  [CANARY_UNBOUND]: Object.freeze([ledgerRow({ ...RUN,
-    run_key: CANARY_UNBOUND, evidence_ref: null })]),
+  [CANARY_UNBOUND]: Object.freeze([ledgerRow({ ...RUN, run_key: CANARY_UNBOUND, evidence_ref: null })]),
   // CANARY_ABSENT is deliberately not a key here: the table answers no rows.
 });
 
 // --- card 13 ---------------------------------------------------------------
 
-function checkRow(raw) {
+function checkRow(raw: { head_sha: string; status: string; conclusion: string | null; completed_at: string | null }) {
   return Object.freeze({
     head_sha: /^[0-9a-f]{40}$/.test(raw.head_sha ?? "") ? raw.head_sha : null,
     status_digest: opaque(raw.status),
@@ -206,15 +239,25 @@ function checkRow(raw) {
     ended_at: instantText(raw.completed_at),
   });
 }
-function completed(headSha, conclusion) {
-  return Object.freeze([checkRow({
-    head_sha: headSha, status: "completed", conclusion, completed_at: T1,
-  })]);
+function completed(headSha: string, conclusion: string) {
+  return Object.freeze([
+    checkRow({
+      head_sha: headSha,
+      status: "completed",
+      conclusion,
+      completed_at: T1,
+    }),
+  ]);
 }
-function unfinished(headSha) {
-  return Object.freeze([checkRow({
-    head_sha: headSha, status: "queued", conclusion: null, completed_at: null,
-  })]);
+function unfinished(headSha: string) {
+  return Object.freeze([
+    checkRow({
+      head_sha: headSha,
+      status: "queued",
+      conclusion: null,
+      completed_at: null,
+    }),
+  ]);
 }
 
 const CI = "ops/ci.sh --strict";
@@ -261,7 +304,7 @@ const CHECK_ROWS = Object.freeze({
 /** Which canary run the ledger holds for this service. */
 const LEDGER_CANARY = CANARY_JOINING;
 /** Which predecessor world the record layer holds: clean | receipt-card-mismatch. */
-const PREDECESSOR_WORLD = "clean";
+const PREDECESSOR_WORLD: string = "clean";
 /**
  * Which release-candidate world ops.release holds for the revision asked about
  * (standing-rule amendment 9): filed | absent | ambiguous | unregistered-maker.
@@ -274,7 +317,7 @@ const PREDECESSOR_WORLD = "clean";
  *                      r7's self-review denial, reachable because the release
  *                      row's correlation and the evaluator's are the same value.
  */
-const CANDIDATE_BUILD_RECORD_WORLD = "filed";
+const CANDIDATE_BUILD_RECORD_WORLD: string = "filed";
 
 /** The maker and correlation the recorder stamped on the candidate row. */
 export const CANDIDATE_MAKER_ACTOR = "joe";
@@ -285,7 +328,7 @@ const SECOND_MAKER = "dell";
 const SECOND_CORRELATION = "1d9f77b2-0c45-4d82-a3e6-90bb5e1c47f0";
 const UNREGISTERED_MAKER = "carr-release-bot";
 
-function candidateRecordRow(maker, correlationId, observedAt) {
+function candidateRecordRow(maker: string, correlationId: string, observedAt: string) {
   return Object.freeze({
     git_sha_digest: digest("release"),
     state_digest: digest("candidate"),
@@ -301,11 +344,11 @@ function candidateRecordRow(maker, correlationId, observedAt) {
  * falsifier the derived read still has to catch: the acceptance receipt signed
  * one thing and the card carries another, so no accepted row joins.
  */
-function mismatchedRows(rows) {
-  return rows.map(row => Object.freeze({ ...row, feedback_hash: FORGED_HASH }));
+function mismatchedRows(rows: readonly ReturnType<typeof acceptedRow>[]) {
+  return rows.map((row) => Object.freeze({ ...row, feedback_hash: FORGED_HASH }));
 }
 
-export const fetchPredecessorOutcomeRows = closedCallable(async query => {
+export const fetchPredecessorOutcomeRows = closedCallable(async (query: unknown) => {
   const rows = rowsFor(PREDECESSOR_ROWS, cell(query, "workRequestRef"));
   return {
     store_ref: "record-layer:work-request-outcome-feedback",
@@ -313,7 +356,7 @@ export const fetchPredecessorOutcomeRows = closedCallable(async query => {
   };
 });
 
-export const fetchSchedulerLedgerRows = closedCallable(async query => {
+export const fetchSchedulerLedgerRows = closedCallable(async (query: unknown) => {
   const storeRef = "control-plane:ops.service+ops.run";
   if (cell(query, "serviceKey") !== SERVICE_KEY) return { store_ref: storeRef, rows: [] };
   // AN OMITTED RUN KEY IS THE DERIVED ADDRESS — the latest run this service's
@@ -323,7 +366,7 @@ export const fetchSchedulerLedgerRows = closedCallable(async query => {
   return { store_ref: storeRef, rows: rowsFor(SCHEDULER_ROWS, named ?? LEDGER_CANARY) };
 });
 
-export const fetchCheckConclusionRows = closedCallable(async query => ({
+export const fetchCheckConclusionRows = closedCallable(async (query: unknown) => ({
   store_ref: "github:checks",
   rows: rowsFor(CHECK_ROWS, `${cell(query, "headSha")}|${cell(query, "checkName")}`),
 }));
@@ -334,24 +377,30 @@ export const fetchCheckConclusionRows = closedCallable(async query => ({
  * text, because a receipt has to NAME its subject maker and a digest names
  * nobody — and everything else as a digest, exactly as the real store does.
  */
-export const fetchCandidateBuildRecordRows = closedCallable(async query => {
+export const fetchCandidateBuildRecordRows = closedCallable(async (query: unknown) => {
   const storeRef = "control-plane:ops.candidate-build-record";
   void cell(query, "gitSha");
   if (CANDIDATE_BUILD_RECORD_WORLD === "absent") return { store_ref: storeRef, rows: [] };
   if (CANDIDATE_BUILD_RECORD_WORLD === "ambiguous")
-    return { store_ref: storeRef, rows: [
-      candidateRecordRow(CANDIDATE_MAKER_ACTOR, CANDIDATE_BUILD_CORRELATION_ID, "2026-09-12T08:00:00.000Z"),
-      candidateRecordRow(SECOND_MAKER, SECOND_CORRELATION, "2026-09-12T07:00:00.000Z"),
-    ] };
+    return {
+      store_ref: storeRef,
+      rows: [
+        candidateRecordRow(CANDIDATE_MAKER_ACTOR, CANDIDATE_BUILD_CORRELATION_ID, "2026-09-12T08:00:00.000Z"),
+        candidateRecordRow(SECOND_MAKER, SECOND_CORRELATION, "2026-09-12T07:00:00.000Z"),
+      ],
+    };
   if (CANDIDATE_BUILD_RECORD_WORLD === "same-session")
-    return { store_ref: storeRef, rows: [
-      candidateRecordRow(CANDIDATE_MAKER_ACTOR, REVIEWING_CORRELATION_ID, "2026-09-12T08:00:00.000Z"),
-    ] };
+    return {
+      store_ref: storeRef,
+      rows: [candidateRecordRow(CANDIDATE_MAKER_ACTOR, REVIEWING_CORRELATION_ID, "2026-09-12T08:00:00.000Z")],
+    };
   if (CANDIDATE_BUILD_RECORD_WORLD === "unregistered-maker")
-    return { store_ref: storeRef, rows: [
-      candidateRecordRow(UNREGISTERED_MAKER, CANDIDATE_BUILD_CORRELATION_ID, "2026-09-12T08:00:00.000Z"),
-    ] };
-  return { store_ref: storeRef, rows: [
-    candidateRecordRow(CANDIDATE_MAKER_ACTOR, CANDIDATE_BUILD_CORRELATION_ID, "2026-09-12T08:00:00.000Z"),
-  ] };
+    return {
+      store_ref: storeRef,
+      rows: [candidateRecordRow(UNREGISTERED_MAKER, CANDIDATE_BUILD_CORRELATION_ID, "2026-09-12T08:00:00.000Z")],
+    };
+  return {
+    store_ref: storeRef,
+    rows: [candidateRecordRow(CANDIDATE_MAKER_ACTOR, CANDIDATE_BUILD_CORRELATION_ID, "2026-09-12T08:00:00.000Z")],
+  };
 });
