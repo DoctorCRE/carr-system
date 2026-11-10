@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Real registered handler, envelope and event writes on disposable PostgreSQL.
 // Committed race fixtures stay only in the loopback database CI discards.

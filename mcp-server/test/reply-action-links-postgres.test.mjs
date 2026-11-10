@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';

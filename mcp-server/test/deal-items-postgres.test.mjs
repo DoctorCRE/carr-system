@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Validator } from '@cfworker/json-schema';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { readDealItems } from '../src/deal-items.ts';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.ts';

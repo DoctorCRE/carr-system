@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.ts';
 
 const bin = ['/opt/homebrew/opt/postgresql@17/bin', '/usr/lib/postgresql/17/bin', '/usr/lib/postgresql/16/bin']
   .find(candidate => existsSync(path.join(candidate, 'initdb')));
@@ -30,7 +30,7 @@ after(async () => {
   }));
 });
 
-const helper = new URL('./helpers/disposable-postgres.mjs', import.meta.url).href;
+const helper = new URL('./helpers/disposable-postgres.ts', import.meta.url).href;
 async function waitFor(predicate) {
   const deadline = performance.now() + 15000;
   while (!predicate()) {
