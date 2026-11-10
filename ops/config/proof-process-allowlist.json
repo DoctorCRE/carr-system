@@ -165,5 +165,16 @@
       "git --no-replace-objects -C repository cat-file -t revision",
       "git --no-replace-objects -C repository merge-base --is-ancestor expected served"
     ]
+  },
+  "tools/prove-chromium-safety.py": {
+    "sha256": "4438e5d31a562d0f0b5f70510dd38709b09d9b7ab50742b1533e72ac64a168b4",
+    "commands": [
+      "git --no-replace-objects cat-file -e <commit>^{commit}",
+      "git --no-replace-objects merge-base --is-ancestor <merge> <release>",
+      "node --test <repository>/mcp-server/test/chromium-safety-args.test.ts"
+    ],
+    "helpers": {
+      "proof_release.release_revision": "91e1961693764676e4748173345a23964e288eddf8ee57a74fc1f692f1070d76"
+    }
   }
 }
