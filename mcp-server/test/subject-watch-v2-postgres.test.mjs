@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { readMigration, migrationNames } from './migration-source.testhelper.mjs';
+import { readMigration, migrationNames } from './migration-source.testhelper.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { sweepSubjectWatches } from '../src/subject-watch-scheduler.ts';

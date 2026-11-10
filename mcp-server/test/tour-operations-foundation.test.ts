@@ -10,7 +10,7 @@ import {
   validateProjectionFact,
 } from "../src/tour-operations-contract.ts";
 import fixture from "./fixtures/tour-operations-foundation.v1.json" with { type: "json" };
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 
 const entities: Record<string, (typeof contract.entities)[keyof typeof contract.entities]> = contract.entities;
 const entityFixtures: Record<string, Record<string, unknown>> = fixture.contract_entities;

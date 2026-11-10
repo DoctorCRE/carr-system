@@ -1,7 +1,7 @@
 // Retiring doctrine_embedding_cosine_idx must not change semantic search: the function scans exactly.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 
 const MODEL = '@cf/baai/bge-small-en-v1.5:cls:chunks-v1';
 const ACTOR = '10000000-0000-4000-8000-000000000004';

@@ -1,5 +1,5 @@
 // Create a PostgreSQL fixture for doctrine embedding tests.
-import { readMigration } from '../migration-source.testhelper.mjs';
+import { readMigration } from '../migration-source.testhelper.ts';
 import { runtimeErrorDatabase } from './runtime-error-postgres.mjs';
 
 export async function doctrineEmbeddingDatabase() {

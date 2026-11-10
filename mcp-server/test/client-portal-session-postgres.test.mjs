@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { readFile } from 'node:fs/promises';
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import { postgresDatabase } from './helpers/postgres-database.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');

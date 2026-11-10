@@ -47,7 +47,7 @@ of client-provided restoration payloads. Restoration values never cross the
 public command interface. The deep module is the existing disposition command;
 the receipt helper shares its private disposition writer and owns exact undo bookkeeping.
 
-Run the installed statechart script against Bulk.tla with `--view view.mjs`.
+Run the installed statechart script against Bulk.tla with `--view view.ts`.
 The checked model bounds the batch to two items, with the second initially
 working. It models allowed/denied items and target no-ops; SQL tests cover real
 visibility, optimistic version conflicts, replay and subtransaction failures.
