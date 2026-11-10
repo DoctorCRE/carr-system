@@ -76,7 +76,8 @@ class UnorderedLedgerTests(unittest.TestCase):
                                     ('9998_wr578_lower.sql', 'wr578_lower')]:
                 sql = f'create table public.{table}(id integer primary key);\n'
                 (repo / 'migrations' / filename).write_text(sql)
-                result = subprocess.run([sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes'],
+                result = subprocess.run([sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes', '--through',
+                                     sorted(p.name for p in (repo / 'migrations').glob('*.sql'))[-1]],
                                         env={**self.child, 'DATABASE_URL': dsn}, capture_output=True,
                                         text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -87,7 +88,8 @@ class UnorderedLedgerTests(unittest.TestCase):
                 self.assertEqual(conn.execute("select filename,sha256,applied_at from schema_migrations where filename not like '%_wr578_%' order by filename").fetchall(), before)
                 self.assertEqual(conn.execute("select to_regclass('public.wr578_higher')::text,to_regclass('public.wr578_lower')::text").fetchone(), ('wr578_higher', 'wr578_lower'))
                 completed = conn.execute('select filename,sha256,applied_at from schema_migrations order by filename').fetchall()
-            result = subprocess.run([sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes'],
+            result = subprocess.run([sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes', '--through',
+                                     sorted(p.name for p in (repo / 'migrations').glob('*.sql'))[-1]],
                                     env={**self.child, 'DATABASE_URL': dsn}, capture_output=True,
                                     text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -113,7 +115,8 @@ class UnorderedLedgerTests(unittest.TestCase):
             (repo / 'migrations' / b).write_text(
                 'create table public.wr578_rollback_probe(id integer);'
                 'alter table public.wr578_dependency add column changed integer;')
-            command = [sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes']
+            command = [sys.executable, str(repo / 'tools/migrate.py'), '--apply', '--yes', '--through',
+                                     sorted(p.name for p in (repo / 'migrations').glob('*.sql'))[-1]]
             with self.psycopg.connect(dsn) as conn:
                 before = conn.execute('select filename,sha256,applied_at from schema_migrations order by filename').fetchall()
             failed = subprocess.run(command, env={**self.child, 'DATABASE_URL': dsn},

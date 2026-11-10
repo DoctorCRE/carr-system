@@ -28,7 +28,7 @@ import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
-import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './helpers/call-rehearsal.mjs';
+import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './helpers/call-rehearsal.ts';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');

@@ -129,6 +129,20 @@ class SnapshotIsolation(unittest.TestCase):
             self.assertNotEqual(original, snapshot_key(schema))
             self.assertNotEqual(snapshot_key(schema), snapshot_key(schema, baseline=True))
 
+    def test_catalog_inputs_invalidate_current_template_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'db').mkdir()
+            schema = root / 'db/schema.sql'
+            schema.write_text('select 1;')
+            original = snapshot_key(schema)
+            baseline = snapshot_key(schema, baseline=True)
+            manifest = root / 'ops/config/rule-enforcement-map.json'
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('{"test": "proof.test.ts"}')
+            self.assertNotEqual(original, snapshot_key(schema))
+            self.assertEqual(baseline, snapshot_key(schema, baseline=True))
+
     def test_supervised_snapshot_connects_and_cleans_up_under_long_root(self):
         binaries = postgres_bin_dir()
         with postgres_fixture_group(), tempfile.TemporaryDirectory() as directory:
