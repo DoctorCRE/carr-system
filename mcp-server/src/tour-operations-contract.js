@@ -21,7 +21,7 @@ export const REQUIRED_PUBLIC_PROPERTY_FIELDS = Object.freeze(["display.name", "d
 // authority (it guards the fact insert inside the seal and names the only
 // columns the share reads select); this copy refuses a bad seal before the
 // database is touched and is the last filter on every client response.
-// test/tour-client-share-allowlist.test.mjs binds the two lists together.
+// test/tour-client-share-allowlist.test.ts binds the two lists together.
 export const CLIENT_TOUR_FIELD_KEYS = Object.freeze([
   "display.name", "display.address", "suite", "property_type", "size",
   "asking_economics", "availability", "parking",
