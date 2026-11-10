@@ -73,7 +73,7 @@ Revision text and queries use overlapping chunks of at most 480 UTF-8 bytes with
 The focused test command is:
 
 ```sh
-node --test mcp-server/test/doctrine-embeddings.test.mjs mcp-server/test/situation-retrieval.test.mjs mcp-server/test/situation-retrieval-integration.test.mjs mcp-server/test/doctrine-bigint-versions.test.mjs mcp-server/test/situation-retrieval-bigint.test.mjs mcp-server/test/change-doctrine-sections-validation.test.mjs
+node --test mcp-server/test/doctrine-embeddings.test.mjs mcp-server/test/situation-retrieval.test.mjs mcp-server/test/situation-retrieval-integration.test.mjs mcp-server/test/doctrine-bigint-versions.test.mjs mcp-server/test/situation-retrieval-bigint.test.ts mcp-server/test/change-doctrine-sections-validation.test.mjs
 ```
 
 Initial failed-test output is retained in the session tool transcript. A separately retained baseline replay also fails the meaning-only fixture against the main retrieval source. It is a fresh baseline replay, not the original failed-test log. The green suite uses fake deterministic embeddings with real PostgreSQL ranking. Independent source review caught and corrected the CI unit-lane pgvector prerequisite. Comment review recommended zero deletions. The separate deslop skill was not available in the searched skill catalog and cache; manual cleanup was used.

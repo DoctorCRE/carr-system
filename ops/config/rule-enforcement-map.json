@@ -540,7 +540,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "mcp-server/test/shared-row-rename-registry.test.mjs"
+        "mcp-server/test/shared-row-rename-registry.test.ts"
       ]
     },
     "stale_count": {
