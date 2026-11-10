@@ -40,6 +40,13 @@ class SuiteClassificationTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout), [target.name])
                 subprocess.run(['node', '--test', str(target)], check=True, capture_output=True)
 
+    def test_retired_controls_are_declared_but_never_installed(self):
+        rows = {r['control_key']: r for r in catalog.compile_catalog()}
+        for key in ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier'):
+            self.assertIn(key, rows)
+            self.assertFalse(rows[key]['installed'])
+            self.assertIn('no implementation file', rows[key]['not_installed_reason'])
+
     def test_checkout_moving_during_compilation_refuses_before_database(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -102,6 +109,51 @@ class ProjectionDatabaseTests(unittest.TestCase):
                 conn.rollback()
                 conn.execute("delete from ops.enforcement_control_catalog where control_key = any(%s)",
                              (list(legacy) + ['unknown-probe'],))
+                conn.commit()
+
+    def test_full_apply_preserves_bound_retired_controls_as_unavailable(self):
+        import psycopg
+        from migration_baseline import MigrationBaseline, repository_ledger
+        dsn = os.environ['CARR_LOCAL_PG_DSN']
+        legacy = ('completion_evidence', 'conduct_stop', 'delegation_tripwire', 'executor_tier')
+        with psycopg.connect(dsn) as conn:
+            try:
+                for key in legacy:
+                    conn.execute("insert into ops.enforcement_control_catalog "
+                        "(control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at) "
+                        "values (%s,'deleted.py','deleted-test.py','stop_gate',true,now()) "
+                        "on conflict (control_key) do update set installed=true,verified_at=now()", (key,))
+                actor = conn.execute("insert into actor(slug,kind,display_name) "
+                    "values ('j775-probe','automation','Synthetic probe') returning id").fetchone()[0]
+                rule = conn.execute("insert into rule(statement,taught_by) "
+                    "values ('Synthetic historical binding',%s) returning id", (actor,)).fetchone()[0]
+                for key in legacy:
+                    conn.execute("insert into ops.rule_control_binding "
+                        "(rule_id,control_key,statement_hash,binding_contract) "
+                        "values (%s,%s,%s,'{}')", (rule, key, 'a' * 64))
+                before = conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall()
+                conn.execute("delete from schema_migrations where filename='1171_retire_stale_deploy_controls.sql'")
+                conn.commit()
+                for attempt in range(2):
+                    result = subprocess.run([sys.executable, 'tools/migrate.py', '--apply', '--yes'],
+                        cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
+                        capture_output=True, text=True, timeout=180)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    if attempt == 0:
+                        self.assertIn('discharged (precondition absent)', result.stdout)
+                    self.assertEqual(conn.execute("select * from ops.rule_control_binding where rule_id=%s order by control_key", (rule,)).fetchall(), before)
+                    self.assertEqual(conn.execute("select control_key,installed,verified_at from ops.enforcement_control_catalog where control_key=any(%s) order by control_key", (list(legacy),)).fetchall(), [(k, False, None) for k in legacy])
+                    self.assertEqual(dict(conn.execute("select filename,sha256 from schema_migrations").fetchall()), repository_ledger(ROOT, MigrationBaseline.load(ROOT)))
+                    conn.commit()
+                result = subprocess.run([sys.executable, 'ops/control-catalog-parity-gate.py'], cwd=ROOT,
+                    env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            finally:
+                conn.rollback()
+                if 'rule' in locals():
+                    conn.execute("delete from ops.rule_control_binding where rule_id=%s", (rule,))
+                    conn.execute("delete from rule where id=%s", (rule,))
+                    conn.execute("delete from actor where id=%s", (actor,))
                 conn.commit()
 
     def test_retirement_refuses_bound_control_atomically(self):
