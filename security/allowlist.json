@@ -903,6 +903,30 @@
       "reason": "Synthetic identity fixture literals; exact current blob only."
     },
     {
+      "path": "mcp-server/src/tour-client-value-safety.ts",
+      "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
+      "rule": "pii-phone",
+      "reason": "Pre-existing validator comment examples of reserved NANP exchange 555 subscriber 0100 digits, including spaced and country-code forms, renamed from .js to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/src/tour-client-value-safety.ts",
+      "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
+      "rule": "pii-address",
+      "reason": "Pre-existing validator comment examples of synthetic gate, key and compass-word street-address phrases illustrate refusal grammar, not property records; renamed from .js to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
+      "rule": "pii-phone",
+      "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "c1a1ab8f8f3989fb49b6ed76e4b1e2499440f5024f6f14dc896352f9355636ee",
+      "rule": "pii-address",
+      "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data."
+    },
+    {
       "path": "audits/decoder-build-ownership.md",
       "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
       "rule": "pii-phone",

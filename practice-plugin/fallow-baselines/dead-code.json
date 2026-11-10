@@ -15,7 +15,7 @@
     "unused-file:ui/planner.css"
   ],
   "unused_exports": [
-    "unused-export:src/evidence.mjs:sourceSchema",
+    "unused-export:src/evidence.ts:sourceSchema",
     "unused-export:src/planner.mjs:errorResult",
     "unused-export:src/planner.mjs:icon",
     "unused-export:src/planner.mjs:plannerInput",

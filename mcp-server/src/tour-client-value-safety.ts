@@ -12,7 +12,7 @@
 // The rules below are written in the subset of regex syntax that JavaScript
 // and PostgreSQL ARE read identically (explicit [^A-Za-z] / [^0-9]
 // boundaries, no \b or \y, lookahead, and the one lookbehind in access_code), and
-// test/tour-client-share-allowlist.test.mjs asserts the SQL functions carry
+// test/tour-client-share-allowlist.test.ts asserts the SQL functions carry
 // exactly these strings. The same test and the Postgres proof run one shared
 // corpus of ordinary CRE text and of smuggled contact/access text through both
 // engines. Change a rule here and you must change it there in the same commit.
@@ -88,9 +88,10 @@ const NOT_ALNUM = "[^A-Za-z0-9]";
 // of a seven-digit local number ("Call 555 0100 hours 8-5" is a phone).
 const AREA_COUNT_UNITS = "sf|rsf|usf|sq|sqft|square|ft|feet|foot|spaces?|stalls?|acres?|ac|seats?";
 const UNIT_WORDS = `${AREA_COUNT_UNITS}|psf|mo|yr|hours|hrs`;
-const caseless = word => word.replace(/[a-z]/g, ch => `[${ch}${ch.toUpperCase()}]`);
+const caseless = (word: string) => word.replace(/[a-z]/g, (ch) => `[${ch}${ch.toUpperCase()}]`);
 const UNIT_QUALIFIERS = "parking|covered|surface|reserved";
-const followedBy = units => `[ -]?((${UNIT_QUALIFIERS.split("|").map(caseless).join("|")}) )?(${units.split("|").map(caseless).join("|")})([^A-Za-z]|$)`;
+const followedBy = (units: string) =>
+  `[ -]?((${UNIT_QUALIFIERS.split("|").map(caseless).join("|")}) )?(${units.split("|").map(caseless).join("|")})([^A-Za-z]|$)`;
 const FOLLOWED_BY_UNIT = followedBy(UNIT_WORDS);
 const FOLLOWED_BY_AREA_COUNT_UNIT = followedBy(AREA_COUNT_UNITS);
 // A place word directly before a number makes it a place number, not an
@@ -121,7 +122,10 @@ export const CLIENT_TEXT_PHONE_JOIN = Object.freeze({
 // so 251 555 01 00, 2 5 1 5 5 5 0 1 0 0 and 1-251-555-0100 read as
 // 2515550100. Parentheses join only inside the 3-3-4 shape above, so
 // "Renovated 2021-2026 (12 suites)" stays text.
-export const CLIENT_TEXT_DIGIT_JOIN = Object.freeze({ pattern: `([0-9])[ .${DASHES}]{1,2}(?=[0-9])`, replacement: "$1" });
+export const CLIENT_TEXT_DIGIT_JOIN = Object.freeze({
+  pattern: `([0-9])[ .${DASHES}]{1,2}(?=[0-9])`,
+  replacement: "$1",
+});
 // Before the seven-digit local-number rule reads a value, a suite/unit/room
 // RANGE is set aside: a suite word, then two numbers of 1-4 digits joined by
 // a dash, the second without a leading zero (Suites 100-1200, Suite
@@ -136,7 +140,8 @@ export const CLIENT_TEXT_SUITE_RANGE = Object.freeze({
 // newer generic ones and the country endings link shorteners use (lnkd.in,
 // amzn.to, s.id, linktr.ee, bit.do, shorturl.at, bit.ly, goo.gl, is.gd,
 // tiny.cc, rb.gy, youtu.be).
-const DOMAIN_ENDINGS = "com|net|org|io|biz|info|us|co|ai|app|realty|health|properties|homes|law|care|clinic|gov|edu|me|xyz|site|online|link|page|tv|ca|uk|de|estate|land|group|llc|pro|ee|to|in|at|do|id|ly|gl|gd|cc|gy|be|realtor|realestate|broker|house|rentals|apartments|property|agency|bio|live|shop|club|tech|one|mx";
+const DOMAIN_ENDINGS =
+  "com|net|org|io|biz|info|us|co|ai|app|realty|health|properties|homes|law|care|clinic|gov|edu|me|xyz|site|online|link|page|tv|ca|uk|de|estate|land|group|llc|pro|ee|to|in|at|do|id|ly|gl|gd|cc|gy|be|realtor|realestate|broker|house|rentals|apartments|property|agency|bio|live|shop|club|tech|one|mx";
 // The unit abbreviations a rate is written with ("$24.00/sq.ft/yr"): a dotted
 // name ending in one of these before a slash is a rate, not a link.
 const UNIT_ENDINGS = "ft|yr|mo|sf|ac|mi|yd";
@@ -152,12 +157,14 @@ const UNIT_ENDINGS = "ft|yr|mo|sf|ac|mi|yd";
 // 181"). The digits may be split by up to three non-alphanumerics other than
 // a comma ("44 11", "4-4-1-1", "44 - 11"); a comma ends the digits, so
 // "2,500 SF" is not a code.
-const PLACE_WORDS = "suites?|ste|units?|bldgs?|floors?|rooms?|levels?|lots?|bays?|phase|pads?|hwy|exit|route|rt|road|i|us|sr|cr|st|ave|blvd|dr|rd|ln|way|pkwy|miles?";
+const PLACE_WORDS =
+  "suites?|ste|units?|bldgs?|floors?|rooms?|levels?|lots?|bays?|phase|pads?|hwy|exit|route|rt|road|i|us|sr|cr|st|ave|blvd|dr|rd|ln|way|pkwy|miles?";
 // A preposition (or a compass word) before a street address is not a filler:
 // "Gate at 2200 Airport Blvd", "Keys to 1200 Duval St", "Key West 1200 Duval
 // St" name a place ("Gate at 4411" is still a code).
 const PREPOSITIONS = "at|from|to|on|off|near|via|faces|west|east|north|south";
-const STREET_TYPES = "st|street|ave|avenue|blvd|rd|road|dr|drive|hwy|highway|pkwy|parkway|ln|lane|way|ct|court|pl|place|block";
+const STREET_TYPES =
+  "st|street|ave|avenue|blvd|rd|road|dr|drive|hwy|highway|pkwy|parkway|ln|lane|way|ct|court|pl|place|block";
 const STREET_ADDRESS = `[0-9]+( [A-Za-z]+){0,3} (${STREET_TYPES})([^A-Za-z]|$)`;
 // Nor is a money word: "Security dep 2500", "Security: first month 2500".
 const MONEY_WORDS = "dep|rent|fee|fees|month|price|cost";
@@ -166,17 +173,21 @@ const ACCESS_LINK = `(${NOT_ALNUM}{1,6}${ACCESS_FILLER}){0,2}${NOT_ALNUM}{0,6}`;
 const ACCESS_DIGITS = `[0-9]([^A-Za-z0-9,]{0,3}[0-9]){2,}`;
 // The trigger words, each with its own plural (a shared plural suffix would
 // read "Pines" as "pin" + "es").
-const ACCESS_WORDS = "gates?|pins?|combos?|combinations?|keys?|entry|entries|access(es)?|call ?box(es)?|entrances?|passwords?|passcodes?|security|securities|lock ?box(es)?|box(es)?|key ?pads?|key-pads?|key ?safes?|padlocks?|fobs?|buzzers?|intercoms?|sentri ?locks?|alarms?|supras?|garages?|doors?|locks?";
+const ACCESS_WORDS =
+  "gates?|pins?|combos?|combinations?|keys?|entry|entries|access(es)?|call ?box(es)?|entrances?|passwords?|passcodes?|security|securities|lock ?box(es)?|box(es)?|key ?pads?|key-pads?|key ?safes?|padlocks?|fobs?|buzzers?|intercoms?|sentri ?locks?|alarms?|supras?|garages?|doors?|locks?";
 // Nor is a year followed by a building-event word ("Alarm 2021 upgrade",
 // "Lock 1998 renovation", "Key 2027 lease-up"), for every trigger; a bare year
 // is still a code ("Code: 2021", "Code 2014 at the gate"), except after a
 // code-book name ("Building code 2021"). Nor a date ("Key dates: 1/1/2027"),
 // nor exactly "24/7" ("Access 24/7"; "Gate 247" is a code; "24x7" never
 // reads as a code because a letter ends the digits).
-const YEAR_EVENT_WORDS = "upgrad|renovat|remodel|retrofit|replac|install|updat|built|build|construct|lease|deliver|complet|edition|standard|complian|expan|refresh|addition|rebuil|conver|inspect|certif|vintage|budget|sign";
+const YEAR_EVENT_WORDS =
+  "upgrad|renovat|remodel|retrofit|replac|install|updat|built|build|construct|lease|deliver|complet|edition|standard|complian|expan|refresh|addition|rebuil|conver|inspect|certif|vintage|budget|sign";
 const ACCESS_EXEMPTIONS = `(?!(19|20)[0-9]{2}${NOT_ALNUM}{1,3}(${YEAR_EVENT_WORDS}))(?!24/7([^0-9]|$))(?![0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}([^0-9]|$))(?![0-9]+${FOLLOWED_BY_UNIT})`;
 const CODE_BOOKS = "building|fire|electrical|plumbing|mechanical|energy|zoning|safety|health";
-const NOT_AFTER_CODE_BOOK = CODE_BOOKS.split("|").map(word => `(?<!${word} )`).join("");
+const NOT_AFTER_CODE_BOOK = CODE_BOOKS.split("|")
+  .map((word) => `(?<!${word} )`)
+  .join("");
 
 // Case-insensitive, checked in this order; the first rule that matches names
 // the refusal. `target` is the text the rule reads: the normalized value
@@ -187,14 +198,23 @@ export const CLIENT_TEXT_RULES = Object.freeze([
   // against an @ with at most one side spaced ("bob@landlord", "bob @landlord");
   // or (at) / [at] before a dotted domain. "4,200 RSF @ $28.50/SF" and
   // "Rate @ market" are not one.
-  Object.freeze({ rule: "email", target: "raw", pattern: "[A-Za-z0-9._%+-] ?@ ?[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*[.][A-Za-z]{2,}|[A-Za-z0-9._%+-]( @|@ ?)[A-Za-z0-9_-]*[A-Za-z]|[A-Za-z0-9._%+-] ?[(\\[] ?at ?[)\\]] ?[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*[.][A-Za-z]{2,}" }),
+  Object.freeze({
+    rule: "email",
+    target: "raw",
+    pattern:
+      "[A-Za-z0-9._%+-] ?@ ?[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*[.][A-Za-z]{2,}|[A-Za-z0-9._%+-]( @|@ ?)[A-Za-z0-9_-]*[A-Za-z]|[A-Za-z0-9._%+-] ?[(\\[] ?at ?[)\\]] ?[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)*[.][A-Za-z]{2,}",
+  }),
   // a URL (http, https, ftp), a bare web domain (its name holds a letter:
   // "Hwy 90.US 29" is a road), a spaced .com/.net/.org ("landlord .com"), a
   // spelled-out "dot com" / "[dot] com", a bracketed dot ("landlord[.]com"),
   // or ANY dotted name followed by a path ("bit.ly/abc", "linktr.ee/bob",
   // "qr.link/x"), except a unit abbreviation before the slash
   // ("$24.00/sq.ft/yr", "$1.25/sq.ft/mo")
-  Object.freeze({ rule: "url", target: "raw", pattern: `(https?|ftp)://|www[.]|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*[.](${DOMAIN_ENDINGS})([^A-Za-z0-9]|$)|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]* ?[.] ?(com|net|org)([^A-Za-z0-9]|$)|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]* [.] ?(${DOMAIN_ENDINGS})([^A-Za-z0-9]|$)|(^|[^A-Za-z])[(\\[]? ?dot ?[)\\]]? ?(com|net|org|co)([^A-Za-z]|$)|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]* ?[(\\[] ?[.] ?[)\\]] ?[A-Za-z]{2,}|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*[.](?!(${UNIT_ENDINGS})/)[A-Za-z]{2,}/[A-Za-z0-9]` }),
+  Object.freeze({
+    rule: "url",
+    target: "raw",
+    pattern: `(https?|ftp)://|www[.]|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*[.](${DOMAIN_ENDINGS})([^A-Za-z0-9]|$)|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]* ?[.] ?(com|net|org)([^A-Za-z0-9]|$)|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]* [.] ?(${DOMAIN_ENDINGS})([^A-Za-z0-9]|$)|(^|[^A-Za-z])[(\\[]? ?dot ?[)\\]]? ?(com|net|org|co)([^A-Za-z]|$)|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]* ?[(\\[] ?[.] ?[)\\]] ?[A-Za-z]{2,}|[A-Za-z0-9-]*[A-Za-z][A-Za-z0-9-]*[.](?!(${UNIT_ENDINGS})/)[A-Za-z]{2,}/[A-Za-z0-9]`,
+  }),
   // a North-American phone number, however its ten digits are grouped
   Object.freeze({ rule: "phone", target: "digits", pattern: "(^|[^0-9])1?[2-9][0-9]{9}([^0-9]|$)" }),
   // a seven-digit local number: 555-0100, 555 - 0100 (exchange 2-9, as NANP
@@ -205,9 +225,17 @@ export const CLIENT_TEXT_RULES = Object.freeze([
   // ("Suites 200 1500"). A dollar sign before the digits is a price. A comma
   // between the groups is a list, not a phone ("Suites 250, 300, 4500
   // total").
-  Object.freeze({ rule: "local_phone", target: "nosuite", pattern: `(^|[^0-9])[2-9][0-9]{2} ?[.${DASHES}] ?[0-9]{4}([^0-9]|$)|(^|[^0-9$])${NOT_AFTER_PHONE_PLACE_WORD}[0-9]{3}(?!${NOT_ALNUM}{0,2},)${NOT_ALNUM}{0,3}[0-9]{4}(?![0-9])(?!${FOLLOWED_BY_AREA_COUNT_UNIT})` }),
+  Object.freeze({
+    rule: "local_phone",
+    target: "nosuite",
+    pattern: `(^|[^0-9])[2-9][0-9]{2} ?[.${DASHES}] ?[0-9]{4}([^0-9]|$)|(^|[^0-9$])${NOT_AFTER_PHONE_PLACE_WORD}[0-9]{3}(?!${NOT_ALNUM}{0,2},)${NOT_ALNUM}{0,3}[0-9]{4}(?![0-9])(?!${FOLLOWED_BY_AREA_COUNT_UNIT})`,
+  }),
   // an international number: +44 20 7946 0958, + 44 ..., 011 44 ...
-  Object.freeze({ rule: "international_phone", target: "digits", pattern: "[+] ?[0-9]{8,}|(^|[^0-9])(011|00)[1-9][0-9]{6,}([^0-9]|$)" }),
+  Object.freeze({
+    rule: "international_phone",
+    target: "digits",
+    pattern: "[+] ?[0-9]{8,}|(^|[^0-9])(011|00)[1-9][0-9]{6,}([^0-9]|$)",
+  }),
   // access-code wording, as whole words: gate code, door combo, entry PIN,
   // alarm code, keypad code ("Westgate Pines", "Fire alarm system" pass); or a
   // trigger word (plural too) before three or more digits, joined as the
@@ -218,14 +246,27 @@ export const CLIENT_TEXT_RULES = Object.freeze([
   // code" only before exactly three plain digits ("Area code 251"), and a
   // code-book code before a bare year ("Building code 2021"). Lookbehind and
   // lookahead read alike in PostgreSQL ARE and JavaScript.
-  Object.freeze({ rule: "access_code", target: "raw", pattern: `(^|[^A-Za-z])(gate|door|key|entry|garage|alarm|keypad|access|lock)[ -]?(codes?|combos?|combination|pins?|passwords?)([^A-Za-z]|$)|(^|[^A-Za-z])(${ACCESS_WORDS})${ACCESS_LINK}${ACCESS_EXEMPTIONS}${ACCESS_DIGITS}|(^|[^A-Za-z])(?<!zip )(?<!zip-)(?<!area )(?<!area-)${NOT_AFTER_CODE_BOOK}codes?${ACCESS_LINK}${ACCESS_EXEMPTIONS}${ACCESS_DIGITS}|(^|[^A-Za-z])(${CODE_BOOKS}) codes?${ACCESS_LINK}(?!(19|20)[0-9]{2}([^0-9]|$))${ACCESS_EXEMPTIONS}${ACCESS_DIGITS}|(^|[^A-Za-z])zip[ -]?codes?${ACCESS_LINK}(?![0-9]{5}(-[0-9]{4})?([^0-9]|$))${ACCESS_DIGITS}|(^|[^A-Za-z])area[ -]?codes?${ACCESS_LINK}([0-9]{4}|[0-9]{1,3}${NOT_ALNUM}[0-9])` }),
-  Object.freeze({ rule: "lockbox", target: "raw", pattern: "(^|[^A-Za-z])(lock[ -]?box(es)?|passcodes?)([^A-Za-z]|$)" }),
+  Object.freeze({
+    rule: "access_code",
+    target: "raw",
+    pattern: `(^|[^A-Za-z])(gate|door|key|entry|garage|alarm|keypad|access|lock)[ -]?(codes?|combos?|combination|pins?|passwords?)([^A-Za-z]|$)|(^|[^A-Za-z])(${ACCESS_WORDS})${ACCESS_LINK}${ACCESS_EXEMPTIONS}${ACCESS_DIGITS}|(^|[^A-Za-z])(?<!zip )(?<!zip-)(?<!area )(?<!area-)${NOT_AFTER_CODE_BOOK}codes?${ACCESS_LINK}${ACCESS_EXEMPTIONS}${ACCESS_DIGITS}|(^|[^A-Za-z])(${CODE_BOOKS}) codes?${ACCESS_LINK}(?!(19|20)[0-9]{2}([^0-9]|$))${ACCESS_EXEMPTIONS}${ACCESS_DIGITS}|(^|[^A-Za-z])zip[ -]?codes?${ACCESS_LINK}(?![0-9]{5}(-[0-9]{4})?([^0-9]|$))${ACCESS_DIGITS}|(^|[^A-Za-z])area[ -]?codes?${ACCESS_LINK}([0-9]{4}|[0-9]{1,3}${NOT_ALNUM}[0-9])`,
+  }),
+  Object.freeze({
+    rule: "lockbox",
+    target: "raw",
+    pattern: "(^|[^A-Za-z])(lock[ -]?box(es)?|passcodes?)([^A-Za-z]|$)",
+  }),
   // internal-note wording (a free-text note cannot be recognised in general;
   // the length cap bounds the rest)
-  Object.freeze({ rule: "internal_note", target: "raw", pattern: "(^|[^A-Za-z])(internal[ -]?(notes?|only|use)|confidential|do not (share|disclose)|broker[ -]only|not for (the )?clients?)([^A-Za-z]|$)" }),
-]);
+  Object.freeze({
+    rule: "internal_note",
+    target: "raw",
+    pattern:
+      "(^|[^A-Za-z])(internal[ -]?(notes?|only|use)|confidential|do not (share|disclose)|broker[ -]only|not for (the )?clients?)([^A-Za-z]|$)",
+  }),
+] satisfies readonly { rule: string; target: "raw" | "digits" | "nosuite"; pattern: string }[]);
 
-const RULES = CLIENT_TEXT_RULES.map(entry => ({ ...entry, regex: new RegExp(entry.pattern, "i") }));
+const RULES = CLIENT_TEXT_RULES.map((entry) => ({ ...entry, regex: new RegExp(entry.pattern, "i") }));
 const DISALLOWED = new RegExp(CLIENT_TEXT_DISALLOWED);
 const DISALLOWED_SOURCE = new RegExp(CLIENT_TEXT_DISALLOWED_SOURCE);
 const PHONE_JOIN = new RegExp(CLIENT_TEXT_PHONE_JOIN.pattern, "g");
@@ -234,14 +275,19 @@ const SUITE_RANGE = new RegExp(CLIENT_TEXT_SUITE_RANGE.pattern, "gi");
 const ROUTE_LABEL = new RegExp(CLIENT_ROUTE_LABEL_PATTERN);
 // C0 controls (tab, newline and carriage return included), DEL and the C1
 // controls -- the same explicit code points the database checks.
-const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
+function hasControlCharacter(value: string) {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+  });
+}
 
 /**
  * NFKC, then the Unicode hyphen (U+2010, which NFKC also makes of the
  * non-breaking hyphen U+2011) read as the ASCII hyphen. Mirrors
  * ops.tour_client_text_fold.
  */
-function foldClientText(value) {
+function foldClientText(value: string) {
   return value.normalize("NFKC").replace(/\u2010/g, "-");
 }
 
@@ -251,7 +297,7 @@ function foldClientText(value) {
  * trimmed. Only meaningful for a value the allowlist admits. Mirrors
  * ops.tour_client_text_normalize.
  */
-export function normalizeClientText(value) {
+export function normalizeClientText(value: string) {
   return foldClientText(value).replace(/ +/g, " ").replace(/^ | $/g, "");
 }
 
@@ -261,11 +307,16 @@ export function normalizeClientText(value) {
  * source set is checked there first); a character that only the fold produces
  * is reported at its position in the folded text.
  */
-export function firstDisallowedCodePoint(value) {
-  for (const [text, pattern] of [[value, DISALLOWED_SOURCE], [foldClientText(value), DISALLOWED]]) {
+export function firstDisallowedCodePoint(value: string) {
+  for (const [text, pattern] of [
+    [value, DISALLOWED_SOURCE],
+    [foldClientText(value), DISALLOWED],
+  ] satisfies [string, RegExp][]) {
     const match = pattern.exec(text);
     if (match) {
-      const hex = text.codePointAt(match.index).toString(16).toUpperCase().padStart(4, "0");
+      const point = text.codePointAt(match.index);
+      if (point === undefined) continue;
+      const hex = point.toString(16).toUpperCase().padStart(4, "0");
       return `U+${hex} at position ${Array.from(text.slice(0, match.index)).length + 1}`;
     }
   }
@@ -276,9 +327,9 @@ export function firstDisallowedCodePoint(value) {
  * The name of the first client text rule `value` breaks, or null when a client
  * may see it inside an allowlisted field. Mirrors ops.tour_client_text_violation.
  */
-export function clientTextViolation(value, maximum = CLIENT_TEXT_MAX_CHARS) {
+export function clientTextViolation(value: unknown, maximum = CLIENT_TEXT_MAX_CHARS) {
   if (typeof value !== "string") return "not_text";
-  if (CONTROL.test(value)) return "control_character";
+  if (hasControlCharacter(value)) return "control_character";
   const disallowed = firstDisallowedCodePoint(value);
   if (disallowed) return `character:${disallowed}`;
   const text = normalizeClientText(value);
@@ -287,26 +338,27 @@ export function clientTextViolation(value, maximum = CLIENT_TEXT_MAX_CHARS) {
   if (Array.from(text).length > maximum) return "too_long";
   const targets = {
     raw: text,
-    digits: text.replace(PHONE_JOIN, CLIENT_TEXT_PHONE_JOIN.replacement).replace(DIGIT_JOIN, CLIENT_TEXT_DIGIT_JOIN.replacement),
+    digits: text
+      .replace(PHONE_JOIN, CLIENT_TEXT_PHONE_JOIN.replacement)
+      .replace(DIGIT_JOIN, CLIENT_TEXT_DIGIT_JOIN.replacement),
     nosuite: text.replace(SUITE_RANGE, CLIENT_TEXT_SUITE_RANGE.replacement),
   };
   for (const entry of RULES) if (entry.regex.test(targets[entry.target])) return entry.rule;
   return null;
 }
 
-
 /** True when `value` is text a client may see inside an allowlisted field. */
-export function isClientSafeText(value, maximum = CLIENT_TEXT_MAX_CHARS) {
+export function isClientSafeText(value: unknown, maximum = CLIENT_TEXT_MAX_CHARS): value is string {
   return clientTextViolation(value, maximum) === null;
 }
 
 /** True when `value` is a short stop marker (A, B, 12). */
-export function isClientRouteLabel(value) {
+export function isClientRouteLabel(value: unknown) {
   return typeof value === "string" && ROUTE_LABEL.test(value);
 }
 
-const METRIC_NUMERIC_KEYS = Object.freeze(["value", "min", "max"]);
-const METRIC_TEXT_KEYS = Object.freeze(["unit", "currency", "period", "label"]);
+const METRIC_NUMERIC_KEYS = Object.freeze(["value", "min", "max"] as const);
+const METRIC_TEXT_KEYS = Object.freeze(["unit", "currency", "period", "label"] as const);
 export const CLIENT_METRIC_KEYS = Object.freeze([...METRIC_NUMERIC_KEYS, ...METRIC_TEXT_KEYS]);
 
 /**
@@ -314,23 +366,29 @@ export const CLIENT_METRIC_KEYS = Object.freeze([...METRIC_NUMERIC_KEYS, ...METR
  * any part of it is unsafe. All-or-nothing on purpose: a metric with one
  * poisoned label is refused whole rather than shown with that part missing.
  */
-export function clientSafeMetric(value) {
+export function clientSafeMetric(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return undefined;
   const keys = Object.keys(value);
   if (!keys.length) return undefined;
-  const out = {};
+  const out: Partial<Record<(typeof CLIENT_METRIC_KEYS)[number], string | number>> = {};
   for (const key of keys) {
-    const part = value[key];
-    if (METRIC_NUMERIC_KEYS.includes(key)) {
-      if (typeof part === "number" ? !Number.isFinite(part) : !isClientSafeText(part)) return undefined;
-    } else if (METRIC_TEXT_KEYS.includes(key)) {
+    const part: unknown = Reflect.get(value, key);
+    if (key === "value" || key === "min" || key === "max") {
+      if (typeof part === "number") {
+        if (!Number.isFinite(part)) return undefined;
+        out[key] = part;
+      } else {
+        if (!isClientSafeText(part)) return undefined;
+        out[key] = normalizeClientText(part);
+      }
+    } else if (key === "unit" || key === "currency" || key === "period" || key === "label") {
       if (!isClientSafeText(part)) return undefined;
+      out[key] = normalizeClientText(part);
     } else {
       return undefined;
     }
-    out[key] = typeof part === "string" ? normalizeClientText(part) : part;
   }
   if (out.value === undefined && out.min === undefined && out.max === undefined) return undefined;
   if (typeof out.min === "number" && typeof out.max === "number" && out.min > out.max) return undefined;
