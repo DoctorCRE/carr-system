@@ -4,7 +4,7 @@
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { PYTHON } from './helpers/call-rehearsal.mjs';
+import { PYTHON } from './helpers/call-rehearsal.ts';
 import { startLocalCarr } from './helpers/local-carr.mjs';
 
 let carr, cookie;

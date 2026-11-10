@@ -2,12 +2,6 @@
 // Worker runtime exposes WebCrypto asynchronously; these seals are calculated
 // while constructing immutable JSON bindings, so keep this dependency-free and
 // deterministic instead of importing Node-only crypto APIs.
-// Compression loops address initialized words within their fixed 64-word blocks.
-function word(words: readonly number[] | Uint32Array, index: number): number {
-  const value = words[index];
-  if (value === undefined) throw new RangeError("SHA-256 word index out of bounds");
-  return value;
-}
 export function sha256(text: string): string {
   const K_CORRECT = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
@@ -19,6 +13,10 @@ export function sha256(text: string): string {
     0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
     0xc67178f2,
   ];
+  const word = (value: number | undefined): number => {
+    if (value === undefined) throw new RangeError("SHA-256 word index outside block");
+    return value;
+  };
   const bytes = new TextEncoder().encode(text);
   const bitLength = bytes.length * 8;
   const padded = new Uint8Array(((bytes.length + 9 + 63) >> 6) << 6);
@@ -40,9 +38,9 @@ export function sha256(text: string): string {
     const w = new Uint32Array(64);
     for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4, false);
     for (let i = 16; i < 64; i++) {
-      const s0 = rotr(word(w, i - 15), 7) ^ rotr(word(w, i - 15), 18) ^ (word(w, i - 15) >>> 3);
-      const s1 = rotr(word(w, i - 2), 17) ^ rotr(word(w, i - 2), 19) ^ (word(w, i - 2) >>> 10);
-      w[i] = (word(w, i - 16) + s0 + word(w, i - 7) + s1) >>> 0;
+      const s0 = rotr(word(w[i - 15]), 7) ^ rotr(word(w[i - 15]), 18) ^ (word(w[i - 15]) >>> 3);
+      const s1 = rotr(word(w[i - 2]), 17) ^ rotr(word(w[i - 2]), 19) ^ (word(w[i - 2]) >>> 10);
+      w[i] = (word(w[i - 16]) + s0 + word(w[i - 7]) + s1) >>> 0;
     }
     let a = h0,
       b = h1,
@@ -55,7 +53,7 @@ export function sha256(text: string): string {
     for (let i = 0; i < 64; i++) {
       const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
       const ch = (e & f) ^ (~e & g);
-      const t1 = (hh + S1 + ch + word(K_CORRECT, i) + word(w, i)) >>> 0;
+      const t1 = (hh + S1 + ch + word(K_CORRECT[i]) + word(w[i])) >>> 0;
       const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
       const maj = (a & b) ^ (a & c) ^ (b & c);
       const t2 = (S0 + maj) >>> 0;
