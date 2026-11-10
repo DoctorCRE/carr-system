@@ -136,3 +136,46 @@ test("unique-by distinguishes scalar types and refuses missing or nonfinite keys
     ],
   );
 });
+
+test("malformed schema nodes preserve refusal and keyword truthiness", () => {
+  const accepted = { valid: true, errors: [] };
+  const refused = { valid: false, errors: ["$: schema refused the value"] };
+  const nullRef = { name: "TypeError", message: "Cannot read properties of null (reading '$ref')" };
+  const nodes = [null, false, true, 0, 1, "", "schema", [], [null]];
+  for (const node of nodes) {
+    const compile = (schema: unknown, value: unknown) => Reflect.apply(compileSchema, undefined, [schema])(value);
+    const reference = { $defs: { entry: node }, $ref: "#/$defs/entry" };
+    if (node === null) {
+      assert.throws(() => compile(reference, {}), nullRef);
+      assert.throws(() => compile({ allOf: [node] }, {}), nullRef);
+      assert.throws(() => compile({ oneOf: [node] }, {}), nullRef);
+      assert.throws(() => Reflect.apply(compileSchema, undefined, [{}, node])(0), nullRef);
+    } else {
+      assert.deepEqual(compile(reference, {}), node === false ? refused : accepted);
+      assert.deepEqual(compile({ allOf: [node] }, {}), node === false ? refused : accepted);
+      assert.deepEqual(
+        compile({ oneOf: [node] }, {}),
+        node === false
+          ? { valid: false, errors: ["$: expected exactly one matching oneOf branch, found 0"] }
+          : accepted,
+      );
+      assert.deepEqual(Reflect.apply(compileSchema, undefined, [{}, node])(0), node === false ? refused : accepted);
+    }
+    assert.deepEqual(compile({ $defs: { entry: node } }, {}), accepted);
+    assert.deepEqual(
+      compile({ not: node }, {}),
+      node ? { valid: false, errors: ["$: value matches forbidden not schema"] } : accepted,
+    );
+    assert.deepEqual(compile({ items: node }, [1]), accepted);
+    assert.deepEqual(compile({ properties: { x: node } }, { x: 1 }), accepted);
+    assert.deepEqual(
+      compile({ additionalProperties: node }, { x: 1 }),
+      node === false ? { valid: false, errors: ["$.x: additional property is not allowed"] } : accepted,
+    );
+    for (const items of [node, { $ref: "#/$defs/entry" }]) {
+      assert.throws(() => compile({ type: "array", "x-carr-unique-by": "id", items, $defs: { entry: node } }, []), {
+        message: "x-carr-unique-by item schema declares no id property",
+      });
+    }
+  }
+});

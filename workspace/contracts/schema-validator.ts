@@ -33,7 +33,7 @@ const isArray = (value: unknown): value is unknown[] => Array.isArray(value);
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-function resolvePointer(root: SchemaObject, reference: string): Schema | undefined {
+function resolvePointer(root: SchemaObject, reference: string): unknown {
   if (!reference.startsWith("#/")) throw new Error(`Only local schema references are supported: ${reference}`);
   const resolved: unknown = reference
     .slice(2)
@@ -44,8 +44,7 @@ function resolvePointer(root: SchemaObject, reference: string): Schema | undefin
         throw new TypeError(`Cannot read properties of ${value} (reading '${key}')`);
       return Reflect.get(Object(value), key);
     }, root);
-  if (resolved === undefined || typeof resolved === "boolean" || isObject(resolved)) return resolved;
-  return {};
+  return resolved;
 }
 
 function valueType(value: unknown): string {
@@ -104,8 +103,10 @@ export function compileSchema(rootSchema: SchemaObject, entrySchema: Schema | un
     "canonical_twin_rule",
     "state_invariants",
   ]);
-  function inspectSchema(schema: Schema | undefined): void {
-    if (!isObject(schema) || inspected.has(schema)) return;
+  function inspectSchema(candidate: unknown): void {
+    if (!isObject(candidate)) return;
+    const schema: SchemaObject = candidate;
+    if (inspected.has(schema)) return;
     inspected.add(schema);
     for (const key of Object.keys(schema)) {
       if (!supportedValidationKeywords.has(key) && !supportedAnnotationKeywords.has(key) && !key.startsWith("x-")) {
@@ -128,7 +129,7 @@ export function compileSchema(rootSchema: SchemaObject, entrySchema: Schema | un
     }
     if (uniqueBy !== undefined) {
       const itemSchema =
-        typeof schema.items === "object" && schema.items.$ref
+        isObject(schema.items) && schema.items.$ref
           ? resolvePointer(rootSchema, schema.items.$ref)
           : schema.items;
       if (
@@ -151,17 +152,20 @@ export function compileSchema(rootSchema: SchemaObject, entrySchema: Schema | un
   inspectSchema(entrySchema);
 
   function validateNode(
-    schema: Schema | undefined,
+    candidate: unknown,
     value: unknown,
     path: string,
     errors: string[],
     referenceStack: string[] = [],
   ): void {
-    if (schema === true || schema === undefined) return;
-    if (schema === false) {
+    if (candidate === true || candidate === undefined) return;
+    if (candidate === false) {
       errors.push(`${path}: schema refused the value`);
       return;
     }
+    if (candidate === null) throw new TypeError("Cannot read properties of null (reading '$ref')");
+    if (!isObject(candidate)) return;
+    const schema: SchemaObject = candidate;
     if (schema.$ref) {
       if (referenceStack.includes(schema.$ref))
         throw new Error(`Recursive schema reference is unsupported: ${schema.$ref}`);
