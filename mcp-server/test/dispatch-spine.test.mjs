@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000119 — the dispatch spine's acceptance proofs, ONE BLOCK PER CRITERION
 // on the WR-000119 card: AC-DS-LINK, AC-DS-ACK, AC-DS-HISTORY, AC-DS-REGISTRY.
 //

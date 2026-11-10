@@ -7,7 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 import { executeRegisteredTool, ToolError } from '../src/tools.js';
-import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.ts';
 import { morningBriefView } from './fixtures/doctorcre-brief-a753e121/morning-brief-model.js';
 
 const JOE = { slug: 'joe', human: true, via: 'oauth-google', client_id: 'fixture' };

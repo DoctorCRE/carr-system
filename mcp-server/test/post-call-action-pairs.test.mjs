@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { executeRegisteredTool } from '../src/tools.js';
 
 const pairs = JSON.parse(readFileSync(new URL('./fixtures/post-call-action-pairs.json', import.meta.url), 'utf8'));

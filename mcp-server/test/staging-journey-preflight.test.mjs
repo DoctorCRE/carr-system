@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // Test staging journey preflight authority refusals.
 import test from 'node:test';
 import assert from 'node:assert/strict';
