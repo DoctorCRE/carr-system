@@ -52,7 +52,7 @@ import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLead
 // The doctrine store's verbs (P2, decision 82a2fb62) live in doctrine.js as a
 // factory over this file's envelope machinery, merged at the bottom.
 import { doctrineTools } from "./doctrine.js";
-import { orgConventionTools, conventionProposals } from "./org-conventions.js";
+import { orgConventionTools, conventionProposals } from "./org-conventions.ts";
 import { situationRetrievalTools } from "./situation-retrieval.js";
 import { investigationTools } from "./investigation.js";
 import { docConversationTools } from "./doc-conversation.js";
@@ -131,7 +131,7 @@ import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
 import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.ts";
 import { partyIdentityTools } from "./party-identity.ts";
-import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.js";
+import { partyDuplicateCandidateTools } from "./party-duplicate-candidates.ts";
 import { briefQueuePage, readBriefLoops, briefLoopKey, briefNeedsJoeKey, briefAssuranceKey } from "./brief-queues.ts";
 import { readBriefAssurance } from "./brief-assurance.ts";
 import { readNeedsJoe } from "./needs-joe.js";
@@ -9411,10 +9411,10 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
-  "org-conventions": "mcp-server/src/org-conventions.js",
+  "org-conventions": "mcp-server/src/org-conventions.ts",
   "research-sites": "mcp-server/src/research-sites.ts",
   "party-identity": "mcp-server/src/party-identity.ts",
-  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.js",
+  "party-duplicate-candidates": "mcp-server/src/party-duplicate-candidates.ts",
   "doc-suggestions": "mcp-server/src/doc-suggestions.ts",
   "whats-new": "mcp-server/src/whats-new.js",
   "invoice-tracker": "mcp-server/src/invoice-tracker.ts",
