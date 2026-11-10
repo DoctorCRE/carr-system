@@ -38,21 +38,24 @@
 // against real source, converted benchmark-acceptance-store.v5.js:959 back to
 // the object form and confirmed this test failed naming that file and line.
 
-import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
 /** Every .js/.mjs/.ts file under dir, recursively. */
-function sourceFiles(dir) {
+function sourceFiles(dir: string): string[] {
   const found = [];
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) { found.push(...sourceFiles(path)); continue; }
+    if (statSync(path).isDirectory()) {
+      found.push(...sourceFiles(path));
+      continue;
+    }
     if (/\.(js|mjs|ts)$/.test(entry)) found.push(path);
   }
   return found;
@@ -69,7 +72,7 @@ const OBJECT_FORM = /writeEvent\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*\{/;
 const ANY_CALL = /\bwriteEvent\s*\(/;
 
 /** 1-based line number of a character offset in text. */
-function lineOf(text, offset) {
+function lineOf(text: string, offset: number) {
   let line = 1;
   for (let i = 0; i < offset; i += 1) if (text[i] === "\n") line += 1;
   return line;
@@ -79,7 +82,7 @@ function lineOf(text, offset) {
  * Scan whole file contents. Returns the object-form hits (file:line plus the
  * line the call starts on) and the number of writeEvent call sites seen.
  */
-function scanTree(dir) {
+function scanTree(dir: string) {
   const files = sourceFiles(dir);
   const hits = [];
   let calls = 0;
@@ -92,7 +95,7 @@ function scanTree(dir) {
 
     for (const match of text.matchAll(new RegExp(OBJECT_FORM.source, "g"))) {
       const line = lineOf(text, match.index);
-      hits.push(`${label}:${line}: ${lines[line - 1].trim()}`);
+      hits.push(`${label}:${line}: ${(lines[line - 1] ?? "").trim()}`);
     }
   }
   return { files, hits, calls };
@@ -105,9 +108,12 @@ test("no writeEvent call in mcp-server/src uses the object form", () => {
   assert.ok(files.length > 50, `the source sweep found only ${files.length} files`);
   assert.ok(calls > 50, `the sweep found only ${calls} writeEvent call sites`);
 
-  assert.deepEqual(hits, [],
+  assert.deepEqual(
+    hits,
+    [],
     `writeEvent takes (client, actor, verb, subjectType, subjectId, fields); ` +
-    `these calls pass an options object as the actor:\n${hits.join("\n")}`);
+      `these calls pass an options object as the actor:\n${hits.join("\n")}`,
+  );
 });
 
 test("the scanner catches every spelling of the object form and spares the positional one", () => {
@@ -116,54 +122,66 @@ test("the scanner catches every spelling of the object form and spares the posit
   const dir = mkdtempSync(join(tmpdir(), "write-event-call-shape-"));
   try {
     // The plain form, exactly as it shipped.
-    writeFileSync(join(dir, "plain.js"), [
-      "export async function record(c) {",
-      '  await writeEvent(c, { subject_type: "portfolio", verb: "x" });',
-      "}",
-      "",
-    ].join("\n"));
+    writeFileSync(
+      join(dir, "plain.js"),
+      [
+        "export async function record(c) {",
+        '  await writeEvent(c, { subject_type: "portfolio", verb: "x" });',
+        "}",
+        "",
+      ].join("\n"),
+    );
 
     // A space between the identifier and the paren — invisible to a scan that
     // pre-filters on the literal `writeEvent(`.
-    writeFileSync(join(dir, "spaced.js"), [
-      "export async function record(c) {",
-      '  await writeEvent (c, { subject_type: "portfolio", verb: "x" });',
-      "}",
-      "",
-    ].join("\n"));
+    writeFileSync(
+      join(dir, "spaced.js"),
+      [
+        "export async function record(c) {",
+        '  await writeEvent (c, { subject_type: "portfolio", verb: "x" });',
+        "}",
+        "",
+      ].join("\n"),
+    );
 
     // The call head broken across three lines, in a nested directory so the
     // recursive walk is exercised too.
     mkdirSync(join(dir, "nested"));
-    writeFileSync(join(dir, "nested", "wrapped.js"), [
-      "export async function record(c) {",
-      "  await writeEvent(",
-      "    c,",
-      "    {",
-      '      subject_type: "portfolio",',
-      "    });",
-      "}",
-      "",
-    ].join("\n"));
+    writeFileSync(
+      join(dir, "nested", "wrapped.js"),
+      [
+        "export async function record(c) {",
+        "  await writeEvent(",
+        "    c,",
+        "    {",
+        '      subject_type: "portfolio",',
+        "    });",
+        "}",
+        "",
+      ].join("\n"),
+    );
 
     // The legitimate call: six positional arguments, the last an object. This
     // one must NOT be flagged, including when it is broken across lines.
-    writeFileSync(join(dir, "positional.js"), [
-      "export async function record(c, actor, id) {",
-      '  await writeEvent(c, actor, "propose-portfolio-revision", "portfolio", id, {',
-      '    payload: { note: "fine" },',
-      "  });",
-      "  await writeEvent(",
-      "    c,",
-      "    actor,",
-      '    "accept-portfolio-revision",',
-      '    "portfolio",',
-      "    id,",
-      "    { payload: {} },",
-      "  );",
-      "}",
-      "",
-    ].join("\n"));
+    writeFileSync(
+      join(dir, "positional.js"),
+      [
+        "export async function record(c, actor, id) {",
+        '  await writeEvent(c, actor, "propose-portfolio-revision", "portfolio", id, {',
+        '    payload: { note: "fine" },',
+        "  });",
+        "  await writeEvent(",
+        "    c,",
+        "    actor,",
+        '    "accept-portfolio-revision",',
+        '    "portfolio",',
+        "    id,",
+        "    { payload: {} },",
+        "  );",
+        "}",
+        "",
+      ].join("\n"),
+    );
 
     const { hits, calls } = scanTree(dir);
     // The hit list is asserted BEFORE the call count so that a scanner which
@@ -187,9 +205,7 @@ test("the scanner actually matches the object form it is looking for", () => {
   assert.ok(OBJECT_FORM.test("await writeEvent(client, {"));
   assert.ok(OBJECT_FORM.test("await writeEvent (c, {"));
   assert.ok(OBJECT_FORM.test("await writeEvent(\n  c,\n  {"));
-  assert.equal(
-    OBJECT_FORM.test('await writeEvent(c, actor, "propose-portfolio-revision", "portfolio", id,'),
-    false);
-  assert.equal(OBJECT_FORM.test("await writeEvent(c, actor, verb, \"deal\", dealId, {"), false);
-  assert.equal(OBJECT_FORM.test("await writeEvent(\n  c,\n  actor,\n  verb,\n  \"deal\",\n  id,\n  {"), false);
+  assert.equal(OBJECT_FORM.test('await writeEvent(c, actor, "propose-portfolio-revision", "portfolio", id,'), false);
+  assert.equal(OBJECT_FORM.test('await writeEvent(c, actor, verb, "deal", dealId, {'), false);
+  assert.equal(OBJECT_FORM.test('await writeEvent(\n  c,\n  actor,\n  verb,\n  "deal",\n  id,\n  {'), false);
 });

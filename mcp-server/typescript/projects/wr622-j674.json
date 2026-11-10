@@ -1,0 +1,12 @@
+{
+  "node": [
+    "test/worker-types-slice4.test.ts",
+    "test/workflow-cutover.v5.test.ts",
+    "test/write-event-call-shape.test.ts"
+  ],
+  "entry": [
+    "test/worker-types-slice4.test.ts",
+    "test/workflow-cutover.v5.test.ts",
+    "test/write-event-call-shape.test.ts"
+  ]
+}

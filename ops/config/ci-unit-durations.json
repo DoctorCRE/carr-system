@@ -508,16 +508,16 @@
     "work-request-triage.test.mjs": {"milliseconds": 648, "serial": false},
     "work-request-withdrawal.test.mjs": {"milliseconds": 586, "serial": false},
     "work-shape.test.mjs": {"milliseconds": 711, "serial": false},
-    "worker-types-slice4.test.mjs": {"milliseconds": 1203, "serial": false},
+    "worker-types-slice4.test.ts": {"milliseconds": 1203, "serial": false},
     "worker-types.test.ts": {"milliseconds": 95703, "serial": false},
-    "workflow-cutover.v5.test.mjs": {"milliseconds": 609, "serial": false},
+    "workflow-cutover.v5.test.ts": {"milliseconds": 609, "serial": false},
     "workflow-effect-envelope.v5.test.mjs": {"milliseconds": 346, "serial": false},
     "workspace-business-read.test.mjs": {"milliseconds": 296, "serial": false},
     "workspace-business-web.test.mjs": {"milliseconds": 778, "serial": false},
     "workspace-command-center-read.test.mjs": {"milliseconds": 230, "serial": false},
     "workspace-command-center-web.test.mjs": {"milliseconds": 543, "serial": false},
     "workspace-surface-inventory.test.mjs": {"milliseconds": 446, "serial": false},
-    "write-event-call-shape.test.mjs": {"milliseconds": 210, "serial": false},
+    "write-event-call-shape.test.ts": {"milliseconds": 210, "serial": false},
     "write-reconciliation.test.mjs": {"milliseconds": 547, "serial": false}
   }
 }
