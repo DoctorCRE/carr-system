@@ -162,6 +162,10 @@ begin
             case when scopes='[]' then '["view_map"]'::jsonb else scopes end,now()+interval '1 hour','sha256:'||repeat('9',64));
           sd:='sha256:'||encode(public.digest('expired-'||n,'sha256'),'hex');
         end if;
+        if state<>'active' and ops.exchange_tour_share_token(td,
+          'sha256:'||encode(public.digest('reexchange-'||n,'sha256'),'hex'),now()+interval '1 hour','sha256:'||repeat('9',64)) is not null then
+          raise exception 'inactive link exchanged a new session %',state;
+        end if;
         if (ops.read_tour_share_packet(sd) is not null) is distinct from (state='active' and scopes ? 'view_packet') then
           raise exception 'view permission matrix failed % %',scopes,state;
         end if;
