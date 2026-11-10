@@ -63,6 +63,39 @@ class StrictProjects(unittest.TestCase):
             module.generate(pkg)
             self.assertEqual(json.loads((pkg / 'knip.json').read_text())['project'], ['b.ts'])
 
+    def test_sibling_workspace_keeps_consumers_as_entries_and_libraries_as_projects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pkg = root / 'mcp-server'
+            admissions = pkg / 'typescript/projects'
+            admissions.mkdir(parents=True)
+            plugin = root / 'practice-plugin'
+            (plugin / 'test').mkdir(parents=True)
+            (plugin / 'src').mkdir()
+            (plugin / 'package.json').write_text('{"name":"practice-plugin"}')
+            (pkg / 'local.ts').touch()
+            for file in ('test/calculators.test.mjs', 'test/fixtures.ts', 'src/runway.ts'):
+                (plugin / file).touch()
+            (admissions / 'plugin.json').write_text(json.dumps({
+                'node': ['local.ts', '../practice-plugin/test/calculators.test.mjs',
+                         '../practice-plugin/test/fixtures.ts'],
+                'worker': ['../practice-plugin/src/runway.ts'],
+                'entry': ['local.ts', '../practice-plugin/test/calculators.test.mjs']}))
+            module.generate(pkg)
+            graph = json.loads((pkg / 'knip.json').read_text())
+            self.assertEqual(graph['workspaces'], {
+                '.': {'entry': ['local.ts'], 'project': ['local.ts']},
+                '../practice-plugin': {
+                    'node': False,
+                    'entry': ['test/calculators.test.mjs'],
+                    'project': ['src/runway.ts', 'test/calculators.test.mjs', 'test/fixtures.ts']}})
+            self.assertEqual(graph['project'], sorted([
+                'local.ts', '../practice-plugin/src/runway.ts',
+                '../practice-plugin/test/calculators.test.mjs', '../practice-plugin/test/fixtures.ts']))
+            before = (pkg / 'knip.json').read_bytes()
+            module.generate(pkg)
+            self.assertEqual((pkg / 'knip.json').read_bytes(), before)
+
     def test_fallow_renames_only_existing_identities(self):
         with tempfile.TemporaryDirectory() as directory:
             pkg = Path(directory)
