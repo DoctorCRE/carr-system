@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
 import { TOOLS } from '../src/tools.js';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 
 const MIGRATION = new URL('../../migrations/1056_drop_unused_indexes.sql', import.meta.url);
 

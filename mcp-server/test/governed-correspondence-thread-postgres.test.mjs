@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // WR-000530 — read-correspondence-thread is bound to the server-derived sponsor
 // on the existing read-connection boundary.
 //

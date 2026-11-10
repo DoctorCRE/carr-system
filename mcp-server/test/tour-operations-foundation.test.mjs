@@ -9,7 +9,7 @@ import {
   validateCanonicalFieldAssertion,
   validateFoundationEntityFixture,
   validateProjectionFact,
-} from "../src/tour-operations-contract.js";
+} from "../src/tour-operations-contract.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const read = file => fs.readFileSync(path.join(root, file), "utf8");

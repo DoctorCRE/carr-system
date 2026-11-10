@@ -1,0 +1,69 @@
+// Tests research requirements for national account and market deal creation.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ToolError } from "../src/tool-error.ts";
+import { handler } from "./helpers/legacy-test-registry.ts";
+
+const joe = {
+  id: "10000000-0000-0000-0000-000000000002",
+  slug: "joe",
+  display: "Joe",
+  human: true,
+  via: "mcp",
+  client_id: "test",
+};
+
+class NationalFake {
+  partyInserts = 0;
+  async query(text: string) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.startsWith("select request_hash, response")) return { rows: [] };
+    if (sql.startsWith("select id,name from party where kind='org'")) return { rows: [] };
+    if (sql.includes("where c.id=$1 and c.client_type='national_account'"))
+      return { rows: [{ id: "account-client", party_id: "account-party", name: "Brand" }] };
+    if (sql.startsWith("select id,name from deal where outcome is null")) return { rows: [] };
+    if (sql.includes("where p.org_id=$1") && sql.includes("lower(p.name)=lower($2)")) return { rows: [] };
+    if (sql.startsWith("insert into party")) {
+      this.partyInserts++;
+      return { rows: [{ id: "new-party" }] };
+    }
+    throw new Error(`unexpected query: ${sql}`);
+  }
+}
+
+test("create-national-account rejects an unresearched synthetic org before insert", async () => {
+  const db = new NationalFake();
+  await assert.rejects(
+    () =>
+      handler("create-national-account", db, joe, {
+        idempotency_key: "00000571-0000-4000-8000-000000000204",
+        name: "Thin Brand",
+        owner: "joe",
+      }),
+    (e) =>
+      e instanceof ToolError &&
+      e.payload.error === "research_evidence_required" &&
+      e.payload.gate === "create-national-account",
+  );
+  assert.equal(db.partyInserts, 0);
+});
+
+test("create-national-market-deal rejects an unresearched franchisee before insert", async () => {
+  const db = new NationalFake();
+  await assert.rejects(
+    () =>
+      handler("create-national-market-deal", db, joe, {
+        idempotency_key: "00000571-0000-4000-8000-000000000205",
+        account_client_id: "account-client",
+        client_name: "Thin Franchisee",
+        deal_name: "Thin Franchisee lease",
+        market: "Pensacola",
+      }),
+    (e) =>
+      e instanceof ToolError &&
+      e.payload.error === "research_evidence_required" &&
+      e.payload.gate === "create-national-market-deal",
+  );
+  assert.equal(db.partyInserts, 0);
+});

@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // End-to-end rehearsal of the Monday pipeline call (WR-000433 AC4).
 //
 // Drives the real Call Mode pipeline on a SYNTHETIC call about SYNTHETIC deals
@@ -13,7 +13,7 @@ import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs'
 // CARR_REHEARSAL_AUDIO=1 (macOS with whisper-cli) speaks the call with `say -o`
 // into the two Quill tracks and transcribes them with transcribe_session.py.
 import test, { before, after } from 'node:test';
-import { NOW } from './helpers/fixed-clock.mjs';
+import { NOW } from './helpers/fixed-clock.ts';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -24,11 +24,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { createCaptureHandler } from '../src/capture.js';
 import { agentActorForToken } from '../src/identity.js';
-import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './helpers/call-rehearsal.mjs';
+import { CALL, PYTHON, callContext, openCallSession, seedSyntheticBook, rehearsalClock, observeRehearsalClaim } from './helpers/call-rehearsal.ts';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const BIN = path.join(REPO, 'tools/dictation-rig/bin');
@@ -152,7 +152,7 @@ test('a recorded weekly call updates every confidently discussed card and leaves
     distiller: SONNET ? 'live' : 'stand-in',
     clock: rehearsalClock(started),
     observeClaim: (token, clock) => observeRehearsalClaim((sql, params) => c.query(sql, params), token, clock),
-    env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
+    env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.ts', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
 
   // The Deal Room hands the companion the exact deal index.
   const { deals: index } = await verb(joe, 'get-call-context', { deal_ids: Object.values(deals) });
@@ -300,7 +300,7 @@ test('a call with an out-of-bound recording clock keeps its phase pending with a
   call = await openCallSession({ root, started, captureUrl: baseUrl, deviceToken: 'synthetic-device-token',
     clock: rehearsalClock(started, 120000),
     observeClaim: (token, clock) => observeRehearsalClaim((sql, params) => c.query(sql, params), token, clock),
-    env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.mjs', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
+    env: { CARR_POST_CALL_VERB_COMMAND: `node ${fileURLToPath(new URL('./helpers/rehearsal-verb.ts', import.meta.url))} ${baseUrl}/rehearsal/verb` } });
   const { deals: index } = await verb(joe, 'get-call-context', { deal_ids: Object.values(deals) });
   call.writeTranscript();
   await call.request('/api/call-context', callContext(call.session, started, index));

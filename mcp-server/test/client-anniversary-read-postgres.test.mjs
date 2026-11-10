@@ -4,7 +4,7 @@ import {readFileSync,existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import pg from 'pg';
-import {acquireDisposablePostgres,acquirePostgresFixtureGroup} from './helpers/disposable-postgres.mjs';
+import {acquireDisposablePostgres,acquirePostgresFixtureGroup} from './helpers/disposable-postgres.ts';
 import {readClientAnniversaries} from '../src/client-anniversary-read.ts';
 let bin;
 try{bin=execFileSync('pg_config',['--bindir'],{encoding:'utf8'}).trim();}catch{}
