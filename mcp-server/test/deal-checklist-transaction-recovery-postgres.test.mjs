@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { readDealChecklist, CHECKLIST_SOURCES } from '../src/deal-checklist.ts';
 
 const deal = { id: '11111111-1111-4111-8111-111111111111', type: 'renewal' };

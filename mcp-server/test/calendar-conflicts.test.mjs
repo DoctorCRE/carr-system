@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 
 const JOE = { slug: "joe", human: true, via: "oauth-google" };
 const base = NOW + 3_600_000;

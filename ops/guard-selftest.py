@@ -1255,6 +1255,36 @@ def fixture_identity_cases():
     return failures
 
 
+PROOF_BROWSER_READS = [
+    ('proof browser J695 discovery', 'curl -q http://127.0.0.1:9333/json/list'),
+    ('proof browser version', 'curl -q -sS http://127.0.0.1:9333/json/version'),
+]
+for name, command in PROOF_BROWSER_READS:
+    case(name, bash(command), ALLOW)
+    case(name + ' Codex', direct_exec(command), ALLOW)
+case('proof browser combined reader J290 replacement',
+     bash('python3 tools/proof-browser-read.py config subscriptions'), ALLOW)
+for name, command in [
+    ('POST', 'curl -q -X POST http://127.0.0.1:9333/json/list'),
+    ('body', 'curl -q -d x=1 http://127.0.0.1:9333/json/list'),
+    ('other port', 'curl -q http://127.0.0.1:9334/json/list'),
+    ('unknown send', 'curl -q -d x=1 https://unrecognised.invalid'),
+    ('new tab', 'curl -q http://127.0.0.1:9333/json/new'),
+    ('close tab', 'curl -q http://127.0.0.1:9333/json/close/ABC'),
+    ('alternate host', 'curl -q http://localhost:9333/json/list'),
+    ('alternate protocol', 'curl -q https://127.0.0.1:9333/json/list'),
+    ('DELETE', 'curl -q -X DELETE http://127.0.0.1:9333/json/list'),
+    ('query', 'curl -q http://127.0.0.1:9333/json/list?payload=1'),
+    ('redirect', 'curl -q -L http://127.0.0.1:9333/json/list'),
+    ('credentials', 'curl -q -H Cookie:secret http://127.0.0.1:9333/json/list'),
+    ('config', 'curl http://127.0.0.1:9333/json/list'),
+    ('expanded', 'curl -q http://127.0.0.1:9333/$(echo json/list)'),
+    ('interpreter J290', "node -e \"fetch('http://127.0.0.1:9333/json/list')\""),
+    ('mixed send', 'curl -q http://127.0.0.1:9333/json/list; curl -q -d x=1 http://127.0.0.1:9333/json/list'),
+]:
+    case('proof browser refuses ' + name, bash(command), DENY)
+
+
 def monotonicity_cases(head_results):
     probes = [(name, payload) for name, payload, _ in CASES]
     probes += [(name, bash(command, '/tmp')) for name, command, *_ in REVIEW_FIXTURE['reviewer_probes']]
@@ -1278,7 +1308,10 @@ def monotonicity_cases(head_results):
             failures.append(name + ': hook process failed ' + error[:100] + head_error[:100])
         elif baseline == DENY:
             blocked += 1
-            if head != DENY:
+            intended_proof_read = any(
+                payload == shape(command)
+                for _, command in PROOF_BROWSER_READS for shape in (bash, direct_exec))
+            if head != DENY and not intended_proof_read:
                 failures.append(name + ': head allows, main blocks')
     for failure in failures:
         print('FAIL monotonicity: ' + failure)

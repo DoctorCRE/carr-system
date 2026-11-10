@@ -1,6 +1,6 @@
 // Tests confirm-merge against the current PostgreSQL activity schema.
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";

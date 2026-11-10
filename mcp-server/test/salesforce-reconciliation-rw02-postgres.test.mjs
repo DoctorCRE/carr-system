@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // salesforce-reconciliation-rw02-postgres.test.mjs — the V5-RW02 evidence
 // store's replay and write-time refusal paths on REAL PostgreSQL.

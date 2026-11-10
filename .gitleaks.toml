@@ -79,9 +79,9 @@ regexes = [
 description = "Reviewed synthetic fixture or non-secret source expression"
 condition = "AND"
 regexTarget = "line"
-paths = ['''(?:^|/)mcp\-server/test/error\-unmasking\.test\.mjs$''']
+paths = ['''(?:^|/)mcp\-server/test/error\-unmasking\.test\.ts$''']
 regexes = [
-  '''^\ \ \ \ message:\ "permission\ denied;\ connecting\ as\ postgresql[:]//carr_writer:hunter2@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ invented\ fixture;\ the\ whole\ point\ of\ this\ case\ is\ that\ it\ must\ NOT\ survive\ into\ the\ payload$''',
+  '''^\ \ \ \ \ \ message:\ "permission\ denied;\ connecting\ as\ postgresql[:]//carr_writer:hunter2@db\.example/carr",\ //\ ci\-secret\-scan:\ allow\ —\ invented\ fixture;\ the\ whole\ point\ of\ this\ case\ is\ that\ it\ must\ NOT\ survive\ into\ the\ payload$''',
 ]
 
 [[allowlists]]
