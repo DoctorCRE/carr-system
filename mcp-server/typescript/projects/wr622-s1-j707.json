@@ -1,0 +1,15 @@
+{
+  "node": [
+    "../client-portal/fixtures/reference-extractor/globals.d.ts",
+    "../client-portal/fixtures/reference-extractor/ref-a/app.ts",
+    "../client-portal/fixtures/reference-extractor/ref-a/data.ts",
+    "../client-portal/fixtures/reference-extractor/ref-v/app.ts",
+    "../client-portal/fixtures/reference-extractor/ref-v/data.ts"
+  ],
+  "entry": [
+    "../client-portal/fixtures/reference-extractor/ref-a/app.ts",
+    "../client-portal/fixtures/reference-extractor/ref-a/data.ts",
+    "../client-portal/fixtures/reference-extractor/ref-v/app.ts",
+    "../client-portal/fixtures/reference-extractor/ref-v/data.ts"
+  ]
+}

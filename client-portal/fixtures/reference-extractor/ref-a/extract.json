@@ -2,15 +2,15 @@
   "site": "REF-A",
   "sources": {
     "data": {
-      "file": "data.js",
+      "file": "data.ts",
       "binding": "window.referenceData"
     },
     "center": {
-      "file": "app.js",
+      "file": "app.ts",
       "binding": "MAP_CENTER"
     },
     "zoom": {
-      "file": "app.js",
+      "file": "app.ts",
       "binding": "MAP_ZOOM"
     }
   },
