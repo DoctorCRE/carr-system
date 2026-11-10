@@ -1,0 +1,8 @@
+{
+  "node": [
+    "test/run-node-suites.test.ts"
+  ],
+  "entry": [
+    "test/run-node-suites.test.ts"
+  ]
+}
