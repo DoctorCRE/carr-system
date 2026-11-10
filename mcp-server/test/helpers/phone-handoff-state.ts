@@ -6,7 +6,7 @@ type HandoffStorage = {
   getAlarm(): Promise<number | null>;
   setAlarm(time: number): Promise<void>;
   deleteAlarm(): Promise<void>;
-  transaction<T>(fn: (storage: HandoffStorage) => T): Promise<T>;
+  transaction<T>(fn: (storage: HandoffStorage) => T | Promise<T>): Promise<T>;
 };
 
 // Structured clones keep storage independent of each object instance.
