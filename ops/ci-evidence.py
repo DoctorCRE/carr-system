@@ -287,11 +287,11 @@ def conversion_ci(commit, workflow):
 
 
 def prove_conversion(*, pr=None, merge_sha=None, timeout=45, root=ROOT):
-    import signal
     import sys
     import time
     sys.path.insert(0, str(ROOT))
     from lib.release_reader import read
+    from lib.proof_deadline import proof_deadline
 
     deadline = time.monotonic() + timeout
 
@@ -300,9 +300,6 @@ def prove_conversion(*, pr=None, merge_sha=None, timeout=45, root=ROOT):
         if budget <= 0:
             raise InsufficientEvidence('deadline')
         return budget
-
-    def expired(_signum, _frame):
-        raise InsufficientEvidence('deadline')
 
     def command(argv, *, check=True):
         return subprocess.run(argv, cwd=root, text=True, capture_output=True,
@@ -320,7 +317,6 @@ def prove_conversion(*, pr=None, merge_sha=None, timeout=45, root=ROOT):
         return value
 
     identity = {}
-    previous = signal.signal(signal.SIGALRM, expired)
     try:
         if not 0 < timeout <= 120 or (pr is None) == (merge_sha is None):
             raise InsufficientEvidence('invalid_arguments')
@@ -328,31 +324,31 @@ def prove_conversion(*, pr=None, merge_sha=None, timeout=45, root=ROOT):
             raise InsufficientEvidence('invalid_pr')
         if merge_sha is not None:
             valid_sha(merge_sha)
-        signal.setitimer(signal.ITIMER_REAL, remaining())
-        snapshot = json.loads(command(['gh', 'api', 'graphql', '-f',
-            'query=' + conversion_query(pr, merge_sha)]).stdout)
-        commit = conversion_commit(snapshot, pr)
-        merge = valid_sha(commit['oid'])
-        valid_sha(commit['tree']['oid'])
-        status, release = http('release')
-        if status != 200 or release['ok'] is not True or release['env']['value'] != 'production':
-            raise InsufficientEvidence('production_release_unavailable')
-        observed = valid_sha(release['git_sha']['value'])
-        identity = {'merge_sha': merge, 'release_sha': observed}
-        for sha in dict.fromkeys((merge, observed)):
-            if command(['git', '--no-replace-objects', 'cat-file', '-e', sha + '^{commit}'], check=False).returncode:
-                command(['git', 'fetch', '--no-tags', 'origin', sha])
-        if command(['git', 'rev-parse', '--is-shallow-repository']).stdout.strip() != 'false':
-            raise InsufficientEvidence('shallow_ancestry')
-        if command(['git', '--no-replace-objects', 'merge-base', '--is-ancestor', merge, observed],
-                   check=False).returncode:
-            raise InsufficientEvidence('release_does_not_contain_merge')
-        workflow = command(['git', '--no-replace-objects', 'show', merge + ':.github/workflows/ci.yml']).stdout
-        run = conversion_ci(commit, workflow)
-        status, health = http('health')
-        if status != 200 or health.get('ok') is not True:
-            raise AssertionError('production_health_failed')
-        remaining()
+        with proof_deadline(remaining(), InsufficientEvidence, 'deadline'):
+            snapshot = json.loads(command(['gh', 'api', 'graphql', '-f',
+                'query=' + conversion_query(pr, merge_sha)]).stdout)
+            commit = conversion_commit(snapshot, pr)
+            merge = valid_sha(commit['oid'])
+            valid_sha(commit['tree']['oid'])
+            status, release = http('release')
+            if status != 200 or release['ok'] is not True or release['env']['value'] != 'production':
+                raise InsufficientEvidence('production_release_unavailable')
+            observed = valid_sha(release['git_sha']['value'])
+            identity = {'merge_sha': merge, 'release_sha': observed}
+            for sha in dict.fromkeys((merge, observed)):
+                if command(['git', '--no-replace-objects', 'cat-file', '-e', sha + '^{commit}'], check=False).returncode:
+                    command(['git', 'fetch', '--no-tags', 'origin', sha])
+            if command(['git', 'rev-parse', '--is-shallow-repository']).stdout.strip() != 'false':
+                raise InsufficientEvidence('shallow_ancestry')
+            if command(['git', '--no-replace-objects', 'merge-base', '--is-ancestor', merge, observed],
+                       check=False).returncode:
+                raise InsufficientEvidence('release_does_not_contain_merge')
+            workflow = command(['git', '--no-replace-objects', 'show', merge + ':.github/workflows/ci.yml']).stdout
+            run = conversion_ci(commit, workflow)
+            status, health = http('health')
+            if status != 200 or health.get('ok') is not True:
+                raise AssertionError('production_health_failed')
+            remaining()
         print(json.dumps({'ok': True, 'merge_sha': merge, 'release_sha': observed, 'ci_run': run}))
         return 0
     except AssertionError as error:
@@ -361,9 +357,6 @@ def prove_conversion(*, pr=None, merge_sha=None, timeout=45, root=ROOT):
     except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, subprocess.SubprocessError) as error:
         print(json.dumps({**identity, 'ok': False, 'classification': 'insufficient_evidence', 'reason': type(error).__name__ + ': ' + str(error)[:180]}))
         return 78
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
 
 
 def main():

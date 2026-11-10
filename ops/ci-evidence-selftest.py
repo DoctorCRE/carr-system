@@ -532,10 +532,11 @@ class ConversionProof(unittest.TestCase):
         child_source = r"""
 import json
 import runpy
+import pathlib
 import signal
 import sys
 from unittest.mock import patch
-sys.path.insert(0, str(__import__('pathlib').Path(sys.argv[1]).parent))
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent))
 suite = runpy.run_path(sys.argv[1])
 case = suite['ConversionProof']()
 case.setUp()
