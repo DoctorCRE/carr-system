@@ -1,9 +1,9 @@
 // Tests vendor meeting reads, contact suggestions, and access controls.
 import test, { before, after } from 'node:test';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import assert from 'node:assert/strict';
-import { appKeysValid, vendorRowRequired, vendorRowOptional, vendorDetailRequired, vendorDetailOptional } from './fixtures/vendor-directory-app-keys.mjs';
+import { appKeysValid, vendorRowRequired, vendorRowOptional, vendorDetailRequired, vendorDetailOptional } from './fixtures/vendor-directory-app-keys.ts';
 import { TOOLS } from '../src/tools.js';
 import { parseBusinessQuery, parseBusinessRecordQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 

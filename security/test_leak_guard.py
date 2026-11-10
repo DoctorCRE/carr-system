@@ -305,6 +305,22 @@ class LeakGuardTest(unittest.TestCase):
         self.assertIn('sample.txt:1', result.stdout)
         self.assertNotIn(value, result.stdout + result.stderr)
 
+    def test_identity_fixture_has_no_phone_exemptions(self):
+        root = SCRIPT.parents[1]
+        path = 'mcp-server/test/correct-party-identity.test.ts'
+        raw = (root / path).read_bytes()
+        allowed = guard.load_allowlist(root / 'security/allowlist.json')
+        digest = hashlib.sha256(raw).hexdigest()
+        self.assertFalse(any(p == path and h == digest and rule == 'pii-phone'
+                             for p, h, rule, _ in allowed))
+        self.assertEqual([hit for hit in guard.pii_findings(raw.decode(), None)
+                          if hit[2] == 'pii-phone'], [])
+        probe = raw + ('\n' + '(212)' + ' 555-0101\n').encode()
+        hits = [hit for hit in guard.pii_findings(probe.decode(), None)
+                if hit[2] == 'pii-phone']
+        self.assertEqual(len(hits), 1)
+        self.assertNotIn((path, hashlib.sha256(probe).hexdigest(), 'pii-phone', ''), allowed)
+
     def test_allowlist_is_bound_to_fixture_bytes_and_requires_reason(self):
         raw = ('test@' + 'fictional-mail.com\n').encode()
         (self.root / 'fixture.txt').write_bytes(raw)
@@ -408,6 +424,37 @@ class LeakGuardTest(unittest.TestCase):
         self.assertIn('asset.dat:1 opaque-binary', result.stdout)
         result = self.run_guard('--staged', '--corpus', str(self.root / 'missing.json'))
         self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_migration_archive_admission_binds_verified_bytes_and_exact_path(self):
+        import sys
+        import shutil
+        self.addCleanup(shutil.rmtree, self.root)
+        repository = SCRIPT.parents[1]
+        with patch.object(sys, 'path', [str(repository / 'tools'), *sys.path]):
+            from generate_migration_archive import verify
+            with contextlib.redirect_stdout(io.StringIO()):
+                verify(repository)
+        archive = 'db/migration-history.zip'
+        raw = (repository / archive).read_bytes()
+        target = self.root / archive
+        target.parent.mkdir()
+        target.write_bytes(raw)
+        self.git('add', archive)
+        options = ('--staged', '--generic-only', '--allowlist', str(repository / 'security/allowlist.json'))
+        result = self.run_guard(*options)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        target.write_bytes(raw + b'\n')
+        self.git('add', archive)
+        result = self.run_guard(*options)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, archive + ':1 opaque-binary\n')
+        target.write_bytes(raw)
+        other = 'db/unreviewed-history.zip'
+        (self.root / other).write_bytes(raw)
+        self.git('add', archive, other)
+        result = self.run_guard(*options)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, other + ':1 opaque-binary\n')
 
     def test_private_history_report_contains_counts_and_paths_only(self):
         (self.root / '.gitignore').write_text('out/\n')

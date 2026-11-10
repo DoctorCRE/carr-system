@@ -1,5 +1,5 @@
 // Test fact store promotion, isolation, and grants on PostgreSQL.
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

@@ -2,6 +2,12 @@
   "schema": "leak-guard-allowlist.v1",
   "entries": [
     {
+      "path": "db/migration-history.zip",
+      "sha256": "82efe62f515483caecc3f66a25e6166df532d49d3ad42367edcc3b6316a486df",
+      "rule": "opaque-binary",
+      "reason": "WR622.S1.J706 deterministic historical SQL archive. All 26 members are byte-identical to blobs in upstream ancestor 3639d54c418841ba15414f1ab1c9d91d57c999c3. The immutable migration manifest verifies all 559 identities and the raw historical snapshot hash; complete archive verification and exact-path/hash leak-guard qualification run in CI. This admits only these reviewed bytes and this path, not changed archives or new data."
+    },
+    {
       "path": "security/fixtures/synthetic-contact.json",
       "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
       "rule": "pii-phone",
@@ -624,7 +630,7 @@
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
     },
     {
-      "path": "mcp-server/test/situation-retrieval-bigint.test.mjs",
+      "path": "mcp-server/test/situation-retrieval-bigint.test.ts",
       "sha256": "e90b22671c9e1286da3979d67850fd9c05b554dbf6d690233013feb7b553f210",
       "rule": "generic-api-key",
       "reason": "Historical synthetic UUID idempotency fixture introduced by 9067df46 in PR #2607, replaced in 3e3c9dcd by patterned UUIDs. Pushed history is retained without force-push. Qualification binds only this path, these exact historical file bytes and this detector."
@@ -867,6 +873,54 @@
       "reason": "The decimal POSIX specification version in public Open Group documentation URLs is not a telephone number. Exact design-note blob only."
     },
     {
+      "path": "mcp-server/src/party-identity.ts",
+      "sha256": "b6e0b94866100e8893a95e26bb5c6a28d7b4fa007604a1dcff72e87731596f07",
+      "rule": "pii-phone",
+      "reason": "rule 54e2bcb9 firm placeholder line"
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-phone",
+      "reason": "Historical pre-correction test blob only. Covers ten phone findings in that immutable blob; no exception applies to the current fixture. Retained for no-rebase history scanning."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-address",
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-address",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "27eb9490f5d6d6137a73c8ea741e2ff0e63b38b2cc1ab3cd26464a4fd363a288",
+      "rule": "pii-email",
+      "reason": "Historical synthetic identity fixture; exact immutable blob only."
+    },
+    {
+      "path": "mcp-server/test/correct-party-identity.test.ts",
+      "sha256": "48db221102eb85ac77bfabfca774f4fbe0bbd3923a31aea01422ea0b503f0bc4",
+      "rule": "pii-email",
+      "reason": "Synthetic identity fixture literals; exact current blob only."
+    },
+    {
+      "path": "mcp-server/test/research-sites.test.ts",
+      "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
+      "rule": "pii-email",
+      "reason": "WR622.S1.J590. The four inherited synthetic invalid-host and credential-refusal fixtures use generic usernames and reserved example domains, not contact identities. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
+      "path": "mcp-server/test/research-sites.test.ts",
+      "sha256": "788d522de1676a233fe82f649bbc18abfad6f73a9d5f7d1082de7fe4c2f3ee2f",
+      "rule": "credential-url",
+      "reason": "WR622.S1.J590. The inherited rejected credential URL uses an explicitly synthetic password on a reserved example domain, not a live credential. Historical reviewed blob retained because range scans inspect every commit. Exact blob only."
+    },
+    {
       "path": "mcp-server/src/tour-client-value-safety.ts",
       "sha256": "325899c98223fe9418c1eea39454c850a271f3f01844721b9a2e7c82f985e609",
       "rule": "pii-phone",
@@ -895,6 +949,50 @@
       "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
       "rule": "pii-phone",
       "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
+      "rule": "pii-phone",
+      "reason": "Pre-existing hardcoded negative-test sentinels use reserved NANP exchange 555 subscriber 0100, including Unicode spacing, to prove client projections refuse contact leakage; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
+    },
+    {
+      "path": "mcp-server/test/tour-client-share-allowlist.test.ts",
+      "sha256": "536566bb4b2adc13e78fd3535a9170196008fcc6a137cac1c65bb2e0106f5283",
+      "rule": "pii-address",
+      "reason": "Pre-existing hardcoded synthetic Medical Plaza and Bayside Medical Plaza street-address fixtures test client field projections; renamed from .mjs to strict .ts; no record-layer data. Merge-main WR622.S1.J676 changes only the migration-helper import and asserts the regex capture before use; fixture literals remain identical."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "b5d8dfb4d92c397df16cda0399e543925f248f2e1172876a39bd40d4812dc1ab"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "client-data",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename.",
+      "value_sha256": "c6b1b5e785e7be1532f19d67b9aad326aa2ecba6a5a73a4843087d8df5b83333"
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-address",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
+      "path": "mcp-server/test/fixtures/tour-client-text-adversarial.ts",
+      "sha256": "75fb2437bb6f41e233716def2b1ef423a34798e2b13a2c4701a230b7bb313e46",
+      "rule": "pii-phone",
+      "reason": "WR622.S1.J597: unchanged synthetic adversarial listing/phone corpus from origin/main; all literal and generated exports compared equal before the TypeScript rename."
+    },
+    {
+      "path": "mcp-server/test/error-unmasking.test.ts",
+      "sha256": "5e2b7fa8838b4eab72867587c87cb5e3237942d5f79f0e7753bbb085d0c1c935",
+      "rule": "credential-url",
+      "reason": "Synthetic redaction-test URL with an invented password, never a live credential. Exact renamed TypeScript fixture blob only."
     }
   ]
 }

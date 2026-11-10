@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Logical migration identities survive removal of baseline-covered files."""
 from __future__ import annotations
+import zipfile
 import hashlib
 import importlib.util
 import json
@@ -50,6 +51,10 @@ class LogicalConsumers(unittest.TestCase):
                     "cutoff": "0888_history.sql", "migrations": [
                         {"filename": n, "sha256": runner_sha256(t)} for n, t in self.history.items()]}
         (self.repo / "db/migration-baseline.json").write_text(json.dumps(document))
+        with zipfile.ZipFile(self.repo / "db/migration-history.zip", "w") as archive:
+            archive.write(self.repo / "db/schema.sql", "db/schema.sql")
+            for name in self.history:
+                archive.write(self.repo / "migrations" / name, "migrations/" + name)
         for name in self.history:
             (self.repo / "migrations" / name).unlink()
         self.base = self.commit()
@@ -79,6 +84,16 @@ class LogicalConsumers(unittest.TestCase):
         base = order.tree_paths(self.repo, self.base)
         self.assertEqual(base, {"migrations/" + n for n in self.history})
         self.assertEqual(order.violations(base, base, base | {"migrations/0887_intruder.sql"}), ["migrations/0887_intruder.sql"])
+
+    def test_integration_compares_identity_when_base_predates_archive(self):
+        archive = self.repo / 'db/migration-history.zip'
+        raw = archive.read_bytes()
+        archive.unlink()
+        base = self.commit()
+        self.git('update-ref', 'refs/remotes/origin/main', base)
+        archive.write_bytes(raw)
+        self.commit()
+        self.assertEqual(integration.validate_candidate(self.repo, base)['pending_migrations'], [])
 
     def test_integration_union_accepts_compacted_history_and_forward_suffix(self):
         (self.repo / "migrations/0889_pending.sql").write_text("select 3;\n")

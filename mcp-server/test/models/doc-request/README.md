@@ -61,7 +61,7 @@ transactions. They observe the second backend blocked by the first, commit both,
 assert three consecutive persisted turns and one receipt. The ask-first test fails on
 c15575e8c0ff75cbe63da5d252efec822196b724 with the sequence unique constraint.
 
-Regenerate outside the repository after copying DocRequest.tla, DocRequest.cfg and view.mjs
+Regenerate outside the repository after copying DocRequest.tla, DocRequest.cfg and view.ts
 to /tmp/j13-model. Set JAVA and TLA2TOOLS to installed tools, then run the installed
-statechart runner with `from-spec /tmp/j13-model/DocRequest.tla --map /tmp/j13-model/view.mjs
+statechart runner with `from-spec /tmp/j13-model/DocRequest.tla --map /tmp/j13-model/view.ts
 --out /tmp/j13-model-result --png`. The chart and report are copied back from that output.

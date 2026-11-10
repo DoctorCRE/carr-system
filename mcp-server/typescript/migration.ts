@@ -39,7 +39,7 @@ function strings(value: unknown, file: string, field: string): string[] {
   return value;
 }
 
-export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json"];
+export const projectPaths = ["tsconfig.node.json", "tsconfig.worker.json", "tsconfig.node-compat.json"];
 
 function compilerOptions(pkg: string, path: string): Record<string, unknown> {
   let parsed: unknown;
@@ -96,7 +96,6 @@ function compilerOptions(pkg: string, path: string): Record<string, unknown> {
       `Set ${flag}=true in the effective config, including inherited overrides.`,
     );
   for (const flag of [
-    "noEmit",
     "allowImportingTsExtensions",
     "erasableSyntaxOnly",
     "verbatimModuleSyntax",
@@ -118,6 +117,14 @@ function compilerOptions(pkg: string, path: string): Record<string, unknown> {
       `${flag} suppresses diagnostics`,
       `Remove ${flag}=true from the effective config, including inherited overrides.`,
     );
+  requireRule(
+    path === "tsconfig.node-compat.json"
+      ? options.noEmit === false && options.emitDeclarationOnly === true && options.composite === true
+      : options.noEmit === true,
+    path,
+    "noEmit may be false only for composite node-compat emitDeclarationOnly",
+    "Keep normal projects noEmit and node-compat composite with emitDeclarationOnly.",
+  );
   return options;
 }
 
@@ -143,26 +150,74 @@ export function projects(pkg: string): string[] {
   return projectPaths.flatMap((path) => {
     const config = object(resolve(pkg, path));
     compilerOptions(pkg, path);
-    return strings(config.files, path, "files").map((file) => resolve(pkg, file));
+    return strings(config.files, path, "files")
+      .filter((file) => !file.startsWith(".generated/"))
+      .map((file) => resolve(pkg, file));
   });
 }
 
-function baselineScope(root: string): {
+function baselineScope(
+  root: string,
+  env: NodeJS.ProcessEnv,
+): {
   base: string;
   javaScript: Set<string>;
   typeScript: Set<string>;
 } {
-  const branch = process.env.GITHUB_BASE_REF || "main";
-  const base = `refs/remotes/origin/${branch}`;
   const git = (args: string[]) =>
-    execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 30_000, stdio: "pipe" });
+    execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 30_000, stdio: "pipe" }).trim();
+  let base = "unresolved";
   try {
-    const present = spawnSync("git", ["rev-parse", "--verify", `${base}^{commit}`], {
-      cwd: root,
-      timeout: 30_000,
-      stdio: "pipe",
-    });
-    if (present.status !== 0) git(["fetch", "--depth=1", "origin", `refs/heads/${branch}:${base}`]);
+    const candidate = git(["rev-parse", "--verify", "HEAD^{commit}"]);
+    const mode = env.GITHUB_EVENT_NAME;
+    if (mode === "pull_request" || mode === "merge_group") {
+      const event = object(env.GITHUB_EVENT_PATH ?? "");
+      const payload = event[mode];
+      if (typeof payload !== "object" || payload === null) throw new Error("Missing event payload");
+      const fields = Object.fromEntries(Object.entries(payload));
+      let declared: unknown = fields.base_sha;
+      if (mode === "pull_request") {
+        const prBase = fields.base;
+        declared = typeof prBase === "object" && prBase !== null && "sha" in prBase ? prBase.sha : undefined;
+      }
+      if (typeof declared !== "string" || !/^[0-9a-f]{40}$/.test(declared))
+        throw new Error("Missing immutable event base SHA");
+      base = declared;
+      if (env.GITHUB_SHA !== candidate || (mode === "merge_group" && fields.head_sha !== candidate))
+        throw new Error("Checkout does not match event candidate");
+      if (mode === "pull_request") {
+        const parents = git(["rev-list", "--parents", "-n", "1", candidate]).split(" ");
+        const prHead = fields.head;
+        if (
+          parents.length !== 3 ||
+          typeof prHead !== "object" ||
+          prHead === null ||
+          !("sha" in prHead) ||
+          prHead.sha !== parents[2]
+        )
+          throw new Error("Synthetic merge does not match event PR head");
+        const parent = parents[1];
+        if (!parent || !git(["rev-list", "--first-parent", parent]).split("\n").includes(base))
+          throw new Error("Event base is not on the synthetic merge's first-parent history");
+        base = parent;
+      } else if (!git(["rev-list", "--first-parent", candidate]).split("\n").includes(base)) {
+        throw new Error("Event base is not on the merge group's first-parent history");
+      }
+    } else if (mode === "push") {
+      const event = object(env.GITHUB_EVENT_PATH ?? "");
+      if (env.GITHUB_SHA !== candidate || event.after !== candidate)
+        throw new Error("Checkout does not match event candidate");
+      if (typeof event.before !== "string" || !/^[0-9a-f]{40}$/.test(event.before))
+        throw new Error("Missing immutable push base SHA");
+      base =
+        event.before === "0".repeat(40) ? git(["merge-base", candidate, "refs/remotes/origin/main"]) : event.before;
+      if (base === candidate) throw new Error("Push baseline cannot be the candidate itself");
+      git(["merge-base", "--is-ancestor", base, candidate]);
+    } else {
+      base = git(["merge-base", candidate, "refs/remotes/origin/main"]);
+    }
+    base = git(["rev-parse", "--verify", `${base}^{commit}`]);
+    process.stdout.write(`Legacy migration baseline ${base}; candidate ${candidate}; mode ${mode ?? "local"}\n`);
     const path = "mcp-server/typescript/migration.json";
     if (!git(["ls-tree", "--name-only", base, "--", path]).trim()) {
       process.stdout.write(`Legacy baseline ${base} has no migration list; allowing initial gate introduction\n`);
@@ -185,16 +240,17 @@ function baselineScope(root: string): {
       javaScript,
       typeScript: new Set(strings(scope.legacyTypeScript, "mcp-server/typescript/migration.json", "legacyTypeScript")),
     };
-  } catch {
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.split("\n")[0] : "Unknown baseline error";
     throw new GateError(
       "mcp-server/typescript/migration.json",
-      `Cannot read legacy migration baseline from ${base}; refusing staged check`,
-      `Restore a readable origin/${branch} base ref and migration list, then rerun check:staged.`,
+      `Cannot read legacy migration baseline from ${base}; refusing staged check (${detail})`,
+      "Restore the event payload, matching candidate and exact base commit history (local: origin/main), then rerun check:staged. No later branch tip is substituted.",
     );
   }
 }
 
-export function migrationIssues(pkg: string, gated: string[]): string[] {
+export function migrationIssues(pkg: string, gated: string[], env: NodeJS.ProcessEnv = process.env): string[] {
   const root = resolve(pkg, "..");
   const scope = object(resolve(pkg, "typescript/migration.json"));
   requireRule(
@@ -214,7 +270,7 @@ export function migrationIssues(pkg: string, gated: string[]): string[] {
       .filter((path) => path && existsSync(resolve(root, path))),
   );
   const issues: string[] = [];
-  const baseline = baselineScope(root);
+  const baseline = baselineScope(root, env);
   const baselinePaths = new Set(
     execFileSync("git", ["ls-tree", "-r", "--name-only", baseline.base], { cwd: root, encoding: "utf8" })
       .trim()

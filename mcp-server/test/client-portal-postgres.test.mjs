@@ -1,5 +1,5 @@
 // Tests client portal authentication and deal access against PostgreSQL.
-import { readMigration } from './migration-source.testhelper.mjs';
+import { readMigration } from './migration-source.testhelper.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';

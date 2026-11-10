@@ -1,7 +1,7 @@
 // Assert that registered verbs pass runtime admission.
 import assert from 'node:assert/strict';
 import {TOOLS} from '../../src/tools.js';
-import {assertRegisteredOperation} from '../../src/mutation-registry.js';
+import {assertRegisteredOperation} from '../../src/mutation-registry.ts';
 
 export async function assertAdmits(verbs) {
   for (const name of verbs) {

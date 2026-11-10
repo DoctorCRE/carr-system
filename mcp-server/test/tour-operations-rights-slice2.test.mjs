@@ -8,7 +8,7 @@ import {
   publicValueIsSafe,
   validateEvidenceRightsLineage,
   validateProjectionFact,
-} from "../src/tour-operations-contract.js";
+} from "../src/tour-operations-contract.ts";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const fixture = JSON.parse(fs.readFileSync(path.join(root, "mcp-server/test/fixtures/tour-operations-foundation.v1.json"), "utf8"));

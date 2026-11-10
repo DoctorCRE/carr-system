@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // amend-closed-loop-postgres.test.mjs — amend-closed-loop on REAL PostgreSQL.
 //
@@ -13,7 +13,7 @@ import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // Each unit invocation owns a migrated snapshot clone.
 
 import test from "node:test";
-import { relinkSourceImports } from "./helpers/relink-source-imports.mjs";
+import { relinkSourceImports } from "./helpers/relink-source-imports.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

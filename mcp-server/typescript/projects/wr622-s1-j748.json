@@ -1,0 +1,4 @@
+{
+  "node": ["codex-continuity-stdio-proxy.ts", "test/codex-continuity-proxy-transitions.test.ts"],
+  "entry": ["codex-continuity-stdio-proxy.ts", "test/codex-continuity-proxy-transitions.test.ts"]
+}

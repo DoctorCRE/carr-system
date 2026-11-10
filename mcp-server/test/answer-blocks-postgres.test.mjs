@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import { Validator } from '@cfworker/json-schema';
-import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
-import { readMigration } from './migration-source.testhelper.mjs';
+import { acquireDisposablePostgres, acquirePostgresFixtureGroup } from './helpers/disposable-postgres.ts';
+import { readMigration } from './migration-source.testhelper.ts';
 import { docConversationTools } from '../src/doc-conversation.js';
 
 const bin = ['/opt/homebrew/opt/postgresql@18/bin', '/usr/lib/postgresql/18/bin']

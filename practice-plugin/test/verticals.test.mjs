@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import Ajv from 'ajv';
 import { VERTICALS } from '../src/verticals.ts';
 import { callTool, TOOLS } from '../src/tools.mjs';
-import { runwayFixture, conversionFixture, saleFixture } from './fixtures.mjs';
+import { runwayFixture, conversionFixture, saleFixture } from './fixtures.ts';
 
 const ajv = new Ajv({ strict: true });
 const spaceTool = TOOLS.find(t => t.name === 'plan_practice_space');

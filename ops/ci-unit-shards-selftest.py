@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import ci_unit_shards as planner
 
@@ -25,9 +26,52 @@ class ShardCoverage(unittest.TestCase):
         shards = planner.plan()
         self.assertEqual(sorted(file for shard in shards for file in shard), files)
         self.assertLessEqual(max(planner.estimate(shard, records, setup) for shard in shards), planner.BUDGET_MS)
-        for count in range(1, len(shards)):
-            self.assertGreater(max(planner.estimate(shard, records, setup) for shard in planner.plan(count=count)),
-                               planner.BUDGET_MS, f'{count} shards would fit with headroom')
+        self.assertLessEqual(len(shards), planner.MAX_COUNT)
+        for shard in shards:
+            self.assertTrue(shard, 'unit shard has zero suites')
+            self.assertEqual(len({bool(records[file].get('unmeasured')) for file in shard}), 1,
+                             'unknown work must be isolated from measured work')
+
+    def test_current_inventory_admits_unmeasured_additions(self):
+        records, setup = planner.durations()
+        for additions in (1, 2):
+            with self.subTest(additions=additions):
+                expanded = {**records, **{
+                    f'new-unmeasured-{index}.test.ts': {
+                        'milliseconds': planner.DEFAULT_SUITE_MS, 'serial': True, 'unmeasured': True}
+                    for index in range(additions)}}
+                with patch.object(planner, 'durations', return_value=(expanded, setup)), \
+                        patch.object(planner, 'suite_files', return_value=sorted(expanded)):
+                    self.test_current_inventory_fits_watchdog_with_cold_setup_and_headroom()
+
+    def test_current_inventory_oracle_rejects_unsafe_plans(self):
+        records = {'known.test.ts': {'milliseconds': 100000, 'serial': True},
+                   'unknown.test.ts': {'milliseconds': 60000, 'serial': True, 'unmeasured': True}}
+        for shards in ([['known.test.ts', 'unknown.test.ts']],
+                       [['known.test.ts']],
+                       [['known.test.ts'], ['unknown.test.ts'], ['unknown.test.ts']],
+                       [['known.test.ts'], ['unknown.test.ts'], []]):
+            with self.subTest(shards=shards), \
+                    patch.object(planner, 'durations', return_value=(records, 167478)), \
+                    patch.object(planner, 'suite_files', return_value=sorted(records)), \
+                    patch.object(planner, 'plan', return_value=shards):
+                with self.assertRaises(AssertionError):
+                    self.test_current_inventory_fits_watchdog_with_cold_setup_and_headroom()
+        capped = {f'suite-{index}.test.ts': {'milliseconds': 1, 'serial': True}
+                  for index in range(planner.MAX_COUNT + 1)}
+        with patch.object(planner, 'durations', return_value=(capped, 167478)), \
+                patch.object(planner, 'suite_files', return_value=sorted(capped)), \
+                patch.object(planner, 'plan', return_value=[[file] for file in capped]):
+            with self.assertRaises(AssertionError):
+                self.test_current_inventory_fits_watchdog_with_cold_setup_and_headroom()
+        for predicted in (planner.BUDGET_MS + 1, planner.WATCHDOG_MS + 1):
+            overweight = {'slow.test.ts': {'milliseconds': predicted - 167478, 'serial': True}}
+            with self.subTest(predicted=predicted), \
+                    patch.object(planner, 'durations', return_value=(overweight, 167478)), \
+                    patch.object(planner, 'suite_files', return_value=sorted(overweight)), \
+                    patch.object(planner, 'plan', return_value=[['slow.test.ts']]):
+                with self.assertRaises(AssertionError):
+                    self.test_current_inventory_fits_watchdog_with_cold_setup_and_headroom()
 
     def test_extension_rename_preserves_measured_budget(self):
         with tempfile.TemporaryDirectory() as directory:

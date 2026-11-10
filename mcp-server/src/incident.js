@@ -464,7 +464,7 @@ const FACT_LIMIT_DEFAULT = 50;
 // carries thousands (INC-20261028-11 held 25,270, a 2.2 MB reply). Paged like
 // facts, with the total reported rather than silently dropped. The per-run and
 // per-deploy occurrence links sort last, so the contextual links callers look
-// for (a work_request, ops/runtime-error-watch.mjs) always fit on the page.
+// for (a work_request, ops/runtime-error-watch.mts) always fit on the page.
 const LINK_LIMIT_DEFAULT = 50;
 const LINK_LIMIT_MAX = 500;
 const TRACE_CORRELATION_MAX = 25;

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { parse } from "@babel/parser";
 import { ToolError } from "../src/tool-error.ts";
 import { publicError } from "../src/public-errors.ts";
-import { assertClosedTopLevel } from "../src/mutation-registry.js";
+import { assertClosedTopLevel } from "../src/mutation-registry.ts";
 
 // These existing refusals remain private until each has a reviewed public shape.
 const INTERNAL_ONLY = new Set([

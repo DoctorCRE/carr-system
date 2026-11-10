@@ -1,5 +1,5 @@
 // Test lead automation evidence, lifecycle decisions and proposals.
-import { readMigration } from "./migration-source.testhelper.mjs";
+import { readMigration } from "./migration-source.testhelper.ts";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -166,7 +166,7 @@ test("malformed contact metadata cannot break the whole job",()=>{
 });
 
 test("lead automation retains human-only party merges", async () => {
-  const { registeredOperation } = await import("../src/mutation-registry.js");
+  const { registeredOperation } = await import("../src/mutation-registry.ts");
   assert.equal(registeredOperation("confirm-merge").human_only, true);
   for (const name of ["advance-leads", "approve-lead-draft", "approve-lead-move"])
     assert.ok(registeredOperation(name));

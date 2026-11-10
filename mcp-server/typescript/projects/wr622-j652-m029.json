@@ -1,0 +1,24 @@
+{
+  "node": [
+    "test/markup-guard.test.ts",
+    "test/memory-rls-connection.test.ts",
+    "test/migration-source.testhelper.ts",
+    "test/models/doc-request/view.ts",
+    "test/models/home-inbox-bulk/view.ts",
+    "test/models/home-inbox-settlement/view.ts",
+    "test/models/people-directory/Chart.map.ts",
+    "test/models/subject-watch-events/view.ts",
+    "test/m029-model-views.test.ts"
+  ],
+  "entry": [
+    "test/markup-guard.test.ts",
+    "test/memory-rls-connection.test.ts",
+    "test/migration-source.testhelper.ts",
+    "test/models/doc-request/view.ts",
+    "test/models/home-inbox-bulk/view.ts",
+    "test/models/home-inbox-settlement/view.ts",
+    "test/models/people-directory/Chart.map.ts",
+    "test/models/subject-watch-events/view.ts",
+    "test/m029-model-views.test.ts"
+  ]
+}

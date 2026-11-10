@@ -1,6 +1,6 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Tests vendor directory migrations and PostgreSQL read and write contracts.
-import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.ts";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';

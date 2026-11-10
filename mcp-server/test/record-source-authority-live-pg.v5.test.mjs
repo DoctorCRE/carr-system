@@ -1,6 +1,6 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Tests record source authority migrations and verbs on PostgreSQL.
-import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.ts";
 // V5-F01 on REAL PostgreSQL: the migration, the two SQL fixtures, and the
 // registered verbs end to end.
 //

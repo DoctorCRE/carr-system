@@ -28,7 +28,7 @@ CLOCK_ALLOW = (
     'lead-automation-concurrency.postgres.mjs', 'invoice-review-regressions.postgres.mjs',
     'salesforce-read-run-store-rw02-postgres.test.mjs',
     'program-controller-census-role-boundary.v5.test.mjs',
-    'recovery-matrix.v5.test.mjs', 'shared-oauth-worker.test.mjs',
+    'recovery-matrix.v5.test.mjs', 'shared-oauth-worker.test.ts',
 )
 
 

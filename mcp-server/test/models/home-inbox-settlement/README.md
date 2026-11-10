@@ -10,4 +10,4 @@ Replacing v2 would break its deployed app parser. The v2 and v3 SQL reads share 
 
 Completion notifications and call-processing completion do not prove all partner work resolved. Fact review uses the canonical pending predicate, including new observations and extraction abstentions. Tour feedback means receipt of a client shortlist or comment for the exact share grant, as AC-INBOX specifies. It does not claim that a broker has acted on the feedback. The adapter tests execute both named resolution transitions, Undo, replay, snooze, stale versions and actor isolation. The app still consumes v2, so this producer change alone changes no deployed app behavior.
 
-Regenerate with pstack's statechart/scripts/statechart command, passing Inbox.tla, --config Inbox.cfg, --map view.mjs and a new --out directory. Java and TLC are required.
+Regenerate with pstack's statechart/scripts/statechart command, passing Inbox.tla, --config Inbox.cfg, --map view.ts and a new --out directory. Java and TLC are required.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { researchSummary } from '../src/lead-follow-up.ts';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 
 let fixture, c, actor, party, lead;

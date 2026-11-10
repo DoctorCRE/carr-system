@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { executeRegisteredTool, TOOLS } from '../src/tools.js';
 import { HOME_REVIEW_CONTRACT } from '../src/home-review.js';
 
