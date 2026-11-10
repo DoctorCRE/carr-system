@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { snapshotDatabase } from './helpers/postgres-database.mjs';
 // amend-closed-loop-postgres.test.mjs — amend-closed-loop on REAL PostgreSQL.
 //

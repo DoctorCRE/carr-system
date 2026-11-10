@@ -22,7 +22,7 @@ test('invalid address sets refuse before reading records', async () => {
 });
 
 test('proof fixture admits only marked traffic and preserves marked request paths', async () => {
-  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { createServer } = await import('./helpers/proof-release-fixture.ts');
   const marker = JSON.parse(await (await import('node:fs/promises')).readFile(
     new URL('../../lib/release-reader-marker.json', import.meta.url), 'utf8'));
   const paths = [];
@@ -57,7 +57,7 @@ test('existing party and lead instructions block exact email matches in PostgreS
   const { createServer } = await import('node:net');
   const path = await import('node:path');
   const { default: pg } = await import('pg');
-  const { acquireDisposablePostgres, acquirePostgresFixtureGroup } = await import('./helpers/disposable-postgres.mjs');
+  const { acquireDisposablePostgres, acquirePostgresFixtureGroup } = await import('./helpers/disposable-postgres.ts');
   let bin;
   for (const config of ['pg_config', '/opt/homebrew/opt/postgresql@17/bin/pg_config', '/usr/lib/postgresql/17/bin/pg_config']) {
     try {
@@ -235,7 +235,7 @@ test('proof CLI consumes registered read replies and refuses contradictions and 
   const { mkdtemp, readFile, writeFile, chmod, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
-  const { createServer } = await import('./helpers/proof-release-fixture.mjs');
+  const { createServer } = await import('./helpers/proof-release-fixture.ts');
   const { spawn } = await import('node:child_process');
   const { Validator } = await import('@cfworker/json-schema');
   const root = path.resolve(import.meta.dirname, '../..');

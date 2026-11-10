@@ -1,4 +1,4 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 // Tests catch-up timeline verbs on the writer route.
 import test from 'node:test';
 import assert from 'node:assert/strict';

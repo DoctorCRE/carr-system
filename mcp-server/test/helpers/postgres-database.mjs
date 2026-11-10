@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import pg from 'pg';
-import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './disposable-postgres.ts';
 
 export async function postgresDatabase(prefix) {
   let bin;

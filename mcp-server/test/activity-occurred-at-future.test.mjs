@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // Test rejection of future activity occurrence timestamps.
 
 import { test } from "node:test";
