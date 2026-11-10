@@ -1,4 +1,4 @@
-import { NOW } from "./helpers/fixed-clock.mjs";
+import { NOW } from "./helpers/fixed-clock.ts";
 // loop-version-and-marker.test.mjs — coverage for the two Phase 1 defects
 // found live 2026-08-13 (decision 7026246b):
 //

@@ -1,10 +1,10 @@
-import { assertDisposableDatabase } from './helpers/disposable-database-url.mjs';
+import { assertDisposableDatabase } from './helpers/disposable-database-url.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import { acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
+import { acquireDisposablePostgres } from './helpers/disposable-postgres.ts';
 import { toolCallContent, UNTRUSTED_NOTICE } from '../src/untrusted-text.ts';
 import { emailProposalTools } from '../src/email-proposals.js';
 

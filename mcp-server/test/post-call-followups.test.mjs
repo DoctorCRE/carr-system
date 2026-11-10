@@ -20,7 +20,7 @@ test('call follow-ups reject caller scope and run on the full-profile read-only 
 });
 
 test('call outcomes preview current action matches and acceptance rechecks them', async t => {
-  const { acquireDisposablePostgres } = await import('./helpers/disposable-postgres.mjs');
+  const { acquireDisposablePostgres } = await import('./helpers/disposable-postgres.ts');
   const { default: pg } = await import('pg');
   const { randomUUID } = await import('node:crypto');
   const fixture = await acquireDisposablePostgres({ prefix: 'call-action-preview-', snapshot: true });

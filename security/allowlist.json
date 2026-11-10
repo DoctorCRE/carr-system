@@ -895,6 +895,12 @@
       "sha256": "459315bb50ffe93175763cda5c5207d2e6465e777b796769c7f012196061f37e",
       "rule": "pii-phone",
       "reason": "The digits are the official POSIX documentation edition identifier in the cited Open Group rename URL, not a phone number. Exact document hash only. WR622.S1.J602."
+    },
+    {
+      "path": "mcp-server/test/error-unmasking.test.ts",
+      "sha256": "5e2b7fa8838b4eab72867587c87cb5e3237942d5f79f0e7753bbb085d0c1c935",
+      "rule": "credential-url",
+      "reason": "Synthetic redaction-test URL with an invented password, never a live credential. Exact renamed TypeScript fixture blob only."
     }
   ]
 }
