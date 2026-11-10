@@ -1,0 +1,4 @@
+{
+  "node": ["../workspace/contracts/schema-validator.ts", "test/schema-validator.test.ts"],
+  "entry": ["../workspace/contracts/schema-validator.ts", "test/schema-validator.test.ts"]
+}

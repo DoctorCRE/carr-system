@@ -54,7 +54,7 @@ class ContactDecoderTests(unittest.TestCase):
     def validate_cases(self, cases):
         script = r"""
 import { readFileSync } from 'node:fs';
-import { compileSchema } from './workspace/contracts/schema-validator.mjs';
+import { compileSchema } from './workspace/contracts/schema-validator.ts';
 const schema = JSON.parse(readFileSync('spec/outlook/contact-observation.v1.json', 'utf8'));
 const cases = JSON.parse(readFileSync(0, 'utf8'));
 for (const item of cases) {
