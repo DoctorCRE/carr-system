@@ -60,7 +60,7 @@ test("trusted PDF orchestration records a terminal failure after a queued job", 
     prepareTourPdfArtifactFn: async () => ({
       packetDigest: digest("2"), templateDigest: digest("3"), rendererDigest: digest("4"),
       qcRulesetVersion: "1.0.0", qcRulesetDigest: digest("5"), markersDigest: digest("6"),
-      rendered: { templateVersion: "1.0.0", rendererVersion: "1.0.0", propertyCount: 1, fontDigests: [digest("7")], artifactDigest: digest("8") },
+      rendered: { templateVersion: "1.0.0", rendererVersion: "1.0.0", propertyCount: 1, pageCount: 2, fontDigests: [digest("7")], artifactDigest: digest("8") },
     }),
     storeAndVerifyTourPdfFn: async () => { throw new Error("private storage detail"); },
     invokeFn: async (_context, verb, args) => {

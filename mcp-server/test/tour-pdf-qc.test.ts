@@ -84,3 +84,23 @@ test("PDF proof cannot convert a clean result into approval or publication autho
   assert.equal(Object.hasOwn(result, "publish"), false);
   assert.equal(Object.hasOwn(result, "dismiss"), false);
 });
+
+test("overview packet QC requires one measured overview before ordered property pages", () => {
+  const withOverview = {
+    ...observed,
+    page_count: 3,
+    pages: [
+      { page_number: 1, page_kind: "overview", property_ref: null, property_marker: null, clipped_box_count: 0 },
+      ...observed.pages.map((p) => ({ ...p, page_number: p.page_number + 1, page_kind: "property" })),
+    ],
+  };
+  const input = { expected: { ...expected, page_count: 3, overview_page_count: 1 }, observed: withOverview };
+  assert.equal(inspectTourPdfProof(input).blocked, false);
+  for (const bad of [
+    { ...withOverview, pages: withOverview.pages.slice(1) },
+    { ...withOverview, pages: [{ ...withOverview.pages[0], page_kind: "property" }, ...withOverview.pages.slice(1)] },
+    { ...withOverview, pages: [{ ...withOverview.pages[0], clipped_box_count: 1 }, ...withOverview.pages.slice(1)] },
+    { ...withOverview, pages: [withOverview.pages[0], ...withOverview.pages.slice(1).reverse()] },
+  ])
+    assert.equal(inspectTourPdfProof({ ...input, observed: bad }).blocked, true);
+});

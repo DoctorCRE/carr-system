@@ -364,7 +364,7 @@ const hostilePacket = {
 
 test("a share packet carries only envelope keys and allowlisted columns, never internal material", () => {
   const packet = projectTourClientPacket(hostilePacket);
-  assert.deepEqual(Object.keys(packet).sort(), ["as_of", "stops"]);
+  assert.deepEqual(Object.keys(packet).sort(), ["as_of", "presentation", "stops"]);
   assert.equal(packet.stops.length, 1);
   const allowedStopKeys = new Set([...CLIENT_TOUR_STOP_ENVELOPE_KEYS, ...Object.values(CLIENT_TOUR_PACKET_COLUMNS)]);
   for (const key of Object.keys(packet.stops[0])) assert.ok(allowedStopKeys.has(key), `stop leaked key ${key}`);
@@ -489,7 +489,7 @@ test("the client's browser exchange and packet read return no internal material"
   assert.deepEqual(exchange, { ok: true, expires_at: "2026-08-28T00:00:00Z", permission_scopes: ["view_packet"] });
   const packet = await h.browser.readPacket(h.client, { session_digest: digest("b") });
   assert.doesNotMatch(JSON.stringify([exchange, packet]), SENTINEL_PATTERN);
-  assert.deepEqual(Object.keys(packet.packet).sort(), ["as_of", "stops"]);
+  assert.deepEqual(Object.keys(packet.packet).sort(), ["as_of", "presentation", "stops"]);
 });
 
 // ---------------------------------------------------------------------------

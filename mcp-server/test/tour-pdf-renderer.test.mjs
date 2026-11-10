@@ -24,7 +24,7 @@ const packet = {
   ],
 };
 
-test("PDF renderer is byte-deterministic with exactly one Letter page per property", async () => {
+test("PDF renderer is byte-deterministic with an overview and one Letter page per property", async () => {
   const first = await renderTourPacketPdf(packet, fonts);
   const second = await renderTourPacketPdf({ ...packet, properties: [...packet.properties].reverse() }, fonts);
   assert.deepEqual(first.bytes, second.bytes);
@@ -36,7 +36,7 @@ test("PDF renderer is byte-deterministic with exactly one Letter page per proper
   assert.equal(first.rendererVersion, TOUR_PDF_RENDERER_VERSION);
   assert.equal(first.templateVersion, TOUR_PDF_TEMPLATE_VERSION);
   const parsed = await PDFDocument.load(first.bytes);
-  assert.equal(parsed.getPageCount(), first.propertyCount);
+  assert.equal(parsed.getPageCount(), first.propertyCount + 1);
   for (const page of parsed.getPages()) assert.deepEqual(page.getSize(), { width: 612, height: 792 });
 });
 
@@ -54,9 +54,9 @@ test("stored PDF inspection derives pages, markers, component digests, and embed
   };
   const rendered = await renderTourPacketPdf(packet, fonts, proof);
   const observed = await inspectStoredTourPacketPdf(rendered.bytes);
-  assert.equal(observed.page_count, 2);
-  assert.deepEqual(observed.pages.map(page => page.property_ref), rendered.propertyRefs);
-  assert.deepEqual(observed.pages.map(page => page.property_marker), rendered.markers);
+  assert.equal(observed.page_count, 3);
+  assert.deepEqual(observed.pages.slice(1).map(page => page.property_ref), rendered.propertyRefs);
+  assert.deepEqual(observed.pages.slice(1).map(page => page.property_marker), rendered.markers);
   assert.ok(observed.pages.every(page => page.clipped_box_count === 0));
   for (const [key, value] of Object.entries(proof)) assert.equal(observed[key], value);
   assert.deepEqual(observed.fonts.map(font => font.digest), rendered.fontDigests);

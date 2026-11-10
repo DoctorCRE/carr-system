@@ -26,22 +26,22 @@ test("Tour packet rendering is deterministic in immutable route order with publi
   assert.equal((first.html.match(/data-property-ref=/g) || []).length, 2);
   assert.ok(first.html.indexOf("Alpha Health Center") < first.html.indexOf("Zeta Medical Plaza"));
   assert.match(first.html, /data-route-sequence="10"/);
-  assert.match(first.html, /data-template-version="1\.1\.0"/);
+  assert.match(first.html, /data-template-version="2\.0\.0"/);
   assert.match(first.html, /#002F6C/);
   assert.match(first.html, /#F57F29/);
   assert.equal((first.html.match(/<main\b/g) || []).length, 1);
   assert.match(first.html, /break-after: page/);
   assert.match(first.html, /page-break-after: always/);
   assert.match(first.html, /height: 9\.9in/);
-  assert.doesNotMatch(first.html, /<section[^>]*(?:overview|cover)/i);
+  assert.match(first.html, /<section[^>]*overview/i);
 });
 
 test("Tour packet preserves allowlisted structured metrics with deterministic formatting", () => {
   const result = renderTourPacket(packet);
   assert.deepEqual(result.facts.properties[0].asking_economics, { value: "24.00", currency: "USD", period: "NNN" });
   assert.deepEqual(result.facts.properties[1].size, { value: 4200, unit: "SF" });
-  assert.equal(formatApprovedMetric({ min: 20, max: 25, currency: "USD", unit: "SF", period: "NNN", label: "Rate" }), "Rate: USD 20–25 SF / NNN");
-  assert.match(result.html, /USD 24\.00 \/ NNN/);
+  assert.equal(formatApprovedMetric({ min: 20, max: 25, currency: "USD", unit: "SF", period: "NNN", label: "Rate" }), "USD 20 to 25 SF per NNN");
+  assert.match(result.html, /USD 24\.00 per NNN/);
   assert.match(result.html, /4200 SF/);
   assert.throws(() => renderTourPacket({ ...packet, properties: [{ ...packet.properties[0], size: { value: 4200, provider: "private" } }] }), error => error instanceof TourPacketRenderError && error.code === "tour_packet_forbidden_field");
   assert.throws(() => renderTourPacket({ ...packet, properties: [{ ...packet.properties[0], size: { value: { nested: "no" } } }] }), error => error instanceof TourPacketRenderError && error.code === "tour_packet_invalid_text");

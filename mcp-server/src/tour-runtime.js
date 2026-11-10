@@ -214,7 +214,7 @@ export async function runTourPdfRender(context, dependencies = {}) {
         idempotency_key: resultIdempotencyKey, render_job_id: renderJobId,
         status: stored.qc.blocked ? "qc_blocked" : "review_ready", artifact_ref: artifactRef,
         artifact_digest: prepared.rendered.artifactDigest, storage_ref: stored.storageRef,
-        content_length: stored.contentLength, page_count: prepared.rendered.propertyCount,
+        content_length: stored.contentLength, page_count: prepared.rendered.pageCount,
         blocking_finding_count: stored.qc.findings.length, qc_run_digest: stored.qcRunDigest,
       }));
     } catch (error) {
