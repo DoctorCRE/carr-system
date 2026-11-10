@@ -27,7 +27,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pgConstraintError, ToolError } from "../src/tools.js";
+import { ToolError } from "../src/tools.js";
+import { pgConstraintError } from "../src/constraint-errors.ts";
 
 // A Postgres driver error carries `code` as the SQLSTATE string; the rest is
 // optional and varies by fault class.

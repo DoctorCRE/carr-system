@@ -32,7 +32,8 @@ import { NOW } from "./helpers/fixed-clock.mjs";
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TOOLS, ToolError, executeRegisteredTool, compareVersion, pgConstraintError } from "../src/tools.js";
+import { TOOLS, ToolError, executeRegisteredTool, compareVersion } from "../src/tools.js";
+import { pgConstraintError } from "../src/constraint-errors.ts";
 
 // ────────────────────────────────────────────────────────────────────────
 // compareVersion — pure logic, no DB. This is the actual fix for defect 1:

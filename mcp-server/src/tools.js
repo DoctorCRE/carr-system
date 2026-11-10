@@ -147,7 +147,6 @@ import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.ts";
 
 import { pgConstraintError } from "./constraint-errors.ts";
-export { describeConstraint, pgConstraintError } from "./constraint-errors.ts";
 
 const PERSON_TITLES = new Set("DR DOCTOR MR MISTER MRS MISS MS MX PROF PROFESSOR REV REVEREND FR FATHER SIR DAME HON HONORABLE RABBI IMAM PASTOR".split(" "));
 const PERSON_SUFFIXES = new Set("MD DO DDS DMD DPM DC OD PHD PSYD DPT PT PA PAC NP RN APRN CRNA MBA MHA MPH JD ESQ CPA JR SR II III IV V".split(" "));
