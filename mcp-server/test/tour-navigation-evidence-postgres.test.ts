@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import pg from "pg";
 import { navigationFixture, unavailableFixture } from "./fixtures/tour-navigation-evidence.ts";
@@ -69,12 +69,15 @@ test("Tour navigation uses sealed entrances and newest promotion through the aut
       try {
         assert.throws(
           () =>
-            execFileSync(process.execPath, ["--test", "mcp-server/test/tour-deal-access.test.ts"], {
-              cwd: new URL("../../", import.meta.url),
-              env: { ...process.env, CARR_TOUR_DEAL_TEST_DATABASE_URL: fixture.dsn },
-              timeout: 60_000,
-              stdio: "pipe",
-            }),
+            writeFileSync(
+              "/tmp/wr12-j3-mutant-child.log",
+              execFileSync(process.execPath, ["--test", "mcp-server/test/tour-deal-access.test.ts"], {
+                cwd: new URL("../../", import.meta.url),
+                env: { ...process.env, CARR_TOUR_DEAL_TEST_DATABASE_URL: fixture.dsn },
+                timeout: 60_000,
+                stdio: "pipe",
+              }),
+            ),
           (error: unknown) =>
             error instanceof Error &&
             "stdout" in error &&
