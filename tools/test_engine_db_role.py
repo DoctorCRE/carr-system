@@ -30,6 +30,13 @@ class ReaderRoleTests(unittest.TestCase):
     def test_explicit_rotation_sets_password(self):
         self.assertTrue(role.password_change(exists=True, rotate=True, authenticated=False))
 
+    def test_managed_owner_does_not_reassert_false_superuser_flags(self):
+        self.assertEqual(role.attribute_options((False, False, False)),
+                         'LOGIN NOCREATEDB NOCREATEROLE NOINHERIT')
+        self.assertIn('NOSUPERUSER', role.attribute_options((True, False, False)))
+        self.assertIn('NOREPLICATION', role.attribute_options((False, True, False)))
+        self.assertIn('NOBYPASSRLS', role.attribute_options((False, False, True)))
+
     def test_role_spec(self):
         data = role.load_spec()
         self.assertEqual(data['role'], 'engine_business_reader')
@@ -88,6 +95,8 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(first['created'])
             self.assertTrue(first['password_changed'])
             self.assertEqual(first['proof']['TimeZone'], 'UTC')
+            self.assertEqual(first['proof']['statement_timeout'], '15s')
+            self.assertEqual(first['proof']['idle_in_transaction_session_timeout'], '30s')
             for key in ['ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused']:
                 self.assertTrue(first['proof'][key], key)
             final = root / 'staging-engine-business-reader.env'
@@ -107,6 +116,12 @@ class ReaderRolePostgresTests(unittest.TestCase):
                 self.assertFalse(conn.execute("SELECT has_table_privilege('engine_business_reader','public.extra','SELECT')").fetchone()[0])
                 self.assertFalse(conn.execute("SELECT has_column_privilege('engine_business_reader','public.activity','id','UPDATE')").fetchone()[0])
                 self.assertFalse(conn.execute("SELECT EXISTS(SELECT FROM pg_default_acl d,aclexplode(d.defaclacl) a WHERE a.grantee='engine_business_reader'::regrole)").fetchone()[0])
+            with role.connect(owner) as conn:
+                conn.execute('CREATE ROLE role_manager CREATEDB CREATEROLE')
+                conn.execute('GRANT fixture TO role_manager')
+                conn.execute('GRANT engine_business_reader TO role_manager WITH ADMIN OPTION')
+                conn.execute('SET ROLE role_manager')
+                role.reconcile(conn, data)
             final.rename(str(final) + '.pending')
             recovered = role.provision(owner, data, 'staging', False, root)
             self.assertFalse(recovered['password_changed'])

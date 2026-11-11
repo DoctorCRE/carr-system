@@ -40,6 +40,7 @@ def validate_spec(data):
     if data['settings'] != {
         'default_transaction_read_only': 'on', 'timezone': 'UTC',
         'search_path': 'pg_catalog, public',
+        'statement_timeout': '15s', 'idle_in_transaction_session_timeout': '30s',
     }:
         raise Refusal('role settings differ from the reader contract')
     return data
@@ -55,14 +56,23 @@ def password_change(*, exists, rotate, authenticated):
     return not exists or rotate
 
 
+def attribute_options(observed):
+    options = ['LOGIN', 'NOCREATEDB', 'NOCREATEROLE', 'NOINHERIT']
+    options += [disabled for enabled, disabled in zip(
+        observed, ['NOSUPERUSER', 'NOREPLICATION', 'NOBYPASSRLS']) if enabled]
+    return ' '.join(options)
+
+
 def grant_statements(data):
     return [f'GRANT SELECT ON TABLE "public"."{name}" TO "{ROLE}"'
             for name in data['tables'] + data['views']]
 
 
 def connect(uri):
-    return psycopg.connect(uri, connect_timeout=20,
-                           options='-c statement_timeout=30000 -c lock_timeout=10000')
+    options = '-c lock_timeout=10000'
+    if urlsplit(uri).username != ROLE:
+        options += ' -c statement_timeout=30000'
+    return psycopg.connect(uri, connect_timeout=20, options=options)
 
 
 def authenticated(uri):
@@ -128,8 +138,10 @@ def reconcile(conn, data, password=None):
             raise Refusal('allowlisted relation missing or wrong kind: ' + name)
     if not exists:
         conn.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(ROLE)))
-    conn.execute(sql.SQL('ALTER ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE '
-                         'NOREPLICATION NOBYPASSRLS NOINHERIT').format(sql.Identifier(ROLE)))
+    observed = conn.execute('SELECT rolsuper,rolreplication,rolbypassrls FROM pg_roles '
+                            'WHERE rolname=%s', (ROLE,)).fetchone()
+    # Managed owners cannot reassert NOSUPERUSER even when it is already false.
+    conn.execute(sql.SQL('ALTER ROLE {} ' + attribute_options(observed)).format(sql.Identifier(ROLE)))
     conn.execute(sql.SQL('ALTER ROLE {} RESET ALL').format(sql.Identifier(ROLE)))
     for key, value in data['settings'].items():
         conn.execute(sql.SQL('ALTER ROLE {} SET {} = {}').format(
@@ -179,6 +191,9 @@ def proof(uri, data):
             WHERE c.relkind='S' AND n.nspname NOT IN ('pg_catalog','information_schema')
             AND has_sequence_privilege(current_user,c.oid,'SELECT,USAGE,UPDATE'))""").fetchone()[0]
         result['TimeZone'] = conn.execute('SHOW TimeZone').fetchone()[0]
+        result['statement_timeout'] = conn.execute('SHOW statement_timeout').fetchone()[0]
+        result['idle_in_transaction_session_timeout'] = conn.execute(
+            'SHOW idle_in_transaction_session_timeout').fetchone()[0]
         result['read_only_default'] = conn.execute('SHOW default_transaction_read_only').fetchone()[0] == 'on'
         result['activity_whole_table_select'] = conn.execute(
             "SELECT has_table_privilege(current_user,'public.activity','SELECT')").fetchone()[0]
@@ -190,6 +205,10 @@ def proof(uri, data):
                     result[name] = {'read': True, 'has_rows': row is not None}
             except psycopg.Error as exc:
                 result[name] = {'read': False, 'sqlstate': exc.sqlstate}
+                denied = re.fullmatch(r'permission denied for (?:function|table|schema) ([a-zA-Z_0-9.]+)',
+                                      exc.diag.message_primary or '')
+                if denied:
+                    result[name]['permission_target'] = denied.group(1)
         conn.rollback()
         conn.execute('SET TRANSACTION READ WRITE')
         for label, statement in {
@@ -271,7 +290,8 @@ def main():
         'role_flags_match', 'no_memberships', 'no_ops_or_auth_usage', 'no_direct_routine_grants',
         'no_default_grants', 'no_sequence_rights', 'read_only_default', 'activity_whole_table_select',
         'ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused'])
-        and result['TimeZone'] == 'UTC' and all(result[n]['read'] for n in ['activity'] + data['views'])) else 1
+        and result['TimeZone'] == 'UTC' and result['statement_timeout'] == '15s'
+        and result['idle_in_transaction_session_timeout'] == '30s' and all(result[n]['read'] for n in ['activity'] + data['views'])) else 1
 
 
 if __name__ == '__main__':
