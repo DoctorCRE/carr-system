@@ -112,6 +112,33 @@ int openat(int fd, const char *name, int flags, ...) {
 """.replace('SIDECAR_FAULT', action).replace('FAULT_NAME', name))
         self.build(str(race))
 
+    def test_interrupted_sidecar_open_retries_without_losing_snapshot(self):
+        self.sidecar_open_fault('static int interrupted = 0; if (!interrupted++) { errno = EINTR; return -1; }')
+        result = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.work / 'store.hxd').read_bytes(), b'synthetic-store')
+        self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+
+    def test_interrupted_directory_read_retries_without_losing_sidecars(self):
+        fault = self.root / 'interrupt-readdir.c'
+        fault.write_text("""
+#define _DARWIN_C_SOURCE
+#define _GNU_SOURCE
+#include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
+struct dirent *readdir(DIR *directory) {
+    static int interrupted = 0;
+    if (!interrupted++) { errno = EINTR; return 0; }
+    struct dirent *(*real_readdir)(DIR *) = dlsym(RTLD_NEXT, "readdir");
+    return real_readdir(directory);
+}
+""")
+        self.build(str(fault))
+        result = self.copy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.work / 'Files/S0/845/EFMData/7.dat').read_bytes(), b'synthetic-body')
+
     def test_sidecar_disappearing_at_open_does_not_fail_snapshot(self):
         self.sidecar_open_fault('unlinkat(fd, name, 0)')
         result = self.copy()
