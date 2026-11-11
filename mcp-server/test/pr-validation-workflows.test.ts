@@ -82,8 +82,9 @@ function read(name: string): Workflow {
 function expression(value: unknown, github: object, success = true, cancelled = false): unknown {
   if (value === undefined) return success && !cancelled;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  const supported = raw === "github.event.pull_request.head.sha || github.sha" ? "true" : raw;
   assert.match(
-    raw,
+    supported,
     /^(?:github\.(?:workflow|repository|ref|run_id|event_name|event\.workflow_run\.(?:conclusion|head_branch|event|head_repository\.full_name)|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base(?:\.ref)?)|always\(\)|cancelled\(\)|'[^']*'|[\s()=!&|]|true|false|null)+$/,
     `unsupported expression: ${raw}`,
   );
@@ -108,23 +109,39 @@ function context(
   event_name: string;
   run_id: number;
   ref: string;
+  sha: string;
   event: {
     action: string;
     changes: object;
-    pull_request: { number?: number; base?: { ref: string }; draft?: boolean };
+    pull_request: { number?: number; base?: { ref: string }; draft?: boolean; head?: { sha: string } };
   };
 } {
   return {
     event_name,
     run_id,
+    sha: "merge-sha",
     ref: event_name === "pull_request" ? `refs/pull/${number}/merge` : "refs/heads/main",
     event: {
       action,
       changes: {},
-      pull_request: event_name === "pull_request" ? { number, base: { ref: "main" } } : {},
+      pull_request: event_name === "pull_request" ? { number, base: { ref: "main" }, head: { sha: "head-sha" } } : {},
     },
   };
 }
+test("expression supports only the exact tested-SHA fallback form", () => {
+  const fallback = `\${{ github.event.pull_request.head.sha || github.sha }}`;
+  assert.equal(expression(fallback, { event: { pull_request: { head: { sha: "head" } } }, sha: "merge" }), "head");
+  assert.equal(expression(fallback, { sha: "merge" }), "merge");
+  for (const unknown of [
+    "github.sha",
+    "github.event.pull_request.head.sha",
+    "github.event.pull_request.head.ref || github.sha",
+    "github.event.pull_request.head.sha || github.ref",
+    "github.unknown",
+  ]) {
+    assert.throws(() => expression(unknown, {}), /unsupported expression/);
+  }
+});
 test("expression rejects repetitive unknown selector fields within a bounded process", () => {
   const result = spawnSync(
     process.execPath,
@@ -186,8 +203,18 @@ for (const file of files) {
     assert.equal(draft.triggers, true);
     assert.deepEqual(draft.runnable, ["verdict"]);
   });
-  test(`${file}: cancellation is scoped to the workflow and PR`, () => {
+  test(`${file}: cancellation is scoped to the workflow, event, PR or ref, and tested SHA`, () => {
+    assert.deepEqual(workflow.concurrency, {
+      group: `\${{ github.workflow }}-\${{ github.event_name }}-\${{ github.event.pull_request.number || github.ref }}-\${{ github.event.pull_request.head.sha || github.sha }}`,
+      "cancel-in-progress": `\${{ github.event_name == 'pull_request' }}`,
+    });
     const current = policy(workflow, context());
+    const nextHead = context();
+    nextHead.event.pull_request.head = { sha: "next-head" };
+    assert.notEqual(policy(workflow, nextHead).group, current.group);
+    const changedMerge = context();
+    changedMerge.sha = "changed-merge";
+    assert.equal(policy(workflow, changedMerge).group, current.group);
     assert.equal(current.cancel, true);
     for (const action of ["opened", "reopened", "ready_for_review", "converted_to_draft"]) {
       const transition = policy(workflow, context("pull_request", action, 9, 3));
@@ -203,7 +230,10 @@ for (const file of files) {
       assert.equal(one.triggers, true);
       assert.equal(one.cancel, false);
       assert.notEqual(one.group, current.group);
-      assert.notEqual(one.group, two.group, "pending non-PR verdicts must not replace each other");
+      assert.equal(one.group, two.group, "same tested SHA shares a group across runs");
+      const nextSha = context(event, "", 9, 3);
+      nextSha.sha = "next-sha";
+      assert.notEqual(one.group, policy(workflow, nextSha).group);
       assert.deepEqual(one.runnable, validationJobs);
     }
   });
