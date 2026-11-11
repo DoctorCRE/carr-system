@@ -159,3 +159,44 @@ test("successful exact-lead contact and current matching route make the lead rea
   ])
     assert.equal((await board([{ ...route, ...change }], fields)).classification, "research");
 });
+
+
+test("manual contact uses structured outcome across optional detail shapes", async () => {
+  const input = {
+    party_id: id,
+    created_at: "2020-01-01T00:00:00Z",
+    email: "reachable@example.test",
+    cell: null,
+    phone: null,
+    activities: [],
+  };
+  const route = { ...evidence, kind: "email", value: { found: true, email: input.email } };
+  for (const detail of [null, "", "Spoke with the practice manager about space.", "{}", '{"note":"Spoke about space"}', '{"note":', "null", "[]", JSON.stringify({ party_id: id })]) {
+    for (const kind of ["call", "text", "email_in", "meeting", "tour"]) {
+      for (const connected of [true, false, null]) {
+        const activity = { id, lead_id: id, kind, connected, occurred_at: new Date(Date.now() - 60000).toISOString(), source: "manual", detail };
+        const r = await board([route], { reachability_input: { ...input, activities: [activity] } });
+        assert.equal(r.classification, connected === true ? "reachable" : "research", JSON.stringify({ kind, connected, detail }));
+      }
+    }
+  }
+});
+
+test("structured party conflicts and invalid machine binding remain research", async () => {
+  const input = { party_id: id, created_at: "2020-01-01T00:00:00Z", email: "reachable@example.test", cell: null, phone: null };
+  const route = { ...evidence, kind: "email", value: { found: true, email: input.email } };
+  const activity = { id, lead_id: id, kind: "email_in", connected: true, occurred_at: new Date(Date.now() - 60000).toISOString() };
+  const binding = { party_id: id, match: "exact", evidence_ref: "fixture:reply", automated: false };
+  for (const source of ["manual", "mail_ingest", "local_mail"]) {
+    const r = await board([route], { reachability_input: { ...input, activities: [{ ...activity, source, detail: JSON.stringify({ ...binding, party_id: "other-party" }) }] } });
+    assert.equal(r.classification, "research");
+  }
+  for (const source of ["mail_ingest", "local_mail"]) {
+    for (const detail of [null, "", "Spoke with the practice manager about space.", "{}", '{"match":', "null", "[]", ...[{ match: "fuzzy" }, { automated: true }, { evidence_ref: "" }].map(change => JSON.stringify({ ...binding, ...change }))]) {
+      const r = await board([route], { reachability_input: { ...input, activities: [{ ...activity, source, detail }] } });
+      assert.equal(r.classification, "research", JSON.stringify({ source, detail }));
+    }
+    const r = await board([route], { reachability_input: { ...input, activities: [{ ...activity, source, connected: null, detail: JSON.stringify(binding) }] } });
+    assert.equal(r.classification, "reachable");
+  }
+});

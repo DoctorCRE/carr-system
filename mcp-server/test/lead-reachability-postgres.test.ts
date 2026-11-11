@@ -109,6 +109,14 @@ test("registered board preserves identity, owns classification, and exposes exac
     assert.equal(object(positive.successful_contact).activity_id, activity);
     assert.equal(object(positive.usable_route).flag_id, route);
     assert.equal(contract.validate(positive).valid, true);
+    for (const detail of [null, "", "Spoke with the practice manager about space.", "{}", JSON.stringify({ party_id: party, note: "Spoke about space" }), '{"note":', "null", "[]"]) {
+      await c.query("update activity set detail=$2 where id=$1", [activity, detail]);
+      assert.equal(await classification(), "reachable", JSON.stringify({ detail }));
+      await c.query("update activity set connected=false where id=$1", [activity]);
+      assert.equal(await classification(), "research", JSON.stringify({ detail, connected: false }));
+      await c.query("update activity set connected=true where id=$1", [activity]);
+    }
+    await c.query("update activity set detail=null where id=$1", [activity]);
     for (const sql of [
       "update record_flag set expires_on=current_date-1 where id=$1",
       'update record_flag set value=\'{"found":true,"email":"wrong@example.test"}\' where id=$1',
