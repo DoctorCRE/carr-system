@@ -1,0 +1,29 @@
+name: Conflict notice
+# After each merge to main, label open PRs that now conflict with it
+# (conflicts-with-main) and clear the label once they are clean again.
+# The schedule is the fallback; pull_request_target (synchronize) clears the
+# label soon after a resync. No checkout: the action only calls the GitHub API.
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [synchronize]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: conflict-notice
+  cancel-in-progress: true
+jobs:
+  label:
+    permissions: {contents: read, pull-requests: write}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: eps1lon/actions-label-merge-conflict@0273be72a0bbd58fcd71d0d6c02c209b50d1e5e1 # v3.1.0
+        with:
+          dirtyLabel: conflicts-with-main
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          commentOnDirty: This PR now conflicts with main. Resync it with main to clear the conflicts-with-main label.
