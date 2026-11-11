@@ -94,11 +94,6 @@ class RunnerTest(unittest.TestCase):
         if len(views) != 1:
             raise AssertionError('Expected one canonical resolver view')
         cls.sql(views[0])
-        migration = (ROOT / 'migrations/1020_email_deal_matching.sql').read_text()
-        activity_ddl = re.findall(r'^alter table public\.activity .*?;$', migration, re.MULTILINE)
-        if len(activity_ddl) != 2:
-            raise AssertionError('Expected the email-context column and constraint migration')
-        cls.sql('\n'.join(activity_ddl))
 
     @classmethod
     def sql(cls, sql):
