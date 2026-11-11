@@ -11,7 +11,7 @@ import { opportunityTimingCtes, opportunityTimingSql } from "./lead-opportunity-
 import { ToolError as DefaultToolError } from "./tool-error.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
-export const LEAD_WORKSPACE_VERSION = "lead-workspace.v1";
+const LEAD_WORKSPACE_VERSION = "lead-workspace.v1";
 export const LEAD_WORKSPACE_SCHEMA = {
   type: "object",
   additionalProperties: false,
