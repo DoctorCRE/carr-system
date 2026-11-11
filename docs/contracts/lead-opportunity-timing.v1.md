@@ -39,6 +39,20 @@ its predecessor on the next read. Removing exact identity or feed availability
 returns timing to unknown. Database failures propagate instead of serving cached
 evidence. Existing stage evidence, history and unavailable search time remain intact.
 
+## Runtime boundary
+
+`parseLeadOpportunityTiming` in `lead-opportunity-timing.ts` returns the typed
+`LeadOpportunityTiming` shape. Both workspace board and detail timing values
+pass through it. The canonical registered fixture response uses the same parser.
+The parser validates the exact contract version, calendar dates, timezone-bearing
+instants and source/date-basis pairs. Supported timing requires nonempty valid
+events; unknown timing requires an empty events array.
+
+A malformed row refuses the entire read with `invalid_lead_opportunity_timing`.
+It does not fall back to unknown, which means absent source support rather than
+corrupt evidence. `test/lead-opportunity-timing.test.ts` replays the reviewer's
+fault-injected board and detail rows and tests each malformed field separately.
+
 ## State transitions and tests
 
 `test/lead-opportunity-timing-postgres.test.ts` exercises the registered read and
