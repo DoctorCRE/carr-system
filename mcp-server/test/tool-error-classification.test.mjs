@@ -412,3 +412,17 @@ test("find-rule validation and forwarded identity errors retain their private cl
     });
   }
 });
+
+
+test("deliverable authorization refusal has a closed public shape", () => {
+  const privateText = "private deal, actor, object key and SQL diagnostics";
+  const result = publicError(new ToolError({
+    error: "deliverable_denied", message: privateText, hint: privateText, detail: privateText,
+    deal_id: privateText, actor_id: privateText, object_key: privateText,
+  }));
+  assert.deepEqual(result, {
+    error: "deliverable_denied",
+    correlation_id: result.correlation_id,
+    hint: "This operation is unavailable for the current actor or deal.",
+  });
+});

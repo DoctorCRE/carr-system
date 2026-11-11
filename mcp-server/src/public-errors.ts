@@ -387,6 +387,7 @@ const PUBLIC_ERRORS = new Map<unknown, string>([
   ["args_not_an_object", "Supply an argument object."],
   ["dispatch_ack_not_authorized", "Only the dispatch's delivering desk or its target session may acknowledge it."],
   ["AUTHORIZATION_REFUSED", "This operation requires partner authority."],
+  ["deliverable_denied", "This operation is unavailable for the current actor or deal."],
   ["vendor_meetings_query_invalid", "Check the vendor meeting filters and restart paging if the query changed."],
   [
     "vendor_meetings_unavailable",
