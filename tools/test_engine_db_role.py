@@ -180,5 +180,59 @@ class ReaderRolePostgresTests(unittest.TestCase):
             self.assertTrue(role.provision(owner, data, 'engine-test', True, root)['password_changed'])
 
 
+    def test_database_overrides_converge_without_changing_other_roles(self):
+        owner = os.environ['ENGINE_ROLE_TEST_DSN']
+        database = 'engine settings "fixture'
+        data = role.load_spec() | {'tables': ['activity'], 'views': []}
+        with role.connect(owner) as conn:
+            conn.autocommit = True
+            conn.execute(role.sql.SQL('CREATE DATABASE {}').format(role.sql.Identifier(database)))
+        from urllib.parse import quote, urlsplit, urlunsplit
+        target = urlunsplit(urlsplit(owner)._replace(path='/' + quote(database)))
+        settings_query = """SELECT setdatabase, setconfig FROM pg_db_role_setting
+            WHERE setrole=%s::regrole ORDER BY setdatabase"""
+        try:
+            with role.connect(target) as conn:
+                conn.execute('CREATE TABLE public.activity(id int)')
+                conn.execute('CREATE FUNCTION public.carr_business_date(timestamp with time zone) '
+                             'RETURNS date LANGUAGE sql AS $$ SELECT $1::date $$')
+                role.reconcile(conn, data)
+                conn.execute('CREATE ROLE settings_bystander')
+                for db in [database, 'postgres']:
+                    for key, value in {
+                        'default_transaction_read_only': 'off', 'timezone': 'America/New_York',
+                        'statement_timeout': '2s', 'idle_in_transaction_session_timeout': '3s',
+                        'search_path': 'pg_catalog', 'application_name': 'unexpected override',
+                    }.items():
+                        conn.execute(role.sql.SQL('ALTER ROLE {} IN DATABASE {} SET {} = {}').format(
+                            role.sql.Identifier(role.ROLE), role.sql.Identifier(db),
+                            role.sql.Identifier(key), role.sql.Literal(value)))
+                conn.execute(role.sql.SQL('ALTER ROLE settings_bystander IN DATABASE {} '
+                                         "SET timezone = 'America/New_York'").format(
+                                             role.sql.Identifier(database)))
+                conn.execute("ALTER ROLE settings_bystander SET statement_timeout = '4s'")
+                before = conn.execute(settings_query, ('settings_bystander',)).fetchall()
+            reader = target.replace('fixture@', role.ROLE + '@')
+            for attempt in range(2):
+                with role.connect(target) as conn:
+                    role.reconcile(conn, data)
+                    observed = conn.execute(settings_query, (role.ROLE,)).fetchall()
+                    self.assertEqual(conn.execute(settings_query, ('settings_bystander',)).fetchall(), before)
+                with role.connect(reader) as conn:
+                    for key, value in data['settings'].items():
+                        with self.subTest(attempt=attempt, setting=key):
+                            self.assertEqual(conn.execute(role.sql.SQL('SHOW {}').format(
+                                role.sql.Identifier(key))).fetchone()[0], value)
+                self.assertEqual(len(observed), 1)
+                self.assertEqual(observed[0][0], 0)
+                self.assertEqual(set(observed[0][1]),
+                                 {key + '=' + value for key, value in data['settings'].items()})
+        finally:
+            with role.connect(owner) as conn:
+                conn.autocommit = True
+                conn.execute(role.sql.SQL('DROP DATABASE {}').format(role.sql.Identifier(database)))
+                conn.execute('DROP ROLE IF EXISTS settings_bystander')
+
+
 if __name__ == '__main__':
     unittest.main()
