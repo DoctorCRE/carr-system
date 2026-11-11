@@ -3,6 +3,7 @@
 // registered tool envelope; public reads accept digests only.
 import { boundedBody, DELIVERABLE_IO_POLICY } from "./private-object-policy.ts";
 import { tourDownloadPolicy } from './tour-download-policy.ts';
+import { tourCheatHistoryQuery } from "./tour-cheat-history.ts";
 import { Pool } from "./postgres.ts";
 import { installTourDealAccess } from './tour-deal-access.js';
 import { callTool } from "./mcp.js";
@@ -268,6 +269,11 @@ export function createTourRuntimeAdapters(renderDependencies = {}) {
       const data = projectTourDetail(await readInternal(context,
         "select ops.read_tour_internal_detail($1::text,$2::uuid,$3::text) as data",
         [organizationTenantForActor(context.actor), context.input.tour_id]));
+      return data ? { ok: true, data } : { ok: false, status: 404 };
+    },
+    readCheatSheetHistoryFn: async context => {
+      const data = await readInternal(context, tourCheatHistoryQuery,
+        [organizationTenantForActor(context.actor), context.input.tour_id]);
       return data ? { ok: true, data } : { ok: false, status: 404 };
     },
     readPropertyEvidenceFn: async context => ({ ok: true, data: await withPool(

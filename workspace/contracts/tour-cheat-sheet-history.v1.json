@@ -1,0 +1,12 @@
+{
+  "schema": "tour-cheat-sheet-history.v1",
+  "version": "1.0.0",
+  "method": "GET",
+  "path": "/api/tours/cheat-sheet/history/v1",
+  "query": {"tour_id": "uuid"},
+  "authentication": "Existing internal tour actor session and deal-access context",
+  "response": {"data": {"revisions": [{"revision_id": "uuid", "revision_number": "positive integer", "content": "object", "created_at": "timestamp", "revision_kind": "autosave or restore"}], "limit": 100}},
+  "order": "revision_number descending",
+  "scope": "Latest 100 immutable internal revisions; no public projection or property mutation",
+  "cache_control": "no-store"
+}

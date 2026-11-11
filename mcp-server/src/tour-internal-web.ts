@@ -54,6 +54,7 @@ const STATIC = new Map([
 const METHODS = new Map([
   ["/api/tours/library", "GET"],
   ["/api/tours/detail", "GET"],
+  ["/api/tours/cheat-sheet/history/v1", "GET"],
   ["/api/tours/property-evidence/v1", "GET"],
   ["/api/tours/properties/search", "POST"],
   ["/api/tours/selection-cart", "GET, POST"],
@@ -570,6 +571,7 @@ const SEAMS = {
   "/api/tours/selection-cart": "readTourSelectionCartFn",
   "/api/tours/library": "listToursFn",
   "/api/tours/detail": "readTourFn",
+  "/api/tours/cheat-sheet/history/v1": "readCheatSheetHistoryFn",
   "/api/tours/property-evidence/v1": "readPropertyEvidenceFn",
   "/api/tours/create": "createTourFn",
   "/api/tours/route-draft": "openRouteDraftFn",
@@ -741,7 +743,11 @@ async function api(
   let input: Record<string, unknown> | null = null;
   if (request.method === "GET") {
     const url = new URL(request.url);
-    if (pathname === "/api/tours/detail" || pathname === "/api/tours/selection-cart") {
+    if (
+      pathname === "/api/tours/detail" ||
+      pathname === "/api/tours/selection-cart" ||
+      pathname === "/api/tours/cheat-sheet/history/v1"
+    ) {
       if ([...url.searchParams.keys()].length !== 1 || !validId(url.searchParams.get("tour_id")))
         return json({ error: "invalid_request" }, 400);
       input = { tour_id: url.searchParams.get("tour_id") };

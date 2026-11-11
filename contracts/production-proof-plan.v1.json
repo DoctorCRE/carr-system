@@ -127,7 +127,7 @@
     "lib/postgres_service_fixture.py", "lib/postgres_snapshot_fixture.py",
     "ops/ci.sh", "ops/ci-gates.py",
     "ops/ci-evidence.py", "ops/ci-unit.py", "ops/ci-secret.py",
-    "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json",
+    "ops/ci_unit_shards.py", "ops/node_test_summary.py", "ops/config/ci-unit-durations.json", "ops/config/ci-execution-budgets.json",
     "ops/ci.py", "ops/ci_scope.py", "ops/db-acceptance-scope.py", "ops/ci-pushfloor.py", "ops/ci-dep-check.py",
     "ops/source-ci-review.py",
     "ops/ci-migration.py", "ops/ci-migration-gates.py", "ops/ci-node-file.mjs",
