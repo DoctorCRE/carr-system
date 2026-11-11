@@ -2,7 +2,11 @@
 import importlib.util
 import pathlib
 import os
+import subprocess
+import sys
 import tempfile
+import io
+from contextlib import redirect_stdout
 from unittest.mock import patch
 import unittest
 
@@ -14,6 +18,15 @@ spec.loader.exec_module(role)
 
 
 class ReaderRoleTests(unittest.TestCase):
+    def test_cli_removes_staging_and_retains_named_branch(self):
+        help_run = subprocess.run([sys.executable, str(PATH), '--help'], capture_output=True, text=True)
+        self.assertEqual(help_run.returncode, 0)
+        self.assertIn('--branch', help_run.stdout)
+        self.assertNotIn('staging', help_run.stdout)
+        staging = subprocess.run([sys.executable, str(PATH), '--environment', 'staging'],
+                                 capture_output=True, text=True)
+        self.assertEqual(staging.returncode, 2)
+
     def test_new_role_sets_generated_password(self):
         self.assertTrue(role.password_change(exists=False, rotate=False, authenticated=False))
 
@@ -60,10 +73,18 @@ class ReaderRoleTests(unittest.TestCase):
         statements = role.grant_statements(role.load_spec())
         text = '\n'.join(statements)
         self.assertIn('GRANT SELECT ON TABLE "public"."activity"', text)
-        self.assertNotIn('FUNCTION', text)
+        self.assertIn('GRANT EXECUTE ON FUNCTION public.carr_business_date(timestamp with time zone)', text)
+        self.assertEqual(len([s for s in statements if 'FUNCTION' in s]), 1)
         self.assertNotIn('SEQUENCE', text)
         self.assertNotIn('DEFAULT PRIVILEGES', text)
         self.assertNotIn('INSERT', text)
+
+    def test_spec_rejects_function_expansion(self):
+        for functions in [[], ['extra_fn()'], ['carr_business_date(timestamp with time zone)', 'extra_fn()']]:
+            data = role.load_spec()
+            data['functions'] = functions
+            with self.assertRaises(role.Refusal):
+                role.validate_spec(data)
 
 
 @unittest.skipUnless(os.environ.get('ENGINE_ROLE_TEST_DSN'), 'canonical PostgreSQL fixture not requested')
@@ -77,8 +98,14 @@ class ReaderRolePostgresTests(unittest.TestCase):
             conn.execute('CREATE TABLE ops.client_portal(id int)')
             for name in data['tables']:
                 conn.execute(role.sql.SQL('CREATE TABLE public.{}(id int)').format(role.sql.Identifier(name)))
+            conn.execute('CREATE FUNCTION public.carr_business_date(timestamp with time zone) '
+                         'RETURNS date LANGUAGE sql STABLE STRICT SET search_path=pg_catalog '
+                         "AS $$ SELECT ($1 AT TIME ZONE 'America/Chicago')::date $$")
+            conn.execute('REVOKE ALL ON FUNCTION public.carr_business_date(timestamp with time zone) FROM PUBLIC')
             for name in data['views']:
                 conn.execute(role.sql.SQL('CREATE VIEW public.{} AS SELECT 1 AS id').format(role.sql.Identifier(name)))
+            conn.execute('CREATE OR REPLACE VIEW public.v_open_deal_room_board AS '
+                         'SELECT extract(day FROM public.carr_business_date(current_timestamp))::int AS id')
             conn.execute('CREATE TABLE public.extra(id int)')
             conn.execute('CREATE ROLE extra_bundle')
             conn.execute('CREATE FUNCTION public.extra_fn() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$')
@@ -91,16 +118,29 @@ class ReaderRolePostgresTests(unittest.TestCase):
             role.credentials, 'build_role_uri', side_effect=fixture_uri
         ), patch.object(role.credentials, 'validate_uri', return_value=('synthetic-password', '127.0.0.1', 5432, 'postgres')):
             root = pathlib.Path(directory)
-            first = role.provision(owner, data, 'staging', False, root)
+            first = role.provision(owner, data, 'engine-test', False, root)
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                role.print_result(first)
+            output = stream.getvalue()
+            self.assertNotIn('postgresql://', output)
+            self.assertNotIn('synthetic-password', output)
             self.assertTrue(first['created'])
             self.assertTrue(first['password_changed'])
-            self.assertEqual(first['proof']['TimeZone'], 'UTC')
-            self.assertEqual(first['proof']['statement_timeout'], '15s')
-            self.assertEqual(first['proof']['idle_in_transaction_session_timeout'], '30s')
+            self.assertTrue(first['proof']['timezone_utc'])
+            self.assertTrue(first['proof']['statement_timeout_15s'])
+            self.assertTrue(first['proof']['idle_timeout_30s'])
             for key in ['ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused']:
                 self.assertTrue(first['proof'][key], key)
-            final = root / 'staging-engine-business-reader.env'
+            self.assertTrue(first['proof']['function_grants_match'])
+            self.assertTrue(first['proof']['v_open_deal_room_board']['read'])
+            final = root / 'engine-test-engine-business-reader.env'
             original = final.read_bytes()
+            secret = original.decode().split('=', 1)[1].strip()
+            from urllib.parse import unquote, urlsplit
+            generated_password = unquote(urlsplit(secret).password)
+            self.assertNotIn(generated_password, output)
+            self.assertNotIn(secret, output)
             with role.connect(owner) as conn:
                 conn.execute('GRANT extra_bundle TO engine_business_reader')
                 conn.execute('GRANT EXECUTE ON FUNCTION public.extra_fn() TO engine_business_reader')
@@ -108,7 +148,9 @@ class ReaderRolePostgresTests(unittest.TestCase):
                 conn.execute('GRANT UPDATE(id) ON public.activity TO engine_business_reader')
                 conn.execute('GRANT USAGE ON SCHEMA ops TO engine_business_reader')
                 conn.execute('ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO engine_business_reader')
-            second = role.provision(owner, data, 'staging', False, root)
+            second = role.provision(owner, data, 'engine-test', False, root)
+            self.assertTrue(second['proof']['function_grants_match'])
+            self.assertTrue(second['proof']['v_open_deal_room_board']['read'])
             self.assertFalse(second['created'])
             self.assertFalse(second['password_changed'])
             self.assertEqual(final.read_bytes(), original)
@@ -123,19 +165,19 @@ class ReaderRolePostgresTests(unittest.TestCase):
                 conn.execute('SET ROLE role_manager')
                 role.reconcile(conn, data)
             final.rename(str(final) + '.pending')
-            recovered = role.provision(owner, data, 'staging', False, root)
+            recovered = role.provision(owner, data, 'engine-test', False, root)
             self.assertFalse(recovered['password_changed'])
             self.assertTrue(final.exists())
-            rotated = role.provision(owner, data, 'staging', True, root)
+            rotated = role.provision(owner, data, 'engine-test', True, root)
             self.assertTrue(rotated['password_changed'])
             self.assertNotEqual(final.read_bytes(), original)
             with patch.object(role, 'authenticated', return_value=False):
                 with self.assertRaises(role.Refusal):
-                    role.provision(owner, data, 'staging', False, root)
+                    role.provision(owner, data, 'engine-test', False, root)
             final.unlink()
             with self.assertRaises(role.Refusal):
-                role.provision(owner, data, 'staging', False, root)
-            self.assertTrue(role.provision(owner, data, 'staging', True, root)['password_changed'])
+                role.provision(owner, data, 'engine-test', False, root)
+            self.assertTrue(role.provision(owner, data, 'engine-test', True, root)['password_changed'])
 
 
 if __name__ == '__main__':

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reconcile the engine's bounded reader login through db-tap run mode.
 
-Use --environment staging or production. Passwords stay in private CARR files.
+Use --environment production, optionally with --branch for a named Neon branch.
+Passwords stay in private CARR files.
 The --rotate flag is the only way to reset an existing login's password.
 """
 import argparse
@@ -23,6 +24,12 @@ import staging_database_credential as credentials
 
 ROLE = 'engine_business_reader'
 SPEC = ROOT / 'tools/config/engine-business-reader.json'
+CHECKS = (
+    'role_flags_match', 'no_memberships', 'no_ops_or_auth_usage', 'function_grants_match',
+    'no_default_grants', 'no_sequence_rights', 'read_only_default', 'activity_whole_table_select',
+    'ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused',
+    'timezone_utc', 'statement_timeout_15s', 'idle_timeout_30s',
+)
 
 
 class Refusal(RuntimeError):
@@ -32,6 +39,8 @@ class Refusal(RuntimeError):
 def validate_spec(data):
     if data['role'] != ROLE or data['schema'] != 'public':
         raise Refusal('role spec exceeds the authorized role or schema')
+    if data.get('functions') != ['carr_business_date(timestamp with time zone)']:
+        raise Refusal('function spec differs from the authorized function')
     names = data['tables'] + data['views']
     if not names or len(names) != len(set(names)) or any(
         not re.fullmatch('[a-z_][a-z_0-9]*', name) for name in names
@@ -65,7 +74,9 @@ def attribute_options(observed):
 
 def grant_statements(data):
     return [f'GRANT SELECT ON TABLE "public"."{name}" TO "{ROLE}"'
-            for name in data['tables'] + data['views']]
+            for name in data['tables'] + data['views']] + [
+                f'GRANT EXECUTE ON FUNCTION public.{name} TO "{ROLE}"'
+                for name in data['functions']]
 
 
 def connect(uri):
@@ -136,6 +147,9 @@ def reconcile(conn, data, password=None):
         expected = ('r', 'p') if name in data['tables'] else ('v',)
         if not kind or kind[0] not in expected:
             raise Refusal('allowlisted relation missing or wrong kind: ' + name)
+    for name in data['functions']:
+        if not conn.execute('SELECT to_regprocedure(%s)', ('public.' + name,)).fetchone()[0]:
+            raise Refusal('allowlisted function missing: ' + name)
     if not exists:
         conn.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(ROLE)))
     observed = conn.execute('SELECT rolsuper,rolreplication,rolbypassrls FROM pg_roles '
@@ -163,10 +177,21 @@ def reconcile(conn, data, password=None):
     expected = {('public', name, 'SELECT', False) for name in data['tables'] + data['views']}
     if actual != expected:
         raise Refusal('direct relation grants differ from the role spec')
+    if not function_grants_match(conn, data):
+        raise Refusal('direct function grants differ from the role spec')
     if conn.execute("""SELECT EXISTS(SELECT FROM pg_type t,aclexplode(t.typacl) a
         JOIN pg_roles r ON r.oid=a.grantee WHERE r.rolname=%s)""", (ROLE,)).fetchone()[0]:
         raise Refusal('unsupported direct type grants; transaction rolled back')
     return not exists
+
+
+def function_grants_match(conn, data):
+    actual = set(conn.execute("""SELECT p.oid,a.privilege_type,a.is_grantable
+        FROM pg_proc p,aclexplode(p.proacl) a
+        WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (ROLE,)).fetchall())
+    expected = {(conn.execute('SELECT to_regprocedure(%s)::oid', ('public.' + name,)).fetchone()[0],
+                 'EXECUTE', False) for name in data['functions']}
+    return actual == expected
 
 
 def proof(uri, data):
@@ -180,9 +205,7 @@ def proof(uri, data):
         result['no_ops_or_auth_usage'] = conn.execute("""SELECT NOT (
             has_schema_privilege(current_user,'ops','USAGE') OR
             has_schema_privilege(current_user,'neon_auth','USAGE'))""").fetchone()[0]
-        result['no_direct_routine_grants'] = conn.execute("""SELECT NOT EXISTS(
-            SELECT FROM pg_proc p,aclexplode(p.proacl) a
-            WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=current_user))""").fetchone()[0]
+        result['function_grants_match'] = function_grants_match(conn, data)
         result['no_default_grants'] = conn.execute("""SELECT NOT EXISTS(
             SELECT FROM pg_default_acl d,aclexplode(d.defaclacl) a
             WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=current_user))""").fetchone()[0]
@@ -190,10 +213,10 @@ def proof(uri, data):
             SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             WHERE c.relkind='S' AND n.nspname NOT IN ('pg_catalog','information_schema')
             AND has_sequence_privilege(current_user,c.oid,'SELECT,USAGE,UPDATE'))""").fetchone()[0]
-        result['TimeZone'] = conn.execute('SHOW TimeZone').fetchone()[0]
-        result['statement_timeout'] = conn.execute('SHOW statement_timeout').fetchone()[0]
-        result['idle_in_transaction_session_timeout'] = conn.execute(
-            'SHOW idle_in_transaction_session_timeout').fetchone()[0]
+        result['timezone_utc'] = conn.execute('SHOW TimeZone').fetchone()[0] == 'UTC'
+        result['statement_timeout_15s'] = conn.execute('SHOW statement_timeout').fetchone()[0] == '15s'
+        result['idle_timeout_30s'] = conn.execute(
+            'SHOW idle_in_transaction_session_timeout').fetchone()[0] == '30s'
         result['read_only_default'] = conn.execute('SHOW default_transaction_read_only').fetchone()[0] == 'on'
         result['activity_whole_table_select'] = conn.execute(
             "SELECT has_table_privilege(current_user,'public.activity','SELECT')").fetchone()[0]
@@ -203,12 +226,8 @@ def proof(uri, data):
                     row = conn.execute(sql.SQL('SELECT * FROM public.{} LIMIT 1').format(
                         sql.Identifier(name))).fetchone()
                     result[name] = {'read': True, 'has_rows': row is not None}
-            except psycopg.Error as exc:
-                result[name] = {'read': False, 'sqlstate': exc.sqlstate}
-                denied = re.fullmatch(r'permission denied for (?:function|table|schema) ([a-zA-Z_0-9.]+)',
-                                      exc.diag.message_primary or '')
-                if denied:
-                    result[name]['permission_target'] = denied.group(1)
+            except psycopg.Error:
+                result[name] = {'read': False, 'has_rows': False}
         conn.rollback()
         conn.execute('SET TRANSACTION READ WRITE')
         for label, statement in {
@@ -229,7 +248,7 @@ def proof(uri, data):
 
 def provision(owner, data, environment, rotate, root):
     parsed = urlsplit(owner)
-    key = 'CARR_DB_' + environment.upper() + '_ENGINE_BUSINESS_READER_URL'
+    key = 'CARR_DB_' + environment.upper().replace('-', '_') + '_ENGINE_BUSINESS_READER_URL'
     final = root / (environment + '-engine-business-reader.env')
     paths = credentials.CredentialPaths(final, pathlib.Path(str(final) + '.pending'))
     if rotate:
@@ -257,15 +276,26 @@ def provision(owner, data, environment, rotate, root):
         elif stored.state == 'pending':
             credentials.promote_pending(paths, key=key, expected_value=stored.value)
         result = proof(stored.value, data)
-    return dict(environment=environment, created=created,
-                password_changed=change, secret_key=key, proof=result)
+    return dict(environment=environment, created=created is True,
+                password_changed=change is True, secret_key=key,
+                proof={name: result[name] is True for name in CHECKS} | {
+                    name: {'read': result[name]['read'] is True,
+                           'has_rows': result[name]['has_rows'] is True}
+                    for name in ['activity'] + data['views']})
+
+
+def print_result(output):
+    print(json.dumps(output, indent=2))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--environment', choices=['staging', 'production'], required=True)
+    parser.add_argument('--environment', choices=['production'], required=True)
+    parser.add_argument('--branch', help='named Neon branch in the production project')
     parser.add_argument('--rotate', action='store_true')
     args = parser.parse_args()
+    if args.branch and not re.fullmatch('[a-z][a-z0-9-]*', args.branch):
+        raise Refusal('branch must be a lowercase Neon branch name')
     data = load_spec()
     owner = os.environ.get('DATABASE_URL')
     if not owner:
@@ -279,19 +309,16 @@ def main():
     tap_spec.loader.exec_module(tap)
     if not pathlib.Path(tap.NEONCTL).exists():
         tap.NEONCTL = shutil.which('neonctl') or tap.NEONCTL
-    expected = tap.dsn(project=args.environment)
+    expected = tap.dsn(branch=args.branch, project=args.environment)
     if urlsplit(expected).hostname != urlsplit(owner).hostname or urlsplit(expected).path != urlsplit(owner).path:
         raise Refusal('db-tap target differs from the selected environment')
-    output = provision(owner, data, args.environment, args.rotate,
+    target = args.environment if args.branch in (None, 'production') else 'branch-' + args.branch
+    output = provision(owner, data, target, args.rotate,
                        pathlib.Path.home() / '.config/carr')
     result = output['proof']
-    print(json.dumps(output, indent=2))
-    return 0 if (all(result[k] is True for k in [
-        'role_flags_match', 'no_memberships', 'no_ops_or_auth_usage', 'no_direct_routine_grants',
-        'no_default_grants', 'no_sequence_rights', 'read_only_default', 'activity_whole_table_select',
-        'ops_read_refused', 'insert_refused', 'update_refused', 'delete_refused'])
-        and result['TimeZone'] == 'UTC' and result['statement_timeout'] == '15s'
-        and result['idle_in_transaction_session_timeout'] == '30s' and all(result[n]['read'] for n in ['activity'] + data['views'])) else 1
+    print_result(output)
+    return 0 if (all(result[k] for k in CHECKS)
+                 and all(result[n]['read'] for n in ['activity'] + data['views'])) else 1
 
 
 if __name__ == '__main__':
