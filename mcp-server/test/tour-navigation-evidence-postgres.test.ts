@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import pg from "pg";
+import type { TourNavigationEvidence } from "../src/tour-navigation-contract.ts";
 import { navigationFixture, unavailableFixture } from "./fixtures/tour-navigation-evidence.ts";
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
@@ -84,7 +85,30 @@ test("Tour navigation uses sealed entrances and newest promotion through the aut
         await c.query(installed);
       }
     }
+    let recorded: TourNavigationEvidence | undefined;
+    c.on("notice", (notice) => {
+      if (notice.message?.startsWith("TOUR_NAVIGATION_RECORD:")) {
+        recorded = JSON.parse(notice.message.slice("TOUR_NAVIGATION_RECORD:".length));
+      }
+    });
     await c.query(statements);
+    assert.ok(recorded && recorded.status === "ready");
+    const stableEvidence = (value: TourNavigationEvidence) => JSON.parse(JSON.stringify(value, (key, item) => {
+      if (["as_of", "observed_at", "verified_at", "retrieved_at", "reviewed_at"].includes(key)) {
+        assert.ok(typeof item === "string" && Number.isFinite(Date.parse(item)), key);
+        return "recorded timestamp";
+      }
+      if (["receipt_id", "entrance_verification_receipt_id", "reviewer_actor_id", "verifier_actor_id"].includes(key)) {
+        assert.match(item, /^[a-f0-9-]{36}$/);
+        return "recorded identity";
+      }
+      if (key === "projection_digest") {
+        assert.match(item, /^sha256:[a-f0-9]{64}$/);
+        return "recorded projection digest";
+      }
+      return item;
+    }));
+    assert.deepEqual(stableEvidence(navigationFixture), stableEvidence(recorded));
     for (const role of ["carr_reader", "carr_writer", "carr_jobs", "carr_authority"]) {
       const result = await c.query(
         "select has_function_privilege($1,'ops.tour_route_navigation_evidence(text,uuid)','execute') allowed",

@@ -118,6 +118,7 @@ begin
      or nav#>>'{evidence,promotion,receipt_digest}' is distinct from 'sha256:'||repeat('9',64)
      or not exists(select 1 from ops.tour_map_promotion_receipt r where r.id::text=nav#>>'{evidence,promotion,receipt_id}' and r.route_version=(nav#>>'{evidence,route_version}')::integer)
   then raise exception 'navigation contract lost exact sealed entrance or matching promotion evidence: %',nav; end if;
+  raise notice 'TOUR_NAVIGATION_RECORD:%',nav;
   if ops.read_tour_internal_detail('wrong-tenant','a2000000-0000-4000-8000-000000000001',v_actor_id) is not null then
     raise exception 'navigation detail leaked across tenant';
   end if;
