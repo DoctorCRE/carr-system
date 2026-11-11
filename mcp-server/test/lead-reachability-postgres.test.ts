@@ -6,8 +6,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
 import pg from "pg";
-import { executeRegisteredTool } from "../src/tools.js";
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
+import { array, executeRegisteredTool, object } from "./helpers/legacy-test-registry.ts";
 
 const contract = new Validator(
   JSON.parse(readFileSync(new URL("../contracts/lead-reachability.v1.json", import.meta.url), "utf8")),
@@ -32,13 +32,13 @@ test("registered board preserves identity, owns classification, and exposes exac
     const read = async () => {
       await c.query("set role carr_reader");
       try {
-        return await executeRegisteredTool(c, actor, "lead-board", { workspace: "leads", lead_id: lead });
+        return object(await executeRegisteredTool(c, actor, "lead-board", { workspace: "leads", lead_id: lead }));
       } finally {
         await c.query("reset role");
       }
     };
     const empty = await read();
-    assert.equal(empty.detail.reachability.evidence_state, "unknown");
+    assert.equal(object(object(empty.detail).reachability).evidence_state, "unknown");
     const finding = (
       await c.query(
         `insert into record_flag(subject_type,subject_id,kind,value,source,observed_at,expires_on,created_by)
@@ -48,25 +48,29 @@ test("registered board preserves identity, owns classification, and exposes exac
       )
     ).rows[0].id;
     const verified = await read();
-    const row = verified.leads.find((r: { id: string }) => r.id === lead);
+    const row = array(verified.leads)
+      .map(object)
+      .find((r) => r.id === lead);
+    assert.ok(row);
+    const reachability = object(row.reachability);
     assert.equal(row.party_id, party);
-    assert.deepEqual(row.reachability, verified.detail.reachability);
-    assert.equal(row.reachability.classification, "research");
-    assert.equal(row.reachability.research_state, "verified");
-    assert.equal(row.reachability.evidence[0].flag_id, finding);
-    assert.equal(row.reachability.evidence[0].source, "https://example.test/registry/1");
+    assert.deepEqual(row.reachability, object(verified.detail).reachability);
+    assert.equal(reachability.classification, "research");
+    assert.equal(reachability.research_state, "verified");
+    assert.equal(object(array(reachability.evidence)[0]).flag_id, finding);
+    assert.equal(object(array(reachability.evidence)[0]).source, "https://example.test/registry/1");
     assert.equal(contract.validate(row.reachability).valid, true);
-    assert.notEqual(row.reachability.source_revision, empty.detail.reachability.source_revision);
+    assert.notEqual(reachability.source_revision, object(object(empty.detail).reachability).source_revision);
     await c.query("update party set contact_state='paused' where id=$1", [party]);
     const restricted = await read();
-    assert.equal(restricted.detail.reachability.contact_eligible, false);
-    assert.equal(restricted.leads.length, verified.leads.length);
+    assert.equal(object(object(restricted.detail).reachability).contact_eligible, false);
+    assert.equal(array(restricted.leads).length, array(verified.leads).length);
     await c.query("update record_flag set kind='discrepancy' where id=$1", [finding]);
-    assert.equal((await read()).detail.reachability.evidence_state, "conflicting");
+    assert.equal(object(object((await read()).detail).reachability).evidence_state, "conflicting");
     if (process.env.CARR_REACHABILITY_RECORDING)
       writeFileSync(
         process.env.CARR_REACHABILITY_RECORDING,
-        JSON.stringify(
+        `${JSON.stringify(
           {
             verb: "lead-board",
             args: { workspace: "leads", lead_id: lead },
@@ -74,7 +78,7 @@ test("registered board preserves identity, owns classification, and exposes exac
           },
           null,
           2,
-        ) + "\n",
+        )}\n`,
       );
   } finally {
     await c.end();

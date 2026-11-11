@@ -151,7 +151,7 @@ export async function leadReachability(
       ...(evidence_state === "expired" ? ["expired_evidence"] : []),
       "verified_usable_route_not_established",
     ],
-    source_revision: "sha256:" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join(""),
+    source_revision: `sha256:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`,
     evaluated_at: new Date(now).toISOString(),
     evidence,
   };

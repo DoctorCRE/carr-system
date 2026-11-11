@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
-import { TOOLS } from "../src/tools.js";
+import { array, handler, object } from "./helpers/legacy-test-registry.ts";
 
 const contract = new Validator(
   JSON.parse(readFileSync(new URL("../contracts/lead-reachability.v1.json", import.meta.url), "utf8")),
@@ -34,7 +34,8 @@ async function board(findings: object[] = [], fields: object = {}) {
     research_evidence: findings,
     ...fields,
   };
-  const result = await TOOLS["lead-board"].handler(
+  const result = await handler(
+    "lead-board",
     {
       query: async () => {
         calls++;
@@ -45,10 +46,11 @@ async function board(findings: object[] = [], fields: object = {}) {
     { workspace: "leads", lead_id: id },
   );
   assert.equal(calls, 1);
-  assert.equal(result.leads[0].id, id);
-  assert.deepEqual(result.leads[0].reachability, result.detail.reachability);
-  assert.equal(contract.validate(result.leads[0].reachability).valid, true);
-  return result.leads[0].reachability;
+  const lead = object(array(result.leads)[0]);
+  assert.equal(lead.id, id);
+  assert.deepEqual(lead.reachability, object(result.detail).reachability);
+  assert.equal(contract.validate(lead.reachability).valid, true);
+  return object(lead.reachability);
 }
 test("missing evidence remains unknown research, eligibility never proves reachability", async () => {
   const r = await board();
@@ -57,15 +59,15 @@ test("missing evidence remains unknown research, eligibility never proves reacha
   assert.equal(r.evidence_state, "unknown");
   assert.equal(r.contact_eligible, true);
   assert.equal(r.research_state, "needs_research");
-  assert.ok(r.missing_reasons.includes("verified_usable_route_not_established"));
+  assert.ok(array(r.missing_reasons).includes("verified_usable_route_not_established"));
 });
 test("identity verification and free form contact findings never assert a usable route", async () => {
   for (const kind of ["verified", "email", "cell", "office_phone"]) {
     const r = await board([{ ...evidence, kind }]);
     assert.equal(r.classification, "research");
     assert.equal(r.evidence_state, "current");
-    assert.equal(r.evidence[0].flag_id, id);
-    assert.equal(r.evidence[0].expires_on, "2099-01-01");
+    assert.equal(object(array(r.evidence)[0]).flag_id, id);
+    assert.equal(object(array(r.evidence)[0]).expires_on, "2099-01-01");
   }
 });
 test("snapshot refresh follows expiry, conflict, renewal, removal and contact restriction", async () => {
@@ -82,7 +84,7 @@ test("snapshot refresh follows expiry, conflict, renewal, removal and contact re
     const restricted = await board([evidence], fields);
     assert.equal(restricted.contact_eligible, false);
     assert.equal(restricted.classification, "research");
-    assert.ok(restricted.missing_reasons.includes("contact_restricted"));
+    assert.ok(array(restricted.missing_reasons).includes("contact_restricted"));
   }
   assert.equal((await board([evidence])).contact_eligible, true);
 });
