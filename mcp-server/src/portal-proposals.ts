@@ -2,13 +2,14 @@
 import type { Db } from "./verb-contract.ts";
 
 type Scope = { slug: string; digest: string; publication_id: string };
-type Selection = { version: number; selected: string[]; notes: Record<string, string> };
-type Receipt = {
+type PortalProposalSelection = { version: number; selected: string[]; notes: Record<string, string> };
+export type PortalProposalRequest = PortalProposalSelection & { idempotency_key: string };
+export type PortalProposalReceipt = {
   status: "success";
   schema_version: "portal-proposals.v1";
   publication_id: string;
   publication_version: number;
-  selection: Selection;
+  selection: PortalProposalSelection;
   retired: string[];
 };
 class ProposalError extends Error {
@@ -18,8 +19,8 @@ class ProposalError extends Error {
     this.status = status;
   }
 }
-function parse(value: unknown): Receipt {
-  const r = value as (Partial<Receipt> & { error?: string }) | null;
+function parse(value: unknown): PortalProposalReceipt {
+  const r = value as (Partial<PortalProposalReceipt> & { error?: string }) | null;
   if (r?.status !== "success") {
     const failure = value as { status?: string; error?: string } | null;
     throw new ProposalError(
@@ -38,7 +39,7 @@ function parse(value: unknown): Receipt {
     !Number.isInteger(r.publication_version)
   )
     throw Error("invalid_proposal_receipt");
-  return r as Receipt;
+  return r as PortalProposalReceipt;
 }
 export function portalProposalStorage(c: Db) {
   const call = async (scope: Scope, version: number | null, request: unknown) =>

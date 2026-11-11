@@ -2,7 +2,7 @@
   "schema_version": "portal-proposals.v1",
   "version": "1.0.0",
   "transport": "Authenticated carr_writer PostgreSQL connection, never a public SQL interface",
-  "type": "mcp-server/src/portal-proposals.ts return type of portalProposalStorage",
+  "type": "mcp-server/src/portal-proposals.ts PortalProposalRequest and PortalProposalReceipt",
   "session_contract": "workspace/contracts/client-portal-session.v1.json",
   "fixture": "workspace/contracts/fixtures/portal-proposals.v1.json",
   "scope": ["slug from URL", "SHA-256 digest of verified session cookie", "publication_id from host publication"],
@@ -21,7 +21,7 @@
     "save": {
       "sql": "select ops.portal_proposal($1::text,$2::text,$3::uuid,$4::integer,$5::jsonb)",
       "arguments": ["slug", "digest", "publication_id", "publication_version", "request"],
-      "request": {"version": "nonnegative integer base selection version", "selected": "up to 100 unique lowercase canonical UUIDs in current publication membership", "notes": "object keyed only by selected property IDs, string values up to 2000 characters", "idempotency_key": "1 to 200 characters, frozen with complete request and source publication revision"},
+      "request": {"version": "nonnegative integer base selection version", "selected": "up to 100 unique lowercase canonical UUIDs in current publication membership", "notes": "object keyed only by selected property IDs, string values up to 2000 UTF-16 code units, matching the retained app parser", "idempotency_key": "1 to 200 characters, frozen with complete request and source publication revision"},
       "idempotency": "Key scoped to portal. Exact JSON request, publication ID and source revision replay the original receipt, even after newer saves or publication revisions. Changed request or source with same key conflicts. Authorization and current publication enablement precede replay."
     },
     "partner_read": {

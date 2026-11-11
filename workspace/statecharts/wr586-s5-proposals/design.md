@@ -4,9 +4,9 @@ Card: WR586.S5.J13
 
 ## System design
 
-The data shape is an immutable proposal version, its exact request and receipt, and immutable canonical membership for a partner publication revision. The proposal version stores its portal, publication revision and deal. Membership is private producer data. Portal scope is derived from the existing session digest and slug. The SQL function owns authorization, CAS and request replay atomically. The TypeScript adapter owns transport and status mapping. The app keeps its injected read/save ports and unwraps `selection`.
+The data shape is an immutable proposal version, its exact request and receipt, and immutable canonical membership for a partner publication revision. Model the Domain led to immutable rows instead of mutable portal JSON. Make Operations Idempotent led to stored request receipts. Boundary Discipline keeps client scope validation in the SQL entrypoint. The proposal version stores its portal, publication revision and deal. Membership is private producer data. Portal scope is derived from the existing session digest and slug. The SQL function owns authorization, CAS and request replay atomically. The TypeScript adapter owns transport and status mapping. The app keeps its injected read/save ports and unwraps `selection`.
 
-Size is medium, one coupled persistence slice. The lightest sufficient design reuses portal sessions and client publications. Reusing publication content itself was rejected because it contains partner-authored text, no canonical property membership, no isolated client versions and no frozen-request receipts. Migration 1183 adds these missing storage grains. No existing table has all four properties.
+Size is medium, one coupled persistence slice. The lightest sufficient design reuses portal sessions and client publications. Reusing publication content itself was rejected because it contains partner-authored text, no canonical property membership, no isolated client versions and no frozen-request receipts. Migration 1183 adds these missing storage grains. The existing ops.tour_selection_cart_version is partner canonical work and cannot receive portal writes. ops.tour_share_feedback_event is per-property immutable packet feedback without whole-list CAS. ops.slice_completion_proposal concerns engineering slice completion. None is an isolated whole-list proposal store.
 
 Two interfaces were compared. New MCP verbs with password/slug inputs would duplicate session entrypoints and expose this client workflow in the partner registry. Session-bound SQL with a typed adapter fits the already deployed session contract. The latter is selected. There are no new registered verbs. SQL execute grants and the grant-contract entries record authority. The trusted publication producer calls bind only after the existing partner deal authorization. It must not forward that operation through client transport. Partner reads similarly require existing deal authorization before calling the exact-version SQL function.
 
@@ -25,7 +25,7 @@ Current publication membership is mandatory for each new save. Publishing a chan
 
 ## Statechart and tests
 
-`Proposals.tla` bounds the model to two distinct requests and two committed versions. It models atomic database calls, replay, stale conflicts, reload and session retirement. It omits PostgreSQL lock scheduling, payload validation, publication changes and transport timeouts. The database tests cover those concrete data guards; the retained app model owns browser uncertainty and disposal.
+`Proposals.tla` bounds the model to two distinct requests and two committed versions. It models atomic database calls, two tabs with separate base versions, replay, stale conflicts, reload and session retirement. TLC checks NoUnauthorizedWrite, NoStaleWrite, ConfirmedVersionExists and ReceiptVersionsUnique. It omits PostgreSQL lock scheduling, payload validation, publication changes and transport timeouts. The database tests cover those concrete data guards; the retained app model owns browser uncertainty and disposal.
 
 | Transition | Executed test |
 | --- | --- |
@@ -36,7 +36,7 @@ Current publication membership is mandatory for each new save. Publishing a chan
 | Publication change and retirement | publication changes retire identities without rewriting their notes |
 | Forged identity and invalid data | forged scope, malformed input and current publication membership |
 
-To regenerate the model chart, copy the TLA/config files to scratch and run the installed statechart tool with `from-spec Proposals.tla`. Its first invocation creates a mapping. Set `state(v)` to `v.phase`, include Save, Retry, Reload, Conflict, Expire and Denied in readerActions, and rerun with JAVA=/opt/homebrew/opt/openjdk@21/bin/java and TLA2TOOLS pointing to tla2tools.jar. The mapping stays in scratch because this repository requires authored executable code to be TypeScript. The committed Mermaid chart is the resulting readable projection.
+To regenerate the model chart, copy the TLA/config files to scratch and run the installed statechart tool with `from-spec Proposals.tla`. Its first invocation creates a mapping. Set `state(v)` to `v.phase`, include Save(1), Save(2), Retry(1), Retry(2), Reload(1), Reload(2), Conflict, Expire and Denied in readerActions, and rerun with JAVA=/opt/homebrew/opt/openjdk@21/bin/java and TLA2TOOLS pointing to tla2tools.jar. The mapping stays in scratch because this repository requires authored executable code to be TypeScript. The committed Mermaid chart is the resulting readable projection.
 
 ## Production proof
 

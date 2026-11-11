@@ -91,7 +91,7 @@ begin
  return '{"status":"invalid","error":"invalid_proposal"}'::jsonb; end if;
  if exists(select 1 from jsonb_array_elements_text(selected) id where not id::uuid=any(members)) then
  return '{"status":"conflict","error":"property_not_published"}'::jsonb; end if;
- if exists(select 1 from jsonb_each(notes) n where not selected ? n.key or jsonb_typeof(n.value)<>'string' or length(n.value#>>'{}')>2000) then
+ if exists(select 1 from jsonb_each(notes) n where not selected ? n.key or jsonb_typeof(n.value)<>'string' or length(n.value#>>'{}') + (select count(*) from regexp_matches(n.value#>>'{}',U&'[\+010000-\+10FFFF]','g'))>2000) then
  return '{"status":"invalid","error":"invalid_proposal"}'::jsonb; end if;
  selection:=jsonb_build_object('version',base+1,'selected',selected,'notes',notes);
  result:=jsonb_build_object('status','success','schema_version','portal-proposals.v1','publication_id',pub.id,

@@ -20,9 +20,9 @@ stateDiagram-v2
   state "Ready" as s2
   state "Saved" as s3
   [*] --> s2
-  s2 --> s3 : Retry(1) or Retry(2) or<br/>Save(1) or Save(2)
-  s2 --> s1 : Expire
-  s2 --> s0 : Conflict
+  s2 --> s3 : Retry exact request or Save<br/>proposal
+  s2 --> s1 : Session retires
+  s2 --> s0 : Refuse stale request
   class s0 works
   class s1 works
   class s2 works

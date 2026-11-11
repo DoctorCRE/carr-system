@@ -4,7 +4,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import pg from "pg";
-import { portalProposalStorage } from "../src/portal-proposals.ts";
+import {
+  type PortalProposalReceipt,
+  type PortalProposalRequest,
+  portalProposalStorage,
+} from "../src/portal-proposals.ts";
 import { postgresDatabase } from "./helpers/postgres-database.mjs";
 import { readMigration } from "./migration-source.testhelper.ts";
 
@@ -79,20 +83,26 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
     await c.query("select ops.exchange_client_portal_session('a','test',$1)", [digest]);
     const store = portalProposalStorage(c);
     const scope = { slug: "a", digest, publication_id: String(pubs[0]) };
-    const request = {
+    const request: PortalProposalRequest = {
       version: 0,
       selected: [property],
       notes: { [property]: "Client note" },
       idempotency_key: "first",
     };
-    const before = (await c.query("select jsonb_agg(to_jsonb(d)) value from deal d")).rows[0].value;
-    let receipt: unknown;
+    const canonical = async () =>
+      (
+        await c.query(
+          "select jsonb_build_object('deals',(select jsonb_agg(to_jsonb(d) order by d.id) from deal d),'clients',(select jsonb_agg(to_jsonb(c) order by c.id) from client c),'parties',(select jsonb_agg(to_jsonb(p) order by p.id) from party p)) value",
+        )
+      ).rows[0].value;
+    const before = await canonical();
+    let receipt: PortalProposalReceipt | undefined;
     await t.test("empty read, save, independent reload and frozen retry", async () => {
       assert.deepEqual((await store.read(scope)).selection, { version: 0, selected: [], notes: {} });
       receipt = await store.save(scope, 1, request);
-      assert.equal((receipt as { selection: { version: number } }).selection.version, 1);
+      assert.equal((receipt as PortalProposalReceipt).selection.version, 1);
       assert.deepEqual(await store.save(scope, 1, request), receipt);
-      assert.deepEqual((await store.read(scope)).selection, (receipt as { selection: unknown }).selection);
+      assert.deepEqual((await store.read(scope)).selection, (receipt as PortalProposalReceipt).selection);
       await assert.rejects(
         store.save(scope, 1, { ...request, notes: { [property]: "changed" } }),
         /idempotency_conflict/,
@@ -107,12 +117,16 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       await assert.rejects(store.read({ ...scope, publication_id: String(pubs[1]) }), /publication_unavailable/);
       await assert.rejects(store.save(scope, 1, { ...request, deal_id: deals[1] }), /invalid_proposal/);
       await assert.rejects(store.save(scope, 1, null), /invalid_proposal/);
-      await assert.rejects(store.save(scope, 1, {...request, version: 10000, idempotency_key: 'capacity'}), /proposal_capacity/);
+      await assert.rejects(
+        store.save(scope, 1, { ...request, version: 10000, idempotency_key: "capacity" }),
+        /proposal_capacity/,
+      );
       for (const change of [
         { selected: [other] },
         { selected: [property, property] },
         { notes: { [other]: "secret" } },
         { notes: { [property]: "x".repeat(2001) } },
+        { notes: { [property]: "😀".repeat(1001) } },
       ])
         await assert.rejects(
           store.save(scope, 1, { ...request, version: 1, idempotency_key: randomUUID(), ...change }),
@@ -128,7 +142,7 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       assert.deepEqual(await store.save(scope, 1, request), receipt);
       const partner = (await c.query("select ops.read_portal_proposal_for_deal($1,$2,1) result", [deals[0], pubs[0]]))
         .rows[0].result;
-      assert.deepEqual(partner.selection, (receipt as { selection: unknown }).selection);
+      assert.deepEqual(partner.selection, (receipt as PortalProposalReceipt).selection);
       assert.equal(
         (await c.query("select ops.read_portal_proposal_for_deal($1,$2,1) result", [deals[1], pubs[0]])).rows[0].result,
         null,
@@ -144,6 +158,7 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
         /publication_unavailable/,
       );
       await bind(pubs[0], 2, [other]);
+      assert.deepEqual(await store.save(scope, 1, request), receipt);
       const read = await store.read(scope);
       assert.deepEqual(read.retired, [property]);
       assert.equal(read.selection.notes[property], "New note");
@@ -184,6 +199,10 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       }
     });
     await t.test("disabled, expired and reassigned portals refuse before replay", async () => {
+      await c.query("update ops.client_publication set published=false where id=$1", [pubs[0]]);
+      await assert.rejects(store.read(scope), /publication_unavailable/);
+      await assert.rejects(store.save(scope, 1, request), /publication_unavailable/);
+      await c.query("update ops.client_publication set published=true where id=$1", [pubs[0]]);
       await c.query("update ops.client_portal set disabled_at=now() where slug='a'");
       await assert.rejects(store.read(scope), /portal_access_denied/);
       await c.query("update ops.client_portal set disabled_at=null where slug='a'");
@@ -196,13 +215,16 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
         "update ops.client_portal_session set created_at=now(),expires_at=now()+interval '168 hours' where digest=$1",
         [digest],
       );
-      const old = (await c.query("select client_id from deal where id=$1", [deals[0]])).rows[0].client_id;
-      await c.query("update deal set client_id=(select client_id from deal where id=$2) where id=$1", [
-        deals[0],
-        deals[1],
-      ]);
-      await assert.rejects(store.read(scope), /portal_access_denied/);
-      await c.query("update deal set client_id=$2 where id=$1", [deals[0], old]);
+      await c.query("begin");
+      try {
+        await c.query("update deal set client_id=(select client_id from deal where id=$2) where id=$1", [
+          deals[0],
+          deals[1],
+        ]);
+        await assert.rejects(store.read(scope), /portal_access_denied/);
+      } finally {
+        await c.query("rollback");
+      }
     });
     await t.test("session retirement refuses reads, saves and retained replay", async () => {
       await c.query("select ops.revoke_client_portal_session('a',$1)", [digest]);
@@ -210,7 +232,7 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       await assert.rejects(store.save(scope, 1, request), /portal_access_denied/);
     });
     await t.test("canonical records and private storage permissions remain unchanged", async () => {
-      assert.deepEqual((await c.query("select jsonb_agg(to_jsonb(d)) value from deal d")).rows[0].value, before);
+      assert.deepEqual(await canonical(), before);
       for (const role of ["carr_reader", "carr_writer", "dot_reader"])
         for (const table of ["portal_proposal_version", "portal_proposal_membership"])
           assert.equal(
