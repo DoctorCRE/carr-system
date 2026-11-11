@@ -61,7 +61,8 @@
           "description",
           "client_name",
           "deal_name",
-          "vendor_ref"
+          "vendor_ref",
+          "identity_restricted"
         ],
         "properties": {
           "id": {
@@ -173,6 +174,9 @@
           "vendor_ref": {
             "type": "string",
             "minLength": 1
+          },
+          "identity_restricted": {
+            "type": "boolean"
           }
         }
       }
@@ -221,6 +225,9 @@
                 "approved_by": {
                   "type": "string",
                   "format": "uuid"
+                },
+                "identity_restricted": {
+                  "const": false
                 }
               }
             }

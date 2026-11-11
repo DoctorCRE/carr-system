@@ -139,6 +139,23 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
         idempotency_key: randomUUID(),
       });
     });
+    await t.test("canonical vendor and contact restrictions exclude approved matches", async () => {
+      const previous = (await db.query("select disposition from vendor where id=$1", [vendor])).rows[0].disposition;
+      await db.query("update vendor set disposition='avoid' where id=$1", [vendor]);
+      assert.equal((await read()).state, "empty");
+      const held = records((await call(names[2], { deal })).rows).find((r) => r.id === need.id);
+      assert.equal(held?.identity_restricted, true);
+      await db.query("update vendor set disposition=$2 where id=$1", [vendor, previous]);
+      await db.query(
+        "update party set contact_state='do_not_contact' where id=(select party_id from vendor where id=$1)",
+        [vendor],
+      );
+      assert.equal((await read()).state, "empty");
+      await db.query("update party set contact_state='active' where id=(select party_id from vendor where id=$1)", [
+        vendor,
+      ]);
+      assert.equal((await read()).state, "ready");
+    });
     const schema = JSON.parse(readFileSync(new URL("../contracts/client-needs.v1.json", import.meta.url), "utf8"));
     const { Validator } = await import("@cfworker/json-schema");
     const validator = new Validator(schema);

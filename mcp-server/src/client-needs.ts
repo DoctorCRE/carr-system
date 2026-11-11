@@ -94,6 +94,10 @@ function authorize(actor: Actor, partnerAuthoritySlugForActor: PartnerResolver, 
 }
 const projection = `select n.*,d.client_id,c.version as client_version,d.version as deal_version,
  p.name as client_name,d.name as deal_name,v.vendor_ref,
+ (exists(select 1 from public.lead l where l.party_id in (p.id,vp.id) and (coalesce(l.suppressed,false) or l.stage='do_not_contact'))
+ or exists(select 1 from public.vendor r where r.party_id in (p.id,vp.id) and r.merged_into is null and r.disposition='avoid')
+ or exists(select 1 from public.party held where held.id in (p.id,vp.id) and held.contact_state<>'active'
+   and (held.contact_state_until is null or held.contact_state_until>=current_date))) as identity_restricted,
  case when n.withdrawn then 'withdrawn'
  when n.observed_at>statement_timestamp() or n.fresh_until<=statement_timestamp() then 'stale'
  when n.approved_revision=n.version and n.approved_client_id=d.client_id then 'approved'
@@ -146,7 +150,8 @@ async function readNeeds(c: Db, actor: Actor, args: unknown, subject: "deal" | "
       : `select v.id from public.vendor v join public.party p on p.id=v.party_id where v.id=$1
      and v.merged_into is null and p.merged_into is null and p.deleted_at is null`;
   if (!(await c.query(exists, [id])).rows.length) throw new ToolError({ error: "not_found" });
-  const eligibility = subject === "vendor" ? `where state='approved' and restriction='allowed'` : "";
+  const eligibility =
+    subject === "vendor" ? `where state='approved' and restriction='allowed' and not identity_restricted` : "";
   const result = (
     await c.query(
       `with needs as (${projection} where n.${subject}_id=$1),
@@ -155,7 +160,7 @@ async function readNeeds(c: Db, actor: Actor, args: unknown, subject: "deal" | "
  select statement_timestamp()::text as as_of,
  coalesce((select jsonb_agg(to_jsonb(page) order by id) from page),'[]'::jsonb) as rows,
  (select count(*)::int from eligible) as total,
- exists(select 1 from needs where state in ('draft','edited_lapsed') and restriction='allowed') as missing_approval`,
+ exists(select 1 from needs where state in ('draft','edited_lapsed') and restriction='allowed' and not identity_restricted) as missing_approval`,
       [id, limit, offset],
     )
   ).rows[0];
