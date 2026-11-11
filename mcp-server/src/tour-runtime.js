@@ -1,6 +1,8 @@
 // Production adapters for the authenticated internal Tour leaf and the public
 // reports leaf. Identity remains owned by Deal Room; writes remain owned by the
 // registered tool envelope; public reads accept digests only.
+import { boundedBody, DELIVERABLE_IO_POLICY } from "./private-object-policy.ts";
+import { tourDownloadPolicy } from './tour-download-policy.ts';
 import { Pool } from "./postgres.ts";
 import { installTourDealAccess } from './tour-deal-access.js';
 import { callTool } from "./mcp.js";
@@ -346,22 +348,37 @@ async function publicAccess({ env }, transaction, fn) {
 
 export function createReportsRuntimeAdapters() {
   return {
-    downloadFn: async ({ env, sessionDigest }) => {
+    downloadFn: async ({ env, sessionDigest, signal }) => {
       if (!/^sha256:[a-f0-9]{64}$/.test(sessionDigest)) return { ok: false, status: 404 };
-      const artifact = await publicAccess({ env }, "begin read only", async client => {
-        const result = await client.query("select ops.read_tour_share_download($1::text) as data", [sessionDigest]);
-        return result.rows[0]?.data;
-      });
-      if (!artifact?.storage_ref || !env.carr_documents?.get) return { ok: false, status: 404 };
-      const object = await env.carr_documents.get(artifact.storage_ref);
-      if (!object) return { ok: false, status: 404 };
-      const bytes = new Uint8Array(await object.arrayBuffer());
-      if (bytes.byteLength !== artifact.content_length || await sha256Bytes(bytes) !== artifact.artifact_digest)
-        return { ok: false, status: 404 };
-      return { ok: true, response: new Response(bytes, { headers: {
-        "content-type": "application/pdf", "content-disposition": 'attachment; filename="Tour.pdf"',
-        "cache-control": "no-store",
-      } }) };
+      if (!env.carr_documents?.get) return { ok: false, status: 404 };
+      try {
+        return await tourDownloadPolicy(env.carr_documents).run(signal, async guard => {
+          guard.assertActive();
+          const artifact = await publicAccess({ env }, "begin read only", async client => {
+            const result = await client.query("select ops.read_tour_share_download($1::text) as data", [sessionDigest]);
+            return result.rows[0]?.data;
+          });
+          if (!artifact?.storage_ref || !env.carr_documents?.get || !Number.isSafeInteger(artifact.content_length) || artifact.content_length < 1 || artifact.content_length > 16 * 1024 * 1024) return { ok: false, status: 404 };
+          guard.admitGrant(artifact.grant_id);
+          const object = await env.carr_documents.get(artifact.storage_ref);
+          guard.assertActive();
+          if (!object) return { ok: false, status: 404 };
+          const bytes = object.body
+            ? await boundedBody(object, 16 * 1024 * 1024, DELIVERABLE_IO_POLICY.timeoutMs)
+            : new Uint8Array(await object.arrayBuffer());
+          guard.assertActive();
+          if (bytes.byteLength !== artifact.content_length || await sha256Bytes(bytes) !== artifact.artifact_digest)
+            return { ok: false, status: 404 };
+          return { ok: true, response: new Response(bytes, { headers: {
+            "content-type": "application/pdf", "content-disposition": 'attachment; filename="Tour.pdf"',
+            "cache-control": "no-store",
+          } }) };
+        });
+      } catch (error) {
+        if (error.message === "download_rate_limited" || error.payload?.error === "deliverable_rate_limited")
+          return { ok: false, status: 429 };
+        return { ok: false, status: 503 };
+      }
     },
     exchangeShareTokenFn: async ({ env, tokenDigest, sessionDigest, sessionExpiresAt, auditDigest }) =>
       publicAccess({ env }, "begin", async client => {

@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createReportsWebHandler } from "../src/reports-web.ts";
 
+test("download budget refusal is a no-store 429 with a retry delay", async () => {
+  const handler = createReportsWebHandler({ downloadFn: async () => ({ ok: false, status: 429 }) });
+  const response = await handler.fetch(
+    new Request("https://reports.doctorcre.com/api/share/download", {
+      headers: { cookie: "__Host-tour_share_session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+    }),
+  );
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "60");
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), { error: "rate_limited" });
+});
+
 test("download requires cookie and returns a private attachment", async () => {
   const handler = createReportsWebHandler({
     downloadFn: async () => ({

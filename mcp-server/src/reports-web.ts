@@ -276,7 +276,14 @@ async function download(request: Request, env: ReportsEnv | undefined, ctx: unkn
   if (!session || !SHARE_BEARER.test(session)) return json({ error: "unauthorized" }, 401);
   if (!dependencies.downloadFn) return json({ error: "not_found" }, 404);
   try {
-    const result = await dependencies.downloadFn({ env, ctx, sessionDigest: await sha256Digest(session) });
+    const result = await dependencies.downloadFn({
+      env,
+      ctx,
+      signal: request.signal,
+      sessionDigest: await sha256Digest(session),
+    });
+    if (isPlainRecord(result) && result.status === 429)
+      return json({ error: "rate_limited" }, 429, { "retry-after": "60" });
     if (!isPlainRecord(result) || !result.ok || !(result.response instanceof Response))
       return dependencyFailure(result);
     return result.response;

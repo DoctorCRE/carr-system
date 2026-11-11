@@ -33,7 +33,7 @@ end $scope_upgrade$;
 create function ops.read_tour_share_download(p_session_digest text)
 returns jsonb language sql stable security definer set search_path=pg_catalog,ops,public,pg_temp as $$
  with g as (select (ops.tour_share_session_grant(p_session_digest,'download')).*)
- select jsonb_build_object('storage_ref',r.storage_ref,'artifact_digest',r.artifact_digest,
+ select jsonb_build_object('grant_id',g.id,'storage_ref',r.storage_ref,'artifact_digest',r.artifact_digest,
   'content_length',r.content_length)
  from g join ops.tour_public_projection p on p.organization_tenant_id=g.organization_tenant_id and p.id=g.projection_id
  join ops.tour_pdf_render_job j on j.organization_tenant_id=p.organization_tenant_id and j.projection_id=p.id
