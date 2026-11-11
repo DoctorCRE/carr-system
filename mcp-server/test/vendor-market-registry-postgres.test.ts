@@ -142,11 +142,6 @@ test("reviewed market registry read and constraints", async (t) => {
   const contract = JSON.parse(readFileSync(new URL("../contracts/vendor-markets.v1.json", import.meta.url), "utf8"));
   assert.equal(result.schema_version, contract.schema_version);
   assert.equal(new Validator(contract.response_schema).validate(result).valid, true);
-  if (process.env.RECORD_VENDOR_MARKET_FIXTURE === "1")
-    writeFileSync(
-      new URL("../contracts/fixtures/vendor-markets.v1.json", import.meta.url),
-      `${JSON.stringify(result, null, 2)}\n`,
-    );
   const recorded = JSON.parse(
     readFileSync(new URL("../contracts/fixtures/vendor-markets.v1.json", import.meta.url), "utf8"),
   );

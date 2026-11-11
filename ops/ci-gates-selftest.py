@@ -55,8 +55,10 @@ class GatesTest(unittest.TestCase):
         self.assertIn('suite passed', output)
 
     def test_measured_suite_budget_does_not_raise_other_suites(self):
-        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+        (self.root / 'ops/config/ci-execution-budgets.json').write_text(json.dumps({
             'gate_suites': {'ops/guard-selftest.py': {'timeout_seconds': 777}}}))
+        (self.root / 'ops/config/ci-unit-durations.json').write_text(json.dumps({
+            'gate_suites': {'ops/guard-selftest.py': {'timeout_seconds': 999}}}))
         (self.root / 'bin/with-timeout.py').write_text(
             '# Enforce each synthetic suite timeout at the process interface.\n'
             'import subprocess,sys\n'

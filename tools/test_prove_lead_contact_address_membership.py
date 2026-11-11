@@ -10,7 +10,7 @@ import threading
 import unittest
 
 RUNNER = Path(__file__).with_name('prove-lead-contact-address-membership.py')
-READ_CAP_SECONDS = json.loads((RUNNER.parents[1] / 'ops/config/ci-unit-durations.json').read_text())[
+READ_CAP_SECONDS = json.loads((RUNNER.parents[1] / 'ops/config/ci-execution-budgets.json').read_text())[
     'lead_contact_address_proof_measurement']['read_cap_seconds']
 
 

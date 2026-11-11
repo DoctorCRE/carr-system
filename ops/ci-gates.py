@@ -70,9 +70,9 @@ class Gates:
         self.timed_out = False
         scope = Path('ops/config/ci-check-scope.json')
         self.scope = json.loads(scope.read_text()) if scope.is_file() else {}
-        durations = Path('ops/config/ci-unit-durations.json')
-        self.suite_budgets = (json.loads(durations.read_text()).get('gate_suites', {})
-                              if durations.is_file() else {})
+        budgets = Path('ops/config/ci-execution-budgets.json')
+        self.suite_budgets = (json.loads(budgets.read_text()).get('gate_suites', {})
+                              if budgets.is_file() else {})
         self.portable = (os.environ.get('CARR_CI_PORTABLE_ONLY') == '1'
                          or os.environ.get('GITHUB_ACTIONS', '').lower() == 'true')
 

@@ -1,3 +1,4 @@
+// Read reviewed vendor markets, explicit memberships, and Regional references.
 import { type Schema, Validator } from "@cfworker/json-schema";
 import { ToolError } from "./tool-error.ts";
 import { vendorDirectoryPayload } from "./vendor-people.ts";
