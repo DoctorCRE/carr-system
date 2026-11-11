@@ -49,7 +49,7 @@ test("bounded summaries never claim complete coverage for omitted rows or text",
   assert.equal(long.coverage.complete, false);
   assert.ok(long.summary.text.length <= 1400);
 });
-test("continuation binds actor, deal and snapshot; stale and retired reads refuse", async () => {
+test("continuation binds actor, deal and source revision; stale and retired reads refuse", async () => {
   const first = await read(db(Array.from({ length: 9 }, () => sample)), { page_size: 1 });
   assert.ok(first.history.next_cursor);
   const cursor = first.history.next_cursor;
