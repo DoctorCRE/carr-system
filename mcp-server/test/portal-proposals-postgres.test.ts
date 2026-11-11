@@ -129,7 +129,7 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       ).rows[0].id;
       deals.push(deal);
       await c.query("select ops.register_client_portal($1,$2,$3)", [deal, slug, "test"]);
-      const pub = slug === "a" ? "00000000-0000-4000-8000-000000000011" : "00000000-0000-4000-8000-000000000012";
+      const pub = slug === "a" ? "00000000-0000-4000-8000-000000000011" : "bbbbbbbb-0000-4000-8000-000000000012";
       pubs.push(pub);
       await c.query("select ops.write_client_publication($1,$2,0,true,'tour','Options','Shared',null,null,'joe')", [
         deal,
@@ -611,6 +611,61 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
             await partner.query("rollback");
           }
         });
+      } finally {
+        await partner.query("rollback");
+        await partner.end();
+      }
+    });
+    await t.test("partner receipts preserve canonical identities for uppercase scope inputs", async () => {
+      const tour = "bbbbbbbb-0000-4000-8000-000000000031";
+      await c.query("insert into ops.tour values('carr-internal',$1,$2)", [tour, deals[1]]);
+      const digestB = createHash("sha256").update("synthetic B session").digest("hex");
+      await c.query("select ops.exchange_client_portal_session('b','test',$1)", [digestB]);
+      await store.save({ slug: "b", digest: digestB, publication_id: pubs[1] }, 1, {
+        version: 0,
+        selected: [other],
+        notes: {},
+        idempotency_key: "canonical-case",
+      });
+      const config = (
+        await c.query(
+          "select inet_server_addr() host,current_setting('port')::integer port,current_database() as database",
+        )
+      ).rows[0];
+      const partner = new pg.Client({ ...config, user: "carr_writer" });
+      await partner.connect();
+      const human = { id: actor, slug: "joe", human: true, organization_tenant_id: "carr-internal" };
+      const target = { deal_id: deals[1], publication_id: pubs[1].toUpperCase(), tour_id: tour.toUpperCase() };
+      const begin = async () => {
+        await partner.query("begin");
+        await partner.query(
+          "select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true),set_config('carr.organization_tenant_id','carr-internal',true)",
+        );
+      };
+      try {
+        await begin();
+        const args = {
+          ...target,
+          publication_version: 1,
+          source_version: 1,
+          cart_version: 0,
+          cart_version_id: null,
+          decision: "keep",
+          property_ids: [],
+          idempotency_key: randomUUID(),
+        };
+        const kept = await TOOLS["accept-portal-proposal-v1"].handler(partner, human, args);
+        assert.equal(kept.publication_id, pubs[1]);
+        assert.equal(kept.tour_id, tour);
+        await partner.query("commit");
+        await begin();
+        const resolved = await TOOLS["read-portal-proposal-review-v1"].handler(partner, human, target);
+        assert.equal(resolved.pending, null);
+        assert.deepEqual(resolved.decision, kept);
+        await assert.rejects(
+          TOOLS["accept-portal-proposal-v1"].handler(partner, human, { ...args, idempotency_key: randomUUID() }),
+          /proposal_already_reviewed/,
+        );
       } finally {
         await partner.query("rollback");
         await partner.end();
