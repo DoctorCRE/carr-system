@@ -1,90 +1,160 @@
 // Read lead guidance, quiet follow-up proposals, and sourced practice and market context.
-import type { Db } from './verb-contract.ts';
-import { ToolError } from './tool-error.ts';
-import { isCalendarDate } from './calendar-date.ts';
 
-const CONTACTABLE_STATES = ['active', 'nurture'];
+import { isCalendarDate } from "./calendar-date.ts";
+import { ToolError } from "./tool-error.ts";
+import type { Db } from "./verb-contract.ts";
+
+const CONTACTABLE_STATES = ["active", "nurture"];
 const contactable = (state: string) => CONTACTABLE_STATES.includes(state);
 
-type Lead = { id: string; stage: string; suppressed: boolean; contact_eligible?: boolean; contact_state?: string; next_action_date?: string | null;
-  est_lease_event?: string | null; event_confidence?: string | null; lane?: string | null };
-const DEAL_OBJECTIVE = 'Coordinate with the linked client and deal before creating competing follow-up.';
+type Lead = {
+  id: string;
+  stage: string;
+  suppressed: boolean;
+  contact_eligible?: boolean;
+  contact_state?: string;
+  next_action_date?: string | null;
+  est_lease_event?: string | null;
+  event_confidence?: string | null;
+  lane?: string | null;
+};
+const DEAL_OBJECTIVE = "Coordinate with the linked client and deal before creating competing follow-up.";
 const CLOSED_OBJECTIVES: Record<string, string> = {
-  closed_won: 'Closed won. Coordinate any post-close follow-up with the owning partner.',
-  closed_lost: 'Closed lost. Review the recorded close with the owning partner before any future outreach.',
+  closed_won: "Closed won. Coordinate any post-close follow-up with the owning partner.",
+  closed_lost: "Closed lost. Review the recorded close with the owning partner before any future outreach.",
 };
 const OBJECTIVES: Record<string, string> = {
-  new: 'Verify identity and discover whether the practice has a real estate decision.',
-  qualified: 'Confirm the decision window, decision makers and an appropriate introduction.',
-  outreach_active: 'Follow the agreed next step and offer one useful reason to respond.',
-  engaged: 'Understand requirements and agree the next decision with the practice.',
-  nurture_drip: 'Respect the requested timing and return with useful, relevant information.',
+  new: "Verify identity and discover whether the practice has a real estate decision.",
+  qualified: "Confirm the decision window, decision makers and an appropriate introduction.",
+  outreach_active: "Follow the agreed next step and offer one useful reason to respond.",
+  engaged: "Understand requirements and agree the next decision with the practice.",
+  nurture_drip: "Respect the requested timing and return with useful, relevant information.",
   opportunity: DEAL_OBJECTIVE,
   active_deal: DEAL_OBJECTIVE,
 };
-type StrategyHold = { reason: 'suppressed' | 'contact_ineligible' | 'unsupported_stage' } | null;
+type StrategyHold = { reason: "suppressed" | "contact_ineligible" | "unsupported_stage" } | null;
 export function leadAdvice<T extends Lead>(lead: T) {
-  const contact_eligible = lead.contact_state === undefined ? lead.contact_eligible :
-    !lead.suppressed && lead.stage !== 'do_not_contact' && contactable(lead.contact_state);
+  const contact_eligible =
+    lead.contact_state === undefined
+      ? lead.contact_eligible
+      : !lead.suppressed && lead.stage !== "do_not_contact" && contactable(lead.contact_state);
   const closed = CLOSED_OBJECTIVES[lead.stage];
-  const hold: StrategyHold = lead.suppressed ? { reason: 'suppressed' } :
-    contact_eligible === false ? { reason: 'contact_ineligible' } :
-    !OBJECTIVES[lead.stage] && !closed ? { reason: 'unsupported_stage' } : null;
-  return { ...lead, contact_eligible,
-    handling_advice: hold ? 'Do not contact. Review the recorded restriction or terminal stage with the owning partner.' : closed ||
-      `${OBJECTIVES[lead.stage]} Research the handed record before preparing an outreach draft.`,
-    strategy: { basis: 'stage_based_guidance', hold, objective: hold ? 'Resolve the recorded hold before any outreach.' : closed || OBJECTIVES[lead.stage],
-      discovery: ['What has the practice already tried?', 'What constraints and timing are firm?',
-        'Who approves the decision?', 'What would make the practice stop?', 'What would success look like in 90 days?'],
-      decision_window: lead.est_lease_event || null, confidence: lead.event_confidence || 'unrecorded',
-      next_step: hold ? 'Ask the owning partner to review the hold.' : lead.next_action_date ?
-        `Respect the recorded next action date ${lead.next_action_date}.` : 'Agree a next step and date; silence is not consent.',
-      channel: 'Use a verified contact route. Keep outreach as a draft for a partner to send.',
-      risk: 'Do not infer personal circumstances, intent, or a confirmed lease expiry from a sourcing signal.', sent: false },
+  const hold: StrategyHold = lead.suppressed
+    ? { reason: "suppressed" }
+    : contact_eligible === false
+      ? { reason: "contact_ineligible" }
+      : !OBJECTIVES[lead.stage] && !closed
+        ? { reason: "unsupported_stage" }
+        : null;
+  return {
+    ...lead,
+    contact_eligible,
+    handling_advice: hold
+      ? "Do not contact. Review the recorded restriction or terminal stage with the owning partner."
+      : closed || `${OBJECTIVES[lead.stage]} Research the handed record before preparing an outreach draft.`,
+    strategy: {
+      basis: "stage_based_guidance",
+      hold,
+      objective: hold ? "Resolve the recorded hold before any outreach." : closed || OBJECTIVES[lead.stage],
+      discovery: [
+        "What has the practice already tried?",
+        "What constraints and timing are firm?",
+        "Who approves the decision?",
+        "What would make the practice stop?",
+        "What would success look like in 90 days?",
+      ],
+      decision_window: lead.est_lease_event || null,
+      confidence: lead.event_confidence || "unrecorded",
+      next_step: hold
+        ? "Ask the owning partner to review the hold."
+        : lead.next_action_date
+          ? `Respect the recorded next action date ${lead.next_action_date}.`
+          : "Agree a next step and date; silence is not consent.",
+      channel: "Use a verified contact route. Keep outreach as a draft for a partner to send.",
+      risk: "Do not infer personal circumstances, intent, or a confirmed lease expiry from a sourcing signal.",
+      sent: false,
+    },
   };
 }
 
-type Finding = { flag_id: string; kind: string; found: boolean; expired: boolean; proposes_correction: boolean;
-  source: string; observed_at: string; expires_on: string | null; value: unknown };
+type Finding = {
+  flag_id: string;
+  kind: string;
+  found: boolean;
+  expired: boolean;
+  proposes_correction: boolean;
+  source: string;
+  observed_at: string;
+  expires_on: string | null;
+  value: unknown;
+};
 export function researchSummary(evidence: Finding[] = [], now = Date.now()) {
-  if (evidence.length > 500) throw new ToolError({ error: 'research_evidence_limit_exceeded' });
+  if (evidence.length > 500) throw new ToolError({ error: "research_evidence_limit_exceeded" });
   const current = currentResearchEvidence(evidence, now);
-  const conflict = current.some(e => e.found && (e.kind === 'discrepancy' || e.proposes_correction));
-  const verified = current.some(e => e.kind === 'verified' && e.found && e.source.trim());
-  return { state: conflict ? 'needs_review' : verified ? 'verified' : 'needs_research', evidence,
-    coverage: 'recorded_findings_only', external_search_performed: false,
-    next_step: conflict ? 'Review discrepancies against original sources before working this record.' : verified ?
-      'Read the cited sources and confirm the practice decision before drafting outreach.' :
-      'Check practice website, professional registry and public filings; record sourced findings with record-finding, including nothing found.' };
+  const conflict = current.some((e) => e.found && (e.kind === "discrepancy" || e.proposes_correction));
+  const verified = current.some((e) => e.kind === "verified" && e.found && e.source.trim());
+  return {
+    state: conflict ? "needs_review" : verified ? "verified" : "needs_research",
+    evidence,
+    coverage: "recorded_findings_only",
+    external_search_performed: false,
+    next_step: conflict
+      ? "Review discrepancies against original sources before working this record."
+      : verified
+        ? "Read the cited sources and confirm the practice decision before drafting outreach."
+        : "Check practice website, professional registry and public filings; record sourced findings with record-finding, including nothing found.",
+  };
 }
 function currentResearchEvidence(evidence: Finding[], now: number) {
-  return evidence.filter(e => {
-    const timestamp = /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d+))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(e.observed_at);
+  return evidence.filter((e) => {
+    const timestamp =
+      /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.(\d+))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(
+        e.observed_at,
+      );
     if (e.expired || !timestamp || !isCalendarDate(e.observed_at.slice(0, 10))) return false;
-    const submillisecond = /[1-9]/.test((timestamp[1] ?? '').slice(3));
+    const submillisecond = /[1-9]/.test((timestamp[1] ?? "").slice(3));
     const firstEligibleClock = Date.parse(e.observed_at) + (submillisecond ? 1 : 0);
     return firstEligibleClock <= now;
   });
 }
 
-export async function leadReachability(lead: Lead & { base_version?: number }, evidence: Finding[] = [], now = Date.now()) {
+export async function leadReachability(
+  lead: Lead & { base_version?: number },
+  evidence: Finding[] = [],
+  now = Date.now(),
+) {
   const research = researchSummary(evidence, now);
   const current = currentResearchEvidence(evidence, now);
   const advised = leadAdvice(lead);
-  const evidence_state = research.state === 'needs_review' ? 'conflicting' : current.length ? 'current' :
-    evidence.some(e => e.expired) ? 'expired' : 'unknown';
+  const evidence_state =
+    research.state === "needs_review"
+      ? "conflicting"
+      : current.length
+        ? "current"
+        : evidence.some((e) => e.expired)
+          ? "expired"
+          : "unknown";
   // record-finding's verified kind is an identity pass. Its free-form values
   // do not bind a verified usable route to the current party contact value.
   const revision = JSON.stringify([lead.base_version ?? null, advised.contact_eligible ?? null, evidence]);
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(revision));
-  return { schema_version: 'lead-reachability.v1', classification: 'research',
-    basis: 'recorded_findings_without_route_binding', evidence_state,
-    contact_eligible: advised.contact_eligible ?? null, research_state: research.state,
-    missing_reasons: [...(advised.contact_eligible === false ? ['contact_restricted'] : []),
-      ...(evidence_state === 'conflicting' ? ['conflicting_evidence'] : []),
-      ...(evidence_state === 'expired' ? ['expired_evidence'] : []), 'verified_usable_route_not_established'],
-    source_revision: 'sha256:' + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join(''),
-    evaluated_at: new Date(now).toISOString(), evidence };
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(revision));
+  return {
+    schema_version: "lead-reachability.v1",
+    classification: "research",
+    basis: "recorded_findings_without_route_binding",
+    evidence_state,
+    contact_eligible: advised.contact_eligible ?? null,
+    research_state: research.state,
+    missing_reasons: [
+      ...(advised.contact_eligible === false ? ["contact_restricted"] : []),
+      ...(evidence_state === "conflicting" ? ["conflicting_evidence"] : []),
+      ...(evidence_state === "expired" ? ["expired_evidence"] : []),
+      "verified_usable_route_not_established",
+    ],
+    source_revision: "sha256:" + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join(""),
+    evaluated_at: new Date(now).toISOString(),
+    evidence,
+  };
 }
 export function researchEvidenceSql(partyId: string) {
   return `coalesce((select jsonb_agg(to_jsonb(f) order by f.observed_at desc,f.flag_id) from (
@@ -94,28 +164,48 @@ export function researchEvidenceSql(partyId: string) {
           and r.subject_type=f.subject_type and r.subject_id=f.subject_id)
       order by observed_at desc,flag_id limit 501) f),'[]'::jsonb)`;
 }
-const marketFilters = { type: 'object', additionalProperties: false, properties: {
-  vertical: { type: 'string', minLength: 1, maxLength: 200 }, city: { type: 'string', minLength: 1, maxLength: 200 },
-  state: { type: 'string', pattern: '^[A-Z]{2}$' },
-} };
+const marketFilters = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    vertical: { type: "string", minLength: 1, maxLength: 200 },
+    city: { type: "string", minLength: 1, maxLength: 200 },
+    state: { type: "string", pattern: "^[A-Z]{2}$" },
+  },
+};
 type MarketFilter = { vertical?: string; city?: string; state?: string };
 
 export function leadFollowUpTools() {
   return {
-    'quiet-follow-ups': {
-      write: false, writerConnection: true,
-      description: 'Read-only follow-up proposals for quiet leads and active vendors. Suggested inactivity intervals default to 45 and 90 days and may be supplied explicitly. Uses the latest recorded contact date or creation date when never contacted. A lead next_action_date overrides the interval. Preserves every open task including future and held tasks; excludes suppressed/terminal leads, restricted parties, merged/deleted records, and leads linked to cold/paused clients. Includes source dates and owner. anchor_on and due_on are calendar-date strings (YYYY-MM-DD), never timestamps. Stored dates retain their calendar day; timestamp anchors and the current day use America/Chicago. Output contract: mcp-server/contracts/quiet-follow-ups.v1.json. Omit owner_slug for all owners, supply null for unassigned owner_id, or an exact recorded actor slug. Never creates a task, changes a cadence rule, drafts or sends email. Existing cadence engine continues scheduled task succession.',
-      inputSchema: { type: 'object', additionalProperties: false, properties: {
-        lead_days: { type: 'integer', minimum: 1, maximum: 365, default: 45 },
-        vendor_days: { type: 'integer', minimum: 1, maximum: 365, default: 90 },
-        owner_slug: { type: ['string', 'null'], minLength: 1, maxLength: 100, pattern: '\\S' },
-      } },
-      handler: async (c: Db, _actor: unknown, args: { lead_days?: number; vendor_days?: number; owner_slug?: string | null }) => {
-        if (args.owner_slug !== undefined && args.owner_slug !== null &&
-          (typeof args.owner_slug !== 'string' || !args.owner_slug.trim() || args.owner_slug.length > 100))
-          throw new ToolError({ error: 'invalid_owner_slug' });
+    "quiet-follow-ups": {
+      write: false,
+      writerConnection: true,
+      description:
+        "Read-only follow-up proposals for quiet leads and active vendors. Suggested inactivity intervals default to 45 and 90 days and may be supplied explicitly. Uses the latest recorded contact date or creation date when never contacted. A lead next_action_date overrides the interval. Preserves every open task including future and held tasks; excludes suppressed/terminal leads, restricted parties, merged/deleted records, and leads linked to cold/paused clients. Includes source dates and owner. anchor_on and due_on are calendar-date strings (YYYY-MM-DD), never timestamps. Stored dates retain their calendar day; timestamp anchors and the current day use America/Chicago. Output contract: mcp-server/contracts/quiet-follow-ups.v1.json. Omit owner_slug for all owners, supply null for unassigned owner_id, or an exact recorded actor slug. Never creates a task, changes a cadence rule, drafts or sends email. Existing cadence engine continues scheduled task succession.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          lead_days: { type: "integer", minimum: 1, maximum: 365, default: 45 },
+          vendor_days: { type: "integer", minimum: 1, maximum: 365, default: 90 },
+          owner_slug: { type: ["string", "null"], minLength: 1, maxLength: 100, pattern: "\\S" },
+        },
+      },
+      handler: async (
+        c: Db,
+        _actor: unknown,
+        args: { lead_days?: number; vendor_days?: number; owner_slug?: string | null },
+      ) => {
+        if (
+          args.owner_slug !== undefined &&
+          args.owner_slug !== null &&
+          (typeof args.owner_slug !== "string" || !args.owner_slug.trim() || args.owner_slug.length > 100)
+        )
+          throw new ToolError({ error: "invalid_owner_slug" });
         const cadence = { lead_days: args.lead_days ?? 45, vendor_days: args.vendor_days ?? 90 };
-        const proposals = (await c.query(`with subjects as (
+        const proposals = (
+          await c.query(
+            `with subjects as (
           select 'lead'::text subject_type,l.id subject_id,l.party_id,l.registry_ref ref,p.name,l.owner_id,
             coalesce(greatest(l.last_touch,t.last_touch),carr_business_date(l.created_at)) anchor_on,
             case when greatest(l.last_touch,t.last_touch) is null then 'created_at' else 'last_contact' end basis,
@@ -144,18 +234,30 @@ export function leadFollowUpTools() {
             carr_business_date()-d.due_on days_overdue from due d
             left join actor a on a.id=d.owner_id where due_on<=carr_business_date()
             and ($5::boolean or ($6::text is null and d.owner_id is null) or a.slug=$6::text)
-          order by d.due_on,d.subject_type,d.subject_id limit 1001`, [cadence.lead_days,cadence.vendor_days,CONTACTABLE_STATES,'active',
-            args.owner_slug === undefined,args.owner_slug ?? null])).rows;
-        if (proposals.length > 1000) throw new ToolError({ error: 'quiet_follow_up_limit_exceeded' });
-        return { schema_version: 'quiet-follow-ups.v1', cadence, proposals, sent: false, tasks_created: false };
+          order by d.due_on,d.subject_type,d.subject_id limit 1001`,
+            [
+              cadence.lead_days,
+              cadence.vendor_days,
+              CONTACTABLE_STATES,
+              "active",
+              args.owner_slug === undefined,
+              args.owner_slug ?? null,
+            ],
+          )
+        ).rows;
+        if (proposals.length > 1000) throw new ToolError({ error: "quiet_follow_up_limit_exceeded" });
+        return { schema_version: "quiet-follow-ups.v1", cadence, proposals, sent: false, tasks_created: false };
       },
     },
-    'territory-state-board': {
+    "territory-state-board": {
       write: false,
-      description: 'City/state submarket board for recorded practice geographies, with dated source evidence. City is the geographic grouping, not a verified submarket polygon. Reads record-finding kind=submarket_state with value fields city, state and condition=soft|balanced|tight. Current evidence requires found=true, an explicit unexpired expires_on and a nonfuture observation. Expired evidence remains visible. Missing evidence is unknown and conflicting current conditions stay conflicting. No condition is inferred from lead volume or a single negotiation. Exact optional city/state/vertical filters.',
+      description:
+        "City/state submarket board for recorded practice geographies, with dated source evidence. City is the geographic grouping, not a verified submarket polygon. Reads record-finding kind=submarket_state with value fields city, state and condition=soft|balanced|tight. Current evidence requires found=true, an explicit unexpired expires_on and a nonfuture observation. Expired evidence remains visible. Missing evidence is unknown and conflicting current conditions stay conflicting. No condition is inferred from lead volume or a single negotiation. Exact optional city/state/vertical filters.",
       inputSchema: marketFilters,
       handler: async (c: Db, _actor: unknown, args: MarketFilter) => {
-        const rows = (await c.query(`with markets as (
+        const rows = (
+          await c.query(
+            `with markets as (
           select distinct p.city,p.state from party p where p.merged_into is null and p.deleted_at is null
             and p.city is not null and p.state is not null and p.specialty is not null
             and ($1::text is null or p.specialty=$1) and ($2::text is null or p.city=$2) and ($3::text is null or p.state=$3))
@@ -170,17 +272,24 @@ export function leadFollowUpTools() {
             from v_record_flag_subject f where f.kind='submarket_state'
               and f.value->>'city'=m.city and f.value->>'state'=m.state
               and f.value->>'condition' in ('soft','balanced','tight')) e on true
-          order by m.state,m.city limit 1001`, [args.vertical || null,args.city || null,args.state || null])).rows;
-        if (rows.length > 1000) throw new ToolError({ error: 'territory_board_limit_exceeded', hint: 'Narrow city or state.' });
-        return { schema_version: 'territory-state-board.v1', coverage: 'recorded_geographies_only', submarkets: rows };
+          order by m.state,m.city limit 1001`,
+            [args.vertical || null, args.city || null, args.state || null],
+          )
+        ).rows;
+        if (rows.length > 1000)
+          throw new ToolError({ error: "territory_board_limit_exceeded", hint: "Narrow city or state." });
+        return { schema_version: "territory-state-board.v1", coverage: "recorded_geographies_only", submarkets: rows };
       },
     },
-    'ideal-client-profile': {
+    "ideal-client-profile": {
       write: false,
-      description: 'Mine recorded closed-won deals into historical fit profiles by vertical, deal type, transaction city and client state. Returns distinct clients, won deal counts and dated deal evidence. Excludes lost/open deals and merged/deleted client parties. Exact optional filters. Closed dates must be recorded and not future. Missing vertical/geography stays unrecorded. Historical fit is a hypothesis, never a prediction or an automatic qualification rule. No commission placeholders or client contact details.',
+      description:
+        "Mine recorded closed-won deals into historical fit profiles by vertical, deal type, transaction city and client state. Returns distinct clients, won deal counts and dated deal evidence. Excludes lost/open deals and merged/deleted client parties. Exact optional filters. Closed dates must be recorded and not future. Missing vertical/geography stays unrecorded. Historical fit is a hypothesis, never a prediction or an automatic qualification rule. No commission placeholders or client contact details.",
       inputSchema: marketFilters,
       handler: async (c: Db, _actor: unknown, args: MarketFilter) => {
-        const rows = (await c.query(`with wins as (
+        const rows = (
+          await c.query(
+            `with wins as (
           select d.id,d.name,d.client_id,d.deal_type,d.closed_on,d.city,p.state,
             coalesce(nullif(cl.vertical,''),nullif(d.segment,''),nullif(p.specialty,'')) vertical
           from deal d join client cl on cl.id=d.client_id join party p on p.id=cl.party_id
@@ -191,22 +300,34 @@ export function leadFollowUpTools() {
           from wins where ($1::text is null or vertical=$1) and ($2::text is null or city=$2)
             and ($3::text is null or state=$3)
           group by vertical,deal_type,city,state order by count(*) desc,vertical,deal_type,city,state limit 1001`,
-          [args.vertical || null,args.city || null,args.state || null])).rows;
-        if (rows.length > 1000) throw new ToolError({ error: 'client_profile_limit_exceeded', hint: 'Narrow vertical, city or state.' });
-        return { schema_version: 'ideal-client-profile.v1', coverage: 'recorded_closed_won_only',
-          profiles: rows.map(row => ({ ...row, hypothesis: 'Historical fit, not a prediction or qualification rule.' })) };
+            [args.vertical || null, args.city || null, args.state || null],
+          )
+        ).rows;
+        if (rows.length > 1000)
+          throw new ToolError({ error: "client_profile_limit_exceeded", hint: "Narrow vertical, city or state." });
+        return {
+          schema_version: "ideal-client-profile.v1",
+          coverage: "recorded_closed_won_only",
+          profiles: rows.map((row) => ({
+            ...row,
+            hypothesis: "Historical fit, not a prediction or qualification rule.",
+          })),
+        };
       },
     },
-    'market-practice-map': {
+    "market-practice-map": {
       write: false,
-      description: 'Geographic practice index by recorded vertical, city and state, with practice snapshots, live role references and sourced research evidence. Exact optional filters. Includes organizations with a recorded specialty or client vertical and people linked to a practice. Excludes merged or deleted parties. This is recorded practice coverage, not a complete market census or verified coordinates. Creates no contacts or leads.',
+      description:
+        "Geographic practice index by recorded vertical, city and state, with practice snapshots, live role references and sourced research evidence. Exact optional filters. Includes organizations with a recorded specialty or client vertical and people linked to a practice. Excludes merged or deleted parties. This is recorded practice coverage, not a complete market census or verified coordinates. Creates no contacts or leads.",
       inputSchema: marketFilters,
       handler: async (c: Db, _actor: unknown, args: MarketFilter) => {
-        const rows = (await c.query(`with practices as (
+        const rows = (
+          await c.query(
+            `with practices as (
           select p.id,p.ref,p.name,p.kind,p.org_id,p.specialty,p.city,p.county,p.state,
             coalesce(nullif(p.specialty,''),(select nullif(cl.vertical,'') from client cl
               where cl.party_id=p.id and cl.merged_into is null order by cl.id limit 1)) vertical,
-            ${researchEvidenceSql('p.id')} evidence,
+            ${researchEvidenceSql("p.id")} evidence,
             coalesce((select jsonb_agg(jsonb_build_object('kind',r.subject_type,'ref',r.ref,'id',r.subject_id) order by r.subject_type,r.subject_id)
               from v_ref_index r where r.party_id=p.id and not r.merged),'[]'::jsonb) roles
           from party p where p.merged_into is null and p.deleted_at is null
@@ -214,30 +335,53 @@ export function leadFollowUpTools() {
               and org.merged_into is null and org.deleted_at is null)))
           select * from practices where vertical is not null and ($1::text is null or vertical=$1)
             and ($2::text is null or city=$2) and ($3::text is null or state=$3)
-          order by vertical,state,city,name,id limit 1001`, [args.vertical || null,args.city || null,args.state || null])).rows;
-        if (rows.length > 1000) throw new ToolError({ error: 'practice_map_limit_exceeded', hint: 'Narrow vertical, city or state.' });
-        return { schema_version: 'market-practice-map.v1', coverage: 'recorded_practices_only',
-          practices: rows.map(({ evidence, ...p }) => ({ ...p, evidence_ref: `party:${p.id}`, research: researchSummary(evidence) })) };
+          order by vertical,state,city,name,id limit 1001`,
+            [args.vertical || null, args.city || null, args.state || null],
+          )
+        ).rows;
+        if (rows.length > 1000)
+          throw new ToolError({ error: "practice_map_limit_exceeded", hint: "Narrow vertical, city or state." });
+        return {
+          schema_version: "market-practice-map.v1",
+          coverage: "recorded_practices_only",
+          practices: rows.map(({ evidence, ...p }) => ({
+            ...p,
+            evidence_ref: `party:${p.id}`,
+            research: researchSummary(evidence),
+          })),
+        };
       },
     },
-    'prospect-research': {
+    "prospect-research": {
       write: false,
-      description: 'Run before working a handed prospect or contact record. Read exact party UUID or P/L/C/V reference, live roles and sourced findings, including expired, nothing-found and discrepancy evidence. Returns needs_research, needs_review or verified. Does not search the web itself; missing evidence requires checking original public sources and recording findings before outreach. Owners remain contacts; creates no leads, edits no identity and sends nothing. Lead workspace detail runs this evidence check in its read snapshot.',
-      inputSchema: { type: 'object', additionalProperties: false, properties: {
-        subject: { type: 'string', minLength: 1, maxLength: 100 },
-      }, required: ['subject'] },
+      description:
+        "Run before working a handed prospect or contact record. Read exact party UUID or P/L/C/V reference, live roles and sourced findings, including expired, nothing-found and discrepancy evidence. Returns needs_research, needs_review or verified. Does not search the web itself; missing evidence requires checking original public sources and recording findings before outreach. Owners remain contacts; creates no leads, edits no identity and sends nothing. Lead workspace detail runs this evidence check in its read snapshot.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          subject: { type: "string", minLength: 1, maxLength: 100 },
+        },
+        required: ["subject"],
+      },
       handler: async (c: Db, _actor: unknown, args: { subject: string }) => {
-        const rows = (await c.query(`select p.id,p.ref,p.name,p.specialty,p.city,p.state,p.contact_state,
+        const rows = (
+          await c.query(
+            `select p.id,p.ref,p.name,p.specialty,p.city,p.state,p.contact_state,
           case when exists(select 1 from client cl where cl.party_id=p.id and cl.merged_into is null) then 'client'
             when exists(select 1 from lead l where l.party_id=p.id) then 'lead'
             when exists(select 1 from vendor v where v.party_id=p.id and v.merged_into is null) then 'vendor' else 'contact' end relationship,
-          ${researchEvidenceSql('p.id')} evidence
+          ${researchEvidenceSql("p.id")} evidence
           from party p where p.merged_into is null and p.deleted_at is null and
             (p.id::text=lower($1) or upper(p.ref)=upper($1) or exists(select 1 from v_ref_index r
-              where r.party_id=p.id and not r.merged and (r.subject_id::text=lower($1) or upper(r.ref)=upper($1))))`, [args.subject])).rows;
-        if (rows.length !== 1) throw new ToolError({ error: rows.length ? 'prospect_ambiguous' : 'prospect_not_found' });
+              where r.party_id=p.id and not r.merged and (r.subject_id::text=lower($1) or upper(r.ref)=upper($1))))`,
+            [args.subject],
+          )
+        ).rows;
+        if (rows.length !== 1)
+          throw new ToolError({ error: rows.length ? "prospect_ambiguous" : "prospect_not_found" });
         const { evidence, ...record } = rows[0];
-        return { schema_version: 'prospect-research.v1', ...record, research: researchSummary(evidence), sent: false };
+        return { schema_version: "prospect-research.v1", ...record, research: researchSummary(evidence), sent: false };
       },
     },
   };
