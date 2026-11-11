@@ -617,11 +617,13 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       }
     });
     await t.test("partner receipts preserve canonical identities for uppercase scope inputs", async () => {
+      const publicationB = pubs[1];
+      assert.ok(publicationB);
       const tour = "bbbbbbbb-0000-4000-8000-000000000031";
       await c.query("insert into ops.tour values('carr-internal',$1,$2)", [tour, deals[1]]);
       const digestB = createHash("sha256").update("synthetic B session").digest("hex");
       await c.query("select ops.exchange_client_portal_session('b','test',$1)", [digestB]);
-      await store.save({ slug: "b", digest: digestB, publication_id: pubs[1] }, 1, {
+      await store.save({ slug: "b", digest: digestB, publication_id: publicationB }, 1, {
         version: 0,
         selected: [other],
         notes: {},
@@ -635,7 +637,7 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       const partner = new pg.Client({ ...config, user: "carr_writer" });
       await partner.connect();
       const human = { id: actor, slug: "joe", human: true, organization_tenant_id: "carr-internal" };
-      const target = { deal_id: deals[1], publication_id: pubs[1].toUpperCase(), tour_id: tour.toUpperCase() };
+      const target = { deal_id: deals[1], publication_id: publicationB.toUpperCase(), tour_id: tour.toUpperCase() };
       const begin = async () => {
         await partner.query("begin");
         await partner.query(
@@ -655,7 +657,7 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
           idempotency_key: randomUUID(),
         };
         const kept = await TOOLS["accept-portal-proposal-v1"].handler(partner, human, args);
-        assert.equal(kept.publication_id, pubs[1]);
+        assert.equal(kept.publication_id, publicationB);
         assert.equal(kept.tour_id, tour);
         await partner.query("commit");
         await begin();
