@@ -1560,7 +1560,7 @@ if "--no-download" in args:
     assert root != original.parent
     assert archive.stat().st_mode & 0o777 == 0o444
     sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
-if mode == "timed-out":
+if mode == "timed-out" or (mode == "transient-timeout" and len(calls) == 1):
     sys.exit(124)
 if mode == "native-error":
     sys.exit(42)
@@ -1585,11 +1585,12 @@ if not archive.exists():
             ("tampered", ["install"], True),
             ("partial-cache", ["offline", "install"], True),
             ("stale", ["install", "update", "install"], True),
-            ("unavailable", ["install", "update", "install"], False),
+            ("unavailable", ["install", "update", "install", "install"], False),
             ("refresh-failed", ["install", "update"], False),
             ("metadata-error", [], False),
             ("metadata-deadline", [], False),
-            ("timed-out", ["install"], False),
+            ("timed-out", ["install", "install", "install"], False),
+            ("transient-timeout", ["install", "install"], True),
             ("native-error", ["install"], False),
             ("publish-error", ["install"], False),
             ("old-version", ["install"], True),
@@ -1623,6 +1624,9 @@ if not archive.exists():
             for call in calls:
                 private = pathlib.Path(next(a.split("=", 1)[1] for a in call if a.startswith("Dir::Cache::archives=")))
                 check(f"zsh {mode} removes private archives", not private.exists())
+            if mode in ("unavailable", "timed-out"):
+                check(f"zsh {mode} explains exhausted retries",
+                      "zsh installation failed after 3 attempts" in ran.stderr, ran.stderr)
             if mode == "tampered":
                 check("zsh quarantines unauthenticated cache bytes",
                       (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
