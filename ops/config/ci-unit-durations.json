@@ -353,6 +353,7 @@
     "portal-parity-browser.test.mjs": {"milliseconds": 52736, "serial": true},
     "portal-parity-probes.test.ts": {"milliseconds": 220, "serial": false},
     "portal-parity.test.mjs": {"milliseconds": 4830, "serial": false},
+    "portal-web.test.mjs": {"milliseconds": 331, "serial": false},
     "post-call-action-pairs.test.mjs": {"milliseconds": 20150, "serial": true},
     "post-call-contacts-postgres.test.mjs": {"milliseconds": 17126, "serial": true},
     "post-call-followups.test.mjs": {"milliseconds": 1601, "serial": true},
