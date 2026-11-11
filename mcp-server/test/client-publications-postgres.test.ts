@@ -322,9 +322,11 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       const revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", cwd: root }).trim();
       const preview = await tools["preview-deal-client-view"].handler(c, partner, { deal_id: dealA });
       const list = await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA });
+      const readClient = () =>
+        executeRegisteredTool(c, partner, "read-client-portal", { slug: "synthetic-a", password: "test" });
       const client = {
         source_commit: revision,
-        response: { portal: await project() },
+        response: await readClient(),
         publication_receipt: { deal_id: dealA, response: withdrawn },
       };
       const fixture = {
@@ -364,7 +366,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
       assert.equal(proof().status, 1);
       fixture["preview-deal-client-view"] = preview;
-      client.response.portal = await project();
+      client.response.portal = (await readClient()).portal;
       await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
       await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
       const releaseRepo = path.join(scratch, "release-repo");
