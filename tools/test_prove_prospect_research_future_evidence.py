@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / 'tools/prove-prospect-research-future-evidence.py'
-READ_CAP_SECONDS = json.loads((ROOT / 'ops/config/ci-unit-durations.json').read_text())[
+READ_CAP_SECONDS = json.loads((ROOT / 'ops/config/ci-execution-budgets.json').read_text())[
     'prospect_research_proof_measurement']['read_cap_seconds']
 LEAD = '00000000-0000-4000-8000-000000000001'
 FINDING = {'kind': 'verified', 'found': True, 'expired': False, 'proposes_correction': False,

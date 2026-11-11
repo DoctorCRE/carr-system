@@ -122,6 +122,14 @@ test("installed HTTP create, detail, cart and cross-deal library enforce canonic
         t,
         `sha256:${"a".repeat(64)}`,
       ]);
+      await c.query("select ops.append_tour_cheat_sheet_revision('carr-internal',$1,$2,0)", [
+        t,
+        { notes: "First broker notes" },
+      ]);
+      await c.query("select ops.append_tour_cheat_sheet_revision('carr-internal',$1,$2,1)", [
+        t,
+        { notes: "Second broker notes" },
+      ]);
       await c.query("reset session authorization");
       if (kind === "inaccessible") await c.query("update public.deal set owner='dell' where id=$1", [d]);
       if (kind === "deleted") await c.query("update public.party set deleted_at=now() where id=$1", [p]);
@@ -147,6 +155,7 @@ test("installed HTTP create, detail, cart and cross-deal library enforce canonic
       },
       listToursFn: runtime.listToursFn,
       readTourFn: runtime.readTourFn,
+      readCheatSheetHistoryFn: runtime.readCheatSheetHistoryFn,
       readTourSelectionCartFn: async ({ input }) => ({
         ok: true,
         data: await read("select ops.read_tour_selection_cart($1,$2,$3) data", ["carr-internal", input?.tour_id]),
@@ -169,6 +178,15 @@ test("installed HTTP create, detail, cart and cross-deal library enforce canonic
     for (const fixture of cases.toReversed()) {
       const detail = await fetch(new Request(`${origin}/api/tours/detail?tour_id=${fixture.t}`));
       const cart = await fetch(new Request(`${origin}/api/tours/selection-cart?tour_id=${fixture.t}`));
+      const history = await fetch(new Request(`${origin}/api/tours/cheat-sheet/history/v1?tour_id=${fixture.t}`));
+      assert.equal(history.status, detail.status, `history authorization for ${fixture.kind}`);
+      if (fixture.kind === "accessible") {
+        const rows = (await history.json()).data.revisions;
+        assert.deepEqual(
+          rows.map((row: { content: unknown }) => row.content),
+          [{ notes: "Second broker notes" }, { notes: "First broker notes" }],
+        );
+      }
       if (fixture.kind === "unknown") {
         unknownDetail = detail.status;
         unknownCart = cart.status;
