@@ -1,17 +1,15 @@
 // Test paginated lead history and stable ordering against PostgreSQL.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import pg from 'pg';
 import { randomUUID } from 'node:crypto';
-import { postgresDatabase } from './helpers/postgres-database.mjs';
+import { snapshotDatabase } from './helpers/postgres-database.mjs';
 import { executeRegisteredTool } from '../src/tools.js';
 
 test('F7 registered Leads history reaches every captured entry with exact counts and stable ties', async () => {
-  const db = await postgresDatabase('lead-history-');
-  const c = db.client;
+  const c = new pg.Client({ connectionString: await snapshotDatabase('lead-history-') });
+  await c.connect();
   try {
-    await c.query('create role neondb_owner');
-    try { execFileSync('psql', [c.connectionParameters.connectionString || `postgresql://fixture@127.0.0.1:${c.connectionParameters.port}/postgres`, '-X', '-v', 'ON_ERROR_STOP=1', '-q', '-f', new URL('../../db/schema.sql', import.meta.url).pathname], { stdio: ['ignore','pipe','pipe'] }); } catch (error) { throw new Error(error.stderr?.toString() || error.message); }
     const actor = (await c.query("insert into actor(slug,kind,display_name) values('history-fixture','automation','Synthetic history') returning id,slug")).rows[0];
     await c.query("select setval(pg_get_serial_sequence('event','mutation_order'),9007199254740993)");
     const read = (lead, extra = {}) => executeRegisteredTool(c, { ...actor, human: false }, 'lead-board', { workspace: 'leads', lead_id: lead, ...extra });
@@ -44,5 +42,5 @@ test('F7 registered Leads history reaches every captured entry with exact counts
       await c.query('update lead set suppressed=true where id=$1', [lead]);
       assert.equal((await read(lead)).detail, null);
     }
-  } finally { await db.close(); }
+  } finally { await c.end(); }
 });

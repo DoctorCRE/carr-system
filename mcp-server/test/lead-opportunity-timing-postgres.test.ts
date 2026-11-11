@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
+import { parseLeadOpportunityTiming } from "../src/lead-opportunity-timing.ts";
 import { array, executeRegisteredTool, object, required, string } from "./helpers/legacy-test-registry.ts";
 import { snapshotDatabase } from "./helpers/postgres-database.mjs";
 
@@ -38,12 +39,10 @@ test("registered workspace separates Added from exact current source evidence", 
         );
         assert.deepEqual(detail.opportunity_timing, board.opportunity_timing);
         assert.equal(r.last_search_at, null);
-        const t = object(detail.opportunity_timing);
-        assert.equal(t.contract, "lead-opportunity-timing.v1");
-        assert.equal(Date.parse(string(t.record_added_at)), Date.parse("2026-11-01T12:00:00Z"));
-        assert.ok(t.status === "supported" || t.status === "unknown");
-        assert.equal(array(t.events).length === 0, t.status === "unknown");
-        return { status: t.status, events: array(t.events).map(object) };
+        const t = parseLeadOpportunityTiming(detail.opportunity_timing);
+        assert.deepEqual(t, parseLeadOpportunityTiming(board.opportunity_timing));
+        assert.equal(Date.parse(t.record_added_at), Date.parse("2026-11-01T12:00:00Z"));
+        return t;
       } catch (error) {
         await c.query("rollback");
         throw error;

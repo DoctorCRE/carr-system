@@ -7,7 +7,7 @@ type ErrorConstructor = new (payload: { error: string }) => Error;
 
 import { isCalendarDate } from "./calendar-date.ts";
 import { leadAdvice, researchEvidenceSql, researchSummary } from "./lead-follow-up.ts";
-import { opportunityTimingCtes, opportunityTimingSql } from "./lead-opportunity-timing.ts";
+import { opportunityTimingCtes, opportunityTimingSql, parseLeadOpportunityTiming } from "./lead-opportunity-timing.ts";
 import { ToolError as DefaultToolError } from "./tool-error.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
@@ -100,11 +100,22 @@ export async function readLeadWorkspace(
   return {
     schema_version: LEAD_WORKSPACE_VERSION,
     generated_at: new Date().toISOString(),
-    leads: row.leads.map(leadAdvice),
+    leads: row.leads.map((lead: Parameters<typeof leadAdvice>[0] & { opportunity_timing: unknown }) => ({
+      ...leadAdvice(lead),
+      opportunity_timing: parseLeadOpportunityTiming(lead.opportunity_timing),
+    })),
     last_search_at: null,
     search_run_coverage: "unavailable",
     ...(args.lead_id
-      ? { detail: row.detail ? { ...leadAdvice(detail), research: researchSummary(research_evidence) } : null }
+      ? {
+          detail: row.detail
+            ? {
+                ...leadAdvice(detail),
+                opportunity_timing: parseLeadOpportunityTiming(detail.opportunity_timing),
+                research: researchSummary(research_evidence),
+              }
+            : null,
+        }
       : {}),
   };
 }

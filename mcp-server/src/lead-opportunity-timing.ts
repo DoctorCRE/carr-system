@@ -1,3 +1,73 @@
+import { isCalendarDate } from "./calendar-date.ts";
+import { ToolError } from "./tool-error.ts";
+
+type OpportunityEvent = {
+  date: string;
+  date_type: "date";
+  date_basis: "enumeration" | "registry_update" | "publication";
+  source: "nppes" | "pecos";
+  record_key: string;
+  revision: string;
+  source_url: string;
+  published_on: string;
+  observed_at: string;
+  meaning: string;
+  uncertainty: string;
+};
+
+export type LeadOpportunityTiming = {
+  contract: "lead-opportunity-timing.v1";
+  record_added_at: string;
+} & ({ status: "unknown"; events: [] } | { status: "supported"; events: [OpportunityEvent, ...OpportunityEvent[]] });
+
+function isInstant(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  return (
+    !!match &&
+    isCalendarDate(match[1]) &&
+    Number(match[2]) < 24 &&
+    Number(match[3]) < 60 &&
+    Number(match[4]) < 60 &&
+    Number(match[6] ?? 0) < 24 &&
+    Number(match[7] ?? 0) < 60 &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function isEvent(value: unknown): value is OpportunityEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const e = value as Record<string, unknown>;
+  return (
+    isCalendarDate(e.date) &&
+    e.date_type === "date" &&
+    isCalendarDate(e.published_on) &&
+    isInstant(e.observed_at) &&
+    ((e.source === "nppes" && (e.date_basis === "enumeration" || e.date_basis === "registry_update")) ||
+      (e.source === "pecos" && e.date_basis === "publication")) &&
+    [e.record_key, e.revision, e.source_url, e.meaning, e.uncertainty].every(
+      (v) => typeof v === "string" && v.trim().length > 0,
+    )
+  );
+}
+
+// Refuse malformed reads. Unknown means absent source support, never corrupt evidence.
+export function parseLeadOpportunityTiming(value: unknown): LeadOpportunityTiming {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const t = value as Record<string, unknown>;
+    if (
+      t.contract === LEAD_OPPORTUNITY_TIMING_VERSION &&
+      isInstant(t.record_added_at) &&
+      Array.isArray(t.events) &&
+      ((t.status === "unknown" && t.events.length === 0) ||
+        (t.status === "supported" && t.events.length > 0 && t.events.every(isEvent)))
+    ) {
+      return value as LeadOpportunityTiming;
+    }
+  }
+  throw new ToolError({ error: "invalid_lead_opportunity_timing" });
+}
+
 // Project exact source event dates without inferring practice openings.
 const LEAD_OPPORTUNITY_TIMING_VERSION = "lead-opportunity-timing.v1";
 
