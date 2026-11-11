@@ -9,6 +9,7 @@ import {
   type PortalProposalRequest,
   portalProposalStorage,
 } from "../src/portal-proposals.ts";
+import { createPortalWebHandler, PORTAL_ORIGIN, portalSqlOperations } from "../src/portal-web.ts";
 import { postgresDatabase } from "./helpers/postgres-database.mjs";
 import { readMigration } from "./migration-source.testhelper.ts";
 
@@ -239,16 +240,98 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
             (
               await c.query("select has_table_privilege($1,$2,'INSERT,UPDATE,DELETE,SELECT') allowed", [
                 role,
-                "ops." + table,
+                `ops.${table}`,
               ])
             ).rows[0].allowed,
             false,
           );
     });
+    await t.test("HTTP issue, proposal round trip, refusals and revoke through real SQL", async () => {
+      const host = createPortalWebHandler({
+        ...portalSqlOperations(async (fn) => {
+          await c.query("begin");
+          try {
+            const result = await fn(c);
+            await c.query("commit");
+            return result;
+          } catch (error) {
+            await c.query("rollback");
+            throw error;
+          }
+        }),
+        deadlineMs: 10000,
+      });
+      const send = (path: string, method = "GET", cookie = "", body?: string, headers: Record<string, string> = {}) =>
+        host.fetch(
+          new Request(`${PORTAL_ORIGIN}/a/${path}`, {
+            method,
+            headers: { origin: PORTAL_ORIGIN, cookie, ...headers },
+            ...(body === undefined ? {} : { body }),
+          }),
+        );
+      const form = await send("");
+      assert.equal(form.status, 200);
+      const csrf = /name="portal-csrf" content="([a-f0-9]+)"/.exec(await form.text())?.[1];
+      assert.ok(csrf);
+      const anonymous = String(form.headers.get("set-cookie")).split(";")[0];
+      const login = await send("login", "POST", anonymous, `password=test&csrf=${csrf}`, {
+        "content-type": "application/x-www-form-urlencoded",
+      });
+      assert.equal(login.status, 303);
+      const cookie = String(login.headers.get("set-cookie")).split(";")[0];
+      const status = await (await send("status", "GET", cookie)).json();
+      assert.equal(status.authenticated, true);
+      const route = `proposals/${pubs[0]}`;
+      const read = await send(route, "GET", cookie);
+      assert.equal(read.status, 200);
+      const current = await read.json();
+      const body = JSON.stringify({
+        publication_version: current.publication_version,
+        request: {
+          version: current.selection.version,
+          selected: [other],
+          notes: { [other]: "HTTP note" },
+          idempotency_key: "http-save",
+        },
+      });
+      const headers = { "content-type": "application/json", "x-portal-csrf": status.csrf };
+      assert.equal((await send(route, "GET")).status, 401);
+      assert.equal((await send(route, "POST", cookie, body, { "content-type": "application/json" })).status, 403);
+      assert.equal((await send(route, "POST", cookie, body, { ...headers, origin: "https://evil.test" })).status, 403);
+      const savedResponse = await send(route, "POST", cookie, body, headers);
+      assert.equal(savedResponse.status, 200);
+      const saved = await savedResponse.json();
+      assert.equal(saved.selection.notes[other], "HTTP note");
+      assert.deepEqual(await (await send(route, "GET", cookie)).json(), saved);
+      assert.deepEqual(await (await send(route, "POST", cookie, body, headers)).json(), saved);
+      const stale = JSON.parse(body);
+      stale.request.idempotency_key = "stale-http";
+      const conflict = await send(route, "POST", cookie, JSON.stringify(stale), headers);
+      assert.equal(conflict.status, 409);
+      assert.equal((await conflict.json()).error, "stale_version");
+      const retired = JSON.parse(body);
+      retired.request.version = saved.selection.version;
+      retired.request.selected = [property];
+      retired.request.notes = {};
+      retired.request.idempotency_key = "retired-http";
+      const refused = await send(route, "POST", cookie, JSON.stringify(retired), headers);
+      assert.equal(refused.status, 409);
+      assert.equal((await refused.json()).error, "retired");
+      assert.equal((await send(`proposals/${pubs[1]}`, "GET", cookie)).status, 409);
+      assert.equal(
+        (
+          await send("logout", "POST", cookie, `csrf=${status.csrf}`, {
+            "content-type": "application/x-www-form-urlencoded",
+          })
+        ).status,
+        303,
+      );
+      assert.equal((await send(route, "GET", cookie)).status, 401);
+    });
     if (process.argv.includes("--record"))
       writeFileSync(
         new URL("../../workspace/contracts/fixtures/portal-proposals.v1.json", import.meta.url),
-        JSON.stringify(receipt, null, 2) + "\n",
+        `${JSON.stringify(receipt, null, 2)}\n`,
       );
     const fixture = JSON.parse(
       readFileSync(new URL("../../workspace/contracts/fixtures/portal-proposals.v1.json", import.meta.url), "utf8"),

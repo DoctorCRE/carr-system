@@ -81,3 +81,73 @@ stateDiagram-v2
 Tests derive from these transitions with synthetic contract adapters. SQL expiry
 and lockout correctness belong to unit A. These tests prove HTTP mapping and
 bounds, not database integration or production availability.
+
+## J3 reconciliation before implementation
+
+Card: WR227.S9.J3
+
+The final host keeps one Fetch seam and adds a PostgreSQL adapter using the
+registered exchange/read/revoke operations and portalProposalStorage. Session
+state stays exclusively in SQL. CSRF is domain-separated SHA-256 of the opaque
+cookie token, exposed by status/page; an anonymous per-slug CSRF cookie protects
+login forms. Every write requires that state and exact Origin. Proposal routes
+are GET/POST /<slug>/proposals/<publication UUID>; POST binds an explicit frozen
+publication_version and request. SQL checks publication ownership and membership.
+No deal or client selector crosses the seam. No mounting or deploy in this job.
+
+```mermaid
+stateDiagram-v2
+  [*] --> LoginForm
+  LoginForm --> LoginForm: missing or wrong CSRF
+  LoginForm --> SignedIn: valid CSRF and password exchange commits
+  SignedIn --> Loaded: read proposal succeeds
+  Loaded --> Saved: same-origin CSRF save commits
+  Saved --> Saved: frozen request retry
+  Loaded --> Conflict: stale version or retired property
+  Conflict --> Loaded: explicit reload
+  SignedIn --> SignedOut: CSRF logout commits
+  SignedIn --> LoginForm: expiry or revocation
+  Loaded --> Refused: foreign origin or session rate exhausted
+  Loaded --> Unavailable: total deadline or dependency capacity exhausted
+```
+
+Request lifetime has one total deadline covering body plus all dependencies.
+Each dependency retains its concurrency slot until settlement even after timeout.
+Per-session action buckets prevent one browser from consuming another's allowance;
+anonymous/login buckets stay per slug. No automatic retry, content cache or queue.
+At current and 10x load, admission refuses rather than queues; distributed ingress
+limits remain a staging mount requirement. Database transaction deadlines are
+required of the injected writer and are set locally by the SQL adapter.
+
+## Current contract and coverage
+
+The J1 text above records the retained branch's starting design. J3 supersedes
+its per-slug action limits, per-dependency deadlines, missing CSRF state and
+lack of SQL transport. The current reference is docs/client-portal/portal-http.md.
+J3 also preserves explicitly published items from client-publications.v1; it
+never restores automatic live roadmap phases.
+
+| Transition | Executed test |
+| --- | --- |
+| Form, deny, lock, issue | login CSRF lockout and per-slug sessions |
+| Two active portals | login CSRF lockout and per-slug sessions |
+| Revoke, repeat, read denied | logout CSRF revocation repeat and clearing |
+| Expire or disable, refuse replay | disabled, expired and reassigned portals refuse before replay |
+| Read, save, replay, reload, conflict, retired | HTTP issue, proposal round trip, refusals and revoke through real SQL |
+| CSRF and origin refuse | origin paths methods and body bounds; HTTP issue, proposal round trip, refusals and revoke through real SQL |
+| Rate refuse and eviction | session rate limits isolate browsers and buckets evict |
+| Deadline, retained slot | deadline retains slot until ignored cancellation settles |
+| Saturation and body deadline | bounded request admission and streamed body deadline |
+| Breaker open, cooldown, recover | breaker cooldown and live recovery |
+| Safe rendered publications | projection retains published items and escapes content with secure cookie bounds |
+
+The chart guides executable HTTP and real PostgreSQL tests. It is not a formal
+TLC model and makes no claim about deployed routing or distributed ingress.
+
+Design and debt pass. A combined Fetch/SQL module keeps the public caller at
+createPortalHost(connectionString, configuredOrigin). Tests use the same Fetch
+interface with the real registered SQL adapter. An alternative separate host
+controller would require callers to coordinate transaction and admission state;
+that complexity stays inside this module. Removed the held JS/MJS copies and
+its obsolete manual duration entry, replacing them with strict TypeScript.
+No second auth scheme, compatibility proposal store, or generic routing framework.
