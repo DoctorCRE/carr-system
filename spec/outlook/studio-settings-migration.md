@@ -112,7 +112,18 @@ Only that historical mapping uses address selection compatible with the pre-bind
 State saves before binding publication, so retry after a failed publication retains the mapping and request keys.
 Without a separate decoder, binding leaves state bytes unchanged.
 An existing matching binding skips decoding and stays unchanged. Missing, conflicting or malformed retained identity evidence exits 1 and leaves state and binding untouched.
-Never edit or delete state to bypass a refusal. Retained email payloads must name the configured account, and retained owner fields must match settings.
+Never edit or delete state to bypass a refusal. Independent retained account evidence must match settings, and retained owner fields must match settings.
+Sender and recipient addresses alone hold with `ledger_binding_evidence_insufficient`.
+When the operator has established that the historical ledger belongs to the configured mailbox, use the same command with `--attest-mailbox ACCOUNT`.
+For Dell's account, read its exact configured value without printing credentials:
+
+```sh
+./.venv/bin/python bin/reconcile-outlook-ledger-binding.py --decoder-vendor "$BINDING_DECODER" \
+  --attest-mailbox "$(./.venv/bin/python -c 'from lib.outlook_settings import load_settings; print(load_settings().account)')"
+```
+
+The flag explicitly attests historical association. The decoder still verifies the current snapshot, every retained identity conflict refuses, and binding.json records `provenance: operator_attested`.
+Repeating the command preserves the binding and state bytes. This flag never overrides a retained account naming a different mailbox.
 A decoder snapshot must independently verify the selected folder account through Sent evidence.
 This evidence is local mailbox identity, not server authorization.
 
