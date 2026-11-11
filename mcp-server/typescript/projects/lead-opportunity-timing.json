@@ -1,0 +1,4 @@
+{
+  "worker": ["src/lead-opportunity-timing.ts", "src/lead-workspace.ts"],
+  "node": ["test/lead-opportunity-timing-postgres.test.ts", "test/lead-opportunity-timing.test.ts"]
+}
