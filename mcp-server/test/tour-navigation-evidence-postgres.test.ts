@@ -26,7 +26,8 @@ test("Tour navigation uses sealed entrances and newest promotion through the aut
       );
       const definition: string = original.rows[0].definition;
       const withoutNavigation = definition.replace(
-        "'navigation',ops.tour_route_navigation_evidence(v.organization_tenant_id,v.id),", "",
+        "'navigation',ops.tour_route_navigation_evidence(v.organization_tenant_id,v.id),",
+        "",
       );
       assert.notEqual(withoutNavigation, definition);
       await c.query(withoutNavigation);
