@@ -34,9 +34,14 @@ _OPENER = urllib.request.build_opener(NoRedirect)
 
 
 def rate_limited(status: int, body: bytes) -> bool:
-    return status == 429 or bool(re.search(
+    if status == 429:
+        return True
+    if not body.lstrip().startswith(b'<'):
+        return False
+    text = re.sub(rb'<[^>]*>', b' ', body)
+    return bool(re.search(
         rb'(?:cloudflare[\s\S]{0,200}?(?:error\s*)?1015|error\s*(?:code\s*:?\s*)?1015)',
-        body, re.I)) and body.lstrip().startswith(b'<')
+        text, re.I))
 
 
 def retry_delay(status: int, headers: dict[str, str], body: bytes,
