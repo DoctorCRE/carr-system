@@ -1,3 +1,4 @@
+// Versioned deal client publication verbs for listing, previewing and publishing.
 import { ToolError } from "./tool-error.ts";
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
 
