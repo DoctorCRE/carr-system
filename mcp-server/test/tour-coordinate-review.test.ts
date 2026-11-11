@@ -125,19 +125,21 @@ test("coordinate review extends authorized detail without granting a new callabl
       ),
     );
     assert.ok(recorded);
-    const proof = `import importlib.util,json,sys
+    const proof = `import contextlib,importlib.util,io,json,sys
+from types import SimpleNamespace
+from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('proof','tools/prove-tour-navigation.py')
 p=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
 d=json.load(sys.stdin)
 r=d['routes'][0]
-p.check_route(d,r['id'],True)
-r['stops'][0]['coordinate_review']['candidates'][0]['position']['latitude']+=0.000001
-try:
- p.check_route(d,r['id'],True)
-except AssertionError:
- sys.exit(0)
-sys.exit(1)
+for broken in (False,True):
+ if broken:
+  r['stops'][0]['coordinate_review']['candidates'][0]['position']['latitude']+=0.000001
+ release=dict(ok=True,env={'value':'production'},git_sha={'value':'a'*40})
+ replies=[SimpleNamespace(status=200,body=json.dumps(value).encode()) for value in (release,{'data':d})]
+ with patch.object(p,'read',side_effect=replies),patch.object(p.subprocess,'run',return_value=SimpleNamespace(returncode=0)),patch.object(p.http.cookiejar.MozillaCookieJar,'load'),patch('sys.argv',['proof','--merge-sha','b'*40,'--tour-id',d['id'],'--route-id',r['id'],'--cookie-jar','/tmp/synthetic-proof-cookies','--coordinate-review']),contextlib.redirect_stdout(io.StringIO()):
+  assert p.main()==(1 if broken else 0)
 `;
     execFileSync("python3", ["-c", proof], {
       input: recorded,
