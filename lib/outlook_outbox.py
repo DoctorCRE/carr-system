@@ -278,4 +278,5 @@ def main() -> int:
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    from lib.outlook_outbox import main as outbox_main
+    raise SystemExit(outbox_main())
