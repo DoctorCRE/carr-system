@@ -4,6 +4,15 @@
 set local lock_timeout='5s';
 set local statement_timeout='30s';
 
+create function ops.tour_deal_access_candidates() returns table(id uuid,owner text,version integer)
+language sql stable security definer set search_path=pg_catalog,pg_temp as $$
+ select d.id,d.owner::text,d.version from public.deal d join public.client c on c.id=d.client_id
+ join public.party p on p.id=c.party_id
+ where c.merged_into is null and p.merged_into is null and p.deleted_at is null
+$$;
+revoke all on function ops.tour_deal_access_candidates() from public;
+grant execute on function ops.tour_deal_access_candidates() to carr_writer,carr_authority;
+
 create table ops.deal_space_search (
  id uuid primary key,
  organization_tenant_id text not null,
@@ -19,7 +28,9 @@ create table ops.deal_space_search (
  result_property_ids jsonb not null default '[]' check(jsonb_typeof(result_property_ids)='array' and jsonb_array_length(result_property_ids)<=100),
  has_more boolean not null default false,
  next_cursor text,
- updated_at timestamptz not null default now()
+ updated_at timestamptz not null default now(),
+ check((last_run_at is null)=(run_criteria is null)),
+ check(last_run_at is not null or (result_property_ids='[]'::jsonb and not has_more and next_cursor is null))
 );
 create index deal_space_search_deal on ops.deal_space_search(organization_tenant_id,deal_id,updated_at desc,id);
 revoke all on ops.deal_space_search from public,carr_reader,carr_writer,carr_jobs,carr_authority;
@@ -90,18 +101,20 @@ begin
 end $$;
 
 revoke all on function ops.read_deal_space_searches(text,text,uuid,uuid),ops.save_deal_space_search(text,text,jsonb),ops.run_deal_space_search(text,text,uuid,uuid,integer) from public;
-grant execute on function ops.read_deal_space_searches(text,text,uuid,uuid),ops.save_deal_space_search(text,text,jsonb),ops.run_deal_space_search(text,text,uuid,uuid,integer) to carr_writer;
+grant execute on function ops.read_deal_space_searches(text,text,uuid,uuid),ops.save_deal_space_search(text,text,jsonb),ops.run_deal_space_search(text,text,uuid,uuid,integer) to carr_authority;
 do $append_grant$
 declare contract jsonb:=ops.scac_current_grant_contract(); entries jsonb;
 begin
- select jsonb_agg(jsonb_build_object('grantee','carr_writer','signature',signature,'grantable',false,'privilege','execute',
- 'ingress_key','db-function-acl:'||signature||':carr_writer:execute','ingress_kind','db_function_acl','function_kind','f',
+ select jsonb_agg(jsonb_build_object('grantee',grantee,'signature',signature,'grantable',false,'privilege','execute',
+ 'ingress_key','db-function-acl:'||signature||':'||grantee||':execute','ingress_kind','db_function_acl','function_kind','f',
  'security_definer',true,'volatility',volatility,'parallel','u','config',jsonb_build_array('search_path=pg_catalog, pg_temp')))
  into entries from (values
- ('ops.read_deal_space_searches(p_tenant text, p_actor text, p_deal uuid, p_search uuid)','s'),
- ('ops.save_deal_space_search(p_tenant text, p_actor text, p_args jsonb)','v'),
- ('ops.run_deal_space_search(p_tenant text, p_actor text, p_deal uuid, p_search uuid, p_version integer)','v')
- ) f(signature,volatility);
+ ('ops.read_deal_space_searches(p_tenant text, p_actor text, p_deal uuid, p_search uuid)','s','carr_authority'),
+ ('ops.save_deal_space_search(p_tenant text, p_actor text, p_args jsonb)','v','carr_authority'),
+ ('ops.run_deal_space_search(p_tenant text, p_actor text, p_deal uuid, p_search uuid, p_version integer)','v','carr_authority'),
+ ('ops.tour_deal_access_candidates()','s','carr_writer'),
+ ('ops.tour_deal_access_candidates()','s','carr_authority')
+ ) f(signature,volatility,grantee);
  contract:=jsonb_set(contract,'{secdef_execute}',contract->'secdef_execute'||entries);
  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L','select '||quote_literal(contract::text)||'::jsonb');
 end $append_grant$;

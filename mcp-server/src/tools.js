@@ -98,7 +98,8 @@ import { engineeringRuntimeTools } from "./engineering-runtime.js";
 import { tourRightsProjectionTools } from "./tour-rights-projection.js";
 import { tourPropertyJurisdictionTools } from "./tour-property-jurisdiction.js";
 import { tourDomainTools } from "./tour-domain.js";
-import { tourPropertySearchTools } from "./tour-property-search.js";
+import { tourPropertySearchTools, tourPropertySearchInputSchema } from "./tour-property-search.js";
+import { installTourDealAccess } from "./tour-deal-access.js";
 import { dealSpaceSearchTools } from "./deal-space-searches.ts";
 import { tourSharingTools } from "./tour-sharing.js";
 import { tourMapPromotionTools } from "./tour-map-promotion.js";
@@ -10787,7 +10788,8 @@ registerTools(tourDomainTools({ withEnvelope, writeEvent, ToolError }), "tour-do
 // Tour Operations delivery surfaces: governed property search and cart,
 // confidential sharing, and deterministic PDF request/review records.
 registerTools(tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }), "tour-property-search");
-registerTools(dealSpaceSearchTools({ withEnvelope, writeEvent }), "deal-space-searches");
+registerTools(dealSpaceSearchTools({ withEnvelope, writeEvent, criteria: tourPropertySearchInputSchema,
+  organizationTenantForActor, canExercisePartnerAuthority, installTourDealAccess }), "deal-space-searches");
 registerTools(tourMapPromotionTools({ withEnvelope, writeEvent, ToolError }), "tour-map-promotion");
 registerTools(tourSharingTools({ withEnvelope, writeEvent, ToolError }), "tour-sharing");
 registerTools(tourArtifactTools({ withEnvelope, writeEvent, ToolError }), "tour-artifacts");

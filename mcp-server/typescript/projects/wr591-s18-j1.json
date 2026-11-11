@@ -1,5 +1,4 @@
 {
-  "worker": ["src/deal-space-searches.ts"],
-  "node": ["test/deal-space-searches.test.ts"],
+  "node": ["src/deal-space-searches.ts", "test/deal-space-searches.test.ts"],
   "entry": ["test/deal-space-searches.test.ts"]
 }

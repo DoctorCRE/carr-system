@@ -1,10 +1,14 @@
 stateDiagram-v2
-  [*] --> Draft: CreateDraft
+  [*] --> Unsaved
+  Unsaved --> Draft: CreateDraft
+  Unsaved --> Saved: CreateSaved
+  Unsaved --> Archived: CreateArchived
   Draft --> Saved: Save
   Saved --> Rerun: Run
   Stale --> Rerun: Run
   Rerun --> Saved: RunSucceeds
   Rerun --> Stale: RunFailsWithOldSnapshot
+  Rerun --> Saved: RunFailsWithFreshSnapshot
   Saved --> Stale: EditCriteria
   Saved --> Stale: Age24Hours
   Draft --> Archived: Archive
@@ -13,7 +17,8 @@ stateDiagram-v2
   Archived --> Saved: Restore
   Saved --> Saved: Reopen
   Stale --> Stale: Reopen
-  %% never: A stale revision overwrites a newer search.
-  %% never: A failed run destroys the prior result snapshot.
-  %% never: An unavailable deal exposes a saved search.
-  %% never: An archived search runs without restoration.
+  %% Guards are exercised by the registered-verb lifecycle test.
+  %% A stale revision cannot overwrite a newer search.
+  %% A failed run preserves the prior result snapshot and freshness state.
+  %% An unavailable deal cannot expose a saved search, including replay.
+  %% An archived search cannot run without restoration.

@@ -1,0 +1,417 @@
+{
+  "created": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "draft",
+      "status": "draft",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 1,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:37.686637-06:00",
+      "last_run_at": null,
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": null,
+      "result_property_ids": [],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  },
+  "saved": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "saved",
+      "status": "saved",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 2,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:37.716763-06:00",
+      "last_run_at": null,
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": null,
+      "result_property_ids": [],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  },
+  "run": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "saved",
+      "status": "saved",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 3,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:37.724338-06:00",
+      "last_run_at": "2026-11-10T20:34:37.724338-06:00",
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "result_property_ids": [],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  },
+  "reopened": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "searches": [
+      {
+        "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+        "name": "Medical space",
+        "state": "saved",
+        "status": "saved",
+        "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+        "version": 3,
+        "criteria": {
+          "sort": "updated_desc",
+          "limit": 100,
+          "query": null,
+          "cursor": null,
+          "counties": [
+            "Escambia"
+          ],
+          "availability": [],
+          "property_types": [],
+          "max_square_feet": 8000,
+          "min_square_feet": 2000,
+          "photos_available": null,
+          "entrance_verified": null,
+          "public_projection_ready": null
+        },
+        "has_more": false,
+        "updated_at": "2026-11-10T20:34:37.724338-06:00",
+        "last_run_at": "2026-11-10T20:34:37.724338-06:00",
+        "next_cursor": null,
+        "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+        "run_criteria": {
+          "sort": "updated_desc",
+          "limit": 100,
+          "query": null,
+          "cursor": null,
+          "counties": [
+            "Escambia"
+          ],
+          "availability": [],
+          "property_types": [],
+          "max_square_feet": 8000,
+          "min_square_feet": 2000,
+          "photos_available": null,
+          "entrance_verified": null,
+          "public_projection_ready": null
+        },
+        "result_property_ids": [],
+        "client_prefill_source": {
+          "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+          "source_ref": "client-intake:synthetic",
+          "observed_at": "2026-11-10T00:00:00Z"
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "stale": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "stale",
+      "status": "saved",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 4,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 3000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:37.945979-06:00",
+      "last_run_at": "2026-11-10T20:34:37.724338-06:00",
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "result_property_ids": [],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  },
+  "archived": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "archived",
+      "status": "archived",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 5,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:38.012188-06:00",
+      "last_run_at": "2026-11-10T20:34:37.724338-06:00",
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "result_property_ids": [],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  },
+  "restored": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "saved",
+      "status": "saved",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 6,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:38.022559-06:00",
+      "last_run_at": "2026-11-10T20:34:37.724338-06:00",
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "result_property_ids": [],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  },
+  "positive": {
+    "ok": true,
+    "schema_version": "deal-space-searches.v1",
+    "search": {
+      "id": "47ce4440-af93-4c7c-a470-c503b0c1379d",
+      "name": "Medical space",
+      "state": "saved",
+      "status": "saved",
+      "deal_id": "aee4bd92-ec4f-4e03-a3d2-f4001053ceaa",
+      "version": 7,
+      "criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "has_more": false,
+      "updated_at": "2026-11-10T20:34:38.033723-06:00",
+      "last_run_at": "2026-11-10T20:34:38.033723-06:00",
+      "next_cursor": null,
+      "requirements": "Lease, budget $30/SF/year NNN, occupy next summer. Parking and ground floor required.",
+      "run_criteria": {
+        "sort": "updated_desc",
+        "limit": 100,
+        "query": null,
+        "cursor": null,
+        "counties": [
+          "Escambia"
+        ],
+        "availability": [],
+        "property_types": [],
+        "max_square_feet": 8000,
+        "min_square_feet": 2000,
+        "photos_available": null,
+        "entrance_verified": null,
+        "public_projection_ready": null
+      },
+      "result_property_ids": [
+        "a1000000-0000-4000-8000-000000000001"
+      ],
+      "client_prefill_source": {
+        "client_id": "df408c93-f795-48d2-bd3b-f69964a04ef7",
+        "source_ref": "client-intake:synthetic",
+        "observed_at": "2026-11-10T00:00:00Z"
+      }
+    }
+  }
+}

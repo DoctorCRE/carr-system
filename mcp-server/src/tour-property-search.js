@@ -141,12 +141,7 @@ function projectCart(value) {
 }
 const schema = (properties, required) => ({ type: "object", additionalProperties: false, properties, required });
 
-export function tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }) {
-  return {
-    "search-tour-properties": {
-      writerConnection: true,
-      description: "Search facts-only property candidates in the initial five Florida counties. Results contain no broker conclusion and do not mutate a Tour.",
-      inputSchema: schema({
+export const tourPropertySearchInputSchema = schema({
         query: { type: ["string", "null"], maxLength: 200 },
         counties: { type: "array", uniqueItems: true, maxItems: 5, items: { type: "string", enum: TOUR_SEARCH_COUNTIES } },
         property_types: { type: "array", uniqueItems: true, maxItems: 12, items: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,63}$" } },
@@ -159,7 +154,14 @@ export function tourPropertySearchTools({ withEnvelope, writeEvent, ToolError })
         sort: { type: "string", enum: [...SORT] },
         cursor: { type: ["string", "null"], pattern: "^[0-9]{1,9}$" },
         limit: { type: "integer", minimum: 1, maximum: 100 },
-      }, [...SEARCH_FIELDS]),
+      }, [...SEARCH_FIELDS]);
+
+export function tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }) {
+  return {
+    "search-tour-properties": {
+      writerConnection: true,
+      description: "Search facts-only property candidates in the initial five Florida counties. Results contain no broker conclusion and do not mutate a Tour.",
+      inputSchema: tourPropertySearchInputSchema,
       handler: async (client, actor, args) => {
         exact(args, SEARCH_FIELDS, ToolError);
         const minimum = integerOrNull(args.min_square_feet, "min_square_feet", ToolError);
