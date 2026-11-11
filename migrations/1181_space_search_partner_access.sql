@@ -77,4 +77,3 @@ begin
  where id=p_search returning * into s;
  return ops.deal_space_search_projection(s);
 end $$;
-
