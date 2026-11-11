@@ -90,6 +90,7 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
     const created = await call(names[0], request);
     const need = record(created.need);
     assert.equal(need.state, "draft");
+    assert.equal(need.revision, 1);
     assert.equal((await read()).state, "missing_approval");
     assert.equal((await call(names[0], request)).replayed, true);
     let version = 1;
@@ -112,7 +113,9 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
     assert.equal(row.client_id, clientId);
     assert.equal(row.deal_id, deal);
     assert.equal(row.vendor_id, vendor);
-    assert.equal(row.approved_revision, row.version);
+    assert.equal(row.approved_revision, need.revision);
+    assert.equal(row.version, 2);
+    assert.equal(row.revision, 1);
     assert.equal(row.source_revision, fields.source_revision);
     assert.equal(row.applicability, fields.applicability);
     await t.test("another vendor never matches shared context", async () => {
@@ -177,7 +180,10 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
       return record(result.need);
     };
     await t.test("approval lapses after edit", async () => {
-      assert.equal((await edit({ source_revision: "review-2" })).state, "edited_lapsed");
+      const edited = await edit({ source_revision: "review-2" });
+      assert.equal(edited.state, "edited_lapsed");
+      assert.equal(edited.revision, 2);
+      assert.equal(edited.approved_revision, null);
       assert.equal((await read()).state, "missing_approval");
     });
     await assert.rejects(

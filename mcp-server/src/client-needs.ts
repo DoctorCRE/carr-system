@@ -100,7 +100,7 @@ const projection = `select n.*,d.client_id,c.version as client_version,d.version
    and (held.contact_state_until is null or held.contact_state_until>=current_date))) as identity_restricted,
  case when n.withdrawn then 'withdrawn'
  when n.observed_at>statement_timestamp() or n.fresh_until<=statement_timestamp() then 'stale'
- when n.approved_revision=n.version and n.approved_client_id=d.client_id then 'approved'
+ when n.approved_revision=n.revision and n.approved_client_id=d.client_id then 'approved'
  when n.version>1 then 'edited_lapsed' else 'draft' end as state
  from public.deal_client_need n join public.deal d on d.id=n.deal_id
  join public.client c on c.id=d.client_id and c.merged_into is null
@@ -294,7 +294,7 @@ export function clientNeedTools({
             throw new ToolError({ error: "version_conflict", current_version: row.version });
           if (!row.approvable) throw new ToolError({ error: "need_not_approvable" });
           await c.query(
-            `update public.deal_client_need set version=version+1,approved_revision=version+1,
+            `update public.deal_client_need set version=version+1,approved_revision=revision,
    approved_client_id=$2,approved_by=$3,approved_at=clock_timestamp(),updated_by=$3 where id=$1`,
             [a.need, deal.client_id, actor.id],
           );

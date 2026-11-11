@@ -12,6 +12,7 @@ create table public.deal_client_need (
  restriction text not null check (restriction in ('allowed','restricted')),
  withdrawn boolean not null default false,
  version integer not null default 1 check (version > 0),
+ revision integer not null default 1 check (revision > 0),
  approved_revision integer,
  approved_client_id uuid references public.client(id),
  approved_by uuid references public.actor(id),
@@ -20,7 +21,7 @@ create table public.deal_client_need (
  updated_by uuid not null references public.actor(id),
  updated_at timestamptz not null default clock_timestamp(),
  check ((approved_revision is null and approved_client_id is null and approved_by is null and approved_at is null)
-     or (approved_revision is not null and approved_revision=version and approved_client_id is not null and approved_by is not null and approved_at is not null))
+     or (approved_revision is not null and approved_revision=revision and approved_client_id is not null and approved_by is not null and approved_at is not null))
 );
 create index deal_client_need_vendor on public.deal_client_need(vendor_id,id);
 create index deal_client_need_deal on public.deal_client_need(deal_id,id);
@@ -31,6 +32,7 @@ begin
     is distinct from row(old.deal_id,old.vendor_id,old.description,old.applicability,old.source_ref,old.source_revision,
         old.observed_at,old.fresh_until,old.restriction,old.withdrawn) then
   new.version := old.version+1;
+  new.revision := old.revision+1;
   new.approved_revision := null; new.approved_client_id := null;
   new.approved_by := null; new.approved_at := null;
  end if;

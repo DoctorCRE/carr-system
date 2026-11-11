@@ -62,7 +62,8 @@
           "client_name",
           "deal_name",
           "vendor_ref",
-          "identity_restricted"
+          "identity_restricted",
+          "revision"
         ],
         "properties": {
           "id": {
@@ -177,6 +178,10 @@
           },
           "identity_restricted": {
             "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       }
