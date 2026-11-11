@@ -2,6 +2,7 @@
 import { FUTURE_WORK_WRITES, workRequestLinkSchema, linkFutureWork } from "./future-work.js";
 import { findExactPostCallAction, withPostCallActionComparisons } from "./post-call-action-match.ts";
 import { leadAdvice, leadFollowUpTools } from "./lead-follow-up.ts";
+import { clientNeedTools } from "./client-needs.ts";
 import censusInventoryFamily from "./tool-families/census-inventory.js";
 import practiceOriginationFamily from "./tool-families/practice-origination.js";
 import scheduleBoardFamily from "./tool-families/schedule-board.js";
@@ -10822,6 +10823,8 @@ registerTools(ruleContextRuntimeTools({ withEnvelope, ToolError }), "rule-contex
 
 const overdueUpdates = dealUpdateResolution({ withEnvelope, writeEvent, partnerOwnerIds, lockDealField, dealNextStepStatus, ToolError });
 registerTools(overdueUpdates.tools, "deal-update-resolution");
+
+registerTools(clientNeedTools({ withEnvelope, writeEvent, partnerAuthoritySlugForActor }), "mcp-server/src/client-needs.ts");
 
 for (const family of toolFamilies) {
   registerTools(family.createTools({ withEnvelope, writeEvent, ToolError, resolveSubject,
