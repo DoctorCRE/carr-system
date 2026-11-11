@@ -324,7 +324,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       sponsoring_human_slug: "joe",
       via: "local-token",
     };
-    await c.query("insert into actor(id,slug,kind,display_name) values($1,'codex','agent','Synthetic agent')", [
+    await c.query("insert into actor(id,slug,kind,display_name) values($1,'codex','automation','Synthetic agent')", [
       sponsored.id,
     ]);
     const sponsoredCommand = {
