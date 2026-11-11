@@ -30,13 +30,33 @@ No network N+1 is introduced; one private helper evaluates each route in the exi
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Unavailable
-    Unavailable --> Ready: current accepted route, sealed entrances, latest matching approval
-    Ready --> Unavailable: rights expire, newer rejection, or route replacement
-    Unavailable --> Unavailable: missing or stale evidence
+    state Eligibility {
+        state Evidence {
+            [*] --> Missing
+            Missing --> Current: review approved
+            Current --> Missing: rights revoked
+            Current --> Missing: route replaced
+            Current --> Missing: dataset replaced
+            Current --> Missing: promotion rejected
+            Missing --> Missing: read unavailable evidence
+        }
+        --
+        state Response {
+            [*] --> Unavailable
+            Unavailable --> Ready: review approved
+            Ready --> Unavailable: rights revoked
+            Ready --> Unavailable: route replaced
+            Ready --> Unavailable: dataset replaced
+            Ready --> Unavailable: promotion rejected
+            Unavailable --> Unavailable: read unavailable evidence
+        }
+    }
+    %% never NoUnreviewedNavigation: Missing & Ready -- Navigation never exposes positions without current reviewed evidence.
+    %% never NoLostApprovedEvidence: Current & Unavailable -- A matching approved route returns exact evidence.
 ```
 
-The PostgreSQL suite exercises missing promotion, approved exact evidence and a backdated rejection through the real detail read.
+The eligibility chart models atomic detail reads, not cached app state. Evidence changes become visible on the next read.
+The PostgreSQL suite exercises missing promotion, approved exact evidence, route replacement, rights revocation, dataset replacement, and a backdated rejection through the real detail read.
 The deal-access suite exercises refusal through HTTP. App navigation and return transitions are outside this producer unit.
 
 PRODUCTION PROOF: `python3 tools/prove-tour-navigation.py --merge-sha <containing-merge> --tour-id <approved-tour> --route-id <accepted-route> --cookie-jar <authenticated-Netscape-cookie-file>`
