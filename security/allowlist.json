@@ -1011,6 +1011,12 @@
       "sha256": "a51d1a31983078234a2a65c2abc3037eaf148994fb292607f7a824bdc936f6e9",
       "rule": "pii-address",
       "reason": "Recorded disposable Tour delivery fixture. The two synthetic addresses originate in mcp-server/test/tour-delivery-data-plane-postgres.sql; no production records are read. This allowance binds only this path and these exact bytes."
+    },
+    {
+      "path": "mcp-server/test/tour-coordinate-review.test.ts",
+      "sha256": "59dcf1690daf37a0ddd45410bab2f6a696d0f172caaae2b77d440687e1206fe0",
+      "rule": "pii-address",
+      "reason": "WR591.S17.J1 disposable coordinate-review test. The invented address is asserted against the existing synthetic Tour delivery SQL fixture; no production records are read. Exact path and immutable bytes only."
     }
   ]
 }
