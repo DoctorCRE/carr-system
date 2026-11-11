@@ -8,3 +8,6 @@ Throughput checkpoint: one database fixture at a time; recover existing implemen
 Model compiler generated /tmp/J9Publications.tla. TLC ran with /opt/homebrew/opt/openjdk@21/bin/java and /tmp/j9-tla2tools.jar. TypeOK and OnlyPublished hold; chart round-trips unchanged. The chart abstracts version conflicts and idempotent replay; PostgreSQL tests execute these separately.
 
 Design and debt pass: codebase-design keeps projection rules in SQL and injects existing deliverable authorization into the three-verb module. zero-tech-debt reuses the existing password/session helper and removes automatic phase projection; no second reader or hosting path. Dynamic test imports keep the legacy worker registry outside the Node strict compilation graph, while executing real runtime authorization and envelopes.
+
+Final model keeps a privatized file marked published while hiding it from the client. Creating a publication advances the saved-version region atomically. OnlyPublished and RecordRequired are separate invariants. The regression in /tmp/j9-version-red demonstrated the missing creation transition; the final chart fixes that model, not a database defect.
+Proof fixtures require a persisted publication event and exercise equal, descendant, older, unrelated, unknown and malformed release identities in a new synthetic Git repository.

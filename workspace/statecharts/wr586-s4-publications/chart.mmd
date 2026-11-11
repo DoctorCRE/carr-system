@@ -3,8 +3,9 @@ stateDiagram-v2
   state Publication {
    [*] --> Unpublished
    Unpublished --> Published: Partner publishes
+   Published --> Published: Partner publishes
    Published --> Unpublished: Partner unpublishes
-   Published --> Unpublished: Partner makes file private
+   Published --> Published: Partner makes file private
    Published --> Published: Partner replaces content
    Unpublished --> Unpublished: Partner edits draft
   }
@@ -12,8 +13,11 @@ stateDiagram-v2
   state Client {
    [*] --> Hidden
    Hidden --> Visible: Partner publishes
+   Visible --> Visible: Partner publishes
    Visible --> Hidden: Partner unpublishes
+   Hidden --> Hidden: Partner unpublishes
    Visible --> Hidden: Partner makes file private
+   Hidden --> Hidden: Partner makes file private
    Visible --> Visible: Partner replaces content
    Hidden --> Hidden: Partner edits draft
    Hidden --> Hidden: Client reads
@@ -23,6 +27,12 @@ stateDiagram-v2
   state Version {
    [*] --> Empty
    Empty --> Saved: Partner saves draft
+   Empty --> Saved: Partner edits draft
+   Empty --> Saved: Partner publishes
+   Saved --> Saved: Partner publishes
+   Saved --> Saved: Partner unpublishes
+   Saved --> Saved: Partner replaces content
+   Saved --> Saved: Partner edits draft
    Saved --> Saved: Partner saves matching version
    Saved --> Saved: Partner retries same action
    Saved --> Conflict: Partner saves stale version
@@ -30,3 +40,4 @@ stateDiagram-v2
   }
  }
  %% never OnlyPublished: Unpublished & Visible -- Unpublished items never appear to the client
+ %% never RecordRequired: Published & Empty -- A published item always has a saved version

@@ -139,10 +139,12 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       ).portal,
       await project(),
     );
-    await write(id, 1, true);
+    assert.equal((await write(id, 1, false, "milestone", null, "Edited draft")).version, 2);
+    assert.equal((await project()).publications.length, 0);
+    await write(id, 2, true);
     assert.equal((await project()).publications[0].title, "Client milestone");
     await assert.rejects(write(id, 1, false), /publication_version_conflict/);
-    await write(id, 2, true, "milestone", null, "Updated milestone");
+    await write(id, 3, true, "milestone", null, "Updated milestone");
     assert.equal((await project()).publications[0].title, "Updated milestone");
     assert.deepEqual(
       (await c.query("select ops.read_client_portal('synthetic-a','test') p")).rows[0].p,
@@ -150,8 +152,8 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     );
     assert.equal(JSON.stringify(await project()).includes("INTERNAL"), false);
     assert.equal((await project("synthetic-b")).publications.length, 0);
-    await assert.rejects(write(id, 3, true, "milestone", null, "Cross client", dealB), /publication_not_found/);
-    await write(id, 3, false);
+    await assert.rejects(write(id, 4, true, "milestone", null, "Cross client", dealB), /publication_not_found/);
+    await write(id, 4, false);
     assert.equal((await project()).publications.length, 0);
     const file = randomUUID();
     await c.query(
@@ -165,7 +167,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       write(randomUUID(), 0, true, "deliverable", file, "Cross file", dealB),
       /publication_file_not_shared/,
     );
-    await write(fid, 0, true, "deliverable", file);
+    assert.equal((await write(fid, 0, true, "deliverable", file)).version, 1);
     assert.equal((await project()).publications[0].deliverable.id, file);
     assert.equal(JSON.stringify(await project()).includes("INTERNAL_OBJECT"), false);
     await c.query("update ops.deal_deliverable set visibility='private',version=3 where id=$1", [file]);
@@ -208,13 +210,13 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       deal_id: dealA,
       idempotency_key: randomUUID(),
       publication_id: id,
-      base_version: 4,
+      base_version: 5,
       published: true,
       kind: "milestone",
       title: "Tool milestone",
       content: "Tool text",
     });
-    assert.equal(published.publication.version, 5);
+    assert.equal(published.publication.version, 6);
     assert.equal(events.length, 1);
     const pendingFile = randomUUID();
     await c.query(
@@ -228,42 +230,15 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       (await project()).publications.some((row: { kind: string }) => row.kind === "deliverable"),
       false,
     );
-    const scratch = await mkdtemp(path.join(tmpdir(), "j9-proof-"));
-    try {
-      const revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", cwd: root }).trim();
-      const preview = await tools["preview-deal-client-view"].handler(c, partner, { deal_id: dealA });
-      const list = await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA });
-      const client = { source_commit: revision, response: { portal: await project() } };
-      const fixture = {
-        release: { git_sha: { value: revision } },
-        "preview-deal-client-view": preview,
-        "list-deal-client-publications": list,
-      };
-      await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
-      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
-      const proof = () =>
-        spawnSync(
-          "python3",
-          [
-            path.join(root, "tools/prove-client-publications.py"),
-            "--expected-revision",
-            revision,
-            "--deal-id",
-            dealA,
-            "--client-response",
-            path.join(scratch, "client.json"),
-            "--fixture",
-            path.join(scratch, "fixture.json"),
-          ],
-          { encoding: "utf8" },
-        );
-      assert.equal(proof().status, 0);
-      client.response.portal.publications[0].title = "Near miss";
-      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
-      assert.equal(proof().status, 1);
-    } finally {
-      await rm(scratch, { recursive: true, force: true });
-    }
+    const foreignCanary = randomUUID();
+    await c.query("update ops.deal_deliverable set visibility='shared',version=6 where id=$1", [file]);
+    await c.query(
+      "insert into ops.client_publication(id,portal_slug,kind,title,deliverable_id,deliverable_version,published,version,updated_by) values($1,'synthetic-b','deliverable','Foreign canary',$2,6,true,1,'joe')",
+      [foreignCanary, file],
+    );
+    assert.equal((await project("synthetic-b")).publications.length, 0);
+    await c.query("delete from ops.client_publication where id=$1", [foreignCanary]);
+    await c.query("update ops.deal_deliverable set visibility='private',version=7 where id=$1", [file]);
     const schema = await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8");
     await c.query("drop table if exists public.event, public.tool_call cascade");
     for (const name of ["event", "tool_call"]) {
@@ -302,6 +277,161 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     await c.query("update actor set active=false where slug='joe'");
     await assert.rejects(registered(), /deliverable_denied/);
     await c.query("update actor set active=true where slug='joe'");
+    assert.equal((await c.query("select count(*)::int n from event where verb='set-client-publication'")).rows[0].n, 1);
+    await registered({ ...command, idempotency_key: randomUUID(), base_version: 1, published: true });
+    await registered({ ...command, idempotency_key: randomUUID(), base_version: 2, published: false });
+    const scratch = await mkdtemp(path.join(tmpdir(), "j9-proof-"));
+    try {
+      const revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", cwd: root }).trim();
+      const preview = await tools["preview-deal-client-view"].handler(c, partner, { deal_id: dealA });
+      const list = await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA });
+      const publicationReceipt = (
+        await c.query(
+          "select id,verb,subject_type,subject_id,new_value from event where verb='set-client-publication' order by recorded_at desc limit 1",
+        )
+      ).rows[0];
+      const client = {
+        source_commit: revision,
+        response: { portal: await project() },
+        publication_receipt: publicationReceipt,
+      };
+      const fixture = {
+        release: { git_sha: { value: revision } },
+        "preview-deal-client-view": preview,
+        "list-deal-client-publications": list,
+      };
+      await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+      const proof = () =>
+        spawnSync(
+          "python3",
+          [
+            path.join(root, "tools/prove-client-publications.py"),
+            "--expected-revision",
+            revision,
+            "--deal-id",
+            dealA,
+            "--client-response",
+            path.join(scratch, "client.json"),
+            "--fixture",
+            path.join(scratch, "fixture.json"),
+          ],
+          { encoding: "utf8" },
+        );
+      assert.equal(proof().status, 0);
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify({ ...client, publication_receipt: null }));
+      assert.equal(proof().status, 78);
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+      const releaseRepo = path.join(scratch, "release-repo");
+      const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+      execFileSync("git", ["init", "-q", releaseRepo], { env: gitEnv, stdio: "pipe" });
+      const releaseGit = (...parts: string[]) =>
+        execFileSync(
+          "git",
+          ["-C", releaseRepo, "-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.test", ...parts],
+          { encoding: "utf8", env: gitEnv, stdio: "pipe" },
+        ).trim();
+      const commitRelease = async (message: string) => {
+        const messagePath = path.join(scratch, "release-message.txt");
+        await writeFile(messagePath, message);
+        releaseGit("commit", "--allow-empty", "-F", messagePath);
+        return releaseGit("rev-parse", "HEAD");
+      };
+      const older = await commitRelease("Synthetic first release\n");
+      const descendant = await commitRelease("Synthetic descendant release\n");
+      releaseGit("checkout", "--orphan", "unrelated");
+      const unrelated = await commitRelease("Synthetic unrelated release\n");
+      const probe = [
+        "import importlib.util, pathlib, sys",
+        "source = sys.argv.pop(2)",
+        "spec = importlib.util.spec_from_file_location('publication_proof', source)",
+        "module = importlib.util.module_from_spec(spec)",
+        "spec.loader.exec_module(module)",
+        "module.ROOT = pathlib.Path(sys.argv.pop(1))",
+        "sys.exit(module.main())",
+      ].join("\n");
+      const ancestryProof = (expected: string) =>
+        spawnSync(
+          "python3",
+          [
+            "-c",
+            probe,
+            releaseRepo,
+            path.join(root, "tools/prove-client-publications.py"),
+            "--expected-revision",
+            expected,
+            "--deal-id",
+            dealA,
+            "--client-response",
+            path.join(scratch, "client.json"),
+            "--fixture",
+            path.join(scratch, "fixture.json"),
+          ],
+          { encoding: "utf8" },
+        );
+      const releaseCases: [string, string, number, string][] = [
+        [older, older, 0, "equal"],
+        [older, descendant, 0, "descendant"],
+        [descendant, older, 78, "older"],
+        [older, unrelated, 78, "unrelated"],
+        [older, "f".repeat(40), 78, "unknown"],
+      ];
+      for (const [expected, observed, code, label] of releaseCases) {
+        fixture.release.git_sha.value = observed;
+        client.source_commit = observed;
+        await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
+        await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+        const result = ancestryProof(expected);
+        assert.equal(result.status, code, label + result.stderr);
+      }
+      await writeFile(path.join(scratch, "fixture.json"), JSON.stringify({ ...fixture, release: null }));
+      assert.equal(ancestryProof(older).status, 78);
+      fixture.release.git_sha.value = revision;
+      client.source_commit = revision;
+      await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+      const liveBundle = {
+        ...client,
+        partner: { "preview-deal-client-view": preview, "list-deal-client-publications": list },
+      };
+      await writeFile(path.join(scratch, "live.json"), JSON.stringify(liveBundle));
+      const transportProbe = [
+        "import importlib.util, json, sys",
+        "from types import SimpleNamespace",
+        "source = sys.argv.pop(1)",
+        "release_path = sys.argv.pop(1)",
+        "spec = importlib.util.spec_from_file_location('publication_proof', source)",
+        "module = importlib.util.module_from_spec(spec)",
+        "spec.loader.exec_module(module)",
+        "release = json.load(open(release_path))['release']",
+        "module.read = lambda *a, **k: SimpleNamespace(body=json.dumps(release).encode())",
+        "sys.exit(module.main())",
+      ].join("\n");
+      assert.equal(
+        spawnSync(
+          "python3",
+          [
+            "-c",
+            transportProbe,
+            path.join(root, "tools/prove-client-publications.py"),
+            path.join(scratch, "fixture.json"),
+            "--expected-revision",
+            revision,
+            "--deal-id",
+            dealA,
+            "--client-response",
+            path.join(scratch, "live.json"),
+          ],
+          { encoding: "utf8" },
+        ).status,
+        0,
+      );
+      client.response.portal.publications[0].title = "Near miss";
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+      assert.equal(proof().status, 1);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
     for (let i = 0; i < 99; i++) await write(randomUUID(), 0, true);
     await assert.rejects(write(randomUUID(), 0, true), /publication_capacity/);
     assert.equal((await project()).publications.length, 100);
