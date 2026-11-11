@@ -6,7 +6,13 @@ type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
 type ErrorConstructor = new (payload: { error: string }) => Error;
 
 import { isCalendarDate } from "./calendar-date.ts";
-import { leadAdvice, leadReachability, researchEvidenceSql, researchSummary } from "./lead-follow-up.ts";
+import {
+  leadAdvice,
+  leadReachability,
+  reachabilityInputSql,
+  researchEvidenceSql,
+  researchSummary,
+} from "./lead-follow-up.ts";
 import { ToolError as DefaultToolError } from "./tool-error.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
@@ -59,7 +65,7 @@ export async function readLeadWorkspace(
   const row = (
     await c.query(
       `with board as materialized (
-      select w.*, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
+      select w.*, ${reachabilityInputSql("w.id", "w.party_id")} reachability_input, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
         from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
     ), correspondence as materialized (
       select * from v_lead_workspace_correspondence where lead_id=$1::uuid
@@ -93,9 +99,9 @@ export async function readLeadWorkspace(
     )
   ).rows[0];
   const now = Date.now();
-  const project = async ({ research_evidence = [], ...lead }: (typeof row.leads)[number]) => ({
+  const project = async ({ research_evidence = [], reachability_input, ...lead }: (typeof row.leads)[number]) => ({
     ...leadAdvice(lead),
-    reachability: await leadReachability(lead, research_evidence, now),
+    reachability: await leadReachability(lead, research_evidence, now, reachability_input),
   });
   const { research_evidence } = row.detail || {};
   return {

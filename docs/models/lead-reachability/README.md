@@ -1,31 +1,33 @@
-# Lead reachability v1
+# Lead reachability v2
 
-`lead-board` with `workspace: "leads"` adds `reachability` to each board row and selected detail. The outer `lead-workspace.v1` contract remains additive. Consumers pin `lead-reachability.v1` and validate the fragment against `mcp-server/contracts/lead-reachability.v1.json`.
+The registered `lead-board` workspace read owns Reachable and Research. The outer `lead-workspace.v1` remains unchanged. Consumers validate `mcp-server/contracts/lead-reachability.v2.json`. V2 replaces the research-only v1 schema because its classification enum and basis were constants and its object rejected additional fields.
 
-This version deliberately returns `classification: "research"` for every lead. `contact_eligible` describes lifecycle restrictions. `research_state` describes recorded research completeness. Neither proves a verified usable contact route. `record-finding` defines `verified` as an identity pass and accepts free-form values for email, cell and office_phone. `update-party-contact` promotes facts using a source string, without a typed finding-to-current-route binding. This projection does not infer that binding. A positive Reachable view remains unproven until canonical route verification supports it. Missing evidence never means a bad lead.
+Reachable requires all of the following in one snapshot.
 
-`evidence_state` reuses researchSummary's expiry, future-observation and conflict rules. `evidence` retains source, finding ID, observation, expiry and value. `evaluated_at` is the evaluation clock. `source_revision` is SHA-256 of the JSON array `[lead.base_version ?? null, contact_eligible ?? null, evidence]` in returned evidence order. A revision identifies the classification inputs, not a release or a freshness promise. Re-evaluate on refresh and expiry even when the source revision is unchanged.
+- A successful contact on this exact lead, dated after lead creation, no later than the read clock, within 90 days. Manual call, text, inbound email, meeting or tour requires `connected=true`. The activity's lead relationship binds it to the current party. Any explicit conflicting party binding refuses it.
+- For `mail_ingest` or `local_mail`, only inbound mail with `match=exact`, the same party ID, a nonempty `evidence_ref` and `automated=false` qualifies. Connected alone cannot bypass these machine-ingest checks. Outbound email never proves successful contact.
+- A found, sourced, nonfuture email, cell or office_phone finding with an explicit unexpired expiry and exact equality to the current party email, cell or phone. Email must have an email shape, phones at least seven digits. Bare contact values and identity verification are insufficient.
+- Contact eligibility is true and no current discrepancy or proposed correction exists. Restrictions, research completeness and evidence conflicts remain separately visible. An expired or missing route or unsuccessful contact yields Research, never a bad-lead judgment.
 
-The projection preserves board membership, ordering and exact IDs. Existing suppressed/merged/deleted filtering remains in the view. It makes one PostgreSQL statement and no external calls. Each lead reads at most 501 findings through the existing evidence query. More than 500 refuses the snapshot rather than claiming complete evidence. There is no cache, queue, write, enrichment, score threshold or outreach. At 10x leads, evidence lookup and JSON volume are the first capacity costs. The single statement gives consistent source inputs. Database failure refuses the read.
+`successful_contact` exposes activity ID, date, kind and source. `usable_route` identifies the finding and route kind. `source_inputs` contains the current party routes, lead creation date and at most 500 recent bound activities. Existing `evidence` retains finding provenance. The SHA-256 revision covers `[base_version, contact_eligible, evidence, source_inputs]`. Refresh can change classification through expiry without changing that revision.
+
+## System design
+
+The existing read module queries evidence and classifies it. No new endpoint or migration. One PostgreSQL statement preserves board membership, ordering and board/detail equality. A correlated lookup reads up to 501 recent activities per lead and refuses above 500, matching the findings bound. At 10x volume the activity lookup and JSON payload grow first. No application N+1, external call, cache, queue, write, idempotency key or retry is introduced. Database failure refuses the snapshot. This uses the existing registered authentication and reader grants.
 
 ## Model and tests
 
-The model abstracts snapshot refresh, evidence changes and eligibility changes. Authentication refusal remains owned by the existing registered tool dispatcher. This read introduces no session or authorization state. Evidence changes between requests produce new snapshots.
+The model abstracts a complete refreshed snapshot into current route, recent successful contact, eligibility and conflict. It does not model SQL parsing, timestamps or authentication. Those are exercised by registered tests. Run TLC with `JAVA=/opt/homebrew/opt/openjdk@21/bin/java`, then `$JAVA -cp /tmp/wr591-j3-tla2tools.jar tlc2.TLC -config Reachability.cfg Reachability.tla` in a scratch copy.
 
-| Transition | Registered board test |
+| Transition | Test |
 | --- | --- |
-| sourced finding recorded | identity verification and free form contact findings never assert a usable route |
-| evidence expires | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| discrepancy recorded | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| discrepancy expires | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| fresh finding recorded | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| evidence removed | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| contact restricted | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| restriction lifted | snapshot refresh follows expiry, conflict, renewal, removal and contact restriction |
-| snapshot refreshed | source revision changes with source facts and preserves future evidence as unknown |
-
-Regenerate from a scratch copy of this directory with the statechart skill's `from-chart reachability.mmd`. Set `JAVA=/opt/homebrew/opt/openjdk@21/bin/java` and `TLA2TOOLS` to a downloaded TLC jar. The checked model has eight states, twenty transitions and no broken rule.
+| Successful contact plus current route | successful exact-lead contact and current matching route make the lead reachable |
+| Unanswered attempt, expiry or changed route | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
+| Suppression, restriction, conflict and renewal | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
+| Future, stale or pre-lead contact | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
+| Exact inbound reply and invalid machine bindings | registered board preserves identity, owns classification, and exposes exact source evidence under carr_reader |
+| Source refresh and removal | source revision changes with source facts and preserves future evidence as unknown |
 
 ## Production proof
 
-After a containing CARR release is verified, call `./run.sh call lead-board '{"workspace":"leads"}'`. Compare exact lead IDs, finding IDs, values, sources, observation/expiry and source revisions independently with `prospect-research` for a verified-route candidate, incomplete lead and restricted or conflicting case. Contact eligibility alone must never be treated as reachable. No qualifying positive record yields insufficient evidence, exit 78. This v1 contract cannot certify a positive route. Do not manufacture a verification finding. The coordinator owns the containing-release proof; this build performs no production calls.
+On a containing release, the coordinator reads the registered board and compares exact lead/party, activity/date, route finding and value, restrictions and revision with independent source reads. No qualifying positive record yields insufficient evidence, exit 78. Do not manufacture production findings. This worker performs no production calls.

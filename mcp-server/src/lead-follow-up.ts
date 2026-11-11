@@ -118,14 +118,67 @@ function currentResearchEvidence(evidence: Finding[], now: number) {
   });
 }
 
+type ContactActivity = {
+  id: string;
+  lead_id: string;
+  kind: string;
+  connected: boolean | null;
+  occurred_at: string;
+  source: string;
+  detail: string | null;
+};
+type ReachabilityInput = {
+  party_id: string;
+  created_at: string;
+  email: string | null;
+  cell: string | null;
+  phone: string | null;
+  activities: ContactActivity[];
+};
+const CONTACT_FRESHNESS_DAYS = 90;
+function successfulContact(leadId: string, input: ReachabilityInput, now: number) {
+  if (input.activities.length > 500) throw new ToolError({ error: "contact_evidence_limit_exceeded" });
+  return input.activities.find((a) => {
+    const date = Date.parse(a.occurred_at);
+    if (
+      a.lead_id !== leadId ||
+      !a.source?.trim() ||
+      !Number.isFinite(date) ||
+      date > now ||
+      date < now - CONTACT_FRESHNESS_DAYS * 86400000 ||
+      date < Date.parse(input.created_at)
+    )
+      return false;
+    let detail: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(a.detail || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) detail = parsed as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    if (detail.party_id !== undefined && detail.party_id !== input.party_id) return false;
+    if (["mail_ingest", "local_mail"].includes(a.source))
+      return (
+        a.kind === "email_in" &&
+        detail.match === "exact" &&
+        detail.party_id === input.party_id &&
+        typeof detail.evidence_ref === "string" &&
+        !!detail.evidence_ref.trim() &&
+        detail.automated === false
+      );
+    return a.connected === true && ["call", "text", "email_in", "meeting", "tour"].includes(a.kind);
+  });
+}
 export async function leadReachability(
   lead: Lead & { base_version?: number },
   evidence: Finding[] = [],
   now = Date.now(),
+  input?: ReachabilityInput,
 ) {
   const research = researchSummary(evidence, now);
   const current = currentResearchEvidence(evidence, now);
   const advised = leadAdvice(lead);
+  const contact_eligible = lead.contact_eligible === false ? false : (advised.contact_eligible ?? null);
   const evidence_state =
     research.state === "needs_review"
       ? "conflicting"
@@ -134,27 +187,71 @@ export async function leadReachability(
         : evidence.some((e) => e.expired)
           ? "expired"
           : "unknown";
-  // record-finding's verified kind is an identity pass. Its free-form values
-  // do not bind a verified usable route to the current party contact value.
-  const revision = JSON.stringify([lead.base_version ?? null, advised.contact_eligible ?? null, evidence]);
+  const contact = input ? successfulContact(lead.id, input, now) : undefined;
+  const day = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  const route = input
+    ? current.find((e) => {
+        const key = e.kind === "office_phone" ? "phone" : e.kind === "email" || e.kind === "cell" ? e.kind : null;
+        if (
+          !key ||
+          !e.found ||
+          !e.source.trim() ||
+          !e.expires_on ||
+          !isCalendarDate(e.expires_on) ||
+          e.expires_on < day
+        )
+          return false;
+        const canonical = input[key];
+        if (
+          typeof canonical !== "string" ||
+          !canonical.trim() ||
+          (key === "email" ? !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(canonical) : canonical.replace(/\D/g, "").length < 7)
+        )
+          return false;
+        const value = e.value;
+        return !!value && typeof value === "object" && key in value && value[key as keyof typeof value] === canonical;
+      })
+    : undefined;
+  const missing_reasons = [
+    ...(contact_eligible !== true ? ["contact_restricted"] : []),
+    ...(evidence_state === "conflicting" ? ["conflicting_evidence"] : []),
+    ...(evidence_state === "expired" ? ["expired_evidence"] : []),
+    ...(!route ? ["verified_usable_route_not_established"] : []),
+    ...(!contact ? ["recent_successful_contact_not_established"] : []),
+  ];
+  const revision = JSON.stringify([lead.base_version ?? null, contact_eligible, evidence, input ?? null]);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(revision));
   return {
-    schema_version: "lead-reachability.v1",
-    classification: "research",
-    basis: "recorded_findings_without_route_binding",
+    schema_version: "lead-reachability.v2",
+    classification: missing_reasons.length ? "research" : "reachable",
+    basis: "successful_contact_and_current_route",
     evidence_state,
-    contact_eligible: advised.contact_eligible ?? null,
+    contact_eligible,
     research_state: research.state,
-    missing_reasons: [
-      ...(advised.contact_eligible === false ? ["contact_restricted"] : []),
-      ...(evidence_state === "conflicting" ? ["conflicting_evidence"] : []),
-      ...(evidence_state === "expired" ? ["expired_evidence"] : []),
-      "verified_usable_route_not_established",
-    ],
+    missing_reasons,
     source_revision: `sha256:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`,
     evaluated_at: new Date(now).toISOString(),
     evidence,
+    successful_contact: contact
+      ? { activity_id: contact.id, occurred_at: contact.occurred_at, source: contact.source, kind: contact.kind }
+      : null,
+    usable_route: route ? { flag_id: route.flag_id, kind: route.kind } : null,
+    contact_freshness_days: CONTACT_FRESHNESS_DAYS,
+    source_inputs: input ?? null,
   };
+}
+export function reachabilityInputSql(leadId: string, partyId: string) {
+  return `(select jsonb_build_object('party_id',p.id,'created_at',l.created_at,
+    'email',p.email,'cell',p.cell,'phone',p.phone,'activities',coalesce((select jsonb_agg(to_jsonb(a) order by a.occurred_at desc,a.id) from (
+      select id,lead_id,kind,connected,occurred_at,source,detail from public.activity
+      where lead_id=l.id and occurred_at>=l.created_at and occurred_at>=now()-interval '90 days'
+        and occurred_at<=now() order by occurred_at desc,id limit 501) a),'[]'::jsonb))
+    from public.lead l join public.party p on p.id=l.party_id where l.id=${leadId} and p.id=${partyId})`;
 }
 export function researchEvidenceSql(partyId: string) {
   return `coalesce((select jsonb_agg(to_jsonb(f) order by f.observed_at desc,f.flag_id) from (

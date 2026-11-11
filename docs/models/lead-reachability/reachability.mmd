@@ -1,24 +1,8 @@
 stateDiagram-v2
- state Snapshot {
-  state Evidence {
-    [*] --> Unknown
-    Unknown --> Current: sourced finding recorded
-    Current --> Expired: evidence expires
-    Current --> Conflicting: discrepancy recorded
-    Conflicting --> Current: discrepancy expires
-    Expired --> Current: fresh finding recorded
-    Current --> Unknown: evidence removed
-  }
-  --
-  state Eligibility {
-    [*] --> Eligible
-    Eligible --> Restricted: contact restricted
-    Restricted --> Eligible: restriction lifted
-  }
-  --
-  state Classification {
-    [*] --> Research
-    Research --> Research: snapshot refreshed
-  }
- }
-  %% never NoUnsupportedReachable: Reachable -- Free form identity findings cannot establish a verified usable route.
+ [*] --> Research
+ Research --> Reachable: successful contact and current matching route, eligible and no conflict
+ Reachable --> Research: contact ages out or route expires, changes or is removed
+ Reachable --> Research: suppression, restriction or conflict recorded
+ Research --> Reachable: evidence renewed or restriction cleared with supporting evidence
+ Reachable --> Reachable: supported snapshot refreshed
+ Research --> Research: missing, future, mismatched or unanswered evidence

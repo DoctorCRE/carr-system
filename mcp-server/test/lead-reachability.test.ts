@@ -7,7 +7,7 @@ import { Validator } from "@cfworker/json-schema";
 import { array, handler, object } from "./helpers/legacy-test-registry.ts";
 
 const contract = new Validator(
-  JSON.parse(readFileSync(new URL("../contracts/lead-reachability.v1.json", import.meta.url), "utf8")),
+  JSON.parse(readFileSync(new URL("../contracts/lead-reachability.v2.json", import.meta.url), "utf8")),
 );
 const id = "30000000-0000-0000-0000-000000000001";
 const evidence = {
@@ -54,7 +54,7 @@ async function board(findings: object[] = [], fields: object = {}) {
 }
 test("missing evidence remains unknown research, eligibility never proves reachability", async () => {
   const r = await board();
-  assert.equal(r.schema_version, "lead-reachability.v1");
+  assert.equal(r.schema_version, "lead-reachability.v2");
   assert.equal(r.classification, "research");
   assert.equal(r.evidence_state, "unknown");
   assert.equal(r.contact_eligible, true);
@@ -101,13 +101,13 @@ test("source revision changes with source facts and preserves future evidence as
 
 test("producer recordings pass the consumer contract and reproduce through the registered read", async () => {
   const recording = object(
-    JSON.parse(readFileSync(new URL("./fixtures/lead-reachability.v1.json", import.meta.url), "utf8")),
+    JSON.parse(readFileSync(new URL("./fixtures/lead-reachability.v2.json", import.meta.url), "utf8")),
   );
   for (const detail of Object.values(object(recording.cases)).map(object)) {
     const expected = object(detail.reachability);
     assert.equal(contract.validate(expected).valid, true);
-    assert.equal(contract.validate({ ...expected, classification: "reachable" }).valid, false);
-    const row = { ...detail, research_evidence: expected.evidence };
+    assert.equal(contract.validate({ ...expected, classification: "fabricated" }).valid, false);
+    const row = { ...detail, research_evidence: expected.evidence, reachability_input: expected.source_inputs };
     const response = await handler(
       "lead-board",
       { query: async () => ({ rows: [{ leads: [row], detail: row }] }) },
@@ -120,18 +120,42 @@ test("producer recordings pass the consumer contract and reproduce through the r
   }
 });
 
-
 test("successful exact-lead contact and current matching route make the lead reachable", async () => {
-  const input = { party_id: id, created_at: "2020-01-01T00:00:00Z", email: "reachable@example.test", cell: null, phone: null,
-    activities: [{ id, lead_id: id, kind: "call", connected: true, occurred_at: new Date(Date.now()-60000).toISOString(), source: "manual", detail: null }] };
+  const input = {
+    party_id: id,
+    created_at: "2020-01-01T00:00:00Z",
+    email: "reachable@example.test",
+    cell: null,
+    phone: null,
+    activities: [
+      {
+        id,
+        lead_id: id,
+        kind: "call",
+        connected: true,
+        occurred_at: new Date(Date.now() - 60000).toISOString(),
+        source: "manual",
+        detail: null,
+      },
+    ],
+  };
   const route = { ...evidence, kind: "email", value: { found: true, email: input.email } };
   const fields = { reachability_input: input };
   const positive = await board([route], fields);
   assert.equal(positive.classification, "reachable");
   assert.equal(object(positive.successful_contact).activity_id, id);
   assert.equal(object(positive.usable_route).kind, "email");
-  for (const change of [{ suppressed: true }, { contact_eligible: false }, { reachability_input: { ...input, activities: [{ ...input.activities[0], connected: false }] } }])
+  for (const change of [
+    { suppressed: true },
+    { contact_eligible: false },
+    { reachability_input: { ...input, activities: [{ ...input.activities[0], connected: false }] } },
+  ])
     assert.equal((await board([route], { ...fields, ...change })).classification, "research");
-  for (const change of [{ expired: true }, { expires_on: null }, { value: { email: "other@example.test" } }, { source: "" }])
+  for (const change of [
+    { expired: true },
+    { expires_on: null },
+    { value: { email: "other@example.test" } },
+    { source: "" },
+  ])
     assert.equal((await board([{ ...route, ...change }], fields)).classification, "research");
 });
