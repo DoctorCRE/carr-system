@@ -1005,6 +1005,12 @@
       "sha256": "31cbca7b1912ff7cb7227046f0bea2bf81c4eb811a3a8a4b6b9a7ad2757ca05d",
       "rule": "pii-address",
       "reason": "WR591.S23.J4 reviewed synthetic PDF fixture. Example Street is invented and verifies deterministic public packet rendering; no production record data."
+    },
+    {
+      "path": "ops/fixtures/tour-navigation-detail.json",
+      "sha256": "a51d1a31983078234a2a65c2abc3037eaf148994fb292607f7a824bdc936f6e9",
+      "rule": "pii-address",
+      "reason": "Recorded disposable Tour delivery fixture. The two synthetic addresses originate in mcp-server/test/tour-delivery-data-plane-postgres.sql; no production records are read. This allowance binds only this path and these exact bytes."
     }
   ]
 }

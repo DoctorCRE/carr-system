@@ -56,7 +56,7 @@ values
 
 set local carr.verified_human_actor_slug='joe';
 do $map_promotion$
-declare v_actor_id text; v_digest text; v_share uuid; v_packet jsonb; v_render_packet jsonb;
+declare v_actor_id text; v_digest text; v_share uuid; v_packet jsonb; v_render_packet jsonb; nav jsonb;
 begin
   select id::text into strict v_actor_id from public.actor where slug='joe' and active and kind='human';
   perform ops.append_tour_entrance_verification_receipt(jsonb_build_object(
@@ -79,6 +79,10 @@ begin
     '[{"property_id":"a1000000-0000-4000-8000-000000000001","field_assertion_id":"a9000000-0000-4000-8000-000000000001","display_field_key":"display.name"},{"property_id":"a1000000-0000-4000-8000-000000000001","field_assertion_id":"a9000000-0000-4000-8000-000000000003","display_field_key":"display.address"},{"property_id":"a1000000-0000-4000-8000-000000000002","field_assertion_id":"a9000000-0000-4000-8000-000000000010","display_field_key":"display.name"},{"property_id":"a1000000-0000-4000-8000-000000000002","field_assertion_id":"a9000000-0000-4000-8000-000000000011","display_field_key":"display.address"}]',
     v_actor_id,'sha256:'||repeat('6',64));
   if v_digest !~ '^sha256:[a-f0-9]{64}$' then raise exception 'map projection did not seal'; end if;
+  nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+  if nav->>'reason' is distinct from 'promotion_missing' or nav->'evidence' is distinct from 'null'::jsonb then
+    raise exception 'navigation guessed evidence before promotion: %',nav;
+  end if;
   begin
     perform ops.issue_tour_share_grant('tour-delivery-proof','ac000000-0000-4000-8000-000000000001','sha256:'||repeat('7',64),'["view_map"]',now()+interval '1 day','sha256:'||repeat('8',64),v_actor_id);
     raise exception 'expected promotion receipt refusal';
@@ -89,7 +93,7 @@ begin
     'decision','approved','reviewed_at',to_char(now(),'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'decision_reason','All required map promotion checks passed.',
     'brief_version','tour-map-brief.v1','canonical_dataset_version','proof-v1','selected_prototype_id','carr-map-tour-v1',
-    'component_registry_version','maplibre-6.1.0','route_version',1,
+    'component_registry_version','maplibre-6.4.1','route_version',1,
     'provider_rights_receipt_ids',jsonb_build_array('a5000000-0000-4000-8000-000000000001'),
     'mobile_test_evidence',jsonb_build_object('status','passed'),'native_navigation_test_evidence',jsonb_build_object('status','passed'),
     'offline_test_evidence',jsonb_build_object('status','passed'),'required_checks',jsonb_build_object(
@@ -102,6 +106,50 @@ begin
   if not ops.tour_public_map_projection_ready('tour-delivery-proof','ac000000-0000-4000-8000-000000000001') then
     raise exception 'approved map promotion did not open readiness';
   end if;
+  nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+  if nav->>'contract_version' is distinct from 'tour-navigation-evidence.v1'
+     or nav->>'status' is distinct from 'ready'
+     or nav#>'{evidence,stops,0,position}' is distinct from '{"latitude":30.421000,"longitude":-87.216000}'::jsonb
+     or nav#>>'{evidence,stops,0,source,source_evidence_id}' is distinct from 'a6000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,stops,0,source,coordinate_candidate_id}' is distinct from 'aa000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,stops,0,route_stop_id}' is distinct from 'a4000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,projection_id}' is distinct from 'ac000000-0000-4000-8000-000000000001'
+     or nav#>>'{evidence,promotion,component_registry_version}' is distinct from 'maplibre-6.4.1'
+     or nav#>>'{evidence,promotion,receipt_digest}' is distinct from 'sha256:'||repeat('9',64)
+     or not exists(select 1 from ops.tour_map_promotion_receipt r where r.id::text=nav#>>'{evidence,promotion,receipt_id}' and r.route_version=(nav#>>'{evidence,route_version}')::integer)
+  then raise exception 'navigation contract lost exact sealed entrance or matching promotion evidence: %',nav; end if;
+  raise notice 'TOUR_NAVIGATION_RECORD:%',nav;
+  if ops.read_tour_internal_detail('wrong-tenant','a2000000-0000-4000-8000-000000000001',v_actor_id) is not null then
+    raise exception 'navigation detail leaked across tenant';
+  end if;
+  begin
+    insert into ops.tour_rights_receipt(organization_tenant_id,provider,policy_key,receipt_version,receipt_digest,terms_url,reviewed_at,reviewer,intended_use,allowed_field_classes,allowed_use_classes,effective_at,status,revoked_at,supersedes_receipt_id)
+    values('tour-delivery-proof','search-proof','search-policy',2,'sha256:'||repeat('f',64),'https://example.invalid/search',now(),'proof','revoked','["*"]','["client_public_display"]',now(),'revoked',now(),'a5000000-0000-4000-8000-000000000001');
+    nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+    if nav->>'reason' is distinct from 'entrance_or_rights_evidence_unavailable' or nav->'evidence' is distinct from 'null'::jsonb then
+      raise exception 'navigation used stale rights: %',nav;
+    end if;
+    raise sqlstate 'ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
+  begin
+    update ops.tour set route_version=2 where id='a2000000-0000-4000-8000-000000000001';
+    nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+    if nav->>'reason' is distinct from 'route_replaced' or nav->'evidence' is distinct from 'null'::jsonb then
+      raise exception 'navigation used replaced route: %',nav;
+    end if;
+    raise sqlstate 'ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
+  begin
+    update ops.tour set canonical_dataset_version='proof-v2' where id='a2000000-0000-4000-8000-000000000001';
+    nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+    if nav->>'reason' is distinct from 'promotion_stale' or nav->'evidence' is distinct from 'null'::jsonb then
+      raise exception 'navigation used stale promotion dataset: %',nav;
+    end if;
+    raise sqlstate 'ZX001';
+  exception when sqlstate 'ZX001' then null;
+  end;
   v_share:=ops.issue_tour_share_grant('tour-delivery-proof','ac000000-0000-4000-8000-000000000001','sha256:'||repeat('a',64),'["view_map","view_packet"]',now()+interval '1 day','sha256:'||repeat('b',64),v_actor_id);
   perform ops.exchange_tour_share_token('sha256:'||repeat('a',64),'sha256:'||repeat('2',64),now()+interval '1 day','sha256:'||repeat('3',64));
   v_packet:=ops.read_tour_share_packet('sha256:'||repeat('2',64));
@@ -220,7 +268,7 @@ begin
     'decision','rejected','reviewed_at',to_char(now()-interval '1 year','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'decision_reason','Mobile, native-navigation, and offline evidence failed.',
     'brief_version','tour-map-brief.v1','canonical_dataset_version','proof-v1','selected_prototype_id','carr-map-tour-v1',
-    'component_registry_version','maplibre-6.1.0','route_version',1,
+    'component_registry_version','maplibre-6.4.1','route_version',1,
     'provider_rights_receipt_ids',jsonb_build_array('a5000000-0000-4000-8000-000000000001'),
     'mobile_test_evidence',jsonb_build_object('status','failed'),'native_navigation_test_evidence',jsonb_build_object('status','failed'),
     'offline_test_evidence',jsonb_build_object('status','failed'),'required_checks',jsonb_build_object(
@@ -232,6 +280,10 @@ begin
       'provider_terms_attribution_expiry_and_cost_gate_passed',true),'receipt_digest','sha256:'||repeat('c',64)),v_actor_id);
   if ops.tour_public_map_projection_ready('tour-delivery-proof','ac000000-0000-4000-8000-000000000001') then
     raise exception 'later appended backdated rejection did not close readiness';
+  end if;
+  nav := ops.read_tour_internal_detail('tour-delivery-proof','a2000000-0000-4000-8000-000000000001',v_actor_id)#>'{routes,0,navigation}';
+  if nav->>'reason' is distinct from 'promotion_rejected' or nav->'evidence' is distinct from 'null'::jsonb then
+    raise exception 'navigation ignored newer backdated rejection: %',nav;
   end if;
   begin
     perform ops.rotate_tour_share_grant('tour-delivery-proof',v_share,'ac000000-0000-4000-8000-000000000001','sha256:'||repeat('d',64),'["view_map"]',now()+interval '1 day','sha256:'||repeat('e',64),v_actor_id);

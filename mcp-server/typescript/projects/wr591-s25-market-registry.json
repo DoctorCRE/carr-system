@@ -1,0 +1,5 @@
+{
+  "worker": ["src/vendor-market-registry.ts"],
+  "node": ["test/vendor-market-registry.test.ts", "test/vendor-market-registry-postgres.test.ts"],
+  "entry": ["test/vendor-market-registry.test.ts", "test/vendor-market-registry-postgres.test.ts"]
+}
