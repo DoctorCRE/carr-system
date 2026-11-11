@@ -1,0 +1,9 @@
+{
+  "node": [
+    "test/tour-feedback-capabilities.test.ts"
+  ],
+  "worker": [],
+  "entry": [
+    "test/tour-feedback-capabilities.test.ts"
+  ]
+}
