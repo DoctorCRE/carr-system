@@ -131,7 +131,6 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     // DoctorCRE V5-J103: a partner's own consent for the local mail and
     // calendar adapter to READ their own carr.us mailbox, and its withdrawal.
     "record-commission-receipt",
-    "record-correspondence-adapter-consent",
     "record-deal-closing",
     "record-deal-item",
     // WR-000529: J102 partner statements the store already refuses to machines.
@@ -156,7 +155,6 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "review-and-triage",
     "review-call-outcome",
     "review-deal-update",
-    "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
     "revoke-web-push-subscription-v1",

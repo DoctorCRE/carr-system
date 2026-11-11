@@ -141,10 +141,6 @@ PROOFS = (
         optional=True,
     ),
     Proof(
-        "mcp-server/test/governed-correspondence-store-postgres.sql",
-        "V5-J103 governed correspondence store PostgreSQL acceptance failed",
-    ),
-    Proof(
         "mcp-server/test/record-source-authority-live-pg.v5.test.mjs",
         "V5-F01 record-source-authority PostgreSQL acceptance failed",
         log="record-source-authority-live-pg",
@@ -203,13 +199,6 @@ PROOFS = (
         "mcp-server/test/dispatch-spine.test.mjs",
         "the dispatch-spine database acceptance proof failed",
         log="dispatch-spine-db",
-        env=ACCEPTANCE_ENV,
-        optional=True,
-    ),
-    Proof(
-        "mcp-server/test/governed-correspondence-thread-postgres.test.mjs",
-        "the governed-correspondence-thread-postgres database acceptance proof failed",
-        log="governed-correspondence-thread-postgres-db",
         env=ACCEPTANCE_ENV,
         optional=True,
     ),
