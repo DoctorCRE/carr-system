@@ -68,7 +68,41 @@
           "observed_at",
           "expires_on",
           "value"
-        ]
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "found": {
+            "type": "boolean"
+          },
+          "expired": {
+            "type": "boolean"
+          },
+          "proposes_correction": {
+            "type": "boolean"
+          },
+          "flag_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_on": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "value": {}
+        }
       }
     }
   },

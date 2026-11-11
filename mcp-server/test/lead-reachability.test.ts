@@ -98,3 +98,24 @@ test("source revision changes with source facts and preserves future evidence as
   assert.notEqual(a.source_revision, (await board([evidence], { base_version: 5 })).source_revision);
   assert.equal((await board([{ ...evidence, observed_at: "2099-01-01T00:00:00Z" }])).evidence_state, "unknown");
 });
+
+test("producer recordings pass the consumer contract and reproduce through the registered read", async () => {
+  const recording = object(
+    JSON.parse(readFileSync(new URL("./fixtures/lead-reachability.v1.json", import.meta.url), "utf8")),
+  );
+  for (const detail of Object.values(object(recording.cases)).map(object)) {
+    const expected = object(detail.reachability);
+    assert.equal(contract.validate(expected).valid, true);
+    assert.equal(contract.validate({ ...expected, classification: "reachable" }).valid, false);
+    const row = { ...detail, research_evidence: expected.evidence };
+    const response = await handler(
+      "lead-board",
+      { query: async () => ({ rows: [{ leads: [row], detail: row }] }) },
+      { id, slug: "joe", human: true },
+      { workspace: "leads", lead_id: detail.id },
+    );
+    const actual = object(object(array(response.leads)[0]).reachability);
+    assert.equal(actual.source_revision, expected.source_revision);
+    assert.deepEqual({ ...actual, evaluated_at: expected.evaluated_at }, expected);
+  }
+});
