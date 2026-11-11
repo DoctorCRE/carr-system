@@ -131,7 +131,7 @@ begin
   end if;
   declare
     grant_id uuid; render_id uuid; result_id uuid; sd text; td text;
-    scopes jsonb; state text; n integer:=0; projection_ref text; property_ref text;
+    scopes jsonb; feedback jsonb; state text; n integer:=0; projection_ref text; property_ref text;
   begin
     insert into ops.tour_pdf_render_job(organization_tenant_id,projection_id,requested_by_actor_id,request,
       projection_digest,packet_digest,template_digest,renderer_digest,qc_ruleset_digest,expected_property_count)
@@ -145,9 +145,9 @@ begin
       'accept',now(),'sha256:'||repeat('7',64),'Reviewed synthetic packet',v_actor_id);
     projection_ref:='projection:public:'||substr(encode(public.digest('tour-delivery-proof:ac000000-0000-4000-8000-000000000001:'||v_digest,'sha256'),'hex'),1,32);
     property_ref:='property:public:'||substr(encode(public.digest('tour-delivery-proof:ac000000-0000-4000-8000-000000000001:a1000000-0000-4000-8000-000000000001','sha256'),'hex'),1,32);
-    for scopes in select value from jsonb_array_elements('[[],["view_packet"],["download"],["view_packet","shortlist"],["view_packet","comment"]]'::jsonb)
+    for scopes in select value from jsonb_array_elements('[[],["view_packet"],["download"],["view_packet","shortlist"],["view_packet","comment"],["view_packet","shortlist","comment","download"]]'::jsonb)
     loop
-      for state in select unnest(array['active','expired','revoked']) loop
+      for state in select unnest(array['active','expired','revoked','session_expired']) loop
        begin
         n:=n+1;
         sd:='sha256:'||encode(public.digest('session-'||n,'sha256'),'hex');
@@ -168,7 +168,13 @@ begin
             case when scopes='[]' then '["view_map"]'::jsonb else scopes end,now()+interval '1 hour','sha256:'||repeat('9',64));
           sd:='sha256:'||encode(public.digest('expired-'||n,'sha256'),'hex');
         end if;
-        if state<>'active' and ops.exchange_tour_share_token(td,
+        if state='session_expired' then
+          sd:='sha256:'||encode(public.digest('expired-session-'||n,'sha256'),'hex');
+          insert into ops.tour_share_session(organization_tenant_id,share_grant_id,session_digest,permission_scopes,expires_at,audit_digest,created_at)
+          values('tour-delivery-proof',grant_id,sd,case when scopes='[]' then '["view_map"]'::jsonb else scopes end,
+            now()-interval '1 second','sha256:'||encode(public.digest('expired-session-audit-'||n,'sha256'),'hex'),now()-interval '1 day');
+        end if;
+        if state in ('expired','revoked') and ops.exchange_tour_share_token(td,
           'sha256:'||encode(public.digest('reexchange-'||n,'sha256'),'hex'),now()+interval '1 hour','sha256:'||repeat('9',64)) is not null then
           raise exception 'inactive link exchanged a new session %',state;
         end if;
@@ -185,6 +191,24 @@ begin
         if (ops.write_tour_share_comment(sd,projection_ref,property_ref,'Synthetic comment',gen_random_uuid()) is not null)
           is distinct from (state='active' and scopes ? 'comment') then
           raise exception 'comment permission matrix failed % %',scopes,state;
+        end if;
+        feedback:=ops.read_tour_share_feedback(sd);
+        if (feedback is not null) is distinct from (state='active' and (scopes ? 'shortlist' or scopes ? 'comment')) then
+          raise exception 'feedback permission matrix failed % %',scopes,state;
+        end if;
+        if feedback is not null and feedback->'permission_scopes' is distinct from scopes then
+          raise exception 'feedback lost live session scopes % %',scopes,feedback;
+        end if;
+        if state='active' and scopes ? 'download' and feedback is not null then
+          sd:='sha256:'||encode(public.digest('narrow-session-'||n,'sha256'),'hex');
+          insert into ops.tour_share_session(organization_tenant_id,share_grant_id,session_digest,permission_scopes,expires_at,audit_digest)
+          values('tour-delivery-proof',grant_id,sd,scopes-'download',now()+interval '1 hour',
+            'sha256:'||encode(public.digest('narrow-session-audit-'||n,'sha256'),'hex'));
+          feedback:=ops.read_tour_share_feedback(sd);
+          if feedback is null or feedback->'permission_scopes' is distinct from (scopes-'download')
+             or ops.read_tour_share_download(sd) is not null then
+            raise exception 'narrow session inherited download from grant %',feedback;
+          end if;
         end if;
         raise sqlstate 'Z0001';
        exception when sqlstate 'Z0001' then null;

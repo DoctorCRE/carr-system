@@ -63,3 +63,28 @@ begin
  execute format('create or replace function ops.scac_current_grant_contract() returns jsonb language sql immutable set search_path=pg_catalog as %L',
   'select '||quote_literal(contract::text)||'::jsonb');
 end $download_grant_contract$;
+
+-- Feedback capabilities reflect the live session, including a narrowed session.
+create or replace function ops.read_tour_share_feedback(p_session_digest text)
+returns jsonb language sql stable security definer set search_path=pg_catalog,ops,public,pg_temp as $$
+  with g as (select grant_row.* from ops.tour_share_session_grant(p_session_digest,'shortlist') grant_row where grant_row.id is not null
+            union all select grant_row.* from ops.tour_share_session_grant(p_session_digest,'comment') grant_row where grant_row.id is not null limit 1),
+  p as (select p.* ,g.id grant_id,s.permission_scopes from g join ops.tour_public_projection p
+       on p.organization_tenant_id=g.organization_tenant_id and p.id=g.projection_id
+       join ops.tour_share_session s on s.session_digest=p_session_digest and s.share_grant_id=g.id
+         and s.organization_tenant_id=g.organization_tenant_id
+       join ops.tour t on t.organization_tenant_id=p.organization_tenant_id and t.id=p.tour_id
+       where p.status='approved' and p.route_version=t.route_version
+         and exists(select 1 from ops.tour_public_projection_seal_receipt seal
+           where seal.organization_tenant_id=p.organization_tenant_id and seal.projection_id=p.id and seal.canonical_projection_digest=p.projection_digest)
+         and not exists(select 1 from ops.tour_public_projection newer where newer.organization_tenant_id=p.organization_tenant_id
+           and newer.tour_id=p.tour_id and newer.projection_version>p.projection_version and newer.status in ('approved','published'))
+         and ops.tour_public_projection_client_safe(p.organization_tenant_id,p.id)
+         and ops.read_tour_public_projection(p.organization_tenant_id,p.id) is not null),
+  items as (select p.organization_tenant_id,p.id projection_id,m.property_id,
+    'property:public:'||substr(encode(public.digest(p.organization_tenant_id||':'||p.id::text||':'||m.property_id::text,'sha256'),'hex'),1,32) property_ref
+    from p join ops.tour_property_membership m on m.organization_tenant_id=p.organization_tenant_id and m.tour_id=p.tour_id and m.route_version=p.route_version)
+  select jsonb_build_object('projection_ref','projection:public:'||substr(encode(public.digest(p.organization_tenant_id||':'||p.id::text||':'||p.projection_digest,'sha256'),'hex'),1,32),
+    'permission_scopes',p.permission_scopes,
+    'items',coalesce((select jsonb_agg(jsonb_build_object('property_ref',i.property_ref) order by i.property_ref) from items i),'[]'::jsonb)) from p;
+$$;
