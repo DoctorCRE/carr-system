@@ -72,7 +72,7 @@ export function dealSpaceSearchTools({
     // The assertion belongs only here, after structural validation of the entire closed input.
     const args = structuredClone(input) as VerbInputs[V];
     const request = structuredClone(args);
-    if ("expected_version" in args && args.expected_version > 2147483646)
+    if ("expected_version" in args && args.expected_version > 2_147_483_646)
       throw new ToolError({ error: "space_search_input_invalid" });
     if ("criteria" in args) {
       if (args.client_prefill_source !== null && args.client_prefill_source.observed_at.length > 64)
@@ -147,7 +147,7 @@ export function dealSpaceSearchTools({
       authorityOnly: true,
       humanOnly: true,
       description:
-        "deal-space-searches.v1. Atomically rerun saved canonical criteria at an exact search version. Expected versions above 2147483646 refuse with space_search_input_invalid. Records server time, run criteria, up to 100 canonical property IDs and a pagination receipt. Failure preserves prior results. IDs can feed the existing Tour selection cart after review. Does not select properties or mutate a Tour.",
+        "deal-space-searches.v1. Atomically rerun saved canonical criteria at an exact search version. Expected versions must leave room for one integer increment; otherwise they refuse with space_search_input_invalid. Records server time, run criteria, up to 100 canonical property IDs and a pagination receipt. Failure preserves prior results. IDs can feed the existing Tour selection cart after review. Does not select properties or mutate a Tour.",
       inputSchema: runSchema,
       handler: async (c: Db, actor: Actor, input: VerbInputs["run-deal-space-search-v1"]) => {
         const { request, value: args } = parse("run-deal-space-search-v1", input);

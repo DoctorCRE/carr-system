@@ -307,9 +307,9 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         cases.push({ verb, label: "baseline", args });
       }
       for (const verb of ["save-deal-space-search-v1", "run-deal-space-search-v1"]) {
-        for (const version of [2147483647, 2147483648, Number.MAX_SAFE_INTEGER, 1e100])
+        for (const version of [2_147_483_647, 2_147_483_648, Number.MAX_SAFE_INTEGER, 1e100])
           add(verb, ["expected_version"], version, "space_search_input_invalid");
-        add(verb, ["expected_version"], 2147483646);
+        add(verb, ["expected_version"], 2_147_483_646);
       }
       for (const path of [
         ["name"],
