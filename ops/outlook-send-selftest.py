@@ -1050,6 +1050,47 @@ class SendTests(unittest.TestCase):
 
 
 class OutboxTests(unittest.TestCase):
+    def test_module_entry_point_sends_submitted_reply_and_refuses_plain_mail(self):
+        script = '''
+import json
+import runpy
+import sys
+from unittest.mock import patch
+from lib import outlook_settings, outlook_runtime
+
+sys.path.insert(0, 'ops')
+fixtures = runpy.run_path('ops/outlook-send-selftest.py')
+case = fixtures['OutboxTests']()
+try:
+    case.setUp()
+    send = fixtures['send_mod']
+    refused = send.send_submitted(send.Mail(('client@example.test',),
+        ('partner@example.test',), (), 'Subject', 'Body'), ports=case.ports)
+    assert (refused.state, refused.reason) == (send.State.REFUSED, 'submission_required')
+    assert not case.sent
+    with patch.object(outlook_settings, 'load_settings', return_value=case.settings), \\
+         patch.object(case.worker, 'load_settings', return_value=case.settings), \\
+         patch.object(send, 'default_ports', return_value=case.ports), \\
+         patch.object(outlook_runtime, 'receipt_line', return_value='fixture receipt'), \\
+         patch.object(case.worker, 'receipt_line', return_value='fixture receipt'):
+        try:
+            runpy.run_module('lib.outlook_outbox', run_name='__main__', alter_sys=True)
+        except SystemExit as exc:
+            code = exc.code
+    receipts = [args for verb, args in case.calls if verb == 'record-email-sent']
+    assert len(case.sent) == 1, receipts
+    assert case.sent[0] == send.Mail(('client@example.test',),
+        ('partner@example.test',), (), 'Submitted subject', 'Submitted final text.')
+    assert receipts[0]['status'] == 'sent', receipts
+    assert receipts[0]['sent_item_id'] == 'sent-42', receipts
+    assert code == 0, code
+finally:
+    case.doCleanups()
+'''
+        child = subprocess.run([sys.executable, '-c', script], cwd=ROOT,
+                               capture_output=True, text=True, timeout=30)
+        self.assertEqual(child.returncode, 0, child.stdout + child.stderr)
+
     def setUp(self):
         self.enterContext(patch.object(ui, 'screen_locked', return_value=False))
         from lib import outlook_outbox
