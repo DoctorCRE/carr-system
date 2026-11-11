@@ -161,9 +161,10 @@ export function normalizeTourPropertySearch(args, ToolError) {
   const minimum = integerOrNull(args.min_square_feet, "min_square_feet", ToolError);
   const maximum = integerOrNull(args.max_square_feet, "max_square_feet", ToolError);
   if (minimum !== null && maximum !== null && minimum > maximum) fail(ToolError, { error: "tour_search_range_invalid" });
+  const counties = stringList(args.counties, "counties", ToolError, { allowed: COUNTY, maximum: COUNTY.size });
   return {
     query: args.query === null ? null : text(args.query, "query", ToolError, 200),
-    counties: stringList(args.counties, "counties", ToolError, { allowed: COUNTY, maximum: COUNTY.size }),
+    counties: counties.length ? counties : [...TOUR_SEARCH_COUNTIES],
     property_types: stringList(args.property_types, "property_types", ToolError, { maximum: 12, slug: true }),
     min_square_feet: minimum,
     max_square_feet: maximum,

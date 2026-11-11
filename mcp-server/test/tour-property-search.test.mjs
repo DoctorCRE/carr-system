@@ -41,6 +41,10 @@ test("saved briefs and direct search share filter normalization", () => {
     assert.throws(() => normalizeTourPropertySearch({ ...searchArgs, query }, ToolError), ToolError);
 });
 
+test("all-counties searches bind the supported five counties before SQL pagination", () => {
+  assert.deepEqual(normalizeTourPropertySearch({ ...searchArgs, counties: [] }, ToolError).counties, [...TOUR_SEARCH_COUNTIES]);
+});
+
 test("specialist search is five-county, facts-only, deterministic, and sanitized", async () => {
   assert.deepEqual(TOUR_SEARCH_COUNTIES, ["Escambia", "Santa Rosa", "Okaloosa", "Walton", "Bay"]);
   const h = harness();

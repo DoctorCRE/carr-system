@@ -156,9 +156,10 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
       ...save,
       idempotency_key: randomUUID(),
       search_id: randomUUID(),
-      criteria: { ...filters, query: "  medical office  " },
+      criteria: { ...filters, counties: [], query: "  medical office  " },
     });
     assert.equal(normalized.search.criteria.query, "medical office");
+    assert.deepEqual(normalized.search.criteria.counties, ["Escambia", "Santa Rosa", "Okaloosa", "Walton", "Bay"]);
     await assert.rejects(
       invoke("save-deal-space-search-v1", {
         ...save,
