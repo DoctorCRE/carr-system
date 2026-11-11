@@ -1,7 +1,7 @@
 // Tests scoped property search and versioned selection cart behavior.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectTourPropertySearch, TOUR_SEARCH_COUNTIES, tourPropertySearchTools } from "../src/tour-property-search.js";
+import { normalizeTourPropertySearch, projectTourPropertySearch, TOUR_SEARCH_COUNTIES, tourPropertySearchTools } from "../src/tour-property-search.js";
 
 class ToolError extends Error { constructor(payload) { super(payload.error); this.payload = payload; } }
 const actor = { id: "actor-00000000-0000-4000-8000-000000000001", slug: "codex" };
@@ -34,6 +34,12 @@ const searchArgs = {
   entrance_verified: null, public_projection_ready: null, photos_available: true,
   sort: "updated_desc", cursor: null, limit: 25,
 };
+
+test("saved briefs and direct search share filter normalization", () => {
+  assert.equal(normalizeTourPropertySearch({ ...searchArgs, query: "  medical office  " }, ToolError).query, "medical office");
+  for (const query of ["", "   ", "medical\u0000office"])
+    assert.throws(() => normalizeTourPropertySearch({ ...searchArgs, query }, ToolError), ToolError);
+});
 
 test("specialist search is five-county, facts-only, deterministic, and sanitized", async () => {
   assert.deepEqual(TOUR_SEARCH_COUNTIES, ["Escambia", "Santa Rosa", "Okaloosa", "Walton", "Bay"]);

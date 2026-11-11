@@ -22,6 +22,7 @@ type Dependencies = {
   organizationTenantForActor: (actor: Actor) => string;
   canExercisePartnerAuthority: (actor: Actor) => boolean;
   installTourDealAccess: (c: Db, actor: Actor) => Promise<void>;
+  normalizeCriteria: (input: VerbInputs["search-tour-properties"]) => VerbInputs["search-tour-properties"];
 };
 export function dealSpaceSearchTools({
   withEnvelope,
@@ -30,6 +31,7 @@ export function dealSpaceSearchTools({
   organizationTenantForActor,
   canExercisePartnerAuthority,
   installTourDealAccess,
+  normalizeCriteria,
 }: Dependencies) {
   const { one: spaceSearchResponseSchema, list: spaceSearchListResponseSchema } = dealSpaceSearchContracts(criteria);
   const saveSchema = object({
@@ -82,19 +84,14 @@ export function dealSpaceSearchTools({
       inputSchema: saveSchema,
       handler: async (c: Db, actor: Actor, args: VerbInputs["save-deal-space-search-v1"]) => {
         await authorize(c, actor, args, saveSchema);
-        if (
-          !args.name.trim() ||
-          args.criteria.cursor !== null ||
-          (args.criteria.min_square_feet !== null &&
-            args.criteria.max_square_feet !== null &&
-            args.criteria.min_square_feet > args.criteria.max_square_feet)
-        )
+        if (!args.name.trim() || args.criteria.cursor !== null)
           throw new ToolError({ error: "space_search_input_invalid" });
+        const normalizedCriteria = normalizeCriteria(args.criteria);
         return withEnvelope(c, actor, "save-deal-space-search-v1", args, async () => {
           const result = await query(c, "select ops.save_deal_space_search($1,$2,$3::jsonb) result", [
             organizationTenantForActor(actor),
             actor.id,
-            JSON.stringify(args),
+            JSON.stringify({ ...args, criteria: normalizedCriteria }),
           ]);
           await writeEvent(c, actor, "save-deal-space-search-v1", "deal", args.deal_id, {
             field: "space_search",

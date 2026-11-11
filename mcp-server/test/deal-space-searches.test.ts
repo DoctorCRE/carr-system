@@ -142,6 +142,32 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     const reopened = await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id });
     assert.deepEqual(reopened.searches, [run.search]);
     assert.equal((await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id: null })).searches.length, 1);
+    for (const query of ["", "   ", "medical\u0000office"])
+      await assert.rejects(
+        invoke("save-deal-space-search-v1", {
+          ...save,
+          idempotency_key: randomUUID(),
+          search_id: randomUUID(),
+          criteria: { ...filters, query },
+        }),
+        /tour_input_invalid/,
+      );
+    const normalized = await invoke("save-deal-space-search-v1", {
+      ...save,
+      idempotency_key: randomUUID(),
+      search_id: randomUUID(),
+      criteria: { ...filters, query: "  medical office  " },
+    });
+    assert.equal(normalized.search.criteria.query, "medical office");
+    await assert.rejects(
+      invoke("save-deal-space-search-v1", {
+        ...save,
+        idempotency_key: randomUUID(),
+        search_id: randomUUID(),
+        client_prefill_source: { ...save.client_prefill_source, client_id: randomUUID() },
+      }),
+      /space_search_prefill_mismatch/,
+    );
     await assert.rejects(
       invoke("save-deal-space-search-v1", { ...save, idempotency_key: randomUUID(), expected_version: 1 }),
       /space_search_version_conflict/,
