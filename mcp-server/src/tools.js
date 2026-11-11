@@ -37,7 +37,7 @@ import { factObservationTools } from "./fact-observations.ts";
 import { actionClosureTools } from "./action-closure.ts";
 import { requirementReplyTools } from "./requirement-replies.js";
 import { requirementRequestTools } from "./requirement-requests.js";
-import { dealDeliverableTools } from "./deal-deliverables.js";
+import { dealDeliverableTools, authorizeDeliverable } from "./deal-deliverables.js";
 import { dealFileTools } from "./deal-files.js";
 import { dealItemTools, readDealItems, shortDealHeading, shortFacts, splitDealNextStep, validateDealItem, DEAL_ITEMS_SCHEMA } from "./deal-items.ts";
 import { bindReferralDeal } from "./relationship-network.ts";
@@ -72,6 +72,7 @@ import { workPortfolioTools } from "./work-portfolio.js";
 import { leaseTermComparisonTools } from "./lease-term-comparison.ts";
 import { partnerRoomTools } from "./partner-room.js";
 import { agentProfileTools } from "./agent-profiles.ts";
+import { clientPublicationTools } from "./client-publications.ts";
 import { clientPortalTools } from "./client-portal.ts";
 import { memoryTools } from "./memory.js";
 import { sessionCheckpointTools, SESSION_CHECKPOINT_VERBS } from './session-checkpoints.js';
@@ -10719,6 +10720,7 @@ registerTools(dealDocumentTextTools(), "deal-document-text");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
+registerTools(clientPublicationTools({ withEnvelope, writeEvent, authorizeDeal: authorizeDeliverable }), "mcp-server/src/client-publications.ts");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
