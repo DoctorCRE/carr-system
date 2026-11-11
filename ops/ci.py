@@ -489,6 +489,13 @@ def main(argv=None):
         requested = options.only if options.only is not None else tuple(CLASS_DESCRIPTIONS)
         options = replace(options, only=tuple(name for name in requested
                           if name not in CLASS_DESCRIPTIONS or name in receipt['classes']))
+    requested = options.only if options.only is not None else tuple(CLASS_DESCRIPTIONS)
+    if not options.gate_programs and any(name in requested for name in ('unit', 'gates', 'migration')):
+        sys.path.insert(0, str(ROOT))
+        from lib.pg_capacity import main as capacity_preflight
+        capacity_exit = capacity_preflight()
+        if capacity_exit:
+            return capacity_exit
     controller = Controller(options, python)
     rc = 1
     def cancel(signum, _):
