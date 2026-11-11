@@ -8,7 +8,7 @@ export type CoordinateReview = {
   candidates: CoordinateCandidate[];
 };
 
-export type PropertyEvidenceRow = {
+type PropertyEvidenceRow = {
   field: string;
   value: unknown;
   review_state: string;
@@ -18,7 +18,7 @@ export type PropertyEvidenceRow = {
   source: { locator: string | null; evidence_class: string | null; retrieved_at: string | null };
 };
 
-export type EntranceReceipt = {
+type EntranceReceipt = {
   verification_receipt_id: string;
   verifier_actor_id: string;
   verified_at: string;
@@ -27,7 +27,7 @@ export type EntranceReceipt = {
   receipt_digest: string;
 };
 
-export type CoordinateCandidate = {
+type CoordinateCandidate = {
   coordinate_candidate_id: string;
   property_id: string;
   coordinate_role:
