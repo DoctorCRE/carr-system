@@ -20,6 +20,7 @@ spec = importlib.util.spec_from_file_location('open_pr_gate', ROOT / 'ops/migrat
 assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
+from git_env import fixture_env
 
 
 class CollisionTests(unittest.TestCase):
@@ -72,7 +73,7 @@ class HostedTests(unittest.TestCase):
             root = Path(directory)
             def git(*args):
                 return subprocess.run(['git', *args], cwd=root, check=True,
-                                      capture_output=True, text=True, env=gate.scrubbed_env()).stdout.strip()
+                                      capture_output=True, text=True, env=fixture_env()).stdout.strip()
             git('init', '-b', 'main')
             git('config', 'user.name', 'Fixture')
             git('config', 'user.email', 'fixture@invalid.test')
