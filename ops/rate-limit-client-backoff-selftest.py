@@ -25,20 +25,24 @@ REPO = Path(__file__).resolve().parents[1]
 class BackoffTest(unittest.TestCase):
     def setUp(self):
         self.expected_method = 'GET'
-        self.expected_path = '/mcp'
+        self.expected_path = f'/mcp/{uuid.uuid4().hex}'
+        self.handler_errors = []
         self.responses = []
         self.requests = []
         self.received_429 = threading.Event()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+            def parse_request(self):
+                if not super().parse_request():
+                    return False
                 if self.path != owner.expected_path:
                     self.send_error(404)
-                    return
-                if self.command != owner.expected_method:
-                    self.send_error(405)
-                    return
+                    return False
+                owner.assertEqual(self.command, owner.expected_method)
+                return True
+
+            def do_GET(self):
                 owner.requests.append(self.rfile.read(int(self.headers.get('Content-Length', 0))))
                 status, headers, body = owner.responses.pop(0)
                 self.send_response(status)
@@ -55,22 +59,24 @@ class BackoffTest(unittest.TestCase):
                 pass
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.server.handle_error = lambda *args: self.handler_errors.append(sys.exc_info()[1])
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
-        self.url = f'http://127.0.0.1:{self.server.server_port}/mcp'
+        self.url = f'http://127.0.0.1:{self.server.server_port}{self.expected_path}'
         self.addCleanup(self.close)
 
     def close(self):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+        self.assertEqual(self.handler_errors, [])
 
     def test_unrelated_probes_do_not_consume_responses(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited'),
                           (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
         for path in ('/', '/favicon.ico', '/mcp?probe=1'):
             with self.subTest(path=path):
-                self.assertEqual(reader.read(self.url.removesuffix('/mcp') + path).status, 404)
+                self.assertEqual(reader.read(self.url.removesuffix(self.expected_path) + path).status, 404)
                 self.assertEqual(self.requests, [])
                 self.assertEqual(len(self.responses), 2)
         result = self.cli({'idempotency_key': 'unchanged'})
@@ -112,6 +118,20 @@ class BackoffTest(unittest.TestCase):
                 self.assertEqual(len(self.requests), 2)
                 self.assertEqual(self.requests[0], self.requests[1])
                 self.assertEqual(self.responses, [])
+
+    def test_unexpected_secret_request_fails_scenario(self):
+        for method, error in (('POST', AssertionError), ('GET', IndexError)):
+            with self.subTest(method=method):
+                conn = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+                try:
+                    conn.request(method, self.expected_path)
+                    with self.assertRaises(http.client.RemoteDisconnected):
+                        conn.getresponse()
+                    self.assertEqual(len(self.handler_errors), 1)
+                    self.assertIsInstance(self.handler_errors[0], error)
+                    self.handler_errors.clear()
+                finally:
+                    conn.close()
 
     def test_reader_429_then_success(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited'), (200, {}, b'recovered')]
