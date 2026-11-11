@@ -89,3 +89,46 @@ The shared services catalog retains its declared owner. Outlook jobs use the pri
 Follow [the README steps](README.md#keep-full-disk-access-across-helper-rebuilds).
 They create the `CARR Local Helpers` identity once, which both helper installers
 detect without any setting.
+
+## Reconcile a pre-binding intake ledger before upgrading
+
+When the private receipt reports `ledger_binding_required`, run this explicit step from the new merged source checkout before its installer.
+The command uses the configured runtime directory and granted copy helper. By default it uses the installed decoder.
+For an older decoder without folder ownership evidence, build the current source separately and pass its vendor directory. It sends no record-layer requests.
+It needs the same Full Disk Access as intake. An active intake writer causes `previous_run_active`, so retry after that writer finishes.
+
+```sh
+BINDING_DECODER="$(mktemp -d /tmp/carr-binding-decoder.XXXXXX)"
+./.venv/bin/python ops/hxprobe-source-digest.py --build-into "$BINDING_DECODER"
+./.venv/bin/python bin/reconcile-outlook-ledger-binding.py --decoder-vendor "$BINDING_DECODER"
+```
+
+The separate build leaves the installed decoder and helper intact. Keep the build directory until the command finishes, then remove that directory.
+
+Exit 0 with `outlook-intake succeeded ledger_bound` proves admission only. Inspect the private receipt and binding in the configured runtime's `out/outlook-intake`.
+The command preserves every retained request key and payload, including both blocked legacy `set-next-action` requests.
+With `--decoder-vendor`, the command verifies the new decoder first, then decodes the same private copy with the installed decoder to save its original Message-ID mapping.
+Only that historical mapping uses address selection compatible with the pre-binding decoder. It admits no mail and makes no requests.
+State saves before binding publication, so retry after a failed publication retains the mapping and request keys.
+Without a separate decoder, binding leaves state bytes unchanged.
+An existing matching binding skips decoding and stays unchanged. Missing, conflicting or malformed retained identity evidence exits 1 and leaves state and binding untouched.
+Never edit or delete state to bypass a refusal. Independent retained account evidence must match settings, and retained owner fields must match settings.
+Sender and recipient addresses alone hold with `ledger_binding_evidence_insufficient`.
+When the operator has established that the historical ledger belongs to the configured mailbox, use the same command with `--attest-mailbox ACCOUNT`.
+For Dell's account, read its exact configured value without printing credentials:
+
+```sh
+./.venv/bin/python bin/reconcile-outlook-ledger-binding.py --decoder-vendor "$BINDING_DECODER" \
+  --attest-mailbox "$(./.venv/bin/python -c 'from lib.outlook_settings import load_settings; print(load_settings().account)')"
+```
+
+The flag explicitly attests historical association. The decoder still verifies the current snapshot, every retained identity conflict refuses, and binding.json records `provenance: operator_attested`.
+Repeating the command preserves the binding and state bytes. This flag never overrides a retained account naming a different mailbox.
+A decoder snapshot must independently verify the selected folder account through Sent evidence.
+This evidence is local mailbox identity, not server authorization.
+
+After successful binding, run `./bin/install-outlook-intake.sh` with `--rebuild-helper` when helper replacement is required.
+The separate-decoder command has already saved legacy Message-IDs, so the installer skips its old launchd reconciliation.
+Without a separate decoder, its existing launchd reconciliation saves those IDs before replacement. The following normal processing pass retires unapplied model actions without replay.
+A helper rebuild without a stable signing identity requires the documented Full Disk Access re-grant.
+The installer never runs legacy binding automatically. Already-bound intake keeps its existing upgrade path.
