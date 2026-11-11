@@ -134,6 +134,8 @@ begin
  if ops.read_tour_feedback('carr-internal',f.projection_id,'joe',null,100) is null then raise exception 'accessible feedback missing'; end if;
  if ops.read_tour_sharing_library('carr-internal',f.projection_id,'joe',null,100) is null then raise exception 'accessible shares missing'; end if;
  if ops.read_tour_public_projection('carr-internal',f.approved_id) is null then raise exception 'accessible approved projection missing'; end if;
+ if ops.read_tour_packet_for_render('carr-internal',f.approved_id,'joe') is null then raise exception 'accessible packet missing'; end if;
+ if ops.read_tour_packet_for_render('carr-internal',f.approved_id,'joe')->'packet'->'properties'->0->'appointment_start' is distinct from 'null'::jsonb then raise exception 'unknown appointment must be null'; end if;
  if ops.read_tour_pdf_render('carr-internal',f.render_id,'joe') is null then raise exception 'accessible PDF status missing'; end if;
 end $internal_reads_accessible$;
 do $read_unavailable$
@@ -151,10 +153,11 @@ begin
   if ops.read_tour_pdf_render('carr-internal',coalesce(fixture.render_id,t),'joe') is not null then raise exception 'unavailable PDF status %',fixture.kind; end if;
   if ops.read_tour_pdf_artifact_for_review('carr-internal',coalesce(fixture.render_id,t),'joe') is not null then raise exception 'unavailable preview %',fixture.kind; end if;
   if ops.read_tour_pdf_artifact_for_download('carr-internal',coalesce(fixture.render_id,t),'joe') is not null then raise exception 'unavailable download %',fixture.kind; end if;
-  if ops.read_tour_packet_for_render('carr-internal',coalesce(fixture.projection_id,t),'joe') is not null then raise exception 'unavailable render packet %',fixture.kind; end if;
+  if ops.read_tour_packet_for_render('carr-internal',coalesce(fixture.approved_id,t),'joe') is not null then raise exception 'unavailable render packet %',fixture.kind; end if;
   if exists(select 1 from jsonb_array_elements(ops.list_tour_library('carr-internal','joe')->'tours') x where x->>'deal_id'=fixture.deal_id::text) then raise exception 'read_unavailable library %',fixture.kind; end if;
  end loop;
  -- The actor argument alone cannot impersonate another partner.
+ if ops.read_tour_packet_for_render('carr-internal',(select approved_id from deal_tour_cases where kind='accessible'),'dell') is not null then raise exception 'packet actor substitution leaked'; end if;
  if ops.read_tour_internal_detail('carr-internal',(select tour_id from deal_tour_cases where kind='inaccessible'),'dell') is not null then raise exception 'actor substitution leaked'; end if;
 end $read_unavailable$;
 set local session authorization carr_authority;

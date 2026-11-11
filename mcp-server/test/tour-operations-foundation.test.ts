@@ -5,6 +5,7 @@ import test from "node:test";
 import contract from "../../workspace/contracts/tour-operations-foundation.v1.json" with { type: "json" };
 import {
   CANONICAL_FACT_REQUIRED_FIELDS,
+  PUBLIC_TOUR_FIELD_KEYS,
   validateCanonicalFieldAssertion,
   validateFoundationEntityFixture,
   validateProjectionFact,
@@ -18,8 +19,12 @@ const entityFixtures: Record<string, Record<string, unknown>> = fixture.contract
 const migration = readMigration("migrations/0318_tour_operations_foundation.sql");
 const rightsHardeningMigration = readMigration("migrations/0427_tour_rights_projection_hardening.sql");
 
+test("foundation public field vocabulary matches the executable contract", () => {
+  assert.deepEqual(contract.public_projection_policy.allowlisted_field_keys, [...PUBLIC_TOUR_FIELD_KEYS]);
+});
+
 test("foundation contract preserves provenance, conflicts, audit, rights versions and tenant integrity", () => {
-  assert.equal(contract.version, "1.9.0");
+  assert.equal(contract.version, "1.10.0");
   for (const field of [
     "organization_tenant_id",
     "property_id",
