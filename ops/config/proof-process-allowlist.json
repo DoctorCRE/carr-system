@@ -190,5 +190,14 @@
       "git --no-replace-objects -C repository cat-file -t revision",
       "git --no-replace-objects -C repository merge-base --is-ancestor expected served"
     ]
+  },
+  "tools/prove-tour-navigation.py": {
+    "sha256": "9869a0ce2f322929aa329b2b35ffb79fd0bfa21ce4c18b049e4658148a968750",
+    "commands": [
+      "git --no-replace-objects -C repository merge-base --is-ancestor merge_sha served_sha"
+    ],
+    "helpers": {
+      "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
+    }
   }
 }

@@ -993,6 +993,12 @@
       "sha256": "5e2b7fa8838b4eab72867587c87cb5e3237942d5f79f0e7753bbb085d0c1c935",
       "rule": "credential-url",
       "reason": "Synthetic redaction-test URL with an invented password, never a live credential. Exact renamed TypeScript fixture blob only."
+    },
+    {
+      "path": "ops/fixtures/tour-navigation-detail.json",
+      "sha256": "a51d1a31983078234a2a65c2abc3037eaf148994fb292607f7a824bdc936f6e9",
+      "rule": "pii-address",
+      "reason": "Recorded disposable Tour delivery fixture. The two synthetic addresses originate in mcp-server/test/tour-delivery-data-plane-postgres.sql; no production records are read. This allowance binds only this path and these exact bytes."
     }
   ]
 }
