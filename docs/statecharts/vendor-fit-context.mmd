@@ -1,0 +1,9 @@
+stateDiagram-v2
+    [*] --> validating
+    validating --> unauthorized: actor is not an authorized partner
+    validating --> invalid: malformed exact subject, category or limit
+    validating --> reading: authorized and valid request
+    reading --> unavailable: required source fails
+    reading --> needs_input: subject, location or requirement is unknown
+    reading --> empty: no supported eligible vendor
+    reading --> ready: bounded sourced comparisons
