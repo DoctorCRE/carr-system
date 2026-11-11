@@ -225,7 +225,8 @@ class ReaderRolePostgresTests(unittest.TestCase):
                                 role.sql.Identifier(key))).fetchone()[0], value)
                 self.assertEqual(len(observed), 1)
                 self.assertEqual(observed[0][0], 0)
-                self.assertEqual(set(observed[0][1]),
+                self.assertEqual({key.lower() + '=' + value for key, value in
+                                  (setting.split('=', 1) for setting in observed[0][1])},
                                  {key + '=' + value for key, value in data['settings'].items()})
         finally:
             with role.connect(owner) as conn:

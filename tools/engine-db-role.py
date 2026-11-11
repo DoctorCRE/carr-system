@@ -157,9 +157,16 @@ def reconcile(conn, data, password=None):
     # Managed owners cannot reassert NOSUPERUSER even when it is already false.
     conn.execute(sql.SQL('ALTER ROLE {} ' + attribute_options(observed)).format(sql.Identifier(ROLE)))
     conn.execute(sql.SQL('ALTER ROLE {} RESET ALL').format(sql.Identifier(ROLE)))
+    for (database,) in conn.execute("""SELECT d.datname FROM pg_db_role_setting s
+        JOIN pg_database d ON d.oid=s.setdatabase
+        WHERE s.setrole=(SELECT oid FROM pg_roles WHERE rolname=%s)""", (ROLE,)).fetchall():
+        conn.execute(sql.SQL('ALTER ROLE {} IN DATABASE {} RESET ALL').format(
+            sql.Identifier(ROLE), sql.Identifier(database)))
     for key, value in data['settings'].items():
+        setting = (sql.SQL(', ').join(sql.Identifier(name) for name in value.split(', '))
+                   if key == 'search_path' else sql.Literal(value))
         conn.execute(sql.SQL('ALTER ROLE {} SET {} = {}').format(
-            sql.Identifier(ROLE), sql.Identifier(key), sql.Literal(value)))
+            sql.Identifier(ROLE), sql.Identifier(key), setting))
     if password is not None:
         conn.execute(sql.SQL('ALTER ROLE {} PASSWORD {}').format(
             sql.Identifier(ROLE), sql.Literal(password)))
