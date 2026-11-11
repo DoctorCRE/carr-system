@@ -1,0 +1,38 @@
+{
+  "with_download": {
+    "status": 200,
+    "body": {
+      "data": {
+        "projection_ref": "projection:public:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "permission_scopes": [
+          "shortlist",
+          "comment"
+        ],
+        "can_download": true,
+        "items": [
+          {
+            "property_ref": "property:public:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ]
+      }
+    }
+  },
+  "without_download": {
+    "status": 200,
+    "body": {
+      "data": {
+        "projection_ref": "projection:public:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "permission_scopes": [
+          "shortlist",
+          "comment"
+        ],
+        "can_download": false,
+        "items": [
+          {
+            "property_ref": "property:public:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -21,6 +21,7 @@ type Dependencies = {
   readFeedbackFn?: Dependency;
   shortlistFn?: Dependency;
   commentFn?: Dependency;
+  downloadFn?: Dependency;
 };
 type ReadDependency = "readShareFn" | "readMapFn" | "readFeedbackFn";
 
@@ -42,6 +43,7 @@ const STATIC_ASSETS = new Map([
 const API_METHODS = new Map([
   ["/api/share/exchange", "POST"],
   ["/api/share/report", "GET"],
+  ["/api/share/download", "GET"],
   ["/api/share/map", "GET"],
   ["/api/share/feedback", "GET"],
   ["/api/share/shortlist", "POST"],
@@ -269,6 +271,27 @@ async function read(
   return publicResponse(result);
 }
 
+async function download(request: Request, env: ReportsEnv | undefined, ctx: unknown, dependencies: Dependencies) {
+  const session = cookieValue(request, SESSION_COOKIE);
+  if (!session || !SHARE_BEARER.test(session)) return json({ error: "unauthorized" }, 401);
+  if (!dependencies.downloadFn) return json({ error: "not_found" }, 404);
+  try {
+    const result = await dependencies.downloadFn({
+      env,
+      ctx,
+      signal: request.signal,
+      sessionDigest: await sha256Digest(session),
+    });
+    if (isPlainRecord(result) && result.status === 429)
+      return json({ error: "rate_limited" }, 429, { "retry-after": "60" });
+    if (!isPlainRecord(result) || !result.ok || !(result.response instanceof Response))
+      return dependencyFailure(result);
+    return result.response;
+  } catch {
+    return json({ error: "share_unavailable" }, 503);
+  }
+}
+
 async function writeFeedback(
   request: Request,
   env: ReportsEnv | undefined,
@@ -347,6 +370,7 @@ async function handleRequest(request: Request, env: ReportsEnv | undefined, ctx:
   const method = API_METHODS.get(pathname);
   if (!method) return json({ error: "not_found" }, 404);
   if (request.method !== method) return methodNotAllowed(method);
+  if (pathname === "/api/share/download") return download(request, env, ctx, dependencies);
   if (pathname === "/api/share/exchange") return exchange(request, env, ctx, dependencies);
   if (pathname === "/api/share/shortlist" || pathname === "/api/share/comment")
     return writeFeedback(request, env, ctx, dependencies, pathname);
