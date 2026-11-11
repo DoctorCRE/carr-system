@@ -1,0 +1,55 @@
+{
+  "as_of": "2026-08-27T12:00:00Z",
+  "caveat": null,
+  "properties": [
+    {
+      "property_ref": "property:public:AlphaHealthCenter01",
+      "route_sequence": 1,
+      "route_label": "A",
+      "name": "Alpha Health Center",
+      "address": "Synthetic location A",
+      "suite": "Suite 120",
+      "property_type": "Medical office",
+      "availability": "Available",
+      "parking": "4.5/1,000 SF",
+      "public_packet_note": "Please meet in the lobby",
+      "size": {
+        "value": 1600,
+        "unit": "SF"
+      },
+      "asking_economics": {
+        "value": "24.00",
+        "currency": "USD",
+        "period": "NNN"
+      },
+      "appointment_start": "2031-03-04T14:00:00.123456+00:00",
+      "appointment_end": "2031-03-04T14:30:00.123456+00:00",
+      "as_of": "2026-08-27T12:00:00Z"
+    },
+    {
+      "property_ref": "property:public:BetaMedicalPlaza0002",
+      "route_sequence": 2,
+      "route_label": "B",
+      "name": "Beta Medical Plaza",
+      "address": "Synthetic location B",
+      "suite": "Suite 220",
+      "property_type": "Medical office",
+      "availability": "Available",
+      "parking": "5 spaces",
+      "size": {
+        "value": 2600,
+        "unit": "SF"
+      },
+      "asking_economics": {
+        "value": "24.00",
+        "currency": "USD",
+        "period": "NNN"
+      },
+      "appointment_start": null,
+      "appointment_end": null,
+      "as_of": "2026-08-27T12:00:00Z"
+    }
+  ],
+  "contract_version": "2.1.0",
+  "renderer_version": "2.0.0"
+}

@@ -995,6 +995,18 @@
       "reason": "Synthetic redaction-test URL with an invented password, never a live credential. Exact renamed TypeScript fixture blob only."
     },
     {
+      "path": "mcp-server/test/tour-client-share-allowlist-postgres.sql",
+      "sha256": "20481086f3790510460c8e00cf471ba5df4b181175ec3cf718c4f1d04eeef01d",
+      "rule": "pii-phone",
+      "reason": "WR591.S23.J4 reviewed synthetic disposable tour proof. Invented 555 phone canaries verify internal contact exclusion; no production record data."
+    },
+    {
+      "path": "mcp-server/test/tour-packet-parity.test.ts",
+      "sha256": "31cbca7b1912ff7cb7227046f0bea2bf81c4eb811a3a8a4b6b9a7ad2757ca05d",
+      "rule": "pii-address",
+      "reason": "WR591.S23.J4 reviewed synthetic PDF fixture. Example Street is invented and verifies deterministic public packet rendering; no production record data."
+    },
+    {
       "path": "ops/fixtures/tour-navigation-detail.json",
       "sha256": "a51d1a31983078234a2a65c2abc3037eaf148994fb292607f7a824bdc936f6e9",
       "rule": "pii-address",
