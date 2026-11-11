@@ -1,25 +1,25 @@
 {
   "schema_version": "client-needs.v1",
   "subject": "vendor",
-  "subject_id": "ce45f4ca-03d3-4634-9615-2dfb7161100a",
-  "as_of": "2026-11-10 21:25:25.52986-06",
+  "subject_id": "c2385ca0-0d6e-448c-8032-c8aba79b2912",
+  "as_of": "2026-11-10 21:31:26.314844-06",
   "state": "ready",
   "rows": [
     {
-      "id": "9fb7d1cf-5c2b-4e04-8631-5ed82ee88cf6",
+      "id": "35d46063-9de1-406c-a77c-fb0824de16c5",
       "state": "approved",
-      "deal_id": "e8e697de-f150-44fb-b1aa-18262951254c",
+      "deal_id": "7e613fe7-dfdc-491a-8613-e086d520d58f",
       "version": 2,
-      "client_id": "cc01edb1-60f8-4995-a61f-482531720265",
+      "client_id": "88ec71af-1fa6-4844-a181-2e23147a6296",
       "deal_name": "Synthetic deal",
-      "vendor_id": "ce45f4ca-03d3-4634-9615-2dfb7161100a",
+      "vendor_id": "c2385ca0-0d6e-448c-8032-c8aba79b2912",
       "withdrawn": false,
       "created_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
       "source_ref": "synthetic:deal-review",
-      "updated_at": "2026-11-10T21:25:25.523652-06:00",
+      "updated_at": "2026-11-10T21:31:26.310292-06:00",
       "updated_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
-      "vendor_ref": "V-6d5f0862-bdc9-4497-b881-6040c57e71ea",
-      "approved_at": "2026-11-10T21:25:25.523569-06:00",
+      "vendor_ref": "V-140d8a26-e97c-4003-a8e1-d11542c9a4b9",
+      "approved_at": "2026-11-10T21:31:26.310175-06:00",
       "approved_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
       "client_name": "Synthetic practice",
       "description": "Practice needs equipment financing",
@@ -31,7 +31,8 @@
       "client_version": 1,
       "source_revision": "review-1",
       "approved_revision": 2,
-      "approved_client_id": "cc01edb1-60f8-4995-a61f-482531720265"
+      "approved_client_id": "88ec71af-1fa6-4844-a181-2e23147a6296",
+      "identity_restricted": false
     }
   ],
   "next_offset": null
