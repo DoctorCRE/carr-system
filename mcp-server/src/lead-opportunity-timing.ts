@@ -1,3 +1,4 @@
+// Parse and project source event dates without inferring practice openings.
 import { isCalendarDate } from "./calendar-date.ts";
 import { ToolError } from "./tool-error.ts";
 
@@ -68,7 +69,6 @@ export function parseLeadOpportunityTiming(value: unknown): LeadOpportunityTimin
   throw new ToolError({ error: "invalid_lead_opportunity_timing" });
 }
 
-// Project exact source event dates without inferring practice openings.
 const LEAD_OPPORTUNITY_TIMING_VERSION = "lead-opportunity-timing.v1";
 
 // Select revisions before matching identity so a corrected record cannot revive an old match.
