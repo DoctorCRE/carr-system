@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const { executeRegisteredTool } = await import(new URL("../src/tools.js", import.meta.url).href);
+const { executeRegisteredTool, authorizeClientPublication } = await import(new URL("../src/tools.js", import.meta.url).href);
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -71,6 +71,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     await c.query("alter table deal add column owner text default 'joe'");
     const events: Parameters<WriteEvent>[] = [];
     const tools = clientPublicationTools({
+      authorizeDeal: authorizeClientPublication,
       withEnvelope: async (_c, _a, _n, _args, fn) => fn(),
       writeEvent: async (...args) => {
         events.push(args);
