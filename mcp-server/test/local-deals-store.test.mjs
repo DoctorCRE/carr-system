@@ -111,7 +111,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query('create schema if not exists ops; create extension if not exists pgcrypto');
     await c.query(readMigration('1068_email_identity.sql'));
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
-    await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
+    await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[],"relation_dml":[]}'::jsonb$$`);
     for (const migration of ['1100_practice_origination.sql', '1131_florida_formation_origination.sql', '1134_florida_document_number_lengths.sql'])
       await c.query(readMigration(migration));
     await c.query(readMigration('1013_register_client_portal.sql'));
