@@ -20,8 +20,7 @@ type Dependencies = {
   writeEvent: WriteEvent;
   criteria: Schema;
   organizationTenantForActor: (actor: Actor) => string;
-  canExercisePartnerAuthority: (actor: Actor) => boolean;
-  installTourDealAccess: (c: Db, actor: Actor) => Promise<void>;
+  partnerAuthoritySlugForActor: (actor: Actor) => string | null;
   normalizeCriteria: (input: VerbInputs["search-tour-properties"]) => VerbInputs["search-tour-properties"];
 };
 export function dealSpaceSearchTools({
@@ -29,8 +28,7 @@ export function dealSpaceSearchTools({
   writeEvent,
   criteria,
   organizationTenantForActor,
-  canExercisePartnerAuthority,
-  installTourDealAccess,
+  partnerAuthoritySlugForActor,
   normalizeCriteria,
 }: Dependencies) {
   const { one: spaceSearchResponseSchema, list: spaceSearchListResponseSchema } = dealSpaceSearchContracts(criteria);
@@ -48,10 +46,16 @@ export function dealSpaceSearchTools({
   const readSchema = object({ deal_id: uuid, search_id: nullable(uuid) });
 
   async function authorize(c: Db, actor: Actor, args: { deal_id: string }, schema: Schema) {
-    if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_only" });
+    const partner = partnerAuthoritySlugForActor(actor);
+    if (!partner) throw new ToolError({ error: "human_only" });
     if (!new Validator(structuredClone(schema), "2020-12", false).validate(args).valid)
       throw new ToolError({ error: "space_search_input_invalid" });
-    await installTourDealAccess(c, actor);
+    const deal = (
+      await c.query<{ id: string; version: number }>("select id,version from public.deal where id=$1", [args.deal_id])
+    ).rows[0];
+    await c.query("select set_config('carr.space_search_deal_access',$1,true)", [
+      JSON.stringify({ slug: actor.slug, partner, deal: deal ?? null }),
+    ]);
     // Recheck before envelope replay so revoked access cannot reveal an old response.
     await query(c, "select ops.read_deal_space_searches($1,$2,$3,null) result", [
       organizationTenantForActor(actor),

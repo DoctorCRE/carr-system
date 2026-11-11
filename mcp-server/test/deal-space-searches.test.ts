@@ -6,7 +6,9 @@ import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
 import pg from "pg";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
-import { agentActorForToken } from "../src/identity.js";
+
+const { authenticatedIdentity, agentActorForToken } = await import(new URL("../src/identity.js", import.meta.url).href);
+
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
 const { executeRegisteredTool, TOOLS } = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -102,44 +104,117 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     };
     for (const owner of ["joe", "dell", null]) {
       await t.test(`${owner ?? "ownerless"} deal supports partner saved-search read, save and run`, async () => {
-        const target = (await c.query(
-          `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+        const target = (
+          await c.query(
+            `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
            values($1,'Synthetic shared search','other','pending',$2,$3,$3) returning id`,
-          [client, owner, actor.id],
-        )).rows[0].id;
+            [client, owner, actor.id],
+          )
+        ).rows[0].id;
         const args = {
-          deal_id: target, search_id: randomUUID(), expected_version: 0,
-          idempotency_key: randomUUID(), name: "Shared partner search", status: "saved",
-          criteria: filters, requirements: "Shared deal", client_prefill_source: null,
+          deal_id: target,
+          search_id: randomUUID(),
+          expected_version: 0,
+          idempotency_key: randomUUID(),
+          name: "Shared partner search",
+          status: "saved",
+          criteria: filters,
+          requirements: "Shared deal",
+          client_prefill_source: null,
         };
         for (const slug of ["joe", "dell", "joe-local", "dell-local", "codex", "claude"]) {
           const human = slug === "joe" || slug === "dell";
-          const row = (await c.query(
-            `insert into actor(slug,kind,display_name) values($1,$2,'Synthetic partner access')
-             on conflict(slug) do update set active=true returning id`, [slug, human ? "human" : "automation"],
-          )).rows[0];
-          const who = human ? { ...row, slug, human } : agentActorForToken(
-            "Bearer synthetic-search", JSON.stringify({ [slug]: "synthetic-search" }), "local-token",
-          );
+          const row = (
+            await c.query(
+              `insert into actor(slug,kind,display_name) values($1,$2,'Synthetic partner access')
+             on conflict(slug) do update set active=true returning id`,
+              [slug, human ? "human" : "automation"],
+            )
+          ).rows[0];
+          const who = human
+            ? { ...row, slug, human }
+            : slug.endsWith("-local")
+              ? agentActorForToken(
+                  "Bearer synthetic-search",
+                  JSON.stringify({ [slug]: "synthetic-search" }),
+                  "local-token",
+                )
+              : authenticatedIdentity.connectionForGrant(
+                  { slug, human: false, client_id: "synthetic-search-client", sponsoring_human_slug: "joe" },
+                  JSON.stringify({ "synthetic-search-client": slug }),
+                );
           Object.assign(who, { id: row.id });
-          // Native agents need the verified native door rather than the local-token door.
-          if (slug === "codex" || slug === "claude") Object.assign(who, {
-            slug, human: false, native_agent_verified: true, sponsoring_human_slug: "joe",
-            authorization_class: "sponsored_agent",
-          });
-          const saved = await invoke("save-deal-space-search-v1", {
-            ...args, search_id: randomUUID(), idempotency_key: randomUUID(),
-          }, who);
-          const ran = await invoke("run-deal-space-search-v1", {
-            deal_id: target, search_id: saved.search.id, expected_version: 1, idempotency_key: randomUUID(),
-          }, who);
+          const saved = await invoke(
+            "save-deal-space-search-v1",
+            {
+              ...args,
+              search_id: randomUUID(),
+              idempotency_key: randomUUID(),
+            },
+            who,
+          );
+          const ran = await invoke(
+            "run-deal-space-search-v1",
+            {
+              deal_id: target,
+              search_id: saved.search.id,
+              expected_version: 1,
+              idempotency_key: randomUUID(),
+            },
+            who,
+          );
           assert.equal(ran.search.version, 2, slug);
-          const read = await invoke("read-deal-space-searches-v1", { deal_id: target, search_id: saved.search.id }, who);
+          const read = await invoke(
+            "read-deal-space-searches-v1",
+            { deal_id: target, search_id: saved.search.id },
+            who,
+          );
           assert.deepEqual(read.searches, [ran.search], slug);
         }
         for (const verb of ["read-deal-space-searches-v1", "save-deal-space-search-v1", "run-deal-space-search-v1"]) {
           const input = verb.startsWith("read-") ? { deal_id: target, search_id: null } : args;
           await assert.rejects(invoke(verb, input, { id: actor.id, slug: "untrusted", human: false }), /human_only/);
+        }
+        for (const change of [
+          "select set_config('carr.organization_tenant_id','wrong-tenant',true)",
+          "select set_config('carr.acting_actor_slug','dell',true)",
+          "select set_config('carr.verified_human_actor_slug','dell',true)",
+          "update actor set active=false where slug='joe'",
+          "update deal set version=version+1 where id=$1",
+          "update client set merged_into=(select client_id from deal where id=$1) where id=(select client_id from deal where id=$1)",
+          "update party set deleted_at=now() where id=(select c.party_id from client c join deal d on d.client_id=c.id where d.id=$1)",
+        ]) {
+          for (const sql of [
+            "select ops.read_deal_space_searches($1,$2,$3,null)",
+            "select ops.save_deal_space_search($1,$2,$3::jsonb)",
+            "select ops.run_deal_space_search($1,$2,$3,$4,1)",
+          ]) {
+            await c.query("begin");
+            try {
+              await setWriterActorContext(c, actor, { partnerAuthorityAct: true });
+              await c.query("set local role carr_authority");
+              await executeRegisteredTool(c, actor, "read-deal-space-searches-v1", {
+                deal_id: target,
+                search_id: null,
+              });
+              await c.query("reset role");
+              await c.query(change, change.includes("$1") ? [target] : []);
+              await c.query("set local role carr_authority");
+              // Each SQL entry point must enforce the bound decision even after TypeScript authorization.
+              const params = sql.includes("save_")
+                ? [JSON.stringify(args)]
+                : sql.includes("run_")
+                  ? [target, args.search_id]
+                  : [target];
+              await assert.rejects(
+                c.query(sql, ["carr-internal", actor.id, ...params]),
+                /space_search_unavailable/,
+                change,
+              );
+            } finally {
+              await c.query("rollback");
+            }
+          }
         }
       });
     }
