@@ -135,6 +135,20 @@ test("installed HTTP create, detail, cart and cross-deal library enforce canonic
       if (kind === "deleted") await c.query("update public.party set deleted_at=now() where id=$1", [p]);
       cases.push({ kind, d, t: kind === "unknown" ? crypto.randomUUID() : t });
     }
+    await c.query("set local session authorization carr_writer");
+    await installTourDealAccess(c, actor);
+    for (const fixture of cases.filter((item) => item.kind !== "accessible")) {
+      await c.query("select set_config('tour_proof.denied_tour', $1, true)", [fixture.t]);
+      await c.query(`do $refusal$
+        begin
+          if ops.read_tour_internal_detail('carr-internal',
+              current_setting('tour_proof.denied_tour')::uuid,
+              current_setting('carr.tour_deal_access')::jsonb->>'slug') is not null then
+            raise exception 'unauthorized extended Tour detail disclosed';
+          end if;
+        end $refusal$`);
+    }
+    await c.query("reset session authorization");
     const tools = tourDomainTools({
       ToolError,
       withEnvelope: async (_c: unknown, _a: unknown, _v: unknown, _x: unknown, fn: () => Promise<unknown>) => fn(),
