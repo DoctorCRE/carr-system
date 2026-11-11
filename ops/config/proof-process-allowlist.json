@@ -199,5 +199,12 @@
     "helpers": {
       "lib.proof_deadline.proof_deadline": "6eab1e3c00b2541dfc2e67abab62ee6f7530a1eb3048561261269431b901d83a"
     }
+  },
+  "tools/prove-client-publications.py": {
+    "sha256": "d08796e060b96ea91bc0bc56f5c609c3caa8a3d22c2675899407f8026d59d158",
+    "commands": [
+      "git rev-parse --verify expected-revision^{commit}",
+      "git merge-base --is-ancestor expected-revision observed-release-revision"
+    ]
   }
 }

@@ -1,18 +1,26 @@
 import { ToolError } from "./tool-error.ts";
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
 
+import { authorizeDeliverable } from "./deal-deliverables.js";
+import { partnerAuthoritySlugForActor } from "./partner-authority.js";
+
+export async function authorizeClientPublication(c: Db, actor: Actor, deal: string): Promise<string> {
+  const sponsor = partnerAuthoritySlugForActor(actor);
+  if (!sponsor) throw new ToolError({ error: "deliverable_denied" });
+  await authorizeDeliverable(c, { ...actor, human: true, slug: sponsor }, deal);
+  return sponsor;
+}
+
 const uuid = { type: "string", format: "uuid" };
 export function clientPublicationTools({
   withEnvelope,
   writeEvent,
-  authorizeDeal,
 }: {
-  authorizeDeal: (c: Db, actor: Actor, deal: string) => Promise<string>;
   withEnvelope: WithEnvelope;
   writeEvent: WriteEvent;
 }) {
   const preview = async (c: Db, actor: Actor, args: VerbInputs["preview-deal-client-view"]) => {
-    await authorizeDeal(c, actor, args.deal_id);
+    await authorizeClientPublication(c, actor, args.deal_id);
     const result = await c.query(
       `select ops.client_portal_projection(split_part(v.client_portal_url,'/',4)) as portal from public.v_deal_client_portal v where v.deal_id=$1`,
       [args.deal_id],
@@ -35,7 +43,7 @@ export function clientPublicationTools({
         required: ["deal_id"],
       },
       handler: async (c: Db, actor: Actor, args: VerbInputs["list-deal-client-publications"]) => {
-        await authorizeDeal(c, actor, args.deal_id);
+        await authorizeClientPublication(c, actor, args.deal_id);
         return {
           ok: true,
           schema_version: "client-publications.v1",
@@ -82,7 +90,7 @@ export function clientPublicationTools({
         required: ["idempotency_key", "deal_id", "publication_id", "base_version", "published", "kind", "title"],
       },
       handler: async (c: Db, actor: Actor, args: VerbInputs["set-client-publication"]) => {
-        await authorizeDeal(c, actor, args.deal_id);
+        const sponsor = await authorizeClientPublication(c, actor, args.deal_id);
         if (
           args.kind === "deliverable"
             ? !args.deliverable_id || !args.deliverable_version || args.content !== undefined
@@ -104,7 +112,7 @@ export function clientPublicationTools({
                 args.content ?? null,
                 args.deliverable_id ?? null,
                 args.deliverable_version ?? null,
-                actor.slug,
+                sponsor,
               ])
             ).rows[0].publication;
           } catch (error) {

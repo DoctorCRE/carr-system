@@ -33,7 +33,7 @@
     }
   },
   "invariants": [
-    "Only authenticated human partners Joe and Dell may author or preview a deal they can access.",
+    "Only authenticated partners Joe and Dell or their verified partner-authority agents may author or preview a deal the sponsoring partner can access. Publication rows use the partner identity; audit events retain the actual actor.",
     "The password-authenticated read-client-portal and partner preview use the same projection.",
     "Milestones remain hidden until explicitly published. Live deal phases are never automatically projected.",
     "Deliverables must remain finalized, shared, same-deal and at the exact published version.",

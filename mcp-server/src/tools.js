@@ -10720,7 +10720,7 @@ registerTools(dealDocumentTextTools(), "deal-document-text");
 // turns, server-derived attribution, human-watchable. See src/partner-room.js.
 registerTools(partnerRoomTools({ withEnvelope, ToolError }), "partner-room");
 registerTools(agentProfileTools(), "agent-profile");
-registerTools(clientPublicationTools({ withEnvelope, writeEvent, authorizeDeal: authorizeDeliverable }), "mcp-server/src/client-publications.ts");
+registerTools(clientPublicationTools({ withEnvelope, writeEvent }), "mcp-server/src/client-publications.ts");
 registerTools(clientPortalTools({ withEnvelope, writeEvent, resolveSubject }), "client-portal");
 // DoctorCRE v5 V5-UX-C02/C06: the resource-metering read contract and the
 // one write door the local, credential-less collector uses. See
