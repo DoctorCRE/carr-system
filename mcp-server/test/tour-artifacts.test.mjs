@@ -15,7 +15,7 @@ function harness(expectedActor = actor) {
     calls.push({ sql, params });
     if (sql.includes("request_tour_pdf_render")) return { rows: [{ render_job_id: ids.job }] };
     if (sql.includes("record_tour_pdf_render_result")) return { rows: [{ render_result_id: ids.result }] };
-    if (sql.includes("read_tour_pdf_render")) return { rows: [{ render: { render_job_id: ids.job, status: "review_ready", artifact_ref: "artifact:tour-pdf:abcdefghijklmnop", artifact_digest: digest("a"), projection_digest: digest("b"), page_count: 2, expected_property_count: 2, blocking_finding_count: 0, human_review_state: "pending", r2_key: "private", lease_digest: digest("c"), token_digest: digest("d") } }] };
+    if (sql.includes("read_tour_pdf_render")) return { rows: [{ render: { render_job_id: ids.job, status: "review_ready", artifact_ref: "artifact:tour-pdf:abcdefghijklmnop", artifact_digest: digest("a"), projection_digest: digest("b"), page_count: 3, expected_property_count: 2, blocking_finding_count: 0, human_review_state: "pending", r2_key: "private", lease_digest: digest("c"), token_digest: digest("d") } }] };
     if (sql.includes("record_tour_pdf_human_review")) return { rows: [{ review_receipt_id: ids.review }] };
     throw new Error(sql);
   } };
@@ -49,10 +49,11 @@ test("renderer result records exact R2/QC evidence without granting approval", a
     idempotency_key: ids.idempotency, render_job_id: ids.job, status: "review_ready",
     artifact_ref: "artifact:tour-pdf:abcdefghijklmnop", artifact_digest: digest("4"),
     storage_ref: `tour-pdf/carr-internal/${ids.job}/artifact.pdf`, content_length: 12345,
-    page_count: 2, blocking_finding_count: 0, qc_run_digest: digest("5"),
+    page_count: 3, blocking_finding_count: 0, qc_run_digest: digest("5"),
   };
   assert.deepEqual(await h.tools["record-tour-pdf-render-result"].handler(h.client, actor, trustedTourRendererResult(result)), { ok: true, render_result_id: ids.result, render_job_id: ids.job, status: "review_ready" });
   assert.match(h.calls[0].sql, /record_tour_pdf_render_result/);
+  assert.equal(h.calls[0].params[7], request.expected_property_count + 1);
   assert.equal(h.events.length, 1);
   assert.doesNotMatch(JSON.stringify(h.events), /storage_ref/);
   assert.equal(Object.hasOwn(result, "decision"), false);
@@ -64,7 +65,7 @@ test("renderer result refuses caller-fabricated receipts and accepts terminal tr
     idempotency_key: ids.idempotency, render_job_id: ids.job, status: "review_ready",
     artifact_ref: "artifact:tour-pdf:abcdefghijklmnop", artifact_digest: digest("4"),
     storage_ref: `tour-pdf/carr-internal/${ids.job}/artifact.pdf`, content_length: 12345,
-    page_count: 2, blocking_finding_count: 0, qc_run_digest: digest("5"),
+    page_count: 3, blocking_finding_count: 0, qc_run_digest: digest("5"),
   };
   await assert.rejects(h.tools["record-tour-pdf-render-result"].handler(h.client, actor, success), error => error?.payload?.error === "tour_trusted_renderer_required");
   await assert.rejects(h.tools["record-tour-pdf-render-result"].handler(h.client, actor, JSON.parse(JSON.stringify(trustedTourRendererResult(success)))), error => error?.payload?.error === "tour_trusted_renderer_required");
@@ -94,6 +95,7 @@ test("render reads are sanitized and human acceptance is a separate receipt, nev
   const h = harness(humanActor);
   const read = await h.tools["read-tour-pdf-render"].handler(h.client, humanActor, { render_job_id: ids.job });
   assert.equal(read.render.status, "review_ready"); assert.equal(read.render.artifact_ref, "artifact:tour-pdf:abcdefghijklmnop");
+  assert.equal(read.render.page_count, read.render.expected_property_count + 1);
   assert.doesNotMatch(JSON.stringify(read), /r2_key|lease_digest|token_digest/);
   const review = { idempotency_key: ids.idempotency, render_job_id: ids.job, qc_run_digest: digest("2"), decision: "accept", reviewed_at: "2026-08-27T12:00:00Z", review_receipt_digest: digest("3"), reason: "QC proof reviewed" };
   assert.deepEqual(await h.tools["record-tour-pdf-human-review"].handler(h.client, humanActor, review), { ok: true, review_receipt_id: ids.review, decision: "accept" });

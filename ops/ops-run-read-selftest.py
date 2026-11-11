@@ -9,14 +9,13 @@ import json
 from pathlib import Path
 import sys
 import os
-import shutil
 import subprocess
-import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_bin_dir
 from lib.studio_proof import (RunBatch, Requirement, Source, Installation, Evidence,
                               observe, read_runs)
 
@@ -144,50 +143,73 @@ class RunReadTest(unittest.TestCase):
         with patch.object(recorder, 'connect', side_effect=AssertionError('must validate first')):
             self.assertEqual(recorder.read_run_batch('x', 'x', 'production', NOW, NOW, 1).status, 'invalid-query')
 
+class PostgresFixtureLifecycleTest(unittest.TestCase):
+    def test_failed_sql_fixture_start_still_stops_and_removes_root(self):
+        from lib.disposable_pg_fixture import DisposablePostgres
+        calls, roots = [], []
+
+        def run(command, **options):
+            calls.append(command)
+            if 'start' in command:
+                raise subprocess.TimeoutExpired(command, 30)
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        def fixture(*args, **options):
+            pg = DisposablePostgres(*args, **options, runner=run)
+            roots.append(pg.root)
+            return pg
+
+        with patch.dict(sys.modules, psycopg=MagicMock()), \
+             patch(__name__ + '.postgres_bin_dir', return_value=Path('/fake')), \
+             patch(__name__ + '.DisposablePostgres', side_effect=fixture), \
+             patch.object(subprocess, 'run', side_effect=AssertionError('raw PostgreSQL launch')):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                method = PostgresReadTest.test_actual_sql_readonly_and_latest_failure
+                getattr(method, '__wrapped__', method)(PostgresReadTest())
+        self.assertTrue(roots)
+        self.assertEqual(calls[-1][-1], 'stop')
+        self.assertTrue(all(not root.exists() for root in roots))
+
+
 class PostgresReadTest(unittest.TestCase):
     @unittest.skipUnless('--postgres' in sys.argv, 'opt-in disposable PostgreSQL transport check')
     def test_actual_sql_readonly_and_latest_failure(self):
         import psycopg
-        initdb = shutil.which('initdb')
-        self.assertIsNotNone(initdb, 'PostgreSQL binaries required for --postgres')
-        binary = Path(initdb).parent
-        with tempfile.TemporaryDirectory(prefix='carr-proof-pg-') as directory:
-            root = Path(directory)
+        binary = postgres_bin_dir()
+        initdb = binary / 'initdb'
+        with DisposablePostgres('carr-proof-pg-', binary / 'pg_ctl') as fixture:
+            root = fixture.root
             data, socket = root / 'data', root / 'socket'
             socket.mkdir()
-            subprocess.run([initdb, '-D', str(data), '-A', 'trust', '--no-locale', '-E', 'UTF8'],
-                           check=True, capture_output=True, timeout=30)
-            subprocess.run([str(binary / 'pg_ctl'), '-D', str(data), '-l', str(root / 'log'),
+            fixture.run([initdb, '-D', str(data), '-A', 'trust', '--no-locale', '-E', 'UTF8'],
+                        check=True, capture_output=True, timeout=30)
+            fixture.run([str(binary / 'pg_ctl'), '-D', str(data), '-l', str(root / 'log'),
                             '-o', f"-F -k {socket} -h ''", '-w', 'start'],
-                           check=True, capture_output=True, timeout=30)
-            try:
-                def connect(_, **options):
-                    return psycopg.connect(host=str(socket), dbname='postgres', autocommit=True)
-                with connect(None) as conn:
-                    conn.execute('create schema ops')
-                    conn.execute('create table ops.service(id uuid primary key, key text)')
-                    conn.execute("""create table ops.run(id uuid, correlation_id uuid, service_id uuid,
-                        run_key text, environment text, source_kind text, source_ref text, state text,
-                        exit_code int, started_at timestamptz, ended_at timestamptz, observed_at timestamptz,
-                        expires_at timestamptz, detail text)""")
-                    sid = '00000000-0000-4000-8000-000000000004'
-                    conn.execute('insert into ops.service values (%s,%s)', (sid, 'outlook-intake'))
-                    for r in (row(), row(run_id='00000000-0000-4000-8000-000000000005',
-                                          state='failed', exit_code=1, ended_at=NOW)):
-                        values = [r[k] for k in recorder.RUN_READ_COLUMNS]
-                        values[2] = sid
-                        conn.execute('insert into ops.run values (' + ','.join(['%s']*14) + ')', values)
-                with patch.object(recorder, 'connect', side_effect=connect):
-                    batch = recorder.read_run_batch('outlook-intake', 'outlook.intake', 'production',
-                                                   NOW-timedelta(hours=1), NOW, 10)
-                self.assertEqual(batch.status, 'ok')
-                self.assertEqual([r.state for r in batch.runs], ['failed', 'succeeded'])
-                self.assertEqual(batch.runs[1].counts['run']['mail_ids'], 2)
-                self.assertEqual(batch.runs[0].ended_at, NOW)
-                self.assertEqual(len(batch.runs[0].run_id), 36)
-            finally:
-                subprocess.run([str(binary / 'pg_ctl'), '-D', str(data), '-m', 'immediate', '-w', 'stop'],
-                               check=True, capture_output=True, timeout=30)
+                        check=True, capture_output=True, timeout=30)
+            def connect(_, **options):
+                return psycopg.connect(host=str(socket), dbname='postgres', autocommit=True)
+            with connect(None) as conn:
+                conn.execute('create schema ops')
+                conn.execute('create table ops.service(id uuid primary key, key text)')
+                conn.execute("""create table ops.run(id uuid, correlation_id uuid, service_id uuid,
+                    run_key text, environment text, source_kind text, source_ref text, state text,
+                    exit_code int, started_at timestamptz, ended_at timestamptz, observed_at timestamptz,
+                    expires_at timestamptz, detail text)""")
+                sid = '00000000-0000-4000-8000-000000000004'
+                conn.execute('insert into ops.service values (%s,%s)', (sid, 'outlook-intake'))
+                for r in (row(), row(run_id='00000000-0000-4000-8000-000000000005',
+                                      state='failed', exit_code=1, ended_at=NOW)):
+                    values = [r[k] for k in recorder.RUN_READ_COLUMNS]
+                    values[2] = sid
+                    conn.execute('insert into ops.run values (' + ','.join(['%s']*14) + ')', values)
+            with patch.object(recorder, 'connect', side_effect=connect):
+                batch = recorder.read_run_batch('outlook-intake', 'outlook.intake', 'production',
+                                               NOW-timedelta(hours=1), NOW, 10)
+            self.assertEqual(batch.status, 'ok')
+            self.assertEqual([r.state for r in batch.runs], ['failed', 'succeeded'])
+            self.assertEqual(batch.runs[1].counts['run']['mail_ids'], 2)
+            self.assertEqual(batch.runs[0].ended_at, NOW)
+            self.assertEqual(len(batch.runs[0].run_id), 36)
 
 
 if __name__ == '__main__':
