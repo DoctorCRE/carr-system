@@ -19,5 +19,14 @@ stateDiagram-v2
    Hidden --> Hidden: Client reads
    Visible --> Visible: Client reads
   }
+  --
+  state Version {
+   [*] --> Empty
+   Empty --> Saved: Partner saves draft
+   Saved --> Saved: Partner saves matching version
+   Saved --> Saved: Partner retries same action
+   Saved --> Conflict: Partner saves stale version
+   Conflict --> Saved: Partner reads current version
+  }
  }
  %% never OnlyPublished: Unpublished & Visible -- Unpublished items never appear to the client
