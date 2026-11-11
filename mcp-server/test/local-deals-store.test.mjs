@@ -81,6 +81,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(table);
       if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
+    await c.query(schema.match(/^grant select \([^)]*\) on table public\.party to carr_reader;$/m)[0]);
     await c.query('alter table activity add column if not exists email_source jsonb');
     await c.query('alter table activity add column if not exists email_context jsonb');
     await c.query(readMigration('1125_calendar_confirmation.sql'));
