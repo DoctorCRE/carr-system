@@ -101,12 +101,13 @@ test("Tour navigation uses sealed entrances and newest promotion through the aut
       reason: "route_unknown",
       evidence: null,
     });
-    execFileSync(process.execPath, ["--test", "mcp-server/test/tour-deal-access.test.ts"], {
+    const authorization = execFileSync(process.execPath, ["--test", "mcp-server/test/tour-deal-access.test.ts"], {
       cwd: new URL("../../", import.meta.url),
       env: { ...process.env, NODE_TEST_CONTEXT: undefined, CARR_TOUR_DEAL_TEST_DATABASE_URL: fixture.dsn },
       timeout: 60_000,
       stdio: "pipe",
     });
+    assert.match(String(authorization), /skipped 0/);
   } finally {
     await c.end();
     await fixture.close();
