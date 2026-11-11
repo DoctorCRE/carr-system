@@ -102,7 +102,7 @@ const revisionRows = definitions
   .map(
     ({ source, view, where, time }) => `select '${source}'::text as source, id,
     encode(sha256(convert_to((to_jsonb(v) - '${time}' || jsonb_build_object('${time}',
-      to_char(${time} at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')))::text,'UTF8')),'hex') as hash
+      to_char(${time} at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))::text,'UTF8')),'hex') as hash
     from ${view} v where ${where}`,
   )
   .join(" union all ");
