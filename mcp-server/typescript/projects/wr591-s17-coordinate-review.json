@@ -1,0 +1,7 @@
+{
+  "node": [
+    "src/tour-coordinate-review-contract.ts",
+    "test/tour-coordinate-review.test.ts"
+  ],
+  "entry": ["test/tour-coordinate-review.test.ts"]
+}

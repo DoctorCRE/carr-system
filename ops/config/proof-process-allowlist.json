@@ -192,7 +192,7 @@
     ]
   },
   "tools/prove-tour-navigation.py": {
-    "sha256": "9869a0ce2f322929aa329b2b35ffb79fd0bfa21ce4c18b049e4658148a968750",
+    "sha256": "7fd981b4b40f4739c0a91223c35044d52903cdbaa55bbdd2331cf5fac356ee01",
     "commands": [
       "git --no-replace-objects -C repository merge-base --is-ancestor merge_sha served_sha"
     ],
