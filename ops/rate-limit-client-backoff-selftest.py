@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Rate-limit retries through the shared reader and real CLI, using loopback only."""
+from concurrent.futures import ThreadPoolExecutor
+import http.client
+import socket
+import uuid
 import json
 import os
 from pathlib import Path
@@ -20,11 +24,24 @@ REPO = Path(__file__).resolve().parents[1]
 
 class BackoffTest(unittest.TestCase):
     def setUp(self):
+        self.expected_method = 'GET'
+        self.expected_path = f'/mcp/{uuid.uuid4().hex}'
+        self.handler_errors = []
         self.responses = []
         self.requests = []
+        self.received_429 = threading.Event()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            def parse_request(self):
+                if not super().parse_request():
+                    return False
+                if self.path != owner.expected_path:
+                    self.send_error(404)
+                    return False
+                owner.assertEqual(self.command, owner.expected_method)
+                return True
+
             def do_GET(self):
                 owner.requests.append(self.rfile.read(int(self.headers.get('Content-Length', 0))))
                 status, headers, body = owner.responses.pop(0)
@@ -33,6 +50,8 @@ class BackoffTest(unittest.TestCase):
                     self.send_header(name, value)
                 self.end_headers()
                 self.wfile.write(body)
+                if status == 429:
+                    owner.received_429.set()
 
             do_POST = do_GET
 
@@ -40,15 +59,79 @@ class BackoffTest(unittest.TestCase):
                 pass
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.server.handle_error = lambda *args: self.handler_errors.append(sys.exc_info()[1])
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
-        self.url = f'http://127.0.0.1:{self.server.server_port}/mcp'
+        self.url = f'http://127.0.0.1:{self.server.server_port}{self.expected_path}'
         self.addCleanup(self.close)
 
     def close(self):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+        self.assertEqual(self.handler_errors, [])
+
+    def test_unrelated_probes_do_not_consume_responses(self):
+        self.responses = [(429, {'Retry-After': '0'}, b'limited'),
+                          (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
+        for path in ('/', '/favicon.ico', '/mcp?probe=1'):
+            with self.subTest(path=path):
+                self.assertEqual(reader.read(self.url.removesuffix(self.expected_path) + path).status, 404)
+                self.assertEqual(self.requests, [])
+                self.assertEqual(len(self.responses), 2)
+        result = self.cli({'idempotency_key': 'unchanged'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.requests[0], self.requests[1])
+        self.assertEqual(self.responses, [])
+
+    def test_stray_get_during_cli_backoff(self):
+        for method, path, body in (('GET', '/', None), ('GET', '/mcp', None),
+                                   ('HEAD', '/mcp', None), ('OPTIONS', '/mcp', None),
+                                   ('POST', '/wrong', b'{}'), ('BAD', '/mcp', None),
+                                   ('POST', '/mcp', b'{'), ('POST', '/mcp', b'{}')):
+            with self.subTest(path=path):
+                self.requests = []
+                self.received_429.clear()
+                self.responses = [(429, {}, b'limited'),
+                                  (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    pending = pool.submit(self.cli, {'idempotency_key': 'unchanged'})
+                    self.assertTrue(self.received_429.wait(10))
+                    if method == 'BAD':
+                        with socket.create_connection(self.server.server_address, timeout=3) as sock:
+                            sock.sendall(b'GET /mcp HTTP/invalid\r\n\r\n')
+                            self.assertIn(b'400', sock.recv(4096).split(b'\r\n')[0])
+                    else:
+                        conn = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+                        try:
+                            conn.request(method, path, body)
+                            probe = conn.getresponse()
+                            self.assertEqual(probe.status, 404)
+                            probe.read()
+                        finally:
+                            conn.close()
+                    self.assertEqual(len(self.requests), 1)
+                    self.assertEqual(len(self.responses), 1)
+                    result = pending.result()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.requests), 2)
+                self.assertEqual(self.requests[0], self.requests[1])
+                self.assertEqual(self.responses, [])
+
+    def test_unexpected_secret_request_fails_scenario(self):
+        for method, error in (('POST', AssertionError), ('GET', IndexError)):
+            with self.subTest(method=method):
+                conn = http.client.HTTPConnection(*self.server.server_address, timeout=3)
+                try:
+                    conn.request(method, self.expected_path)
+                    with self.assertRaises(http.client.RemoteDisconnected):
+                        conn.getresponse()
+                    self.assertEqual(len(self.handler_errors), 1)
+                    self.assertIsInstance(self.handler_errors[0], error)
+                    self.handler_errors.clear()
+                finally:
+                    conn.close()
 
     def test_reader_429_then_success(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited'), (200, {}, b'recovered')]
@@ -73,6 +156,7 @@ class BackoffTest(unittest.TestCase):
                     with self.subTest(status=status, body=body, client=client):
                         self.requests = []
                         self.responses = [(status, {'Retry-After': '0'}, body), (200, {}, b'recovered')]
+                        self.expected_method = 'GET' if client == 'reader' else 'POST'
                         result = reader.read(self.url) if client == 'reader' else self.cli({})
                         self.assertEqual(len(self.requests), 1)
                         if client == 'reader':
@@ -103,6 +187,7 @@ class BackoffTest(unittest.TestCase):
         self.assertIsNone(reader.retry_delay(200, {}, 1, 0))
 
     def cli(self, args, **extra):
+        self.expected_method = 'POST'
         env = {**os.environ, 'CARR_MCP_LOCAL_TOKEN': 'synthetic-bearer',
                'CARR_MCP_ENV': '/nonexistent/J281-tokens', 'CARR_MCP_URL': self.url}
         env.pop('DATABASE_URL', None)
