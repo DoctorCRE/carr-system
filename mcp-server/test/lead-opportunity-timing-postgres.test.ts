@@ -42,6 +42,7 @@ test("registered workspace separates Added from exact current source evidence", 
         assert.equal(t.contract, "lead-opportunity-timing.v1");
         assert.equal(Date.parse(string(t.record_added_at)), Date.parse("2026-11-01T12:00:00Z"));
         assert.ok(t.status === "supported" || t.status === "unknown");
+        assert.equal(array(t.events).length === 0, t.status === "unknown");
         return { status: t.status, events: array(t.events).map(object) };
       } catch (error) {
         await c.query("rollback");
@@ -108,6 +109,10 @@ test("registered workspace separates Added from exact current source evidence", 
     assert.equal(corrected.source_url, canonical.source_url);
     assert.equal(Date.parse(string(corrected.observed_at)), canonical.recorded_at.getTime());
     assert.equal(corrected.published_on, "2026-11-02");
+    await ingest("2026-10-03", "registry_update");
+    t = await timing();
+    assert.equal(required(t.events[0]).date, "2026-10-03");
+    assert.notEqual(required(t.events[0]).revision, corrected.revision);
     const coverage = object(await executeRegisteredTool(c, actor, "list-practice-origination", {}));
     await executeRegisteredTool(c, actor, "record-practice-origination-feed", {
       idempotency_key: randomUUID(),
@@ -139,7 +144,7 @@ test("registered workspace separates Added from exact current source evidence", 
     assert.equal(t.events.length, 2);
     assert.deepEqual(
       t.events.map((e) => e.date),
-      ["2026-10-02", "2026-11-02"],
+      ["2026-10-03", "2026-11-02"],
     );
     assert.equal(required(t.events[1]).meaning, "Public PECOS enrollment observed");
     const duplicate = randomUUID();
