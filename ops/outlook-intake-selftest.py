@@ -527,6 +527,30 @@ class IntakeTest(unittest.TestCase):
         path.write_text(json.dumps(state))
         return path, state
 
+    def test_prebinding_participants_cannot_bind_two_mailboxes(self):
+        retained = []
+        for account in ('other-mailbox@example.test', OWNER):
+            with self.subTest(account=account):
+                path, state = self.legacy_ledger()
+                request = next(iter(state['requests'].values()))
+                args = json.loads(request['payload'])
+                args.pop('email_source')
+                args['kind'] = 'email_out'
+                args['email_context'] = {'sender': {'email': 'other-mailbox@example.test'},
+                                         'recipients': [{'email': OWNER}]}
+                request['payload'] = json.dumps(args)
+                path.write_text(json.dumps(state))
+                retained.append(path.read_bytes())
+                self.run_intake()
+                settings = intake.replace(load_settings(self.home), account=account)
+                result = intake.run(self.repo, self.home, self.fake.ports(), settings=settings,
+                                    reconcile_binding=True)
+                self.assertEqual(result.reason, 'ledger_binding_evidence_insufficient')
+                self.assertFalse((self.out() / 'binding.json').exists())
+                self.assertEqual(path.read_bytes(), retained[-1])
+                self.assertFalse(self.fake.calls)
+        self.assertEqual(*retained)
+
     def bind_legacy(self):
         return intake.run(self.repo, self.home, self.fake.ports(), reconcile_binding=True)
 
