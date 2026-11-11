@@ -50,6 +50,20 @@ class BackoffTest(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
 
+    def test_unrelated_probes_do_not_consume_responses(self):
+        self.responses = [(429, {'Retry-After': '0'}, b'limited'),
+                          (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
+        for path in ('/', '/favicon.ico', '/mcp?probe=1'):
+            with self.subTest(path=path):
+                self.assertEqual(reader.read(self.url.removesuffix('/mcp') + path).status, 404)
+                self.assertEqual(self.requests, [])
+                self.assertEqual(len(self.responses), 2)
+        result = self.cli({'idempotency_key': 'unchanged'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(self.requests[0], self.requests[1])
+        self.assertEqual(self.responses, [])
+
     def test_reader_429_then_success(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited'), (200, {}, b'recovered')]
         self.assertEqual(reader.read(self.url).body, b'recovered')
