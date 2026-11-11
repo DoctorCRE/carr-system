@@ -119,13 +119,19 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     const outcomes = [];
     for (const [phase, verb, args] of [
       ["create", "save-deal-space-search-v1", { ...save, search_id: concurrentSearch, status: "saved" }],
-      ["update", "save-deal-space-search-v1", { ...save, search_id: concurrentSearch, expected_version: 1, status: "saved" }],
+      [
+        "update",
+        "save-deal-space-search-v1",
+        { ...save, search_id: concurrentSearch, expected_version: 1, status: "saved" },
+      ],
       ["run", "run-deal-space-search-v1", { deal_id: deal, search_id: concurrentSearch, expected_version: 2 }],
     ] as const) {
       const request = { ...args, idempotency_key: randomUUID() };
       let arrivals = 0;
       let release!: () => void;
-      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       // Correct serialization permits only one receipt read until the first transaction commits.
       const timeout = setTimeout(() => release(), 1000);
       const concurrent = async () => {
@@ -158,7 +164,11 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
       try {
         const responses = await Promise.allSettled([concurrent(), concurrent()]);
         const row = (await c.query("select version from ops.deal_space_search where id=$1", [concurrentSearch])).rows;
-        const receipts = (await c.query("select count(*)::int as count from tool_call where idempotency_key=$1", [request.idempotency_key])).rows[0].count;
+        const receipts = (
+          await c.query("select count(*)::int as count from tool_call where idempotency_key=$1", [
+            request.idempotency_key,
+          ])
+        ).rows[0].count;
         outcomes.push({ phase, responses, row, receipts });
       } finally {
         clearTimeout(timeout);
@@ -166,9 +176,12 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     }
     for (const [index, { phase, responses, row, receipts }] of outcomes.entries()) {
       await t.test(`overlapping same-key ${phase} replays one mutation`, () => {
-        assert.equal(responses.filter((result) => result.status === "fulfilled").length, 2,
-          `${phase}: both overlapping same-key calls must succeed: ${JSON.stringify(responses)}`);
-        const [first, second] = responses.map((result) => result.status === "fulfilled" ? result.value : null);
+        assert.equal(
+          responses.filter((result) => result.status === "fulfilled").length,
+          2,
+          `${phase}: both overlapping same-key calls must succeed: ${JSON.stringify(responses)}`,
+        );
+        const [first, second] = responses.map((result) => (result.status === "fulfilled" ? result.value : null));
         assert.deepEqual(first.search, second.search, `${phase}: identical committed result`);
         assert.equal([first, second].filter((result) => result.replayed === true).length, 1, `${phase}: one replay`);
         assert.deepEqual(row, [{ version: index + 1 }], `${phase}: one mutation`);
