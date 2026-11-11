@@ -1,0 +1,8 @@
+{
+  "node": [
+    "src/tour-navigation-contract.ts",
+    "test/tour-navigation-evidence-postgres.test.ts",
+    "test/fixtures/tour-navigation-evidence.ts"
+  ],
+  "entry": ["test/tour-navigation-evidence-postgres.test.ts"]
+}

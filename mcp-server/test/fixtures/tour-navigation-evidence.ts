@@ -1,0 +1,66 @@
+import { TOUR_NAVIGATION_CONTRACT, type TourNavigationEvidence } from "../../src/tour-navigation-contract.ts";
+
+export const navigationFixture = {
+  contract_version: TOUR_NAVIGATION_CONTRACT,
+  status: "ready",
+  reason: null,
+  evidence: {
+    route_version_id: "a3000000-0000-4000-8000-000000000001",
+    route_version: 1,
+    projection_id: "ac000000-0000-4000-8000-000000000001",
+    projection_version: 1,
+    projection_digest: `sha256:${"0".repeat(64)}`,
+    as_of: "2026-11-10T12:00:00Z",
+    promotion: {
+      receipt_id: "ab000000-0000-4000-8000-000000000001",
+      receipt_digest: `sha256:${"9".repeat(64)}`,
+      reviewed_at: "2026-11-10T12:00:00Z",
+      reviewer_actor_id: "synthetic-reviewer",
+      route_version: 1,
+      canonical_dataset_version: "proof-v1",
+      component_registry_version: "maplibre-6.1.0",
+      selected_prototype_id: "carr-map-tour-v1",
+      brief_version: "tour-map-brief.v1",
+      provider_rights_receipt_ids: ["a5000000-0000-4000-8000-000000000001"],
+      mobile_test_evidence: { status: "passed" },
+      native_navigation_test_evidence: { status: "passed" },
+      offline_test_evidence: { status: "passed" },
+      required_checks: { exact_native_navigation_handoff: true },
+    },
+    stops: [
+      {
+        route_stop_id: "a4000000-0000-4000-8000-000000000001",
+        property_id: "a1000000-0000-4000-8000-000000000001",
+        route_sequence: 1,
+        route_label: "A",
+        position: { latitude: 30.421, longitude: -87.216 },
+        source: {
+          coordinate_candidate_id: "aa000000-0000-4000-8000-000000000001",
+          coordinate_role: "entrance",
+          precision_class: "entrance",
+          observed_at: "2026-11-08T12:00:00Z",
+          review_state: "reviewed",
+          source_evidence_id: "a6000000-0000-4000-8000-000000000001",
+          stable_locator: "proof:search",
+          content_digest: `sha256:${"2".repeat(64)}`,
+          retrieved_at: "2026-10-10T12:00:00Z",
+          retrieval_status: "read",
+          rights_receipt_id: "a5000000-0000-4000-8000-000000000001",
+          entrance_verification_receipt_id: "ae000000-0000-4000-8000-000000000001",
+          receipt_digest: `sha256:${"4".repeat(64)}`,
+          verifier_actor_id: "synthetic-reviewer",
+          verified_at: "2026-11-09T12:00:00Z",
+          evidence_reference: "proof:native-navigation:one",
+          native_navigation_proof: { status: "passed" },
+        },
+      },
+    ],
+  },
+} satisfies TourNavigationEvidence;
+
+export const unavailableFixture = {
+  contract_version: TOUR_NAVIGATION_CONTRACT,
+  status: "unavailable",
+  reason: "promotion_missing",
+  evidence: null,
+} satisfies TourNavigationEvidence;
