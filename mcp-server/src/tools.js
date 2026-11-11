@@ -10798,7 +10798,7 @@ registerTools(tourDomainTools({ withEnvelope, writeEvent, ToolError }), "tour-do
 // confidential sharing, and deterministic PDF request/review records.
 registerTools(tourPropertySearchTools({ withEnvelope, writeEvent, ToolError }), "tour-property-search");
 registerTools(dealSpaceSearchTools({ withEnvelope, writeEvent, criteria: tourPropertySearchInputSchema,
-  organizationTenantForActor, canExercisePartnerAuthority, installTourDealAccess,
+  organizationTenantForActor, partnerAuthoritySlugForActor,
   normalizeCriteria: input => normalizeTourPropertySearch(input, ToolError) }), "deal-space-searches");
 registerTools(tourMapPromotionTools({ withEnvelope, writeEvent, ToolError }), "tour-map-promotion");
 registerTools(tourSharingTools({ withEnvelope, writeEvent, ToolError }), "tour-sharing");

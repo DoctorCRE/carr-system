@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { Validator } from "@cfworker/json-schema";
+import { type Schema, Validator } from "@cfworker/json-schema";
 import pg from "pg";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
+import { publicError } from "../src/public-errors.ts";
+
+const { authenticatedIdentity, agentActorForToken } = await import(new URL("../src/identity.js", import.meta.url).href);
+
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
 const { executeRegisteredTool, TOOLS } = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -99,6 +103,123 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         throw e;
       }
     };
+    for (const owner of ["joe", "dell", null]) {
+      await t.test(`${owner ?? "ownerless"} deal supports partner saved-search read, save and run`, async () => {
+        const target = (
+          await c.query(
+            `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+           values($1,'Synthetic shared search','other','pending',$2,$3,$3) returning id`,
+            [client, owner, actor.id],
+          )
+        ).rows[0].id;
+        const args = {
+          deal_id: target,
+          search_id: randomUUID(),
+          expected_version: 0,
+          idempotency_key: randomUUID(),
+          name: "Shared partner search",
+          status: "saved",
+          criteria: filters,
+          requirements: "Shared deal",
+          client_prefill_source: null,
+        };
+        await invoke("save-deal-space-search-v1", args);
+        for (const slug of ["joe", "dell", "joe-local", "dell-local", "codex", "claude"]) {
+          const human = slug === "joe" || slug === "dell";
+          const row = (
+            await c.query(
+              `insert into actor(slug,kind,display_name) values($1,$2,'Synthetic partner access')
+             on conflict(slug) do update set active=true returning id`,
+              [slug, human ? "human" : "automation"],
+            )
+          ).rows[0];
+          const who = human
+            ? { ...row, slug, human }
+            : slug.endsWith("-local")
+              ? agentActorForToken(
+                  "Bearer synthetic-search",
+                  JSON.stringify({ [slug]: "synthetic-search" }),
+                  "local-token",
+                )
+              : authenticatedIdentity.connectionForGrant(
+                  { slug, human: false, client_id: "synthetic-search-client", sponsoring_human_slug: "joe" },
+                  JSON.stringify({ "synthetic-search-client": slug }),
+                );
+          Object.assign(who, { id: row.id });
+          const saved = await invoke(
+            "save-deal-space-search-v1",
+            {
+              ...args,
+              search_id: randomUUID(),
+              idempotency_key: randomUUID(),
+            },
+            who,
+          );
+          const ran = await invoke(
+            "run-deal-space-search-v1",
+            {
+              deal_id: target,
+              search_id: saved.search.id,
+              expected_version: 1,
+              idempotency_key: randomUUID(),
+            },
+            who,
+          );
+          assert.equal(ran.search.version, 2, slug);
+          const read = await invoke(
+            "read-deal-space-searches-v1",
+            { deal_id: target, search_id: saved.search.id },
+            who,
+          );
+          assert.deepEqual(read.searches, [ran.search], slug);
+        }
+        for (const verb of ["read-deal-space-searches-v1", "save-deal-space-search-v1", "run-deal-space-search-v1"]) {
+          const input = verb.startsWith("read-") ? { deal_id: target, search_id: null } : args;
+          await assert.rejects(invoke(verb, input, { id: actor.id, slug: "untrusted", human: false }), /human_only/);
+        }
+        for (const change of [
+          "select set_config('carr.organization_tenant_id','wrong-tenant',true)",
+          "select set_config('carr.acting_actor_slug','dell',true)",
+          "select set_config('carr.verified_human_actor_slug','dell',true)",
+          "update actor set active=false where slug='joe'",
+          "update deal set version=version+1 where id=$1",
+          "update client set merged_into=(select client_id from deal where id=$1) where id=(select client_id from deal where id=$1)",
+          "update party set deleted_at=now() where id=(select c.party_id from client c join deal d on d.client_id=c.id where d.id=$1)",
+        ]) {
+          for (const sql of [
+            "select ops.read_deal_space_searches($1,$2,$3,null)",
+            "select ops.save_deal_space_search($1,$2,$3::jsonb)",
+            "select ops.run_deal_space_search($1,$2,$3,$4,1)",
+          ]) {
+            await c.query("begin");
+            try {
+              await setWriterActorContext(c, actor, { partnerAuthorityAct: true });
+              await c.query("set local role carr_authority");
+              await executeRegisteredTool(c, actor, "read-deal-space-searches-v1", {
+                deal_id: target,
+                search_id: null,
+              });
+              await c.query("reset role");
+              await c.query(change, change.includes("$1") ? [target] : []);
+              await c.query("set local role carr_authority");
+              // Each SQL entry point must enforce the bound decision even after TypeScript authorization.
+              const params = sql.includes("save_")
+                ? [JSON.stringify(args)]
+                : sql.includes("run_")
+                  ? [target, args.search_id]
+                  : [target];
+              await assert.rejects(
+                c.query(sql, ["carr-internal", actor.id, ...params]),
+                /space_search_unavailable/,
+                change,
+              );
+            } finally {
+              await c.query("rollback");
+            }
+          }
+        }
+      });
+    }
     const search_id = randomUUID();
     const save = {
       idempotency_key: randomUUID(),
@@ -115,6 +236,146 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         observed_at: "2026-11-10T00:00:00Z",
       },
     };
+    await t.test("registered saved-search input-domain inventory never leaks generic failures", async (boundary) => {
+      boundary.mock.method(console, "error", () => {});
+      const requests: Record<string, Record<string, unknown>> = {
+        "save-deal-space-search-v1": { ...save, search_id: randomUUID(), idempotency_key: randomUUID() },
+        "run-deal-space-search-v1": {
+          deal_id: deal,
+          search_id: randomUUID(),
+          idempotency_key: randomUUID(),
+          expected_version: 1,
+        },
+        "read-deal-space-searches-v1": { deal_id: deal, search_id: null },
+      };
+      const cases: { verb: string; label: string; args: Record<string, unknown>; code?: string | undefined }[] = [];
+      const add = (verb: string, path: string[], value: unknown, code?: string) => {
+        const request = requests[verb];
+        assert.ok(request);
+        const args = structuredClone(request);
+        let parent = args;
+        for (const key of path.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
+        const key = path.at(-1);
+        assert.ok(key);
+        parent[key] = value;
+        cases.push({ verb, label: `${path.join(".")}=${JSON.stringify(value)}`, args, code });
+      };
+      for (const [verb, args] of Object.entries(requests)) {
+        const schema = TOOLS[verb].inputSchema;
+        const walk = (properties: Record<string, Schema | boolean>, path: string[] = []) => {
+          for (const [key, field] of Object.entries(properties)) {
+            assert.equal(typeof field, "object");
+            if (typeof field === "boolean") continue;
+            const at = [...path, key];
+            for (const value of [null, {}, [], false, true, 1.5, ""]) add(verb, at, value);
+            if (field.type === "object") walk(field.properties ?? {}, at);
+            if (field.anyOf?.[0]?.type === "object") walk(field.anyOf[0].properties ?? {}, at);
+            for (const value of field.enum ?? []) add(verb, at, value);
+            if (field.type === "array") {
+              add(verb, at, []);
+              const items = field.items;
+              assert.ok(items && typeof items === "object" && !Array.isArray(items));
+              const item = items.enum?.[0] ?? "medical";
+              assert.ok(typeof field.maxItems === "number");
+              add(verb, at, [item]);
+              add(verb, at, [item, item]);
+              add(
+                verb,
+                at,
+                Array.from({ length: field.maxItems + 1 }, (_, n) => `type_${n}`),
+              );
+            }
+            if (field.format === "uuid") {
+              for (const value of [randomUUID(), "00000000-0000-0000-0000-000000000000", "bad-uuid"])
+                add(verb, at, value);
+            }
+            for (const bound of [field.minimum, field.maximum]) {
+              if (typeof bound === "number") for (const value of [bound - 1, bound, bound + 1]) add(verb, at, value);
+            }
+            if (typeof field.maxLength === "number") {
+              for (const size of [field.maxLength, field.maxLength + 1]) add(verb, at, "x".repeat(size));
+            }
+            const missing = structuredClone(args);
+            let parent = missing;
+            for (const part of path) parent = parent[part] as Record<string, unknown>;
+            delete parent[key];
+            cases.push({ verb, label: `${at.join(".")} missing`, args: missing });
+          }
+        };
+        walk(schema.properties);
+        cases.push({ verb, label: "unknown field", args: { ...args, unexpected: true } });
+        cases.push({ verb, label: "baseline", args });
+      }
+      for (const verb of ["save-deal-space-search-v1", "run-deal-space-search-v1"]) {
+        for (const version of [2_147_483_647, 2_147_483_648, Number.MAX_SAFE_INTEGER, 1e100])
+          add(verb, ["expected_version"], version, "space_search_input_invalid");
+        add(verb, ["expected_version"], 2_147_483_646);
+      }
+      for (const path of [
+        ["name"],
+        ["requirements"],
+        ["client_prefill_source", "source_ref"],
+        ["client_prefill_source", "observed_at"],
+      ]) {
+        for (const text of ["a\u0000b", "a\ud800b", "a\udfffb", "😀", "é", "   "])
+          add(
+            "save-deal-space-search-v1",
+            path,
+            text,
+            text.includes(String.fromCharCode(0)) || /[\ud800-\udfff]/u.test(text)
+              ? "space_search_input_invalid"
+              : undefined,
+          );
+      }
+      for (const query of ["", "   ", "a\u0000b", "a\n", "a\ud800b", "😀".repeat(200)])
+        add("save-deal-space-search-v1", ["criteria", "query"], query);
+      add("save-deal-space-search-v1", ["criteria", "min_square_feet"], 9000, "tour_search_range_invalid");
+      add("save-deal-space-search-v1", ["criteria", "cursor"], "1", "space_search_input_invalid");
+      for (let unit = 0xd800; unit <= 0xdfff; unit++) {
+        for (const path of [["name"], ["requirements"], ["client_prefill_source", "source_ref"], ["criteria", "query"]])
+          add("save-deal-space-search-v1", path, `a${String.fromCharCode(unit)}b`, "space_search_input_invalid");
+      }
+      for (const size of [43, 44])
+        add(
+          "save-deal-space-search-v1",
+          ["client_prefill_source", "observed_at"],
+          `2026-11-10T00:00:00.${"1".repeat(size)}Z`,
+          size === 44 ? "space_search_input_invalid" : undefined,
+        );
+      const documented = new Set([
+        "space_search_input_invalid",
+        "space_search_unavailable",
+        "space_search_version_conflict",
+        "space_search_prefill_mismatch",
+        "space_search_not_runnable",
+        "tour_input_invalid",
+        "tour_search_range_invalid",
+        "missing_required",
+        "unregistered_operation_fields",
+        "value_not_in_declared_vocabulary",
+        "invalid_number",
+      ]);
+      const failures: string[] = [];
+      for (const { verb, label, args, code } of cases) {
+        // Each probe rolls back so field order cannot change later expectations.
+        await c.query("begin");
+        try {
+          await setWriterActorContext(c, actor, { partnerAuthorityAct: true });
+          await c.query("set local role carr_authority");
+          const result = await executeRegisteredTool(c, actor, verb, args);
+          assert.equal(result.ok, true);
+          assert.equal(code, undefined, `${verb} ${label} should refuse`);
+        } catch (error) {
+          const actual = publicError(error).error;
+          if (!documented.has(actual) || (code && actual !== code))
+            failures.push(`${verb} ${label}: ${actual} expected ${code ?? "documented refusal"}`);
+        } finally {
+          await c.query("rollback");
+        }
+      }
+      t.diagnostic(`${cases.length} inventory probes`);
+      assert.deepEqual(failures, [], `${cases.length} inventory probes`);
+    });
     const concurrentSearch = randomUUID();
     const outcomes = [];
     for (const [phase, verb, args] of [
@@ -216,15 +477,24 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     const reopened = await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id });
     assert.deepEqual(reopened.searches, [run.search]);
     assert.equal((await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id: null })).searches.length, 1);
-    for (const query of ["", "   ", "medical\u0000office"])
+    for (const [criteria, code] of [
+      ...["", "   ", "medical\u0000office"].map((query) => [{ ...filters, query }, "tour_input_invalid"] as const),
+      [{ ...filters, min_square_feet: 9000, max_square_feet: 8000 }, "tour_search_range_invalid"],
+    ] as const)
       await assert.rejects(
         invoke("save-deal-space-search-v1", {
           ...save,
           idempotency_key: randomUUID(),
           search_id: randomUUID(),
-          criteria: { ...filters, query },
+          criteria,
         }),
-        /tour_input_invalid/,
+        (error: unknown) => {
+          const result = publicError(error);
+          assert.equal(result.error, code);
+          assert.match(result.correlation_id, /^[0-9a-f-]{36}$/);
+          assert.deepEqual(Object.keys(result).sort(), ["correlation_id", "error", "hint"]);
+          return true;
+        },
       );
     const normalized = await invoke("save-deal-space-search-v1", {
       ...save,

@@ -1017,6 +1017,30 @@
       "sha256": "59dcf1690daf37a0ddd45410bab2f6a696d0f172caaae2b77d440687e1206fe0",
       "rule": "pii-address",
       "reason": "WR591.S17.J1 disposable coordinate-review test. The invented address is asserted against the existing synthetic Tour delivery SQL fixture; no production records are read. Exact path and immutable bytes only."
+    },
+    {
+      "path": "mcp-server/src/deal-space-searches.ts",
+      "sha256": "22b0e46dc80d42fb384a0919933e38159f9f321b85fc9b9bbf624d2d9912d67c",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/test/deal-space-searches.test.ts",
+      "sha256": "c920fbcaaeceb04eeaa18b0e8a5bfab5bc9b694ef21cde3969d01a51a8b9f510",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/src/deal-space-searches.ts",
+      "sha256": "21b42aa4d80bcc7808defd07ad31105be55d6f5433af0a84e686776a59d30825",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
+    },
+    {
+      "path": "mcp-server/test/deal-space-searches.test.ts",
+      "sha256": "990d9324e7263b479524b2549d8833a403f0ae44b8e1e990ea29a827ac53e12d",
+      "rule": "pii-phone",
+      "reason": "WR591.S18.J30 historical source contains public PostgreSQL integer boundary constants, not contact data. Exact path and blob identity only. Current source groups those constants with numeric separators."
     }
   ]
 }
