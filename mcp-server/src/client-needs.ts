@@ -1,4 +1,5 @@
-import { Validator } from "@cfworker/json-schema";
+// Record deal-owned client needs and match only current approved vendor applicability.
+import { Validator, type Schema } from "@cfworker/json-schema";
 import responseSchema from "../contracts/client-needs.v1.json" with { type: "json" };
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { ToolError } from "./tool-error.ts";
@@ -82,7 +83,7 @@ type RecordArgs = { idempotency_key: string; deal: string; need?: string; base_v
 type ApproveArgs = { idempotency_key: string; deal: string; need: string; base_version: number };
 type ReadArgs = { deal?: string; vendor?: string; limit?: number; offset?: number };
 function parse<T>(schema: object, args: unknown): T {
-  if (!new Validator(schema).validate(args).valid) throw new ToolError({ error: "invalid_need_input" });
+  if (!new Validator(structuredClone(schema)).validate(args).valid) throw new ToolError({ error: "invalid_need_input" });
   return args as T;
 }
 function authorize(actor: Actor, approve = false) {
@@ -166,7 +167,7 @@ async function readNeeds(c: Db, actor: Actor, args: unknown, subject: "deal" | "
     rows: result.rows,
     next_offset: offset + limit < result.total ? offset + limit : null,
   };
-  if (!new Validator(responseSchema).validate(response).valid) throw new ToolError({ error: "invalid_need_response" });
+  if (!new Validator(structuredClone(responseSchema) as unknown as Schema).validate(response).valid) throw new ToolError({ error: "invalid_need_response" });
   return response;
 }
 export function clientNeedTools({ withEnvelope, writeEvent }: { withEnvelope: WithEnvelope; writeEvent: WriteEvent }) {
