@@ -112,6 +112,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query(readMigration('1068_email_identity.sql'));
     await c.query(schema.match(/CREATE TABLE ops\.client_portal \([\s\S]*?\n\);/)[0]);
     await c.query(`create function ops.scac_current_grant_contract() returns jsonb language sql immutable as $$select '{"secdef_execute":[]}'::jsonb$$`);
+    for (const migration of ['1100_practice_origination.sql', '1131_florida_formation_origination.sql', '1134_florida_document_number_lengths.sql'])
+      await c.query(readMigration(migration));
     await c.query(readMigration('1013_register_client_portal.sql'));
     await applyPendingDealRoomReads(c);
     await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
@@ -1399,6 +1401,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('set local role carr_reader');
       assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals,[]);
       const leads = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads',lead_id:id(30)}));
+      assert.equal(leads.detail.opportunity_timing.status,'unknown');
+      assert.deepEqual(leads.detail.opportunity_timing.events,[]);
       assert.equal(leads.detail.notes,'Synthetic retained history');
       assert.equal(leads.detail.stage,'nurture_drip');
       assert.equal(leads.leads.length,1);
