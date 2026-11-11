@@ -2,7 +2,24 @@
 -- rollback: forward function replacement; lock-review: no table changes.
 create function ops.tour_property_coordinate_review(p_tenant text,p_property uuid,p_as_of timestamptz)
 returns jsonb language sql stable security definer set search_path=pg_catalog,ops,public,pg_temp as $$
-with candidates as (
+with display_facts as (
+  select distinct on (a.field_key) a.field_key,a.value
+  from ops.tour_field_assertion a
+  join ops.tour_property p on p.organization_tenant_id=a.organization_tenant_id and p.id=a.property_id and p.property_status='active'
+  join ops.tour_source_evidence e on e.organization_tenant_id=a.organization_tenant_id and e.id=a.source_evidence_id
+    and e.rights_receipt_id=a.rights_receipt_id and e.retrieval_status='read' and e.retrieved_at<=p_as_of
+  join ops.tour_rights_receipt r on r.organization_tenant_id=a.organization_tenant_id and r.id=a.rights_receipt_id
+    and r.status='active' and r.revoked_at is null and r.effective_at<=p_as_of
+    and (r.expires_at is null or r.expires_at>p_as_of) and r.allowed_use_classes ? 'canonical_fact'
+    and (r.allowed_field_classes ? a.field_key or r.allowed_field_classes ? '*')
+    and not exists(select 1 from ops.tour_rights_receipt newer where newer.organization_tenant_id=r.organization_tenant_id
+      and newer.provider=r.provider and newer.policy_key=r.policy_key
+      and newer.receipt_version>r.receipt_version and newer.effective_at<=p_as_of)
+  where a.organization_tenant_id=p_tenant and a.property_id=p_property and a.field_key in ('display.name','display.address')
+    and a.review_state='reviewed' and a.observed_at<=p_as_of and a.effective_from<=p_as_of
+    and (a.effective_to is null or a.effective_to>p_as_of) and jsonb_typeof(a.value)='string'
+  order by a.field_key,a.effective_from desc,a.observed_at desc,a.id desc
+), candidates as (
   select c.*, e.stable_locator, e.retrieval_status, e.retrieved_at,
     r.provider rights_provider,r.policy_key,r.receipt_version,r.terms_url,r.allowed_use_classes,r.allowed_field_classes,
     r.effective_at,r.expires_at,r.revoked_at,r.status rights_status,
@@ -44,6 +61,8 @@ with candidates as (
     and er.property_id=c.property_id and er.coordinate_candidate_id=c.id and er.verified_at<=p_as_of and er.created_at<=p_as_of
 )
 select jsonb_build_object('schema','tour-coordinate-review.v1','property_id',p_property,'as_of',p_as_of,
+  'property_name',(select value#>>'{}' from display_facts where field_key='display.name'),
+  'property_address',(select value#>>'{}' from display_facts where field_key='display.address'),
   'status',case when count(*)=0 then 'unknown' else 'candidates' end,
   'reason',case when count(*)=0 then 'no_observed_candidates' else null end,
   'property_evidence',ops.read_tour_property_evidence(p_tenant,p_property,p_as_of),

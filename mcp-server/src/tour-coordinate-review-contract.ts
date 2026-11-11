@@ -1,6 +1,8 @@
 export type CoordinateReview = {
   schema: "tour-coordinate-review.v1";
   property_id: string;
+  property_name: string | null;
+  property_address: string | null;
   as_of: string;
   status: "unknown" | "candidates";
   reason: "no_observed_candidates" | null;

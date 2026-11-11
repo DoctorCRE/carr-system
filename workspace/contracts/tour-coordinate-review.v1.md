@@ -11,8 +11,9 @@ or database execute grant exists. The response uses `cache-control: no-store`.
 `schema` is `tour-coordinate-review.v1`. `property_id` is the exact stop property.
 `as_of` is the transaction snapshot time. `property_evidence` contains the existing
 rights-bound, effective-dated property evidence rows, including site address and
-building. Empty rows mean unknown evidence. The stop's `property_name` and
-`property_address` remain the existing effective reviewed display facts.
+building. Empty rows mean unknown evidence. Review-local `property_name` and
+`property_address` contain rights-bound, effective reviewed display facts or
+explicit nulls when unknown. Use these fields for coordinate review.
 
 `status=unknown`, `reason=no_observed_candidates`, and `candidates=[]` mean no
 authorized observed candidates. Otherwise `status=candidates` and `reason=null`.

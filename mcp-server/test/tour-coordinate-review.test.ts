@@ -67,6 +67,8 @@ test("coordinate review extends authorized detail without granting a new callabl
     };
     let review = await read();
     assert.equal(review.candidates.length, 1);
+    assert.equal(review.property_name, "Current Medical Plaza");
+    assert.equal(review.property_address, "100 Current Way");
     assert.equal(review.candidates[0]?.approval.status, "unverified");
     assert.deepEqual(review.candidates[0]?.position, { latitude: 30.421, longitude: -87.216 });
     assert.equal(review.candidates[0]?.source.stable_locator, "proof:search");
@@ -107,6 +109,7 @@ test("coordinate review extends authorized detail without granting a new callabl
       (organization_tenant_id,provider,policy_key,receipt_version,receipt_digest,terms_url,reviewed_at,reviewer,intended_use,allowed_field_classes,allowed_use_classes,effective_at,status,supersedes_receipt_id)
       values ('tour-delivery-proof','search-proof','search-policy',2,'sha256:'||repeat('8',64),'https://example.invalid/terms',now(),'proof','replacement','["*"]','["canonical_fact"]',now(),'active','a5000000-0000-4000-8000-000000000001')`);
     review = await read();
+    assert.equal(review.property_address, null);
     assert.ok(
       review.candidates.every(
         (row) => row.position === null && row.approval.status === "rights_unavailable" && row.approval.receipt === null,
