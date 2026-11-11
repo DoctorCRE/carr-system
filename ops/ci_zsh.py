@@ -7,7 +7,25 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import unquote
+
+
+RETRY_EXHAUSTED = 75
+ACQUISITION_FAILURE = re.compile(
+    r"Temporary failure resolving|Could not resolve|Failed to fetch|Unable to fetch some archives|"
+    r"Connection timed out|Connection refused|Could not connect|Cannot initiate the connection|"
+    r"https?://[^\n]*\b5[0-9]{2}\b|\b5[0-9]{2}\b[^\n]*https?://", re.IGNORECASE)
+PACKAGE_FAILURE = re.compile(
+    r"dpkg: error|Sub-process .*dpkg.*error|Unmet dependencies|"
+    r"held broken packages|Unable to correct problems|post-installation script|"
+    r"pre-installation script", re.IGNORECASE)
+
+
+def acquisition_failure(result):
+    output = result.stdout or ""
+    return (result.returncode == 100 and ACQUISITION_FAILURE.search(output) is not None
+            and PACKAGE_FAILURE.search(output) is None)
 
 
 def verify_archives(root, private, cache, phase):
@@ -92,20 +110,35 @@ def main():
         install = ["install", "-y", "-qq", "--no-install-recommends", "zsh"]
 
         def apt(arguments, seconds):
-            return subprocess.run(["timeout", "--kill-after=5s", str(seconds) + "s",
-                                   "sudo", "apt-get", *options, *arguments]).returncode
+            completed = subprocess.run(["timeout", "--kill-after=5s", str(seconds) + "s",
+                                        "sudo", "apt-get", *options, *arguments],
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                       env={**os.environ, "LC_ALL": "C"})
+            print(completed.stdout or "", end="", file=sys.stderr)
+            return completed
 
         if any(private.glob("*.deb")):
             result = apt([*install, "--no-download"], 120)
-            if result != 100:
-                return result
-        result = apt(install, 180)
-        if result == 100:
-            result = apt(["update", "-qq"], 60)
-            if result == 0:
-                result = apt(install, 180)
-        if result != 0:
-            return result
+            if not acquisition_failure(result):
+                return result.returncode
+        for attempt, backoff in enumerate((0, 2, 4), start=1):
+            if backoff:
+                time.sleep(backoff)
+            result = apt(install, 180)
+            if result.returncode == 0:
+                break
+            if result.returncode != 124 and not acquisition_failure(result):
+                return result.returncode
+            if result.returncode == 100 and attempt == 1:
+                refreshed = apt(["update", "-qq"], 60)
+                if refreshed.returncode != 0:
+                    print("zsh package index refresh failed with exit " + str(refreshed.returncode), file=sys.stderr)
+                    return refreshed.returncode
+            print(f"zsh install attempt {attempt}/3 failed with exit {result.returncode}", file=sys.stderr)
+        if result.returncode != 0:
+            print(f"zsh installation failed after 3 attempts; last cause exit {result.returncode}",
+                  file=sys.stderr)
+            return RETRY_EXHAUSTED
         verify_archives(private, private, cache, "install")
         return 0
     finally:

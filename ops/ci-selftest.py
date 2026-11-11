@@ -1559,14 +1559,35 @@ if "--no-download" in args:
     assert archive.read_bytes() == b"trusted-zsh-package"
     assert root != original.parent
     assert archive.stat().st_mode & 0o777 == 0o444
+    if mode == "partial-cache":
+        print("E: Unable to fetch some archives", file=sys.stderr)
+    if mode == "cached-dpkg-error":
+        print("dpkg: error processing package zsh (--configure)", file=sys.stderr)
+        sys.exit(100)
     sys.exit(124 if mode == "cached-timed-out" else 100 if mode == "partial-cache" else 0)
-if mode == "timed-out":
+attempt = sum("install" in call and "--no-download" not in call for call in calls)
+if mode in ("dpkg-error", "dependencies", "held-packages", "unknown-error") or (mode == "fatal-second" and attempt == 2) or (mode == "fatal-third" and attempt == 3):
+    print({"dependencies": "E: Unmet dependencies", "held-packages": "E: Unable to correct problems, you have held broken packages.", "unknown-error": "E: Unknown apt error"}.get(mode, "dpkg: error processing package zsh (--configure): post-installation script returned error exit status 1"), file=sys.stderr)
+    sys.exit(100)
+if mode == "timed-out" or (mode == "transient-timeout" and len(calls) == 1) or (mode in ("success-third", "fatal-second", "fatal-third") and attempt < 3):
     sys.exit(124)
+network_errors = {
+    "dns-error": "Temporary failure resolving archive.ubuntu.com",
+    "resolve-error": "Could not resolve archive.ubuntu.com",
+    "fetch-error": "E: Failed to fetch http://archive.ubuntu.com/zsh.deb 404 Not Found",
+    "connection-timeout": "Connection timed out [IP: 1.2.3.4 80]",
+    "connection-refused": "Could not connect to archive.ubuntu.com:80 Connection refused",
+    "http-error": "503 Service Unavailable http://archive.ubuntu.com/ubuntu",
+}
+if mode in network_errors and attempt == 1:
+    print(network_errors[mode], file=sys.stderr)
+    sys.exit(100)
 if mode == "native-error":
     sys.exit(42)
 if mode in ("cached", "cache-replaced"):
     sys.exit("network must not be used on a verified cache hit")
 if mode in ("unavailable", "refresh-failed") or (mode == "stale" and not any("update" in c for c in calls)):
+    print("E: Failed to fetch http://archive.ubuntu.com/zsh.deb Temporary failure resolving archive.ubuntu.com", file=sys.stderr)
     sys.exit(100)
 if not archive.exists():
     archive.write_bytes(b"trusted-zsh-package")
@@ -1576,29 +1597,44 @@ if not archive.exists():
             path = fixture / name
             path.write_text(source)
             path.chmod(0o755)
-        for mode, expected, success in (
-            ("preinstalled", [], True),
-            ("cached", ["offline"], True),
-            ("cached-timed-out", ["offline"], False),
-            ("cache-replaced", ["offline"], True),
-            ("cold", ["install"], True),
-            ("tampered", ["install"], True),
-            ("partial-cache", ["offline", "install"], True),
-            ("stale", ["install", "update", "install"], True),
-            ("unavailable", ["install", "update", "install"], False),
-            ("refresh-failed", ["install", "update"], False),
-            ("metadata-error", [], False),
-            ("metadata-deadline", [], False),
-            ("timed-out", ["install"], False),
-            ("native-error", ["install"], False),
-            ("publish-error", ["install"], False),
-            ("old-version", ["install"], True),
-            ("symlink", ["install"], True),
+        for mode, expected, exit_code in (
+            ("preinstalled", [], 0),
+            ("cached", ["offline"], 0),
+            ("cached-timed-out", ["offline"], 124),
+            ("cached-dpkg-error", ["offline"], 100),
+            ("cache-replaced", ["offline"], 0),
+            ("cold", ["install"], 0),
+            ("tampered", ["install"], 0),
+            ("partial-cache", ["offline", "install"], 0),
+            ("stale", ["install", "update", "install"], 0),
+            ("unavailable", ["install", "update", "install", "install"], 75),
+            ("refresh-failed", ["install", "update"], 100),
+            ("metadata-error", [], 1),
+            ("metadata-deadline", [], 1),
+            ("timed-out", ["install", "install", "install"], 75),
+            ("transient-timeout", ["install", "install"], 0),
+            ("native-error", ["install"], 42),
+            ("publish-error", ["install"], 1),
+            ("old-version", ["install"], 0),
+            ("symlink", ["install"], 0),
+            ("dns-error", ["install", "update", "install"], 0),
+            ("resolve-error", ["install", "update", "install"], 0),
+            ("fetch-error", ["install", "update", "install"], 0),
+            ("connection-timeout", ["install", "update", "install"], 0),
+            ("connection-refused", ["install", "update", "install"], 0),
+            ("http-error", ["install", "update", "install"], 0),
+            ("dpkg-error", ["install"], 100),
+            ("dependencies", ["install"], 100),
+            ("held-packages", ["install"], 100),
+            ("unknown-error", ["install"], 100),
+            ("success-third", ["install", "install", "install"], 0),
+            ("fatal-second", ["install", "install"], 100),
+            ("fatal-third", ["install", "install", "install"], 100),
         ):
             archives = fixture / mode
             archives.mkdir()
             archive = archives / "zsh_1_amd64.deb"
-            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline"):
+            if mode in ("cached", "cache-replaced", "partial-cache", "tampered", "metadata-error", "old-version", "cached-timed-out", "metadata-deadline", "cached-dpkg-error"):
                 archive.write_bytes(b"altered-zsh-package" if mode == "tampered" else b"trusted-zsh-package")
             if mode == "old-version":
                 archive.rename(archives / "zsh_2_amd64.deb")
@@ -1618,11 +1654,14 @@ if not archive.exists():
             actions = [("download" if "--download-only" in c else "offline" if "--no-download" in c
                         else "update" if "update" in c else "install") for c in calls]
             check(f"zsh {mode} follows the package-manager path", actions == expected, actions)
-            check(f"zsh {mode} propagates setup success or failure", (ran.returncode == 0) == success,
+            check(f"zsh {mode} returns the exact setup exit", ran.returncode == exit_code,
                   {"rc": ran.returncode, "stderr": ran.stderr})
             for call in calls:
                 private = pathlib.Path(next(a.split("=", 1)[1] for a in call if a.startswith("Dir::Cache::archives=")))
                 check(f"zsh {mode} removes private archives", not private.exists())
+            if mode in ("unavailable", "timed-out"):
+                check(f"zsh {mode} explains exhausted retries",
+                      f"zsh installation failed after 3 attempts; last cause exit {124 if mode == 'timed-out' else 100}" in ran.stderr, ran.stderr)
             if mode == "tampered":
                 check("zsh quarantines unauthenticated cache bytes",
                       (archives / "quarantine" / archive.name).read_bytes() == b"altered-zsh-package")
