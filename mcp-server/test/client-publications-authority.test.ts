@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { executeRegisteredTool } from "../src/tools.js";
+const { executeRegisteredTool } = await import(new URL("../src/tools.js", import.meta.url).href);
 
 for (const sponsor of ["joe", "dell"]) {
   for (const published of [true, false]) {
