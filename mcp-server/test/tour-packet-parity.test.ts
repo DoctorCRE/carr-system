@@ -19,17 +19,14 @@ test("real PDF text equals the versioned web presentation for three shuffled pro
     route_sequence: n,
     route_label: String(n),
     name: `Property ${n}`,
-    address: `${n} Example Street`,
+    address: `Synthetic location ${n}`,
     appointment_start: n === 1 ? "2031-03-04T14:00:00.123456+00:00" : null,
     appointment_end: n === 1 ? "2031-03-04T14:30:00.123456+00:00" : null,
     public_packet_note: n === 1 ? "Please meet in the lobby" : null,
     size: { min: 1000, max: 2000, unit: "SF" },
   }));
   const presentation = tourPacketPresentation(properties);
-  assert.equal(
-    presentation.stops[0]?.appointment,
-    "2031-03-04T14:00:00.123456+00:00 to 2031-03-04T14:30:00.123456+00:00",
-  );
+  assert.equal(presentation.stops[0]?.appointment, "Tue, Mar 4, 8:00 to 8:30 AM CST");
   assert.equal(presentation.stops[1]?.appointment, null);
   const render = await renderer();
   const rendered = await render(
@@ -79,7 +76,7 @@ test("public notes are explicit and internal notes cannot enter rendering", asyn
     route_sequence: 1,
     route_label: "A",
     name: "Office",
-    address: "1 Example Street",
+    address: "Synthetic location 1",
   };
   const renderPacket = loaded.renderTourPacket;
   const render = (stop: object) => renderPacket({ as_of: "2031-03-04T14:00:00Z", properties: [stop] });
