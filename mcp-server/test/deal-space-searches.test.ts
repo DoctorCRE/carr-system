@@ -50,7 +50,7 @@ test("recorded saved-search responses obey the exported consumer contract", () =
   }
 });
 
-test("saved search lifecycle, canonical run, reopen, conflict, archive and authority", async () => {
+test("saved search lifecycle, canonical run, reopen, conflict, archive and authority", async (t) => {
   const fixture = await acquireDisposablePostgres({ prefix: "deal-space-search-", snapshot: true, baseline: true });
   const c = new pg.Client({ connectionString: fixture.dsn });
   try {
@@ -115,6 +115,67 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         observed_at: "2026-11-10T00:00:00Z",
       },
     };
+    const concurrentSearch = randomUUID();
+    const outcomes = [];
+    for (const [phase, verb, args] of [
+      ["create", "save-deal-space-search-v1", { ...save, search_id: concurrentSearch, status: "saved" }],
+      ["update", "save-deal-space-search-v1", { ...save, search_id: concurrentSearch, expected_version: 1, status: "saved" }],
+      ["run", "run-deal-space-search-v1", { deal_id: deal, search_id: concurrentSearch, expected_version: 2 }],
+    ] as const) {
+      const request = { ...args, idempotency_key: randomUUID() };
+      let arrivals = 0;
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      // Correct serialization permits only one receipt read until the first transaction commits.
+      const timeout = setTimeout(() => release(), 1000);
+      const concurrent = async () => {
+        const connection = new pg.Client({ connectionString: fixture.dsn });
+        await connection.connect();
+        const query = connection.query.bind(connection);
+        connection.query = (async (text: string, values?: unknown[]) => {
+          const result = await query(text, values);
+          if (text.startsWith("select request_hash, response from tool_call")) {
+            if (++arrivals === 2) release();
+            await barrier;
+          }
+          return result;
+        }) as typeof connection.query;
+        try {
+          await connection.query("begin");
+          await setWriterActorContext(connection, actor, { partnerAuthorityAct: true });
+          await connection.query("set local role carr_authority");
+          await installTourDealAccess(connection, actor);
+          const response = await executeRegisteredTool(connection, actor, verb, request);
+          await connection.query("commit");
+          return response;
+        } catch (error) {
+          await connection.query("rollback");
+          throw error;
+        } finally {
+          await connection.end();
+        }
+      };
+      try {
+        const responses = await Promise.allSettled([concurrent(), concurrent()]);
+        const row = (await c.query("select version from ops.deal_space_search where id=$1", [concurrentSearch])).rows;
+        const receipts = (await c.query("select count(*)::int as count from tool_call where idempotency_key=$1", [request.idempotency_key])).rows[0].count;
+        outcomes.push({ phase, responses, row, receipts });
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    for (const [index, { phase, responses, row, receipts }] of outcomes.entries()) {
+      await t.test(`overlapping same-key ${phase} replays one mutation`, () => {
+        assert.equal(responses.filter((result) => result.status === "fulfilled").length, 2,
+          `${phase}: both overlapping same-key calls must succeed: ${JSON.stringify(responses)}`);
+        const [first, second] = responses.map((result) => result.status === "fulfilled" ? result.value : null);
+        assert.deepEqual(first.search, second.search, `${phase}: identical committed result`);
+        assert.equal([first, second].filter((result) => result.replayed === true).length, 1, `${phase}: one replay`);
+        assert.deepEqual(row, [{ version: index + 1 }], `${phase}: one mutation`);
+        assert.equal(receipts, 1, `${phase}: one receipt`);
+      });
+    }
+    await c.query("delete from ops.deal_space_search where id=$1", [concurrentSearch]);
     const created = await invoke("save-deal-space-search-v1", save);
     assert.equal(created.search.state, "draft");
     assert.equal(created.search.version, 1);
