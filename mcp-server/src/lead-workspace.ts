@@ -4,11 +4,12 @@ import type { Db, VerbInputs } from "./verb-contract.ts";
 // The validator checks each field before returning a normalized review.
 type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
 // The existing default is Error; production injects the structured ToolError.
-type ErrorConstructor = new (payload: any) => Error;
+type ErrorConstructor = new (payload: { error: string }) => Error;
 
 import { leadAdvice, researchSummary, researchEvidenceSql } from "./lead-follow-up.ts";
 
 import { isCalendarDate } from "./calendar-date.ts";
+import { opportunityTimingCtes, opportunityTimingSql } from "./lead-opportunity-timing.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
 export const LEAD_WORKSPACE_VERSION = "lead-workspace.v1";
@@ -39,8 +40,11 @@ export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = 
   // One statement is one PostgreSQL snapshot, also on the stateless HTTP
   // reader. UUID equality stays in PostgreSQL, including mixed-case input.
   const row = (await c.query(`with board as materialized (
-      select w.*, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
+      with ${opportunityTimingCtes}
+      select w.*, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status,
+        ${opportunityTimingSql} as opportunity_timing
         from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
+        left join timing_events timing on timing.party_id=w.party_id
     ), correspondence as materialized (
       select * from v_lead_workspace_correspondence where lead_id=$1::uuid
     ), correspondence_tail as materialized (
