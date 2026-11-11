@@ -24,12 +24,12 @@ SourcesRead ==
 SourceFails ==
     /\ \/ (main = "Reading" /\ main' = "Unavailable")
 
-\* continue unchanged revision
-ContinueUnchangedRevision ==
+\* continue after audit or unrelated write
+ContinueAfterAuditOrUnrelatedWrite ==
     /\ \/ (main = "Ready" /\ main' = "Ready")
 
-\* database revision changes
-DatabaseRevisionChanges ==
+\* supported source content changes
+SupportedSourceContentChanges ==
     /\ \/ (main = "Ready" /\ main' = "Stale")
 
 \* actor or deal changes
@@ -48,7 +48,7 @@ Retry ==
 AuthorizedFreshRead ==
     /\ \/ (main = "Refused" /\ main' = "Reading")
 
-Next == SourcesRead \/ SourceFails \/ ContinueUnchangedRevision \/ DatabaseRevisionChanges \/ ActorOrDealChanges \/ Refresh \/ Retry \/ AuthorizedFreshRead
+Next == SourcesRead \/ SourceFails \/ ContinueAfterAuditOrUnrelatedWrite \/ SupportedSourceContentChanges \/ ActorOrDealChanges \/ Refresh \/ Retry \/ AuthorizedFreshRead
 
 Spec == Init /\ [][Next]_vars
 

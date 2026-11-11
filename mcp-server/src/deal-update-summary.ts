@@ -98,8 +98,17 @@ function corpus(continuation: boolean): string {
     )
     .join(" union all ");
 }
-const SQL = `with summary_rows as (${corpus(false)}), page_rows as (${corpus(true)})
-  select pg_current_snapshot()::text as revision,
+const revisionRows = definitions
+  .map(
+    ({ source, view, where, time }) => `select '${source}'::text as source, id,
+    encode(sha256(convert_to((to_jsonb(v) - '${time}' || jsonb_build_object('${time}',
+      to_char(${time} at time zone 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')))::text,'UTF8')),'hex') as hash
+    from ${view} v where ${where}`,
+  )
+  .join(" union all ");
+const SQL = `with revision_rows as (${revisionRows}), summary_rows as (${corpus(false)}), page_rows as (${corpus(true)})
+  select (select encode(sha256(convert_to(coalesce(string_agg(source || ':' || hash,',' order by source, id),''),'UTF8')),'hex')
+      from revision_rows) as revision,
     exists(select 1 from v_deal_room_deal where id=$1) as exists,
     exists(select 1 from v_deal_room_event where subject_id=$1 and (field is null or field not in ${eventFields})) as unsupported_events_present,
     (select coalesce(jsonb_agg(to_jsonb(s) - 'stamp' order by stamp desc, source desc, id desc),'[]'::jsonb)
@@ -112,7 +121,7 @@ export function dealUpdateSummaryTools() {
     "read-deal-update-summary-v1": {
       write: false,
       description:
-        "Authenticated deal-update-summary.v1 read. Bounded attributed extracts of activity summaries, notes and domain field changes, with exact original history. No inference or model calls. Complete only when every supported update fits the extract budget. Cursor binds actor/deal and database snapshot; any database revision change requires refresh instead of silently skipping new or edited rows.",
+        "Authenticated deal-update-summary.v1 read. Bounded attributed extracts of activity summaries, notes and domain field changes, with exact original history. No inference or model calls. Complete only when every supported update fits the extract budget. Cursor binds actor/deal and supported source content; relevant arrivals, edits or deletions require refresh. Unrelated writes and read auditing preserve continuation.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
