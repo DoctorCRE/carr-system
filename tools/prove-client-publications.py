@@ -2,8 +2,9 @@
 """Compare partner preview with an independently captured authenticated client response.
 
 No passwords or portal sessions are acquired. The evidence bundle contains
-independent authenticated partner and client reads plus a persisted publication
-event from the same containing release. Missing evidence is 78.
+independent authenticated partner and client reads, an existing versioned
+publication receipt, and their release identity. Missing evidence exits 78.
+The publication_receipt contains deal_id and the original API response.
 """
 import argparse
 import json
@@ -30,16 +31,25 @@ def verify(preview, authored, client, receipt, deal_id):
     if not isinstance(rows, list) or not isinstance(visible, list):
         raise ValueError('publication_rows_invalid')
     by_id = {row['id']: row for row in rows}
-    if not isinstance(receipt, dict) or not isinstance(receipt.get('new_value'), dict) or not receipt.get('id'):
+    if not isinstance(receipt, dict) or not isinstance(receipt.get('response'), dict):
         return 78
-    if receipt.get('verb') != 'set-client-publication' or receipt.get('subject_type') != 'deal' or receipt.get('subject_id') != deal_id:
+    if receipt.get('deal_id') != deal_id:
         raise ValueError('publication_receipt_scope')
-    recorded = receipt['new_value']
+    response = receipt['response']
+    if response.get('ok') is not True or response.get('schema_version') != 'client-publications.v1':
+        raise ValueError('publication_receipt_contract')
+    recorded = response.get('publication')
+    if not isinstance(recorded, dict):
+        return 78
     source = by_id.get(recorded.get('id'))
     if not source or source.get('version') != recorded.get('version'):
         return 78
     if recorded != {key: source.get(key) for key in ('id', 'version', 'published')}:
         raise ValueError('publication_receipt_mismatch')
+    expected_text = {row['id'] for row in rows if row.get('published') is True and row.get('kind') != 'deliverable'}
+    visible_text = {row.get('id') for row in visible if row.get('kind') != 'deliverable'}
+    if expected_text != visible_text:
+        raise ValueError('publication_text_membership')
     for row in visible:
         source = by_id.get(row.get('id'))
         if not source or source.get('published') is not True:
@@ -78,8 +88,13 @@ def main():
         expected = expected.stdout.strip()
         receipt = json.loads(args.client_response.read_text())
         fixture = json.loads(args.fixture.read_text()) if args.fixture else None
-        release = fixture['release'] if fixture else json.loads(read(
-            'https://api.doctorcre.com/release', timeout=remaining(), max_bytes=1048576).body)
+        if fixture:
+            release = fixture['release']
+        else:
+            reply = read('https://api.doctorcre.com/release', timeout=remaining(), max_bytes=1048576)
+            if reply.status != 200:
+                return 78
+            release = json.loads(reply.body)
         if not isinstance(receipt, dict) or not isinstance(release, dict) or not isinstance(release.get('git_sha'), dict):
             return 78
         revision = release['git_sha'].get('value')

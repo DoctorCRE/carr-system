@@ -141,9 +141,22 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     );
     assert.equal((await write(id, 1, false, "milestone", null, "Edited draft")).version, 2);
     assert.equal((await project()).publications.length, 0);
+    await assert.rejects(write(id, 1, false), /publication_version_conflict/);
+    assert.equal(
+      (await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA })).publications.find(
+        (row: { id: string }) => row.id === id,
+      )?.version,
+      2,
+    );
     await write(id, 2, true);
     assert.equal((await project()).publications[0].title, "Client milestone");
     await assert.rejects(write(id, 1, false), /publication_version_conflict/);
+    assert.equal(
+      (await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA })).publications.find(
+        (row: { id: string }) => row.id === id,
+      )?.version,
+      3,
+    );
     await write(id, 3, true, "milestone", null, "Updated milestone");
     assert.equal((await project()).publications[0].title, "Updated milestone");
     assert.deepEqual(
@@ -174,6 +187,15 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     assert.equal((await project()).publications.length, 0);
     await c.query("update ops.deal_deliverable set visibility='shared',version=4 where id=$1", [file]);
     assert.equal((await project()).publications.length, 0);
+    await c.query("update ops.deal_deliverable set visibility='private',version=5 where id=$1", [file]);
+    assert.equal((await project()).publications.length, 0);
+    await assert.rejects(write(fid, 0, false, "deliverable", file), /publication_version_conflict/);
+    const marked = (
+      await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA })
+    ).publications.find((row: { id: string }) => row.id === fid);
+    assert.equal(marked?.version, 1);
+    assert.equal(marked?.published, true);
+    await c.query("update ops.deal_deliverable set visibility='shared',version=6 where id=$1", [file]);
     await write(fid, 1, true, "deliverable", file);
     assert.equal((await project()).publications.length, 1);
     await assert.rejects(
@@ -224,21 +246,21 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       [pendingFile, dealA, "b".repeat(64), "unfinalized-" + pendingFile],
     );
     await assert.rejects(write(randomUUID(), 0, true, "deliverable", pendingFile), /publication_file_not_shared/);
-    await c.query("update ops.deal_deliverable set visibility='private',version=5 where id=$1", [file]);
+    await c.query("update ops.deal_deliverable set visibility='private',version=7 where id=$1", [file]);
     await write(fid, 2, false, "deliverable", file);
     assert.equal(
       (await project()).publications.some((row: { kind: string }) => row.kind === "deliverable"),
       false,
     );
     const foreignCanary = randomUUID();
-    await c.query("update ops.deal_deliverable set visibility='shared',version=6 where id=$1", [file]);
+    await c.query("update ops.deal_deliverable set visibility='shared',version=8 where id=$1", [file]);
     await c.query(
       "insert into ops.client_publication(id,portal_slug,kind,title,deliverable_id,deliverable_version,published,version,updated_by) values($1,'synthetic-b','deliverable','Foreign canary',$2,6,true,1,'joe')",
       [foreignCanary, file],
     );
     assert.equal((await project("synthetic-b")).publications.length, 0);
     await c.query("delete from ops.client_publication where id=$1", [foreignCanary]);
-    await c.query("update ops.deal_deliverable set visibility='private',version=7 where id=$1", [file]);
+    await c.query("update ops.deal_deliverable set visibility='private',version=9 where id=$1", [file]);
     const schema = await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8");
     await c.query("drop table if exists public.event, public.tool_call cascade");
     for (const name of ["event", "tool_call"]) {
@@ -279,21 +301,31 @@ test("publication lifecycle, client isolation and exact preview", async () => {
     await c.query("update actor set active=true where slug='joe'");
     assert.equal((await c.query("select count(*)::int n from event where verb='set-client-publication'")).rows[0].n, 1);
     await registered({ ...command, idempotency_key: randomUUID(), base_version: 1, published: true });
-    await registered({ ...command, idempotency_key: randomUUID(), base_version: 2, published: false });
+    const withdrawn = await registered({
+      ...command,
+      idempotency_key: randomUUID(),
+      base_version: 2,
+      published: false,
+    });
+    assert.deepEqual(
+      (
+        await c.query(
+          "select new_value from event where verb='set-client-publication' order by recorded_at desc limit 1",
+        )
+      ).rows[0].new_value,
+      withdrawn.publication,
+    );
+    const secondText = randomUUID();
+    await write(secondText, 0, true, "report", null, "Second published text");
     const scratch = await mkdtemp(path.join(tmpdir(), "j9-proof-"));
     try {
       const revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", cwd: root }).trim();
       const preview = await tools["preview-deal-client-view"].handler(c, partner, { deal_id: dealA });
       const list = await tools["list-deal-client-publications"].handler(c, partner, { deal_id: dealA });
-      const publicationReceipt = (
-        await c.query(
-          "select id,verb,subject_type,subject_id,new_value from event where verb='set-client-publication' order by recorded_at desc limit 1",
-        )
-      ).rows[0];
       const client = {
         source_commit: revision,
         response: { portal: await project() },
-        publication_receipt: publicationReceipt,
+        publication_receipt: { deal_id: dealA, response: withdrawn },
       };
       const fixture = {
         release: { git_sha: { value: revision } },
@@ -321,6 +353,19 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       assert.equal(proof().status, 0);
       await writeFile(path.join(scratch, "client.json"), JSON.stringify({ ...client, publication_receipt: null }));
       assert.equal(proof().status, 78);
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+      const withoutSecond = {
+        ...preview.portal,
+        publications: preview.portal.publications.filter((row: { id: string }) => row.id !== secondText),
+      };
+      fixture["preview-deal-client-view"] = { ...preview, portal: withoutSecond };
+      client.response.portal = withoutSecond;
+      await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
+      await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
+      assert.equal(proof().status, 1);
+      fixture["preview-deal-client-view"] = preview;
+      client.response.portal = await project();
+      await writeFile(path.join(scratch, "fixture.json"), JSON.stringify(fixture));
       await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
       const releaseRepo = path.join(scratch, "release-repo");
       const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
@@ -404,7 +449,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
         "module = importlib.util.module_from_spec(spec)",
         "spec.loader.exec_module(module)",
         "release = json.load(open(release_path))['release']",
-        "module.read = lambda *a, **k: SimpleNamespace(body=json.dumps(release).encode())",
+        "module.read = lambda *a, **k: SimpleNamespace(status=200, body=json.dumps(release).encode())",
         "sys.exit(module.main())",
       ].join("\n");
       assert.equal(
@@ -426,13 +471,32 @@ test("publication lifecycle, client isolation and exact preview", async () => {
         ).status,
         0,
       );
+      assert.equal(
+        spawnSync(
+          "python3",
+          [
+            "-c",
+            transportProbe.replace("status=200", "status=503"),
+            path.join(root, "tools/prove-client-publications.py"),
+            path.join(scratch, "fixture.json"),
+            "--expected-revision",
+            revision,
+            "--deal-id",
+            dealA,
+            "--client-response",
+            path.join(scratch, "live.json"),
+          ],
+          { encoding: "utf8" },
+        ).status,
+        78,
+      );
       client.response.portal.publications[0].title = "Near miss";
       await writeFile(path.join(scratch, "client.json"), JSON.stringify(client));
       assert.equal(proof().status, 1);
     } finally {
       await rm(scratch, { recursive: true, force: true });
     }
-    for (let i = 0; i < 99; i++) await write(randomUUID(), 0, true);
+    for (let i = 0; i < 98; i++) await write(randomUUID(), 0, true);
     await assert.rejects(write(randomUUID(), 0, true), /publication_capacity/);
     assert.equal((await project()).publications.length, 100);
     const other = new pg.Client({
