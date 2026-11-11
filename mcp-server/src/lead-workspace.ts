@@ -13,6 +13,7 @@ import {
   researchEvidenceSql,
   researchSummary,
 } from "./lead-follow-up.ts";
+import { opportunityTimingCtes, opportunityTimingSql, parseLeadOpportunityTiming } from "./lead-opportunity-timing.ts";
 import { ToolError as DefaultToolError } from "./tool-error.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
@@ -65,8 +66,11 @@ export async function readLeadWorkspace(
   const row = (
     await c.query(
       `with board as materialized (
-      select w.*, ${reachabilityInputSql("w.id", "w.party_id", "w.created_at")} reachability_input, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status
+      with ${opportunityTimingCtes}
+      select w.*, ${reachabilityInputSql("w.id", "w.party_id", "w.created_at")} reachability_input, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status,
+        ${opportunityTimingSql} as opportunity_timing
         from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
+        left join timing_events timing on timing.party_id=w.party_id
     ), correspondence as materialized (
       select * from v_lead_workspace_correspondence where lead_id=$1::uuid
     ), correspondence_tail as materialized (
@@ -101,6 +105,7 @@ export async function readLeadWorkspace(
   const now = Date.now();
   const project = async ({ research_evidence = [], reachability_input, ...lead }: (typeof row.leads)[number]) => ({
     ...leadAdvice(lead),
+    opportunity_timing: parseLeadOpportunityTiming(lead.opportunity_timing),
     reachability: await leadReachability(lead, research_evidence, now, reachability_input),
   });
   const { research_evidence } = row.detail || {};
