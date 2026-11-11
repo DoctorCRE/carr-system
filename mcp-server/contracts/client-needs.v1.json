@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "client-needs.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subject",
+    "subject_id",
+    "as_of",
+    "state",
+    "rows",
+    "next_offset"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "client-needs.v1"
+    },
+    "subject": {
+      "enum": [
+        "deal",
+        "vendor"
+      ]
+    },
+    "subject_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "as_of": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "ready",
+        "missing_approval",
+        "empty"
+      ]
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "deal_id",
+          "vendor_id",
+          "client_id",
+          "version",
+          "source_ref",
+          "source_revision",
+          "applicability",
+          "restriction",
+          "observed_at",
+          "fresh_until",
+          "approved_revision",
+          "approved_by",
+          "approved_at",
+          "state",
+          "description",
+          "client_name",
+          "deal_name",
+          "vendor_ref",
+          "identity_restricted",
+          "revision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "deal_id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "vendor_id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "source_ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "applicability": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed_at": {
+            "type": "string",
+            "minLength": 1,
+            "format": "date-time"
+          },
+          "fresh_until": {
+            "type": "string",
+            "minLength": 1,
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "restriction": {
+            "enum": [
+              "allowed",
+              "restricted"
+            ]
+          },
+          "state": {
+            "enum": [
+              "draft",
+              "approved",
+              "edited_lapsed",
+              "withdrawn",
+              "stale"
+            ]
+          },
+          "approved_revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "client_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "deal_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "vendor_ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identity_restricted": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "next_offset": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "subject": {
+            "const": "vendor"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rows": {
+            "items": {
+              "properties": {
+                "state": {
+                  "const": "approved"
+                },
+                "restriction": {
+                  "const": "allowed"
+                },
+                "approved_revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "approved_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "approved_by": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "identity_restricted": {
+                  "const": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

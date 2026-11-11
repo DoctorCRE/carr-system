@@ -1,0 +1,5 @@
+{
+ "worker": ["src/client-needs.ts"],
+ "node": ["test/client-needs-postgres.test.ts"],
+ "entry": ["src/client-needs.ts", "test/client-needs-postgres.test.ts"]
+}

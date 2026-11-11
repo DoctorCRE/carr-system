@@ -261,7 +261,7 @@ class Controls(unittest.TestCase):
                          ['opened', 'edited', 'synchronize', 'reopened',
                           'converted_to_draft', 'ready_for_review'])
         self.assertEqual(wf['concurrency'], {
-            'group': '${{ github.workflow }}-${{ github.head_ref || github.ref }}',
+            'group': '${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}',
             'cancel-in-progress': "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main') }}"})
         self.assertEqual(wf['jobs']['select']['if'],
                          "${{ !cancelled() && !github.event.pull_request.draft }}")
