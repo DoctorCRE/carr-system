@@ -3,13 +3,13 @@ import type { Db, VerbInputs } from "./verb-contract.ts";
 
 // The validator checks each field before returning a normalized review.
 type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
-// The existing default is Error; production injects the structured ToolError.
 type ErrorConstructor = new (payload: { error: string }) => Error;
 
 import { leadAdvice, researchSummary, researchEvidenceSql } from "./lead-follow-up.ts";
 
 import { isCalendarDate } from "./calendar-date.ts";
 import { opportunityTimingCtes, opportunityTimingSql } from "./lead-opportunity-timing.ts";
+import { ToolError as DefaultToolError } from "./tool-error.ts";
 
 // Optional authenticated Leads workspace; the legacy board has live callers.
 export const LEAD_WORKSPACE_VERSION = "lead-workspace.v1";
@@ -25,7 +25,7 @@ export const LEAD_WORKSPACE_SCHEMA = {
   },
 };
 
-export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = {}, ToolError: ErrorConstructor = Error) {
+export async function readLeadWorkspace(c: Db, args: VerbInputs["lead-board"] = {}, ToolError: ErrorConstructor = DefaultToolError) {
   const cursor = args.correspondence_cursor;
   if ((cursor !== undefined && (!cursor || typeof cursor !== "object" || Array.isArray(cursor) ||
       Object.keys(cursor).length !== 2 ||
