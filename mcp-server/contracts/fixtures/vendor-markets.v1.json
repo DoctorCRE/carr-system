@@ -1,0 +1,154 @@
+{
+  "ok": true,
+  "schema_version": "vendor-markets.v1",
+  "state": "ready",
+  "selected_market": "sandestin",
+  "markets": [
+    {
+      "kind": "market",
+      "name": "other",
+      "slug": "other",
+      "source": "Synthetic reviewed fixture",
+      "aliases": [
+        "other"
+      ],
+      "boundary": "Synthetic second boundary.",
+      "memberships": [
+        {
+          "source": "Synthetic reviewed fixture",
+          "vendor_id": "7cc31999-d3c9-4f8f-865a-1aa2a0ffe066",
+          "market_slug": "other",
+          "reviewed_at": "2026-11-10T17:52:04.426156-06:00",
+          "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "office_presence": false,
+          "service_coverage": "Explicit second service"
+        }
+      ],
+      "reviewed_at": "2026-11-10T17:52:04.414485-06:00",
+      "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      "vendor_count": 1,
+      "regional_references": []
+    },
+    {
+      "kind": "regional",
+      "name": "panhandle",
+      "slug": "panhandle",
+      "source": "Synthetic reviewed fixture",
+      "aliases": [
+        "panhandle"
+      ],
+      "boundary": "Synthetic Florida Panhandle coverage; statewide Florida not implied.",
+      "memberships": [
+        {
+          "source": "Synthetic reviewed fixture",
+          "vendor_id": "30122e2b-18d5-474a-85b9-174ab7cad96d",
+          "market_slug": "panhandle",
+          "reviewed_at": "2026-11-10T17:52:04.42647-06:00",
+          "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "office_presence": false,
+          "service_coverage": "Explicit Florida Panhandle service"
+        }
+      ],
+      "reviewed_at": "2026-11-10T17:52:04.414872-06:00",
+      "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      "vendor_count": 1,
+      "regional_references": []
+    },
+    {
+      "kind": "market",
+      "name": "sandestin",
+      "slug": "sandestin",
+      "source": "Synthetic reviewed fixture",
+      "aliases": [
+        "sand destin",
+        "sandestin"
+      ],
+      "boundary": "Synthetic Sandestin boundary; statewide Florida not implied.",
+      "memberships": [
+        {
+          "source": "Synthetic reviewed fixture",
+          "vendor_id": "7cc31999-d3c9-4f8f-865a-1aa2a0ffe066",
+          "market_slug": "sandestin",
+          "reviewed_at": "2026-11-10T17:52:04.424861-06:00",
+          "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "office_presence": true,
+          "service_coverage": "Explicit local service"
+        }
+      ],
+      "reviewed_at": "2026-11-10T17:52:04.412146-06:00",
+      "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+      "vendor_count": 1,
+      "regional_references": [
+        {
+          "note": "Regional reference, not local membership",
+          "source": "Synthetic fixture",
+          "market_kind": "market",
+          "market_slug": "sandestin",
+          "reviewed_at": "2026-11-10T17:52:04.427463-06:00",
+          "reviewed_by": "b6c38b27-d006-4fad-9c38-49edf3130a07",
+          "regional_kind": "regional",
+          "regional_slug": "panhandle"
+        }
+      ]
+    }
+  ],
+  "vendors": [
+    {
+      "id": "30122e2b-18d5-474a-85b9-174ab7cad96d",
+      "ref": "V-SYN-991a52fa-5e98-4d03-ac8d-749695aa3f18",
+      "name": "Synthetic regional",
+      "people": [
+        {
+          "office": null,
+          "company": null,
+          "contact": {
+            "id": "6ecee3c1-5586-4a7e-8b49-83cb0aaa2fb4",
+            "cell": null,
+            "name": "Synthetic regional",
+            "email": null,
+            "phone": null
+          },
+          "research": {
+            "status": "not_researched",
+            "expires_on": null,
+            "finding_id": null,
+            "observed_at": null
+          }
+        }
+      ],
+      "category": "banker",
+      "market_slugs": [
+        "panhandle"
+      ]
+    },
+    {
+      "id": "7cc31999-d3c9-4f8f-865a-1aa2a0ffe066",
+      "ref": "V-SYN-348dfbb9-c4cb-4ca2-a542-56af5bca0100",
+      "name": "Synthetic multi",
+      "people": [
+        {
+          "office": null,
+          "company": null,
+          "contact": {
+            "id": "1c09bb84-c4b0-4f79-8245-b81742f9feba",
+            "cell": null,
+            "name": "Synthetic multi",
+            "email": null,
+            "phone": null
+          },
+          "research": {
+            "status": "not_researched",
+            "expires_on": null,
+            "finding_id": null,
+            "observed_at": null
+          }
+        }
+      ],
+      "category": "banker",
+      "market_slugs": [
+        "other",
+        "sandestin"
+      ]
+    }
+  ]
+}
