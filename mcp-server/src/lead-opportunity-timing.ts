@@ -1,3 +1,4 @@
+// Project exact source event dates without inferring practice openings.
 const LEAD_OPPORTUNITY_TIMING_VERSION = "lead-opportunity-timing.v1";
 
 // Select revisions before matching identity so a corrected record cannot revive an old match.
