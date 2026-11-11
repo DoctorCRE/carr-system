@@ -26,6 +26,9 @@ class BackoffTest(unittest.TestCase):
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.path != '/mcp':
+                    self.send_error(404)
+                    return
                 owner.requests.append(self.rfile.read(int(self.headers.get('Content-Length', 0))))
                 status, headers, body = owner.responses.pop(0)
                 self.send_response(status)
