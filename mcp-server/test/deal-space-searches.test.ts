@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { Validator } from "@cfworker/json-schema";
+import { type Schema, Validator } from "@cfworker/json-schema";
 import pg from "pg";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
 import { publicError } from "../src/public-errors.ts";
@@ -236,6 +236,138 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         observed_at: "2026-11-10T00:00:00Z",
       },
     };
+    await t.test("registered saved-search input-domain inventory never leaks generic failures", async () => {
+      const requests: Record<string, Record<string, unknown>> = {
+        "save-deal-space-search-v1": { ...save, search_id: randomUUID(), idempotency_key: randomUUID() },
+        "run-deal-space-search-v1": {
+          deal_id: deal,
+          search_id: randomUUID(),
+          idempotency_key: randomUUID(),
+          expected_version: 1,
+        },
+        "read-deal-space-searches-v1": { deal_id: deal, search_id: null },
+      };
+      const cases: { verb: string; label: string; args: Record<string, unknown>; code?: string | undefined }[] = [];
+      const add = (verb: string, path: string[], value: unknown, code?: string) => {
+        const request = requests[verb];
+        assert.ok(request);
+        const args = structuredClone(request);
+        let parent = args;
+        for (const key of path.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
+        const key = path.at(-1);
+        assert.ok(key);
+        parent[key] = value;
+        cases.push({ verb, label: `${path.join(".")}=${JSON.stringify(value)}`, args, code });
+      };
+      for (const [verb, args] of Object.entries(requests)) {
+        const schema = TOOLS[verb].inputSchema;
+        const walk = (properties: Record<string, Schema | boolean>, path: string[] = []) => {
+          for (const [key, field] of Object.entries(properties)) {
+            assert.equal(typeof field, "object");
+            if (typeof field === "boolean") continue;
+            const at = [...path, key];
+            for (const value of [null, {}, [], false, true, 1.5, ""]) add(verb, at, value);
+            if (field.type === "object") walk(field.properties ?? {}, at);
+            if (field.anyOf?.[0]?.type === "object") walk(field.anyOf[0].properties ?? {}, at);
+            for (const value of field.enum ?? []) add(verb, at, value);
+            if (field.type === "array") {
+              add(verb, at, []);
+              const items = field.items;
+              assert.ok(items && typeof items === "object" && !Array.isArray(items));
+              const item = items.enum?.[0] ?? "medical";
+              assert.ok(typeof field.maxItems === "number");
+              add(verb, at, [item]);
+              add(verb, at, [item, item]);
+              add(
+                verb,
+                at,
+                Array.from({ length: field.maxItems + 1 }, (_, n) => `type_${n}`),
+              );
+            }
+            if (field.format === "uuid") {
+              for (const value of [randomUUID(), "00000000-0000-0000-0000-000000000000", "bad-uuid"])
+                add(verb, at, value);
+            }
+            for (const bound of [field.minimum, field.maximum]) {
+              if (typeof bound === "number") for (const value of [bound - 1, bound, bound + 1]) add(verb, at, value);
+            }
+            if (typeof field.maxLength === "number") {
+              for (const size of [field.maxLength, field.maxLength + 1]) add(verb, at, "x".repeat(size));
+            }
+            const missing = structuredClone(args);
+            let parent = missing;
+            for (const part of path) parent = parent[part] as Record<string, unknown>;
+            delete parent[key];
+            cases.push({ verb, label: `${at.join(".")} missing`, args: missing });
+          }
+        };
+        walk(schema.properties);
+        cases.push({ verb, label: "unknown field", args: { ...args, unexpected: true } });
+        cases.push({ verb, label: "baseline", args });
+      }
+      for (const verb of ["save-deal-space-search-v1", "run-deal-space-search-v1"]) {
+        for (const version of [2147483647, 2147483648, Number.MAX_SAFE_INTEGER, 1e100])
+          add(verb, ["expected_version"], version, "space_search_input_invalid");
+        add(verb, ["expected_version"], 2147483646);
+      }
+      for (const path of [
+        ["name"],
+        ["requirements"],
+        ["client_prefill_source", "source_ref"],
+        ["client_prefill_source", "observed_at"],
+      ]) {
+        for (const text of ["a\u0000b", "a\ud800b", "a\udfffb", "😀", "é", "   "])
+          add(
+            "save-deal-space-search-v1",
+            path,
+            text,
+            text.includes(String.fromCharCode(0)) || /[\ud800-\udfff]/u.test(text)
+              ? "space_search_input_invalid"
+              : undefined,
+          );
+      }
+      for (const query of ["", "   ", "a\u0000b", "a\n", "a\ud800b", "😀".repeat(200)])
+        add("save-deal-space-search-v1", ["criteria", "query"], query);
+      add("save-deal-space-search-v1", ["criteria", "min_square_feet"], 9000, "tour_search_range_invalid");
+      add("save-deal-space-search-v1", ["criteria", "cursor"], "1", "space_search_input_invalid");
+      for (let unit = 0xd800; unit <= 0xdfff; unit++) {
+        for (const path of [["name"], ["requirements"], ["client_prefill_source", "source_ref"], ["criteria", "query"]])
+          add("save-deal-space-search-v1", path, `a${String.fromCharCode(unit)}b`, "space_search_input_invalid");
+      }
+      const documented = new Set([
+        "space_search_input_invalid",
+        "space_search_unavailable",
+        "space_search_version_conflict",
+        "space_search_prefill_mismatch",
+        "space_search_not_runnable",
+        "tour_input_invalid",
+        "tour_search_range_invalid",
+        "missing_required",
+        "unregistered_operation_fields",
+        "value_not_in_declared_vocabulary",
+        "invalid_number",
+      ]);
+      const failures: string[] = [];
+      for (const { verb, label, args, code } of cases) {
+        // Each probe rolls back so field order cannot change later expectations.
+        await c.query("begin");
+        try {
+          await setWriterActorContext(c, actor, { partnerAuthorityAct: true });
+          await c.query("set local role carr_authority");
+          const result = await executeRegisteredTool(c, actor, verb, args);
+          assert.equal(result.ok, true);
+          assert.equal(code, undefined, `${verb} ${label} should refuse`);
+        } catch (error) {
+          const actual = publicError(error).error;
+          if (!documented.has(actual) || (code && actual !== code))
+            failures.push(`${verb} ${label}: ${actual} expected ${code ?? "documented refusal"}`);
+        } finally {
+          await c.query("rollback");
+        }
+      }
+      t.diagnostic(`${cases.length} inventory probes`);
+      assert.deepEqual(failures, [], `${cases.length} inventory probes`);
+    });
     const concurrentSearch = randomUUID();
     const outcomes = [];
     for (const [phase, verb, args] of [

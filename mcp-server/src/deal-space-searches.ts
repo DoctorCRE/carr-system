@@ -3,6 +3,22 @@ import { type Schema, Validator } from "@cfworker/json-schema";
 import { ToolError } from "./tool-error.ts";
 import type { Actor, Db, VerbInputs, WithEnvelope, WriteEvent } from "./verb-contract.ts";
 
+type SearchVerb = "save-deal-space-search-v1" | "run-deal-space-search-v1" | "read-deal-space-searches-v1";
+declare const parsedInput: unique symbol;
+type Parsed<V extends SearchVerb> = VerbInputs[V] & { readonly [parsedInput]: true };
+
+function postgresText(value: unknown): void {
+  if (typeof value === "string") {
+    // JSONB cannot encode NUL or isolated UTF-16 surrogates. Paired surrogates are valid Unicode.
+    if (value.includes(String.fromCharCode(0)) || /[\ud800-\udfff]/u.test(value))
+      throw new ToolError({ error: "space_search_input_invalid" });
+  } else if (Array.isArray(value)) {
+    for (const item of value) postgresText(item);
+  } else if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) postgresText(item);
+  }
+}
+
 const uuid = { type: "string", format: "uuid" } satisfies Schema;
 const object = (properties: Record<string, Schema>, required = Object.keys(properties)) =>
   ({ type: "object", additionalProperties: false, properties, required }) satisfies Schema;
@@ -45,11 +61,31 @@ export function dealSpaceSearchTools({
   const runSchema = object({ ...base, idempotency_key: uuid, expected_version: { type: "integer", minimum: 1 } });
   const readSchema = object({ deal_id: uuid, search_id: nullable(uuid) });
 
-  async function authorize(c: Db, actor: Actor, args: { deal_id: string }, schema: Schema) {
+  const schemas = {
+    "save-deal-space-search-v1": saveSchema,
+    "run-deal-space-search-v1": runSchema,
+    "read-deal-space-searches-v1": readSchema,
+  };
+  function parse<V extends SearchVerb>(verb: V, input: unknown): { request: Parsed<V>; value: Parsed<V> } {
+    if (!new Validator(structuredClone(schemas[verb]), "2020-12", false).validate(input).valid)
+      throw new ToolError({ error: "space_search_input_invalid" });
+    // The assertion belongs only here, after structural validation of the entire closed input.
+    const args = structuredClone(input) as VerbInputs[V];
+    const request = structuredClone(args);
+    if ("expected_version" in args && args.expected_version > 2147483646)
+      throw new ToolError({ error: "space_search_input_invalid" });
+    if ("criteria" in args) {
+      if (!args.name.trim() || args.criteria.cursor !== null)
+        throw new ToolError({ error: "space_search_input_invalid" });
+      args.criteria = normalizeCriteria(args.criteria);
+    }
+    postgresText(args);
+    postgresText(request);
+    return { request: request as Parsed<V>, value: args as Parsed<V> };
+  }
+  async function authorize(c: Db, actor: Actor, args: Parsed<SearchVerb>) {
     const partner = partnerAuthoritySlugForActor(actor);
     if (!partner) throw new ToolError({ error: "human_only" });
-    if (!new Validator(structuredClone(schema), "2020-12", false).validate(args).valid)
-      throw new ToolError({ error: "space_search_input_invalid" });
     const deal = (
       await c.query<{ id: string; version: number }>("select id,version from public.deal where id=$1", [args.deal_id])
     ).rows[0];
@@ -84,18 +120,16 @@ export function dealSpaceSearchTools({
       authorityOnly: true,
       humanOnly: true,
       description:
-        "deal-space-searches.v1. Create with expected_version=0 and a new search_id, or replace a brief at its exact current version. Stores canonical criteria plus full requirements and optional client prefill provenance. Criteria cursor must be null. Drafts and archived briefs cannot run. Restore an archived brief by saving status=saved. Does not query MLS, create a planner, or change a Tour.",
+        "deal-space-searches.v1. Create with expected_version=0 and a new search_id, or replace a brief at its exact current version. Stores canonical criteria plus full requirements and optional client prefill provenance. Criteria cursor must be null. Inputs outside PostgreSQL text or mutable int4 version domains refuse with space_search_input_invalid. Drafts and archived briefs cannot run. Restore an archived brief by saving status=saved. Does not query MLS, create a planner, or change a Tour.",
       inputSchema: saveSchema,
-      handler: async (c: Db, actor: Actor, args: VerbInputs["save-deal-space-search-v1"]) => {
-        await authorize(c, actor, args, saveSchema);
-        if (!args.name.trim() || args.criteria.cursor !== null)
-          throw new ToolError({ error: "space_search_input_invalid" });
-        const normalizedCriteria = normalizeCriteria(args.criteria);
-        return withEnvelope(c, actor, "save-deal-space-search-v1", args, async () => {
+      handler: async (c: Db, actor: Actor, input: VerbInputs["save-deal-space-search-v1"]) => {
+        const { request, value: args } = parse("save-deal-space-search-v1", input);
+        await authorize(c, actor, args);
+        return withEnvelope(c, actor, "save-deal-space-search-v1", request, async () => {
           const result = await query(c, "select ops.save_deal_space_search($1,$2,$3::jsonb) result", [
             organizationTenantForActor(actor),
             actor.id,
-            JSON.stringify({ ...args, criteria: normalizedCriteria }),
+            JSON.stringify(args),
           ]);
           await writeEvent(c, actor, "save-deal-space-search-v1", "deal", args.deal_id, {
             field: "space_search",
@@ -111,11 +145,12 @@ export function dealSpaceSearchTools({
       authorityOnly: true,
       humanOnly: true,
       description:
-        "deal-space-searches.v1. Atomically rerun saved canonical criteria at an exact search version. Records server time, run criteria, up to 100 canonical property IDs and a pagination receipt. Failure preserves prior results. IDs can feed the existing Tour selection cart after review. Does not select properties or mutate a Tour.",
+        "deal-space-searches.v1. Atomically rerun saved canonical criteria at an exact search version. Expected versions above 2147483646 refuse with space_search_input_invalid. Records server time, run criteria, up to 100 canonical property IDs and a pagination receipt. Failure preserves prior results. IDs can feed the existing Tour selection cart after review. Does not select properties or mutate a Tour.",
       inputSchema: runSchema,
-      handler: async (c: Db, actor: Actor, args: VerbInputs["run-deal-space-search-v1"]) => {
-        await authorize(c, actor, args, runSchema);
-        return withEnvelope(c, actor, "run-deal-space-search-v1", args, async () => {
+      handler: async (c: Db, actor: Actor, input: VerbInputs["run-deal-space-search-v1"]) => {
+        const { request, value: args } = parse("run-deal-space-search-v1", input);
+        await authorize(c, actor, args);
+        return withEnvelope(c, actor, "run-deal-space-search-v1", request, async () => {
           const result = await query(c, "select ops.run_deal_space_search($1,$2,$3,$4,$5) result", [
             organizationTenantForActor(actor),
             actor.id,
@@ -140,8 +175,9 @@ export function dealSpaceSearchTools({
       description:
         "deal-space-searches.v1. Reopen one saved search by deal and search ID, or list up to 100 newest briefs with search_id=null and explicit truncation. Includes archived briefs. Results become stale after changed criteria or 24 hours; prior run criteria remain visible. Requirements are descriptive and are not executed as filters. No MLS or publication authority.",
       inputSchema: readSchema,
-      handler: async (c: Db, actor: Actor, args: VerbInputs["read-deal-space-searches-v1"]) => {
-        await authorize(c, actor, args, readSchema);
+      handler: async (c: Db, actor: Actor, input: VerbInputs["read-deal-space-searches-v1"]) => {
+        const { value: args } = parse("read-deal-space-searches-v1", input);
+        await authorize(c, actor, args);
         const result = await query(c, "select ops.read_deal_space_searches($1,$2,$3,$4) result", [
           organizationTenantForActor(actor),
           actor.id,
