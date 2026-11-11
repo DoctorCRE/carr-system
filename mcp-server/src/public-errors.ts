@@ -24,6 +24,16 @@ type InputSchema = { properties?: Record<string, InputSchema>; items?: InputSche
 // Public shapes are deliberately closed. Never copy messages, hints, wrapped
 // details, event rows, driver codes, or arbitrary properties from a refusal.
 const PUBLIC_ERRORS = new Map<unknown, string>([
+  ["space_search_unavailable", "The saved search or deal is unavailable in the current scope."],
+  ["space_search_input_invalid", "Supply saved-search inputs using the documented operation shape."],
+  [
+    "space_search_response_invalid",
+    "The saved-search response is invalid. Quote the correlation_id when reporting it.",
+  ],
+  ["space_search_prefill_mismatch", "Use client prefill from the deal's current client."],
+  ["space_search_version_conflict", "Reopen the saved search and retry with its current version."],
+  ["space_search_not_runnable", "Save the search before running it. Draft and archived searches cannot run."],
+  ["space_search_run_unavailable", "The canonical search could not run. Prior saved results are preserved."],
   ["push_not_configured", "Web push is not configured."],
   ["push_config_invalid", "The configured web push public key is invalid."],
   ["push_session_required", "Sign in as a partner to read web push configuration."],

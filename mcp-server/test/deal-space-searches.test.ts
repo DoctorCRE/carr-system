@@ -5,8 +5,8 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
 import pg from "pg";
-import { publicError } from "../src/public-errors.ts";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
+import { publicError } from "../src/public-errors.ts";
 import { acquireDisposablePostgres } from "./helpers/disposable-postgres.ts";
 
 const { executeRegisteredTool, TOOLS } = await import(new URL("../src/tools.js", import.meta.url).href);
@@ -100,24 +100,26 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
         throw e;
       }
     };
-    await t.test("ownerless deal returns a typed unavailable refusal", async () => {
-      const ownerless = (
-        await c.query(
-          `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
-           values($1,'Synthetic ownerless search','other','pending',null,$2,$2) returning id`,
-          [client, actor.id],
-        )
-      ).rows[0].id;
-      await assert.rejects(
-        invoke("read-deal-space-searches-v1", { deal_id: ownerless, search_id: null }),
-        (error: unknown) => {
-          assert.ok(error instanceof Error);
-          assert.equal(error.message, "space_search_unavailable");
-          assert.equal(publicError(error).error, "space_search_unavailable");
-          return true;
-        },
-      );
-    });
+    for (const owner of [null, "dell"]) {
+      await t.test(`${owner ?? "ownerless"} deal returns a typed unavailable refusal`, async () => {
+        const unavailable = (
+          await c.query(
+            `insert into deal(client_id,name,deal_type,phase,owner,created_by,updated_by)
+             values($1,'Synthetic unavailable search','other','pending',$2,$3,$3) returning id`,
+            [client, owner, actor.id],
+          )
+        ).rows[0].id;
+        await assert.rejects(
+          invoke("read-deal-space-searches-v1", { deal_id: unavailable, search_id: null }),
+          (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.equal(error.message, "space_search_unavailable");
+            assert.equal(publicError(error).error, "space_search_unavailable");
+            return true;
+          },
+        );
+      });
+    }
     const search_id = randomUUID();
     const save = {
       idempotency_key: randomUUID(),
