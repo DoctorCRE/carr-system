@@ -5,6 +5,11 @@
 set local lock_timeout='5s';
 set local statement_timeout='30s';
 
+lock table ops.correspondence_adapter_consent,
+  ops.correspondence_adapter_consent_revocation,
+  ops.correspondence_adapter_read_receipt,
+  ops.correspondence_draft in access exclusive mode;
+
 do $empty_store$
 begin
   if exists(select 1 from ops.correspondence_adapter_consent)
