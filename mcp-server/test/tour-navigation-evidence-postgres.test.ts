@@ -39,7 +39,7 @@ test("Tour navigation uses sealed entrances and newest promotion through the aut
         (select jsonb_agg(to_jsonb(t) order by t.oid) from pg_trigger t) triggers`;
       const before = (await c.query(authorizationCatalog)).rows;
       const migration = readFileSync(
-        new URL("../../migrations/1173_tour_navigation_evidence.sql", import.meta.url),
+        new URL("../../migrations/1175_tour_navigation_evidence.sql", import.meta.url),
         "utf8",
       );
       await c.query(migration);
