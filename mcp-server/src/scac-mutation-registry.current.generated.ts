@@ -27,6 +27,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     authority_only: true,
     delegates_to: [],
   },
+  "accept-portal-proposal-v1": {
+    ingress_key: "mcp-tool:accept-portal-proposal-v1",
+    source_locator: "mcp-server/src/portal-proposal-acceptance.ts",
+    schema_digest: "022d2c346deab6fdfc232a55eb05d6e62a6867345ed632950cce4d77e1d61624",
+    write: true,
+    human_only: true,
+    human_caller_only: true,
+    authority_only: true,
+    delegates_to: [],
+  },
   "accept-ready-plan": {
     ingress_key: "mcp-tool:accept-ready-plan",
     source_locator: "mcp-server/src/work-request-intake.js",
@@ -2645,6 +2655,16 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     human_only: false,
     human_caller_only: false,
     authority_only: false,
+    delegates_to: [],
+  },
+  "read-portal-proposal-review-v1": {
+    ingress_key: "mcp-tool:read-portal-proposal-review-v1",
+    source_locator: "mcp-server/src/portal-proposal-acceptance.ts",
+    schema_digest: "c78cc67906551da35b3b6d0a78b3a8351aea3adafd8ac42d1df00251937934a0",
+    write: false,
+    human_only: true,
+    human_caller_only: true,
+    authority_only: true,
     delegates_to: [],
   },
   "read-portfolio": {

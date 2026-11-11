@@ -1,1 +1,1 @@
-{"worker":["src/portal-proposals.ts"],"node":["test/portal-proposals-postgres.test.ts"],"entry":["test/portal-proposals-postgres.test.ts"]}
+{"worker":["src/portal-proposals.ts","src/portal-proposal-acceptance.ts"],"node":["test/portal-proposals-postgres.test.ts"],"entry":["test/portal-proposals-postgres.test.ts"]}

@@ -5,6 +5,21 @@ import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import pg from "pg";
 import {
+  parseProposalReview,
+  type portalProposalAcceptance,
+  proposalReviewSchema,
+} from "../src/portal-proposal-acceptance.ts";
+
+type Api = ReturnType<typeof portalProposalAcceptance>;
+const registered: unknown = await import(new URL("../src/tools.js", import.meta.url).href);
+const { TOOLS } = registered as {
+  TOOLS: {
+    "read-portal-proposal-review-v1": { handler: Api["read"]; inputSchema: unknown };
+    "accept-portal-proposal-v1": { handler: Api["accept"]; inputSchema: unknown };
+  };
+};
+
+import {
   type PortalProposalReceipt,
   type PortalProposalRequest,
   portalProposalStorage,
@@ -35,6 +50,39 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       "create table ops.tour_property(organization_tenant_id text,id uuid,primary key(organization_tenant_id,id))",
     );
     await c.query(readMigration("1183_portal_proposals.sql"));
+    const extract = (file: string, name: string) => {
+      const body = readMigration(file);
+      const start = body.lastIndexOf("create or replace function ops." + name + "(");
+      return body.slice(start, body.indexOf("end $$;", start) + 7);
+    };
+    await c.query(
+      "create table ops.tour(organization_tenant_id text,id uuid,deal_id uuid,primary key(organization_tenant_id,id))",
+    );
+    const cartMigration = readMigration("0430_tour_delivery_data_plane.sql");
+    const cartStart = cartMigration.indexOf("create table if not exists ops.tour_selection_cart_version");
+    await c.query(cartMigration.slice(cartStart, cartMigration.indexOf(";", cartStart) + 1));
+    await c.query(extract("0429_tour_domain_route_cheat_sheet.sql", "tour_server_actor_id"));
+    await c.query(extract("0430_tour_delivery_data_plane.sql", "append_tour_selection_cart_version"));
+    await c.query("alter table public.deal add column owner text");
+    const access = readMigration("1142_tour_deal_access.sql");
+    await c.query(access.slice(access.indexOf("create function ops.tour_deal_visible"), access.indexOf("$$;") + 3));
+    await assert.rejects(c.query("select ops.review_portal_proposal(null,null,null,null)"), { code: "42883" });
+    await c.query(readMigration("1184_portal_proposal_acceptance.sql"));
+    for (const table of ["event", "tool_call"]) {
+      for (const column of [
+        "via",
+        "client_id",
+        "organization_tenant_id",
+        "sponsoring_human_slug",
+        "personal_scope",
+        "authorization_class",
+        "correlation_id",
+      ])
+        await c.query(`alter table public.${table} add column if not exists ${column} text`);
+    }
+    await c.query(
+      "alter role carr_writer login; grant usage on schema ops,public to carr_writer; grant select on public.deal,public.actor,public.event,public.tool_call to carr_writer; grant insert on public.event,public.tool_call to carr_writer; grant usage,select on all sequences in schema public to carr_writer",
+    );
     const actor = randomUUID();
     await c.query("insert into actor(id,slug,kind,display_name) values($1,'joe','human','Synthetic')", [actor]);
     await c.query(
@@ -58,8 +106,12 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
       ).rows[0].id;
       const deal = (
         await c.query(
-          "insert into deal(client_id,name,deal_type,phase,created_by,updated_by) values($1,'Synthetic','lease','research',$2,$2) returning id",
-          [client, actor],
+          "insert into deal(id,client_id,name,deal_type,phase,created_by,updated_by) values($3,$1,'Synthetic','lease','research',$2,$2) returning id",
+          [
+            client,
+            actor,
+            slug === "a" ? "00000000-0000-4000-8000-000000000041" : "00000000-0000-4000-8000-000000000042",
+          ],
         )
       ).rows[0].id;
       deals.push(deal);
@@ -198,6 +250,194 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
         await connection.end();
       }
     });
+    await t.test("partner read cannot fence a client source update", async () => {
+      const config = (
+        await c.query(
+          "select inet_server_addr() host, current_setting('port')::integer port, current_user as user, current_database() as database",
+        )
+      ).rows[0];
+      const partner = new pg.Client(config);
+      await partner.connect();
+      try {
+        await partner.query("set role carr_writer");
+        await partner.query("begin");
+        await partner.query("set local statement_timeout='5s'");
+        const read = async () =>
+          (await partner.query("select ops.read_portal_proposal_for_deal($1,$2,null) result", [deals[0], pubs[0]]))
+            .rows[0].result;
+        assert.equal((await read()).selection.version, 4);
+        await c.query("set statement_timeout='5s'");
+        await store.save(scope, 2, {
+          version: 4,
+          selected: [other],
+          notes: { [other]: "changed during partner transaction" },
+          idempotency_key: "during-partner",
+        });
+        assert.equal((await read()).selection.version, 5);
+        await partner.query("rollback");
+        for (const table of ["client_portal", "portal_proposal_version", "portal_proposal_membership"]) {
+          await assert.rejects(partner.query("select * from ops." + table + " for update"), { code: "42501" });
+        }
+      } finally {
+        await partner.query("rollback");
+        await partner.end();
+      }
+    });
+    await t.test("guarded acceptance, uncertain replay, second-tab conflict and notification dedup", async () => {
+      const tour = "00000000-0000-4000-8000-000000000031";
+      await c.query("insert into ops.tour values('carr-internal',$1,$2)", [tour, deals[0]]);
+      const config = (
+        await c.query(
+          "select inet_server_addr() host, current_setting('port')::integer port, current_database() as database",
+        )
+      ).rows[0];
+      const partner = new pg.Client({ ...config, user: "carr_writer" });
+      await partner.connect();
+      const human = {
+        id: actor,
+        slug: "joe",
+        human: true,
+        organization_tenant_id: "carr-internal",
+        sponsoring_human_slug: "joe",
+        authorization_class: "human",
+      };
+      const target = { deal_id: deals[0], publication_id: pubs[0], tour_id: tour };
+      const read = () => TOOLS["read-portal-proposal-review-v1"].handler(partner, human, target);
+      const accept = (args: Record<string, unknown>) =>
+        TOOLS["accept-portal-proposal-v1"].handler(partner, human, args);
+      const begin = async () => {
+        await partner.query("begin");
+        await partner.query(
+          "select set_config('carr.acting_actor_slug','joe',true),set_config('carr.verified_human_actor_slug','joe',true),set_config('carr.organization_tenant_id','carr-internal',true)",
+        );
+      };
+      const requestFor = (
+        r: ReturnType<typeof parseProposalReview>,
+        decision = "accept",
+        property_ids = r.selected,
+      ) => ({
+        ...target,
+        publication_version: r.publication_version,
+        source_version: r.source_version,
+        cart_version: r.cart_version,
+        cart_version_id: r.cart_version_id,
+        decision,
+        property_ids,
+        idempotency_key: randomUUID(),
+      });
+      try {
+        await begin();
+        const pending = await read();
+        assert.equal(pending.review.source_version, 5);
+        assert.deepEqual(pending.review.added, [other]);
+        assert.equal(pending.review.notes[other], "changed during partner transaction");
+        assert.deepEqual((await read()).pending, pending.pending);
+        const fixture = pending;
+        if (process.argv.includes("--record"))
+          writeFileSync(
+            new URL("../../workspace/contracts/fixtures/portal-proposal-acceptance.v1.json", import.meta.url),
+            JSON.stringify(fixture, null, 2) + "\n",
+          );
+        assert.deepEqual(
+          fixture,
+          JSON.parse(
+            readFileSync(
+              new URL("../../workspace/contracts/fixtures/portal-proposal-acceptance.v1.json", import.meta.url),
+              "utf8",
+            ),
+          ),
+        );
+        const old = requestFor(pending.review);
+        await partner.query("commit");
+        await store.save(scope, 2, {
+          version: 5,
+          selected: [other],
+          notes: { [other]: "new source" },
+          idempotency_key: "source-six",
+        });
+        await begin();
+        await assert.rejects(accept(old), /proposal_source_changed/);
+        await partner.query("rollback");
+        await begin();
+        const review = (await read()).review;
+        const request = requestFor(review);
+        const receipt = await accept(request);
+        assert.equal(receipt.state, "accepted");
+        assert.equal(receipt.source_version, 6);
+        await c.query("set statement_timeout='200ms'");
+        await assert.rejects(
+          store.save(scope, 2, { version: 6, selected: [other], notes: {}, idempotency_key: "blocked-save" }),
+          { code: "57014" },
+        );
+        await c.query("set statement_timeout='5s'");
+        await partner.query("commit");
+        await begin();
+        await assert.rejects(accept({ ...request, idempotency_key: randomUUID() }), /proposal_source_changed/);
+        await partner.query("rollback");
+        await store.save(scope, 2, { version: 6, selected: [other], notes: {}, idempotency_key: "source-seven" });
+        await begin();
+        const replay = await accept(request);
+        assert.equal("replayed" in replay && replay.replayed, true);
+        assert.deepEqual({ ...replay, replayed: undefined }, { ...receipt, replayed: undefined });
+        await partner.query("commit");
+        assert.equal(
+          (await c.query("select count(*)::integer n from ops.tour_selection_cart_version where tour_id=$1", [tour]))
+            .rows[0].n,
+          1,
+        );
+        await begin();
+        await assert.rejects(accept({ ...request, idempotency_key: randomUUID() }), /proposal_source_changed/);
+        await partner.query("rollback");
+        await begin();
+        const current = (await read()).review;
+        const kept = await accept(requestFor(current, "keep", current.mine));
+        assert.equal(kept.state, "kept");
+        const resolved = await read();
+        assert.equal(resolved.pending, null);
+        assert.deepEqual(resolved.decision, kept);
+        await partner.query("commit");
+        assert.equal(
+          (await c.query("select count(*)::integer n from ops.tour_selection_cart_version where tour_id=$1", [tour]))
+            .rows[0].n,
+          1,
+        );
+        await begin();
+        const perProperty = await accept(requestFor((await read()).review, "accept", []));
+        assert.deepEqual(perProperty.property_ids, []);
+        await partner.query("commit");
+        const event = (
+          await c.query(
+            "select new_value from event where verb='accept-portal-proposal-v1' order by recorded_at limit 1",
+          )
+        ).rows[0].new_value;
+        assert.equal(event.source_version, 6);
+        assert.equal(event.selection_version_id, receipt.selection_version_id);
+        await begin();
+        await assert.rejects(
+          TOOLS["read-portal-proposal-review-v1"].handler(partner, { ...human, human: false }, target),
+          /human_only/,
+        );
+        await assert.rejects(
+          TOOLS["read-portal-proposal-review-v1"].handler(partner, human, { ...target, deal_id: deals[1] }),
+          /proposal_retired/,
+        );
+        await partner.query("rollback");
+        await begin();
+        await assert.rejects(
+          accept({ ...requestFor((await read()).review), property_ids: [randomUUID()] }),
+          /proposal_input_invalid/,
+        );
+        await partner.query("rollback");
+        await c.query("update ops.client_publication set published=false where id=$1", [pubs[0]]);
+        await begin();
+        await assert.rejects(accept(request), /proposal_retired/);
+        await partner.query("rollback");
+        await c.query("update ops.client_publication set published=true where id=$1", [pubs[0]]);
+      } finally {
+        await partner.query("rollback");
+        await partner.end();
+      }
+    });
     await t.test("disabled, expired and reassigned portals refuse before replay", async () => {
       await c.query("update ops.client_publication set published=false where id=$1", [pubs[0]]);
       await assert.rejects(store.read(scope), /publication_unavailable/);
@@ -257,4 +497,21 @@ test("proposal session, exact replay, CAS, membership and canonical isolation", 
   } finally {
     await db.close();
   }
+});
+
+test("registered proposal review contract and recorded SQL response stay pinned", () => {
+  const contract = JSON.parse(
+    readFileSync(new URL("../../workspace/contracts/portal-proposal-acceptance.v1.json", import.meta.url), "utf8"),
+  );
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL("../../workspace/contracts/fixtures/portal-proposal-acceptance.v1.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(contract.review, proposalReviewSchema);
+  assert.deepEqual(contract.read_request, TOOLS["read-portal-proposal-review-v1"].inputSchema);
+  assert.deepEqual(contract.accept_request, TOOLS["accept-portal-proposal-v1"].inputSchema);
+  assert.deepEqual(parseProposalReview(fixture.review), fixture.review);
+  assert.throws(() => parseProposalReview({ ...fixture.review, source_version: "5" }), /proposal_response_invalid/);
 });
