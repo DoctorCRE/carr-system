@@ -49,5 +49,6 @@
   "consumer_note": "Consumers must render publications (including milestone items), treat roadmap as empty, and never infer visibility from a file's shared designation alone. This is an additive portal payload field with an intentional removal of automatic phase exposure.",
   "contract_version": "1.1.0",
   "recovered_from": "541e47ffce83bbd6cb591545417be0dd91a3ea0c",
-  "conflict_resolution": "WR586 CLIENT-VIEW is later than WR227 AC2. Published milestones replace automatic live-phase exposure. Roadmap remains an empty compatibility shape. Existing portal URL/password/session behavior is unchanged."
+  "conflict_resolution": "WR586 CLIENT-VIEW is later than WR227 AC2. Published milestones replace automatic live-phase exposure. Roadmap remains an empty compatibility shape. Existing portal URL/password/session behavior is unchanged.",
+  "write_recovery": "Retry the identical command with the identical UUID idempotency key after an unknown outcome. A different payload reusing that key fails key_reuse. Re-read the authored list to reconcile a version conflict. Withdrawal remains allowed when the existing linked file has become private or stale; it preserves the pinned file identity and never exposes it."
 }

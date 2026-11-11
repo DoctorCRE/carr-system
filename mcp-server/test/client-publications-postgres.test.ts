@@ -5,8 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const { authorizeDeliverable } = await import(`../src/${"deal-deliverables"}.js`);
-const { executeRegisteredTool } = await import(`../src/${"tools"}.js`);
+const { authorizeDeliverable } = await import(new URL("../src/deal-deliverables.js", import.meta.url).href);
+const { executeRegisteredTool } = await import(new URL("../src/tools.js", import.meta.url).href);
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -187,7 +187,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       }),
     );
     await assert.rejects(
-      c.query("select ops.write_client_publication($1,$2,1,true,'deliverable','Stale',null,$3,2,'joe')", [
+      c.query("select ops.write_client_publication($1,$2,2,true,'deliverable','Stale',null,$3,2,'joe')", [
         dealA,
         fid,
         file,
@@ -265,6 +265,7 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       await rm(scratch, { recursive: true, force: true });
     }
     const schema = await readFile(new URL("../../db/schema.sql", import.meta.url), "utf8");
+    await c.query("drop table if exists public.event, public.tool_call cascade");
     for (const name of ["event", "tool_call"]) {
       const ddl = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`));
       assert.ok(ddl);
