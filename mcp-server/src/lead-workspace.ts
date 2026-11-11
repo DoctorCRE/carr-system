@@ -6,7 +6,13 @@ type StageReview = NonNullable<VerbInputs["update-lead"]["stage_review"]>;
 type ErrorConstructor = new (payload: { error: string }) => Error;
 
 import { isCalendarDate } from "./calendar-date.ts";
-import { leadAdvice, researchEvidenceSql, researchSummary } from "./lead-follow-up.ts";
+import {
+  leadAdvice,
+  leadReachability,
+  reachabilityInputSql,
+  researchEvidenceSql,
+  researchSummary,
+} from "./lead-follow-up.ts";
 import { opportunityTimingCtes, opportunityTimingSql, parseLeadOpportunityTiming } from "./lead-opportunity-timing.ts";
 import { ToolError as DefaultToolError } from "./tool-error.ts";
 
@@ -61,7 +67,7 @@ export async function readLeadWorkspace(
     await c.query(
       `with board as materialized (
       with ${opportunityTimingCtes}
-      select w.*, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status,
+      select w.*, ${reachabilityInputSql("w.id", "w.party_id", "w.created_at")} reachability_input, ${researchEvidenceSql("w.party_id")} research_evidence, p.prospect_client_id,p.prospect_client_version,p.prospect_engagement_status,
         ${opportunityTimingSql} as opportunity_timing
         from v_lead_workspace w left join v_lead_prospect_engagement p on p.lead_id=w.id
         left join timing_events timing on timing.party_id=w.party_id
@@ -82,7 +88,7 @@ export async function readLeadWorkspace(
     ) select coalesce((select jsonb_agg(to_jsonb(b) order by b.stage_sort,b.score desc nulls last,b.name,b.id)
         from board b),'[]'::jsonb) as leads,
       (select to_jsonb(b)||d.detail||jsonb_build_object(
-        'research_evidence',${researchEvidenceSql("b.party_id")},
+        'research_evidence',b.research_evidence,
         'correspondence',coalesce((select jsonb_agg(to_jsonb(a)-'lead_id' order by a.occurred_at desc,a.id desc) from correspondence_page a),'[]'::jsonb),
         'stage_history',coalesce((select jsonb_agg(to_jsonb(e)-'lead_id'||jsonb_build_object('mutation_order',e.mutation_order::text) order by e.mutation_order desc) from stage_page e),'[]'::jsonb),
         'correspondence_page',jsonb_build_object('total',(select count(*) from correspondence),'has_more',(select count(*)>100 from correspondence_tail),
@@ -96,24 +102,23 @@ export async function readLeadWorkspace(
       [args.lead_id || null, cursor?.occurred_at || null, cursor?.id || null, args.stage_history_cursor || null],
     )
   ).rows[0];
-  const { research_evidence, ...detail } = row.detail || {};
+  const now = Date.now();
+  const project = async ({ research_evidence = [], reachability_input, ...lead }: (typeof row.leads)[number]) => ({
+    ...leadAdvice(lead),
+    opportunity_timing: parseLeadOpportunityTiming(lead.opportunity_timing),
+    reachability: await leadReachability(lead, research_evidence, now, reachability_input),
+  });
+  const { research_evidence } = row.detail || {};
   return {
     schema_version: LEAD_WORKSPACE_VERSION,
     generated_at: new Date().toISOString(),
-    leads: row.leads.map((lead: Parameters<typeof leadAdvice>[0] & { opportunity_timing: unknown }) => ({
-      ...leadAdvice(lead),
-      opportunity_timing: parseLeadOpportunityTiming(lead.opportunity_timing),
-    })),
+    leads: await Promise.all(row.leads.map(project)),
     last_search_at: null,
     search_run_coverage: "unavailable",
     ...(args.lead_id
       ? {
           detail: row.detail
-            ? {
-                ...leadAdvice(detail),
-                opportunity_timing: parseLeadOpportunityTiming(detail.opportunity_timing),
-                research: researchSummary(research_evidence),
-              }
+            ? { ...(await project(row.detail)), research: researchSummary(research_evidence, now) }
             : null,
         }
       : {}),

@@ -1,0 +1,14 @@
+{
+  "worker": [
+    "src/client-publications.ts"
+  ],
+  "node": [
+    "test/client-publications-postgres.test.ts",
+    "test/client-publications-authority.test.ts"
+  ],
+  "entry": [
+    "src/client-publications.ts",
+    "test/client-publications-postgres.test.ts",
+    "test/client-publications-authority.test.ts"
+  ]
+}
