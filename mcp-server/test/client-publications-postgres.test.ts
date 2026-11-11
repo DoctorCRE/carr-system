@@ -5,7 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const { executeRegisteredTool, authorizeClientPublication } = await import(new URL("../src/tools.js", import.meta.url).href);
+const { executeRegisteredTool, authorizeClientPublication } = await import(
+  new URL("../src/tools.js", import.meta.url).href
+);
 
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -314,19 +316,53 @@ test("publication lifecycle, client isolation and exact preview", async () => {
       ).rows[0].new_value,
       withdrawn.publication,
     );
-    const sponsored = { id: randomUUID(), slug: "codex", human: false,
-      native_agent_verified: true, sponsoring_human_slug: "joe", via: "local-token" };
-    await c.query("insert into actor(id,slug,kind,display_name) values($1,'codex','agent','Synthetic agent')", [sponsored.id]);
-    const sponsoredCommand = { ...command, publication_id: randomUUID(), idempotency_key: randomUUID(),
-      base_version: 0, published: true };
+    const sponsored = {
+      id: randomUUID(),
+      slug: "codex",
+      human: false,
+      native_agent_verified: true,
+      sponsoring_human_slug: "joe",
+      via: "local-token",
+    };
+    await c.query("insert into actor(id,slug,kind,display_name) values($1,'codex','agent','Synthetic agent')", [
+      sponsored.id,
+    ]);
+    const sponsoredCommand = {
+      ...command,
+      publication_id: randomUUID(),
+      idempotency_key: randomUUID(),
+      base_version: 0,
+      published: true,
+    };
     await registered(sponsoredCommand, sponsored);
-    assert.equal((await project()).publications.some((row: { id: string }) => row.id === sponsoredCommand.publication_id), true);
-    assert.equal((await c.query("select updated_by from ops.client_publication where id=$1", [sponsoredCommand.publication_id])).rows[0].updated_by, "joe");
-    assert.equal((await c.query("select actor_id from event where idempotency_key=$1", [sponsoredCommand.idempotency_key])).rows[0].actor_id, sponsored.id);
-    await registered({ ...sponsoredCommand, idempotency_key: randomUUID(), base_version: 1, published: false }, sponsored);
-    assert.equal((await project()).publications.some((row: { id: string }) => row.id === sponsoredCommand.publication_id), false);
-    await assert.rejects(registered({ ...sponsoredCommand, idempotency_key: randomUUID(), base_version: 2 },
-      { ...sponsored, native_agent_verified: false }));
+    assert.equal(
+      (await project()).publications.some((row: { id: string }) => row.id === sponsoredCommand.publication_id),
+      true,
+    );
+    assert.equal(
+      (await c.query("select updated_by from ops.client_publication where id=$1", [sponsoredCommand.publication_id]))
+        .rows[0].updated_by,
+      "joe",
+    );
+    assert.equal(
+      (await c.query("select actor_id from event where idempotency_key=$1", [sponsoredCommand.idempotency_key])).rows[0]
+        .actor_id,
+      sponsored.id,
+    );
+    await registered(
+      { ...sponsoredCommand, idempotency_key: randomUUID(), base_version: 1, published: false },
+      sponsored,
+    );
+    assert.equal(
+      (await project()).publications.some((row: { id: string }) => row.id === sponsoredCommand.publication_id),
+      false,
+    );
+    await assert.rejects(
+      registered(
+        { ...sponsoredCommand, idempotency_key: randomUUID(), base_version: 2 },
+        { ...sponsored, native_agent_verified: false },
+      ),
+    );
     const secondText = randomUUID();
     await write(secondText, 0, true, "report", null, "Second published text");
     const scratch = await mkdtemp(path.join(tmpdir(), "j9-proof-"));
