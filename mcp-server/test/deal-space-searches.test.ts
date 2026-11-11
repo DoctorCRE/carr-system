@@ -5,6 +5,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { Validator } from "@cfworker/json-schema";
 import pg from "pg";
+import { publicError } from "../src/public-errors.ts";
 import { dealSpaceSearchContracts } from "../src/deal-space-searches.ts";
 
 const { authenticatedIdentity, agentActorForToken } = await import(new URL("../src/identity.js", import.meta.url).href);
@@ -336,15 +337,27 @@ test("saved search lifecycle, canonical run, reopen, conflict, archive and autho
     const reopened = await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id });
     assert.deepEqual(reopened.searches, [run.search]);
     assert.equal((await invoke("read-deal-space-searches-v1", { deal_id: deal, search_id: null })).searches.length, 1);
-    for (const query of ["", "   ", "medical\u0000office"])
+    for (const [criteria, code] of [
+      ...["", "   ", "medical\u0000office"].map((query) => [
+        { ...filters, query },
+        "tour_input_invalid",
+      ] as const),
+      [{ ...filters, min_square_feet: 9000, max_square_feet: 8000 }, "tour_search_range_invalid"],
+    ] as const)
       await assert.rejects(
         invoke("save-deal-space-search-v1", {
           ...save,
           idempotency_key: randomUUID(),
           search_id: randomUUID(),
-          criteria: { ...filters, query },
+          criteria,
         }),
-        /tour_input_invalid/,
+        (error: unknown) => {
+          const result = publicError(error);
+          assert.equal(result.error, code);
+          assert.match(result.correlation_id, /^[0-9a-f-]{36}$/);
+          assert.deepEqual(Object.keys(result).sort(), ["correlation_id", "error", "hint"]);
+          return true;
+        },
       );
     const normalized = await invoke("save-deal-space-search-v1", {
       ...save,

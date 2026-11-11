@@ -67,6 +67,7 @@ for (const [code, extra] of [
   ["space_search_response_invalid", {}], ["space_search_prefill_mismatch", {}],
   ["space_search_version_conflict", {}], ["space_search_not_runnable", {}],
   ["space_search_run_unavailable", {}],
+  ["tour_input_invalid", { field: "query" }], ["tour_search_range_invalid", {}],
   ["tour_share_scope_invalid", {}], ["personal_doc_not_owner", {}], ["personal_loop_not_owner", {}],
   ["work_request_not_found", {}], ["work_request_terminal_state", {}], ["work_request_not_completable", {}],
   ["invalid_completion", {}], ["missing_criterion_evidence", {}], ["missing_change_ref", {}],
