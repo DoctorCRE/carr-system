@@ -1047,6 +1047,12 @@
       "sha256": "dd731bba56524da53355336e2bcda3a2a1af7050667332be4e07cfabe50399d4",
       "rule": "pii-email",
       "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
+    },
+    {
+      "path": "db/schema.sql",
+      "sha256": "5532d2ae3b6e9a4bf2c0c72eab7ad096279363086021c0a7a6976974caf4b64a",
+      "rule": "pii-email",
+      "reason": "WR622.S13.J334 regenerated schema snapshot retains the existing Dell staff actor email from migration 1014. No client rows or new contact values. Exact snapshot bytes only."
     }
   ]
 }

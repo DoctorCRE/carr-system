@@ -58,7 +58,7 @@ GRANT_FULL = re.compile(
 # authority connection — write it with the verb that does it, or fix the grant.
 READER_EXEMPT: dict[str, str] = {
     "ops.requirement_request":
-        "read on the writer connection by request-checklist-document and issue-requirement-upload; "
+        "read on writer or authority connections by request-checklist-document and issue-requirement-upload; "
         "readers use public.v_requirement_request",
     "ops.requirement_reply_proposal":
         "read on the writer connection by confirm-requirement-reply and reject-requirement-reply; "
