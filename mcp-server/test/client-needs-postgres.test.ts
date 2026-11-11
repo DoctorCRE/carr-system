@@ -115,6 +115,30 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
     assert.equal(row.approved_revision, row.version);
     assert.equal(row.source_revision, fields.source_revision);
     assert.equal(row.applicability, fields.applicability);
+    await t.test("another vendor never matches shared context", async () => {
+      const other = (
+        await db.query(
+          "insert into vendor(party_id,vendor_ref,category,created_by,updated_by) values($1,$2,'banker',$3,$3) returning id",
+          [await party("Other synthetic vendor"), `V-${randomUUID()}`, joe.id],
+        )
+      ).rows[0].id;
+      assert.equal((await call(names[3], { vendor: other })).state, "empty");
+      const second = await call(names[0], { deal, fields, idempotency_key: randomUUID() });
+      const secondNeed = record(second.need);
+      await call(names[1], { deal, need: secondNeed.id, base_version: 1, idempotency_key: randomUUID() });
+      const page = await call(names[3], { vendor, limit: 1 });
+      assert.equal(page.next_offset, 1);
+      const next = await call(names[3], { vendor, limit: 1, offset: 1 });
+      assert.equal(next.next_offset, null);
+      assert.notEqual(record(records(page.rows)[0]).id, record(records(next.rows)[0]).id);
+      await call(names[0], {
+        deal,
+        need: secondNeed.id,
+        base_version: 2,
+        fields: { ...fields, withdrawn: true },
+        idempotency_key: randomUUID(),
+      });
+    });
     const schema = JSON.parse(readFileSync(new URL("../contracts/client-needs.v1.json", import.meta.url), "utf8"));
     const { Validator } = await import("@cfworker/json-schema");
     const validator = new Validator(schema);
@@ -143,27 +167,56 @@ test("deal need lifecycle, exact vendor matching, audit and recorded contract", 
       call(names[1], { deal, need: need.id, base_version: 1, idempotency_key: randomUUID() }),
       /version_conflict/,
     );
+    await t.test("edited need can be approved again", async () => {
+      await approve();
+      version++;
+      assert.equal((await read()).state, "ready");
+    });
+    await t.test("approved need can be withdrawn and restored without approval", async () => {
+      await edit({ withdrawn: true });
+      assert.equal((await read()).state, "empty");
+      await assert.rejects(approve(), /need_not_approvable/);
+      assert.equal((await edit({ withdrawn: false })).state, "edited_lapsed");
+    });
+    await t.test("restricted need never matches", async () => {
+      await approve();
+      version++;
+      await edit({ restriction: "restricted" });
+      assert.equal((await read()).state, "empty");
+      await assert.rejects(approve(), /need_not_approvable/);
+    });
+    await t.test("stale and future source evidence never matches", async () => {
+      await edit({ fresh_until: "2026-01-02T00:00:00Z" });
+      assert.equal((await read()).state, "empty");
+      await assert.rejects(approve(), /need_not_approvable/);
+      await edit({ observed_at: "2098-01-01T00:00:00Z" });
+      assert.equal((await read()).state, "empty");
+      assert.equal((await edit({})).state, "edited_lapsed");
+    });
     await approve();
     version++;
-    assert.equal((await read()).state, "ready");
-    await edit({ withdrawn: true });
-    assert.equal((await read()).state, "empty");
-    await assert.rejects(approve(), /need_not_approvable/);
-    assert.equal((await edit({ withdrawn: false })).state, "edited_lapsed");
-    await approve();
-    version++;
-    await edit({ restriction: "restricted" });
-    assert.equal((await read()).state, "empty");
-    await assert.rejects(approve(), /need_not_approvable/);
-    await edit({ fresh_until: "2026-01-02T00:00:00Z" });
-    assert.equal((await read()).state, "empty");
-    await assert.rejects(approve(), /need_not_approvable/);
-    await edit({ observed_at: "2098-01-01T00:00:00Z" });
-    assert.equal((await read()).state, "empty");
-    await edit({});
-    await approve();
-    version++;
-    await db.query("update deal set client_id=null where id=$1", [deal]);
+    await t.test("approved need becomes stale when freshness expires", async () => {
+      const expiry = (await db.query("select (clock_timestamp()+interval '2 seconds')::text as expiry")).rows[0].expiry;
+      await edit({ fresh_until: expiry });
+      await approve();
+      version++;
+      assert.equal((await read()).state, "ready");
+      await db.query("select pg_sleep(2.1)");
+      assert.equal((await read()).state, "empty");
+      const stale = record(records((await call(names[2], { deal })).rows)[0]);
+      assert.equal(stale.state, "stale");
+      await edit({});
+      await approve();
+      version++;
+    });
+    const otherClient = (
+      await db.query("insert into client(party_id,roster_ref,created_by,updated_by) values($1,$2,$3,$3) returning id", [
+        await party("Other synthetic practice"),
+        `C-${randomUUID()}`,
+        joe.id,
+      ])
+    ).rows[0].id;
+    await db.query("update deal set client_id=$2 where id=$1", [deal, otherClient]);
     assert.equal((await read()).state, "empty");
     await db.query("update deal set client_id=$2 where id=$1", [deal, clientId]);
     await db.query("update deal_client_need set description='Edited outside verb' where id=$1", [need.id]);
