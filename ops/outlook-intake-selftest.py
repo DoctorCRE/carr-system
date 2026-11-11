@@ -661,6 +661,34 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.decodes, decodes)
         self.assertFalse(self.fake.calls)
 
+    def test_prebinding_cli_binds_or_refuses_without_replaying(self):
+        for conflict in (False, True):
+            with self.subTest(conflict=conflict):
+                binding = self.out() / 'binding.json'
+                binding.unlink(missing_ok=True)
+                path, state = self.legacy_ledger()
+                if conflict:
+                    request = next(iter(state['requests'].values()))
+                    args = json.loads(request['payload'])
+                    args['email_source']['mailbox_owner'] = 'dell'
+                    request['payload'] = json.dumps(args)
+                    path.write_text(json.dumps(state))
+                self.assertEqual(self.run_intake().reason, 'ledger_binding_required')
+                before = path.read_bytes()
+                with patch.object(intake.Path, 'home', return_value=self.home), \
+                        patch.object(intake, '_decoder', return_value=self.fake.decode), \
+                        patch.object(intake, '_carr', return_value=self.fake.carr), \
+                        patch.object(email_router, 'step') as route, \
+                        patch('sys.stdout', new_callable=StringIO) as stdout, \
+                        self.assertRaises(SystemExit) as stopped:
+                    runpy.run_path(str(ROOT / 'bin/reconcile-outlook-ledger-binding.py'), run_name='__main__')
+                self.assertEqual(stopped.exception.code, 1 if conflict else 0)
+                self.assertIn('ledger_binding_evidence_conflict' if conflict else 'ledger_bound', stdout.getvalue())
+                self.assertEqual(binding.exists(), not conflict)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertFalse(self.fake.calls)
+                route.assert_not_called()
+
     def test_matching_legacy_binding_preserves_request_keys(self):
         self.run_intake([mail(CLIENT.email, -timedelta(hours=1))])
         path = self.out() / intake.STATE
