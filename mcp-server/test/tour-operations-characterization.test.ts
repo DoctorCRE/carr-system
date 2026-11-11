@@ -87,7 +87,7 @@ function outputs() {
 }
 test("tour contract output bytes match the JavaScript characterization", () => {
   const digest = createHash("sha256").update(JSON.stringify(outputs())).digest("hex");
-  assert.equal(digest, "b4f5949be4b1c7f3c2f7953c243fcb44b6d495b361756e89b71c9864fbd5bcc7");
+  assert.equal(digest, "86a5226a1c6d292e6ffcddd7b805abe24cefd4e0fdaf167a3c4247ef72fb1a1b");
 });
 
 test("SHA-256 strict word reads preserve multi-block and UTF-8 digests", () => {

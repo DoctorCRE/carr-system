@@ -32,8 +32,10 @@ def check_coordinate_review(stop, point):
     assert selected is not None, 'navigation candidate absent from review'
     assert selected['property_id'] == stop['property_id'], 'candidate property mismatch'
     assert selected['position'] == point['position'], 'review/navigation position mismatch'
-    for field in ('coordinate_role', 'precision_class', 'review_state'):
+    for field in ('coordinate_role', 'precision_class', 'review_state', 'observed_at'):
         assert selected[field] == source[field], f'review/navigation {field} mismatch'
+    for field in ('stable_locator', 'retrieved_at', 'retrieval_status'):
+        assert selected['source'][field] == source[field], f'review/navigation {field} mismatch'
     for field in ('source_evidence_id', 'rights_receipt_id'):
         owner = selected['source'] if field == 'source_evidence_id' else selected['rights']
         assert owner[field] == source[field], f'review/navigation {field} mismatch'

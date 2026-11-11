@@ -102,7 +102,7 @@ export async function renderTourPacketPdf(input, fonts, proof = {}) {
   overviewText(presentation.title, 24, bold);
   overviewText(presentation.summary);
   overviewText(presentation.overview, 16, bold);
-  for (const [index, property] of presentation.stops.entries()) overviewText(`${index + 1}. ${property.route_label} · ${property.name} · ${property.address}`);
+  for (const [index, property] of presentation.stops.entries()) overviewText(`${index + 1}. ${property.route_label} · ${property.name} · ${property.address}${property.appointment ? ` · ${property.appointment}` : ""}`);
   overviewText(presentation.map, 16, bold);
   overviewText(presentation.properties, 16, bold);
   presentation.stops.forEach((property, index) => {
@@ -114,11 +114,13 @@ export async function renderTourPacketPdf(input, fonts, proof = {}) {
     page.drawRectangle({ x: 42, y: 727, width: 528, height: 3, color: ORANGE });
     drawLines(page, wrap(property.name, bold, 24, 528, 2), { x: 42, y: 687, size: 24, lineHeight: 28, font: bold, color: NAVY });
     drawLines(page, wrap(property.address, regular, 11.5, 528, 2), { x: 42, y: 622, size: 11.5, lineHeight: 15, font: regular, color: MUTED });
+    if (property.appointment) drawLines(page, wrap(property.appointment, regular, 9, 528, 2), { x: 42, y: 592, size: 9, lineHeight: 12, font: regular, color: INK });
     property.facts.forEach((fact, factIndex) => {
       const y = 570 - factIndex * 49;
       page.drawText(fact.label, { x: 42, y, size: 9, font: bold, color: NAVY });
       drawLines(page, wrap(fact.value, regular, 10.5, 340, 2), { x: 210, y, size: 10.5, lineHeight: 14, font: regular, color: INK });
     });
+    if (property.public_packet_note) drawLines(page, wrap(property.public_packet_note, regular, 10, 528, 2), { x: 42, y: 290, size: 10, lineHeight: 12, font: regular, color: INK });
     page.drawText(presentation.notes, { x: 42, y: 267, size: 12, font: bold, color: NAVY });
     for (let line = 0; line < 6; line++) page.drawLine({ start: { x: 42, y: 240 - line * 30 }, end: { x: 570, y: 240 - line * 30 }, thickness: .7, color: LINE });
   });
@@ -128,6 +130,7 @@ export async function renderTourPacketPdf(input, fonts, proof = {}) {
     bytes: pdfBytes,
     artifactDigest: await sha256(pdfBytes),
     fontDigests: Object.freeze([regularDigest, boldDigest]),
+    contractVersion: packet.contractVersion,
     rendererVersion: TOUR_PDF_RENDERER_VERSION,
     templateVersion: TOUR_PDF_TEMPLATE_VERSION,
     pageCount: presentation.stops.length + 1,
