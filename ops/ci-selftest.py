@@ -67,6 +67,8 @@ def ci_fixture():
             if name not in {"migrations", "mcp-server"}:
                 (root / name / (name.replace("-", "_") + "_fixture.py")).write_text("value: int = 1\n")
         (root / "ops/scac-mutation-inventory.ts").write_text("// Check the synthetic registry.\n")
+        for name in ("release_reader.py", "release-reader-marker.json"):
+            shutil.copy2(REPO / "lib" / name, root / "lib" / name)
         (root / "ops/migration-depth1.py").write_text("print('synthetic depth-1 acceptance passed')\n")
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         requirements = "synthetic-package>=1\n"
