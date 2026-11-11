@@ -89,3 +89,25 @@ The shared services catalog retains its declared owner. Outlook jobs use the pri
 Follow [the README steps](README.md#keep-full-disk-access-across-helper-rebuilds).
 They create the `CARR Local Helpers` identity once, which both helper installers
 detect without any setting.
+
+## Reconcile a pre-binding intake ledger before upgrading
+
+When the private receipt reports `ledger_binding_required`, run this explicit step from the new merged source checkout before its installer.
+The command uses the configured runtime directory, installed decoder and granted copy helper. It sends no record-layer requests.
+It needs the same Full Disk Access as intake. An active intake writer causes `previous_run_active`, so retry after that writer finishes.
+
+```sh
+./.venv/bin/python bin/reconcile-outlook-ledger-binding.py
+```
+
+Exit 0 with `outlook-intake succeeded ledger_bound` proves admission only. Inspect the private receipt and binding in the configured runtime's `out/outlook-intake`.
+The command preserves every state byte, including both blocked legacy `set-next-action` request keys.
+An existing matching binding skips decoding and stays unchanged. Missing, conflicting or malformed retained identity evidence exits 1 and leaves state and binding untouched.
+Never edit or delete state to bypass a refusal. Retained email payloads must name the configured account, and retained owner fields must match settings.
+A decoder snapshot must independently verify the selected folder account through Sent evidence.
+This evidence is local mailbox identity, not server authorization.
+
+After successful binding, run `./bin/install-outlook-intake.sh` with `--rebuild-helper` when helper replacement is required.
+Its existing launchd reconciliation saves legacy Message-IDs before decoder replacement. The following normal processing pass retires unapplied model actions without replay.
+A helper rebuild without a stable signing identity requires the documented Full Disk Access re-grant.
+The installer never runs legacy binding automatically. Already-bound intake keeps its existing upgrade path.

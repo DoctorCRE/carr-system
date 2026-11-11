@@ -544,6 +544,12 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(self.fake.decodes, decodes)
         self.assertFalse(self.fake.calls)
+        decoder = load_settings(self.home).decoder
+        decoder.parent.mkdir(parents=True, exist_ok=True)
+        decoder.write_text('synthetic decoder, invoked through Fake.decode only')
+        decoder.chmod(0o700)
+        self.assertEqual(self.run_intake().reason, 'reconciled')
+        self.assertEqual(json.loads(path.read_text())['requests'], state['requests'])
         self.assertEqual(self.run_intake().state, 'succeeded')
         saved = json.loads(path.read_text())
         self.assertEqual(saved['requests'], {k: r for k, r in state['requests'].items() if r['acknowledged']})
@@ -551,13 +557,16 @@ class IntakeTest(unittest.TestCase):
 
     def test_prebinding_reconciliation_refuses_missing_or_conflicting_evidence(self):
         for change in ('foreign_account', 'foreign_owner', 'no_owner', 'no_account',
-                       'key_conflict', 'broken_payload', 'empty_requests', 'state_identity'):
+                       'key_conflict', 'broken_payload', 'empty_requests', 'state_identity', 'foreign_context'):
             with self.subTest(change=change):
                 path, state = self.legacy_ledger()
                 requests = list(state['requests'].values())
                 args = json.loads(requests[0]['payload'])
                 if change == 'foreign_account':
                     args['email_identity'] = {'mailbox_account': 'foreign@example.test', 'mailbox_owner': 'joe'}
+                elif change == 'foreign_context':
+                    args['email_identity'] = {'mailbox_account': OWNER, 'mailbox_owner': 'joe'}
+                    args['email_context']['recipients'] = [{'email': 'foreign@example.test'}]
                 elif change == 'foreign_owner':
                     args['email_source']['mailbox_owner'] = 'dell'
                 elif change == 'no_owner':
@@ -601,6 +610,55 @@ class IntakeTest(unittest.TestCase):
         with patch.object(intake, '_load', side_effect=foreign):
             self.assertEqual(self.bind_legacy().reason, 'ledger_binding_evidence_invalid')
         self.assertFalse((self.out() / 'binding.json').exists())
+        self.assertFalse(self.fake.calls)
+
+    def test_prebinding_reconciliation_binding_write_failure_retries_without_state_loss(self):
+        path, _ = self.legacy_ledger()
+        self.run_intake()
+        before = path.read_bytes()
+        original = intake._private_write
+        def fail(path, text):
+            if path.name == 'binding.json':
+                raise OSError('synthetic binding failure')
+            return original(path, text)
+        with patch.object(intake, '_private_write', side_effect=fail):
+            self.assertEqual(self.bind_legacy().reason, 'ledger_binding_invalid')
+        self.assertFalse((self.out() / 'binding.json').exists())
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_prebinding_command_uses_configured_runtime_and_never_calls_router(self):
+        runtime_settings = load_settings(self.home)
+        outcome = intake.Outcome('succeeded', 'ledger_bound')
+        with patch.object(intake.Path, 'home', return_value=self.home), \
+                patch.object(intake, 'run', return_value=outcome) as run, \
+                patch.object(email_router, 'step') as route:
+            self.assertEqual(intake.main(reconcile_binding=True), 0)
+        self.assertEqual(run.call_args.args[:2], (runtime_settings.repo, self.home))
+        self.assertTrue(run.call_args.kwargs['reconcile_binding'])
+        route.assert_not_called()
+
+    def test_prebinding_reconciliation_preserves_existing_binding_and_refuses_changes(self):
+        self.run_intake()
+        binding = self.out() / 'binding.json'
+        before = binding.read_bytes()
+        path = self.out() / intake.STATE
+        state = path.read_bytes()
+        self.fake.calls.clear()
+        decodes = self.fake.decodes
+        self.assertEqual(self.bind_legacy().reason, 'ledger_bound')
+        self.assertEqual(binding.read_bytes(), before)
+        self.assertEqual(path.read_bytes(), state)
+        settings_path = self.home / '.config/carr/outlook.json'
+        values = json.loads(settings_path.read_text())
+        settings_path.write_text(json.dumps({**values, 'owner': 'dell'}))
+        self.assertEqual(self.bind_legacy().reason, 'ledger_binding_mismatch')
+        binding.write_text('{broken')
+        self.assertEqual(self.bind_legacy().reason, 'ledger_binding_invalid')
+        self.assertEqual(binding.read_text(), '{broken')
+        self.assertEqual(path.read_bytes(), state)
+        self.assertEqual(self.fake.decodes, decodes)
         self.assertFalse(self.fake.calls)
 
     def test_matching_legacy_binding_preserves_request_keys(self):
@@ -3196,7 +3254,7 @@ class IntakeTest(unittest.TestCase):
         settings = load_settings(self.home)
         order, models = [], []
 
-        def fake_run(repo, home, ports, *, settings=None):
+        def fake_run(repo, home, ports, *, settings=None, reconcile_binding=False):
             order.append('intake')
             ports.read_unresolved({'subject': 'S', 'text': 'T', 'sender': 'a@b.test'}, datetime(2026, 10, 26).date(), [], [])
             return intake.Outcome('succeeded', 'ok')
