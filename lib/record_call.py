@@ -56,7 +56,7 @@ DETAIL_LIMIT = 300
 _TRANSIENT = re.compile(
     r"could not reach the deployed Worker"
     r"|^HTTP 5\d\d from "
-    r"|^rate limit \(HTTP 429 / Cloudflare 1015\); attempts="
+    r"|^rate limit \(HTTP 429\); attempts="
     r"|^non-JSON response \(HTTP 5\d\d\)", re.M)
 _TOOL_ERROR = "TOOL ERROR "
 

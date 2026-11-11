@@ -33,21 +33,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(NoRedirect)
 
 
-def rate_limited(status: int, body: bytes) -> bool:
-    if status == 429:
-        return True
-    if not body.lstrip().startswith(b'<'):
-        return False
-    text = re.sub(rb'<[^>]*>', b' ', body)
-    return bool(re.search(
-        rb'(?:cloudflare[\s\S]{0,200}?(?:error\s*)?1015|error\s*(?:code\s*:?\s*)?1015)',
-        text, re.I))
-
-
-def retry_delay(status: int, headers: dict[str, str], body: bytes,
+def retry_delay(status: int, headers: dict[str, str],
                 attempt: int, elapsed: float, *, now: float | None = None) -> float | None:
     """None means return the original response; never shorten Retry-After."""
-    if not rate_limited(status, body) or attempt >= 6:
+    if status != 429 or attempt >= 6:
         return None
     value = next((v.strip() for k, v in headers.items() if k.lower() == 'retry-after'), '')
     delay: float | None = None
@@ -86,17 +75,15 @@ def read(url: str, opener=_OPENER.open, timeout: float = 15, *,
         with response:
             body = response.read() if max_bytes is None else response.read(max_bytes + 1)
             reply = Reply(response.status, dict(response.headers.items()), body)
-        delay = retry_delay(reply.status, reply.headers, body, attempt, time.monotonic() - started)
+        delay = retry_delay(reply.status, reply.headers, attempt, time.monotonic() - started)
         if delay is None:
-            if rate_limited(reply.status, body):
-                print(f'rate limit (HTTP 429 / Cloudflare 1015); attempts={attempt}', file=sys.stderr)
+            if reply.status == 429:
+                print(f'rate limit (HTTP 429); attempts={attempt}', file=sys.stderr)
             return reply
         time.sleep(delay)
 
 
 if __name__ == '__main__':
     call = json.load(sys.stdin)
-    body = call['body'].encode()
-    print(json.dumps({'limited': rate_limited(call['status'], body),
-                      'delay': retry_delay(call['status'], call['headers'], body,
+    print(json.dumps({'delay': retry_delay(call['status'], call['headers'],
                                            call['attempt'], call['elapsed'])}))

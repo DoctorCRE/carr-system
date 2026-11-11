@@ -55,31 +55,32 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(reader.read(self.url).body, b'recovered')
         self.assertEqual(len(self.requests), 2)
 
-    def test_reader_date_then_1015_then_success(self):
+    def test_reader_retry_after_date(self):
         self.responses = [(429, {'Retry-After': formatdate(1007, usegmt=True)}, b'limited'),
-                          (403, {'Retry-After': '0'}, b'<html>Error 1015</html>'),
                           (200, {}, b'recovered')]
         with patch.object(reader.time, 'time', return_value=1000), patch.object(reader.time, 'sleep') as sleep:
             self.assertEqual(reader.read(self.url).body, b'recovered')
-        self.assertEqual([c.args[0] for c in sleep.call_args_list], [7, 0])
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [7])
 
-    def test_reader_tagged_cloudflare_1015(self):
-        body = (REPO / 'ops/fixtures/cloudflare-1015.html').read_bytes()
-        self.responses = [(403, {'Retry-After': '0'}, body), (200, {}, b'recovered')]
-        reply = reader.read(self.url)
-        self.assertEqual(reply.status, 200)
-        self.assertEqual(reply.body, b'recovered')
-        self.assertEqual(len(self.requests), 2)
-
-    def test_reader_auth_html_never_retries(self):
-        for status in (401, 403, 500, 503):
-            with self.subTest(status=status):
-                body = b'<html><h1>Access denied</h1><p>Cloudflare</p></html>'
-                self.responses = [(status, {'Retry-After': '0'}, body)]
-                reply = reader.read(self.url)
-                self.assertEqual(reply.status, status)
-                self.assertEqual(reply.body, body)
-        self.assertEqual(len(self.requests), 4)
+    def test_non429_html_never_retries_both_consumers(self):
+        bodies = [(REPO / 'ops/fixtures/cloudflare-1015.html').read_bytes(),
+                  b'<html><h1>Access denied</h1><p>Cloudflare request reference 1015</p></html>',
+                  b'<html><h1>Access denied</h1><p>Cloudflare</p><p>Reference <span>1015</span></p></html>',
+                  b'<html>Cloudflare<p>Request reference <span data-detail="' + b'x' * 220 + b'">1015</span></p></html>']
+        for status in (400, 401, 403, 404, 409, 500, 503):
+            for body in bodies:
+                for client in ('reader', 'cli'):
+                    with self.subTest(status=status, body=body, client=client):
+                        self.requests = []
+                        self.responses = [(status, {'Retry-After': '0'}, body), (200, {}, b'recovered')]
+                        result = reader.read(self.url) if client == 'reader' else self.cli({})
+                        self.assertEqual(len(self.requests), 1)
+                        if client == 'reader':
+                            self.assertEqual(result.status, status)
+                            self.assertEqual(result.body, body)
+                        else:
+                            self.assertEqual(result.returncode, 1)
+                            self.assertNotIn('rate limit', result.stderr)
 
     def test_reader_exhaustion(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited')] * 6
@@ -88,25 +89,18 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(len(self.requests), 6)
         self.assertIn('attempts=6', ''.join(c.args[0] for c in stderr.write.call_args_list))
 
-    def test_other_errors_never_retry(self):
-        for status in (400, 401, 403, 404, 409, 500, 503):
-            with self.subTest(status=status):
-                self.responses = [(status, {}, b'error')]
-                self.assertEqual(reader.read(self.url).status, status)
-        self.assertEqual(len(self.requests), 7)
-
     def test_retry_after_variants_and_bounds(self):
         for value, expected in [('7', 7), (formatdate(1007, usegmt=True), 7),
                                 (formatdate(999, usegmt=True), 0)]:
             with self.subTest(value=value):
-                self.assertEqual(reader.retry_delay(429, {'rEtRy-AfTeR': value}, b'', 1, 0, now=1000), expected)
+                self.assertEqual(reader.retry_delay(429, {'rEtRy-AfTeR': value}, 1, 0, now=1000), expected)
         for value in ('invalid', '-1', '1.5'):
             with patch.object(reader.random, 'uniform', return_value=0.5):
-                self.assertEqual(reader.retry_delay(429, {'Retry-After': value}, b'', 2, 0), 10.5)
-        self.assertIsNone(reader.retry_delay(429, {'Retry-After': '91'}, b'', 1, 0))
-        self.assertIsNone(reader.retry_delay(429, {}, b'', 6, 0))
-        self.assertIsNone(reader.retry_delay(429, {'Retry-After': '1'}, b'', 1, 89.5))
-        self.assertIsNone(reader.retry_delay(200, {}, b'{"record":1015}', 1, 0))
+                self.assertEqual(reader.retry_delay(429, {'Retry-After': value}, 2, 0), 10.5)
+        self.assertIsNone(reader.retry_delay(429, {'Retry-After': '91'}, 1, 0))
+        self.assertIsNone(reader.retry_delay(429, {}, 6, 0))
+        self.assertIsNone(reader.retry_delay(429, {'Retry-After': '1'}, 1, 89.5))
+        self.assertIsNone(reader.retry_delay(200, {}, 1, 0))
 
     def cli(self, args, **extra):
         env = {**os.environ, 'CARR_MCP_LOCAL_TOKEN': 'synthetic-bearer',
@@ -116,8 +110,8 @@ class BackoffTest(unittest.TestCase):
         return subprocess.run([str(REPO / 'run.sh'), 'call', 'synthetic-write', json.dumps(args)],
                               capture_output=True, text=True, env=env, timeout=15)
 
-    def test_cli_write_1015_reuses_exact_body(self):
-        self.responses = [(403, {'Retry-After': '0'}, b'<html>Cloudflare Error 1015</html>'),
+    def test_cli_write_429_reuses_exact_body(self):
+        self.responses = [(429, {'Retry-After': '0'}, b'limited'),
                           (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
         result = self.cli({'idempotency_key': 'same-key', 'value': 'unchanged'})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -125,21 +119,12 @@ class BackoffTest(unittest.TestCase):
         self.assertEqual(self.requests[0], self.requests[1])
         self.assertEqual(json.loads(self.requests[1])['params']['arguments']['idempotency_key'], 'same-key')
 
-    def test_cli_tagged_cloudflare_1015(self):
-        body = (REPO / 'ops/fixtures/cloudflare-1015.html').read_bytes()
-        self.responses = [(403, {'Retry-After': '0'}, body),
-                          (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
-        result = self.cli({'idempotency_key': 'tagged-heading'})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.requests), 2)
-        self.assertEqual(self.requests[0], self.requests[1])
-
     def test_cli_exhaustion_preserves_error(self):
         self.responses = [(429, {'Retry-After': '0'}, b'limited')] * 6
         result = self.cli({})
         self.assertEqual(result.returncode, 1)
         self.assertIn('non-JSON response (HTTP 429)', result.stderr)
-        self.assertIn('rate limit (HTTP 429 / Cloudflare 1015); attempts=6', result.stderr)
+        self.assertIn('rate limit (HTTP 429); attempts=6', result.stderr)
         self.assertEqual(len(self.requests), 6)
 
     def test_cli_429_then_success(self):
@@ -150,17 +135,33 @@ class BackoffTest(unittest.TestCase):
         self.assertNotIn('rate limit', result.stderr)
         self.assertEqual(len(self.requests), 2)
 
-    def test_cli_other_4xx_never_retry(self):
-        self.responses = [(403, {}, b'<html>Access denied</html>')]
-        result = self.cli({})
-        self.assertEqual(result.returncode, 1)
-        self.assertNotIn('rate limit', result.stderr)
-        self.assertEqual(len(self.requests), 1)
+    def test_reader_without_retry_after(self):
+        self.responses = [(429, {}, b'limited'), (200, {}, b'recovered')]
+        with patch.object(reader.random, 'uniform', return_value=0.5), patch.object(reader.time, 'sleep') as sleep:
+            self.assertEqual(reader.read(self.url).body, b'recovered')
+        sleep.assert_called_once_with(5.5)
+        self.assertEqual(len(self.requests), 2)
+
+    def test_cli_retry_after_date_and_fallback(self):
+        for headers in ({'Retry-After': formatdate(time.time() + 2, usegmt=True)}, {}):
+            with self.subTest(headers=headers):
+                self.requests = []
+                self.responses = [(429, headers, b'limited'),
+                                  (200, {}, b'{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"null"}]}}')]
+                started = time.time()
+                result = self.cli({'idempotency_key': 'unchanged'})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.requests), 2)
+                self.assertEqual(self.requests[0], self.requests[1])
+                if headers:
+                    self.assertGreaterEqual(time.time(), reader.parsedate_to_datetime(headers['Retry-After']).timestamp())
+                else:
+                    self.assertGreaterEqual(time.time() - started, 5)
 
     def test_exhausted_call_is_transient(self):
         from lib.record_call import call_verb, TRANSIENT
         def runner(*args, **kwargs):
-            return subprocess.CompletedProcess(args, 1, '', 'non-JSON response (HTTP 429) from fixture\nrate limit (HTTP 429 / Cloudflare 1015); attempts=6')
+            return subprocess.CompletedProcess(args, 1, '', 'non-JSON response (HTTP 429) from fixture\nrate limit (HTTP 429); attempts=6')
         result = call_verb('synthetic-read', {}, runner=runner)
         self.assertEqual(result.kind, TRANSIENT)
         self.assertIn('attempts=6', result.detail)
@@ -170,7 +171,7 @@ class BackoffTest(unittest.TestCase):
         result = self.cli({}, CARR_RECORD_DEADLINE_MS=str(int(time.time() * 1000 + 1500)))
         self.assertEqual(result.returncode, 1)
         self.assertIn('record call deadline exceeded', result.stderr)
-        self.assertIn('rate limit (HTTP 429 / Cloudflare 1015); attempts=1', result.stderr)
+        self.assertIn('rate limit (HTTP 429); attempts=1', result.stderr)
         self.assertEqual(len(self.requests), 1)
 
 

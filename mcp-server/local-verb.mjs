@@ -231,20 +231,19 @@ async function runViaWorker(verbName, verbArgs) {
         body: requestBody,
       });
       bodyText = await res.text();
-      limited = false;
-      if (res.status !== 429 && !bodyText.trimStart().startsWith("<")) break;
+      limited = res.status === 429;
+      if (!limited) break;
       const policy = JSON.parse(execFileSync("python3", [path.join(REPO, "lib", "release_reader.py")], {
         input: JSON.stringify({ status: res.status, headers: Object.fromEntries(res.headers || []),
-          body: bodyText, attempt: attempts, elapsed: (performance.now() - started) / 1000 }),
+          attempt: attempts, elapsed: (performance.now() - started) / 1000 }),
         encoding: "utf8", timeout: deadline === 0 ? 5000 : Math.max(1, Math.min(5000, deadline - Date.now())),
         maxBuffer: 1024 * 1024,
       }));
-      limited = policy.limited;
       if (policy.delay === null) break;
       await sleep(policy.delay * 1000, undefined, { signal: controller.signal });
     }
   } catch (e) {
-    if (limited) console.error(`rate limit (HTTP 429 / Cloudflare 1015); attempts=${attempts}`);
+    if (limited) console.error(`rate limit (HTTP 429); attempts=${attempts}`);
     if (controller.signal.aborted || (deadline !== 0 && deadline <= Date.now())) {
       console.error("could not reach the deployed Worker: record call deadline exceeded");
       process.exit(1);
@@ -257,7 +256,7 @@ async function runViaWorker(verbName, verbArgs) {
     process.exit(1);
   } finally {
     clearTimeout(timer);
-    if (limited) console.error(`rate limit (HTTP 429 / Cloudflare 1015); attempts=${attempts}`);
+    if (limited) console.error(`rate limit (HTTP 429); attempts=${attempts}`);
   }
 
   let body;
